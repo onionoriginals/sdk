@@ -1038,9 +1038,11 @@ async function verifyEvent(
   resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>,
   authorizedKeyIds?: Set<string>,
   ordinalsProvider?: OrdinalsLookup,
-  // Post-anchor events (except the legacy v0 transfer read path) are exempt
-  // from the key-lineage check: their authority is sat control, enforced by
-  // the walk's sat gate. The walk decides this — pre-anchor events never skip.
+  // True ONLY for post-anchor `update` events — the one type the walk's sat
+  // gate authorizes instead of key lineage; the skip is scoped to exactly the
+  // gate that replaces it. Every other post-anchor type keeps the lineage
+  // check here and is additionally rejected by the walk's default-deny policy
+  // block. Pre-anchor events never skip.
   skipAuthorization?: boolean
 ): Promise<EventVerification> {
   const errors: string[] = [];
@@ -1604,7 +1606,9 @@ export async function verifyEventLog(
     // There is no transfer event in this model: ownership is the sat, moved by
     // a plain Bitcoin transaction, never a log event. A v1 transfer (one that
     // assigns a controller) is rejected ANYWHERE; the v0 legacy shape
-    // (previousOwner/newOwner/txid, no authority effect) stays readable.
+    // (previousOwner/newOwner/txid, no authority effect) stays readable only
+    // AT OR BEFORE the anchor — post-anchor it falls to the default-deny
+    // policy block below like every other non-update type.
     if (!options?.verifier && isV1Transfer) {
       eventResult.proofValid = false;
       eventResult.errors.push(
@@ -1677,20 +1681,23 @@ export async function verifyEventLog(
             }
           }
         }
-      } else if (event.type !== 'update' && event.type !== 'transfer') {
+      } else if (event.type !== 'update' && !isV1Transfer) {
         // DEFAULT-DENY: the arms above enumerate every type this model gives
         // post-anchor semantics (rotateKey/deactivate/migrate rejected, update
-        // sat-gated, v1 transfer rejected earlier, v0 transfer passed through
-        // on key lineage below). Anything else — a hand-built `create` (also
-        // rejected structurally above) or an unknown type from a foreign
-        // writer — must not slide through as an implicitly trusted entry.
+        // sat-gated, v1 transfer rejected earlier with its specific message).
+        // Everything else lands here — a legacy v0 transfer included: the
+        // legacy read path holds only AT OR BEFORE the anchor, because
+        // post-anchor a v0 transfer signed by the creator's frozen key is
+        // indistinguishable from a fresh forgery written after selling the
+        // sat, and it would verify with no sat gate and no witness. Also a
+        // hand-built `create` (rejected structurally above too) or an unknown
+        // type from a foreign writer — nothing slides through as an
+        // implicitly trusted entry.
         eventResult.proofValid = false;
         eventResult.errors.push(
           `Event ${i}: '${String(event.type)}' events are not permitted after the btco anchor`
         );
       }
-      // Legacy v0 transfers pass through on the key-lineage path (no sat gate,
-      // no author requirement) — the legacy read path.
     }
 
     // Resource-update continuity (default path only; a custom verifier owns

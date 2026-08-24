@@ -313,6 +313,27 @@ describe('sat-gated appends', () => {
     expect(result.verified).toBe(true);
   });
 
+  test('legacy v0 transfer AFTER the anchor, signed by the creator key: REJECTED — no post-anchor path skips the sat', async () => {
+    // The v0 read path holds only at or before the anchor. Post-anchor, a v0
+    // transfer signed by the creator's frozen key is indistinguishable from a
+    // fresh forgery written after selling the sat — and it used to verify
+    // clean (no sat gate, no witness) and render as a creator entry.
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const { log } = await makeAnchoredLog(provider, a);
+    const withTransfer = await appendEvent(
+      log, 'transfer',
+      { previousOwner: 'bc1qseller', newOwner: 'bc1qbuyer', txid: 'f'.repeat(64), transferredAt: '2026-08-23T00:00:02Z' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+
+    const result = await verifyEventLog(withTransfer, { ordinalsProvider: provider });
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /'transfer' events are not permitted after the btco anchor/.test(e))).toBe(true);
+    // And the forged entry is never presented as a creator entry.
+    expect(result.events[result.events.length - 1].authorClass).not.toBe('creator');
+  });
+
   test('CHAINED HOLDERS: A pre-anchor, migrate, B appends, C appends — verifies, holder chain reads [B, C]', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();

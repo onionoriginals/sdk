@@ -167,15 +167,34 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(result.verified).toBe(true);
   });
 
-  test('MID-LOG match: a legacy v0 transfer after the newest anchor still passes (present-in-log, not is-the-head)', async () => {
+  test('MID-LOG match: a newest anchor committing to a mid-log event still passes (present-in-log, not is-the-head)', async () => {
+    // The freshness check requires the newest on-sat anchor's digest to be
+    // PRESENT in the log, not to be the head. (This used to be exercised via
+    // a post-anchor legacy v0 transfer extending the head past the anchor —
+    // that pass-through is closed now, so the mid-log condition comes from
+    // the sat side instead: a newer anchor doc re-committing to an older
+    // event.)
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
     const { log: full } = await addHolderAppend(prefix, provider, b);
-    // A legacy v0 transfer (previousOwner/newOwner, no authority effect) rides
-    // the key-lineage read path — no sat gate — so the log's HEAD is now past
-    // the newest on-sat anchor (the holder append, a MID-log event).
+    // A newer anchor doc lands on the sat committing to the MIGRATE event's
+    // digest — an event that IS in the log, but mid-log (the holder append is
+    // the head).
+    await inscribeDoc(provider, SAT, chainDigest(full.events[1]), undefined, deriveDidCel(full));
+
+    const result = await verifyEventLog(full, { ordinalsProvider: provider, checkHeadFreshness: true });
+    expect(result.errors).toEqual([]);
+    expect(result.verified).toBe(true);
+  });
+
+  test('a post-anchor legacy v0 transfer no longer rides past the sat gate — the log fails', async () => {
+    const provider = new OrdMockProvider();
+    const a = await makeKey();
+    const b = await makeKey();
+    const { log: prefix } = await makeAnchoredLog(provider, a);
+    const { log: full } = await addHolderAppend(prefix, provider, b);
     const withLegacyTransfer = await appendEvent(
       full,
       'transfer',
@@ -184,9 +203,8 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     );
 
     const result = await verifyEventLog(withLegacyTransfer, { ordinalsProvider: provider, checkHeadFreshness: true });
-    // Newest on-sat anchor = the holder append (a MID-log event now), which IS present.
-    expect(result.errors).toEqual([]);
-    expect(result.verified).toBe(true);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /'transfer' events are not permitted after the btco anchor/.test(e))).toBe(true);
   });
 
   test('FOREIGN anchor: newest on-sat anchor commits to a digest absent from the log → STALE_LOG', async () => {
