@@ -71,7 +71,7 @@ Every Originals asset is controlled by a Decentralized Identifier (DID). The con
 
 | Layer | DID Method | Resolution |
 |-------|------------|------------|
-| genesis (peer) | `did:cel` | Derived from the genesis event; self-certifying (see `specs/did-cel-method.md`) |
+| genesis | `did:cel` | Derived from the genesis event; self-certifying (see `specs/did-cel-method.md`) |
 | webvh | `did:webvh` | HTTP-based with version history |
 | btco  | `did:btco` | Bitcoin ordinals inscription |
 
@@ -131,7 +131,6 @@ signature: `created`, `verificationMethod`, `proofPurpose`, `cryptosuite` and
 `type` are all attested. Under the read-only `eddsa-jcs-2022` label the
 signature covers the event alone and those fields are unattested — which is
 why it was retired.
-| `bitcoin-ordinals-2024` | secp256k1 | Bitcoin witnessing |
 
 ### 2.3 Hash Chain Integrity
 
@@ -261,7 +260,7 @@ A WitnessProof extends the proof envelope with additional fields:
 ```json
 {
   "type": "OriginalsCelProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
   "proofPurpose": "assertionMethod",
@@ -291,7 +290,7 @@ Content-Type: application/json
 ```json
 {
   "type": "OriginalsCelProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
   "proofPurpose": "assertionMethod",
@@ -371,7 +370,7 @@ this event and therefore MUST NOT be embedded in it.
   "proof": [
     {
       "type": "OriginalsCelProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-20T12:00:00Z",
       "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
@@ -409,10 +408,10 @@ Logs written by pre-`did:cel` releases embed the asset DID directly:
 ```json
 {
   "name": "My Digital Artwork",
-  "did": "did:peer:4zQm...",
+  "did": "did:key:z6Mk...",
   "layer": "peer",
   "resources": [ /* ... */ ],
-  "creator": "did:peer:4zQm...",
+  "creator": "did:key:z6Mk...",
   "createdAt": "2026-01-20T12:00:00Z"
 }
 ```
@@ -443,9 +442,9 @@ Modifies asset state (metadata, resources, or custom fields).
   "proof": [
     {
       "type": "OriginalsCelProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-21T12:00:00Z",
-      "verificationMethod": "did:peer:4zQm...#key-0",
+      "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
       "proofValue": "z4XYZ..."
     }
@@ -477,9 +476,9 @@ Permanently seals the event log, preventing further modifications.
   "proof": [
     {
       "type": "OriginalsCelProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-22T12:00:00Z",
-      "verificationMethod": "did:peer:4zQm...#key-0",
+      "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
       "proofValue": "z5ABC..."
     }
@@ -661,7 +660,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
   "proof": [
     {
       "type": "OriginalsCelProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-23T12:00:00Z",
       "verificationMethod": "did:webvh:example.com:abc123#key-0",
       "proofPurpose": "assertionMethod",
@@ -669,7 +668,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
     },
     {
       "type": "OriginalsCelProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "witnessedAt": "2026-01-23T12:00:01Z",
       "verificationMethod": "did:web:witness.example.com#key-0",
       "proofPurpose": "assertionMethod",
@@ -685,7 +684,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `sourceDid` | string | Yes | Original did:peer |
+| `sourceDid` | string | Yes | Source did:cel |
 | `targetDid` | string | Yes | New did:webvh |
 | `layer` | string | Yes | Must be `"webvh"` |
 | `domain` | string | Yes | Domain hosting the DID |
@@ -872,7 +871,7 @@ interface EventVerification {
       "type": "create",
       "data": {
         "name": "Genesis Artwork #1",
-        "did": "did:peer:4zQmR...",
+        "did": "did:key:z6MkR...",
         "layer": "peer",
         "resources": [
           {
@@ -881,14 +880,14 @@ interface EventVerification {
             "url": ["ipfs://QmABC..."]
           }
         ],
-        "creator": "did:peer:4zQmR...",
+        "creator": "did:key:z6MkR...",
         "createdAt": "2026-01-20T10:00:00Z"
       },
       "proof": [{
         "type": "OriginalsCelProof",
-        "cryptosuite": "eddsa-jcs-2022",
+        "cryptosuite": "originals-cel-ed25519-jcs-v1",
         "created": "2026-01-20T10:00:00Z",
-        "verificationMethod": "did:peer:4zQmR...#key-0",
+        "verificationMethod": "did:key:z6MkR...#z6MkR...",
         "proofPurpose": "assertionMethod",
         "proofValue": "z3FXQkcWb..."
       }]
@@ -902,9 +901,9 @@ interface EventVerification {
       "previousEvent": "uH4sI...",
       "proof": [{
         "type": "OriginalsCelProof",
-        "cryptosuite": "eddsa-jcs-2022",
+        "cryptosuite": "originals-cel-ed25519-jcs-v1",
         "created": "2026-01-20T11:00:00Z",
-        "verificationMethod": "did:peer:4zQmR...#key-0",
+        "verificationMethod": "did:key:z6MkR...#z6MkR...",
         "proofPurpose": "assertionMethod",
         "proofValue": "z4YQw..."
       }]
@@ -912,7 +911,7 @@ interface EventVerification {
     {
       "type": "update",
       "data": {
-        "sourceDid": "did:peer:4zQmR...",
+        "sourceDid": "did:cel:uEiD...",
         "targetDid": "did:webvh:example.com:abc123",
         "layer": "webvh",
         "domain": "example.com",
@@ -922,7 +921,7 @@ interface EventVerification {
       "proof": [
         {
           "type": "OriginalsCelProof",
-          "cryptosuite": "eddsa-jcs-2022",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "created": "2026-01-21T10:00:00Z",
           "verificationMethod": "did:webvh:example.com:abc123#key-0",
           "proofPurpose": "assertionMethod",
@@ -930,7 +929,7 @@ interface EventVerification {
         },
         {
           "type": "OriginalsCelProof",
-          "cryptosuite": "eddsa-jcs-2022",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "created": "2026-01-21T10:00:01Z",
           "verificationMethod": "did:web:witness.example.com#key-0",
           "proofPurpose": "assertionMethod",

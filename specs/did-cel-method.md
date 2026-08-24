@@ -2,7 +2,7 @@
 
 **Version:** 0.1
 **Status:** Draft
-**Date:** 2026-07-10
+**Date:** 2026-08-24
 
 > Draft method specification. The normative source of truth is the implementation
 > in `packages/sdk/src/cel/` (notably `celDid.ts` and `algorithms/verifyEventLog.ts`)
@@ -31,8 +31,7 @@ The three axes the Originals model keeps distinct map onto the log as follows:
 - **Ownership** is the Bitcoin sat/UTXO, and exists only at the `did:btco` layer.
 
 A `did:cel` is the genesis layer of an asset that may later earn stronger resolution
-substrates (`did:webvh`, `did:btco`). It is the log-native replacement for the
-`did:peer` genesis previously used by the SDK.
+substrates (`did:webvh`, `did:btco`).
 
 ---
 
@@ -103,10 +102,11 @@ fail the log).
 
 Two binding modes apply, selected by the controller DID:
 
-1. **Self-certifying controller** — `did:key`, or long-form `did:peer:4` (which
-   embeds its DID document). Its key material is enumerable offline, so the genesis
-   proof's key **MUST** be one of the embedded Ed25519 keys. Checked with no
-   resolver; fail closed if it is not among them.
+1. **Self-certifying controller** — `did:key`. Its key material is enumerable
+   offline, so the genesis proof's key **MUST** be one of the embedded Ed25519
+   keys. Checked with no resolver; fail closed if it is not among them.
+   `did:key` is the ONLY self-certifying method: a `did:peer` controller
+   enumerates to the empty set and therefore **MUST** fail closed.
 2. **Resolver-backed controller** — `did:webvh` and other methods whose keys are not
    embedded in the identifier. The genesis proof's verification-method DID (the part
    before `#`) **MUST** byte-equal `data.controller`, **and** the caller's resolver
@@ -141,7 +141,7 @@ closed.
   | `did:btco` anchored | Bitcoin (inscription commits to the log head) |
 
 A long form (embedding the genesis event in the identifier for fully offline genesis
-resolution, analogous to `did:peer:4`) is out of scope for v0.1.
+resolution) is out of scope for v0.1.
 
 ---
 
@@ -158,8 +158,8 @@ control from the current key set to a new controller.
   authorization against the key set *as it stood when the event was appended* —
   **before** the set is swapped. A rotation that fails any check **MUST NOT** rotate;
   the retired key set stays in force so a failed hijack cannot strand the log.
-- The `rotateKey` `newController` **MUST** be a self-certifying DID (`did:key` or
-  long-form `did:peer:4`) carrying an Ed25519 key. A resolver-backed `newController`
+- The `rotateKey` `newController` **MUST** be a self-certifying DID (`did:key`)
+  carrying an Ed25519 key. A resolver-backed `newController`
   (e.g. `did:webvh`) **MUST** fail closed: nothing is signed by the new key at
   rotation time, so there is no proof of possession to bind it (a design for this is
   deferred). A missing, non-string, or unbindable `newController` **MUST** fail the
@@ -229,20 +229,20 @@ Authority semantics differ by type and **MUST** be honored:
 
 ## 8. Legacy compatibility
 
-Logs written by pre-`did:cel` SDK releases embed the asset DID in `data.did` (the
-`PeerAssetData` shape, typically a `did:peer:4`). These remain verifiable on a
-dual-accept read path:
+Logs written by pre-`did:cel` SDK releases embed the asset DID in `data.did`.
+These remain verifiable on a dual-accept read path:
 
 - Readers **MUST** accept a legacy `data.did` genesis and keep its exact prior
-  verification behavior (self-certifying binding when `data.did` is a `did:key` or
-  long-form `did:peer:4`; trust-on-first-use otherwise). For such logs the reported
-  asset DID is the declared `data.did`, and `expectedDid` matching is string
-  equality (versus suffix derivation for `did:cel`).
+  verification behavior: self-certifying binding when `data.did` is a `did:key`,
+  trust-on-first-use otherwise. For such logs the reported asset DID is the
+  declared `data.did`, and `expectedDid` matching is string equality (versus
+  suffix derivation for `did:cel`).
 - Writers **MUST** emit only the new `CelAssetData` shape (no `data.did`).
-- **Documented behavioral delta:** a genesis whose `data.did` is a *malformed*
-  long-form `did:peer:4` (its embedded document fails to parse) now **fails closed**
-  (only when the genesis proof's `verificationMethod` is itself a `did:key`),
-  where earlier releases fell back to trust-on-first-use.
+- **`did:peer` is not part of this path.** Support was removed entirely — no
+  creation, no resolution, no verifier read path. A legacy log whose `data.did`
+  is a `did:peer` **MUST** fail closed, as **MUST** any credential issued to or
+  by one. This is a deliberate read break, taken while exactly one mainnet asset
+  existed.
 
 ---
 
@@ -269,7 +269,7 @@ Every test path is relative to `packages/sdk/tests/unit/cel/`.
 | 15 | A failed rotation MUST NOT rotate the set | `key-rotation-authority.test.ts` — "rotation signed by an UNAUTHORIZED key fails — and does NOT rotate" |
 | 16 | `newController` MUST be self-certifying; unbindable/missing fails the event + log | `key-rotation-authority.test.ts` — "unbindable newController fails closed"; "missing/non-string newController fails closed" |
 | 17 | Rotations chain (a→b→c); retired keys dead | `key-rotation-authority.test.ts` — "second rotation chains authority a→b→c" |
-| 18 | `migrate`/`transfer` MUST NOT change authority | `key-rotation-authority.test.ts` — "migrate/transfer cause no authority change (old key keeps working)" |
+| 18 | `migrate` MUST NOT change authority; a `transfer` entry is rejected outright | `key-rotation-authority.test.ts` — "a webvh migrate causes no authority change (old key keeps working; a transfer entry is not even readable)" |
 | 19 | `deactivate` seals the log; post-deactivate events fail | `key-rotation-authority.test.ts` — "deactivate still seals the log regardless of rotation"; `deactivateEventLog.test.ts` |
 | 20 | Chain link: `previousEvent` equals digest of prior committed fields | `appendEvent.test.ts` — "appends a typed event with correct chain link and signed payload"; `hash-chain-tamper.test.ts` |
-| 21 | Legacy `data.did` logs verify as before; report declared DID | `did-cel-verification.test.ts` — "legacy data.did logs verify exactly as before and report assetDid" |
+| 21 | Legacy `did:key` `data.did` logs verify as before; report declared DID | `did-cel-verification.test.ts` — "legacy data.did logs verify exactly as before and report assetDid" |
