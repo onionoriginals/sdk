@@ -481,6 +481,86 @@
   font-size: var(--text-sm);
 }
 
+/* The publish payoff: the did:webvh log, live and fetched back.
+   It shipped with no rules at all, so the heading ran straight into its status
+   ("for nowresolved ✓"), the link label ran into the URL, and the URL — one
+   unbreakable did:webvh slug — spilled out of the left column and over the
+   divider into the event log. It gets the same card treatment as the revise
+   panel above it, and the slug gets an explicit break rule. */
+.demo-resolved {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.demo-resolved-head {
+  display: flex;
+  align-items: baseline;
+  /* Wrap rather than squeeze: the temporary heading is long enough that the
+     status would otherwise sit beside a two-line title. It drops to its own
+     right-aligned line instead. */
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Shared with the deposit heading, which was equally unspaced. */
+.demo-resolved-badge {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.demo-resolved-badge[data-ok] {
+  color: var(--ok);
+}
+
+/* Label above, URL below: side by side, a full log URL leaves the label no
+   room worth having. */
+.demo-resolved-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--webvh);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.demo-resolved-link:hover {
+  color: var(--text-primary);
+}
+
+.demo-resolved-link code {
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  /* The slug carries no spaces or hyphens to break at, so `anywhere` is the
+     only rule that keeps it inside the column. */
+  overflow-wrap: anywhere;
+}
+
+.demo-resolved-note {
+  margin-top: var(--sp-3);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+
 .demo-done {
   margin-top: var(--sp-4);
   padding: var(--sp-4);
