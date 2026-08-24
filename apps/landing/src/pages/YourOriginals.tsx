@@ -11,7 +11,12 @@ import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, originalPath } from '../router';
 import { sameOriginUrl, type CelLog } from './original-detail-data';
-import { inscribeAvailability, rowAfterInscribe, type InscribeAvailability } from './inscribe-availability';
+import {
+  inscribeAvailability,
+  rowAfterInscribe,
+  unclaimedInscriptions,
+  type InscribeAvailability,
+} from './inscribe-availability';
 import { fetchHostedCel, resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import './your-originals.css';
 
@@ -264,6 +269,10 @@ export function YourOriginals() {
     return () => { live = false; };
   }, [bitcoin?.signingClient, user?.subOrgId]);
 
+  // Pushable records no row accounts for. Computed once per render over ALL
+  // rows: a record is only unattributable if NOTHING claims it.
+  const unclaimed = unclaimedInscriptions(originals, unfinished);
+
   const startInscribe = async (row: OriginalRow) => {
     if (!bitcoin) return;
     setInscribing(row.did);
@@ -383,8 +392,8 @@ export function YourOriginals() {
               // log has not been read yet, which reads as 'unknown'.
               const action: InscribeAvailability = inscribeAvailability({
                 row,
-                records: unfinished,
                 unfinished,
+                unclaimed,
                 authorshipDid,
                 signedIn: isAuthenticated && !!bitcoin,
                 cel: row.did in cels ? cels[row.did] : undefined,

@@ -666,6 +666,14 @@ export const yourOriginals = {
       'foreign-controller':
         'This Original was made before signing keys were kept for you, so the key that could add to its history only ever existed in the browser that created it — and it’s gone. Everything already in its history stays signed, verifiable and hosted; it just can’t be carried on to Bitcoin. Anything you make from now on can be.',
       unknown: 'Reading this Original’s signed log…',
+      /**
+       * An inscription is already built and paid for and waiting to be pushed,
+       * and we cannot tell which Original it belongs to. Rebuilding would
+       * replace it, so the copy points at the thing that clears it rather than
+       * describing the ambiguity — finishing it is one click away, above.
+       */
+      'pending-elsewhere':
+        'You have an inscription that’s already built and waiting to be sent. Finish that one first — until it lands, starting another could replace it.',
     },
   },
   /**

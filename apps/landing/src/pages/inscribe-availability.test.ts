@@ -4,7 +4,12 @@
  * rule that Finish and Inscribe never appear together.
  */
 import { describe, test, expect } from 'bun:test';
-import { inscribeAvailability, genesisController, rowAfterInscribe } from './inscribe-availability';
+import {
+  inscribeAvailability,
+  genesisController,
+  rowAfterInscribe,
+  unclaimedInscriptions,
+} from './inscribe-availability';
 import { inscribeIsComplete } from '../components/Demo';
 import { yourOriginals } from '../content';
 import type { OriginalRow, PendingInscription } from './YourOriginals';
@@ -37,8 +42,8 @@ const record = (over: Partial<PendingInscription> = {}): PendingInscription => (
 });
 
 const base = {
-  records: [] as PendingInscription[],
   unfinished: [] as PendingInscription[],
+  unclaimed: [] as PendingInscription[],
   authorshipDid: MINE,
   signedIn: true,
   cel: celFor(MINE) as CelLog | null | undefined,
@@ -71,7 +76,6 @@ describe('a row with stored hex', () => {
     const got = inscribeAvailability({
       ...base,
       row: row({ commitTxId: 'commit-1' }),
-      records: [rec],
       unfinished: [rec],
     });
     expect(got).toEqual({ kind: 'finish', commitTxId: 'commit-1' });
@@ -84,7 +88,7 @@ describe('a row with stored hex', () => {
     // Superseded, or simply broadcast and waiting: not re-inscribable either.
     const rec = record({ superseded: true });
     expect(
-      inscribeAvailability({ ...base, row: row({ commitTxId: 'commit-1' }), records: [rec], unfinished: [] })
+      inscribeAvailability({ ...base, row: row({ commitTxId: 'commit-1' }), unfinished: [] })
     ).toEqual({ kind: 'none' });
   });
 });
@@ -204,7 +208,7 @@ describe('a row that was just inscribed', () => {
     const after = rowAfterInscribe(row(), 'commit-9');
     const rec = record({ commitTxId: 'commit-9' });
     expect(
-      inscribeAvailability({ ...base, row: after, records: [rec], unfinished: [rec] })
+      inscribeAvailability({ ...base, row: after, unfinished: [rec] })
     ).toEqual({ kind: 'finish', commitTxId: 'commit-9' });
   });
 
@@ -225,9 +229,70 @@ describe('a row that was just inscribed', () => {
       inscribeAvailability({
         ...base,
         row: row({ commitTxId: 'commit-9', inscriptionStatus: 'pending' }),
-        records: [rec],
         unfinished: [rec],
       })
     ).toEqual({ kind: 'finish', commitTxId: 'commit-9' });
+  });
+});
+
+/**
+ * The guard that used to be dead code: it joined on `commitTxId`, downstream
+ * of the early return that had already sent every row carrying one home. So
+ * the case it was written for — signed hex on the server while the row that
+ * paid for it recorded nothing — could never fire, and /me compounded it by
+ * feeding `records` the already-narrowed `unfinished` array.
+ */
+describe('signed hex waiting that no row accounts for', () => {
+  const loose = record({ commitTxId: 'commit-loose', status: 'signed' });
+
+  test('a record no row claims is unclaimed', () => {
+    expect(unclaimedInscriptions([row()], [loose])).toEqual([loose]);
+  });
+
+  test('a record a row claims is not', () => {
+    expect(unclaimedInscriptions([row({ commitTxId: 'commit-loose' })], [loose])).toEqual([]);
+  });
+
+  test('a row that claims a DIFFERENT commit does not account for it', () => {
+    expect(unclaimedInscriptions([row({ commitTxId: 'commit-other' })], [loose])).toEqual([loose]);
+  });
+
+  test('an unattributable row is disabled rather than rebuilt over', () => {
+    // The rebuild would supersede the very pair the Finish banner is offering
+    // to push, stranding a reveal that was already paid to build.
+    expect(inscribeAvailability({ ...base, row: row(), unclaimed: [loose] })).toEqual({
+      kind: 'disabled',
+      reason: 'pending-elsewhere',
+    });
+  });
+
+  test('it outranks having a usable key: the money is what is at stake', () => {
+    expect(
+      inscribeAvailability({ ...base, row: row(), unclaimed: [loose], cel: celFor(THEIRS) })
+    ).toEqual({ kind: 'disabled', reason: 'pending-elsewhere' });
+  });
+
+  test('the row that DOES claim it still gets Finish', () => {
+    expect(
+      inscribeAvailability({
+        ...base,
+        row: row({ commitTxId: 'commit-loose' }),
+        unfinished: [loose],
+        unclaimed: [],
+      })
+    ).toEqual({ kind: 'finish', commitTxId: 'commit-loose' });
+  });
+
+  test('self-clearing: once nothing is pushable, rows open back up', () => {
+    expect(inscribeAvailability({ ...base, row: row(), unclaimed: [] })).toEqual({
+      kind: 'inscribe',
+    });
+  });
+
+  test('the copy points at the click that clears it', () => {
+    const copy = yourOriginals.inscribe.reasons['pending-elsewhere'];
+    expect(copy).toMatch(/finish/i);
+    // and never implies the Original itself is the problem
+    expect(copy).not.toMatch(/can’t|cannot/i);
   });
 });

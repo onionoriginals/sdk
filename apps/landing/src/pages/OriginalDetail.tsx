@@ -22,7 +22,12 @@ import {
   type OriginalRow,
   type PendingInscription,
 } from './YourOriginals';
-import { inscribeAvailability, rowAfterInscribe, type InscribeAvailability } from './inscribe-availability';
+import {
+  inscribeAvailability,
+  rowAfterInscribe,
+  unclaimedInscriptions,
+  type InscribeAvailability,
+} from './inscribe-availability';
 import { resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import {
   webvhArtifacts,
@@ -79,6 +84,8 @@ export function OriginalDetail({ did }: { did: string }) {
   // The resume surface: this page had no Bitcoin action at all, so a published
   // Original that was never inscribed dead-ended here.
   const [records, setRecords] = useState<PendingInscription[]>([]);
+  /** Every row this user has — needed to tell a claimed record from a loose one. */
+  const [allRows, setAllRows] = useState<OriginalRow[]>([]);
   const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
   const [inscribing, setInscribing] = useState(false);
   const [inscribeNote, setInscribeNote] = useState<string | null>(null);
@@ -104,8 +111,12 @@ export function OriginalDetail({ did }: { did: string }) {
         arts ? fetchText(arts.celUrl) : null
       ]);
       // Overlay live confirmation state (the stored row stays 'pending').
-      const row = withLiveInscriptionStatus(rows, inscriptionRecs.records).find((r) => r.did === did) ?? null;
-      if (live) setRecords(inscriptionRecs.records);
+      const rowsWithStatus = withLiveInscriptionStatus(rows, inscriptionRecs.records);
+      const row = rowsWithStatus.find((r) => r.did === did) ?? null;
+      if (live) {
+        setRecords(inscriptionRecs.records);
+        setAllRows(rowsWithStatus);
+      }
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
@@ -233,8 +244,10 @@ export function OriginalDetail({ did }: { did: string }) {
   const action: InscribeAvailability | null = data?.row
     ? inscribeAvailability({
         row: data.row,
-        records,
         unfinished: unfinishedInscriptions(records),
+        // Over ALL the user's rows, not just this one: a record another
+        // Original already claims is attributed and must not disable this row.
+        unclaimed: unclaimedInscriptions(allRows, unfinishedInscriptions(records)),
         authorshipDid,
         signedIn: isAuthenticated && !!bitcoin,
         cel: loaded ? data.cel : undefined,

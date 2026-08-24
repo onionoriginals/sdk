@@ -41,7 +41,9 @@ export type DisabledReason =
   /** The Original's controller is a key nobody holds any more. */
   | 'foreign-controller'
   /** Its log has not been read yet, so we cannot say either way. */
-  | 'unknown';
+  | 'unknown'
+  /** Signed hex is waiting that we cannot rule out belonging to this row. */
+  | 'pending-elsewhere';
 
 /**
  * The `did:key` verification method a CEL genesis names as controller, or null.
@@ -57,10 +59,14 @@ export function genesisController(cel: CelLog | null | undefined): string | null
 
 export interface AvailabilityInput {
   row: OriginalRow;
-  /** In-flight inscription records for this user (GET /api/btc/inscribe). */
-  records: PendingInscription[];
   /** The rows whose signed hex is pushable — `unfinishedInscriptions(records)`. */
   unfinished: PendingInscription[];
+  /**
+   * Pushable records that no row claims — `unclaimedInscriptions(rows, unfinished)`.
+   * Any of them could belong to THIS row, so while one exists no unattributable
+   * row may be rebuilt over. See the note on that branch below.
+   */
+  unclaimed: PendingInscription[];
   /** The viewer's authorship `did:key`, or null when they have none. */
   authorshipDid: string | null;
   /** Whether a signing session exists at all. */
@@ -74,7 +80,7 @@ export interface AvailabilityInput {
 
 /** What this row offers. Pure — no DOM, no fetch. */
 export function inscribeAvailability(input: AvailabilityInput): InscribeAvailability {
-  const { row, records, unfinished, authorshipDid, signedIn, cel } = input;
+  const { row, unfinished, unclaimed, authorshipDid, signedIn, cel } = input;
 
   // Already on chain: neither recovery applies, whatever else is true.
   if (row.btcoDid || row.inscriptionStatus === 'confirmed') return { kind: 'none' };
@@ -92,9 +98,18 @@ export function inscribeAvailability(input: AvailabilityInput): InscribeAvailabi
   // rows written at inscribe time carry 'pending' too, and closing on it any
   // earlier would swallow the Finish offer.
   if (row.inscriptionStatus === 'pending') return { kind: 'none' };
-  if (records.some((r) => r.commitTxId && r.fundingOutpoint && rowMatchesRecord(row, r))) {
-    return { kind: 'none' };
-  }
+  // A pushable record nobody's row claims. The durable row is written
+  // best-effort AFTER inscribing while the server's record is written DURING
+  // the API call, so a row can carry no commit id while signed hex already
+  // exists at status 'signed' — and this row might be it. Rebuilding would
+  // supersede the very pair the Finish banner is offering to push, stranding
+  // a reveal that was already paid to build.
+  //
+  // There is no join to be more precise with: the record carries no DID and
+  // the row this case exists for carries no commit id. So the rule is
+  // conservative and self-clearing — finishing or broadcasting the record
+  // drops it from `unfinished`, and every row opens back up.
+  if (unclaimed.length > 0) return { kind: 'disabled', reason: 'pending-elsewhere' };
 
   if (!signedIn) return { kind: 'disabled', reason: 'signed-out' };
   if (!authorshipDid) return { kind: 'disabled', reason: 'no-authorship-key' };
@@ -124,11 +139,17 @@ export function rowAfterInscribe(row: OriginalRow, commitTxId: string | undefine
 }
 
 /**
- * Whether an inscription record belongs to this row. The store is keyed by
- * funding outpoint rather than by DID, so the only honest join is the commit
- * id the row itself recorded — a row with none cannot be matched, which is
- * exactly the "never built" case this feature exists for.
+ * Pushable records that no row accounts for.
+ *
+ * A row claims a record by recording its commit id. What is left over cannot be
+ * attributed to anything — the store is keyed by funding outpoint and carries
+ * no DID, and a row that never recorded a commit id has nothing to match on —
+ * so it is treated as possibly belonging to any un-inscribed row.
  */
-function rowMatchesRecord(row: OriginalRow, record: PendingInscription): boolean {
-  return !!row.commitTxId && row.commitTxId === record.commitTxId;
+export function unclaimedInscriptions(
+  rows: OriginalRow[],
+  unfinished: PendingInscription[]
+): PendingInscription[] {
+  const claimed = new Set(rows.map((r) => r.commitTxId).filter(Boolean));
+  return unfinished.filter((r) => !claimed.has(r.commitTxId));
 }
