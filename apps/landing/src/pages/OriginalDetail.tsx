@@ -22,7 +22,7 @@ import {
   type OriginalRow,
   type PendingInscription,
 } from './YourOriginals';
-import { inscribeAvailability, type InscribeAvailability } from './inscribe-availability';
+import { inscribeAvailability, rowAfterInscribe, type InscribeAvailability } from './inscribe-availability';
 import { resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import {
   webvhArtifacts,
@@ -211,6 +211,21 @@ export function OriginalDetail({ did }: { did: string }) {
           : yourOriginals.inscribe.commitOnly
         : outcome.message
     );
+    if (outcome.ok) {
+      // Record the commit on the row the selector reads. Without this the row
+      // is untouched, `action` recomputes to 'inscribe', the button re-enables
+      // and a second click builds and pays for a second commit/reveal pair.
+      // The durable row catches up on the next load; this is the same patch
+      // /me applies.
+      setData((d) =>
+        d && d.row
+          ? {
+              ...d,
+              row: rowAfterInscribe(d.row, outcome.inscription.commitTxId),
+            }
+          : d
+      );
+    }
     setInscribing(false);
   };
 

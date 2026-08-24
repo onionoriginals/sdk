@@ -11,7 +11,7 @@ import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, originalPath } from '../router';
 import { sameOriginUrl, type CelLog } from './original-detail-data';
-import { inscribeAvailability, type InscribeAvailability } from './inscribe-availability';
+import { inscribeAvailability, rowAfterInscribe, type InscribeAvailability } from './inscribe-availability';
 import { fetchHostedCel, resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import './your-originals.css';
 
@@ -286,11 +286,7 @@ export function YourOriginals() {
     if (outcome.ok) {
       // Reflect it immediately; the durable record catches up on the next load.
       setOriginals((rows) =>
-        rows.map((r) =>
-          r.did === row.did
-            ? { ...r, commitTxId: outcome.inscription.commitTxId, inscriptionStatus: 'pending' as const }
-            : r
-        )
+        rows.map((r) => (r.did === row.did ? rowAfterInscribe(r, outcome.inscription.commitTxId) : r))
       );
     }
     setInscribing(null);

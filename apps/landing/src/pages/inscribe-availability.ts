@@ -86,6 +86,12 @@ export function inscribeAvailability(input: AvailabilityInput): InscribeAvailabi
   // A commit we know about but cannot push (superseded, or already broadcast
   // and simply waiting) is still not something to re-inscribe over.
   if (row.commitTxId) return { kind: 'none' };
+  // An inscribe was attempted but recorded no commit id — the durable row is
+  // written 'pending' once, at inscribe time, so this only ever means in
+  // flight. Placed AFTER the Finish branch, which needs a commit id anyway:
+  // rows written at inscribe time carry 'pending' too, and closing on it any
+  // earlier would swallow the Finish offer.
+  if (row.inscriptionStatus === 'pending') return { kind: 'none' };
   if (records.some((r) => r.commitTxId && r.fundingOutpoint && rowMatchesRecord(row, r))) {
     return { kind: 'none' };
   }
@@ -99,6 +105,22 @@ export function inscribeAvailability(input: AvailabilityInput): InscribeAvailabi
   if (controller !== authorshipDid) return { kind: 'disabled', reason: 'foreign-controller' };
 
   return { kind: 'inscribe' };
+}
+
+/**
+ * The row as it stands immediately after a successful inscribe.
+ *
+ * Recording the commit is what CLOSES the action: `inscribeAvailability` sends
+ * any row carrying a `commitTxId` home as 'none' (or 'finish', once the server
+ * records catch up), so the button cannot be clicked a second time and build a
+ * second commit/reveal pair. The durable row catches up on the next load;
+ * this is the optimistic copy in between.
+ *
+ * Shared so both surfaces apply the same rule — the detail page originally set
+ * a note and nothing else, and re-enabled its own button.
+ */
+export function rowAfterInscribe(row: OriginalRow, commitTxId: string | undefined): OriginalRow {
+  return { ...row, commitTxId, inscriptionStatus: 'pending' };
 }
 
 /**

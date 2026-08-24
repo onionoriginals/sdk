@@ -4,7 +4,7 @@
  * rule that Finish and Inscribe never appear together.
  */
 import { describe, test, expect } from 'bun:test';
-import { inscribeAvailability, genesisController } from './inscribe-availability';
+import { inscribeAvailability, genesisController, rowAfterInscribe } from './inscribe-availability';
 import { inscribeIsComplete } from '../components/Demo';
 import { yourOriginals } from '../content';
 import type { OriginalRow, PendingInscription } from './YourOriginals';
@@ -176,5 +176,58 @@ describe('a resumed inscription that only got its commit out', () => {
   test('the done copy is reserved for a reveal that actually landed', () => {
     expect(yourOriginals.inscribe.done).toMatch(/inscribed/i);
     expect(yourOriginals.inscribe.done).not.toBe(yourOriginals.inscribe.commitOnly);
+  });
+});
+
+/**
+ * The detail page used to set a note after a successful inscribe and nothing
+ * else — the row was untouched, `action` recomputed to 'inscribe', the button
+ * re-enabled, and a second click built and paid for a second commit/reveal
+ * pair. Both surfaces now close the action through the same helper.
+ */
+describe('a row that was just inscribed', () => {
+  test('records the commit and reads as pending', () => {
+    expect(rowAfterInscribe(row(), 'commit-9')).toMatchObject({
+      commitTxId: 'commit-9',
+      inscriptionStatus: 'pending',
+    });
+  });
+
+  test('offers no second inscribe, so the button cannot be clicked twice', () => {
+    // The server records have not caught up yet — the state right after the
+    // call returns, which is exactly when a second click was possible.
+    const after = rowAfterInscribe(row(), 'commit-9');
+    expect(inscribeAvailability({ ...base, row: after })).toEqual({ kind: 'none' });
+  });
+
+  test('offers Finish once the record for that commit arrives', () => {
+    const after = rowAfterInscribe(row(), 'commit-9');
+    const rec = record({ commitTxId: 'commit-9' });
+    expect(
+      inscribeAvailability({ ...base, row: after, records: [rec], unfinished: [rec] })
+    ).toEqual({ kind: 'finish', commitTxId: 'commit-9' });
+  });
+
+  test('a commit id we never got back still closes the action', () => {
+    // resumeInscribe can return ok with no commitTxId. Re-inscribing on that
+    // is the one thing that must not happen, so the row goes to 'pending'
+    // regardless and the selector reads 'pending' alone as in flight.
+    const after = rowAfterInscribe(row(), undefined);
+    expect(after.inscriptionStatus).toBe('pending');
+    expect(inscribeAvailability({ ...base, row: after })).toEqual({ kind: 'none' });
+  });
+
+  test('closing on pending does not swallow a Finish offer', () => {
+    // The durable row is written 'pending' at inscribe time, so the row a
+    // Finish banner points at carries BOTH a commit id and 'pending'.
+    const rec = record({ commitTxId: 'commit-9' });
+    expect(
+      inscribeAvailability({
+        ...base,
+        row: row({ commitTxId: 'commit-9', inscriptionStatus: 'pending' }),
+        records: [rec],
+        unfinished: [rec],
+      })
+    ).toEqual({ kind: 'finish', commitTxId: 'commit-9' });
   });
 });
