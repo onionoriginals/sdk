@@ -143,6 +143,35 @@ jobs:
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      # --frozen-lockfile here specifically: an audit of a tree that drifted
+      # from the committed lockfile is an audit of something we do not ship.
+      - name: Install dependencies (bun)
+        run: bun install --frozen-lockfile
+
+      # --prod first and separately, because these are the advisories that
+      # reach EVERY consumer of the published packages: `npm audit` fires on
+      # their install, against dependencies they did not choose. A dev-only
+      # advisory is a smaller problem than a shipped one, and conflating them
+      # is how the shipped one sat unnoticed (undici 5.29.0, 10 highs, through
+      # jsonld).
+      - name: Audit production dependencies
+        run: bun audit --prod
+
+      - name: Audit all dependencies (including dev)
+        run: bun audit
+
   install-docs:
     name: Documented install commands resolve to this major
     runs-on: ubuntu-latest
