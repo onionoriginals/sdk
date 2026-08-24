@@ -639,6 +639,13 @@ export const yourOriginals = {
    */
   inscribe: {
     cta: 'Inscribe on Bitcoin',
+    /**
+     * The detail-page section heading. Neutral on purpose, and never the CTA
+     * text: the same section carries the reason an Original CANNOT be
+     * inscribed, where "Inscribe on Bitcoin" would read as an offer being
+     * withdrawn — and above the button it would just say the same thing twice.
+     */
+    sectionEyebrow: 'Bitcoin',
     busy: 'Inscribing…',
     hydrating: 'Rebuilding from its signed log…',
     done: 'Inscribed — the transactions are on their way to the network.',

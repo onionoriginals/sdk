@@ -613,8 +613,15 @@
 
 /* ——— resume: inscribe a published Original that never reached Bitcoin ——— */
 
+/* The eyebrow is inline elsewhere on this page; here it heads a block, so the
+   action below it needs a row of its own rather than sharing that line. */
+.od-inscribe .eyebrow {
+  display: block;
+  margin-bottom: var(--sp-4);
+}
+
 .od-inscribe .btn {
-  margin-top: var(--sp-4);
+  display: inline-flex;
 }
 
 /* .od-note is an inline-flex row elsewhere on this page; the reasons here are

@@ -281,7 +281,7 @@ export function OriginalDetail({ did }: { did: string }) {
             {data.row.btcoDid && <Bitcoin row={data.row} />}
             {action && (action.kind === 'inscribe' || action.kind === 'disabled') && (
               <section className="od-section od-inscribe">
-                <p className="eyebrow">{yourOriginals.inscribe.cta}</p>
+                <p className="eyebrow">{yourOriginals.inscribe.sectionEyebrow}</p>
                 {action.kind === 'inscribe' ? (
                   <button
                     type="button"
