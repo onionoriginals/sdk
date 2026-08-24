@@ -28,6 +28,9 @@
   --webvh-soft: rgba(76, 194, 255, 0.13);
   --btco: #f7931a;
   --btco-soft: rgba(247, 147, 26, 0.14);
+  /* Custody chain (holder entries): deliberately outside the layer palette so
+     a holder's addition never reads as the creator's voice. */
+  --holder: #9aa7b4;
 
   /* Status */
   --ok: #3fdd9d;

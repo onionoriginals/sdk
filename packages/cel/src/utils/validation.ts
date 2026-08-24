@@ -14,8 +14,11 @@ export function validateDID(did: string): boolean {
   }
   const method = match[1];
 
-  // Validate supported methods
-  const supportedMethods = ['peer', 'webvh', 'btco', 'cel'];
+  // Validate supported methods. did:peer support is removed entirely — a
+  // did:peer identifier is no longer a valid asset or issuer DID. did:key IS
+  // supported: it is the protocol's (only) self-certifying method — genesis
+  // controllers, rotation targets, and committed authors are all did:keys.
+  const supportedMethods = ['key', 'webvh', 'btco', 'cel'];
   if (!supportedMethods.includes(method)) {
     return false;
   }

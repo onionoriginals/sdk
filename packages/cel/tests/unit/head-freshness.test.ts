@@ -8,7 +8,10 @@
  * must commit (via headDigestMultibase) to the chain digest of SOME event
  * PRESENT in the presented log; otherwise the log is STALE_LOG.
  *
- * Reuses the OrdMock-as-chain fixtures from non-cooperative-rotation.test.ts.
+ * Fixtures drive OrdMockProvider as the chain; the newer on-sat anchor is
+ * produced by a SAT-GATED holder append: an update committing its author in
+ * data.author, reinscribed on the anchoring sat — the only post-anchor write
+ * the verifier accepts (rotateKey is rejected after the anchor).
  */
 import { describe, test, expect } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
@@ -104,17 +107,19 @@ async function makeAnchoredLog(provider: OrdMockProvider, a: Key, sat = SAT) {
   return { log, migrateInscriptionId: insc.inscriptionId, migrateDigest };
 }
 
-// Append a non-cooperative rotateKey and reinscribe the rotated anchor doc on SAT.
-async function addNonCoopRotation(log: EventLog, provider: OrdMockProvider, newController: Key) {
-  const rotated = await appendEvent(
+// Append a SAT-GATED holder entry (an update committing its author, signed by
+// the holder) and reinscribe the anchor doc on SAT — the newer on-sat anchor
+// the freshness check compares against.
+async function addHolderAppend(log: EventLog, provider: OrdMockProvider, holder: Key) {
+  const appended = await appendEvent(
     log,
-    'rotateKey',
-    { newController: newController.didKey, rotatedAt: '2026-07-10T00:00:02Z' },
-    { signer: newController.signer, verificationMethod: newController.vm }
+    'update',
+    { author: holder.didKey, statement: 'held', occurredAt: '2026-07-10T00:00:02Z' },
+    { signer: holder.signer, verificationMethod: holder.vm }
   );
-  const rotDigest = chainDigest(rotated.events[rotated.events.length - 1]);
-  const insc = await inscribeDoc(provider, SAT, rotDigest, newController.pubMb, deriveDidCel(log));
-  return { log: attachWitness(rotated, insc, SAT), inscriptionId: insc.inscriptionId, rotDigest };
+  const rotDigest = chainDigest(appended.events[appended.events.length - 1]);
+  const insc = await inscribeDoc(provider, SAT, rotDigest, holder.pubMb, deriveDidCel(log));
+  return { log: attachWitness(appended, insc, SAT), inscriptionId: insc.inscriptionId, rotDigest };
 }
 
 const STALE = (r: { errors: string[] }) => r.errors.some(e => /STALE_LOG/.test(e));
@@ -130,49 +135,56 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     expect(STALE(result)).toBe(false);
   });
 
-  test('TRUNCATION: a valid pre-rotation prefix fails STALE_LOG once the rotation is re-inscribed', async () => {
+  test('TRUNCATION: a valid prefix fails STALE_LOG once a later append is re-inscribed', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    // The buyer (b) reinscribes + rotates: the sat's newest anchor now commits
-    // to the rotation. `prefix` (create, migrate) is a VALID prefix of the full
-    // log — it omits the rotation event.
-    await addNonCoopRotation(prefix, provider, b);
+    // The buyer (b) makes a sat-gated append: the sat's newest anchor now
+    // commits to it. `prefix` (create, migrate) is a VALID prefix of the full
+    // log — it omits the buyer's entry.
+    await addHolderAppend(prefix, provider, b);
 
     // Without the flag the truncated prefix still verifies (pure-algorithm).
     const lenient = await verifyEventLog(prefix, { ordinalsProvider: provider });
     expect(lenient.verified).toBe(true);
 
-    // With the flag it is caught: newest anchor commits to the sliced-off rotation.
+    // With the flag it is caught: newest anchor commits to the sliced-off append.
     const strict = await verifyEventLog(prefix, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(strict.verified).toBe(false);
     expect(STALE(strict)).toBe(true);
   });
 
-  test('the honest FULL log (rotation included) passes with the flag', async () => {
+  test('the honest FULL log (holder append included) passes with the flag', async () => {
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    const { log: full } = await addNonCoopRotation(prefix, provider, b);
+    const { log: full } = await addHolderAppend(prefix, provider, b);
 
     const result = await verifyEventLog(full, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(result.errors).toEqual([]);
     expect(result.verified).toBe(true);
   });
 
-  test('MID-LOG match: a later local append not yet re-inscribed still passes (present-in-log, not is-the-head)', async () => {
+  test('MID-LOG match: a newest anchor committing to a mid-log event still passes (present-in-log, not is-the-head)', async () => {
+    // The freshness check requires the newest on-sat anchor's digest to be
+    // PRESENT in the log, not to be the head. (This used to be exercised via
+    // a post-anchor legacy v0 transfer extending the head past the anchor —
+    // that pass-through is closed now, so the mid-log condition comes from
+    // the sat side instead: a newer anchor doc re-committing to an older
+    // event.)
     const provider = new OrdMockProvider();
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    const { log: full } = await addNonCoopRotation(prefix, provider, b);
-    // b appends an update locally that has NOT been re-inscribed on the sat.
-    const withLocalAppend = await appendEvent(full, 'update', { note: 'local' }, { signer: b.signer, verificationMethod: b.vm });
+    const { log: full } = await addHolderAppend(prefix, provider, b);
+    // A newer anchor doc lands on the sat committing to the MIGRATE event's
+    // digest — an event that IS in the log, but mid-log (the holder append is
+    // the head).
+    await inscribeDoc(provider, SAT, chainDigest(full.events[1]), undefined, deriveDidCel(full));
 
-    const result = await verifyEventLog(withLocalAppend, { ordinalsProvider: provider, checkHeadFreshness: true });
-    // Newest on-sat anchor = the rotation (a MID-log event now), which IS present.
+    const result = await verifyEventLog(full, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(result.errors).toEqual([]);
     expect(result.verified).toBe(true);
   });
@@ -271,11 +283,11 @@ describe('checkHeadFreshness — truncated-log detection', () => {
       const a = await makeKey();
       const b = await makeKey();
       const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a); // I_mig
-      const { inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b); // I_rot, omitted from prefix
+      const { inscriptionId: rotInscriptionId } = await addHolderAppend(prefix, provider, b); // I_rot, omitted from prefix
 
-      // I_rot genuinely postdates I_mig (block 200 vs 100). Newest-first list is
-      // [I_rot, I_mig]: a list-tail walk would pick I_mig (present in prefix) and
-      // fail open. Height-based selection picks I_rot → its digest is absent → STALE.
+      // I_app genuinely postdates I_mig (block 200 vs 100). Newest-first list is
+      // [I_app, I_mig]: a list-tail walk would pick I_mig (present in prefix) and
+      // fail open. Height-based selection picks I_app → its digest is absent → STALE.
       const misordered = newestFirstWithHeights(provider, {
         [migrateInscriptionId]: 100,
         [rotInscriptionId]: 200,
@@ -290,7 +302,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
       const a = await makeKey();
       const b = await makeKey();
       const { log: prefix, migrateInscriptionId } = await makeAnchoredLog(provider, a);
-      const { log: full, inscriptionId: rotInscriptionId } = await addNonCoopRotation(prefix, provider, b);
+      const { log: full, inscriptionId: rotInscriptionId } = await addHolderAppend(prefix, provider, b);
 
       const misordered = newestFirstWithHeights(provider, {
         [migrateInscriptionId]: 100,
@@ -318,7 +330,7 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const a = await makeKey();
     const b = await makeKey();
     const { log: prefix } = await makeAnchoredLog(provider, a);
-    await addNonCoopRotation(prefix, provider, b);
+    await addHolderAppend(prefix, provider, b);
 
     const result = await verifyEventLog(prefix, { ordinalsProvider: provider });
     expect(result.verified).toBe(true);

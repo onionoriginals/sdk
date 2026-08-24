@@ -65,7 +65,12 @@ export interface AssetTransferredEvent extends BaseEvent {
     id: string;
     layer: LayerType;
   };
-  /** Best-effort pre-move sat holder; omitted when no owner index is available (never fabricated). Ownership is the sat itself (#366 ownership-is-sat). */
+  /**
+   * Best-effort pre-move sat holder; omitted when no owner index is available
+   * (never fabricated). Ownership is the sat itself, read live from the chain;
+   * the sat move also hands the recipient the right to append to the log —
+   * recorded there only when the new holder writes their first entry.
+   */
   from?: string;
   to: string;
   transactionId: string;
@@ -373,9 +378,9 @@ export interface CelHostFailedEvent extends BaseEvent {
 }
 
 /**
- * Emitted when a recipient rotates the did:btco keys by reinscribing an
+ * Emitted when the controller rotates the did:btco keys by reinscribing an
  * updated document (same id, new verification method) on the same sat —
- * the recipient-side act of the rotation-first ownership model (#366).
+ * a cooperative rotation, signed by the outgoing controller.
  */
 export interface KeyRotatedEvent extends BaseEvent {
   type: 'key:rotated';

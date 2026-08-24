@@ -6,6 +6,7 @@
  * and a summary of the signed did:webvh version-history log.
  */
 import type { OriginalRow } from './YourOriginals';
+import { claimedSignerDid } from '@originals/sdk/cel';
 
 /* ——— CEL log shapes (what LifecycleManager publishes as cel.json) ——— */
 
@@ -175,6 +176,62 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
   ];
 }
 
+/* ——— Custody chain (holder entries), item 5 ——— */
+
+export interface CustodyRow {
+  /** The holder's claimed did:key (a display CLAIM — only verification promotes it). */
+  author: string;
+  statement?: string;
+  occurredAt?: string;
+  eventIndex: number;
+}
+
+/**
+ * Fold the holder entries (post-anchor updates signed outside the creator
+ * lineage) out of the CEL — the detail page's custody section. Mirrors the
+ * SDK managers' defensive fold: lineage is the genesis controller plus
+ * pre-anchor rotations; the anchor is the btco migrate; nothing here is
+ * verified, so the page labels these as the holders' claims.
+ */
+export function celCustody(cel: CelLog | null): CustodyRow[] {
+  const events = cel?.events ?? [];
+  // Lineage is genesis `data.controller` only (the model's sole genesis
+  // identity; there is no legacy shape to read) plus pre-anchor rotations.
+  // The signer is read via the SDK's shared `claimedSignerDid` (author, else
+  // the first NON-WITNESS proof's VM DID) — a hand-rolled proof[0] read here
+  // previously mislabeled a witness-first proof array's `did:btco:witness` as
+  // the author.
+  const lineage = new Set<string>();
+  const genesisController = events[0]?.data?.controller;
+  if (typeof genesisController === 'string') lineage.add(genesisController);
+  let anchored = false;
+  const rows: CustodyRow[] = [];
+  for (let i = 1; i < events.length; i++) {
+    const e = events[i];
+    const data = e.data ?? {};
+    if (e.type === 'migrate' && data.layer === 'btco') {
+      anchored = true;
+      continue;
+    }
+    if (!anchored && e.type === 'rotateKey' && typeof data.newController === 'string') {
+      lineage.add(data.newController);
+      continue;
+    }
+    if (anchored && e.type === 'update') {
+      const author = claimedSignerDid(e as { data?: unknown; proof?: unknown });
+      if (author === undefined || !lineage.has(author)) {
+        rows.push({
+          author: author ?? '(unverified author)',
+          ...(typeof data.statement === 'string' ? { statement: data.statement } : {}),
+          ...(typeof data.occurredAt === 'string' ? { occurredAt: data.occurredAt } : {}),
+          eventIndex: i,
+        });
+      }
+    }
+  }
+  return rows;
+}
+
 /** The resources sealed at genesis (id + media type + content digest). */
 export function celResources(cel: CelLog | null): CelResourceRef[] {
   const create = cel?.events?.find((e) => e.type === 'create');
@@ -279,15 +336,15 @@ export function sameOriginUrl(url: string, currentHost?: string): string {
 }
 
 /**
- * The multibase segment a published resource is HOSTED under. The SDK hosts
- * resources at `…/resources/<base64url multibase of the RAW sha-256 bytes>`
- * (LifecycleManager.publishResources), while the CEL create event records the
- * multihash-wrapped `digestMultibase` — this converts the declared hex back to
- * the hosted key segment.
+ * The multibase segment a published resource is HOSTED under: the CANONICAL
+ * multibase multihash of the sha-256 (`u` + base64url-nopad(0x12 0x20 ||
+ * digest), "uEi…") — the only segment form the SDK writes
+ * (LifecycleManager.publishResources). Converts the CEL-declared hex back to
+ * that hosted key segment.
  */
 export function sha256HexToResourceMultibase(hex: string): string | null {
   if (!/^[0-9a-f]{64}$/.test(hex)) return null;
-  const bytes = hex.match(/../g)!.map((b) => parseInt(b, 16));
+  const bytes = [0x12, 0x20, ...hex.match(/../g)!.map((b) => parseInt(b, 16))];
   const b64 = btoa(String.fromCharCode(...bytes));
   return 'u' + b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

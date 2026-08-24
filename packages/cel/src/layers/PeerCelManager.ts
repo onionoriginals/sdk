@@ -15,6 +15,7 @@ import { createEventLog } from '../algorithms/createEventLog.js';
 import { updateEventLog } from '../algorithms/updateEventLog.js';
 import { deriveDidCel } from '../celDid.js';
 import { multibase } from '../utils/encoding.js';
+import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
 
 /**
  * Configuration options for PeerCelManager
@@ -340,9 +341,19 @@ export class PeerCelManager {
       metadata: {},
     };
 
+    // Creator-vs-holder gate (defensive fold, item 5's second line of
+    // defense): post-anchor updates signed outside the creator lineage fold
+    // ONLY into state.custody — never into name/resources/creator/controller/
+    // did/layer or the metadata catch-all — and a post-anchor rotateKey (never
+    // valid) touches nothing. This fold does not trust the verifier to have
+    // caught a bad entry.
+    const custodyFold = beginCustodyFold(log.events[0]);
+
     // Apply subsequent events
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
+      const custodyAction = custodyFoldStep(custodyFold, event, i);
+      if (custodyAction === 'holder' || custodyAction === 'ignore') continue;
 
       if (event.type === 'update') {
         // Merge update data into state
@@ -369,7 +380,7 @@ export class PeerCelManager {
         
         // Store other fields in metadata
         for (const [key, value] of Object.entries(updateData)) {
-          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt'].includes(key)) {
+          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'author'].includes(key)) {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
@@ -433,6 +444,8 @@ export class PeerCelManager {
         }
       }
     }
+
+    finishCustodyFold(custodyFold, state);
 
     return state;
   }

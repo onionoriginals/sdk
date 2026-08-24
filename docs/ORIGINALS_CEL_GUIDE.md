@@ -139,8 +139,8 @@ Assets exist in one of three **trust layers**, each providing different levels o
    │  • No external witnesses                                 │
    │  • Instant, free, offline creation                       │
    │  • Verification: cryptographic proof only                │
-   │  • (did:peer is deprecated as a creation method;         │
-   │     verifiers keep a read-only path for legacy logs)     │
+   │  • (did:peer support is removed entirely — no read     │
+   │     path; legacy did:peer logs no longer verify)         │
    │                                                          │
    └───────────────────────────┬──────────────────────────────┘
                                │ migrate()
@@ -254,10 +254,12 @@ A transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership`) th
 accept it in old logs, but the SDK no longer emits it. Ownership is never a credential
 and is never transferred by editing a DID document.
 
-A new sat holder who wants to *author* provenance but can't get the seller's signature
-uses `authorizeSigner` (renamed from `claimOwnership`, #366): they reinscribe the
-did:btco doc with their key and self-sign a `rotateKey`. This establishes a signing key —
-it does not grant ownership, because the sat already is ownership.
+There is no rotation after the btco anchor at all: `rotateKey` is rejected
+post-anchor (so `rotateBtcoKeys` always throws, and the former non-cooperative
+`authorizeSigner` is removed). Holding the sat grants the right to APPEND —
+the holder writes with their own key, committing it in `data.author`, authorized
+by the reinscription on the anchoring sat — never control of the key set. The
+controller key lineage is frozen once the asset is inscribed.
 
 ---
 

@@ -20,7 +20,7 @@ const config = { network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: f
 
 describe('credential tamper resistance (issue #167)', () => {
   const didManager = new DIDManager(config);
-  const did = 'did:peer:issuer1';
+  const did = 'did:key:issuer1';
   const sk = new Uint8Array(32).map((_, i) => (i + 1) & 0xff);
   const pk = ed25519.getPublicKey(sk);
   const vm = {
@@ -44,7 +44,7 @@ describe('credential tamper resistance (issue #167)', () => {
     issuer: did,
     validFrom: '2026-01-01T00:00:00Z',
     credentialSubject: {
-      id: 'did:peer:subject1',
+      id: 'did:key:subject1',
       resourceId: 'resource-123',
       contentHash: 'deadbeefcafe'
     }
@@ -99,7 +99,7 @@ describe('credential tamper resistance (issue #167)', () => {
       issuer: did,
       validFrom: '2026-01-01T00:00:00Z',
       credentialSubject: {
-        id: 'did:peer:subject1',
+        id: 'did:key:subject1',
         someUndefinedTerm: 'not in any context'
       }
     } as any;
@@ -115,10 +115,10 @@ describe('credential tamper resistance (issue #167)', () => {
     const cred = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:peer:issuer1',
+      issuer: 'did:key:issuer1',
       issuanceDate: '2026-01-01T00:00:00Z',
       credentialSubject: {
-        id: 'did:peer:subject1',
+        id: 'did:key:subject1',
         someUndefinedTerm: 'dropped silently before the fix'
       }
     } as any;
@@ -137,7 +137,7 @@ describe('credential tamper resistance (issue #167)', () => {
         contentType: 'text/plain',
         createdAt: '2026-01-01T00:00:00Z'
       } as any,
-      'did:peer:asset1',
+      'did:key:asset1',
       did
     );
     const signed = await cm.signCredential(unsigned, vm.secretKeyMultibase, vm.id);

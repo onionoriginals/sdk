@@ -75,11 +75,11 @@ describe('CEL Event Log Performance', () => {
         const start = performance.now();
         await createEventLog({
           name: `Asset ${i}`,
-          did: `did:peer:4z6MkTest${i}`,
+          did: `did:webvh:example.com:4z6MkTest${i}`,
           layer: 'peer',
           createdAt: new Date().toISOString(),
           resources: [],
-          creator: `did:peer:4z6MkTest${i}`,
+          creator: `did:webvh:example.com:4z6MkTest${i}`,
         }, signerOpts);
         durations.push(performance.now() - start);
       }
@@ -95,11 +95,11 @@ describe('CEL Event Log Performance', () => {
       const promises = Array.from({ length: batchSize }, (_, i) =>
         createEventLog({
           name: `Concurrent ${i}`,
-          did: `did:peer:4z6MkConc${i}`,
+          did: `did:webvh:example.com:4z6MkConc${i}`,
           layer: 'peer',
           createdAt: new Date().toISOString(),
           resources: [],
-          creator: `did:peer:4z6MkConc${i}`,
+          creator: `did:webvh:example.com:4z6MkConc${i}`,
         }, signerOpts)
       );
       const results = await Promise.all(promises);
@@ -119,11 +119,11 @@ describe('CEL Event Log Performance', () => {
     test('updateEventLog append performance', async () => {
       let log = await createEventLog({
         name: 'Update Test',
-        did: 'did:peer:4z6MkUpdateTest',
+        did: 'did:webvh:example.com:4z6MkUpdateTest',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [],
-        creator: 'did:peer:4z6MkUpdateTest',
+        creator: 'did:webvh:example.com:4z6MkUpdateTest',
       }, signerOpts);
 
       const iterations = 30;
@@ -146,11 +146,11 @@ describe('CEL Event Log Performance', () => {
     test('update performance does not degrade with log size', async () => {
       let log = await createEventLog({
         name: 'Scaling Test',
-        did: 'did:peer:4z6MkScaleTest',
+        did: 'did:webvh:example.com:4z6MkScaleTest',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [],
-        creator: 'did:peer:4z6MkScaleTest',
+        creator: 'did:webvh:example.com:4z6MkScaleTest',
       }, signerOpts);
 
       // Build up a log with 50 events
@@ -179,11 +179,11 @@ describe('CEL Event Log Performance', () => {
       for (let i = 0; i < 10; i++) {
         let log = await createEventLog({
           name: `Verify Test ${i}`,
-          did: `did:peer:4z6MkVerify${i}`,
+          did: `did:webvh:example.com:4z6MkVerify${i}`,
           layer: 'peer',
           createdAt: new Date().toISOString(),
           resources: [],
-          creator: `did:peer:4z6MkVerify${i}`,
+          creator: `did:webvh:example.com:4z6MkVerify${i}`,
         }, signerOpts);
         // Add 5 updates each
         for (let j = 0; j < 5; j++) {
@@ -211,11 +211,11 @@ describe('CEL Event Log Performance', () => {
     test('JSON serialization round-trip', async () => {
       sampleLog = await createEventLog({
         name: 'Serialize Test',
-        did: 'did:peer:4z6MkSerialize',
+        did: 'did:webvh:example.com:4z6MkSerialize',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'a'.repeat(64) }],
-        creator: 'did:peer:4z6MkSerialize',
+        creator: 'did:webvh:example.com:4z6MkSerialize',
       }, signerOpts);
       for (let i = 0; i < 10; i++) {
         sampleLog = await updateEventLog(sampleLog, { step: i }, signerOpts);
@@ -245,11 +245,11 @@ describe('CEL Event Log Performance', () => {
     test('CBOR serialization round-trip', async () => {
       const log = await createEventLog({
         name: 'CBOR Test',
-        did: 'did:peer:4z6MkCBOR',
+        did: 'did:webvh:example.com:4z6MkCBOR',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'b'.repeat(64) }],
-        creator: 'did:peer:4z6MkCBOR',
+        creator: 'did:webvh:example.com:4z6MkCBOR',
       }, signerOpts);
 
       const iterations = 50;
@@ -276,11 +276,11 @@ describe('CEL Event Log Performance', () => {
     test('JSON vs CBOR size comparison', async () => {
       const log = await createEventLog({
         name: 'Size Comparison',
-        did: 'did:peer:4z6MkSize',
+        did: 'did:webvh:example.com:4z6MkSize',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [{ id: 'r1', type: 'text', contentType: 'text/plain', hash: 'c'.repeat(64) }],
-        creator: 'did:peer:4z6MkSize',
+        creator: 'did:webvh:example.com:4z6MkSize',
       }, signerOpts);
 
       const json = serializeEventLogJson(log);
@@ -305,11 +305,11 @@ describe('CEL Event Log Performance', () => {
       // Warm up
       await createEventLog({
         name: 'warmup',
-        did: 'did:peer:4z6MkWarmup',
+        did: 'did:webvh:example.com:4z6MkWarmup',
         layer: 'peer',
         createdAt: new Date().toISOString(),
         resources: [],
-        creator: 'did:peer:4z6MkWarmup',
+        creator: 'did:webvh:example.com:4z6MkWarmup',
       }, signerOpts);
 
       const runs: number[] = [];
@@ -317,11 +317,11 @@ describe('CEL Event Log Performance', () => {
         const start = performance.now();
         await createEventLog({
           name: `reg-${i}`,
-          did: `did:peer:4z6MkReg${i}`,
+          did: `did:webvh:example.com:4z6MkReg${i}`,
           layer: 'peer',
           createdAt: new Date().toISOString(),
           resources: [],
-          creator: `did:peer:4z6MkReg${i}`,
+          creator: `did:webvh:example.com:4z6MkReg${i}`,
         }, signerOpts);
         runs.push(performance.now() - start);
       }

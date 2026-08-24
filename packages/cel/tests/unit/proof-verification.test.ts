@@ -89,7 +89,7 @@ describe('CEL Proof Verification', () => {
   // -------------------------------------------------------------------------
   test('1. Round-trip: real sign → verify → verified: true, cryptographicallyVerified: true', async () => {
     const log0 = await createEventLog(
-      { name: 'test-asset', layer: 'peer', did: 'did:peer:test' },
+      { name: 'test-asset', layer: 'peer', did: `did:key:${keypair.publicKeyMultikey}` },
       createOpts,
     );
     const log1 = await updateEventLog(log0, { version: 2 }, updateOpts);

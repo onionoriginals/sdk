@@ -75,7 +75,8 @@ Every Originals asset is controlled by a Decentralized Identifier (DID). The con
 | webvh | `did:webvh` | HTTP-based with version history |
 | btco  | `did:btco` | Bitcoin ordinals inscription |
 
-Legacy logs use `did:peer` (numalgo 4) as the genesis identity; new logs derive a
+Legacy logs used `did:peer` (numalgo 4) as the genesis identity; that method's
+support is removed entirely (such logs no longer verify). New logs derive a
 `did:cel` from the genesis event.
 
 ### 2.2 Proof Requirements
@@ -401,9 +402,10 @@ Logs written by pre-`did:cel` releases embed the asset DID directly:
 - Readers MUST continue to accept this shape (dual-accept); the reported asset DID is
   the declared `data.did`.
 - Writers MUST NOT emit it; new assets use `CelAssetData` above.
-- Behavioral delta: a genesis whose `data.did` is a *malformed* long-form
-  `did:peer:4` now fails closed — only when the genesis proof's `verificationMethod`
-  is itself a `did:key` (previously trust-on-first-use).
+- Behavioral delta: a genesis whose `data.did` is a `did:peer` DID (any form) now
+  fails closed — did:peer support is removed entirely, so such legacy logs no
+  longer verify. A `did:key` `data.did` keeps the embedded-key binding; other
+  methods keep trust-on-first-use.
 
 ### 5.2 Update Event
 
@@ -589,7 +591,7 @@ event type that changes the authorized key set.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `newController` | string | Yes | The new controller DID — MUST be self-certifying (`did:key` or long-form `did:peer:4`) |
+| `newController` | string | Yes | The new controller DID — MUST be self-certifying (`did:key`; did:peer is refused) |
 | `rotatedAt` | string | Yes | ISO 8601 timestamp |
 
 #### 5.6.3 Rules

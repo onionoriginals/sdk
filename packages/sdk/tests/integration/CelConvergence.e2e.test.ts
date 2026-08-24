@@ -75,24 +75,28 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
     await sdk.lifecycle.transferOwnership(asset, NEW_OWNER);
     expect(asset.celLog!.events.length).toBe(lenBeforeTransfer);
 
-    // rotate — the recipient reinscribes the same-id doc with a fresh key,
-    // appending rotateKey and RE-embedding a fresher #cel on the same sat.
+    // rotate is a REMOVED capability: the key lineage is frozen at the anchor.
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+    await expect(sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey }))
+      .rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
+
+    // append — a sat-gated statement: commits data.author, reinscribes the
+    // same-id doc, RE-embedding a fresher #cel on the same sat.
+    await asset.appendStatement({ statement: 'exhibited' });
 
     // ---- The log tells the whole story, in order. ----
-    // inscribe appends a controller-signed acknowledgeWitness update after the
-    // btco migrate (map §5.1). The transfer contributed nothing. The fill(7)
-    // rotation carries no matching secret, so the post-rotation controller can't
-    // sign its own acknowledgment — that append degrades (NO_SIGNING_KEY) and no
-    // trailing update lands.
+    // The transfer contributed nothing; the refused rotation contributed
+    // nothing; the statement is the new head.
     const log = asset.celLog!;
-    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update', 'rotateKey']);
+    expect(log.events.map(e => e.type)).toEqual(['create', 'migrate', 'migrate', 'update']);
 
     // ---- verify() gates on the WHOLE chain, needing the ordinals provider
-    // for the btco witness proof. ----
+    // for the btco witness proofs. ----
     const result = await verifyEventLog(log, { expectedDid: didCel, ordinalsProvider });
     expect(result.verified).toBe(true);
+    // The creator still holds the pen: their post-anchor entry is a CREATOR claim.
+    expect(result.events[3].authorClass).toBe('creator');
+    expect(result.holders).toEqual([]);
     // Same guarantee via the asset façade, and fail-closed without the dep.
     expect(await asset.verify({ ordinalsProvider })).toBe(true);
     expect(await asset.verify()).toBe(false);
@@ -105,22 +109,25 @@ describe('CEL convergence end-to-end (#Phase2 Task9)', () => {
     expect(folded.bindings['did:webvh']).toBe(webvhBinding);
     // The btco witness proof (#367) makes the binding log-derivable in the real flow.
     expect(folded.bindings['did:btco']).toBe(btcoDid);
+    // A creator statement is not custody.
+    expect(folded.custody).toEqual([]);
 
     // ---- Two anchors, one sat: newest-inscription-wins resolution. ----
-    // resolveDID returns the CURRENT (rotated) doc, so its #cel is the FRESHER
-    // anchor — the rotateKey entry (now index 4, after the inscribe ack; the
-    // transfer added nothing), not the inscription-time head.
-    const rotateEntry = log.events[4];
+    // resolveDID returns the CURRENT doc, so its #cel is the FRESHER anchor —
+    // the statement entry (index 3), not the inscription-time head.
+    const statementEntry = log.events[3];
     const currentDoc = await sdk.did.resolveDID(btcoDid, { skipCache: true });
     const currentAnchor = (currentDoc!.service || []).find(s => s.type === 'OriginalsCelAnchor');
     expect(currentAnchor).toBeDefined();
     expect((currentAnchor!.serviceEndpoint as any).headDigestMultibase)
-      .toBe(computeDigestMultibase(canonicalizeEntryForChain(rotateEntry)));
+      .toBe(computeDigestMultibase(canonicalizeEntryForChain(statementEntry)));
     // Sanity: the two anchors are genuinely distinct heads of the same log.
     expect(inscriptionAnchorDigest)
       .not.toBe((currentAnchor!.serviceEndpoint as any).headDigestMultibase);
-    // The rotated doc carries the incoming controller's key and keeps its manifest.
-    expect(currentDoc!.verificationMethod?.[0]?.publicKeyMultibase).toBe(newKey);
+    // The reinscribed doc announces the APPENDING key (the creator, still
+    // holding) and keeps its manifest.
+    expect(`did:key:${currentDoc!.verificationMethod?.[0]?.publicKeyMultibase}`)
+      .toBe((statementEntry.data as any).author);
     expect((currentDoc!.service || []).some(s => s.type === 'OriginalsResourceManifest')).toBe(true);
   });
 });

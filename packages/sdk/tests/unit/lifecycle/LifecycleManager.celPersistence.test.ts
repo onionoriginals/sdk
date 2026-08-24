@@ -50,13 +50,13 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const stored = await storage.getObject('cel', celStoragePath(asset.id));
     expect(stored).not.toBeNull();
     const log = parseEventLogJson(Buffer.from(stored!.content).toString('utf8'));
-    // Last event is the acknowledgeWitness update (map §5.1); the btco migrate
-    // it acknowledges is present just before it.
+    // The head is the btco migrate itself — no acknowledgment is appended (a
+    // post-anchor event would need its own reinscription under sat-gated
+    // appends). The stored copy carries the migrate WITH its witness proof.
     const last = log.events[log.events.length - 1];
-    expect(last.type).toBe('update');
-    expect((last.data as any).operation).toBe('acknowledgeWitness');
-    const migrate = log.events.find(e => e.type === 'migrate' && (e.data as any).layer === 'btco');
-    expect(migrate).toBeDefined();
+    expect(last.type).toBe('migrate');
+    expect((last.data as any).layer).toBe('btco');
+    expect(last.proof.some((p: any) => p.cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
   });
 
   test('post-publish appends refresh the webvh-hosted cel.json (not frozen at publish time)', async () => {
@@ -81,10 +81,11 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const after = parseEventLogJson(
       Buffer.from((await storage.getObject('example.com', celJsonPath))!.content).toString('utf8')
     );
-    // inscribe appends the btco migrate AND its acknowledgeWitness update.
+    // inscribe appends the btco migrate (no acknowledgment — a post-anchor
+    // event would need its own reinscription under sat-gated appends).
     expect(after.events.some(e => e.type === 'migrate' && (e.data as any).layer === 'btco')).toBe(true);
-    expect(after.events[after.events.length - 1].type).toBe('update');
-    expect(after.events.length).toBe(before.events.length + 2);
+    expect(after.events[after.events.length - 1].type).toBe('migrate');
+    expect(after.events.length).toBe(before.events.length + 1);
   });
 
   test('legacy put-shaped adapters receive the cel/<suffix>.json key', async () => {
@@ -156,7 +157,7 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     const beforeLog = parseEventLogJson(before);
     // The stored copy reflects the real authoring flow: no transfer event.
     expect(beforeLog.events.some(e => e.type === 'transfer')).toBe(false);
-    expect(beforeLog.events[beforeLog.events.length - 1].type).toBe('update');
+    expect(beforeLog.events[beforeLog.events.length - 1].type).toBe('migrate');
 
     await sdk.lifecycle.transferOwnership(asset, 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080');
 
@@ -170,22 +171,26 @@ describe('CEL storage persistence (#Phase3 Task 3)', () => {
     expect(afterLog.events.some(e => e.type === 'transfer')).toBe(false);
   });
 
-  test('rotateBtcoKeys refreshes the stored copy with the rotateKey event', async () => {
+  test('a post-anchor statement append refreshes the stored copy (rotateBtcoKeys is refused and writes nothing)', async () => {
     const storage = new MemoryStorageAdapter();
     const sdk = makeSdk({ storageAdapter: storage });
     const asset = await sdk.lifecycle.createAsset(RES);
     await sdk.lifecycle.inscribeOnBitcoin(asset);
 
     const newKey = multikey.encodePublicKey(new Uint8Array(32).fill(7), 'Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey });
+    await expect(sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey }))
+      .rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
+
+    await asset.appendStatement({ statement: 'archived' });
 
     const stored = await storage.getObject('cel', celStoragePath(asset.id));
     const log = parseEventLogJson(Buffer.from(stored!.content).toString('utf8'));
     const last = log.events[log.events.length - 1];
-    expect(last.type).toBe('rotateKey');
-    expect((last.data as any).newController).toBe(`did:key:${newKey}`);
+    expect(last.type).toBe('update');
+    expect((last.data as any).statement).toBe('archived');
+    expect(log.events.some(e => e.type === 'rotateKey')).toBe(false);
     // The refresh happens post-append, so the earlier btco migrate event's
-    // witness proof (attached before rotation) is present in the stored copy.
+    // witness proof is present in the stored copy.
     const migrate = log.events.find(e => e.type === 'migrate');
     expect(migrate!.proof.some((p: any) => p.cryptosuite === 'bitcoin-ordinals-2024')).toBe(true);
   });

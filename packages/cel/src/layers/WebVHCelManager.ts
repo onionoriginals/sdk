@@ -16,6 +16,7 @@ import { witnessEvent } from '../algorithms/witnessEvent.js';
 import type { WitnessService } from '../witnesses/WitnessService.js';
 import type { CelSigner } from './PeerCelManager.js';
 import { deriveDidCel } from '../celDid.js';
+import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
 
 /**
  * Configuration options for WebVHCelManager
@@ -218,18 +219,11 @@ export class WebVHCelManager {
    */
   private generateWebVHDid(sourceDid: string): string {
     // Extract a stable identifier from the source DID
-    // For did:peer, extract the key portion after the method
     let idPart: string;
-    
-    if (sourceDid.startsWith('did:peer:')) {
-      // For peer DIDs, use a hash-derived portion
-      // did:peer:4zQm... -> use the multibase portion
-      const peerPart = sourceDid.replace('did:peer:', '');
-      // Take first 32 chars of the peer DID identifier for brevity
-      idPart = peerPart.substring(0, Math.min(32, peerPart.length));
-    } else if (sourceDid.startsWith('did:cel:')) {
+
+    if (sourceDid.startsWith('did:cel:')) {
       // did:cel suffix is a base64url digest (already URL-safe); truncate it
-      // exactly the way the did:peer branch truncates its identifier.
+      // for brevity.
       const celPart = sourceDid.replace('did:cel:', '');
       idPart = celPart.substring(0, Math.min(32, celPart.length));
     } else if (sourceDid.startsWith('did:key:')) {
@@ -308,9 +302,19 @@ export class WebVHCelManager {
       metadata: {},
     };
 
+    // Creator-vs-holder gate (defensive fold, item 5's second line of
+    // defense): post-anchor updates signed outside the creator lineage fold
+    // ONLY into state.custody — never into name/resources/creator/controller/
+    // did/layer or the metadata catch-all — and a post-anchor rotateKey (never
+    // valid) touches nothing. This fold does not trust the verifier to have
+    // caught a bad entry.
+    const custodyFold = beginCustodyFold(log.events[0]);
+
     // Apply subsequent events
     for (let i = 1; i < log.events.length; i++) {
       const event = log.events[i];
+      const custodyAction = custodyFoldStep(custodyFold, event, i);
+      if (custodyAction === 'holder' || custodyAction === 'ignore') continue;
 
       if (event.type === 'update' || event.type === 'migrate') {
         const updateData = event.data as Record<string, unknown>;
@@ -355,7 +359,7 @@ export class WebVHCelManager {
         
         // Store other fields in metadata
         for (const [key, value] of Object.entries(updateData)) {
-          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt'].includes(key)) {
+          if (!['name', 'resources', 'updatedAt', 'did', 'layer', 'creator', 'createdAt', 'sourceDid', 'targetDid', 'domain', 'migratedAt', 'author'].includes(key)) {
             state.metadata = state.metadata || {};
             state.metadata[key] = value;
           }
@@ -398,6 +402,8 @@ export class WebVHCelManager {
         }
       }
     }
+
+    finishCustodyFold(custodyFold, state);
 
     return state;
   }

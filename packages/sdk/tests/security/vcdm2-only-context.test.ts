@@ -14,8 +14,8 @@ import type { VerifiableCredential } from '../../src/types';
 describe('VCDM 2.0-only context enforcement (issue #300)', () => {
   const wellFormedExceptContext = {
     type: ['VerifiableCredential'],
-    issuer: 'did:peer:issuer',
-    credentialSubject: { id: 'did:peer:subject' },
+    issuer: 'did:key:issuer',
+    credentialSubject: { id: 'did:key:subject' },
   };
 
   test('validateCredential rejects a VCDM 1.1-only credential', () => {

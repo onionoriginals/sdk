@@ -12,7 +12,7 @@ describe('diwings documentLoader', () => {
   });
 
   test('resolves DID and fragment', async () => {
-    const did = 'did:peer:123';
+    const did = 'did:key:123';
     const dm = new DIDManager({} as any);
     spyOn(dm, 'resolveDID').mockResolvedValue({
       '@context': ['https://www.w3.org/ns/did/v1'],
@@ -27,14 +27,14 @@ describe('diwings documentLoader', () => {
   });
 
   test('falls back to registered VM when the DID itself does not resolve', async () => {
-    const did = 'did:peer:unresolvable-1';
+    const did = 'did:key:unresolvable-1';
     registerVerificationMethod({ id: `${did}#key-1`, type: 'Multikey', controller: did, publicKeyMultibase: 'zReg' });
     const res = await loader(`${did}#key-1`);
     expect(res.document.publicKeyMultibase).toBe('zReg');
   });
 
   test('throws for an unresolvable bare DID', async () => {
-    await expect(loader('did:peer:unresolvable-2')).rejects.toThrow('DID not resolved');
+    await expect(loader('did:key:unresolvable-2')).rejects.toThrow('DID not resolved');
   });
 
   test('throws on unknown IRI', async () => {
@@ -55,11 +55,11 @@ describe('documentLoader branches', () => {
 
   test('returns cached verification method for fragment (self-certifying method)', async () => {
     const dm = new DIDManager({} as any);
-    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:reg1' } as any);
+    spyOn(dm, 'resolveDID').mockResolvedValueOnce({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:key:reg1' } as any);
     const loader = createDocumentLoader(dm);
-    registerVerificationMethod({ id: 'did:peer:reg1#key-1', type: 'Multikey', controller: 'did:peer:reg1', publicKeyMultibase: 'zAb' });
-    const res = await loader('did:peer:reg1#key-1');
-    expect(res.document.id).toBe('did:peer:reg1#key-1');
+    registerVerificationMethod({ id: 'did:key:reg1#key-1', type: 'Multikey', controller: 'did:key:reg1', publicKeyMultibase: 'zAb' });
+    const res = await loader('did:key:reg1#key-1');
+    expect(res.document.id).toBe('did:key:reg1#key-1');
     expect(res.document.publicKeyMultibase).toBe('zAb');
   });
 
@@ -208,16 +208,16 @@ describe('documentLoader rejects retired verification methods', () => {
     const dm = new DIDManager({} as any);
     spyOn(dm, 'resolveDID').mockResolvedValueOnce({
       '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:revcache'
+      id: 'did:key:revcache'
     } as any);
     const loader = createDocumentLoader(dm);
     registerVerificationMethod({
-      id: 'did:peer:revcache#key-1',
+      id: 'did:key:revcache#key-1',
       type: 'Multikey',
-      controller: 'did:peer:revcache',
+      controller: 'did:key:revcache',
       publicKeyMultibase: 'zCached',
       revoked: '2024-01-01T00:00:00Z'
     } as any);
-    await expect(loader('did:peer:revcache#key-1')).rejects.toThrow('retired');
+    await expect(loader('did:key:revcache#key-1')).rejects.toThrow('retired');
   });
 });

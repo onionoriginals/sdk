@@ -83,7 +83,7 @@ describe('editing an Original by its title', () => {
 
     const url = (hash: string) => {
       const parts = published.webvhDid!.split(':');
-      const bytes = Uint8Array.from(hash.match(/../g)!.map((h) => parseInt(h, 16)));
+      const bytes = Uint8Array.from([0x12, 0x20, ...hash.match(/../g)!.map((h) => parseInt(h, 16))]);
       const mb = 'u' + btoa(String.fromCharCode(...bytes))
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       return `https://${decodeURIComponent(parts[3])}/${parts.slice(4).join('/')}/resources/${mb}`;

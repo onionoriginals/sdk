@@ -11,7 +11,7 @@ import { DIDManager } from '../../../src/did/DIDManager';
 // tampered credential fails.
 describe('UnifiedVerifier (spike)', () => {
   const didManager = new DIDManager({} as any);
-  const did = 'did:peer:issuer-unified';
+  const did = 'did:key:issuer-unified';
   const sk = new Uint8Array(32).map((_, i) => (i + 7) & 0xff);
   const pk = ed25519.getPublicKey(sk);
   const vm = {
@@ -43,7 +43,7 @@ describe('UnifiedVerifier (spike)', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject-unified' },
+        credentialSubject: { id: 'did:key:subject-unified' },
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
@@ -61,12 +61,12 @@ describe('UnifiedVerifier (spike)', () => {
         type: ['VerifiableCredential', 'Test'],
         issuer: did,
         issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:peer:subject-unified' },
+        credentialSubject: { id: 'did:key:subject-unified' },
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
     // Tamper with the subject after signing.
-    vc.credentialSubject.id = 'did:peer:attacker';
+    vc.credentialSubject.id = 'did:key:attacker';
 
     const unified = new UnifiedVerifier(didManager);
     const res = await unified.verify(vc);

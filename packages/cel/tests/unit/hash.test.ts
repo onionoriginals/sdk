@@ -3,7 +3,8 @@ import {
   computeDigestMultibase,
   verifyDigestMultibase,
   decodeDigestMultibase,
-  digestMultibaseEquals
+  digestMultibaseEquals,
+  resourcePathSegment,
 } from '../../src/hash';
 import { multibase } from '../../src/utils/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -179,6 +180,40 @@ describe('CEL Hash Utilities', () => {
       expect(digestMultibaseEquals(modern, other)).toBe(false);
       expect(digestMultibaseEquals(legacy, other)).toBe(false);
       expect(digestMultibaseEquals('not-multibase', modern)).toBe(false);
+    });
+  });
+
+  describe('resource path segments (one hash encoding)', () => {
+    // Golden vectors from the real mainnet inscription
+    // 8ad88c2ab862cb311da677e56ba5aea2edbfab459650decaad3406cf1081360bi0:
+    // three encodings of the SAME sha256 digest of artwork.svg.
+    const HEX = '74a170a58ea0fcb71ef08acab6facb6d199315fcb4821b5827199bcd8f2e6c23';
+    const CANONICAL = 'uEiB0oXCljqD8tx7wisq2-sttGZMV_LSCG1gnGZvNjy5sIw';
+    const LEGACY = 'udKFwpY6g_Lce8IrKtvrLbRmTFfy0ghtYJxmbzY8ubCM';
+
+    test('resourcePathSegment emits the canonical multihash form (on-chain golden vector)', () => {
+      expect(resourcePathSegment(HEX)).toBe(CANONICAL);
+    });
+
+    test('resourcePathSegment never emits the legacy raw-digest form', () => {
+      // parseResourcePathSegment (the dual-form reader) is deleted — nothing
+      // reads segments back and no legacy URL exists. The write side is
+      // canonical-only: the golden vectors prove the two forms differ and
+      // that only the canonical one is ever produced.
+      expect(resourcePathSegment(HEX)).not.toBe(LEGACY);
+      expect(resourcePathSegment(HEX).startsWith('uEi')).toBe(true);
+    });
+
+    test('resourcePathSegment agrees with computeDigestMultibase for the same content', () => {
+      const content = new TextEncoder().encode('round trip');
+      const digest = computeDigestMultibase(content);
+      const hex = Array.from(sha256(content)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      expect(resourcePathSegment(hex)).toBe(digest);
+    });
+
+    test('resourcePathSegment rejects non-hex and wrong-length input', () => {
+      expect(() => resourcePathSegment('nothex')).toThrow();
+      expect(() => resourcePathSegment(HEX.slice(0, 62))).toThrow();
     });
   });
 

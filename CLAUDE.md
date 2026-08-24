@@ -16,7 +16,7 @@ This is a TypeScript SDK for the Originals Protocol - enabling creation, discove
 - **`did:webvh`** - Public discovery via HTTPS hosting
 - **`did:btco`** - Transferable ownership on Bitcoin (ownership IS live sat control)
 
-Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` is deprecated as a creation method — the verifier keeps a legacy read path for pre-existing `did:peer:4` logs, but new assets are minted as `did:cel`.)
+Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` support is REMOVED entirely — no creation, no resolution, no verifier read path; pre-existing `did:peer` logs and credentials no longer verify.)
 
 ## Build and Test Commands
 
@@ -77,7 +77,7 @@ The DID system supports three DID methods with unified interfaces:
 - `createDIDWebVH()` - Create a did:webvh identifier for public hosting
 - `migrateToDIDWebVH()` - Upgrade a genesis (did:cel) asset to did:webvh for public hosting
 - `migrateToDIDBTCO()` - Inscribe DID on Bitcoin for transferable ownership (sat = identity)
-- `resolveDID()` - Universal resolver for all DID methods (incl. legacy did:peer read path)
+- `resolveDID()` - Universal resolver for all supported DID methods (did:peer is not one — it resolves to null)
 
 > Genesis is minted via `sdk.lifecycle.createAsset()` (a `did:cel` `create` event) — there is no `createDIDPeer()`.
 
@@ -150,8 +150,9 @@ An Original asset **IS a CEL** (Cryptographic Event Log — `@originals/cel`, pa
 - `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel and `currentLayer` is `'did:cel'`
 - `publishToWeb()` - Migrates to did:webvh (`migrate` event)
 - `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof
-- `transferOwnership()` - A pure Bitcoin **sat move** — writes NOTHING to the CEL (ownership IS sat control; the CEL is authorship only). Ownership is read live via `getCurrentOwner()`, never from a log event. The `transfer` CEL event type is legacy/read-only (verifiers still accept it in old logs; the SDK no longer emits it). `rotateBtcoKeys()` reinscribes same-id doc with a new key (`rotateKey` event, COOPERATIVE — signed by the outgoing controller), re-embedding a fresher `#cel`
-- `authorizeSigner()` - OPTIONAL author-enablement (#366, renamed from `claimOwnership`): does NOT grant or claim ownership (the sat is ownership). It lets a sat holder who cannot obtain the seller's signature establish a signing key so they can author new provenance — they reinscribe the did:btco doc with THEIR key and SELF-SIGN the `rotateKey`; the reinscription witness proves sat control, and the verifier accepts the otherwise-unauthorized rotation. `privateKey` is REQUIRED. Contrast with the cooperative `rotateBtcoKeys`.
+- `transferOwnership()` - A pure Bitcoin **sat move** — writes NOTHING to the CEL (ownership IS sat control; the sat move hands over the RIGHT TO APPEND). Ownership is read live via `getCurrentOwner()`, never from a log event. The `transfer` CEL event type is rejected anywhere, in any shape — there is no transfer event in the model and no legacy log to read.
+- **Sat-gated appends**: after the btco anchor, authority is sat control — a post-anchor event must commit its signer in `data.author` and carry a verified reinscription witness on the anchoring sat that strictly postdates the current anchor. The sat holder appends with their OWN key (`asset.appendStatement()`); holder entries carry an allowlisted shape (`statement`/`occurredAt`/`links`/`ext`) and can never make authenticity claims (`name`/`resources`… are creator-lineage only, `CEL_HOLDER_FIELD_NOT_PERMITTED` locally). `rotateKey`/`deactivate`/`migrate` are REJECTED post-anchor: `rotateBtcoKeys()` now always throws `KEY_ROTATION_NOT_PERMITTED` (the controller key lineage is frozen at inscription time), and no witness-acknowledgment events are appended. The verifier reports `authorClass` per entry plus `creatorKeys`/`holders`; `classifyLogEntries` is the pure display fold.
+- The non-cooperative rotation path (#366, `authorizeSigner`, formerly `claimOwnership`) is REMOVED: holding the sat grants no control of the key set, so a rotateKey not signed by the current controller never verifies. `rotateBtcoKeys` (cooperative, signed by the outgoing controller) is the only rotation. The creator's key lineage is frozen once the asset is inscribed — a lost post-migrate controller key cannot be rotated away.
 - `asset.serialize()` / `lifecycle.loadAsset()` - The interchange format (#377): `serialize()` emits a self-describing `AssetEnvelope` (the CEL log + captured DID docs + resources + an `unverified` honesty section); `loadAsset()` is the inverse and VERIFIES BY DEFAULT — same `verifyEventLog` gate plus resource↔genesis binding and DID-doc↔fold cross-checks, all fail-closed. With an ordinalsProvider it sets `checkHeadFreshness`, rejecting a truncated pre-rotation hand-off as `STALE_LOG` (#366).
 - Event-driven architecture via EventEmitter; when no keyStore/signing key is available, appends degrade with a `cel:append-skipped` event (verification is public-key-only and needs no keys; only WRITING needs the controller key)
 - Batch operations support for multiple assets

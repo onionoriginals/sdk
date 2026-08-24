@@ -53,11 +53,12 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     await sdk.lifecycle.inscribeOnBitcoin(asset);
     const btcoDid = asset.bindings!['did:btco']!;
 
-    // The append landed: the signed btco migrate, then a controller-signed
-    // acknowledgeWitness update (map §5.1). Satoshi/txid are NOT in the migrate
-    // signed data — they arrive later via witness proofs.
+    // The append landed: the signed btco migrate, and nothing after it (no
+    // acknowledgment — a post-anchor append would need its own reinscription
+    // under sat-gated appends). Satoshi/txid are NOT in the migrate signed
+    // data — they arrive later via witness proofs.
     const log = asset.celLog!;
-    expect(log.events.length).toBe(eventsBefore + 2);
+    expect(log.events.length).toBe(eventsBefore + 1);
     const last = log.events.find(e => e.type === 'migrate' && (e.data as any).layer === 'btco')!;
     expect(last.type).toBe('migrate');
     expect((last.data as any).layer).toBe('btco');

@@ -318,7 +318,13 @@ export const demo = {
     chainLabel: 'previousEvent',
     genesisLabel: 'genesis · no parent',
     signedBy: 'signed by',
-    unsigned: 'unsigned'
+    unsigned: 'unsigned',
+    /** Creator entries: the authenticity claim about what the work IS. */
+    authenticityTitle: 'Authenticity — the creator’s record',
+    /** Holder entries: chain of custody; can add to the story, never define the work. */
+    custodyTitle: 'Custody — holders’ additions',
+    heldBy: 'Held by',
+    unverifiedAuthor: 'unverified author'
   },
   inspector: {
     provenanceTab: 'Provenance',

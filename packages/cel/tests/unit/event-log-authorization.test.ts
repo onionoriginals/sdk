@@ -193,9 +193,9 @@ describe('CEL event-log authorization and btco verifiability', () => {
     expect(result.errors.some(e => /not valid JSON/.test(e))).toBe(false);
   });
 
-  it('rejects a LEGACY create event re-signed by a different key than the one embedded in the did:peer', async () => {
+  it('rejects a LEGACY create event re-signed by a different key than the one embedded in data.did', async () => {
     // Attack: copy a victim's create event `data` verbatim (including the
-    // victim's self-certifying did:peer:4) and re-sign event 0 with the
+    // victim's self-certifying did:key) and re-sign event 0 with the
     // attacker's own did:key. The log is internally consistent, but the
     // create key is not embedded in the DID — verification must fail.
     //
@@ -204,13 +204,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // verify READ path must keep rejecting this forgery on them.
     const victim = makeSigner();
     const victimVm = (await victim({ probe: true })).verificationMethod;
-    const victimKeyMb = victimVm.slice('did:key:'.length).split('#')[0];
-    const didPeerMod = await import('@aviarytech/did-peer');
-    const victimDid: string = await didPeerMod.createNumAlgo4(
-      [{ type: 'Multikey', publicKeyMultibase: victimKeyMb }],
-      undefined,
-      undefined
-    );
+    const victimDid = victimVm.split('#')[0];
     const legacyData = {
       name: 'Victim Asset',
       did: victimDid,
@@ -231,6 +225,42 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const forged = { events: [{ type: 'create', data: legacyData, proof: [attackerProof] }] };
 
     const result = await verifyEventLog(forged as any);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /not a key embedded in the self-certifying DID/.test(e))).toBe(true);
+  });
+
+  it('refuses a LEGACY did:peer data.did log outright — did:peer support is removed entirely', async () => {
+    // did:peer is no longer a supported method anywhere in the verifier: a
+    // legacy log whose genesis names a did:peer:4 data.did fails EVEN WHEN it
+    // is correctly signed by the key that DID embeds. The fixture below is a
+    // frozen, genuine long-form did:peer:4 (generated once with
+    // @aviarytech/did-peer, which is no longer a dependency) embedding the
+    // frozen keypair's public key — under the old legacy read path this log
+    // verified; now the prefix is refused before any resolution.
+    const FROZEN_PUB_MB = 'z6Mkvu7X4wxDXTpRTQgtMMpkedyJJgnXZYPnMVD9DjjbXFPD';
+    const FROZEN_PRIV_MB = 'z3u2WxZ8zoixSwjPjKaB4K9sPp3kkFDjnvddozvHjRTvVMHT';
+    const FROZEN_PEER_DID = 'did:peer:4zQmdZX2kFmuSknngEjNgkPAijmakC9YcqfcS8cbMJRzsCBH:z2E3ApMRVSzHJcKffrpLi1ex4H6YDtwSuhNERf4QcAFcSQEZ2CA8o3wuTuHDhk1qPmXof4zgH9LtPMY1FhMT5yBjiSUQgDRrcC35e4HTG3YgWZ4Et8w19JAHuHQxsk9WkoshRpCj5MfTXwtbSSwH8LfwFAMHsAYfAbidTBaeRmNKFDTmUE42Y4rygYHXKHTJqPdczvk9SBoExqtEsAHprvPNWqtWcAU5CVzv1S6tmEBP1kpBCvuGkD41MKmdGX6YNyZBH8a5baiVx5UDaZk6VMrtDnegnATnNNZShXQ6UxpoRGQTDNjQu8thVe6HRdE9CqeBfH8MQZHw7Lg';
+    const priv = multikey.decodePrivateKey(FROZEN_PRIV_MB).key;
+    const victim = async (data: unknown) => ({
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: '2020-01-01T00:00:00Z',
+      verificationMethod: `did:key:${FROZEN_PUB_MB}#${FROZEN_PUB_MB}`,
+      proofPurpose: 'assertionMethod',
+      proofValue: multikey.encodeMultibase(new Uint8Array(await ed25519.signAsync(canonicalizeEvent(data), priv))),
+    });
+    const legacyData = {
+      name: 'Legacy Peer Asset',
+      did: FROZEN_PEER_DID,
+      layer: 'peer',
+      resources: [],
+      creator: FROZEN_PEER_DID,
+      createdAt: '2020-01-01T00:00:00Z',
+    };
+    const proof = await victim({ type: 'create', data: legacyData });
+    const log = { events: [{ type: 'create', data: legacyData, proof: [proof] }] };
+
+    const result = await verifyEventLog(log as any);
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => /not a key embedded in the self-certifying DID/.test(e))).toBe(true);
   });

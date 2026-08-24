@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   webvhArtifacts,
   celTimeline,
+  celCustody,
   celResources,
   parseDidLog,
   didLogSummary,
@@ -170,10 +171,10 @@ describe('digestMultibaseSha256Hex', () => {
 describe('sha256HexToResourceMultibase', () => {
   // Real pair from a live publish: resource.hash hex vs the multibase segment
   // LifecycleManager.publishResources hosts the bytes under.
-  test('encodes a raw sha-256 as the hosted base64url multibase', () => {
+  test('encodes a sha-256 as the hosted CANONICAL multihash multibase (uEi…)', () => {
     expect(
       sha256HexToResourceMultibase('5d53804fc73b572e35ddbe52354379ef11b2ac295b92d84c1589bd473700d3e0')
-    ).toBe('uXVOAT8c7Vy413b5SNUN57xGyrClbkthMFYm9RzcA0-A');
+    ).toBe('uEiBdU4BPxztXLjXdvlI1Q3nvEbKsKVuS2EwVib1HNwDT4A');
   });
   test('null for a non-sha-256 hex', () => {
     expect(sha256HexToResourceMultibase('abc')).toBeNull();
@@ -218,5 +219,85 @@ describe('detailMode', () => {
   });
   test('ready with a row', () => {
     expect(detailMode({ authLoading: false, authenticated: true, loaded: true, row })).toBe('ready');
+  });
+});
+
+describe('celCustody (item 5: the custody chain, folded from the CEL)', () => {
+  const CREATOR = 'did:key:z6MkCreatorX';
+  const HOLDER = 'did:key:z6MkHolderY';
+  const log = (events: unknown[]) => ({ events }) as never;
+
+  test('a post-anchor non-lineage update folds into custody; creator entries never do', () => {
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: CREATOR, name: 'renamed' } },
+      { type: 'update', data: { author: HOLDER, statement: 'held it', occurredAt: 't1' } },
+    ]));
+    expect(rows).toEqual([{ author: HOLDER, statement: 'held it', occurredAt: 't1', eventIndex: 3 }]);
+  });
+
+  test('pre-anchor updates are never custody, and a pre-anchor rotation extends the lineage', () => {
+    const ROTATED = 'did:key:z6MkRotatedZ';
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'update', data: { name: 'pre-anchor rename' }, proof: [{ verificationMethod: `${CREATOR}#k` }] },
+      { type: 'rotateKey', data: { newController: ROTATED } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: ROTATED, name: 'post-anchor, still creator lineage' } },
+    ]));
+    expect(rows).toEqual([]);
+  });
+
+  test('an authorless post-anchor update is custody with the unverified-author placeholder', () => {
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { statement: 'no author' } },
+    ]));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].author).toBe('(unverified author)');
+  });
+
+  test('a null log folds to no custody', () => {
+    expect(celCustody(null)).toEqual([]);
+  });
+
+  test('a WITNESS-FIRST proof array is not read as the author — the shared signer read skips witness proofs', () => {
+    // The hand-rolled proof[0] read labeled `did:btco:witness` as the author,
+    // which made a creator entry with a witness-first proof array fold into
+    // custody under the witness's name.
+    const rows = celCustody(log([
+      { type: 'create', data: { controller: CREATOR, resources: [] } },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      {
+        type: 'update',
+        data: { name: 'renamed' },
+        proof: [
+          { verificationMethod: 'did:btco:witness', cryptosuite: 'bitcoin-ordinals-2024' },
+          { verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' },
+        ],
+      },
+    ]));
+    expect(rows).toEqual([]);
+  });
+
+  test('a genesis WITHOUT data.controller has no lineage: every post-anchor entry is custody, the create-proof signer\'s included', () => {
+    // Genesis lineage is data.controller only — no fallback to other genesis
+    // fields or the create proof's VM (there is no legacy shape to read).
+    const rows = celCustody(log([
+      {
+        type: 'create',
+        data: { resources: [] },
+        proof: [{ verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' }],
+      },
+      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
+      { type: 'update', data: { author: CREATOR, statement: 'renamed attempt' } },
+      { type: 'update', data: { author: HOLDER, statement: 'held it' } },
+    ]));
+    expect(rows).toEqual([
+      { author: CREATOR, statement: 'renamed attempt', eventIndex: 2 },
+      { author: HOLDER, statement: 'held it', eventIndex: 3 },
+    ]);
   });
 });
