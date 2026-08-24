@@ -1,7 +1,20 @@
 /**
- * U10 / R17, R18 — the authorship key.
+ * U10 / R17, R18 — the account key.
  *
- * The Ed25519 seed in `webvh.ts` signs every Original the user authors, and it
+ * NAME COLLISION, read this first. Two different Ed25519 keys are called an
+ * "authorship key" in this app and they are NOT the same key:
+ *
+ *  - THIS one signs the user's own `did:webvh` identity document. It lives in
+ *    this browser's `localStorage` and nowhere else.
+ *  - The one in `sdk/turnkey-cel-signer.ts` signs CEL events — the controller
+ *    of each Original the user authors. It is held in their Turnkey
+ *    sub-organization, so it comes back with the session on any device.
+ *
+ * This module used to be both, which is why the file is named as it is. It
+ * stopped being the second when CEL authorship moved into custody, and that
+ * move is what makes a published Original inscribable after a reload.
+ *
+ * The Ed25519 seed in `webvh.ts` signs the user's own DID, and it
  * exists in exactly one place: this browser's `localStorage`. Clearing site
  * data, switching browsers, or Safari evicting storage all destroy it, and
  * nothing on our side can reissue it. KTD10 says the launch remedy is
