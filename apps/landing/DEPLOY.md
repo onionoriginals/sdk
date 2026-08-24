@@ -18,9 +18,34 @@ inscription path is live it strands real money.
 | Start command | `bun run apps/landing/serve.ts` |
 | Persistent volume | required, mounted, with `ORIGINALS_DATA_DIR` pointing at it |
 
-`/railway.json` at the repo root carries the build and start commands. It does
-**not** declare the volume or any environment variable — those are dashboard
-state, so the checklist below is the only place they are written down.
+`/railway.json` at the repo root carries the build and start commands, and pins
+**`numReplicas: 1`**. It does **not** declare the volume or any environment
+variable — those are dashboard state, so the checklist below is the only place
+they are written down.
+
+### Why one replica, and why the process now enforces it
+
+`numReplicas: 1` is load-bearing, not a cost setting. Everything on the money
+path coordinates through in-process state: the double-spend guard is a promise
+chain keyed by JWT sub, every rate limiter is an in-memory Map, the deposit
+sweep walks a process-local cursor, and both file stores serialize their
+read-modify-write on the single-threaded event loop. Each is correct for
+exactly one writer.
+
+Two writers is not a degraded version of that. Two replicas polling the same
+user's inscription both see the same funding outpoint as unspent, both build a
+commit against it, and the loser's reveal is stranded on a double-spent commit
+— a creator's BTC committed to an inscription that can never land.
+
+JSON has no comments, so the reason lives here. And because a dashboard click or
+an autoscale rule can override the pin regardless, the process no longer trusts
+it: on boot it claims a heartbeat lock file in the data directory
+(`.instance.lock`) and **refuses to start if another live process already holds
+it**, logging the holder's pid and host. A crashed holder is detected by PID on
+the same host, or after 60 quiet seconds across a restart, and the next start
+takes over. If you ever need to clear one by hand, delete
+`$ORIGINALS_DATA_DIR/.instance.lock` — but only once you are certain no other
+instance is running.
 
 ## Environment contract
 
@@ -78,11 +103,15 @@ any of these is outstanding.
    published durability SLA. Record the schedule and who enabled it in the log
    at the bottom of this file — the setting is dashboard-only and cannot
    appear in a commit, so that line is the only evidence it happened.
-3. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
+3. **One replica.** `railway.json` pins `numReplicas: 1` and the boot log must
+   read `sole writer to that dir`. If a deploy is refusing to start with
+   "another process is already writing", the service is scaled above one —
+   scale it back rather than deleting the lock.
+4. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
    per-client rate limits are inert and everyone shares one bucket. Confirm it
    from the `[landing] proxy sample:` line the server logs once per process:
    the resolved identity must be your address, not the proxy's.
-4. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
+5. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
    add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
    and inscription is impossible. `bun scripts/check:ordinals` — i.e.
    `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
@@ -94,7 +123,7 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
-5. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
    check earned its place twice over: the login path was broken the entire time
    it went unrun, in two independent ways, and neither was reachable from any
    test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
@@ -104,7 +133,7 @@ any of these is outstanding.
    credential being installed cannot already exist. It now runs STAMP_LOGIN
    with the attested stamp, which is what `@turnkey/core` does. The only thing
    that proves it works is running it against a real org.
-6. **One complete mainnet inscription by a human**, from a cold browser,
+7. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 
 ## Turning on strict mode

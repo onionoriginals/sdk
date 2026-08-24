@@ -40,6 +40,7 @@ import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
 import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
+import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
@@ -62,6 +63,15 @@ const hostStore = createWebvhHostStore();
 // deploy that dir is ephemeral and every redeploy silently wipes signed-in
 // users' Originals (checkConfig() above reports exactly that, by name).
 const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolveDataDir(process.env);
+// Single-instance enforcement, BEFORE any store opens the directory. This
+// process is single-instance by construction — the double-spend guard, every
+// rate limiter and both file stores coordinate through in-process state — and
+// railway.json pins numReplicas to 1, but a dashboard click or an autoscale
+// rule can still put a second writer on this volume. Refuse rather than let two
+// commits go live against one funding set. Throws MultipleInstanceError.
+const instanceLock = acquireInstanceLock(originalsDataDir, { log: (m) => console.warn(m) });
+releaseOnExit(instanceLock);
+
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,
 // same JWT-sub namespacing) so a dead tab can never strand committed funds.
@@ -209,6 +219,9 @@ console.log(
 );
 console.log(
   `[landing] durable Originals dir: ${originalsDataDir}${originalsDataDirIsExplicit ? '' : ' (default — NOT set via ORIGINALS_DATA_DIR)'}`
+);
+console.log(
+  `[landing] sole writer to that dir (instance lock ${instanceLock.path}, owner ${instanceLock.record.owner})`
 );
 
 // Monitoring sweep (stranger-safe checklist): any inscription still holding
