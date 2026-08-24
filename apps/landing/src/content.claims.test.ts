@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { hero, site, why } from './content';
+import { hero, protocol, site, why } from './content';
 
 /**
  * What the page is allowed to claim (protocol design review, 2026-08).
@@ -69,5 +69,15 @@ describe('the page states the indexer trust assumption', () => {
     expect(card).toBeDefined();
     expect(card!.body).toMatch(/inscribe/i);
     expect(card!.body).toMatch(/copy of the log/i);
+  });
+});
+
+describe('the page does not imply did:cel is a standard', () => {
+  test('the protocol section says which methods are registered and which is ours', () => {
+    // "Built on W3C DIDs" covers did:webvh and did:btco. did:cel is
+    // unregistered, has no Universal Resolver driver, and its verification
+    // algorithm is ours — the first thing a W3C reader checks.
+    expect(protocol.standardsNote).toMatch(/did:cel/);
+    expect(protocol.standardsNote).toMatch(/not registered|unregistered/i);
   });
 });

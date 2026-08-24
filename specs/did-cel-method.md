@@ -4,12 +4,25 @@
 **Status:** Draft
 **Date:** 2026-08-24
 
+> **`did:cel` is NOT a registered DID method, and is in production use.**
+>
+> It does not appear in the [W3C DID Extensions registry](https://www.w3.org/TR/did-extensions-methods/),
+> no registration has been submitted, and none is currently scheduled. There is
+> no Universal Resolver driver for it. The verification algorithm below —
+> genesis binding, the satoshi gate, first-anchor-wins uniqueness, the holder
+> allowlist — is ours alone: no third-party implementation of it exists, so
+> today nothing outside this SDK can resolve or verify a `did:cel`.
+>
+> Treat it as a proprietary identifier that follows DID syntax. The other two
+> methods in the Originals lifecycle, `did:webvh` and `did:btco`, ARE
+> registered; `did:cel` is not, and statements about Originals being "built on
+> W3C DIDs" must not be read to include it. Registering `cel` (or renaming it)
+> is an open decision — until it is made and executed, this notice stands.
+
 > Draft method specification. The normative source of truth is the implementation
 > in `packages/sdk/src/cel/` (notably `celDid.ts` and `algorithms/verifyEventLog.ts`)
 > and its test suite; every **MUST** below is pinned to a test in
-> [Appendix A](#appendix-a-normative-must--pinning-test). Before publishing beyond
-> draft, check the [DIF](https://identity.foundation/) / W3C DID method registry for
-> a `cel` name collision.
+> [Appendix A](#appendix-a-normative-must--pinning-test).
 
 The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHOULD**, **MAY**
 are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
@@ -222,8 +235,13 @@ Authority semantics differ by type and **MUST** be honored:
   root of authority from an injected co-signer.
 - **Deactivation seals the log.** A sealed log **MUST NOT** be extended; verifiers
   fail closed on any post-`deactivate` event.
-- **Registry.** `cel` is not yet a registered DID method name. Check the DIF/W3C DID
-  method registry for a collision before publishing beyond draft.
+- **Registry.** `cel` is an unregistered method name, in production use, with no
+  registration submitted and none scheduled — see the notice at the top of this
+  document. An unregistered name carries a real risk: nothing reserves `cel`, so
+  another party may register it for an unrelated method, at which point every
+  identifier here becomes ambiguous to any resolver that honours the registry.
+  Verifiers **MUST NOT** assume a `did:cel` they encounter was produced by this
+  specification without checking it against this algorithm.
 
 ---
 

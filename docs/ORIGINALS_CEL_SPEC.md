@@ -79,6 +79,12 @@ Legacy logs used `did:peer` (numalgo 4) as the genesis identity; that method's
 support is removed entirely (such logs no longer verify). New logs derive a
 `did:cel` from the genesis event.
 
+> **`did:cel` is not a registered DID method.** No registration has been
+> submitted and no Universal Resolver driver exists, so a `did:cel` is
+> resolvable and verifiable only by an implementation of this specification.
+> `did:webvh` and `did:btco` are registered; `cel` is not. See
+> [specs/did-cel-method.md](../specs/did-cel-method.md).
+
 ### 2.2 Proof Requirements
 
 Every event MUST include at least one proof from the asset controller.

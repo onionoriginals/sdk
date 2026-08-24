@@ -770,6 +770,15 @@ export const protocol = {
     'Assets migrate unidirectionally — did:cel → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
   migrationNote:
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
+  /**
+   * Which of the three method names are actually standards (protocol design
+   * review, 2026-08). "Built on W3C DIDs" is true of the syntax and of two of
+   * the three methods; did:cel is ours, unregistered, and verifiable today only
+   * by an implementation of our own algorithm. Saying so here is cheaper than
+   * having a W3C reader discover it — it is the first thing they check.
+   */
+  standardsNote:
+    'On standards: did:webvh and did:btco are registered DID methods. did:cel is ours — it follows DID syntax but is not registered, and for now only this SDK can verify one.',
   columns: [
     {
       layer: 'did:cel',

@@ -41,7 +41,9 @@ The Originals Protocol organizes digital asset lifecycles through three distinct
 1. **Unidirectional Progression**: Assets migrate from private → public → permanent, never backward
 2. **Cryptographic Integrity**: All operations include verifiable proofs of ownership and provenance
 3. **Economic Gravity**: Each layer has different cost/security tradeoffs (free/easy → $25/year → $75-200 one-time)
-4. **W3C Compliance**: Uses standard DID and Verifiable Credential specifications
+4. **W3C Compliance**: Uses standard DID syntax and the Verifiable Credential
+   data model. Note that of the three methods, `did:webvh` and `did:btco` are
+   registered; `did:cel` is not (see below)
 5. **Portability**: Assets carry full provenance history through migrations
 6. **Privacy by Default**: Private layer requires no registration or disclosure
 
@@ -97,8 +99,12 @@ Normative definition: [specs/did-cel-method.md](specs/did-cel-method.md). This
 section states only what the three-layer model needs; where the two differ,
 the method specification governs.
 
-> **did:cel is not a registered DID method.** See the method specification for
-> the current registration status and what that means for interoperability.
+> **did:cel is not a registered DID method.** Unlike `did:webvh` and
+> `did:btco`, `cel` does not appear in the W3C DID Extensions registry, no
+> registration has been submitted, and no Universal Resolver driver exists.
+> Its verification algorithm is specific to this implementation. Treat it as a
+> proprietary identifier in DID syntax; see
+> [specs/did-cel-method.md](specs/did-cel-method.md).
 
 **Characteristics:**
 - The asset *is* a Cryptographic Event Log; the identifier is derived from the
