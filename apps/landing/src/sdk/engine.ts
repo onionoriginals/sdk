@@ -413,6 +413,15 @@ export class DemoEngine {
     const current = this.snapshot();
     const svgHash = toHex(sha256(new TextEncoder().encode(artworkSvg)));
 
+    // The SAME controller that signed genesis. An `update` is a signed CEL
+    // append like any other, and supplying a signer to `createAsset` means the
+    // SDK generated no key and put nothing in the keyStore — so leaving these
+    // appends to the keyStore fallback finds nothing and throws
+    // CEL_APPEND_FAILED (NO_SIGNING_KEY). Cached, so this is not a second
+    // Turnkey round-trip.
+    const authorship = await this.resolveAuthorshipSigner();
+    const signed = authorship ? { signer: authorship } : undefined;
+
     // The artwork is generated FROM the title, so a text edit changes these
     // bytes — that is the edit. Skip when identical: addResourceVersion refuses
     // a no-op version rather than logging one.
@@ -421,7 +430,8 @@ export class DemoEngine {
         current.resource.id,
         artworkSvg,
         'image/svg+xml',
-        `Artwork regenerated for "${title}"`
+        `Artwork regenerated for "${title}"`,
+        signed
       );
       this.assetResourceHash = svgHash; // the /me summary posts this on publish
     }
@@ -442,7 +452,8 @@ export class DemoEngine {
           current.metadata.id,
           next,
           'application/json',
-          `Metadata follows the artwork to "${title}"`
+          `Metadata follows the artwork to "${title}"`,
+          signed
         );
       }
     }
