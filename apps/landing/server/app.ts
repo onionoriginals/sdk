@@ -154,19 +154,31 @@ export function buildFetch(deps: {
       );
     }
 
-    // 3. WebVH log/resource GETs served at the resolver's exact URLs.
+    // 3. The JSON-LD context every issued credential points at.
+    //
+    // Ahead of the host stores, not after them, and that ORDER IS THE SECURITY
+    // PROPERTY. `/api/host/*` is unauthenticated with client-chosen keys, and
+    // hostStore.serve() looks a request up as `${url.host}${url.pathname}` —
+    // so a stranger who PUTs `originals.build/context` would otherwise shadow
+    // this route and hand every external verifier bytes of their choosing.
+    //
+    // That store's usual defence does not apply here. Anonymous writes are
+    // acceptable for did:webvh logs because those are self-certifying: tamper
+    // with one and it fails verification. A JSON-LD context certifies nothing.
+    // It DEFINES the terms every credential is read through, so replacing it
+    // silently changes what those credentials mean — or, served as garbage,
+    // breaks every verification at once. It must not be shadowable, so it is
+    // resolved first and the write path refuses the key (see webvh-host.ts).
+    const context = serveContextDocument(req, url);
+    if (context) return context;
+
+    // 4. WebVH log/resource GETs served at the resolver's exact URLs.
     if (req.method === 'GET' || req.method === 'HEAD') {
       const served = hostStore.serve(req, url);
       if (served) return served;
       const durable = originals?.serve(url);
       if (durable) return durable;
     }
-
-    // 4. The JSON-LD context every issued credential points at. Must come
-    // before the SPA fallback, which is exactly what used to answer here —
-    // with index.html, under text/html (see context-document.ts).
-    const context = serveContextDocument(req, url);
-    if (context) return context;
 
     // 5. Static SPA + fallback (with traversal guard).
     return serveStatic(url, distDir);

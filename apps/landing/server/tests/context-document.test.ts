@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildFetch } from '../app';
 import { json } from '../router';
+import { createWebvhHostStore, shadowsReservedPath } from '../webvh-host';
 
 // Read from disk rather than importing it: the route imports this same file,
 // so an import here would compare it to itself. Reading the SDK's copy
@@ -115,5 +116,111 @@ describe('GET /context', () => {
       expect(res.headers.get('content-type')).toBe('application/ld+json; charset=utf-8');
       expect(JSON.parse(await res.text())).toEqual(sdkContext);
     }
+  });
+});
+
+/**
+ * The canonical context cannot be shadowed by hosted content.
+ *
+ * `/api/host/*` is unauthenticated with client-chosen keys, and the store looks
+ * a request up as `${url.host}${url.pathname}` — so `originals.build/context`
+ * would intercept this route. The store tolerates anonymous writes because
+ * did:webvh logs are self-certifying and fail verification if tampered with. A
+ * JSON-LD context has no such property: it defines what every credential MEANS,
+ * so whoever serves it controls how external verifiers read all of them.
+ *
+ * Two independent guarantees, asserted separately so neither can rot into the
+ * other: the route resolves first, AND the key never enters the store.
+ */
+describe('/context outranks anonymous hosted content', () => {
+  // A store that answers EVERYTHING, standing in for an attacker who has
+  // successfully stored the shadowing key.
+  const hostileStore = {
+    async handlePut() {
+      return json({ error: 'not_implemented' }, 501);
+    },
+    read() {
+      return json({ error: 'not_found' }, 404);
+    },
+    serve() {
+      return new Response('{"@context":{"OWNED":"attacker"}}', {
+        status: 200,
+        headers: { 'content-type': 'application/ld+json' },
+      });
+    },
+  };
+
+  test('the canonical document wins even when the store would answer', async () => {
+    const fetchFn = buildFetch({
+      apiRoutes: null,
+      hostStore: hostileStore,
+      distDir,
+      trustedProxyHops: 0,
+    });
+    const res = await fetchFn(new Request('http://originals.build/context'));
+    const body = await res.text();
+
+    expect(body).not.toContain('OWNED');
+    expect(JSON.parse(body)).toEqual(sdkContext);
+  });
+
+  test('hosted routes still work — only the reserved path is taken', async () => {
+    // The guard must not cost the store its actual job.
+    const fetchFn = buildFetch({
+      apiRoutes: null,
+      hostStore: hostileStore,
+      distDir,
+      trustedProxyHops: 0,
+    });
+    const res = await fetchFn(new Request('http://originals.build/alice/did.jsonl'));
+    expect(await res.text()).toContain('OWNED');
+  });
+});
+
+describe('the host store refuses the shadowing key outright', () => {
+  test('a PUT that would shadow /context is rejected', async () => {
+    const store = createWebvhHostStore();
+    const res = await store.handlePut(
+      new Request('http://x/api/host/originals.build/context', { method: 'PUT', body: 'x' }),
+      new URL('http://x/api/host/originals.build/context'),
+      '1.2.3.4'
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'reserved_key' });
+  });
+
+  test('percent-encoding does not get past it — the decoded key is checked', async () => {
+    const store = createWebvhHostStore();
+    const path = '/api/host/originals.build/%63ontext';
+    const res = await store.handlePut(
+      new Request(`http://x${path}`, { method: 'PUT', body: 'x' }),
+      new URL(`http://x${path}`),
+      '1.2.3.4'
+    );
+    expect(res.status).toBe(403);
+  });
+
+  test('only an exact match is reserved; ordinary keys still store', async () => {
+    const store = createWebvhHostStore();
+    for (const key of ['originals.build/contextual', 'originals.build/context/x']) {
+      const res = await store.handlePut(
+        new Request(`http://x/api/host/${key}`, { method: 'PUT', body: 'x' }),
+        new URL(`http://x/api/host/${key}`),
+        '1.2.3.4'
+      );
+      expect(res.status).toBe(200);
+    }
+  });
+});
+
+describe('shadowsReservedPath', () => {
+  test('matches the path after the host, and nothing else', () => {
+    expect(shadowsReservedPath('originals.build/context')).toBe(true);
+    expect(shadowsReservedPath('any.host/context')).toBe(true);
+    expect(shadowsReservedPath('originals.build/contextual')).toBe(false);
+    expect(shadowsReservedPath('originals.build/context/x')).toBe(false);
+    expect(shadowsReservedPath('originals.build/a/context')).toBe(false);
+    // A bare key with no host segment addresses nothing servable.
+    expect(shadowsReservedPath('context')).toBe(false);
   });
 });
