@@ -37,7 +37,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@turnkey/sdk-types": "1.2.0",
+    "@turnkey/sdk-types": "1.5.1",
     "@turnkey/sdk-server": "^7.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
