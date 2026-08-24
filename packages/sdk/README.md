@@ -28,22 +28,40 @@ Requires Node.js `>=20.10.0` (or Bun). Published as ESM.
 
 ## Quick start
 
+This snippet runs as-is (`scripts/check-readme-snippets.mjs` executes it against
+the built `dist` in CI, so it cannot silently rot).
+
+<!-- readme:run -->
 ```typescript
 import { OriginalsSDK } from '@originals/sdk';
+import { OrdMockProvider } from '@originals/sdk/testing';
+
+// Custody is required to mint — see "Custody" below for why, and for the
+// remote-custody (`signer`) alternative. A Map is the smallest thing that
+// satisfies the contract; it is not durable, so use a real store for anything
+// you intend to keep.
+const keys = new Map<string, string>();
+const myKeyStore = {
+  getPrivateKey: async (id: string) => keys.get(id) ?? null,
+  setPrivateKey: async (id: string, privateKey: string) => { keys.set(id, privateKey); },
+};
 
 const sdk = OriginalsSDK.create({
-  network: 'mainnet',          // 'mainnet' | 'signet' | 'regtest'
+  network: 'regtest',          // 'mainnet' | 'signet' | 'regtest'
   defaultKeyType: 'ES256K',    // 'ES256K' | 'Ed25519' | 'ES256'
   keyStore: myKeyStore,        // custody: keyStore OR signer — see "Custody" below
+  ordinalsProvider: new OrdMockProvider(),  // real Bitcoin: OrdinalsClient
 });
 
 // 1. Create an asset privately (did:cel genesis — offline, free)
+//    `hash` is the sha256 hex of the content; this is the digest of the
+//    empty string, which is a real digest and keeps the snippet runnable.
 const asset = await sdk.lifecycle.createAsset([
   {
     id: 'artwork-1',
     type: 'image',
     contentType: 'image/png',
-    hash: '<sha256-hex-of-content>',
+    hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   },
 ]);
 

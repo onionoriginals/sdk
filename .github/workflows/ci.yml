@@ -115,6 +115,13 @@ jobs:
       - name: Verify browser-facing entry points have no eager Node builtins
         run: node scripts/check-browser-safety.mjs
 
+      # The quick starts are the first code an adopter runs. The root README's
+      # threw NO_CUSTODY on its happy path against this very dist and nothing
+      # noticed, because nothing had ever executed it. Runs here rather than in
+      # the package suites because it needs the BUILD.
+      - name: Execute the documented README snippets against the built dist
+        run: node scripts/check-readme-snippets.mjs
+
   landing:
     name: Landing app typechecks, tests and builds
     runs-on: ubuntu-latest

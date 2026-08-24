@@ -29,15 +29,31 @@ npm install @originals/sdk@next
 
 ## Quick Start
 
+This snippet runs as-is (`scripts/check-readme-snippets.mjs` executes it against
+the built `dist` in CI, so it cannot silently rot).
+
+<!-- readme:run -->
 ```typescript
 import { OriginalsSDK } from '@originals/sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
+
+// Custody first: createAsset mints an Ed25519 controller key, and the SDK
+// refuses to mint (NO_CUSTODY) if it has nowhere to keep it — an asset whose
+// key was dropped can never author another event. This Map is the smallest
+// thing that satisfies the contract; use a real keyStore, or a `signer` for
+// Turnkey/KMS/HSM custody, for anything you intend to keep.
+const keys = new Map<string, string>();
+const keyStore = {
+  getPrivateKey: async (id: string) => keys.get(id) ?? null,
+  setPrivateKey: async (id: string, privateKey: string) => { keys.set(id, privateKey); }
+};
 
 // For testing/development - use mock provider
 const originals = OriginalsSDK.create({
   network: 'regtest',
   enableLogging: true,
-  ordinalsProvider: new OrdMockProvider()
+  ordinalsProvider: new OrdMockProvider(),
+  keyStore
 });
 
 // Create a digital asset
