@@ -75,6 +75,19 @@ export class TurnkeyCelSigner {
     this.publicKeyMultibase = opts.publicKeyMultibase;
   }
 
+  /**
+   * `ExternalSigner` declares this, but a CEL signer never reaches it: the SDK
+   * owns canonicalization and hands over finished bytes, and
+   * `signerFromExternalSigner` refuses a sign()-only signer for exactly that
+   * reason. Implemented as a refusal so a future caller that wires this into
+   * the document-level path is told why instead of getting a wrong signature.
+   */
+  async sign(): Promise<{ proofValue: string }> {
+    throw new Error(
+      'TurnkeyCelSigner signs SDK-owned preimages via signBytes; it does not canonicalize documents itself.'
+    );
+  }
+
   async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {
     if (typeof this.client.signRawPayload !== 'function') {
       throw new Error('This Turnkey client cannot sign raw payloads, so it cannot author CEL events.');

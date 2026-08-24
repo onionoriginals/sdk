@@ -17,7 +17,10 @@ import { short } from './format';
 export { short };
 import {
   OriginalsSDK,
-  type OriginalsAsset
+  signerFromExternalSigner,
+  type AssetEnvelope,
+  type OriginalsAsset,
+  type OriginalsSigner
 } from '@originals/sdk';
 import { classifyLogEntries, type EntryAuthorClass } from '@originals/sdk/cel';
 export type { EntryAuthorClass };
@@ -31,6 +34,8 @@ import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { userWebvhSlug } from '../auth/webvh';
 import { btcNetwork, btcoExplorerUrl, demoTier, type BtcNetworkFlag, type DemoTier } from './network-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
+import { ensureAuthorshipAccount } from '../auth/turnkey-session';
+import { TurnkeyCelSigner, authorshipPublicKeyMultibase } from './turnkey-cel-signer';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export { btcNetwork, btcRealEnabled, btcRealFor, btcoExplorerUrl, demoTier } from './network-flag';
@@ -146,6 +151,14 @@ export class DemoEngine {
   private readonly subOrgId?: string;
   private assetTitle = '';
   private assetResourceHash = '';
+  /**
+   * The Turnkey-held key that authors this user's Originals, resolved once and
+   * reused. Null until resolved; `authorshipResolved` distinguishes "not tried
+   * yet" from "tried and there is none" so a failure is not retried on every
+   * lifecycle call.
+   */
+  private authorshipSigner: OriginalsSigner | null = null;
+  private authorshipResolved = false;
   asset: OriginalsAsset | null = null;
   /**
    * The tier this engine runs at (R5) — real Bitcoin only when the deploy
@@ -243,6 +256,77 @@ export class DemoEngine {
   }
 
   /**
+   * The key that authors this user's Originals, resolved once per engine.
+   *
+   * Turnkey-held and Ed25519: CEL is Ed25519-only, and a key in custody comes
+   * back with the session on any device. That is the whole point — an
+   * Original whose controller key lived in a tab could never be inscribed
+   * after a reload, which is the pre-broadcast resume gap.
+   *
+   * Returns null for an anonymous visitor (there is no sub-org to hold a key)
+   * and for any failure to reach Turnkey. Callers pass the result straight to
+   * the SDK, which falls back to generating a controller into the in-memory
+   * keyStore — the old behaviour, correct for a throwaway anonymous run and
+   * honestly un-resumable.
+   */
+  private async resolveAuthorshipSigner(): Promise<OriginalsSigner | null> {
+    if (this.authorshipResolved) return this.authorshipSigner;
+    this.authorshipResolved = true;
+    if (!this.authed || !this.subOrgId) return null;
+    try {
+      // Dynamic: @turnkey/sdk-browser pulls a browser-only dependency graph
+      // that must not load under `bun test` (same reason useAuth defers it).
+      const { openSessionKey } = await import('../auth/turnkey-browser-client');
+      const handle = await openSessionKey(this.subOrgId);
+      const client = handle.client as unknown as TurnkeyBitcoinClient;
+      const address = await ensureAuthorshipAccount(client, this.subOrgId);
+      const publicKeyMultibase = authorshipPublicKeyMultibase(address);
+      if (!publicKeyMultibase) {
+        log('authorship:unavailable', `authorship account ${address} is not an Ed25519 key`);
+        return null;
+      }
+      const external = new TurnkeyCelSigner({
+        client,
+        subOrgId: this.subOrgId,
+        signWith: address,
+        publicKeyMultibase,
+      });
+      this.authorshipSigner = signerFromExternalSigner(external, { publicKeyMultibase });
+      this.emit(
+        'authorship:key',
+        `Authoring as ${short(this.authorshipSigner.verificationMethodId)} — a Turnkey-held key, not this browser's`,
+        { verificationMethodId: this.authorshipSigner.verificationMethodId }
+      );
+      return this.authorshipSigner;
+    } catch (err) {
+      // Never fatal: losing custody means this run is un-resumable, not that
+      // it cannot happen at all.
+      log('authorship:unavailable', err);
+      return null;
+    }
+  }
+
+  /**
+   * Rebuild a previously published Original from the artifacts it hosts, so
+   * the rest of this engine can act on it exactly as if it had just been made
+   * here. `loadAsset` verifies the whole signed chain fail-closed, so a log
+   * that does not hold up throws rather than producing a usable asset.
+   */
+  async hydrate(envelope: AssetEnvelope): Promise<DemoAssetState> {
+    const { asset } = await this.sdk.lifecycle.loadAsset(envelope);
+    this.asset = asset;
+    const primary = asset.resources[0];
+    this.assetResourceHash = primary?.hash ?? '';
+    this.assetTitle = this.assetTitle || (primary?.id ?? '');
+    this.emit('asset:hydrated', `Rebuilt ${short(asset.id)} from its hosted event log`, {
+      assetId: asset.id,
+      layer: asset.currentLayer,
+      events: asset.celLog?.events?.length ?? 0,
+    });
+    return this.snapshot();
+  }
+
+  /**
    * Step 1 — create a did:cel asset. The primary resource is the artwork
    * itself: a real SVG file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
@@ -259,6 +343,11 @@ export class DemoEngine {
     });
     const metaBytes = new TextEncoder().encode(metadata);
 
+    // The controller this asset is minted under. With a Turnkey signer the
+    // asset is authorable again after this tab closes; without one the SDK
+    // generates a key into the in-memory keyStore, which is correct for an
+    // anonymous throwaway run and honestly un-resumable.
+    const authorship = await this.resolveAuthorshipSigner();
     const asset = await this.sdk.lifecycle.createAsset([
       {
         id: 'artwork.svg',
@@ -276,7 +365,7 @@ export class DemoEngine {
         hash: toHex(sha256(metaBytes)),
         size: metaBytes.length
       }
-    ]);
+    ], authorship ? { signer: authorship } : undefined);
     this.asset = asset;
     this.assetTitle = title;
     this.assetResourceHash = svgHash;
@@ -405,7 +494,14 @@ export class DemoEngine {
       );
     }
 
-    await this.sdk.lifecycle.publishToWeb(this.asset, this.publisherDid);
+    // Same key that authored genesis, or the append is refused: pre-anchor,
+    // the CEL only accepts its current controller as signer.
+    const publishSigner = await this.resolveAuthorshipSigner();
+    await this.sdk.lifecycle.publishToWeb(
+      this.asset,
+      this.publisherDid,
+      publishSigner ? { signer: publishSigner } : undefined
+    );
 
     // Prove REAL resolution: publishToWeb hosts the ASSET's did:webvh log (+ cel
     // + resources) at this origin. Fetch that log back over the network via the
@@ -484,6 +580,7 @@ export class DemoEngine {
     };
   }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
+    const inscribeSigner = await this.resolveAuthorshipSigner();
     if (opts?.funding) {
       // Real sat-selected path: the user's Turnkey key signs the commit.
       const satSigner = new TurnkeySatSigner({
@@ -496,6 +593,7 @@ export class DemoEngine {
       await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
         fundingUtxos,
         satSigner,
+        ...(inscribeSigner ? { signer: inscribeSigner } : {}),
         changeAddress: opts.funding.changeAddress,
         // No default here: real BTC must be built at the LIVE rate. Left
         // undefined, the SDK resolves it from the provider's estimateFee
@@ -504,8 +602,11 @@ export class DemoEngine {
         feeRate: opts.feeRate,
       });
     } else {
-      // Mock path (unchanged): fixed demo feeRate against OrdMockProvider.
-      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, opts?.feeRate ?? 7);
+      // Mock path: fixed demo feeRate against OrdMockProvider.
+      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
+        feeRate: opts?.feeRate ?? 7,
+        ...(inscribeSigner ? { signer: inscribeSigner } : {}),
+      });
     }
     const state = this.snapshot();
     if (state.inscription) {
