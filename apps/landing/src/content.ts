@@ -626,6 +626,34 @@ export const yourOriginals = {
     failed: 'Could not finish the inscription — try again in a moment.',
   },
   /**
+   * The pre-broadcast resume gap: a published Original that was never
+   * inscribed. Distinct from `finish` above, which recovers an inscription
+   * that WAS built and signed — these two never appear on the same row.
+   *
+   * The disabled reasons are the honest half. Inscribing appends a signed
+   * migrate event, and pre-anchor the CEL accepts only its current controller
+   * as signer, so an Original minted before authorship moved into Turnkey
+   * custody answers to a key that lived in a tab and is gone. That cannot be
+   * fixed by signing in again on another device, and the copy must not imply
+   * it can.
+   */
+  inscribe: {
+    cta: 'Inscribe on Bitcoin',
+    busy: 'Inscribing…',
+    hydrating: 'Rebuilding from its signed log…',
+    done: 'Inscribed — the transactions are on their way to the network.',
+    failed: 'Could not inscribe this Original — nothing was broadcast and nothing was spent.',
+    /** Shown under a disabled action, keyed by `DisabledReason`. */
+    reasons: {
+      'signed-out': 'Sign in to inscribe this Original on Bitcoin.',
+      'no-authorship-key':
+        'This browser can’t reach your signing key right now, so it can’t sign the event inscribing adds. Sign in again and it will come back.',
+      'foreign-controller':
+        'This Original was made before signing keys were kept for you, so the key that could add to its history only ever existed in the browser that created it — and it’s gone. Everything already in its history stays signed, verifiable and hosted; it just can’t be carried on to Bitcoin. Anything you make from now on can be.',
+      unknown: 'Reading this Original’s signed log…',
+    },
+  },
+  /**
    * R31 — a deposit-read outage is asynchronous: it can start after a creator
    * sends BTC and closes the tab, so the deposit screen's own copy reaches
    * nobody. This block is the version that greets them on their NEXT VISIT,

@@ -610,3 +610,17 @@
   color: var(--text-tertiary);
   text-align: right;
 }
+
+/* ——— resume: inscribe a published Original that never reached Bitcoin ——— */
+
+.od-inscribe .btn {
+  margin-top: var(--sp-4);
+}
+
+/* .od-note is an inline-flex row elsewhere on this page; the reasons here are
+   sentences, so they wrap as a block. */
+.od-inscribe .od-note {
+  display: block;
+  max-width: 68ch;
+  line-height: 1.65;
+}

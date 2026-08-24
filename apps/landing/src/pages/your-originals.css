@@ -12,7 +12,29 @@
   margin: var(--sp-8) 0 0;
   display: grid;
   gap: var(--sp-5);
-  grid-template-columns: 1fr;
+  /* minmax(0, ...) rather than a bare `1fr`, whose floor is the content's
+     min-content width — the trap the wider grid audit fixed everywhere else.
+     These cells now carry an action and its explanation, so the floor matters. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The card, then whatever Bitcoin action the row offers, stacked. */
+.your-originals-grid li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.your-original-action {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.your-original-action-note {
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
 }
 
 @media (min-width: 640px) {

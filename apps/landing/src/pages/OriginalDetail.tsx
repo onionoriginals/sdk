@@ -8,7 +8,7 @@
  * hashes and both proof chains in the visitor's browser (verify-original.ts).
  */
 import { useEffect, useRef, useState } from 'react';
-import { originalDetail } from '../content';
+import { originalDetail, yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate } from '../router';
 import { short } from '../sdk/format';
@@ -17,9 +17,13 @@ import { btcoExplorerUrl } from '../sdk/network-flag';
 import {
   fetchOriginals,
   fetchInscriptions,
+  unfinishedInscriptions,
   withLiveInscriptionStatus,
   type OriginalRow,
+  type PendingInscription,
 } from './YourOriginals';
+import { inscribeAvailability, type InscribeAvailability } from './inscribe-availability';
+import { resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import {
   webvhArtifacts,
   celTimeline,
@@ -71,7 +75,13 @@ const isText = (r: CelResourceRef) =>
   /^(application\/json|text\/)/.test(r.mediaType ?? '');
 
 export function OriginalDetail({ did }: { did: string }) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
+  // The resume surface: this page had no Bitcoin action at all, so a published
+  // Original that was never inscribed dead-ended here.
+  const [records, setRecords] = useState<PendingInscription[]>([]);
+  const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
+  const [inscribing, setInscribing] = useState(false);
+  const [inscribeNote, setInscribeNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [data, setData] = useState<DetailData | null>(null);
   const [checks, setChecks] = useState<OriginalCheck[] | null>(null);
@@ -95,6 +105,7 @@ export function OriginalDetail({ did }: { did: string }) {
       ]);
       // Overlay live confirmation state (the stored row stays 'pending').
       const row = withLiveInscriptionStatus(rows, inscriptionRecs.records).find((r) => r.did === did) ?? null;
+      if (live) setRecords(inscriptionRecs.records);
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
@@ -173,7 +184,41 @@ export function OriginalDetail({ did }: { did: string }) {
     };
   }, [isAuthenticated, did]);
 
+  useEffect(() => {
+    let alive = true;
+    void resolveAuthorshipDid(bitcoin?.signingClient, user?.subOrgId).then(
+      (resolved) => alive && setAuthorshipDid(resolved)
+    );
+    return () => { alive = false; };
+  }, [bitcoin?.signingClient, user?.subOrgId]);
+
+  const startInscribe = async () => {
+    if (!bitcoin || !data?.row) return;
+    setInscribing(true);
+    setInscribeNote(null);
+    const outcome = await resumeInscribe({
+      did,
+      host: window.location.host,
+      subOrgId: user?.subOrgId,
+      fundingAddress: bitcoin.fundingAddress,
+      signingClient: bitcoin.signingClient,
+      cel: data.cel,
+    });
+    setInscribeNote(outcome.ok ? yourOriginals.inscribe.done : outcome.message);
+    setInscribing(false);
+  };
+
   const mode = detailMode({ authLoading, authenticated: isAuthenticated, loaded, row: data?.row ?? null });
+  const action: InscribeAvailability | null = data?.row
+    ? inscribeAvailability({
+        row: data.row,
+        records,
+        unfinished: unfinishedInscriptions(records),
+        authorshipDid,
+        signedIn: isAuthenticated && !!bitcoin,
+        cel: loaded ? data.cel : undefined,
+      })
+    : null;
 
   const copyDid = async () => {
     try {
@@ -234,6 +279,24 @@ export function OriginalDetail({ did }: { did: string }) {
             )}
             {data.resources.length > 0 && <Resources data={data} />}
             {data.row.btcoDid && <Bitcoin row={data.row} />}
+            {action && (action.kind === 'inscribe' || action.kind === 'disabled') && (
+              <section className="od-section od-inscribe">
+                <p className="eyebrow">{yourOriginals.inscribe.cta}</p>
+                {action.kind === 'inscribe' ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={inscribing}
+                    onClick={() => void startInscribe()}
+                  >
+                    {inscribing ? yourOriginals.inscribe.busy : yourOriginals.inscribe.cta}
+                  </button>
+                ) : (
+                  <p className="od-note">{yourOriginals.inscribe.reasons[action.reason]}</p>
+                )}
+                {inscribeNote && <p className="od-note" role="status">{inscribeNote}</p>}
+              </section>
+            )}
             {data.logSummary && <Identity summary={data.logSummary} />}
             <Artifacts did={did} />
           </>
