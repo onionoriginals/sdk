@@ -136,6 +136,27 @@ jobs:
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 
+  install-docs:
+    name: Documented install commands resolve to this major
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20.10.0"
+
+      # Reads the LIVE registry: every `npm install @originals/*` in the shipped
+      # markdown must resolve to the major this repo documents. The launch-review
+      # bug (docs describing 3.x while `latest` served 2.1.0) is registry state,
+      # so no amount of source review catches it — only asking npm does.
+      # A registry failure fails this job rather than skipping it: a gate that
+      # passes when it could not check is how the bug shipped.
+      - name: Check install commands against the registry
+        run: node scripts/check-install-docs.mjs
+
   changeset:
     name: Changeset present
     # Only on PRs, and skip the "Version Packages" PR (which intentionally has no

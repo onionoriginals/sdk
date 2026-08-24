@@ -501,7 +501,7 @@ interface BitcoinTransaction {
 
 ### During Migration
 
-- [ ] Install Originals SDK: `npm install @originals/sdk`
+- [ ] Install Originals SDK: `npm install @originals/sdk@next`
 - [ ] Set up test environment with regtest or signet network
 - [ ] Configure `OrdinalsProvider` (use `OrdMockProvider` for testing)
 - [ ] Replace UTXO selection with SDK functions

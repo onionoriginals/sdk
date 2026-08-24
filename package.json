@@ -14,6 +14,7 @@
     "landing:ci": "bun apps/landing/scripts/ci.mjs",
     "landing:check": "turbo run build --filter='./packages/*' && cd apps/landing && bun run typecheck && bun run typecheck:server && bun test && bun run build",
     "verify:esm": "node scripts/verify-esm.mjs",
+    "check:install-docs": "node scripts/check-install-docs.mjs",
     "verify:browser": "node scripts/check-browser-safety.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",

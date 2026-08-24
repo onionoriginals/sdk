@@ -18,13 +18,13 @@ By the end of this tutorial, you'll have:
 ## Step 1: Install the SDK
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 ```
 
 Or with Bun:
 
 ```bash
-bun add @originals/sdk
+bun add @originals/sdk@next
 ```
 
 ## Step 2: Initialize the SDK

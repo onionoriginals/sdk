@@ -25,9 +25,9 @@ Get up and running with Originals CEL in 5 minutes.
 ### Installation
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 # or
-bun add @originals/sdk
+bun add @originals/sdk@next
 ```
 
 ### Create Your First Asset
@@ -518,7 +518,7 @@ The `originals-cel` CLI provides command-line access to CEL operations.
 
 ```bash
 # Via npm/bun (global)
-npm install -g @originals/sdk
+npm install -g @originals/sdk@next
 
 # Or run directly via npx
 npx originals-cel --help
@@ -1044,7 +1044,7 @@ Check that proofs have all required fields:
 Ensure the SDK is installed in your project:
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 ```
 
 For Convex actions using Node.js, add `"use node";` at the top of the file.

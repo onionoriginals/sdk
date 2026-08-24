@@ -18,8 +18,14 @@ Assets migrate unidirectionally through these layers, with economic gravity dete
 ## Installation
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 ```
+
+> **Why `@next`:** 3.x is still a prerelease, so npm's `latest` tag deliberately
+> stays on the last stable release (2.1.0). Everything documented here — `did:cel`
+> genesis, the CEL event log, custody-required signers, the `./testing` subpath —
+> is 3.x only, so a bare `npm install @originals/sdk` would hand you a different
+> SDK than this README describes. Drop the tag once 3.0.0 ships to `latest`.
 
 ## Quick Start
 

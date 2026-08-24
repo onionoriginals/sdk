@@ -5,9 +5,9 @@ Turnkey-based authentication for the [Originals Protocol](https://github.com/oni
 ## Installation
 
 ```bash
-npm install @originals/auth
+npm install @originals/auth@next
 # or
-bun add @originals/auth
+bun add @originals/auth@next
 ```
 
 Requires Node.js `>=20.10.0` (or Bun). Published as ESM. `express` is an optional peer dependency for the server middleware.
