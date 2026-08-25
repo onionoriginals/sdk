@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import * as api from './api';
 import type { AuthUser } from './api';
-import { createUserWebVHDid } from './webvh';
+import { createUserWebVHDid, readUserWebVHDid } from './webvh';
 import {
   stampLoginToSession,
   ensureBitcoinFundingAccount,
+  ensureIdentityAccount,
+  ensureAuthorshipAccount,
   readSessionMeta,
   writeSessionMeta,
   clearSessionMeta,
@@ -16,6 +18,7 @@ import {
 } from './turnkey-session';
 import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
+import { HttpHostingStorageAdapter } from '../sdk/http-hosting-adapter';
 import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
 import { reportBootstrapFailure, prerequisiteFailure, type BootstrapStep } from './bootstrap-report';
@@ -51,6 +54,8 @@ interface AuthContextValue {
   startOtp: (email: string) => Promise<void>;
   verify: (code: string) => Promise<void>;
   createIdentity: () => Promise<string>;
+  /** The already-published DID, or null. Never mints — see `loadIdentity`. */
+  loadIdentity: () => Promise<string | null>;
   signOut: () => Promise<void>;
   /** Start a signing-session refresh: re-sends the OTP without signing out. */
   beginReauth: () => Promise<void>;
@@ -226,16 +231,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const createIdentity = useCallback(async () => {
     if (!user) throw new Error('Sign in before creating an identity');
-    // Signed in the browser with a real Ed25519 key (see auth/webvh.ts): the
-    // parent Turnkey key can't sign for the credential-less sub-org.
-    // The same null-safe guard every other key-material call site uses: a
-    // browser that denies storage refuses by name instead of throwing raw.
+    // Turnkey custody, so this needs a LIVE session: the sub-org quorum holds
+    // only the user, so only their session credential can sign the DID. Refuse
+    // by name rather than letting turnkeySignBytes fail deep in the build.
+    if (!bitcoin?.signingClient) {
+      throw new Error('Your signing session is not active — sign in again to create your DID.');
+    }
+    const client = bitcoin.signingClient;
+    const [identityAddress, authorshipAddress] = await Promise.all([
+      ensureIdentityAccount(client, user.subOrgId),
+      // Attribution only (published as assertionMethod); never signs the DID.
+      ensureAuthorshipAccount(client, user.subOrgId),
+    ]);
     const { did } = await createUserWebVHDid({
       subOrgId: user.subOrgId,
       email: user.email,
-      storage: browserKeyStorage(),
+      client,
+      identityAddress,
+      authorshipAddress,
+      hosting: new HttpHostingStorageAdapter(),
     });
     return did;
+  }, [user, bitcoin]);
+
+  /**
+   * The DID this user already published, or null. Read-only: showing an
+   * identity must never mint one, and unlike creating it needs no session.
+   */
+  const loadIdentity = useCallback(async () => {
+    if (!user) return null;
+    const found = await readUserWebVHDid({
+      subOrgId: user.subOrgId,
+      hosting: new HttpHostingStorageAdapter(),
+    });
+    return found?.did ?? null;
   }, [user]);
 
   const signOut = useCallback(async () => {
@@ -282,6 +311,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         startOtp,
         verify,
         createIdentity,
+        loadIdentity,
         signOut,
         beginReauth,
         cancelReauth,

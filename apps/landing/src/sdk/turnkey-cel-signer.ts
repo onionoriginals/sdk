@@ -24,10 +24,9 @@
  * and is held in Turnkey, which is the whole reason a published Original can
  * still be inscribed after a reload.
  */
-import type { Turnkey } from '@turnkey/sdk-server';
 import { base58AddressToEd25519Multikey } from '@originals/sdk';
 import { turnkeySignBytes } from '@originals/auth';
-import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
+import { asTurnkeyApiClient, type TurnkeyBitcoinClient } from '../auth/turnkey-session';
 
 /**
  * The Multikey for a Turnkey Ed25519 account address.
@@ -44,16 +43,6 @@ export function authorshipPublicKeyMultibase(address: string): string | null {
   } catch {
     return null;
   }
-}
-
-/**
- * `turnkeySignBytes` reaches the API as `client.apiClient().signRawPayload`
- * — the server SDK's shape. The browser's IndexedDB client exposes
- * `signRawPayload` directly, so it is wrapped rather than special-cased
- * inside the shared signing helper.
- */
-function asApiClient(client: TurnkeyBitcoinClient): Turnkey {
-  return { apiClient: () => client } as unknown as Turnkey;
 }
 
 /**
@@ -99,7 +88,7 @@ export class TurnkeyCelSigner {
       throw new Error('This Turnkey client cannot sign raw payloads, so it cannot author CEL events.');
     }
     const signature = await turnkeySignBytes(
-      { turnkeyClient: asApiClient(this.client), organizationId: this.subOrgId, signWith: this.signWith },
+      { turnkeyClient: asTurnkeyApiClient(this.client), organizationId: this.subOrgId, signWith: this.signWith },
       data
     );
     return { signature };

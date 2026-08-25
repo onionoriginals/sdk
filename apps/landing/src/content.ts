@@ -85,82 +85,32 @@ export const login = {
 };
 
 /**
- * The signed-in hero panel. The DID it makes is signed by a browser-local
- * Ed25519 key and stored in localStorage (auth/webvh.ts) — created and shown,
- * never hosted. Nothing here may call it live, hosted or resolvable (R9).
+ * The signed-in hero panel. The DID it makes is signed by a Turnkey-held
+ * Ed25519 key and its log is published to this origin (auth/webvh.ts), so it
+ * resolves and it survives this browser. Custody is stated, never implied: the
+ * old copy promised "we never get a copy", and quietly downgrading that to
+ * custody is the kind of thing a user should never discover on their own.
  */
 export const identityPanel = {
   layerLabel: 'did:webvh',
-  idleTitle: 'Your own DID, signed in this browser',
+  idleTitle: 'Your own DID — no key to lose',
   idleBody:
-    'Mint a did:webvh signed by a key only this browser holds — yours to keep, and yours to prove this identity is yours.',
+    'Mint a did:webvh signed by a key held in your name, so signing in is all it takes to be you again. No seed phrase, no backup file, nothing to write down.',
   createAction: 'Create your did:webvh',
   creating: 'Creating…',
   createFailed: 'DID creation failed — try again.',
   doneTitle: 'Your DID is signed',
   doneNote:
-    'Signed by a key this browser holds, and stored here beside it. It isn’t published anywhere yet, so nothing else can look it up — and clearing this browser’s storage takes the key with it.',
+    'Signed by your key at Turnkey, our custody provider, and published where DIDs resolve — so it comes back on any browser or device you sign in from. Nothing to back up.',
+  /** The custody fact itself, stated plainly rather than buried in legal. */
+  custodyNote:
+    'Turnkey holds the key; we can ask it to sign only while you are signed in. That is the trade for never having a key to lose — if you would rather hold your own, the SDK signs locally and never talks to us.',
+  /** Creating needs a live signing session (auth/webvh.ts TurnkeyWebVHSigner). */
+  sessionRequired: 'Your signing session has expired — sign in again to create your DID.',
   copy: 'Copy',
   copied: 'Copied',
   copyAria: 'Copy DID',
-  copiedAria: 'DID copied',
-  /**
-   * U10 / R17 — shown BEFORE the key exists. Creating used to be one click, so
-   * any warning beside the finished state arrived after the irreversible step.
-   * `warning.reminder` is the same fact restated for a returning user.
-   */
-  warning: {
-    title: 'First, the part nobody can undo for you',
-    body:
-      'Creating your DID generates a signing key that only this browser will hold. It signs this DID, and we never get a copy — so if this browser’s storage is cleared, or you move to another browser or device, the key is gone and no one can reissue it. The Originals you make are signed separately, by a key held for you, and they come back wherever you sign in.',
-    remedy:
-      'Save an encrypted backup as soon as it exists. That file, plus the passphrase you pick for it, is what carries this DID to another browser.',
-    acknowledge: 'I understand this key will exist only in this browser',
-    confirm: 'Create my DID',
-    cancel: 'Go back',
-    reminder:
-      'Your signing key is still only in this browser. Clearing site data, moving to another browser, or a browser evicting storage all take it with them — and it cannot be reissued.',
-    notAcknowledged: 'Confirm you understand before your key is created.'
-  },
-  /** U10 / R18 — the export half. Passphrase-wrapped; nothing is uploaded. */
-  backup: {
-    open: 'Save a backup',
-    title: 'Save an encrypted backup',
-    body:
-      'Wraps your signing key and your DID into one file, encrypted with a passphrase you choose. Keep both — the file is useless without the passphrase, and no one can reset it for you.',
-    passphraseLabel: 'Backup passphrase',
-    passphrasePlaceholder: 'At least 10 characters',
-    confirmLabel: 'Repeat passphrase',
-    action: 'Download backup',
-    working: 'Encrypting…',
-    done: 'Backup downloaded. Store it somewhere you will still have next year.',
-    mismatch: 'The two passphrases don’t match.',
-    weak: 'Use a passphrase of at least 10 characters.',
-    failed: 'Couldn’t create the backup — try again.',
-    cancel: 'Cancel'
-  },
-  /** U10 / R18 — the import half, including the replace warning. */
-  restore: {
-    open: 'Restore from a backup',
-    title: 'Restore from a backup',
-    body:
-      'Choose the backup file you saved and enter its passphrase. It is unwrapped here in your browser and never sent anywhere.',
-    fileLabel: 'Backup file',
-    passphraseLabel: 'Backup passphrase',
-    action: 'Restore',
-    working: 'Restoring…',
-    done: 'Restored. This browser can sign as you again.',
-    replaceTitle: 'This browser already holds a different key',
-    replaceBody:
-      'Restoring replaces it. Anything signed by the key that is here now can no longer be added to from this browser unless you also kept a backup of that one.',
-    replaceAcknowledge: 'I understand the key in this browser will be replaced',
-    replaceBlocked: 'Confirm the replacement before restoring.',
-    noFile: 'Choose your backup file first.',
-    wrongPassphrase: 'That passphrase doesn’t match this file.',
-    malformed: 'That file isn’t an Originals backup.',
-    failed: 'Couldn’t restore that backup — try again.',
-    cancel: 'Cancel'
-  }
+  copiedAria: 'DID copied'
 };
 
 export const hero = {
