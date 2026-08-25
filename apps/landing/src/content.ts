@@ -93,7 +93,7 @@ export const identityPanel = {
   layerLabel: 'did:webvh',
   idleTitle: 'Your own DID, signed in this browser',
   idleBody:
-    'Mint a did:webvh signed by a key only this browser holds — yours to keep, and yours to sign your work with.',
+    'Mint a did:webvh signed by a key only this browser holds — yours to keep, and yours to prove this identity is yours.',
   createAction: 'Create your did:webvh',
   creating: 'Creating…',
   createFailed: 'DID creation failed — try again.',
@@ -112,9 +112,9 @@ export const identityPanel = {
   warning: {
     title: 'First, the part nobody can undo for you',
     body:
-      'Creating your DID generates a signing key that only this browser will hold. It signs everything you make with Originals, and we never get a copy — so if this browser’s storage is cleared, or you move to another browser or device, the key is gone and no one can reissue it.',
+      'Creating your DID generates a signing key that only this browser will hold. It signs this DID, and we never get a copy — so if this browser’s storage is cleared, or you move to another browser or device, the key is gone and no one can reissue it. The Originals you make are signed separately, by a key held for you, and they come back wherever you sign in.',
     remedy:
-      'Save an encrypted backup as soon as it exists. That file, plus the passphrase you pick for it, is what carries your work to another browser.',
+      'Save an encrypted backup as soon as it exists. That file, plus the passphrase you pick for it, is what carries this DID to another browser.',
     acknowledge: 'I understand this key will exist only in this browser',
     confirm: 'Create my DID',
     cancel: 'Go back',
@@ -626,6 +626,64 @@ export const yourOriginals = {
     failed: 'Could not finish the inscription — try again in a moment.',
   },
   /**
+   * The pre-broadcast resume gap: a published Original that was never
+   * inscribed. Distinct from `finish` above, which recovers an inscription
+   * that WAS built and signed — these two never appear on the same row.
+   *
+   * The disabled reasons are the honest half. Inscribing appends a signed
+   * migrate event, and pre-anchor the CEL accepts only its current controller
+   * as signer, so an Original minted before authorship moved into Turnkey
+   * custody answers to a key that lived in a tab and is gone. That cannot be
+   * fixed by signing in again on another device, and the copy must not imply
+   * it can.
+   */
+  inscribe: {
+    cta: 'Inscribe on Bitcoin',
+    /**
+     * The detail-page section heading. Neutral on purpose, and never the CTA
+     * text: the same section carries the reason an Original CANNOT be
+     * inscribed, where "Inscribe on Bitcoin" would read as an offer being
+     * withdrawn — and above the button it would just say the same thing twice.
+     */
+    sectionEyebrow: 'Bitcoin',
+    busy: 'Inscribing…',
+    hydrating: 'Rebuilding from its signed log…',
+    done: 'Inscribed — the transactions are on their way to the network.',
+    /**
+     * Only the commit reached the network. The reveal carries the inscription,
+     * so until it propagates there is nothing on chain — saying "inscribed"
+     * here is the same lie #506 removed from the demo. Nothing more is owed;
+     * the server re-pushes the reveal on its own.
+     */
+    commitOnly:
+      'Your funding transaction is on the network. The second transaction — the one that carries the inscription — has not propagated yet, which is expected while the first is unconfirmed. It is signed and saved, and goes out automatically. Nothing is stuck and nothing more is owed.',
+    /** Shown under a disabled action, keyed by `DisabledReason`. */
+    reasons: {
+      'signed-out': 'Sign in to inscribe this Original on Bitcoin.',
+      'no-authorship-key':
+        'This browser can’t reach your signing key right now, so it can’t sign the event inscribing adds. Sign in again and it will come back.',
+      'foreign-controller':
+        'This Original was made before signing keys were kept for you, so the key that could add to its history only ever existed in the browser that created it — and it’s gone. Everything already in its history stays signed, verifiable and hosted; it just can’t be carried on to Bitcoin. Anything you make from now on can be.',
+      /**
+       * Not fetched yet. Rendered as NOTHING, not as this text: on first paint
+       * no row's log has been read, so showing it flashed a note under every
+       * card. Kept as a string for a caller that wants to say it out loud.
+       */
+      reading: 'Reading this Original’s signed log…',
+      /** Fetched, and it did not come back readable. A real answer, so it shows. */
+      unreadable:
+        'This Original’s signed log could not be read from where it is hosted, so there is nothing to carry to Bitcoin yet. Reloading may fix it.',
+      /**
+       * An inscription is already built and paid for and waiting to be pushed,
+       * and we cannot tell which Original it belongs to. Rebuilding would
+       * replace it, so the copy points at the thing that clears it rather than
+       * describing the ambiguity — finishing it is one click away, above.
+       */
+      'pending-elsewhere':
+        'You have an inscription that’s already built and waiting to be sent. Finish that one first — until it lands, starting another could replace it.',
+    },
+  },
+  /**
    * R31 — a deposit-read outage is asynchronous: it can start after a creator
    * sends BTC and closes the tab, so the deposit screen's own copy reaches
    * nobody. This block is the version that greets them on their NEXT VISIT,
@@ -920,7 +978,8 @@ export const legal = {
       {
         heading: 'Keys held in your browser',
         body: [
-          'The Ed25519 key that signs everything you author lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
+          'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
+          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, that key does not exist and the Original is signed by a key generated in the page and discarded with it.',
           'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.'
         ]

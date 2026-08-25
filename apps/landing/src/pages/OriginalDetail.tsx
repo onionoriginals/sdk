@@ -8,7 +8,7 @@
  * hashes and both proof chains in the visitor's browser (verify-original.ts).
  */
 import { useEffect, useRef, useState } from 'react';
-import { originalDetail } from '../content';
+import { originalDetail, yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate } from '../router';
 import { short } from '../sdk/format';
@@ -17,9 +17,18 @@ import { btcoExplorerUrl } from '../sdk/network-flag';
 import {
   fetchOriginals,
   fetchInscriptions,
+  unfinishedInscriptions,
   withLiveInscriptionStatus,
   type OriginalRow,
+  type PendingInscription,
 } from './YourOriginals';
+import {
+  inscribeAvailability,
+  rowAfterInscribe,
+  unclaimedInscriptions,
+  type InscribeAvailability,
+} from './inscribe-availability';
+import { resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import {
   webvhArtifacts,
   celTimeline,
@@ -71,7 +80,17 @@ const isText = (r: CelResourceRef) =>
   /^(application\/json|text\/)/.test(r.mediaType ?? '');
 
 export function OriginalDetail({ did }: { did: string }) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
+  // The resume surface: this page had no Bitcoin action at all, so a published
+  // Original that was never inscribed dead-ended here.
+  const [records, setRecords] = useState<PendingInscription[]>([]);
+  /** Every row this user has — needed to tell a claimed record from a loose one. */
+  const [allRows, setAllRows] = useState<OriginalRow[]>([]);
+  const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
+  const [inscribing, setInscribing] = useState(false);
+  /** Which half of the inscribe the button is in — rebuild, then broadcast. */
+  const [stage, setStage] = useState<'hydrating' | 'inscribing'>('hydrating');
+  const [inscribeNote, setInscribeNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [data, setData] = useState<DetailData | null>(null);
   const [checks, setChecks] = useState<OriginalCheck[] | null>(null);
@@ -94,7 +113,12 @@ export function OriginalDetail({ did }: { did: string }) {
         arts ? fetchText(arts.celUrl) : null
       ]);
       // Overlay live confirmation state (the stored row stays 'pending').
-      const row = withLiveInscriptionStatus(rows, inscriptionRecs.records).find((r) => r.did === did) ?? null;
+      const rowsWithStatus = withLiveInscriptionStatus(rows, inscriptionRecs.records);
+      const row = rowsWithStatus.find((r) => r.did === did) ?? null;
+      if (live) {
+        setRecords(inscriptionRecs.records);
+        setAllRows(rowsWithStatus);
+      }
 
       let logEntries: ReturnType<typeof parseDidLog> | null = null;
       try {
@@ -173,7 +197,66 @@ export function OriginalDetail({ did }: { did: string }) {
     };
   }, [isAuthenticated, did]);
 
+  useEffect(() => {
+    let alive = true;
+    void resolveAuthorshipDid(bitcoin?.signingClient, user?.subOrgId).then(
+      (resolved) => alive && setAuthorshipDid(resolved)
+    );
+    return () => { alive = false; };
+  }, [bitcoin?.signingClient, user?.subOrgId]);
+
+  const startInscribe = async () => {
+    if (!bitcoin || !data?.row) return;
+    setInscribing(true);
+    setStage('hydrating');
+    setInscribeNote(null);
+    const outcome = await resumeInscribe({
+      did,
+      host: window.location.host,
+      subOrgId: user?.subOrgId,
+      fundingAddress: bitcoin.fundingAddress,
+      signingClient: bitcoin.signingClient,
+      cel: data.cel,
+      onProgress: (stage) => setStage(stage),
+    });
+    setInscribeNote(
+      outcome.ok
+        ? outcome.complete
+          ? yourOriginals.inscribe.done
+          : yourOriginals.inscribe.commitOnly
+        : outcome.message
+    );
+    if (outcome.ok) {
+      // Record the commit on the row the selector reads. Without this the row
+      // is untouched, `action` recomputes to 'inscribe', the button re-enables
+      // and a second click builds and pays for a second commit/reveal pair.
+      // The durable row catches up on the next load; this is the same patch
+      // /me applies.
+      setData((d) =>
+        d && d.row
+          ? {
+              ...d,
+              row: rowAfterInscribe(d.row, outcome.inscription.commitTxId),
+            }
+          : d
+      );
+    }
+    setInscribing(false);
+  };
+
   const mode = detailMode({ authLoading, authenticated: isAuthenticated, loaded, row: data?.row ?? null });
+  const action: InscribeAvailability | null = data?.row
+    ? inscribeAvailability({
+        row: data.row,
+        unfinished: unfinishedInscriptions(records),
+        // Over ALL the user's rows, not just this one: a record another
+        // Original already claims is attributed and must not disable this row.
+        unclaimed: unclaimedInscriptions(allRows, unfinishedInscriptions(records)),
+        authorshipDid,
+        signedIn: isAuthenticated && !!bitcoin,
+        cel: loaded ? data.cel : undefined,
+      })
+    : null;
 
   const copyDid = async () => {
     try {
@@ -234,6 +317,30 @@ export function OriginalDetail({ did }: { did: string }) {
             )}
             {data.resources.length > 0 && <Resources data={data} />}
             {data.row.btcoDid && <Bitcoin row={data.row} />}
+            {action &&
+              (action.kind === 'inscribe' ||
+                (action.kind === 'disabled' && action.reason !== 'reading')) && (
+              <section className="od-section od-inscribe">
+                <p className="eyebrow">{yourOriginals.inscribe.sectionEyebrow}</p>
+                {action.kind === 'inscribe' ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={inscribing}
+                    onClick={() => void startInscribe()}
+                  >
+                    {!inscribing
+                      ? yourOriginals.inscribe.cta
+                      : stage === 'hydrating'
+                        ? yourOriginals.inscribe.hydrating
+                        : yourOriginals.inscribe.busy}
+                  </button>
+                ) : (
+                  <p className="od-note">{yourOriginals.inscribe.reasons[action.reason]}</p>
+                )}
+                {inscribeNote && <p className="od-note" role="status">{inscribeNote}</p>}
+              </section>
+            )}
             {data.logSummary && <Identity summary={data.logSummary} />}
             <Artifacts did={did} />
           </>

@@ -76,14 +76,30 @@ export interface TurnkeyBitcoinClient {
     unsignedTransaction: string;
     type: 'TRANSACTION_TYPE_BITCOIN';
   }): Promise<{ signedTransaction: string }>;
+  /**
+   * Raw byte signing — the Ed25519 half of this client, used to author CEL
+   * events (see ../sdk/turnkey-cel-signer). Optional because the pure test
+   * doubles for the Bitcoin paths have no reason to implement it; anything
+   * that needs it checks first and says so rather than throwing at sign time.
+   */
+  signRawPayload?(params: {
+    organizationId: string;
+    signWith: string;
+    payload: string;
+    encoding: 'PAYLOAD_ENCODING_HEXADECIMAL';
+    hashFunction: 'HASH_FUNCTION_NO_OP';
+  }): Promise<unknown>;
   createWalletAccounts(params: {
     walletId: string;
     organizationId: string;
     accounts: Array<{
-      curve: 'CURVE_SECP256K1';
+      curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
       pathFormat: 'PATH_FORMAT_BIP32';
       path: string;
-      addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH' | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH';
+      addressFormat:
+        | 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH'
+        | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH'
+        | 'ADDRESS_FORMAT_SOLANA';
     }>;
   }): Promise<{ addresses: string[] }>;
   /**
@@ -457,3 +473,65 @@ function verifyFundingAddress(address: string | undefined, prefix: string): stri
   return address;
 }
 
+/* ——— The authorship account (Ed25519, Turnkey-held) ——————————————————— */
+
+/**
+ * The Turnkey account whose key signs an Original's CEL events.
+ *
+ * Ed25519 because CEL is Ed25519-only, and Turnkey-held rather than
+ * browser-held because an Original that can only be finished in the browser
+ * that started it is the gap this exists to close: a key in Turnkey comes back
+ * with the session, on any device.
+ *
+ * Turnkey reports an Ed25519 account in Solana's address format, which IS the
+ * raw 32-byte public key in base58 — see `authorshipPublicKeyMultibase`. The
+ * path is fixed so re-reading always yields the same key: an Original's
+ * controller identity must not move under it.
+ */
+export const AUTHORSHIP_ACCOUNT = {
+  curve: 'CURVE_ED25519',
+  pathFormat: 'PATH_FORMAT_BIP32',
+  path: "m/44'/501'/0'/0'",
+  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+} as const;
+
+/**
+ * The sub-org's authorship account address, creating it if this wallet has
+ * none. Mirrors `ensureBitcoinFundingAccount`: read by path first, create only
+ * on a miss, and treat Turnkey's "already exists" as proof to re-read rather
+ * than as a failure.
+ */
+export async function ensureAuthorshipAccount(
+  client: TurnkeyBitcoinClient,
+  subOrgId: string
+): Promise<string> {
+  const findExisting = async (): Promise<string | undefined> => {
+    const { accounts } = await client.getWalletAccounts({ organizationId: subOrgId });
+    return accounts?.find((a) => a.path === AUTHORSHIP_ACCOUNT.path)?.address;
+  };
+
+  const already = await findExisting();
+  if (already) return already;
+
+  const { wallets } = await client.getWallets({ organizationId: subOrgId });
+  const wallet = wallets[0];
+  if (!wallet) throw new Error('No Turnkey wallet found for the sub-organization.');
+
+  let addresses: string[];
+  try {
+    ({ addresses } = await client.createWalletAccounts({
+      walletId: wallet.walletId,
+      organizationId: subOrgId,
+      accounts: [{ ...AUTHORSHIP_ACCOUNT }],
+    }));
+  } catch (err) {
+    if (!/already exists/i.test(String((err as Error)?.message ?? err))) throw err;
+    const recovered = await findExisting();
+    if (!recovered) throw err;
+    return recovered;
+  }
+
+  const address = addresses[0];
+  if (!address) throw new Error('Turnkey returned no authorship account address.');
+  return address;
+}
