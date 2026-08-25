@@ -8,6 +8,7 @@ import {
   readUserWebVHDid,
   userDidLogKey,
   userWebvhSlug,
+  WebVHIdentityError,
 } from './webvh';
 
 async function makeSigner(): Promise<{ signer: BrowserWebVHSigner; priv: Uint8Array; pub: Uint8Array }> {
@@ -123,5 +124,59 @@ describe('reading an identity never creates one', () => {
     };
     const found = await readUserWebVHDid({ subOrgId: 'suborg-abc0123456789', hosting });
     expect(found!.did).toBe(built.did);
+  });
+});
+
+describe('a failed read never overwrites a published identity', () => {
+  const slug = () => userWebvhSlug('suborg-abc0123456789');
+  const key = () => userDidLogKey(DEFAULT_WEBVH_DOMAIN, slug());
+
+  /**
+   * The expensive failure this guards: reporting a transient read failure as
+   * "no identity yet" makes the caller mint a NEW SCID over the user's stable
+   * did.jsonl, so the original DID stops resolving and every Original authored
+   * under it is orphaned. A thrown error costs a retry instead.
+   */
+  test('a network failure propagates instead of reading as absent', async () => {
+    const puts: string[] = [];
+    const hosting = {
+      put: async (k: string) => {
+        puts.push(k);
+        return `https://${k}`;
+      },
+      get: async () => {
+        throw new Error('network down');
+      },
+    };
+    await expect(
+      readUserWebVHDid({ subOrgId: 'suborg-abc0123456789', hosting })
+    ).rejects.toThrow(/network down/);
+    expect(puts).toEqual([]);
+  });
+
+  test('a truncated log throws rather than inviting a remint', async () => {
+    const hosting = {
+      put: async (k: string) => `https://${k}`,
+      get: async () => ({ content: '{"versionId":"1-abc","stat' }),
+    };
+    await expect(
+      readUserWebVHDid({ subOrgId: 'suborg-abc0123456789', hosting })
+    ).rejects.toThrow(WebVHIdentityError);
+  });
+
+  test('bytes that are not a did:webvh log are still not an empty slot', async () => {
+    const hosting = {
+      put: async (k: string) => `https://${k}`,
+      get: async () => ({ content: '[{"state":{"id":"did:example:not-webvh"}}]' }),
+    };
+    await expect(
+      readUserWebVHDid({ subOrgId: 'suborg-abc0123456789', hosting })
+    ).rejects.toThrow(WebVHIdentityError);
+  });
+
+  test('only an affirmative 404 — a null from the adapter — reads as absent', async () => {
+    const hosting = { put: async (k: string) => `https://${k}`, get: async () => null };
+    expect(await readUserWebVHDid({ subOrgId: 'suborg-abc0123456789', hosting })).toBeNull();
+    expect(key()).toContain(slug());
   });
 });

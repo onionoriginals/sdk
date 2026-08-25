@@ -18,7 +18,7 @@ import {
 } from './turnkey-session';
 import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
-import { HttpHostingStorageAdapter } from '../sdk/http-hosting-adapter';
+import { DurableHostingStorageAdapter } from '../sdk/durable-hosting-adapter';
 import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
 import { reportBootstrapFailure, prerequisiteFailure, type BootstrapStep } from './bootstrap-report';
@@ -249,7 +249,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       client,
       identityAddress,
       authorshipAddress,
-      hosting: new HttpHostingStorageAdapter(),
+      // DURABLE, not the /api/host demo store: that one is in-memory with a
+      // 2h TTL and LRU eviction, and this log cannot be regenerated (a rebuild
+      // gets a new SCID). Losing it loses the identity.
+      hosting: new DurableHostingStorageAdapter(),
     });
     return did;
   }, [user, bitcoin]);
@@ -262,7 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return null;
     const found = await readUserWebVHDid({
       subOrgId: user.subOrgId,
-      hosting: new HttpHostingStorageAdapter(),
+      hosting: new DurableHostingStorageAdapter(),
     });
     return found?.did ?? null;
   }, [user]);

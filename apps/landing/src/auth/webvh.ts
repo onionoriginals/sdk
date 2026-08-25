@@ -29,7 +29,11 @@ import { asTurnkeyApiClient, type TurnkeyBitcoinClient } from './turnkey-session
  * files) that no longer exists; only the "cannot sign" case survives it.
  */
 export class WebVHIdentityError extends Error {
-  constructor(readonly code: 'no-key', message: string) {
+  constructor(
+    readonly code: 'no-key' | 'log-unreadable',
+    message: string,
+    readonly cause?: unknown
+  ) {
     super(message);
     this.name = 'WebVHIdentityError';
   }
@@ -315,22 +319,36 @@ function parseDidLog(text: string): Array<{ state?: unknown }> {
   return trimmed.split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
-/** The DID already published for this key, or null if absent/unusable. */
+/**
+ * The DID published at this key, or null ONLY when the host affirmatively says
+ * there is none (a 404, which the adapters map to null).
+ *
+ * Never swallow anything else. A caught network blip or a half-written log
+ * would be reported as "no identity yet", and the caller's next move is to mint
+ * one — a NEW SCID written over the user's stable `did.jsonl`, which stops the
+ * original DID resolving and orphans every Original authored under it. Failing
+ * loudly costs a retry; guessing costs the identity.
+ */
 async function readPublishedDid(
   hosting: DidLogHosting,
   logKey: string
 ): Promise<WebVHDidResult | null> {
+  const found = await hosting.get(logKey);
+  if (!found) return null;
+  const text =
+    typeof found.content === 'string' ? found.content : new TextDecoder().decode(found.content);
+  let didLog: Array<{ state?: unknown }>;
   try {
-    const found = await hosting.get(logKey);
-    if (!found) return null;
-    const text =
-      typeof found.content === 'string' ? found.content : new TextDecoder().decode(found.content);
-    const didLog = parseDidLog(text);
-    const did = didFromLog(didLog);
-    if (!did) return null;
-    return { did, didDocument: didLog[didLog.length - 1]?.state, didLog };
-  } catch {
-    return null;
+    didLog = parseDidLog(text);
+  } catch (cause) {
+    throw new WebVHIdentityError('log-unreadable', `The DID log at ${logKey} could not be parsed`, cause);
   }
+  const did = didFromLog(didLog);
+  // Bytes that are not a did:webvh log are a log we must not overwrite either:
+  // something is there, and we cannot prove it isn't the user's identity.
+  if (!did) {
+    throw new WebVHIdentityError('log-unreadable', `The data at ${logKey} is not a did:webvh log`);
+  }
+  return { did, didDocument: didLog[didLog.length - 1]?.state, didLog };
 }
 

@@ -27,11 +27,18 @@ export function IdentityPanel() {
   // must never mint an identity nobody asked for. Reading needs no session, so
   // this runs as soon as there is a user.
   useEffect(() => {
+    // Clear FIRST, on every account change. This component survives a sign-out
+    // and sign-in, so leaving the previous DID up while the next load resolves
+    // (or fails, or returns none) would show and copy one account's identity
+    // under another's name.
+    setDid(null);
+    setError(null);
+    setCopied(false);
     if (!subOrgId) return;
     let cancelled = false;
     loadIdentity()
       .then((existing) => {
-        if (!cancelled && existing) setDid(existing);
+        if (!cancelled) setDid(existing);
       })
       .catch(() => {
         /* Idle state is the correct fallback: the button retries out loud. */
