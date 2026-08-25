@@ -473,6 +473,17 @@ function verifyFundingAddress(address: string | undefined, prefix: string): stri
   return address;
 }
 
+/**
+ * `turnkeySignBytes` expects the server SDK's shape (`client.apiClient()`),
+ * while the browser's IndexedDB client exposes `signRawPayload` directly. Both
+ * Ed25519 signers (CEL events, did:webvh) need this same wrap, so it lives here
+ * with the client interface rather than being re-declared beside each of them.
+ * Type-only import: erased at runtime, so this module stays dependency-free.
+ */
+export function asTurnkeyApiClient(client: TurnkeyBitcoinClient): import('@turnkey/sdk-server').Turnkey {
+  return { apiClient: () => client } as unknown as import('@turnkey/sdk-server').Turnkey;
+}
+
 /* ——— The authorship account (Ed25519, Turnkey-held) ——————————————————— */
 
 /**
@@ -496,6 +507,22 @@ export const AUTHORSHIP_ACCOUNT = {
 } as const;
 
 /**
+ * The Turnkey account whose key signs the user's OWN did:webvh — a DIFFERENT
+ * key from AUTHORSHIP_ACCOUNT, at its own path, on purpose. Identity update
+ * authority (the DID's `updateKeys`) and per-Original authorship are separate
+ * powers; one key holding both means rotating either one rewrites the other.
+ */
+export const IDENTITY_ACCOUNT = {
+  curve: 'CURVE_ED25519',
+  pathFormat: 'PATH_FORMAT_BIP32',
+  path: "m/44'/501'/1'/0'",
+  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+} as const;
+
+/** The Ed25519 account specs this app provisions. */
+export type Ed25519AccountSpec = typeof AUTHORSHIP_ACCOUNT | typeof IDENTITY_ACCOUNT;
+
+/**
  * The sub-org's authorship account address, creating it if this wallet has
  * none. Mirrors `ensureBitcoinFundingAccount`: read by path first, create only
  * on a miss, and treat Turnkey's "already exists" as proof to re-read rather
@@ -505,9 +532,25 @@ export async function ensureAuthorshipAccount(
   client: TurnkeyBitcoinClient,
   subOrgId: string
 ): Promise<string> {
+  return ensureEd25519Account(client, subOrgId, AUTHORSHIP_ACCOUNT);
+}
+
+/** The sub-org's identity account address — same contract, its own path. */
+export async function ensureIdentityAccount(
+  client: TurnkeyBitcoinClient,
+  subOrgId: string
+): Promise<string> {
+  return ensureEd25519Account(client, subOrgId, IDENTITY_ACCOUNT);
+}
+
+async function ensureEd25519Account(
+  client: TurnkeyBitcoinClient,
+  subOrgId: string,
+  spec: Ed25519AccountSpec
+): Promise<string> {
   const findExisting = async (): Promise<string | undefined> => {
     const { accounts } = await client.getWalletAccounts({ organizationId: subOrgId });
-    return accounts?.find((a) => a.path === AUTHORSHIP_ACCOUNT.path)?.address;
+    return accounts?.find((a) => a.path === spec.path)?.address;
   };
 
   const already = await findExisting();
@@ -522,7 +565,7 @@ export async function ensureAuthorshipAccount(
     ({ addresses } = await client.createWalletAccounts({
       walletId: wallet.walletId,
       organizationId: subOrgId,
-      accounts: [{ ...AUTHORSHIP_ACCOUNT }],
+      accounts: [{ ...spec }],
     }));
   } catch (err) {
     if (!/already exists/i.test(String((err as Error)?.message ?? err))) throw err;
@@ -532,6 +575,6 @@ export async function ensureAuthorshipAccount(
   }
 
   const address = addresses[0];
-  if (!address) throw new Error('Turnkey returned no authorship account address.');
+  if (!address) throw new Error(`Turnkey returned no address for account path ${spec.path}.`);
   return address;
 }
