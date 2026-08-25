@@ -259,10 +259,16 @@ export {
   digestMultibaseEquals,
 } from '@originals/cel';
 export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel';
-// The CEL suite labels (plan 042): one written, one accepted for pre-042 logs.
+// The CEL proof labels: one written, one accepted for logs sealed under the
+// previous name. The suite pair is plan 042; the type pair renames the claim
+// `DataIntegrityProof` made and never implemented.
 export {
   CEL_CRYPTOSUITE,
   CEL_CRYPTOSUITE_LEGACY,
+  CEL_PROOF_TYPE,
+  CEL_PROOF_TYPE_LEGACY,
+  CEL_PROOF_TYPES,
+  isCelProofType,
   verifyDidKeyProof,
   structuralCheckReason,
 } from '@originals/cel';

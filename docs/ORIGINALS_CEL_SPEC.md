@@ -71,7 +71,7 @@ Every Originals asset is controlled by a Decentralized Identifier (DID). The con
 
 | Layer | DID Method | Resolution |
 |-------|------------|------------|
-| genesis (peer) | `did:cel` | Derived from the genesis event; self-certifying (see `specs/did-cel-method.md`) |
+| genesis | `did:cel` | Derived from the genesis event; self-certifying (see `specs/did-cel-method.md`) |
 | webvh | `did:webvh` | HTTP-based with version history |
 | btco  | `did:btco` | Bitcoin ordinals inscription |
 
@@ -79,28 +79,43 @@ Legacy logs used `did:peer` (numalgo 4) as the genesis identity; that method's
 support is removed entirely (such logs no longer verify). New logs derive a
 `did:cel` from the genesis event.
 
+> **`did:cel` is not a registered DID method.** No registration has been
+> submitted and no Universal Resolver driver exists, so a `did:cel` is
+> resolvable and verifiable only by an implementation of this specification.
+> `did:webvh` and `did:btco` are registered; `cel` is not. See
+> [specs/did-cel-method.md](../specs/did-cel-method.md).
+
 ### 2.2 Proof Requirements
 
 Every event MUST include at least one proof from the asset controller.
 
-#### 2.2.1 DataIntegrityProof Structure
+#### 2.2.1 Proof Structure
 
 ```json
 {
-  "type": "DataIntegrityProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "type": "OriginalsCelProof",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
-  "verificationMethod": "did:peer:4zQm...#key-0",
+  "verificationMethod": "did:key:z6Mk...#z6Mk...",
   "proofPurpose": "assertionMethod",
   "proofValue": "z3FXQkcW..."
 }
 ```
 
+**This is not a W3C Data Integrity proof, and no conforming Data Integrity
+implementation can verify it.** The field shape is borrowed from that
+specification and the hashing step mirrors it, but the cryptosuite is an
+Originals construction, unregistered, and the payload is canonicalized with
+plain JCS — no JSON-LD expansion, no RDF canonicalization, no `@context`
+processing. The `type` and `cryptosuite` values say so rather than implying
+otherwise; earlier releases wrote `DataIntegrityProof`/`eddsa-jcs-2022`, both
+of which claimed a conformance this protocol never implemented.
+
 #### 2.2.2 Required Proof Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"DataIntegrityProof"` |
+| `type` | string | Yes | Must be `"OriginalsCelProof"`. Verifiers MUST also accept `"DataIntegrityProof"` on logs sealed before the rename |
 | `cryptosuite` | string | Yes | Cryptographic suite identifier |
 | `created` | string | Yes | ISO 8601 timestamp |
 | `verificationMethod` | string | Yes | DID URL of signing key |
@@ -111,9 +126,17 @@ Every event MUST include at least one proof from the asset controller.
 
 | Cryptosuite | Key Type | Use Case |
 |-------------|----------|----------|
-| `eddsa-jcs-2022` | Ed25519 | Primary signing |
-| `eddsa-rdfc-2022` | Ed25519 | RDF canonicalization |
-| `bitcoin-ordinals-2024` | secp256k1 | Bitcoin witnessing |
+| `originals-cel-ed25519-jcs-v1` | Ed25519 | Controller event signatures |
+| `bitcoin-ordinals-2024` | — | Bitcoin witness attestations (an inscription reference, not a signature) |
+| `eddsa-jcs-2022` | Ed25519 | Accepted on read only; never written. Logs sealed before the rename |
+
+Signing input for `originals-cel-ed25519-jcs-v1` is
+`sha256(JCS(proofConfig)) || sha256(JCS(payload))`, where `proofConfig` is the
+proof without `proofValue`. The proof configuration is therefore inside the
+signature: `created`, `verificationMethod`, `proofPurpose`, `cryptosuite` and
+`type` are all attested. Under the read-only `eddsa-jcs-2022` label the
+signature covers the event alone and those fields are unattested — which is
+why it was retired.
 
 ### 2.3 Hash Chain Integrity
 
@@ -238,12 +261,12 @@ Witnesses provide independent attestation that an event existed at a specific ti
 
 ### 4.3 WitnessProof Structure
 
-A WitnessProof extends DataIntegrityProof with additional fields:
+A WitnessProof extends the proof envelope with additional fields:
 
 ```json
 {
-  "type": "DataIntegrityProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "type": "OriginalsCelProof",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
   "proofPurpose": "assertionMethod",
@@ -272,8 +295,8 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "DataIntegrityProof",
-  "cryptosuite": "eddsa-jcs-2022",
+  "type": "OriginalsCelProof",
+  "cryptosuite": "originals-cel-ed25519-jcs-v1",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:web:witness.example.com#key-0",
   "proofPurpose": "assertionMethod",
@@ -288,7 +311,7 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "DataIntegrityProof",
+  "type": "OriginalsCelProof",
   "cryptosuite": "bitcoin-ordinals-2024",
   "created": "2026-01-20T12:00:00Z",
   "verificationMethod": "did:btco:abc123#key-0",
@@ -352,8 +375,8 @@ this event and therefore MUST NOT be embedded in it.
   },
   "proof": [
     {
-      "type": "DataIntegrityProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "type": "OriginalsCelProof",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-20T12:00:00Z",
       "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
@@ -391,10 +414,10 @@ Logs written by pre-`did:cel` releases embed the asset DID directly:
 ```json
 {
   "name": "My Digital Artwork",
-  "did": "did:peer:4zQm...",
+  "did": "did:key:z6Mk...",
   "layer": "peer",
   "resources": [ /* ... */ ],
-  "creator": "did:peer:4zQm...",
+  "creator": "did:key:z6Mk...",
   "createdAt": "2026-01-20T12:00:00Z"
 }
 ```
@@ -424,10 +447,10 @@ Modifies asset state (metadata, resources, or custom fields).
   "previousEvent": "uABC...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "type": "OriginalsCelProof",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-21T12:00:00Z",
-      "verificationMethod": "did:peer:4zQm...#key-0",
+      "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
       "proofValue": "z4XYZ..."
     }
@@ -458,10 +481,10 @@ Permanently seals the event log, preventing further modifications.
   "previousEvent": "uDEF...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "type": "OriginalsCelProof",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-22T12:00:00Z",
-      "verificationMethod": "did:peer:4zQm...#key-0",
+      "verificationMethod": "did:key:z6Mk...#z6Mk...",
       "proofPurpose": "assertionMethod",
       "proofValue": "z5ABC..."
     }
@@ -642,16 +665,16 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
   "previousEvent": "uGHI...",
   "proof": [
     {
-      "type": "DataIntegrityProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "type": "OriginalsCelProof",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "created": "2026-01-23T12:00:00Z",
       "verificationMethod": "did:webvh:example.com:abc123#key-0",
       "proofPurpose": "assertionMethod",
       "proofValue": "z6DEF..."
     },
     {
-      "type": "DataIntegrityProof",
-      "cryptosuite": "eddsa-jcs-2022",
+      "type": "OriginalsCelProof",
+      "cryptosuite": "originals-cel-ed25519-jcs-v1",
       "witnessedAt": "2026-01-23T12:00:01Z",
       "verificationMethod": "did:web:witness.example.com#key-0",
       "proofPurpose": "assertionMethod",
@@ -667,7 +690,7 @@ readers MUST still recognize that legacy shape, but writers MUST emit `migrate`:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `sourceDid` | string | Yes | Original did:peer |
+| `sourceDid` | string | Yes | Source did:cel |
 | `targetDid` | string | Yes | New did:webvh |
 | `layer` | string | Yes | Must be `"webvh"` |
 | `domain` | string | Yes | Domain hosting the DID |
@@ -854,7 +877,7 @@ interface EventVerification {
       "type": "create",
       "data": {
         "name": "Genesis Artwork #1",
-        "did": "did:peer:4zQmR...",
+        "did": "did:key:z6MkR...",
         "layer": "peer",
         "resources": [
           {
@@ -863,14 +886,14 @@ interface EventVerification {
             "url": ["ipfs://QmABC..."]
           }
         ],
-        "creator": "did:peer:4zQmR...",
+        "creator": "did:key:z6MkR...",
         "createdAt": "2026-01-20T10:00:00Z"
       },
       "proof": [{
-        "type": "DataIntegrityProof",
-        "cryptosuite": "eddsa-jcs-2022",
+        "type": "OriginalsCelProof",
+        "cryptosuite": "originals-cel-ed25519-jcs-v1",
         "created": "2026-01-20T10:00:00Z",
-        "verificationMethod": "did:peer:4zQmR...#key-0",
+        "verificationMethod": "did:key:z6MkR...#z6MkR...",
         "proofPurpose": "assertionMethod",
         "proofValue": "z3FXQkcWb..."
       }]
@@ -883,10 +906,10 @@ interface EventVerification {
       },
       "previousEvent": "uH4sI...",
       "proof": [{
-        "type": "DataIntegrityProof",
-        "cryptosuite": "eddsa-jcs-2022",
+        "type": "OriginalsCelProof",
+        "cryptosuite": "originals-cel-ed25519-jcs-v1",
         "created": "2026-01-20T11:00:00Z",
-        "verificationMethod": "did:peer:4zQmR...#key-0",
+        "verificationMethod": "did:key:z6MkR...#z6MkR...",
         "proofPurpose": "assertionMethod",
         "proofValue": "z4YQw..."
       }]
@@ -894,7 +917,7 @@ interface EventVerification {
     {
       "type": "update",
       "data": {
-        "sourceDid": "did:peer:4zQmR...",
+        "sourceDid": "did:cel:uEiD...",
         "targetDid": "did:webvh:example.com:abc123",
         "layer": "webvh",
         "domain": "example.com",
@@ -903,16 +926,16 @@ interface EventVerification {
       "previousEvent": "uK7tP...",
       "proof": [
         {
-          "type": "DataIntegrityProof",
-          "cryptosuite": "eddsa-jcs-2022",
+          "type": "OriginalsCelProof",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "created": "2026-01-21T10:00:00Z",
           "verificationMethod": "did:webvh:example.com:abc123#key-0",
           "proofPurpose": "assertionMethod",
           "proofValue": "z5XRt..."
         },
         {
-          "type": "DataIntegrityProof",
-          "cryptosuite": "eddsa-jcs-2022",
+          "type": "OriginalsCelProof",
+          "cryptosuite": "originals-cel-ed25519-jcs-v1",
           "created": "2026-01-21T10:00:01Z",
           "verificationMethod": "did:web:witness.example.com#key-0",
           "proofPurpose": "assertionMethod",

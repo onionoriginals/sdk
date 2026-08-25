@@ -202,7 +202,7 @@ export class HttpWitness implements WitnessService {
     
     const proof = data as Record<string, unknown>;
     
-    // Check required DataIntegrityProof fields
+    // Check the required CEL proof envelope fields
     const requiredFields = ['type', 'cryptosuite', 'created', 'verificationMethod', 'proofPurpose', 'proofValue'];
     for (const field of requiredFields) {
       if (typeof proof[field] !== 'string') {

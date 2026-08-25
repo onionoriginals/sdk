@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createEventLog } from '../../src/algorithms/createEventLog';
 import { createRealCelSigner } from '../fixtures/celSigner';
 import type { DataIntegrityProof, EventLog, CreateOptions } from '../../src/types';
-import { CEL_CRYPTOSUITE } from '../../src/proofVerification';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '../../src/proofVerification';
 
 /**
  * Real Ed25519 did:key signer. Seal-time self-verification (plan 034) rejects
@@ -101,7 +101,7 @@ describe('createEventLog', () => {
       expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     });
 
-    test('proof has type DataIntegrityProof', async () => {
+    test('proof has the CEL proof type', async () => {
       const data = { name: 'Test Asset' };
       const options: CreateOptions = {
         signer: createMockSigner(verificationMethod),
@@ -111,7 +111,7 @@ describe('createEventLog', () => {
       const log = await createEventLog(data, options);
       const proof = log.events[0].proof[0];
 
-      expect(proof.type).toBe('DataIntegrityProof');
+      expect(proof.type).toBe(CEL_PROOF_TYPE);
     });
 
     test('proof includes verificationMethod', async () => {

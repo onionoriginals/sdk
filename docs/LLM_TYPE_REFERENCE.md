@@ -795,7 +795,7 @@ interface CredentialStatus {
 
 ```typescript
 interface Proof {
-  /** Proof type (e.g., 'DataIntegrityProof') */
+  /** Proof type: 'OriginalsCelProof' for CEL proofs, 'DataIntegrityProof' for W3C VC proofs */
   type: string;
   
   /** ISO 8601 creation timestamp */

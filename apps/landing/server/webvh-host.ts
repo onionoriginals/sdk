@@ -53,6 +53,40 @@ interface Entry {
 const HOST_PREFIX = '/api/host/';
 
 /**
+ * Keys this store refuses, because serving them would shadow a canonical route.
+ *
+ * A stored object is looked up on GET as `${url.host}${url.pathname}`, so the
+ * key `<any-host>/context` intercepts `/context` — the JSON-LD context every
+ * issued credential resolves through. Writes here are unauthenticated with
+ * client-chosen keys, so without this a stranger could define what every
+ * Originals credential MEANS to an external verifier, or break all of them at
+ * once by storing junk.
+ *
+ * The store's usual justification for anonymous writes — did:webvh logs are
+ * self-certifying, so tampering is caught at verification — does not cover a
+ * context document, which certifies nothing and is trusted by construction.
+ *
+ * This is defence in depth. `buildFetch` resolves `/context` BEFORE this store,
+ * which is what actually guarantees the canonical document wins; refusing the
+ * key too means a shadowing object never enters the store at all, so no
+ * reordering of those routes can quietly reopen the hole.
+ */
+const RESERVED_KEY_PATHS = new Set(['context']);
+
+/**
+ * Whether a put key would shadow a reserved route.
+ *
+ * Keys are `${domain}/${relativePath}`; only the path after the host matters,
+ * and only an exact match shadows — `serve()` compares `url.pathname` byte for
+ * byte, so `context/x` and `contextual` reach nothing and stay allowed.
+ */
+export function shadowsReservedPath(key: string): boolean {
+  const slash = key.indexOf('/');
+  if (slash < 0) return false;
+  return RESERVED_KEY_PATHS.has(key.slice(slash + 1));
+}
+
+/**
  * Capacity numbers, revisited together now that a full store evicts instead of
  * refusing. They bound MEMORY; the TTL now only bounds staleness.
  *
@@ -222,6 +256,8 @@ export function createWebvhHostStore(opts?: {
 
     const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
     if (!key) return json({ error: 'missing_key' }, 400);
+    // Checked on the DECODED key, so `%63ontext` cannot slip past it.
+    if (shadowsReservedPath(key)) return json({ error: 'reserved_key' }, 403);
 
     const body = new Uint8Array(await req.arrayBuffer());
     if (body.byteLength > maxObjectBytes) {

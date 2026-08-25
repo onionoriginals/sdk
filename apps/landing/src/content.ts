@@ -13,9 +13,9 @@ export const site = {
    * methods before it named anything a creator wants. Title stays under 60
    * characters and description under 155 so neither is truncated in search.
    */
-  title: 'Originals — Proof you made it, carved into Bitcoin',
+  title: 'Originals — Proof you published it first, on Bitcoin',
   description:
-    'Screenshots are free. Provenance is not. Give your work a signed history of who made it and who owns it — anchored on Bitcoin, verifiable by anyone.',
+    'Screenshots are free. Provenance is not. Timestamp your work on Bitcoin the moment you publish it, so you can show you were first — and who owns it now.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -164,10 +164,10 @@ export const identityPanel = {
 };
 
 export const hero = {
-  eyebrow: 'Anchored on Bitcoin · Yours even if we disappear',
-  headline: 'Proof you made it. Carved into Bitcoin.',
+  eyebrow: 'Anchored on Bitcoin · Timestamped the moment you publish',
+  headline: 'Proof you published it first. Carved into Bitcoin.',
   subhead:
-    'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed, verifiable history of who made it, where it lives, and who owns it — from private draft to Bitcoin-anchored original.',
+    'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed history of when it was published, where it lives, and who owns it now — from private draft to Bitcoin-anchored original.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
   primaryCta: { label: 'Make your first Original', href: '#demo' },
   exampleLink: { label: 'See one that already exists', href: '#example' },
@@ -205,13 +205,13 @@ export const layers = [
 export const why = {
   id: 'why',
   eyebrow: 'Why it matters',
-  headline: 'The internet copies. Originals prove.',
+  headline: 'The internet copies. Originals prove who was first.',
   subhead:
-    'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail.',
+    'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail, timestamped on Bitcoin.',
   cards: [
     {
       title: 'Provenance you can hand to anyone',
-      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can verify the whole chain — without trusting you, us, or any platform.'
+      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can re-check every signature themselves — no account, no permission, nothing to ask us for. One honest caveat: the Bitcoin facts (which satoshi, which block, who holds it) are read from an Ordinals index, not from block headers your browser checked. The signatures need no one’s word. The chain data is as good as that index.'
     },
     {
       title: 'A lifecycle, not a lock-in',
@@ -219,7 +219,7 @@ export const why = {
     },
     {
       title: 'Rails that outlive companies',
-      body: 'Built on W3C DIDs, Verifiable Credentials, and Bitcoin Ordinals. No proprietary registry, no token. If we vanish tomorrow, your provenance still verifies.'
+      body: 'Built on W3C DIDs, Verifiable Credentials, and Bitcoin Ordinals. No proprietary registry, no token. Inscribe it and keep a copy of the log, and it still verifies the day we vanish. Before you inscribe, it lives on this host and leaves with it — so export it.'
     }
   ]
 };
@@ -828,6 +828,15 @@ export const protocol = {
     'Assets migrate unidirectionally — did:cel → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
   migrationNote:
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
+  /**
+   * Which of the three method names are actually standards (protocol design
+   * review, 2026-08). "Built on W3C DIDs" is true of the syntax and of two of
+   * the three methods; did:cel is ours, unregistered, and verifiable today only
+   * by an implementation of our own algorithm. Saying so here is cheaper than
+   * having a W3C reader discover it — it is the first thing they check.
+   */
+  standardsNote:
+    'On standards: did:webvh and did:btco are registered DID methods. did:cel is ours — it follows DID syntax but is not registered, and for now only this SDK can verify one.',
   columns: [
     {
       layer: 'did:cel',

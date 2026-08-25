@@ -27,6 +27,7 @@ import { hexSha256ToDigestMultibase } from '../signerAdapter.js';
 import {
   structuralCheck,
   structuralCheckReason,
+  isCelProofType,
   extractEd25519FromDidKey,
   verifyProofWithKey,
   verifyDidKeyProof,
@@ -268,9 +269,9 @@ async function verifyBitcoinWitnessProof(
 ): Promise<string | null> {
   // Structural validity first (the generic structuralCheck does not apply —
   // its cryptosuite whitelist is for signature proofs): a proof missing its
-  // basic Data Integrity fields must not be accepted just because an
-  // inscription happens to match.
-  if (proof.type !== 'DataIntegrityProof') {
+  // basic envelope fields must not be accepted just because an inscription
+  // happens to match.
+  if (!isCelProofType(proof.type)) {
     return `bitcoin witness proof has invalid type (${String(proof.type)})`;
   }
   if (!proof.proofValue || typeof proof.proofValue !== 'string') {
@@ -514,7 +515,7 @@ async function verifyHeadFreshness(
 
 /**
  * Authenticates a COMPETING anchoring (#402): true iff its inscribed did:btco
- * document carries a DataIntegrityProof (eddsa-jcs-2022) signed by a key in the
+ * document carries a CEL proof signed by a key in the
  * verified log's authorized-key history. Without this gate, `getAnchoringsForDidCel`
  * counts ANY inscription that back-links the did:cel via `alsoKnownAs` — so a
  * non-controller could inscribe `{alsoKnownAs:[didCel]}` on their own earlier sat
@@ -522,12 +523,23 @@ async function verifyHeadFreshness(
  * a proof by an unauthorized key, therefore does NOT count.
  *
  * The signed payload is the DID document with its `proof` removed, verified with
- * the SAME `eddsa-jcs-2022` primitive the CEL uses (`dispatchVerify` over
- * `canonicalizeEvent(docWithoutProof)`). NOTE: this is THIS codebase's signing
- * convention — JCS over the proofless document — NOT W3C Data Integrity, which
- * signs over document + proof-options (the proof sans `proofValue`); don't treat
- * them as interchangeable if a real VCDM proof path is ever added. Authorization
- * compares the resolved
+ * the SAME primitive the CEL uses for event proofs (`dispatchVerify`, which
+ * hashes per the proof's declared suite — for the current one,
+ * `sha256(JCS(proofConfig)) || sha256(JCS(docWithoutProof))`).
+ *
+ * NOTE: that construction MIRRORS the W3C Data Integrity hashing step but is
+ * NOT Data Integrity, and no conforming implementation can verify it: the
+ * cryptosuite is ours and unregistered, and the document is canonicalized with
+ * JCS exactly as given — no JSON-LD expansion, no RDF canonicalization, no
+ * `@context` processing. This is why these proofs are labelled
+ * `OriginalsCelProof`/`originals-cel-ed25519-jcs-v1` and no longer
+ * `DataIntegrityProof`/`eddsa-jcs-2022`: both of those names asserted a
+ * conformance that was never implemented. Don't treat the two as
+ * interchangeable if a real VCDM proof path is ever added.
+ *
+ * Both labels are ACCEPTED here, because this reads an artifact written by
+ * someone else — possibly before the rename, possibly by another
+ * implementation. Authorization compares the resolved
  * PUBLIC KEY against the history set — not the VM URI string — matching the
  * controller-binding elsewhere in this file. Fail-closed throughout: a missing
  * doc, a malformed/structurally-invalid proof, an unresolvable or unauthorized

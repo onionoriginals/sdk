@@ -8,6 +8,7 @@
  * @see https://w3c-ccg.github.io/cel-spec/
  */
 
+import { CEL_PROOF_TYPE } from '../proofVerification.js';
 import type { WitnessProof, CelBitcoinManager } from '../types.js';
 import type { WitnessService } from './WitnessService.js';
 
@@ -165,7 +166,7 @@ export class BitcoinWitness implements WitnessService {
       
       // Build the WitnessProof with Bitcoin-specific extensions
       const proof: BitcoinWitnessProof = {
-        type: 'DataIntegrityProof',
+        type: CEL_PROOF_TYPE,
         cryptosuite: 'bitcoin-ordinals-2024',
         created: now,
         verificationMethod: this.verificationMethod,
