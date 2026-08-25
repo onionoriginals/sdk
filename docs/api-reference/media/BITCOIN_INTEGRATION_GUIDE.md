@@ -65,19 +65,19 @@ AWS_KMS_KEY_ID=your_kms_key_id
 ### Using npm
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 ```
 
 ### Using yarn
 
 ```bash
-yarn add @originals/sdk
+yarn add @originals/sdk@next
 ```
 
 ### Using bun
 
 ```bash
-bun add @originals/sdk
+bun add @originals/sdk@next
 ```
 
 ### TypeScript Configuration

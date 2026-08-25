@@ -244,7 +244,7 @@ await sdk.did.createDIDWebVH({
 
 ## Critical Rules
 
-1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer; also pass it to `asset.verify({ ordinalsProvider })` to verify inscribed (did:btco) assets
+1. **Bitcoin ops need `ordinalsProvider`** - Always configure for inscribe/transfer. `asset.verify()` then uses it automatically for inscribed (did:btco) assets; it returns a `VerificationReport` — check `.verified`, and read `.code` on failure (`ORDINALS_PROVIDER_REQUIRED` means the proof was never checked, not that it failed)
 2. **Keys are Multikey, not JWK** - Use `multikey.encode*()` functions
 3. **Migration is one-way** - did:cel → webvh → btco only (no fallback once on btco)
 4. **Max fee rate: 10,000 sat/vB** - Prevents accidental fund loss

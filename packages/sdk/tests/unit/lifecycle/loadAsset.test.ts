@@ -85,7 +85,9 @@ describe('loadAsset — round-trip', () => {
     expect(lp.txid).toBe(oBtco.transactionId);
 
     // The loaded asset re-verifies on its own.
-    expect(await loaded.verify({ ordinalsProvider: (sdk as any).config?.ordinalsProvider })).toBe(true);
+    // No hand-threaded provider: loadAsset binds the manager's own, so a
+    // loaded asset re-verifies with a bare call.
+    expect((await loaded.verify()).verified).toBe(true);
   });
 
   test('genesis-only asset round-trips (currentLayer did:cel)', async () => {

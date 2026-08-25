@@ -25,20 +25,42 @@ Assets migrate unidirectionally through these layers, with economic gravity dete
 ## Installation
 
 ```bash
-npm install @originals/sdk
+npm install @originals/sdk@next
 ```
+
+> **Why `@next`:** 3.x is still a prerelease, so npm's `latest` tag deliberately
+> stays on the last stable release (2.1.0). Everything documented here — `did:cel`
+> genesis, the CEL event log, custody-required signers, the `./testing` subpath —
+> is 3.x only, so a bare `npm install @originals/sdk` would hand you a different
+> SDK than this README describes. Drop the tag once 3.0.0 ships to `latest`.
 
 ## Quick Start
 
+This snippet runs as-is (`scripts/check-readme-snippets.mjs` executes it against
+the built `dist` in CI, so it cannot silently rot).
+
+<!-- readme:run -->
 ```typescript
 import { OriginalsSDK } from '@originals/sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
+
+// Custody first: createAsset mints an Ed25519 controller key, and the SDK
+// refuses to mint (NO_CUSTODY) if it has nowhere to keep it — an asset whose
+// key was dropped can never author another event. This Map is the smallest
+// thing that satisfies the contract; use a real keyStore, or a `signer` for
+// Turnkey/KMS/HSM custody, for anything you intend to keep.
+const keys = new Map<string, string>();
+const keyStore = {
+  getPrivateKey: async (id: string) => keys.get(id) ?? null,
+  setPrivateKey: async (id: string, privateKey: string) => { keys.set(id, privateKey); }
+};
 
 // For testing/development - use mock provider
 const originals = OriginalsSDK.create({
   network: 'regtest',
   enableLogging: true,
-  ordinalsProvider: new OrdMockProvider()
+  ordinalsProvider: new OrdMockProvider(),
+  keyStore
 });
 
 // Create a digital asset
@@ -56,6 +78,13 @@ const published = await originals.lifecycle.publish(draft, 'did:webvh:my-domain.
 
 // Inscribe on Bitcoin for permanent ownership (mints did:btco:<sat>)
 const inscribed = await originals.lifecycle.inscribe(published);
+
+// Verify the whole signed chain. No argument needed: verify() uses the
+// ordinalsProvider from the SDK config, so the Bitcoin witness proof is
+// actually checked. On failure the report names a reason — `report.code` tells
+// a proof that does not hold apart from a check that could not run.
+const report = await inscribed.verify();
+console.log(report.verified, report.code ?? '');
 
 // Transfer ownership: a pure Bitcoin sat move. Ownership IS live sat control,
 // so this writes NOTHING to the CEL — read the owner back with getCurrentOwner().

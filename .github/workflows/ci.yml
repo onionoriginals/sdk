@@ -115,6 +115,13 @@ jobs:
       - name: Verify browser-facing entry points have no eager Node builtins
         run: node scripts/check-browser-safety.mjs
 
+      # The quick starts are the first code an adopter runs. The root README's
+      # threw NO_CUSTODY on its happy path against this very dist and nothing
+      # noticed, because nothing had ever executed it. Runs here rather than in
+      # the package suites because it needs the BUILD.
+      - name: Execute the documented README snippets against the built dist
+        run: node scripts/check-readme-snippets.mjs
+
   landing:
     name: Landing app typechecks, tests and builds
     runs-on: ubuntu-latest
@@ -135,6 +142,56 @@ jobs:
       # Not landing:ci — that page-drive needs an API server + TURNKEY_* secrets.
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      # --frozen-lockfile here specifically: an audit of a tree that drifted
+      # from the committed lockfile is an audit of something we do not ship.
+      - name: Install dependencies (bun)
+        run: bun install --frozen-lockfile
+
+      # --prod first and separately, because these are the advisories that
+      # reach EVERY consumer of the published packages: `npm audit` fires on
+      # their install, against dependencies they did not choose. A dev-only
+      # advisory is a smaller problem than a shipped one, and conflating them
+      # is how the shipped one sat unnoticed (undici 5.29.0, 10 highs, through
+      # jsonld).
+      - name: Audit production dependencies
+        run: bun audit --prod
+
+      - name: Audit all dependencies (including dev)
+        run: bun audit
+
+  install-docs:
+    name: Documented install commands resolve to this major
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20.10.0"
+
+      # Reads the LIVE registry: every `npm install @originals/*` in the shipped
+      # markdown must resolve to the major this repo documents. The launch-review
+      # bug (docs describing 3.x while `latest` served 2.1.0) is registry state,
+      # so no amount of source review catches it — only asking npm does.
+      # A registry failure fails this job rather than skipping it: a gate that
+      # passes when it could not check is how the bug shipped.
+      - name: Check install commands against the registry
+        run: node scripts/check-install-docs.mjs
 
   changeset:
     name: Changeset present

@@ -221,7 +221,7 @@ describe('Resource-update handoff (e2e)', () => {
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false);
 
     // The log is still verifiable — no unverifiable event was ever appended.
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
     // But the envelope now carries UNPROVABLE in-memory v2/v3 (degraded, never
     // logged); a buyer must fail closed rather than restore unverifiable
     // versions (#401 post-genesis binding). The log soundness is proven above.
@@ -248,7 +248,7 @@ describe('Resource-update handoff (e2e)', () => {
     expect(contents).toContain('v2b');
 
     // The resulting chain verifies (genesis → v2a → v2b, correctly serialized).
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     const { verification } = await buyer.lifecycle.loadAsset(asset.serialize());
     expect(verification?.verified).toBe(true);
@@ -270,6 +270,6 @@ describe('Resource-update handoff (e2e)', () => {
     expect(updates.length).toBe(2);
     expect(asset.getResourceVersion('a', 2)?.content).toBe('a2');
     expect(asset.getResourceVersion('b', 2)?.content).toBe('b2');
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 });

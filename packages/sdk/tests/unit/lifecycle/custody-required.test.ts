@@ -59,7 +59,7 @@ describe('createAsset requires custody [plan 041]', () => {
     const asset = await sdk.lifecycle.createAsset(RES, { controller: 'ephemeral' });
     expect(asset.currentLayer).toBe('did:cel');
     // It still verifies — it simply can never gain another event.
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   test('createDraft forwards custody rather than bypassing the requirement', async () => {

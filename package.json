@@ -14,6 +14,8 @@
     "landing:ci": "bun apps/landing/scripts/ci.mjs",
     "landing:check": "turbo run build --filter='./packages/*' && cd apps/landing && bun run typecheck && bun run typecheck:server && bun test && bun run build",
     "verify:esm": "node scripts/verify-esm.mjs",
+    "check:install-docs": "node scripts/check-install-docs.mjs",
+    "check:readme": "turbo run build --filter='./packages/*' && node scripts/check-readme-snippets.mjs",
     "verify:browser": "node scripts/check-browser-safety.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",
@@ -42,7 +44,12 @@
     "turbo": "^2.3.3"
   },
   "overrides": {
-    "human-id": "4.1.1"
+    "human-id": "4.1.1",
+    "undici": "^6.28.0",
+    "brace-expansion": "^5.0.8",
+    "nanoid": "^3.3.16",
+    "postcss": "^8.5.23",
+    "js-yaml": "^4.3.1"
   },
   "engines": {
     "node": ">=20.10.0"

@@ -21,6 +21,7 @@ export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
 export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
 export type { AssetEnvelope } from './lifecycle/assetEnvelope.js';
 export { checkGenesisResourceBinding } from './lifecycle/genesisBinding.js';
+export type { VerificationReport, VerificationFailureCode } from './lifecycle/VerificationReport.js';
 
 // Type exports
 export * from './types/index.js';

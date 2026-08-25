@@ -20,6 +20,11 @@ import { createDidManagerKeyResolver } from '@originals/cel';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
+import {
+  VERIFIED,
+  verificationFailure,
+  type VerificationReport
+} from './VerificationReport.js';
 import type { AppendFailurePolicy } from '../types/common.js';
 import {
   ASSET_ENVELOPE_FORMAT,
@@ -79,6 +84,10 @@ export class OriginalsAsset {
   // Per-layer DID documents captured at operation time (publish/inscribe/rotate).
   // These are discarded by the live flow otherwise; serialize() needs them.
   #didDocuments: Map<'did:webvh' | 'did:btco', DIDDocument> = new Map();
+  // Verification dependencies the SDK is already configured with, bound by
+  // LifecycleManager at mint/load. Undefined for assets constructed directly,
+  // which is why verify() still accepts per-call overrides.
+  #verificationDefaults?: { ordinalsProvider?: OrdinalsLookup };
   // Injected by LifecycleManager (createAsset / loadAsset). Appends a signed CEL
   // event via the manager's degrade-aware path and returns the new head digest,
   // or null when the append was skipped (no keyStore / no signing key). Undefined
@@ -220,6 +229,15 @@ export class OriginalsAsset {
   /** The CEL event log backing this asset, if minted via createAsset. */
   get celLog(): EventLog | undefined {
     return this.#celLog;
+  }
+
+  /**
+   * @internal — verification dependencies the SDK already holds, bound at mint
+   * and at load so `verify()` does not make the caller re-thread configuration
+   * the SDK was constructed with.
+   */
+  _bindVerificationDefaults(defaults: { ordinalsProvider?: OrdinalsLookup }): void {
+    this.#verificationDefaults = defaults;
   }
 
   /**
@@ -433,27 +451,43 @@ export class OriginalsAsset {
     return this.provenance.migrations.find(m => m.inscriptionId === inscriptionId) || null;
   }
 
+  /**
+   * Verify this asset: the whole signed CEL chain, the genesis resource
+   * binding, the DID document, resource integrity and credentials.
+   *
+   * Returns a {@link VerificationReport}, never a bare boolean — check
+   * `.verified`, and read `.code` when it is false. `false` used to mean both
+   * "the proof does not hold" and "I could not check it", which for a proof
+   * product is the one ambiguity that must not exist.
+   *
+   * @param deps.ordinalsProvider - Overrides the provider bound from the SDK
+   *   config. Assets minted or loaded through `sdk.lifecycle` already carry the
+   *   configured one, so the documented create → publish → inscribe → verify
+   *   flow needs no argument here. Absent both ways, a btco-anchored log fails
+   *   closed with `ORDINALS_PROVIDER_REQUIRED`.
+   */
   async verify(deps?: {
     didManager?: DIDManager;
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
     /**
      * Required to verify `bitcoin-ordinals-2024` witness proofs in the CEL log
-     * (btco-anchored assets). Without it, a log carrying a bitcoin witness
-     * proof fails closed — see VerifyOptions.ordinalsProvider.
+     * (btco-anchored assets). Defaults to the SDK-configured provider — see
+     * VerifyOptions.ordinalsProvider for the fail-closed contract.
      */
     ordinalsProvider?: OrdinalsLookup;
-  }): Promise<boolean> {
-    const result = await this.runVerificationChecks(deps);
+  }): Promise<VerificationReport> {
+    const report = await this.runVerificationChecks(deps);
     // 'verification:completed' is part of the public EventTypeMap and is
     // subscribed by EventLogger; it was declared but never emitted (issue #352).
     await this.eventEmitter.emit({
       type: 'verification:completed',
       timestamp: new Date().toISOString(),
       asset: { id: this.id },
-      result
+      result: report.verified,
+      ...(report.code ? { code: report.code } : {})
     });
-    return result;
+    return report;
   }
 
   private async runVerificationChecks(deps?: {
@@ -461,7 +495,11 @@ export class OriginalsAsset {
     credentialManager?: CredentialManager;
     fetch?: (url: string) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
     ordinalsProvider?: OrdinalsLookup;
-  }): Promise<boolean> {
+  }): Promise<VerificationReport> {
+    // A per-call provider wins; otherwise use the one the SDK is already
+    // configured with. Threading it by hand was the whole bug: the config held
+    // a provider, verify() ignored it, and every inscribed asset reported false.
+    const ordinalsProvider = deps?.ordinalsProvider ?? this.#verificationDefaults?.ordinalsProvider;
     try {
       // 0) GATING: whole-chain CEL verification. `expectedDid: this.id` is the
       // binding check for _replaceCelLog — a swapped-in foreign log (even one
@@ -471,14 +509,32 @@ export class OriginalsAsset {
         const celResult = await verifyEventLog(this.#celLog, {
           expectedDid: this.id,
           resolveKey: deps?.didManager ? createDidManagerKeyResolver(deps.didManager) : undefined,
-          ordinalsProvider: deps?.ordinalsProvider,
+          ordinalsProvider,
           // With a provider we can (and must) reject a truncated pre-rotation
           // log whose on-chain head betrays the omission (#366). No provider ⇒
           // the flag is a no-op (btco witnesses fail closed without one anyway).
-          checkHeadFreshness: deps?.ordinalsProvider !== undefined
+          checkHeadFreshness: ordinalsProvider !== undefined
         });
         if (!celResult.verified) {
-          return false;
+          // Separate "I could not look" from "the proof does not hold". The
+          // verifier reports the missing provider by name; matching it is
+          // narrow, but the alternative is reporting a configuration gap as a
+          // failed proof, which is the ambiguity this report exists to remove.
+          if (!ordinalsProvider && celResult.errors.some((e) => /ordinalsProvider/i.test(e))) {
+            return verificationFailure(
+              'ORDINALS_PROVIDER_REQUIRED',
+              'This asset is anchored on Bitcoin and its witness proof was NOT checked: no ordinals provider ' +
+                'was available. This is not a statement about the proof — configure `ordinalsProvider` on the ' +
+                'SDK (OrdMockProvider for tests, OrdinalsClient/QuickNodeProvider for real chains) or pass one ' +
+                'to verify(), then verify again.',
+              { errors: celResult.errors }
+            );
+          }
+          return verificationFailure(
+            'CEL_LOG_INVALID',
+            'The signed event log did not verify.',
+            { errors: celResult.errors }
+          );
         }
 
         // Bind the in-memory resources to the verified genesis: every resource
@@ -487,26 +543,40 @@ export class OriginalsAsset {
         // resources passes (the log verifies, the resources don't back it).
         // Shared with loadAsset via the extracted pure helper.
         if (!checkGenesisResourceBinding(this.#celLog, this.resources)) {
-          return false;
+          return verificationFailure(
+            'GENESIS_RESOURCE_BINDING',
+            'The event log verified, but this asset\'s resources do not match the digests recorded at genesis.'
+          );
         }
       }
 
       // 1) DID Document validation (structure + supported method via validateDID)
       if (!validateDIDDocument(this.did)) {
-        return false;
+        return verificationFailure(
+          'DID_DOCUMENT_INVALID',
+          `The DID document for ${this.id} is structurally invalid or uses an unsupported method.`
+        );
       }
 
       // 2) Resources integrity
       for (const res of this.resources) {
         if (!res || typeof res.id !== 'string' || typeof res.type !== 'string' || typeof res.contentType !== 'string') {
-          return false;
+          return verificationFailure(
+            'RESOURCE_INVALID',
+            'A resource is missing a string id, type or contentType.',
+            { resourceId: typeof res?.id === 'string' ? res.id : undefined }
+          );
         }
         // Anchored: the hash must be entirely hex. An unanchored test would
         // accept any string merely containing a hex character (e.g.
         // "not-a-real-hash"); this structural gate runs before the content/URL
         // integrity checks below.
         if (typeof res.hash !== 'string' || !/^[0-9a-f]+$/i.test(res.hash)) {
-          return false;
+          return verificationFailure(
+            'RESOURCE_INVALID',
+            `Resource "${res.id}" has no valid hex hash.`,
+            { resourceId: res.id }
+          );
         }
 
         // If inline content is present, verify by hashing it
@@ -515,7 +585,11 @@ export class OriginalsAsset {
           const computed = hashResource(data);
           const expected = (res.hash || '').toLowerCase();
           if (computed.toLowerCase() !== expected) {
-            return false;
+            return verificationFailure(
+              'RESOURCE_HASH_MISMATCH',
+              `Resource "${res.id}" has inline content that does not hash to its declared hash.`,
+              { resourceId: res.id, declared: expected, computed: computed.toLowerCase() }
+            );
           }
           continue;
         }
@@ -526,7 +600,12 @@ export class OriginalsAsset {
         if (typeof res.url === 'string') {
           // No fetcher → hosted content is unverifiable → fail closed.
           if (!deps?.fetch) {
-            return false;
+            return verificationFailure(
+              'RESOURCE_UNVERIFIABLE',
+              `Resource "${res.id}" is hosted at a URL and its bytes were NOT checked: verify() was given no ` +
+                `fetch implementation. Pass one to confirm hosted content, or attach the content inline.`,
+              { resourceId: res.id, url: res.url }
+            );
           }
           try {
             const response = await deps.fetch(res.url);
@@ -534,11 +613,19 @@ export class OriginalsAsset {
             const computed = hashResource(buf);
             const expected = (res.hash || '').toLowerCase();
             if (computed.toLowerCase() !== expected) {
-              return false;
+              return verificationFailure(
+                'RESOURCE_HASH_MISMATCH',
+                `Resource "${res.id}" was fetched but does not hash to its declared hash.`,
+                { resourceId: res.id, url: res.url, declared: expected, computed: computed.toLowerCase() }
+              );
             }
-          } catch {
+          } catch (err) {
             // Fetch error on a hosted resource → unverifiable → fail closed.
-            return false;
+            return verificationFailure(
+              'RESOURCE_UNVERIFIABLE',
+              `Resource "${res.id}" could not be fetched, so its integrity was NOT checked.`,
+              { resourceId: res.id, url: res.url, error: (err as Error)?.message }
+            );
           }
         }
       }
@@ -546,7 +633,11 @@ export class OriginalsAsset {
       // 3) Credentials validation
       for (const cred of this.credentials) {
         if (!validateCredential(cred)) {
-          return false;
+          return verificationFailure(
+            'CREDENTIAL_INVALID',
+            'A credential attached to this asset is structurally invalid.',
+            { credentialId: (cred as { id?: unknown }).id }
+          );
         }
       }
 
@@ -558,13 +649,23 @@ export class OriginalsAsset {
       if (deps?.credentialManager && typeof deps.credentialManager.verifyCredential === 'function' && deps?.didManager) {
         for (const cred of this.credentials) {
           const ok = await deps.credentialManager.verifyCredential(cred);
-          if (!ok) return false;
+          if (!ok) {
+            return verificationFailure(
+              'CREDENTIAL_UNVERIFIED',
+              'A credential attached to this asset did not verify cryptographically.',
+              { credentialId: (cred as { id?: unknown }).id }
+            );
+          }
         }
       }
 
-      return true;
-    } catch {
-      return false;
+      return VERIFIED;
+    } catch (err) {
+      return verificationFailure(
+        'VERIFICATION_ERROR',
+        `Verification threw: ${(err as Error)?.message ?? String(err)}`,
+        { error: (err as Error)?.message ?? String(err) }
+      );
     }
   }
 

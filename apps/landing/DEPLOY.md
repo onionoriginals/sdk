@@ -18,14 +18,47 @@ inscription path is live it strands real money.
 | Start command | `bun run apps/landing/serve.ts` |
 | Persistent volume | required, mounted, with `ORIGINALS_DATA_DIR` pointing at it |
 
-`/railway.json` at the repo root carries the build and start commands. It does
-**not** declare the volume or any environment variable — those are dashboard
-state, so the checklist below is the only place they are written down.
+`/railway.json` at the repo root carries the build and start commands, and pins
+**`numReplicas: 1`**. It does **not** declare the volume or any environment
+variable — those are dashboard state, so the checklist below is the only place
+they are written down.
+
+### Why one replica, and why the process now enforces it
+
+`numReplicas: 1` is load-bearing, not a cost setting. Everything on the money
+path coordinates through in-process state: the double-spend guard is a promise
+chain keyed by JWT sub, every rate limiter is an in-memory Map, the deposit
+sweep walks a process-local cursor, and both file stores serialize their
+read-modify-write on the single-threaded event loop. Each is correct for
+exactly one writer.
+
+Two writers is not a degraded version of that. Two replicas polling the same
+user's inscription both see the same funding outpoint as unspent, both build a
+commit against it, and the loser's reveal is stranded on a double-spent commit
+— a creator's BTC committed to an inscription that can never land.
+
+JSON has no comments, so the reason lives here. And because a dashboard click or
+an autoscale rule can override the pin regardless, the process no longer trusts
+it: on boot it claims a heartbeat lock file in the data directory
+(`.instance.lock`) and **refuses to start if another live process already holds
+it**, logging the holder's pid and host. A crashed holder is detected by PID on
+the same host, or after 60 quiet seconds across a restart, and the next start
+takes over. If you ever need to clear one by hand, delete
+`$ORIGINALS_DATA_DIR/.instance.lock` — but only once you are certain no other
+instance is running.
 
 ## Environment contract
 
 `apps/landing/server/config.ts` validates this at boot and reports every
-violation by name. It is **warn-only** unless `CONFIG_STRICT=1`. See
+violation by name. It is **warn-only** unless `CONFIG_STRICT=1`, with one
+exception: **the durable data directory is always fatal on a deploy.**
+
+`ORIGINALS_DATA_DIR` unset, unwritable, or writable-but-not-a-mounted-volume
+**refuses the boot regardless of `CONFIG_STRICT`.** That path holds the only
+copies of signed reveal transactions, so booting past it means accepting a
+stranger's Bitcoin while writing the one artifact that could recover it to
+storage a redeploy deletes. A service that is down is recoverable in minutes;
+that data is not recoverable at all. Every other rule is unchanged — see
 "Turning on strict mode" before you set that flag.
 
 ### Server, read at runtime
@@ -59,18 +92,26 @@ real-money action; a mismatch is reported in both directions.
 Run one deploy with the code as-is and read the boot log. Do not proceed while
 any of these is outstanding.
 
-1. **Volume attached and mounted.** The log must not say the data directory is
-   writable but not a mounted volume. Writability alone passes on exactly the
-   ephemeral path this check exists to catch.
+1. **Volume attached and mounted.** Enforced at boot: the server now refuses
+   to start if the data directory is unset, unwritable, or writable but not a
+   mounted volume — regardless of `CONFIG_STRICT`. Writability alone passes on
+   exactly the ephemeral path this check exists to catch, which is why the
+   mount check and not the write probe is the gate. If the deploy is crash-
+   looping with `[fatal] ORIGINALS_DATA_DIR`, the volume is the problem; attach
+   it and point `ORIGINALS_DATA_DIR` at its mount path.
 2. **Scheduled backup enabled.** Railway backups are opt-in and there is no
    published durability SLA. Record the schedule and who enabled it in the log
    at the bottom of this file — the setting is dashboard-only and cannot
    appear in a commit, so that line is the only evidence it happened.
-3. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
+3. **One replica.** `railway.json` pins `numReplicas: 1` and the boot log must
+   read `sole writer to that dir`. If a deploy is refusing to start with
+   "another process is already writing", the service is scaled above one —
+   scale it back rather than deleting the lock.
+4. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
    per-client rate limits are inert and everyone shares one bucket. Confirm it
    from the `[landing] proxy sample:` line the server logs once per process:
    the resolved identity must be your address, not the proxy's.
-4. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
+5. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
    add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
    and inscription is impossible. `bun scripts/check:ordinals` — i.e.
    `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
@@ -82,7 +123,7 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
-5. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
    check earned its place twice over: the login path was broken the entire time
    it went unrun, in two independent ways, and neither was reachable from any
    test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
@@ -92,14 +133,18 @@ any of these is outstanding.
    credential being installed cannot already exist. It now runs STAMP_LOGIN
    with the attested stamp, which is what `@turnkey/core` does. The only thing
    that proves it works is running it against a real org.
-6. **One complete mainnet inscription by a human**, from a cold browser,
+7. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 
 ## Turning on strict mode
 
-`CONFIG_STRICT=1` turns every contract violation into a refusal to start.
-`/railway.json` caps restarts at 5, so flipping it against an environment that
-does not satisfy the contract takes the site down rather than degrading it.
+`CONFIG_STRICT=1` turns every remaining contract violation into a refusal to
+start. `/railway.json` caps restarts at 5, so flipping it against an environment
+that does not satisfy the contract takes the site down rather than degrading it.
+
+It does **not** govern the data directory: those violations are fatal either
+way (see "Environment contract"), so unsetting `CONFIG_STRICT` is not a way to
+boot past a missing volume, and was never meant to be.
 
 Deploy warn-only first, read the boot log, and fix everything it names —
 `NODE_ENV` and `TRUSTED_PROXY_HOPS` in particular are ones Railway does not

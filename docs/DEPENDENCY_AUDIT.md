@@ -1,125 +1,100 @@
-# Dependency Audit — @originals/sdk v1.9.0
+# Dependency audit
 
-**Date:** 2026-03-06
-**Runtime:** Bun 1.3.5
-**Lockfile:** bun.lock (v1)
+**Last reviewed:** 2026-08-24, against `@originals/sdk` 3.0.0-next.1,
+`@originals/cel` 0.2.0-next.1, `@originals/auth` 3.0.0-next.0.
 
----
+## The live answer is CI, not this file
 
-## Production Dependencies
+`bun audit --prod` and `bun audit` run as a **required CI job** on every push and
+pull request (`.github/workflows/ci.yml`, job `audit`). A new advisory against
+anything in the tree turns the build red on the next commit.
 
-| Package | Version | Purpose | Vulnerability |
-|---------|---------|---------|---------------|
-| `@noble/curves` | ^1.6.0 | Elliptic curve crypto | None |
-| `@noble/ed25519` | ^2.0.0 | Ed25519 signatures | None |
-| `@noble/hashes` | ^2.0.1 | SHA-256, SHA-512 | None |
-| `@noble/secp256k1` | ^2.0.0 | Bitcoin/secp256k1 | None |
-| `@scure/base` | ^1.1.6 | Base encoding | None |
-| `@scure/bip32` | ^2.0.0 | HD key derivation | None |
-| `@scure/btc-signer` | ^1.8.0 | Bitcoin tx signing | None |
-| `@stablelib/ed25519` | ^2.0.2 | Ed25519 (legacy) | None |
-| `b58` | ^4.0.3 | Base58 encoding | None |
-| `bitcoinjs-lib` | ^6.1.0 | Bitcoin address validation | None |
-| `cbor-js` | ^0.1.0 | CBOR encoding | None |
-| `didwebvh-ts` | ^2.5.5 | did:webvh implementation | **Transitive: minimatch, brace-expansion** |
-| `jsonld` | ^8.3.3 | JSON-LD processing | **Transitive: undici** |
-| `micro-ordinals` | ^0.2.2 | Ordinals inscription | None |
-| `multiformats` | ^12.0.0 | Multicodec/multibase | None |
-| `uuid` | ^13.0.0 | UUID generation | None |
+That job — not this page — is the source of truth. This page exists to record the
+things a tool cannot tell you: which advisories we have deliberately overridden,
+and why. Do not read a package table here as current; the previous version of
+this file listed `@scure/bip32`, `cbor-js`, `multiformats`, noble v1.x and
+`@semantic-release/*` long after all of them had left the tree, which made it
+actively misleading.
 
-### Production Vulnerability Summary
+**Current state: `bun audit` reports no vulnerabilities.**
 
-Only **2 production deps** have transitive vulnerabilities, both in deep dependencies:
+## Why `--prod` runs separately
 
-1. **`didwebvh-ts` → minimatch <3.1.3, @isaacs/brace-expansion <=5.0.0** (High: ReDoS)
-   - Impact: Low — these are used for glob matching in build/tooling context, not user-facing input processing
-   - Mitigation: Wait for upstream update or pin override
+Production advisories reach every consumer of the published packages: `npm audit`
+fires on *their* install, against dependencies they did not choose and cannot
+easily replace. A dev-only advisory is our problem; a production one is
+everybody's. The CI job runs `bun audit --prod` as its own step so the two can
+never be conflated in a summary count — which is exactly how a shipped one went
+unnoticed (see undici below).
 
-2. **`jsonld` → undici <6.23.0** (Moderate: unbounded decompression)
-   - Impact: Low — jsonld uses undici for fetching JSON-LD contexts, which are fetched from trusted URLs
-   - Mitigation: Wait for upstream update
+## Standing overrides
 
-### Crypto Library Assessment
+These live in the root `package.json` under `overrides`. Each forces a
+transitive dependency to a patched version its own parent has not yet moved to.
+Every one of them is a **bug in someone else's dependency range**, so each should
+be deleted as soon as the parent catches up.
 
-The `@noble/*` and `@scure/*` families are audited, well-maintained cryptographic libraries by Paul Miller. All are at current stable versions with no known vulnerabilities. These are the correct choices for a Bitcoin/DID SDK.
+| Override | Forced to | Why | Remove when |
+|---|---|---|---|
+| `undici` | `^6.28.0` | **Shipped to every SDK consumer.** `jsonld@8` → `@digitalbazaar/http-client@3.4.1` → `undici@^5.21.2`, which resolved to 5.29.0: ten high advisories (unbounded WebSocket memory, request smuggling, CRLF injection, response-queue poisoning). The whole 5.x line and 6.x up to 6.27.0 are affected, so no in-range version is clean. | `jsonld@9` is adopted — it depends on `http-client@4`, whose own range is already `^6.28.0`. See the note below on why that upgrade is not this change. |
+| `js-yaml` | `^4.3.1` | Quadratic CPU consumption in `!!omap` resolution (GHSA-5p4m-2wfm-xmqj) affects 3.x and 4.x below 4.3.1. Reached through `didwebvh-ts` (production) and through `changesets`/`commitlint` (dev). | `didwebvh-ts`, `read-yaml-file` and `cosmiconfig` all require ≥4.3.1. |
+| `brace-expansion` | `^5.0.8` | Two DoS advisories below 5.0.8 (unbounded expansion length; unbounded intermediate arrays bypassing the earlier mitigation). Dev-only — reaches us through `eslint` and `typescript-eslint`. | eslint's tree moves past 5.0.7. |
+| `nanoid` | `^3.3.16` | Non-secure generators can loop indefinitely on negative or zero size. Dev-only, via `vite`. | vite's tree moves past 3.3.15. |
+| `postcss` | `^8.5.23` | Path traversal via `sourceMappingURL` auto-loading discloses arbitrary `.map` files. Dev-only, via `vite`. | vite's tree moves past 8.5.22. |
+| `human-id` | `4.1.1` | Pre-existing; pins changesets' branch-name generator. | — |
 
----
+Forcing `js-yaml` to 4.x collapses the two copies in the tree onto one. That is
+a real behaviour change for `read-yaml-file` and `cosmiconfig`, which sat on
+3.15.0 — both were checked by running `bunx changeset status` and `commitlint`
+against the overridden tree, and both work (v4's `load` is the API they use;
+only the removed `safeLoad`/`safeDump` would have broken them).
 
-## Dev Dependencies
+### Why not simply upgrade `jsonld` to 9?
 
-| Package | Version | Status |
-|---------|---------|--------|
-| `@babel/core` | ^7.28.4 | Current |
-| `@babel/preset-env` | ^7.28.3 | Current |
-| `@types/bun` | ^1.3.0 | Current |
-| `@types/node` | ^20.19.17 | Current |
-| `@typescript-eslint/eslint-plugin` | ^6.0.0 | **Outdated** — v8 available |
-| `@typescript-eslint/parser` | ^6.0.0 | **Outdated** — v8 available |
-| `bun-types` | ^1.3.1 | Current |
-| `eslint` | ^8.0.0 | **Outdated** — v9 available |
-| `prettier` | ^3.0.0 | Current |
-| `tsc-alias` | ^1.8.16 | Current |
-| `typedoc` | ^0.28.17 | Current |
-| `typescript` | ^5.0.0 | Current |
+It is the obvious fix and it does not work yet. `jsonld@9.0.0` pulls
+`rdf-canonize@5` and a stricter safe mode; against it, eight tests fail — the
+whole BBS+ `bbs-2023` selective-disclosure round-trip, plus safe-mode
+canonicalization in `CredentialManager`. That is the canonicalization step
+underneath every signature this SDK produces, so it is not a dependency bump to
+land inside a packaging fix. The override closes the advisory today; the
+upgrade needs its own change with the BBS+ suite green.
 
-### Dev Vulnerability Summary
+## Production dependency surface
 
-Most dev vulnerabilities come from `eslint` v8 and its transitive dependency tree (`minimatch`, `ajv`). The `eslint` v8 → v9 migration would resolve these. The `@semantic-release/*` packages at the root monorepo have minor patch updates available.
+Enumerated so the shape is legible, not to be maintained as a version table —
+read `package.json` for versions and `bun audit` for advisories.
 
----
+- **`@originals/sdk`** — `@noble/*` and `@scure/*` (curves, ed25519, hashes,
+  secp256k1, base, btc-signer), `@digitalbazaar/bbs-signatures`, `@originals/cel`,
+  `b58`, `bitcoinjs-lib`, `didwebvh-ts`, `fflate`, `jsonld`, `micro-ordinals`,
+  `uuid`.
+- **`@originals/cel`** — `@noble/curves`, `@noble/ed25519`, `@noble/hashes`,
+  `@scure/base`, `cborg`. Deliberately minimal: no Bitcoin stack, no `jsonld`,
+  no Node builtins (enforced by `scripts/check-browser-safety.mjs`).
+- **`@originals/auth`** — `@noble/*`, `@originals/sdk`, `@turnkey/*`,
+  `jsonwebtoken`.
 
-## Vulnerability Report (14 total)
+The `@noble/*` and `@scure/*` families are the audited, minimal-dependency
+crypto libraries this SDK is built on. They pull nothing transitively, which is
+why none of the advisories above ever touch the signing path.
 
-### High Severity (12)
+`jsonld` is the one heavyweight, and it is used only for JSON-LD
+canonicalization and BBS+ selective disclosure. It is lazy-imported
+(`src/crypto/signingInput.ts`, `src/vc/utils/jsonld.ts`) so it never lands in a
+consumer's bundle unless they sign or verify a credential — but it is a hard
+`dependencies` entry, so its advisories still fire on every adopter's `npm
+install`. That is the whole reason the `undici` override exists.
 
-| CVE/Advisory | Package | Affected | Type | Production? |
-|-------------|---------|----------|------|-------------|
-| GHSA-3ppc-4f35-3m26 | minimatch <3.1.3 | eslint, typedoc, didwebvh-ts | ReDoS | Transitive via didwebvh-ts |
-| GHSA-7r86-cg39-jmmj | minimatch <3.1.3 | Same | ReDoS (GLOBSTAR) | Transitive via didwebvh-ts |
-| GHSA-23c5-xmqv-rm74 | minimatch <3.1.3 | Same | ReDoS (extglobs) | Transitive via didwebvh-ts |
-| GHSA-83g3-92jg-28cx | tar <7.5.8 | @semantic-release/npm | File traversal | No (dev only) |
-| GHSA-qffp-2rhf-9h96 | tar <7.5.8 | @semantic-release/npm | Path traversal | No (dev only) |
-| GHSA-7h2j-956f-4vf2 | @isaacs/brace-expansion <=5.0.0 | eslint, typedoc, didwebvh-ts | Resource consumption | Transitive via didwebvh-ts |
+## Version pinning strategy
 
-### Moderate Severity (2)
+Caret ranges in every `package.json`, exact versions in `bun.lock`. Consumers
+resolve against their own lockfile; the `overrides` block is the only place we
+override that, and only for the advisories above.
 
-| CVE/Advisory | Package | Affected | Type | Production? |
-|-------------|---------|----------|------|-------------|
-| GHSA-2g4f-4pwh-qvx6 | ajv <6.14.0 | eslint, @commitlint | ReDoS | No (dev only) |
-| GHSA-g9mf-h72j-4rw9 | undici <6.23.0 | @semantic-release/github, jsonld | Decompression DoS | Transitive via jsonld |
-
----
+CI installs with `--frozen-lockfile` in the audit job: auditing a tree that has
+drifted from the committed lockfile is auditing something we do not ship.
 
 ## Automation
 
-### Dependabot (already configured)
-
-`.github/dependabot.yml` is in place with:
-- Weekly checks on Mondays
-- Grouped updates for `@noble/*` / `@scure/*` (crypto) and dev tools
-- GitHub Actions ecosystem also tracked
-- 10 PR limit
-
-### Recommendations
-
-1. **No immediate action required** — all high-severity vulns are in transitive deps of dev tools or used in non-user-facing contexts
-2. **Pin versions in lockfile** — `bun.lock` already pins all transitive deps (confirmed)
-3. **Update dev tools when ready:**
-   - `eslint` v8 → v9 (breaking: flat config migration)
-   - `@typescript-eslint/*` v6 → v8 (breaking: requires eslint v9)
-   - `@semantic-release/*` patch updates (non-breaking)
-4. **Monitor upstream:**
-   - `didwebvh-ts` for minimatch fix
-   - `jsonld` for undici update
-5. **Consider overrides** if upstream is slow — Bun supports `"overrides"` in package.json to force transitive dep versions
-
----
-
-## Version Pinning Strategy
-
-Current approach: **caret ranges** (`^`) for all deps. This is appropriate for an SDK because:
-- Lockfile (`bun.lock`) pins exact versions for reproducible builds
-- Caret ranges allow Dependabot to propose compatible updates
-- Production consumers get their own lockfile resolution
-
-No changes recommended to version strategy.
+`.github/dependabot.yml` runs weekly with grouped updates for the crypto
+families and dev tooling. Dependabot proposes; the `audit` job is what blocks.

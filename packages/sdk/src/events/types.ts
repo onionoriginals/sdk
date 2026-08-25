@@ -9,6 +9,7 @@
 
 import { LayerType } from '../types/index.js';
 import type { MigrationError } from '../migration/types.js';
+import type { VerificationFailureCode } from '../lifecycle/VerificationReport.js';
 
 /**
  * Base event interface that all events extend
@@ -149,6 +150,13 @@ export interface VerificationCompletedEvent extends BaseEvent {
     id: string;
   };
   result: boolean;
+  /**
+   * Why verification did not succeed — the `code` from the
+   * {@link VerificationReport}. Absent when `result` is true. A subscriber
+   * logging these can tell "the proof does not hold" from "no ordinals provider
+   * was configured, so it was never checked".
+   */
+  code?: VerificationFailureCode;
   checks?: {
     didDocument: boolean;
     resources: boolean;

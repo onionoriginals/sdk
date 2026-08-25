@@ -100,9 +100,9 @@ describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #3
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });
 
-    const ok = await asset.verify();
+    const report = await asset.verify();
     expect(events.length).toBe(1);
-    expect(events[0].result).toBe(ok);
+    expect(events[0].result).toBe(report.verified);
     expect(events[0].asset.id).toBe(asset.id);
   });
 
@@ -113,10 +113,14 @@ describe("'verification:completed' is emitted by OriginalsAsset.verify (issue #3
     const events: VerificationCompletedEvent[] = [];
     asset.on('verification:completed', (e) => { events.push(e); });
 
-    const ok = await asset.verify();
-    expect(ok).toBe(false);
+    const report = await asset.verify();
+    expect(report.verified).toBe(false);
     expect(events.length).toBe(1);
     expect(events[0].result).toBe(false);
+    // The event carries the reason too, so a subscriber logging these can tell
+    // a failed proof from a check that never ran.
+    expect(events[0].code).toBe(report.code);
+    expect(report.code).toBe('GENESIS_RESOURCE_BINDING');
   });
 });
 

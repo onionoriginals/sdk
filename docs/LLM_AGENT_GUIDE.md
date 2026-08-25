@@ -820,11 +820,22 @@ await asset.verify(deps?: {
   didManager?: DIDManager;
   credentialManager?: CredentialManager;
   fetch?: (url: string) => Promise<Response>;
-  ordinalsProvider?: OrdinalsProvider;  // Required to verify inscribed (did:btco) assets
-}): Promise<boolean>
+  // Defaults to the SDK-configured provider for assets minted or loaded
+  // through sdk.lifecycle — pass one only to override it.
+  ordinalsProvider?: OrdinalsProvider;
+}): Promise<VerificationReport>
+
+interface VerificationReport {
+  verified: boolean;
+  code?: VerificationFailureCode;   // absent when verified
+  message?: string;                 // absent when verified
+  details?: Record<string, unknown>;
+}
 ```
 
-> Inscribed assets carry a Bitcoin witness proof in their CEL log; verifying one **requires** passing `{ ordinalsProvider }`, or verification fails closed.
+> **Check `.verified`, never the report's truthiness** — the report object is always truthy.
+>
+> Inscribed assets carry a Bitcoin witness proof in their CEL log, which fails closed without an ordinals provider. `verify()` uses the one from the SDK config, so `create → publish → inscribe → verify` needs no argument. When no provider is available from either source the report is `{ verified: false, code: 'ORDINALS_PROVIDER_REQUIRED' }` — that is "the proof was not checked", **not** "the proof does not hold". Branch on `code`, not on `verified` alone.
 
 ### ProvenanceChain Structure
 

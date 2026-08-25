@@ -135,7 +135,7 @@ describe('addResourceVersion on a published (did:webvh) asset', () => {
     const storage = new MemoryStorageAdapter();
     const { asset } = await publishedAsset(storage);
     await asset.addResourceVersion('doc.txt', V2, 'text/plain');
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   // Abort-before-mutate: hosting runs BEFORE the append, so a hosting failure

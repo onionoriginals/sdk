@@ -59,7 +59,7 @@ describe('editing an Original by its title', () => {
 
     // Genesis plus two edits, each edit touching artwork + metadata.
     expect(third.celLog.filter((e) => e.type === 'update')).toHaveLength(4);
-    expect(await engine.asset!.verify()).toBe(true);
+    expect((await engine.asset!.verify()).verified).toBe(true);
   });
 
   test('typing the title back to what was committed produces no new version', async () => {

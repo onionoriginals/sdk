@@ -105,7 +105,7 @@ describe('#400: addResourceVersion vs lifecycle append race', () => {
 
     // The chain must still verify end-to-end (a clobbered/stale-chained append
     // would break continuity).
-    expect(await asset.verify()).toBe(true);
+    expect((await asset.verify()).verified).toBe(true);
   });
 
   // The end-to-end publish variant proves one op's wiring against a real clobber.
