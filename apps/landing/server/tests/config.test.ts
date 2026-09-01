@@ -428,6 +428,14 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
     }
   });
 
+  test('a mixed-case value is reported — URL lowercases hosts, so it would diverge from every request', () => {
+    const issues = errors(
+      validateConfig({ env: { ...MAINNET, VITE_WEBVH_HOST: 'Originals.Build' }, dataDir: mounted })
+    );
+    expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+    expect(issues[0].message).toMatch(/lowercase/);
+  });
+
   test('not required on testnet4 — a throwaway chain does not mint permanent DIDs worth protecting', () => {
     expect(errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }))).toEqual([]);
   });

@@ -114,7 +114,12 @@ export function buildFetch(deps: {
   canonicalHost?: string;
   log?: (message: string) => void;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
-  const { apiRoutes, hostStore, distDir, originals, canonicalHost } = deps;
+  const { apiRoutes, hostStore, distDir, originals } = deps;
+  // Lowercased once, not per request: `URL` lowercases the host it parses, so
+  // comparing against a mixed-case value would never match and every document
+  // request would redirect forever. config.ts rejects a non-lowercase value at
+  // boot; this makes the loop unreachable for any caller, however wired.
+  const canonicalHost = deps.canonicalHost?.toLowerCase();
   const hops = deps.trustedProxyHops ?? trustedProxyHops();
   const log = deps.log ?? ((m: string) => console.log(m));
   // One sample per process so the hop count can be checked against the live

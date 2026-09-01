@@ -266,3 +266,35 @@ test('the JSON-LD context is served on any host, never redirected', async () => 
   expect(res.status).toBe(200);
   expect(res.headers.get('content-type')).toContain('application/ld+json');
 });
+
+/**
+ * A mixed-case canonical host must not loop. `URL` lowercases the host it
+ * parses, so comparing it against a mixed-case configured value would never
+ * match and every document request would redirect forever. config.ts rejects
+ * such a value at boot; buildFetch normalises so the loop is unreachable
+ * whatever the wiring.
+ */
+test('a mixed-case canonical host serves rather than redirecting forever', async () => {
+  const fetchFn = buildFetch({
+    apiRoutes: configuredRoutes,
+    hostStore: noopHostStore,
+    distDir,
+    trustedProxyHops: 0,
+    canonicalHost: 'Originals.Build',
+  });
+  const res = await fetchFn(new Request('https://originals.build/app.js'));
+  expect(res.status).toBe(200);
+});
+
+test('a mixed-case canonical host still redirects a foreign host, to the lowercase form', async () => {
+  const fetchFn = buildFetch({
+    apiRoutes: configuredRoutes,
+    hostStore: noopHostStore,
+    distDir,
+    trustedProxyHops: 0,
+    canonicalHost: 'Originals.Build',
+  });
+  const res = await fetchFn(new Request('https://x.up.railway.app/page'));
+  expect(res.status).toBe(301);
+  expect(res.headers.get('location')).toBe('https://originals.build/page');
+});
