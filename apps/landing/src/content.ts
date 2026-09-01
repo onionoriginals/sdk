@@ -198,10 +198,23 @@ export const demo = {
     titleLabel: 'Asset title',
     titlePlaceholder: 'e.g. Genesis Artwork #001',
     defaultTitle: 'Genesis Artwork #001',
-    mediumLabel: 'Medium',
-    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
+    sourceLabel: 'Source',
+    sourceGenerate: 'Generate',
+    sourceUpload: 'Upload',
+    sourceWrite: 'Write',
+    uploadCta: 'Choose a file',
+    uploadHint: 'An SVG or a plain text file, up to 32 KB.',
+    uploadTooBig: 'That file is larger than 32 KB. Inscribing pays by the byte, so the demo keeps uploads small enough to actually reach Bitcoin.',
+    uploadWrongType: 'That file type can’t be carried yet — an SVG or a plain text file, please.',
+    uploadEmpty: 'That file is empty, so there would be nothing to hash.',
+    writePlaceholder: 'Type or paste anything. These exact characters get hashed, signed and published.',
+    writeEmpty: 'Write something first — an empty asset has nothing to prove.',
+    writeHint: 'These exact characters are what get hashed, signed and published.',
+    styleLabel: 'Style',
+    nameAction: 'New name',
+    nameHint: 'Or write your own',
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed, signed and published.'
+    artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
   },
   steps: [
     {

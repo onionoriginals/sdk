@@ -27,7 +27,7 @@ function installHostFetch(host: string) {
 }
 
 const NONCE = 7;
-const art = (title: string, medium = 'Artwork') => generateArtwork(title, medium, NONCE).svg;
+const art = (title: string, style = 'Orbits') => generateArtwork(title, style, NONCE).svg;
 
 describe('editing an Original by its title', () => {
   let restore: () => void;

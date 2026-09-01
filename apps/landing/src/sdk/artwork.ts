@@ -2,7 +2,7 @@
  * Deterministic generative artwork.
  *
  * The demo's asset is a real SVG file generated in the browser from a seed
- * (title + medium + a regenerate nonce). The SVG's actual bytes are what the
+ * (style + a regenerate nonce). The SVG's actual bytes are what the
  * SDK hashes, signs, publishes, and inscribes — so the provenance chain the
  * demo produces belongs to a concrete piece of art you can see, not to an
  * abstract JSON blob. Same seed → same bytes → same sha-256, which is the
@@ -157,6 +157,42 @@ function dotGrid(rand: () => number, a: string, b: string): string {
   return parts.join('');
 }
 
+/**
+ * The generative styles, named for what they actually draw.
+ *
+ * These replace the old MEDIUM list (Artwork/Music/Writing/Photograph/Dataset),
+ * which promised a content type the renderer never honoured: five labels mapped
+ * onto three shapes, and "Photograph" drew vector orbits. A name the picture
+ * cannot keep is worse than no name, so the control now says what you get.
+ */
+export const ART_STYLES = ['Orbits', 'Constellation', 'Radial Bars', 'Dot Grid'] as const;
+
+export type ArtStyle = (typeof ART_STYLES)[number];
+
+/** Title words. Deliberately plain: an evocative label the art can live up to. */
+const NAME_FIRST = [
+  'Amber', 'Violet', 'Cobalt', 'Halcyon', 'Distant', 'Quiet',
+  'Pale', 'Deep', 'Slow', 'Bright', 'Late', 'Northern'
+];
+const NAME_SECOND = [
+  'Orbit', 'Signal', 'Meridian', 'Transit', 'Aperture', 'Lattice',
+  'Drift', 'Ascent', 'Perigee', 'Cadence', 'Vertex', 'Field'
+];
+
+/**
+ * A title for a generated piece, from the same (style, nonce) pair that decides
+ * the picture — so one Regenerate moves the name and the art together, and the
+ * same seed always names the same artwork.
+ */
+export function generateName(style: string, nonce: number): string {
+  const [s1, s2, s3, s4] = cyrb128(`name ${style} ${nonce}`);
+  const rand = sfc32(s1, s2, s3, s4);
+  const first = NAME_FIRST[Math.floor(rand() * NAME_FIRST.length)];
+  const second = NAME_SECOND[Math.floor(rand() * NAME_SECOND.length)];
+  const n = 1 + Math.floor(rand() * 999);
+  return `${first} ${second} #${String(n).padStart(3, '0')}`;
+}
+
 export interface GeneratedArtwork {
   /** Complete standalone SVG document — the asset's actual bytes. */
   svg: string;
@@ -167,19 +203,22 @@ export interface GeneratedArtwork {
 
 export function generateArtwork(
   title: string,
-  medium: string,
+  style: string,
   nonce: number,
   opts: { transparent?: boolean } = {}
 ): GeneratedArtwork {
-  const seed = `${title} ${medium} ${nonce}`;
+  // Seeded by STYLE and nonce, not the title: the picture is chosen by the
+  // style you picked, so typing a name does not reshuffle the art under you.
+  // The title still reaches the bytes below, via the SVG's <title> element.
+  const seed = `${style} ${nonce}`;
   const [s1, s2, s3, s4] = cyrb128(seed);
   const rand = sfc32(s1, s2, s3, s4);
   const [a, b] = PALETTES[Math.floor(rand() * PALETTES.length)];
 
   let body: string;
-  if (medium === 'Music') body = radialBars(rand, a, b);
-  else if (medium === 'Dataset') body = dotGrid(rand, a, b);
-  else body = orbits(rand, a, b, medium === 'Writing' ? 2 : 0);
+  if (style === 'Radial Bars') body = radialBars(rand, a, b);
+  else if (style === 'Dot Grid') body = dotGrid(rand, a, b);
+  else body = orbits(rand, a, b, style === 'Constellation' ? 2 : 0);
 
   const coreR = f(16 + rand() * 14);
   const glowX = f(S * (0.3 + rand() * 0.4));
@@ -187,7 +226,7 @@ export function generateArtwork(
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" role="img">` +
-    `<title>${escapeXml(title)} — ${escapeXml(medium)}</title>` +
+    `<title>${escapeXml(title)} — ${escapeXml(style)}</title>` +
     `<defs>` +
     `<radialGradient id="g" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${a}" stop-opacity="0.9"/><stop offset="60%" stop-color="${a}" stop-opacity="0.25"/><stop offset="100%" stop-color="${a}" stop-opacity="0"/></radialGradient>` +
     `<radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${b}" stop-opacity="0.16"/><stop offset="100%" stop-color="${b}" stop-opacity="0"/></radialGradient>` +
@@ -198,7 +237,7 @@ export function generateArtwork(
       : `<rect width="${S}" height="${S}" fill="#0b0d13"/>` +
         `<circle cx="${glowX}" cy="${glowY}" r="${S * 0.55}" fill="url(#glow)"/>`) +
     body +
-    (medium === 'Dataset'
+    (style === 'Dot Grid'
       ? ''
       : `<circle cx="${C}" cy="${C}" r="${f(coreR * 2.6)}" fill="url(#g)"/><circle cx="${C}" cy="${C}" r="${coreR}" fill="${a}"/><circle cx="${C}" cy="${C}" r="${f(coreR * 0.45)}" fill="#0b0d13" opacity="0.55"/>`) +
     `</svg>`;

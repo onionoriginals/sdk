@@ -8,7 +8,8 @@ import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
 import { btcNetwork, demoTier, type BtcNetworkFlag } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import type { SigningStatus } from '../auth/turnkey-session';
-import { generateArtwork } from '../sdk/artwork';
+import { generateArtwork, generateName, ART_STYLES } from '../sdk/artwork';
+import type { AssetSource } from '../sdk/engine';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { CelChain } from './CelChain';
 import { Pipeline } from './Pipeline';
@@ -649,6 +650,31 @@ function useEngine(authed: boolean, subOrgId?: string) {
   return { getEngine, discardEngine };
 }
 
+/**
+ * The upload ceiling. Inscription pays by the byte — witness data is roughly a
+ * vbyte per four bytes — so 32 KB is about 8,000 vB, a cost a visitor can
+ * actually cover. A larger cap would let someone build an asset they can never
+ * afford to put on Bitcoin, which is a dead end on the money path.
+ */
+const MAX_SOURCE_BYTES = 32 * 1024;
+
+/**
+ * The published length, in BYTES. `String.length` counts UTF-16 code units, so
+ * it under-counts every emoji and CJK character — the bytes that get hashed and
+ * paid for on-chain are UTF-8, and that is what the cap has to measure.
+ */
+const byteLength = (text: string) => new TextEncoder().encode(text).length;
+
+/** What was committed to the log, including WHICH source produced it. */
+interface CommittedSource {
+  title: string;
+  style: string;
+  nonce: number;
+  sourceKind: 'generate' | 'upload' | 'write';
+  uploaded: { name: string; content: string; contentType: string } | null;
+  written: string;
+}
+
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
@@ -666,23 +692,74 @@ export function Demo() {
   const durabilityNote = publishDurabilityNote(isAuthenticated);
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
-  const [medium, setMedium] = useState(demo.form.mediums[0]);
+  const [style, setStyle] = useState<string>(getArtSeed().style);
+  // Where the asset's bytes come from. Generated artwork is the default; a
+  // visitor can bring an SVG or type raw text instead. All three travel the
+  // same lifecycle, because all three are text (see AssetSource in engine.ts).
+  const [sourceKind, setSourceKind] = useState<'generate' | 'upload' | 'write'>('generate');
+  const [uploaded, setUploaded] = useState<{ name: string; content: string; contentType: string } | null>(null);
+  const [written, setWritten] = useState('');
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
-  // The artwork is the asset: regenerated live from title/medium/nonce while
+  // The artwork is the asset: regenerated live from title/style/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
   const artwork = useMemo(
-    () => generateArtwork(title.trim() || demo.form.defaultTitle, medium, nonce),
-    [title, medium, nonce]
+    () => generateArtwork(title.trim() || demo.form.defaultTitle, style, nonce),
+    [title, style, nonce]
   );
 
   // Keep the hero halo in sync: it renders this exact seed.
   useEffect(() => {
-    setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
-  }, [title, medium, nonce]);
-  // The title/medium/nonce whose artwork is actually committed to the log —
+    setArtSeed({ title: title.trim() || demo.form.defaultTitle, style, nonce });
+  }, [title, style, nonce]);
+
+  // The asset's actual bytes — whichever source is selected.
+  const source = useMemo<AssetSource>(() => {
+    if (sourceKind === 'upload' && uploaded) {
+      return { content: uploaded.content, contentType: uploaded.contentType, filename: uploaded.name };
+    }
+    if (sourceKind === 'write') {
+      // Bare `text/plain`, no charset parameter: the SDK's resource validator
+      // accepts `type/subtype` only and refuses media-type parameters.
+      return { content: written, contentType: 'text/plain', filename: 'asset.txt' };
+    }
+    return { content: artwork.svg, contentType: 'image/svg+xml', filename: 'artwork.svg' };
+  }, [sourceKind, uploaded, written, artwork]);
+
+  const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceBytes = byteLength(source.content);
+  // Measured on the FINAL bytes, whatever produced them. Checking only at
+  // upload time missed the Write tab entirely, where multibyte text can pass a
+  // code-unit limit and still exceed the cap that is actually charged for.
+  const sourceTooBig = sourceBytes > MAX_SOURCE_BYTES;
+  // Empty bytes are refused rather than hashed: an asset with nothing in it can
+  // be created, but it proves nothing, and the wording says so.
+  const sourceReady = source.content.trim().length > 0 && !sourceTooBig;
+
+  const onPickFile = async (file: File | undefined) => {
+    setSourceError(null);
+    if (!file) return;
+    if (file.size > MAX_SOURCE_BYTES) return setSourceError(demo.form.uploadTooBig);
+    const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
+    const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name);
+    if (!isSvg && !isText) return setSourceError(demo.form.uploadWrongType);
+    const content = await file.text();
+    if (!content.trim()) return setSourceError(demo.form.uploadEmpty);
+    // Re-check after decoding: `file.size` counts bytes, and a multi-byte file
+    // could pass the byte check yet still be what we publish.
+    if (new TextEncoder().encode(content).length > MAX_SOURCE_BYTES) {
+      return setSourceError(demo.form.uploadTooBig);
+    }
+    setUploaded({
+      name: file.name,
+      content,
+      contentType: isSvg ? 'image/svg+xml' : 'text/plain'
+    });
+  };
+  // The title/style/nonce whose artwork is actually committed to the log —
   // what Discard restores to. Divergence is detected from the BYTES, not from
   // these, so any route to new artwork counts as a revision.
-  const [committed, setCommitted] = useState<{ title: string; medium: string; nonce: number } | null>(null);
+  const [committed, setCommitted] = useState<CommittedSource | null>(null);
   const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -748,14 +825,35 @@ export function Demo() {
     });
   };
 
-  const create = () =>
-    run('idle', 'creating', 'created', async (engine) => {
-      const state = await engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg);
-      setCommitted({ title, medium, nonce }); // what's on screen is now what's in the log
+  const create = () => {
+    // Refuse to hash nothing. An empty upload or a blank textarea would mint a
+    // genesis whose resource proves nothing, which is worse than a refusal.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
+    if (!sourceReady) {
+      setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
+      return;
+    }
+    return run('idle', 'creating', 'created', async (engine) => {
+      const state = await engine.create(title.trim() || demo.form.defaultTitle, style, source);
+      setCommitted({ title, style, nonce, sourceKind, uploaded, written }); // on screen == in the log
       return state;
     });
+  };
   // Revising leaves `phase` alone — the asset stays exactly where it was.
   const update = async () => {
+    // A revision can grow past the cap just as a genesis can — the Write box is
+    // still editable after create, so the same byte gate applies here.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
+    if (!sourceReady) {
+      setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
+      return;
+    }
     // Same gate as the pipeline steps: a revision and a publish must not both
     // be appending to the log at once.
     await runExclusive(runningRef, async () => {
@@ -763,8 +861,8 @@ export function Demo() {
       setUpdating(true);
       try {
         const engine = await getEngine();
-        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
-        setCommitted({ title, medium, nonce });
+        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, style, source));
+        setCommitted({ title, style, nonce, sourceKind, uploaded, written });
       } catch (err) {
         console.error('[originals-demo]', err);
         setError(demoFailureMessage(err));
@@ -970,12 +1068,19 @@ export function Demo() {
   // Compare the BYTES on screen against the bytes in the log. Retyping the
   // title back to its committed value therefore clears the pending state, and
   // a nonce bump that happened to reproduce the same art would too.
-  const pendingRevision = canRevise && !!asset && artwork.svg !== asset.resource.content;
+  const pendingRevision = canRevise && !!asset && source.content !== asset.resource.content;
   const discardRevision = () => {
     if (!committed) return;
     setTitle(committed.title);
-    setMedium(committed.medium);
+    setStyle(committed.style);
     setNonce(committed.nonce);
+    // The SOURCE is part of what was committed. Restoring only title/style/
+    // nonce would leave an alternate source selected, so the revision stayed
+    // pending and publishing stayed disabled with no way back but by hand.
+    setSourceKind(committed.sourceKind);
+    setUploaded(committed.uploaded);
+    setWritten(committed.written);
+    setSourceError(null);
   };
   // The form is the edit surface once an asset exists: typing a new title
   // regenerates the artwork, which IS the new version. Locked only while an
@@ -1019,8 +1124,19 @@ export function Demo() {
               <div className="demo-controls">
                 <div className="demo-asset" data-layer={asset?.layer ?? 'draft'}>
                   <div className="demo-art">
-                    <img src={artwork.dataUri} alt={`Generated artwork for “${title || demo.form.defaultTitle}”`} />
-                    {(phase === 'idle' || canRevise) && (
+                    {sourceIsImage ? (
+                      <img
+                        src={
+                          sourceKind === 'generate'
+                            ? artwork.dataUri
+                            : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source.content)}`
+                        }
+                        alt={`Artwork for “${title || demo.form.defaultTitle}”`}
+                      />
+                    ) : (
+                      <pre className="demo-art-text">{source.content || demo.form.writePlaceholder}</pre>
+                    )}
+                    {sourceKind === 'generate' && (phase === 'idle' || canRevise) && (
                       <button
                         type="button"
                         className="demo-art-refresh"
@@ -1045,28 +1161,110 @@ export function Demo() {
                   <div className="demo-form" data-disabled={formLocked || undefined}>
                     <label className="demo-field">
                       <span>{demo.form.titleLabel}</span>
-                      <input
-                        type="text"
-                        value={title}
-                        maxLength={80}
-                        placeholder={demo.form.titlePlaceholder}
-                        disabled={formLocked}
-                        onChange={(e) => setTitle(e.target.value)}
-                      />
+                      <div className="demo-field-row">
+                        <input
+                          type="text"
+                          value={title}
+                          maxLength={80}
+                          placeholder={demo.form.titlePlaceholder}
+                          disabled={formLocked}
+                          onChange={(e) => setTitle(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="demo-name-btn"
+                          disabled={formLocked}
+                          title={demo.form.nameHint}
+                          onClick={() => setTitle(generateName(style, Math.floor(Math.random() * 1e9)))}
+                        >
+                          {demo.form.nameAction}
+                        </button>
+                      </div>
                     </label>
-                    <label className="demo-field">
-                      <span>{demo.form.mediumLabel}</span>
-                      <select
-                        value={medium}
-                        disabled={formLocked}
-                        onChange={(e) => setMedium(e.target.value)}
-                      >
-                        {demo.form.mediums.map((m) => (
-                          <option key={m}>{m}</option>
+                    <div className="demo-field">
+                      <span>{demo.form.sourceLabel}</span>
+                      <div className="demo-source-tabs" role="tablist">
+                        {([
+                          ['generate', demo.form.sourceGenerate],
+                          ['upload', demo.form.sourceUpload],
+                          ['write', demo.form.sourceWrite]
+                        ] as const).map(([kind, label]) => (
+                          <button
+                            key={kind}
+                            type="button"
+                            role="tab"
+                            aria-selected={sourceKind === kind}
+                            data-active={sourceKind === kind || undefined}
+                            disabled={formLocked}
+                            onClick={() => {
+                              setSourceKind(kind);
+                              setSourceError(null);
+                            }}
+                          >
+                            {label}
+                          </button>
                         ))}
-                      </select>
-                    </label>
-                    <p className="demo-art-hint">{demo.form.artHint}</p>
+                      </div>
+                    </div>
+
+                    {sourceKind === 'generate' && (
+                      <label className="demo-field">
+                        <span>{demo.form.styleLabel}</span>
+                        <select
+                          value={style}
+                          disabled={formLocked}
+                          onChange={(e) => setStyle(e.target.value)}
+                        >
+                          {ART_STYLES.map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {sourceKind === 'upload' && (
+                      <label className="demo-field">
+                        <span>{demo.form.uploadCta}</span>
+                        <input
+                          type="file"
+                          accept=".svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
+                          disabled={formLocked}
+                          onChange={(e) => void onPickFile(e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+
+                    {sourceKind === 'write' && (
+                      <label className="demo-field">
+                        <span>{demo.form.sourceWrite}</span>
+                        <textarea
+                          className="demo-source-text"
+                          value={written}
+                          rows={5}
+                          placeholder={demo.form.writePlaceholder}
+                          disabled={formLocked}
+                          onChange={(e) => setWritten(e.target.value)}
+                        />
+                      </label>
+                    )}
+
+                    {sourceKind === 'write' && written.length > 0 && (
+                      <p className="demo-source-count" data-over={sourceTooBig || undefined}>
+                        {sourceBytes.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes
+                      </p>
+                    )}
+                    {(sourceError ?? (sourceTooBig ? demo.form.uploadTooBig : null)) && (
+                      <p className="demo-source-error">
+                        {sourceError ?? demo.form.uploadTooBig}
+                      </p>
+                    )}
+                    <p className="demo-art-hint">
+                      {sourceKind === 'generate'
+                        ? demo.form.artHint
+                        : sourceKind === 'upload'
+                          ? demo.form.uploadHint
+                          : demo.form.writeHint}
+                    </p>
                   </div>
                 </div>
 

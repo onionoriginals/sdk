@@ -8,14 +8,14 @@
  * asserting it.
  */
 import { describe, test, expect } from 'bun:test';
-import { generateArtwork } from './artwork';
+import { generateArtwork, generateName, ART_STYLES } from './artwork';
 
-const MEDIA = ['Music', 'Dataset', 'Writing', 'Photography'] as const;
+const STYLES = ['Radial Bars', 'Dot Grid', 'Constellation', 'Orbits'] as const;
 
 describe('generateArtwork', () => {
-  test('is deterministic for the same title/medium/nonce', () => {
-    const a = generateArtwork('First Light', 'Photography', 7);
-    const b = generateArtwork('First Light', 'Photography', 7);
+  test('is deterministic for the same title/style/nonce', () => {
+    const a = generateArtwork('First Light', 'Orbits', 7);
+    const b = generateArtwork('First Light', 'Orbits', 7);
 
     expect(a.svg).toBe(b.svg);
     expect(a.dataUri).toBe(b.dataUri);
@@ -23,23 +23,33 @@ describe('generateArtwork', () => {
   });
 
   test('every input component changes the output', () => {
-    const base = generateArtwork('First Light', 'Photography', 7).svg;
+    const base = generateArtwork('First Light', 'Orbits', 7).svg;
 
-    expect(generateArtwork('Second Light', 'Photography', 7).svg).not.toBe(base);
-    expect(generateArtwork('First Light', 'Writing', 7).svg).not.toBe(base);
-    expect(generateArtwork('First Light', 'Photography', 8).svg).not.toBe(base);
+    // The title reaches the bytes through the SVG's <title> element even though
+    // it no longer seeds the picture — so it still changes what gets hashed.
+    expect(generateArtwork('Second Light', 'Orbits', 7).svg).not.toBe(base);
+    expect(generateArtwork('First Light', 'Constellation', 7).svg).not.toBe(base);
+    expect(generateArtwork('First Light', 'Orbits', 8).svg).not.toBe(base);
+  });
+
+  test('the picture is seeded by style and nonce alone, so typing a name never reshuffles it', () => {
+    const strip = (svg: string) => svg.replace(/<title>[\s\S]*?<\/title>/, '');
+
+    expect(strip(generateArtwork('First Light', 'Orbits', 7).svg)).toBe(
+      strip(generateArtwork('A Totally Different Name', 'Orbits', 7).svg)
+    );
   });
 
   test('consecutive nonces stay distinct across a run of seeds', () => {
     const seen = new Set<string>();
     for (let nonce = 0; nonce < 40; nonce++) {
-      seen.add(generateArtwork('Untitled', 'Photography', nonce).svg);
+      seen.add(generateArtwork('Untitled', 'Orbits', nonce).svg);
     }
     expect(seen.size).toBe(40);
   });
 
-  test.each(MEDIA)('produces a standalone, well-formed SVG document for %s', (medium) => {
-    const { svg, dataUri, palette } = generateArtwork('Untitled', medium, 3);
+  test.each(STYLES)('produces a standalone, well-formed SVG document for %s', (style) => {
+    const { svg, dataUri, palette } = generateArtwork('Untitled', style, 3);
 
     expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
     expect(svg.endsWith('</svg>')).toBe(true);
@@ -55,16 +65,23 @@ describe('generateArtwork', () => {
     expect(decodeURIComponent(dataUri.slice('data:image/svg+xml;charset=utf-8,'.length))).toBe(svg);
   });
 
-  test('medium selects a distinct generator, not just a distinct seed', () => {
-    // Dataset is the dot-grid branch and deliberately omits the core circles.
-    expect(generateArtwork('X', 'Dataset', 1).svg).toContain('<circle');
-    expect(generateArtwork('X', 'Dataset', 1).svg).not.toContain('fill="url(#g)"');
-    expect(generateArtwork('X', 'Photography', 1).svg).toContain('fill="url(#g)"');
+  test('style selects a distinct generator, not just a distinct seed', () => {
+    // Dot Grid is its own branch and deliberately omits the core circles.
+    expect(generateArtwork('X', 'Dot Grid', 1).svg).toContain('<circle');
+    expect(generateArtwork('X', 'Dot Grid', 1).svg).not.toContain('fill="url(#g)"');
+    expect(generateArtwork('X', 'Orbits', 1).svg).toContain('fill="url(#g)"');
+  });
+
+  test('every named style renders, and no two draw the same picture', () => {
+    const bodies = ART_STYLES.map((style) =>
+      generateArtwork('X', style, 1).svg.replace(/<title>[\s\S]*?<\/title>/, '')
+    );
+    expect(new Set(bodies).size).toBe(ART_STYLES.length);
   });
 
   test('transparent omits the opaque backdrop but keeps the body', () => {
-    const solid = generateArtwork('X', 'Photography', 1);
-    const clear = generateArtwork('X', 'Photography', 1, { transparent: true });
+    const solid = generateArtwork('X', 'Orbits', 1);
+    const clear = generateArtwork('X', 'Orbits', 1, { transparent: true });
 
     expect(solid.svg).toContain('fill="#0b0d13"');
     expect(clear.svg).not.toContain('<rect');
@@ -75,7 +92,7 @@ describe('generateArtwork', () => {
   });
 
   test('the title is XML-escaped, so it cannot break out of the <title> element', () => {
-    const { svg } = generateArtwork('<script>alert("x")</script> & co', 'Writing', 1);
+    const { svg } = generateArtwork('<script>alert("x")</script> & co', 'Constellation', 1);
 
     expect(svg).not.toContain('<script>');
     expect(svg).toContain('&lt;script&gt;');
@@ -86,8 +103,31 @@ describe('generateArtwork', () => {
   });
 
   test('an empty title still yields a valid document', () => {
-    const { svg } = generateArtwork('', 'Writing', 0);
+    const { svg } = generateArtwork('', 'Constellation', 0);
     expect(svg.startsWith('<svg')).toBe(true);
     expect(svg.endsWith('</svg>')).toBe(true);
+  });
+});
+
+/**
+ * The generated title. Paired with the picture by construction: one seed names
+ * the piece and draws it, so Regenerate moves both together.
+ */
+describe('generateName', () => {
+  test('is deterministic for the same style and nonce', () => {
+    expect(generateName('Orbits', 7)).toBe(generateName('Orbits', 7));
+  });
+
+  test('a new nonce gives a new name', () => {
+    const names = new Set(Array.from({ length: 40 }, (_, n) => generateName('Orbits', n)));
+    // Not 40: the word lists collide by design at this size. Enough variety
+    // that a visitor pressing the button sees a different name, not a fixed one.
+    expect(names.size).toBeGreaterThan(30);
+  });
+
+  test('reads as a title — two words and a number, no placeholder tells', () => {
+    for (const style of ART_STYLES) {
+      expect(generateName(style, 3)).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+ #\d{3}$/);
+    }
   });
 });

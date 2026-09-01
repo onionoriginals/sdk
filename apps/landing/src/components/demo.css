@@ -176,6 +176,122 @@
   color: var(--text-tertiary);
 }
 
+/* Source picker: three exclusive tabs, styled as one segmented control so it
+   reads as "pick one of these", not "three buttons that do something". */
+.demo-source-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+}
+
+.demo-source-tabs button {
+  flex: 1 1 0;
+  height: 34px;
+  border: 0;
+  border-radius: calc(var(--r-sm) - 2px);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.demo-source-tabs button[data-active] {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.demo-source-tabs button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.demo-source-text {
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.demo-source-count {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-source-count[data-over] {
+  color: var(--danger, #f87171);
+}
+
+.demo-source-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--danger, #f87171);
+}
+
+/* A text asset previews as its own bytes, in the frame the artwork would fill. */
+.demo-art-text {
+  margin: 0;
+  padding: var(--sp-4);
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Title input and its name generator sit on one line; the button keeps its
+   label rather than shrinking to an icon, so its purpose needs no guessing. */
+.demo-field-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.demo-name-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.demo-name-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.24);
+  color: var(--text-primary);
+}
+
+.demo-name-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .demo-field input,
 .demo-field select {
   width: 100%;
