@@ -257,41 +257,6 @@
   color: var(--text-secondary);
 }
 
-/* Title input and its name generator sit on one line; the button keeps its
-   label rather than shrinking to an icon, so its purpose needs no guessing. */
-.demo-field-row {
-  display: flex;
-  gap: var(--sp-2);
-  align-items: stretch;
-  min-width: 0;
-}
-
-.demo-name-btn {
-  flex: 0 0 auto;
-  height: 40px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-
-.demo-name-btn:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.24);
-  color: var(--text-primary);
-}
-
-.demo-name-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .demo-field input,
 .demo-field select {
   width: 100%;
@@ -501,6 +466,20 @@
 .demo-sim-btn .demo-spinner {
   border-color: rgba(255, 255, 255, 0.22);
   border-top-color: var(--text-secondary);
+}
+
+/*
+ * The notes below the pipeline (mock disclaimer, sign-in prompt, key-custody
+ * line). `.demo-inscribe-note` previously had NO rule at all, so these rendered
+ * as raw <p>: body-sized, default margins, full-strength colour — which read as
+ * page copy that had escaped its card and collided with the panels above and
+ * below. They are asides about the step, and are typed like the other asides.
+ */
+.demo-inscribe-note {
+  margin-top: var(--sp-3);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
 }
 
 .demo-sim-note {
