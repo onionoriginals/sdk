@@ -41,6 +41,15 @@ export interface OriginalSummary extends OriginalInscription {
   createdAt: string;
   /** Derived (not stored): the resolvable URL of the artwork resource, for the thumbnail. */
   resourceUrl?: string;
+  /**
+   * Derived: the resource's media type, read from its `.ctype` sidecar.
+   *
+   * Callers need this to know whether `resourceUrl` is something they may put
+   * in an `<img>`. A text Original has a perfectly good resource URL that is
+   * not an image, and rendering it as one draws a broken icon over a valid
+   * asset — so the type travels with the URL rather than being assumed.
+   */
+  resourceContentType?: string;
 }
 
 interface UserIndex {
@@ -174,13 +183,27 @@ export function createOriginalsStore(opts: {
     return segs.length ? `${host}/${segs.join('/')}/resources/` : `${host}/resources/`;
   }
 
+  /** The stored media type for a hosted key, or undefined if the sidecar is gone. */
+  function readContentType(key: string): string | undefined {
+    try {
+      const path = keyToPath(hostedDir, key) + CTYPE_SUFFIX;
+      return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+    } catch {
+      return undefined; // traversal or unreadable → simply unknown
+    }
+  }
+
   function list(subOrgId: string): OriginalSummary[] {
     const idx = readIndex(subOrgId);
     const keys = Object.keys(idx.sizes);
     return idx.originals.map((o) => {
       const prefix = resourcePrefix(o.did);
       const resourceKey = prefix ? keys.find((k) => k.startsWith(prefix)) : undefined;
-      return { ...o, resourceUrl: resourceKey ? `https://${resourceKey}` : undefined };
+      return {
+        ...o,
+        resourceUrl: resourceKey ? `https://${resourceKey}` : undefined,
+        resourceContentType: resourceKey ? readContentType(resourceKey) : undefined
+      };
     });
   }
 

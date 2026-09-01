@@ -26,6 +26,8 @@ export interface OriginalRow {
   resourceHash: string;
   createdAt: string;
   resourceUrl?: string;
+  /** The resource's media type — only an image may be used as the cover. */
+  resourceContentType?: string;
   /** Present once the Original migrated to did:btco (real inscription). */
   btcoDid?: string;
   inscriptionId?: string;
@@ -209,6 +211,15 @@ async function resolveLive(did: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Whether a stored resource may be used as a cover image.
+ *
+ * The store derives `resourceUrl` for ANY primary resource, text included, so
+ * presence of a URL is not evidence there is a picture behind it. Unknown types
+ * fall back to the empty cover: a plain tile beats a broken image icon.
+ */
+const isImageType = (contentType: string | undefined) => !!contentType?.startsWith('image/');
 
 export function YourOriginals() {
   const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
@@ -414,7 +425,7 @@ export function YourOriginals() {
                     aria-label={`“${row.title}” — ${yourOriginals.viewLabel}`}
                   >
                     <span className="your-original-cover">
-                      {row.resourceUrl ? (
+                      {row.resourceUrl && isImageType(row.resourceContentType) ? (
                         <img src={sameOriginUrl(row.resourceUrl, window.location.host)} alt="" />
                       ) : (
                         <span className="your-original-cover-empty" aria-hidden="true" />
