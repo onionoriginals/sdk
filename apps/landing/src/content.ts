@@ -211,8 +211,6 @@ export const demo = {
     writeEmpty: 'Write something first — an empty asset has nothing to prove.',
     writeHint: 'These exact characters are what get hashed, signed and published.',
     styleLabel: 'Style',
-    nameAction: 'New name',
-    nameHint: 'Or write your own',
     regenerate: 'Regenerate',
     artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
   },
