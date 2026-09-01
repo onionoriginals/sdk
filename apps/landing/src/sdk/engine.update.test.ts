@@ -101,16 +101,16 @@ describe('revise a created asset', () => {
     expect(again.resource.version).toBe(1);
   });
 
-  test('editing only the medium still revises the metadata', async () => {
+  test('editing only the style still revises the metadata', async () => {
     const engine = new DemoEngine();
     await engine.create('Same', 'Artwork', SVG);
-    const updated = await engine.update('Same', 'Photograph', SVG);
+    const updated = await engine.update('Same', 'Dot Grid', SVG);
 
     // Artwork bytes unchanged here (the caller passed the same SVG), so only
     // metadata.json gains a version.
     expect(updated.resource.version).toBe(1);
     expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update']);
-    expect((JSON.parse(updated.metadata!.content) as { medium: string }).medium).toBe('Photograph');
+    expect((JSON.parse(updated.metadata!.content) as { style: string }).style).toBe('Dot Grid');
   });
 
   test('revisions stack — each one chains to the version before it', async () => {

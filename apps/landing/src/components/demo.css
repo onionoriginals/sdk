@@ -176,6 +176,41 @@
   color: var(--text-tertiary);
 }
 
+/* Title input and its name generator sit on one line; the button keeps its
+   label rather than shrinking to an icon, so its purpose needs no guessing. */
+.demo-field-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.demo-name-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.demo-name-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.24);
+  color: var(--text-primary);
+}
+
+.demo-name-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .demo-field input,
 .demo-field select {
   width: 100%;

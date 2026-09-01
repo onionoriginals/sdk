@@ -462,7 +462,10 @@ function mediumFromMetadata(data: DetailData): string | null {
   const text = meta ? data.resourceTexts[meta.id] : undefined;
   if (!text) return null;
   try {
-    const parsed = JSON.parse(text) as { medium?: unknown };
+    // `style` since the rename; `medium` for assets published before it —
+    // including the first real mainnet Original, which must keep rendering.
+    const parsed = JSON.parse(text) as { style?: unknown; medium?: unknown };
+    if (typeof parsed.style === 'string') return parsed.style;
     return typeof parsed.medium === 'string' ? parsed.medium : null;
   } catch {
     return null;

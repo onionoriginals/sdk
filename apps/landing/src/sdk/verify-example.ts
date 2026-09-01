@@ -35,6 +35,7 @@ export interface ExampleCheck {
 
 export interface VerifiedExample {
   title: string;
+  /** The style label, whichever key the published manifest carried. */
   medium: string;
   artworkDataUri: string;
   dids: { cel: string; webvh: string };
@@ -46,7 +47,9 @@ export interface VerifiedExample {
 
 interface Manifest {
   title: string;
-  medium: string;
+  /** `medium` before the style rename; `style` after. Readers accept either. */
+  medium?: string;
+  style?: string;
   dids: Record<string, string>;
   resources: Array<{ id: string; contentType: string; hash: string }>;
 }
@@ -157,7 +160,8 @@ export async function verifyExample(): Promise<VerifiedExample> {
 
   const result: VerifiedExample = {
     title: manifest.title,
-    medium: manifest.medium,
+    // `style` since the rename; `medium` for manifests published before it.
+    medium: manifest.style ?? manifest.medium ?? '',
     artworkDataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artworkSvg)}`,
     dids: { cel: manifest.dids['did:cel'], webvh: manifest.dids['did:webvh'] },
     credentialTypes: credential.type,

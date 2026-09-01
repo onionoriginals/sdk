@@ -198,10 +198,11 @@ export const demo = {
     titleLabel: 'Asset title',
     titlePlaceholder: 'e.g. Genesis Artwork #001',
     defaultTitle: 'Genesis Artwork #001',
-    mediumLabel: 'Medium',
-    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
+    styleLabel: 'Style',
+    nameAction: 'New name',
+    nameHint: 'Or write your own',
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed, signed and published.'
+    artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
   },
   steps: [
     {

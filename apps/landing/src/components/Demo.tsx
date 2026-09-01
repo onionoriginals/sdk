@@ -8,7 +8,7 @@ import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
 import { btcNetwork, demoTier, type BtcNetworkFlag } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import type { SigningStatus } from '../auth/turnkey-session';
-import { generateArtwork } from '../sdk/artwork';
+import { generateArtwork, generateName, ART_STYLES } from '../sdk/artwork';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { CelChain } from './CelChain';
 import { Pipeline } from './Pipeline';
@@ -666,23 +666,23 @@ export function Demo() {
   const durabilityNote = publishDurabilityNote(isAuthenticated);
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
-  const [medium, setMedium] = useState(demo.form.mediums[0]);
+  const [style, setStyle] = useState<string>(getArtSeed().style);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
-  // The artwork is the asset: regenerated live from title/medium/nonce while
+  // The artwork is the asset: regenerated live from title/style/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
   const artwork = useMemo(
-    () => generateArtwork(title.trim() || demo.form.defaultTitle, medium, nonce),
-    [title, medium, nonce]
+    () => generateArtwork(title.trim() || demo.form.defaultTitle, style, nonce),
+    [title, style, nonce]
   );
 
   // Keep the hero halo in sync: it renders this exact seed.
   useEffect(() => {
-    setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
-  }, [title, medium, nonce]);
-  // The title/medium/nonce whose artwork is actually committed to the log —
+    setArtSeed({ title: title.trim() || demo.form.defaultTitle, style, nonce });
+  }, [title, style, nonce]);
+  // The title/style/nonce whose artwork is actually committed to the log —
   // what Discard restores to. Divergence is detected from the BYTES, not from
   // these, so any route to new artwork counts as a revision.
-  const [committed, setCommitted] = useState<{ title: string; medium: string; nonce: number } | null>(null);
+  const [committed, setCommitted] = useState<{ title: string; style: string; nonce: number } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -750,8 +750,8 @@ export function Demo() {
 
   const create = () =>
     run('idle', 'creating', 'created', async (engine) => {
-      const state = await engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg);
-      setCommitted({ title, medium, nonce }); // what's on screen is now what's in the log
+      const state = await engine.create(title.trim() || demo.form.defaultTitle, style, artwork.svg);
+      setCommitted({ title, style, nonce }); // what's on screen is now what's in the log
       return state;
     });
   // Revising leaves `phase` alone — the asset stays exactly where it was.
@@ -763,8 +763,8 @@ export function Demo() {
       setUpdating(true);
       try {
         const engine = await getEngine();
-        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
-        setCommitted({ title, medium, nonce });
+        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, style, artwork.svg));
+        setCommitted({ title, style, nonce });
       } catch (err) {
         console.error('[originals-demo]', err);
         setError(demoFailureMessage(err));
@@ -974,7 +974,7 @@ export function Demo() {
   const discardRevision = () => {
     if (!committed) return;
     setTitle(committed.title);
-    setMedium(committed.medium);
+    setStyle(committed.style);
     setNonce(committed.nonce);
   };
   // The form is the edit surface once an asset exists: typing a new title
@@ -1045,24 +1045,35 @@ export function Demo() {
                   <div className="demo-form" data-disabled={formLocked || undefined}>
                     <label className="demo-field">
                       <span>{demo.form.titleLabel}</span>
-                      <input
-                        type="text"
-                        value={title}
-                        maxLength={80}
-                        placeholder={demo.form.titlePlaceholder}
-                        disabled={formLocked}
-                        onChange={(e) => setTitle(e.target.value)}
-                      />
+                      <div className="demo-field-row">
+                        <input
+                          type="text"
+                          value={title}
+                          maxLength={80}
+                          placeholder={demo.form.titlePlaceholder}
+                          disabled={formLocked}
+                          onChange={(e) => setTitle(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="demo-name-btn"
+                          disabled={formLocked}
+                          title={demo.form.nameHint}
+                          onClick={() => setTitle(generateName(style, Math.floor(Math.random() * 1e9)))}
+                        >
+                          {demo.form.nameAction}
+                        </button>
+                      </div>
                     </label>
                     <label className="demo-field">
-                      <span>{demo.form.mediumLabel}</span>
+                      <span>{demo.form.styleLabel}</span>
                       <select
-                        value={medium}
+                        value={style}
                         disabled={formLocked}
-                        onChange={(e) => setMedium(e.target.value)}
+                        onChange={(e) => setStyle(e.target.value)}
                       >
-                        {demo.form.mediums.map((m) => (
-                          <option key={m}>{m}</option>
+                        {ART_STYLES.map((s) => (
+                          <option key={s}>{s}</option>
                         ))}
                       </select>
                     </label>

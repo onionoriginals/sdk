@@ -331,13 +331,13 @@ export class DemoEngine {
    * itself: a real SVG file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
    */
-  async create(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
+  async create(title: string, style: string, artworkSvg: string): Promise<DemoAssetState> {
     const svgBytes = new TextEncoder().encode(artworkSvg);
     const svgHash = toHex(sha256(svgBytes));
 
     const metadata = buildMetadata({
       title,
-      medium,
+      style,
       created: new Date().toISOString(),
       artworkHash: svgHash
     });
@@ -401,7 +401,7 @@ export class DemoEngine {
    * never names a resource URL that 404s. did:btco is refused here because an
    * update there is a PAID on-chain append — real sats, not a demo click.
    */
-  async update(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
+  async update(title: string, style: string, artworkSvg: string): Promise<DemoAssetState> {
     const asset = this.asset;
     if (!asset) throw new Error('Create an asset first');
     if (asset.currentLayer === 'did:btco') {
@@ -436,14 +436,14 @@ export class DemoEngine {
       this.assetResourceHash = svgHash; // the /me summary posts this on publish
     }
 
-    // metadata.json embeds the title, the medium AND the artwork's sha-256, so
+    // metadata.json embeds the title, the style AND the artwork's sha-256, so
     // leaving it at v1 would have the asset's own metadata describe bytes it no
     // longer carries. Genesis `created` is preserved — it is when the asset was
     // made, not when it was last edited.
     if (current.metadata) {
       const next = buildMetadata({
         title,
-        medium,
+        style,
         created: createdAtOf(current.metadata.content),
         artworkHash: svgHash
       });
@@ -723,14 +723,17 @@ export class DemoEngine {
  */
 function buildMetadata(input: {
   title: string;
-  medium: string;
+  style: string;
   created: string;
   artworkHash: string;
 }): string {
   return JSON.stringify(
     {
       title: input.title,
-      medium: input.medium,
+      // Renamed from `medium`: the value names the generative style, which is
+      // what it always actually described. Readers fall back to `medium` so
+      // assets published before the rename still show their label.
+      style: input.style,
       creator: 'you',
       created: input.created,
       artwork: { file: 'artwork.svg', sha256: input.artworkHash }
