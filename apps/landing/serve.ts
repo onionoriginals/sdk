@@ -39,7 +39,7 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
+import { checkConfig, isStrictConfig, resolveDataDir, isBareHost } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
@@ -175,6 +175,16 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   };
 }
 
+/**
+ * The canonical host for did:webvh (#529). Bare hostname only — the DID embeds
+ * it verbatim, so a scheme or path here would mint identifiers that cannot
+ * resolve. Unset (dev, tests) means no redirect and no pinning.
+ */
+function canonicalWebvhHost(): string | undefined {
+  const v = process.env.VITE_WEBVH_HOST?.trim();
+  return v && isBareHost(v) ? v : undefined;
+}
+
 const api = buildApiRoutes();
 
 const server = Bun.serve({
@@ -185,6 +195,10 @@ const server = Bun.serve({
     hostStore,
     distDir: DIST,
     originals: api?.originals ?? null,
+    // The one host did:webvh identifiers may name (#529). Same value the SPA
+    // bakes in, read at runtime here so the redirect and the DID agree; a bad
+    // value is already a named violation in the boot config report.
+    canonicalHost: canonicalWebvhHost(),
   }),
   // Last line of defence (R3): a handler that throws must not reach a client
   // as an untyped 500 with nothing in the log. One named JSON body, one

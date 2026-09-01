@@ -198,3 +198,71 @@ describe('SPA document security headers', () => {
     expect(res.headers.get('content-security-policy')).toBeNull();
   });
 });
+
+/**
+ * Canonical-host redirect (#529). A visitor who lands on the Railway-generated
+ * hostname would otherwise mint did:webvh identifiers pinned to it, permanently.
+ * Document requests bounce to the canonical host; API requests never do — a
+ * redirected PUT would break publishing, and platform probes must not chase a
+ * 301 to reach a healthy process.
+ */
+describe('canonical host redirect', () => {
+  const canonical = (host?: string) =>
+    buildFetch({
+      apiRoutes: configuredRoutes,
+      hostStore: noopHostStore,
+      distDir,
+      trustedProxyHops: 0,
+      canonicalHost: host,
+    });
+
+  test('a document GET on a non-canonical host 301s to the canonical one', async () => {
+    const res = await canonical('originals.build')(new Request('https://x.up.railway.app/some/page'));
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://originals.build/some/page');
+  });
+
+  test('the query string survives the redirect', async () => {
+    const res = await canonical('originals.build')(
+      new Request('https://x.up.railway.app/verify?did=did%3Awebvh%3Aabc&x=1')
+    );
+    expect(res.headers.get('location')).toBe('https://originals.build/verify?did=did%3Awebvh%3Aabc&x=1');
+  });
+
+  test('the canonical host itself is served, not redirected', async () => {
+    const res = await canonical('originals.build')(new Request('https://originals.build/app.js'));
+    expect(res.status).toBe(200);
+  });
+
+  test('no canonical host configured means no redirect — dev and tests are unaffected', async () => {
+    const res = await canonical(undefined)(new Request('http://localhost:3000/some/page'));
+    expect(res.status).toBe(200);
+  });
+
+  test('/api/* is never redirected: a bounced PUT would break publishing', async () => {
+    const res = await canonical('originals.build')(
+      new Request('https://x.up.railway.app/api/health')
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: 'ok' });
+  });
+});
+
+/**
+ * /context is host-agnostic by design (context-document.ts): every context URL
+ * in the wild must resolve to the same bytes on whatever origin answers. A
+ * JSON-LD document loader is not obliged to follow redirects, so the canonical
+ * redirect must not touch it.
+ */
+test('the JSON-LD context is served on any host, never redirected', async () => {
+  const fetchFn = buildFetch({
+    apiRoutes: configuredRoutes,
+    hostStore: noopHostStore,
+    distDir,
+    trustedProxyHops: 0,
+    canonicalHost: 'originals.build',
+  });
+  const res = await fetchFn(new Request('https://pichu.originals.build/context'));
+  expect(res.status).toBe(200);
+  expect(res.headers.get('content-type')).toContain('application/ld+json');
+});
