@@ -54,23 +54,40 @@ does nothing** — the value is already in the bundle. It must match
 compares the two at boot and the browser compares them again before any
 real-money action; a mismatch is reported in both directions.
 
+`VITE_WEBVH_HOST` is the same shape of value and the more permanent one. It is
+the single host every `did:webvh` identifier this site publishes will name,
+**forever** — a did:webvh domain cannot be changed after publication. Unset, the
+SPA falls back to `window.location.host`, so a visitor who arrives on the
+Railway-generated `*.up.railway.app` hostname mints DIDs pinned to it. Set it to
+the canonical domain (`originals.build`) as a **bare hostname** — no scheme, no
+port, no path. Required on a mainnet deploy and reported by name at boot; the
+server also reads it at runtime and 301s document requests from any other host,
+so the redirect and the DID cannot disagree. `/api/*` is exempt from that
+redirect, so publishing writes and platform probes are unaffected.
+
 ## Before enabling mainnet
 
 Run one deploy with the code as-is and read the boot log. Do not proceed while
 any of these is outstanding.
 
-1. **Volume attached and mounted.** The log must not say the data directory is
+1. **`VITE_WEBVH_HOST` set to the canonical domain, and the SPA rebuilt with
+   it.** The boot log names it if it is missing. Verify it reached the bundle,
+   not just the dashboard: `curl -s https://<host>/assets/engine-*.js | grep -o
+   'VITE_WEBVH_HOST:`[^`]*`'` — Vite deletes the branch entirely when the value
+   is absent at build time, so an unset var leaves no trace to grep for and the
+   only evidence is the value being present.
+2. **Volume attached and mounted.** The log must not say the data directory is
    writable but not a mounted volume. Writability alone passes on exactly the
    ephemeral path this check exists to catch.
-2. **Scheduled backup enabled.** Railway backups are opt-in and there is no
+3. **Scheduled backup enabled.** Railway backups are opt-in and there is no
    published durability SLA. Record the schedule and who enabled it in the log
    at the bottom of this file — the setting is dashboard-only and cannot
    appear in a commit, so that line is the only evidence it happened.
-3. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
+4. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
    per-client rate limits are inert and everyone shares one bucket. Confirm it
    from the `[landing] proxy sample:` line the server logs once per process:
    the resolved identity must be your address, not the proxy's.
-4. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
+5. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
    add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
    and inscription is impossible. `bun scripts/check:ordinals` — i.e.
    `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
@@ -82,7 +99,7 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
-5. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
    check earned its place twice over: the login path was broken the entire time
    it went unrun, in two independent ways, and neither was reachable from any
    test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
@@ -92,7 +109,7 @@ any of these is outstanding.
    credential being installed cannot already exist. It now runs STAMP_LOGIN
    with the attested stamp, which is what `@turnkey/core` does. The only thing
    that proves it works is running it against a real org.
-6. **One complete mainnet inscription by a human**, from a cold browser,
+7. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 
 ## Turning on strict mode

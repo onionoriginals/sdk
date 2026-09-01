@@ -268,6 +268,28 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     );
   }
 
+  // The did:webvh host (#529). `demoHost()` in the SPA falls back to
+  // `window.location.host`, so an unset VITE_WEBVH_HOST means whichever
+  // hostname the visitor arrived on is baked into their DID — and a did:webvh
+  // domain cannot be changed after publication. Railway keeps its generated
+  // *.up.railway.app hostname reachable alongside the custom domain, so the
+  // wrong host is one bookmark away. Gated on mainnet: only there does a
+  // mis-pinned DID cost anything that cannot be thrown away.
+  const webvhHost = env.VITE_WEBVH_HOST;
+  if (btcNetwork === 'mainnet') {
+    if (!webvhHost) {
+      report(
+        'VITE_WEBVH_HOST',
+        'VITE_WEBVH_HOST is unset with BTC_NETWORK=mainnet — every published DID is pinned to whatever hostname the visitor arrived on, permanently. Set it and REBUILD the SPA (Vite bakes it at build time).'
+      );
+    } else if (!isBareHost(webvhHost)) {
+      report(
+        'VITE_WEBVH_HOST',
+        `VITE_WEBVH_HOST="${webvhHost}" is not a bare lowercase hostname — a did:webvh domain carries no scheme, port or path, and must be lowercase (e.g. "originals.build").`
+      );
+    }
+  }
+
   // Durable data. Only signed-in users have any, so this follows the auth surface.
   if (authIntended(env)) {
     const { explicit } = resolveDataDir(env);
@@ -335,6 +357,23 @@ export function browserBtcFlag(
   if (v === 'mainnet' || v === 'testnet4') return v;
   if (v === undefined || v === '') return env.VITE_BTC_TESTNET === '1' ? 'testnet4' : 'off';
   return 'off';
+}
+
+/**
+ * A bare hostname, as a did:webvh domain must be: no scheme, no port, no path,
+ * and LOWERCASE. The DID string embeds this verbatim, so anything else mints an
+ * identifier that cannot resolve.
+ *
+ * Case is not cosmetic here. `URL` lowercases the host it parses, so a
+ * mixed-case value diverges from every request the server sees, twice over:
+ * the canonical redirect would bounce forever (the parsed host never equals
+ * the configured one), and the hosting store — which puts under
+ * `${domain}/${path}` and looks up `${url.host}${url.pathname}` — would file
+ * published logs under a key no GET can reach. DNS being case-insensitive is
+ * what makes that failure silent rather than obvious.
+ */
+export function isBareHost(value: string): boolean {
+  return /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value);
 }
 
 /** Warn-only unless explicitly opted in. See the module header for why. */

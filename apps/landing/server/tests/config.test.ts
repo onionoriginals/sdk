@@ -94,7 +94,7 @@ describe('validateConfig — deployed environment', () => {
   });
 
   test('a missing QUICKNODE_ENDPOINT with BTC_NETWORK=mainnet is reported', () => {
-    const env = { ...GOOD, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet' };
+    const env = { ...GOOD, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', VITE_WEBVH_HOST: 'originals.build' };
     expect(keys(errors(validateConfig({ env, dataDir: mounted })))).toContain('QUICKNODE_ENDPOINT');
     // …and is satisfied by setting it. (Errors only: a mainnet deploy on the
     // free deposit indexer still carries U4's standing BTC_INDEXER_API warn.)
@@ -234,6 +234,8 @@ describe('validateConfig — network skew, both directions', () => {
     ...GOOD,
     BTC_NETWORK: 'mainnet',
     QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/',
+    // Required on mainnet since #529; set here so these cases isolate chain skew.
+    VITE_WEBVH_HOST: 'originals.build',
   };
 
   test('the matching pair is not flagged', () => {
@@ -357,7 +359,7 @@ describe('strict mode', () => {
  * to start the very deploy this decision describes.
  */
 describe('validateConfig — the deposit indexer seam', () => {
-  const MAINNET = { ...GOOD, BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://q.example', VITE_BTC_NETWORK: 'mainnet' };
+  const MAINNET = { ...GOOD, BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://q.example', VITE_BTC_NETWORK: 'mainnet', VITE_WEBVH_HOST: 'originals.build' };
 
   test('a mainnet deploy on the free default is warned about, never errored', () => {
     const issues = validateConfig({ env: MAINNET, dataDir: mounted });
@@ -390,5 +392,51 @@ describe('validateConfig — the deposit indexer seam', () => {
 
   test('a testnet4 deploy is not nagged about the free API', () => {
     expect(keys(validateConfig({ env: GOOD, dataDir: mounted }))).not.toContain('BTC_INDEXER_API');
+  });
+});
+
+/**
+ * The did:webvh host (#529). `demoHost()` falls back to `window.location.host`,
+ * so without VITE_WEBVH_HOST baked in, whichever hostname a visitor happened to
+ * arrive on is written into their DID — permanently, because a did:webvh domain
+ * cannot be changed after publication. Railway keeps its generated
+ * *.up.railway.app hostname reachable alongside the custom domain, so this is
+ * not hypothetical. Required once the deploy spends real money.
+ */
+describe('validateConfig — the did:webvh host is pinned, not inherited from the visitor', () => {
+  const MAINNET = {
+    ...GOOD,
+    BTC_NETWORK: 'mainnet',
+    VITE_BTC_NETWORK: 'mainnet',
+    QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/',
+  };
+
+  test('a mainnet deploy without VITE_WEBVH_HOST is reported naming it', () => {
+    const issues = errors(validateConfig({ env: without(MAINNET, 'VITE_WEBVH_HOST'), dataDir: mounted }));
+    expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+  });
+
+  test('setting it to a bare host satisfies the rule', () => {
+    const env = { ...MAINNET, VITE_WEBVH_HOST: 'originals.build' };
+    expect(errors(validateConfig({ env, dataDir: mounted }))).toEqual([]);
+  });
+
+  test('a value carrying a scheme or a path is reported — the DID wants a bare host', () => {
+    for (const bad of ['https://originals.build', 'originals.build/', 'originals.build/logs']) {
+      const issues = errors(validateConfig({ env: { ...MAINNET, VITE_WEBVH_HOST: bad }, dataDir: mounted }));
+      expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+    }
+  });
+
+  test('a mixed-case value is reported — URL lowercases hosts, so it would diverge from every request', () => {
+    const issues = errors(
+      validateConfig({ env: { ...MAINNET, VITE_WEBVH_HOST: 'Originals.Build' }, dataDir: mounted })
+    );
+    expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+    expect(issues[0].message).toMatch(/lowercase/);
+  });
+
+  test('not required on testnet4 — a throwaway chain does not mint permanent DIDs worth protecting', () => {
+    expect(errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }))).toEqual([]);
   });
 });
