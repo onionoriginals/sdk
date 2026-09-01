@@ -658,6 +658,23 @@ function useEngine(authed: boolean, subOrgId?: string) {
  */
 const MAX_SOURCE_BYTES = 32 * 1024;
 
+/**
+ * The published length, in BYTES. `String.length` counts UTF-16 code units, so
+ * it under-counts every emoji and CJK character — the bytes that get hashed and
+ * paid for on-chain are UTF-8, and that is what the cap has to measure.
+ */
+const byteLength = (text: string) => new TextEncoder().encode(text).length;
+
+/** What was committed to the log, including WHICH source produced it. */
+interface CommittedSource {
+  title: string;
+  style: string;
+  nonce: number;
+  sourceKind: 'generate' | 'upload' | 'write';
+  uploaded: { name: string; content: string; contentType: string } | null;
+  written: string;
+}
+
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
@@ -710,9 +727,14 @@ export function Demo() {
   }, [sourceKind, uploaded, written, artwork]);
 
   const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceBytes = byteLength(source.content);
+  // Measured on the FINAL bytes, whatever produced them. Checking only at
+  // upload time missed the Write tab entirely, where multibyte text can pass a
+  // code-unit limit and still exceed the cap that is actually charged for.
+  const sourceTooBig = sourceBytes > MAX_SOURCE_BYTES;
   // Empty bytes are refused rather than hashed: an asset with nothing in it can
   // be created, but it proves nothing, and the wording says so.
-  const sourceReady = source.content.trim().length > 0;
+  const sourceReady = source.content.trim().length > 0 && !sourceTooBig;
 
   const onPickFile = async (file: File | undefined) => {
     setSourceError(null);
@@ -737,7 +759,7 @@ export function Demo() {
   // The title/style/nonce whose artwork is actually committed to the log —
   // what Discard restores to. Divergence is detected from the BYTES, not from
   // these, so any route to new artwork counts as a revision.
-  const [committed, setCommitted] = useState<{ title: string; style: string; nonce: number } | null>(null);
+  const [committed, setCommitted] = useState<CommittedSource | null>(null);
   const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -806,18 +828,32 @@ export function Demo() {
   const create = () => {
     // Refuse to hash nothing. An empty upload or a blank textarea would mint a
     // genesis whose resource proves nothing, which is worse than a refusal.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
     if (!sourceReady) {
       setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
       return;
     }
     return run('idle', 'creating', 'created', async (engine) => {
       const state = await engine.create(title.trim() || demo.form.defaultTitle, style, source);
-      setCommitted({ title, style, nonce }); // what's on screen is now what's in the log
+      setCommitted({ title, style, nonce, sourceKind, uploaded, written }); // on screen == in the log
       return state;
     });
   };
   // Revising leaves `phase` alone — the asset stays exactly where it was.
   const update = async () => {
+    // A revision can grow past the cap just as a genesis can — the Write box is
+    // still editable after create, so the same byte gate applies here.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
+    if (!sourceReady) {
+      setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
+      return;
+    }
     // Same gate as the pipeline steps: a revision and a publish must not both
     // be appending to the log at once.
     await runExclusive(runningRef, async () => {
@@ -826,7 +862,7 @@ export function Demo() {
       try {
         const engine = await getEngine();
         setAsset(await engine.update(title.trim() || demo.form.defaultTitle, style, source));
-        setCommitted({ title, style, nonce });
+        setCommitted({ title, style, nonce, sourceKind, uploaded, written });
       } catch (err) {
         console.error('[originals-demo]', err);
         setError(demoFailureMessage(err));
@@ -1038,6 +1074,13 @@ export function Demo() {
     setTitle(committed.title);
     setStyle(committed.style);
     setNonce(committed.nonce);
+    // The SOURCE is part of what was committed. Restoring only title/style/
+    // nonce would leave an alternate source selected, so the revision stayed
+    // pending and publishing stayed disabled with no way back but by hand.
+    setSourceKind(committed.sourceKind);
+    setUploaded(committed.uploaded);
+    setWritten(committed.written);
+    setSourceError(null);
   };
   // The form is the edit surface once an asset exists: typing a new title
   // regenerates the artwork, which IS the new version. Locked only while an
@@ -1198,7 +1241,6 @@ export function Demo() {
                           className="demo-source-text"
                           value={written}
                           rows={5}
-                          maxLength={MAX_SOURCE_BYTES}
                           placeholder={demo.form.writePlaceholder}
                           disabled={formLocked}
                           onChange={(e) => setWritten(e.target.value)}
@@ -1206,7 +1248,16 @@ export function Demo() {
                       </label>
                     )}
 
-                    {sourceError && <p className="demo-source-error">{sourceError}</p>}
+                    {sourceKind === 'write' && written.length > 0 && (
+                      <p className="demo-source-count" data-over={sourceTooBig || undefined}>
+                        {sourceBytes.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes
+                      </p>
+                    )}
+                    {(sourceError ?? (sourceTooBig ? demo.form.uploadTooBig : null)) && (
+                      <p className="demo-source-error">
+                        {sourceError ?? demo.form.uploadTooBig}
+                      </p>
+                    )}
                     <p className="demo-art-hint">
                       {sourceKind === 'generate'
                         ? demo.form.artHint

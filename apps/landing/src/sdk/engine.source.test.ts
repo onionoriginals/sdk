@@ -75,3 +75,47 @@ describe('the asset source', () => {
     expect(updated.resource.content).toBe('second');
   });
 });
+
+/**
+ * The 32 KB cap is charged in UTF-8 bytes, because that is what gets hashed and
+ * paid for on-chain. Measuring it with `String.length` — UTF-16 code units —
+ * under-counts every emoji and CJK character, so a "32,000 character" note can
+ * be nearly 100 KB of inscription. These pin the unit.
+ */
+describe('the source byte cap', () => {
+  const MAX_SOURCE_BYTES = 32 * 1024;
+  const byteLength = (t: string) => new TextEncoder().encode(t).length;
+
+  test('ASCII: code units and bytes agree', () => {
+    const text = 'a'.repeat(MAX_SOURCE_BYTES);
+    expect(text.length).toBe(MAX_SOURCE_BYTES);
+    expect(byteLength(text)).toBe(MAX_SOURCE_BYTES);
+  });
+
+  test('emoji: a string well under the cap by length is well over it by bytes', () => {
+    // Each of these is 2 UTF-16 code units and 4 UTF-8 bytes.
+    const text = '😀'.repeat(MAX_SOURCE_BYTES / 2);
+    expect(text.length).toBeLessThanOrEqual(MAX_SOURCE_BYTES);
+    expect(byteLength(text)).toBeGreaterThan(MAX_SOURCE_BYTES);
+  });
+
+  test('CJK: three bytes per character, one code unit', () => {
+    const text = '漢'.repeat(20_000);
+    expect(text.length).toBeLessThan(MAX_SOURCE_BYTES);
+    expect(byteLength(text)).toBe(60_000);
+  });
+
+  test('the engine still carries multibyte text verbatim when it fits', async () => {
+    const text = '漢字 😀 mixed\n';
+    const state = await new DemoEngine().create('Mixed', 'Orbits', {
+      content: text,
+      contentType: 'text/plain',
+      filename: 'asset.txt'
+    });
+
+    // Byte-identical round-trip: multibyte characters survive the encode the
+    // SDK does when it hashes, so what is published is what was typed.
+    expect(state.resource.content).toBe(text);
+    expect(byteLength(state.resource.content)).toBe(byteLength(text));
+  });
+});
