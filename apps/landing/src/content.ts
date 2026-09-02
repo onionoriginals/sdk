@@ -437,6 +437,14 @@ export const demo = {
     // The sat is decided by the commit's first input, so it IS known already;
     // the inscription that will ride on it is not on chain yet.
     commitOnlySatPrefix: 'It will land on satoshi',
+    // The commit txid is the ONE thing that lets someone watch their own money
+    // land. Withholding it while telling them to wait is what made this step
+    // feel like nothing happened.
+    commitOnlyTxLabel: 'Funding transaction:',
+    commitOnlyFeeLabel: 'paid at',
+    commitOnlyTrackLink: 'Track it on Your Originals',
+    commitOnlyRevealPending:
+      'The inscription transaction is signed and saved; it broadcasts as soon as the one above confirms.',
     commitOnlyBody:
       'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
     balanceReuse:

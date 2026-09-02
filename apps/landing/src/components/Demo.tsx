@@ -5,7 +5,7 @@ import { explorerTxUrl } from '../sdk/explorer';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
-import { btcNetwork, demoTier, type BtcNetworkFlag } from '../sdk/network-flag';
+import { btcNetwork, demoTier, type BtcNetworkFlag, btcoExplorerUrl } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import type { SigningStatus } from '../auth/turnkey-session';
 import { generateArtwork, generateName, ART_STYLES } from '../sdk/artwork';
@@ -1107,6 +1107,13 @@ export function Demo() {
   // regenerates the artwork, which IS the new version. Locked only while an
   // operation is in flight, or once inscribed (that append costs sats).
   const formLocked = busy || phase === 'inscribed';
+  // Linked so a creator can watch the funding transaction confirm. Uses the
+  // same explorer helper as the completed view, so a simulated run — where the
+  // helper withholds the URL — offers no link to a transaction that isn't.
+  const commitExplorerUrl = asset?.inscription?.commitTxId
+    ? btcoExplorerUrl(asset.inscription.commitTxId)
+    : undefined;
+
   const stepActions = [create, publish, inscribe];
   const stepPhases: Phase[][] = [
     ['creating'],
@@ -1584,10 +1591,38 @@ export function Demo() {
                         on claiming completion — and link to a reveal txid that
                         404s — while saying above that it had not finished. */}
                     {!doneView.claimComplete ? (
-                      <p className="demo-inscribe-note">
-                        {demo.deposit.commitOnlySatPrefix}{' '}
-                        <code>{asset.inscription?.satoshi}</code>.
-                      </p>
+                      <>
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.commitOnlySatPrefix}{' '}
+                          <code>{asset.inscription?.satoshi}</code>.
+                        </p>
+                        {/* The funding txid, linked. Without it this step says
+                            "wait" and gives no way to watch — which reads as
+                            nothing having happened, at the exact moment real
+                            money just moved. */}
+                        {commitExplorerUrl && (
+                          <p className="demo-inscribe-note">
+                            {demo.deposit.commitOnlyTxLabel}{' '}
+                            <a
+                              className="demo-explorer-link"
+                              href={commitExplorerUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <code>{asset.inscription?.commitTxId}</code>
+                            </a>
+                            {asset.inscription?.feeRate
+                              ? ` — ${demo.deposit.commitOnlyFeeLabel} ${asset.inscription.feeRate} sat/vB`
+                              : ''}
+                          </p>
+                        )}
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.commitOnlyRevealPending}
+                        </p>
+                        <a className="demo-explorer-link" href="/me">
+                          {demo.deposit.commitOnlyTrackLink}
+                        </a>
+                      </>
                     ) : (
                       <>
                         <p>
