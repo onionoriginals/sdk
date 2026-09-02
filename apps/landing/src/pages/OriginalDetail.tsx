@@ -676,7 +676,15 @@ function Identity({ summary }: { summary: DidLogSummary }) {
 
 function Bitcoin({ row }: { row: OriginalRow }) {
   const b = originalDetail.bitcoin;
-  const explorerUrl = row.revealTxId ? btcoExplorerUrl(row.revealTxId) : undefined;
+  // Link ONLY transactions that are actually on the network. The reveal is
+  // signed and persisted before it is broadcast, so `revealTxId` exists while
+  // the transaction does not — linking it unconditionally handed a 404 to
+  // someone who had just paid. While the reveal is still pending, the funding
+  // transaction IS live, and is what a creator can usefully watch.
+  const revealLive = row.revealBroadcast === true;
+  const explorerUrl = revealLive && row.revealTxId ? btcoExplorerUrl(row.revealTxId) : undefined;
+  const commitExplorerUrl =
+    !revealLive && row.commitTxId ? btcoExplorerUrl(row.commitTxId) : undefined;
   return (
     <section className="od-section">
       <div className="section-head">
@@ -712,16 +720,31 @@ function Bitcoin({ row }: { row: OriginalRow }) {
               <dd><code>{row.satoshi}</code></dd>
             </div>
           )}
+          {!revealLive && row.commitTxId && (
+            <div>
+              <dt>{b.commitTxLabel}</dt>
+              <dd><code title={row.commitTxId}>{short(row.commitTxId, 24, 8)}</code></dd>
+            </div>
+          )}
           {row.revealTxId && (
             <div>
               <dt>{b.txLabel}</dt>
-              <dd><code title={row.revealTxId}>{short(row.revealTxId, 24, 8)}</code></dd>
+              <dd>
+                <code title={row.revealTxId}>{short(row.revealTxId, 24, 8)}</code>
+                {!revealLive && <span className="od-tx-note">{b.txNotBroadcastNote}</span>}
+              </dd>
             </div>
           )}
         </dl>
         {explorerUrl && (
           <a className="od-raw-link" href={explorerUrl} target="_blank" rel="noreferrer">
             {b.explorerLabel}
+            <ExternalIcon />
+          </a>
+        )}
+        {commitExplorerUrl && (
+          <a className="od-raw-link" href={commitExplorerUrl} target="_blank" rel="noreferrer">
+            {b.commitExplorerLabel}
             <ExternalIcon />
           </a>
         )}

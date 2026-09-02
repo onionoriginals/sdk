@@ -646,3 +646,13 @@
   max-width: 68ch;
   line-height: 1.65;
 }
+
+/* The "signed, not broadcast" caveat sits under a txid that has no explorer
+   page yet. Muted and on its own line so it reads as a status, not a label. */
+.od-tx-note {
+  display: block;
+  margin-top: var(--sp-1, 4px);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
