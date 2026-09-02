@@ -744,9 +744,14 @@ export const originalDetail = {
     inscriptionLabel: 'Inscription',
     satoshiLabel: 'Satoshi',
     txLabel: 'Reveal transaction',
+    // The reveal is signed and saved before it is broadcast, so its id exists
+    // while the transaction does not. Say so rather than linking a 404.
+    txNotBroadcastNote: 'Signed and saved, not yet broadcast — it goes out once the funding transaction confirms.',
+    commitTxLabel: 'Funding transaction',
     pendingBadge: 'awaiting confirmation',
     confirmedBadge: 'confirmed on-chain',
-    explorerLabel: 'View on mempool.space'
+    explorerLabel: 'View on mempool.space',
+    commitExplorerLabel: 'View the funding transaction on mempool.space'
   }
 };
 
