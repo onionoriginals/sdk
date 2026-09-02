@@ -87,7 +87,8 @@ export interface TurnkeyBitcoinClient {
     signWith: string;
     payload: string;
     encoding: 'PAYLOAD_ENCODING_HEXADECIMAL';
-    hashFunction: 'HASH_FUNCTION_NO_OP';
+    // Ed25519 only. NO_OP is rejected by Turnkey for this curve.
+    hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE';
   }): Promise<unknown>;
   createWalletAccounts(params: {
     walletId: string;

@@ -96,7 +96,12 @@ describe('TurnkeyCelSigner', () => {
   test('signs through turnkeySignBytes and returns its 64 bytes verbatim', async () => {
     const r = '0x' + '11'.repeat(32);
     const s = '0x' + '22'.repeat(32);
-    let seen: { payload?: string; signWith?: string; organizationId?: string } = {};
+    let seen: {
+      payload?: string;
+      signWith?: string;
+      organizationId?: string;
+      hashFunction?: string;
+    } = {};
     const client = stubClient({
       signRawPayload: async (params) => {
         seen = params;
@@ -115,6 +120,11 @@ describe('TurnkeyCelSigner', () => {
     expect(signature[63]).toBe(0x22);
     // The SDK owns canonicalization and hashing: the exact bytes go out.
     expect(seen.payload).toBe('0xdead');
+    // NOT_APPLICABLE, not NO_OP. Turnkey rejects NO_OP on an Ed25519 key
+    // ("cannot use hash function NoOp to produce ed25519 signature") — a hard
+    // failure at sign time that no local stub notices unless it is asserted,
+    // which is exactly how the wrong value once reached mainnet.
+    expect(seen.hashFunction).toBe('HASH_FUNCTION_NOT_APPLICABLE');
     expect(seen.signWith).toBe(SOLANA_ADDRESS);
     expect(seen.organizationId).toBe('sub-1');
   });
