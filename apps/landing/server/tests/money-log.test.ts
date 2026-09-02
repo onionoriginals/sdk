@@ -257,6 +257,9 @@ describe('inscribe-path transitions (R29)', () => {
   function inscribeHarness(broadcast?: (txHex: string) => Promise<string>) {
     const cap = capture();
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'money-insc-')) });
+    // #493: an unbound account may not name its own change address, so bind it
+    // as the real flow does when a creator reads their deposit address.
+    store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
     const routes = createBitcoinRoutes({
       jwtSecret: JWT,
       provider: {

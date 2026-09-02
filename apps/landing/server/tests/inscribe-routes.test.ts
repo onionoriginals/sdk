@@ -130,6 +130,8 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
 
 function harness(opts?: {
+  /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
+  bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
   txStatus?: { confirmed: boolean } | ((txid: string) => { confirmed: boolean });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
@@ -160,6 +162,11 @@ function harness(opts?: {
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
   const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
   const store = createInscriptionsStore({ dataDir });
+  // Bind the deposit address up front, as the real flow does when a creator
+  // reads it before funding. Without this the route refuses (#493): an unbound
+  // account may not name its own change address. Cases that need the UNBOUND
+  // state assert it explicitly rather than relying on the harness.
+  if (opts?.bind !== false) store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
@@ -436,6 +443,7 @@ describe('GET /api/btc/inscribe', () => {
     let lookups = 0;
     const pair = buildPair();
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')) });
+    store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS); // #493: unbound cannot inscribe
     const provider = {
       async broadcastTransaction() { return 'f'.repeat(64); },
       async getTransactionStatus() { lookups++; return { confirmed: true }; },
@@ -1448,11 +1456,42 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
 
   test('refuses a changeAddress that is not the address bound to this account', async () => {
     const pair = buildPair();
-    const { routes, store, broadcasts } = harness();
+    // bind:false — bindDepositAddress is FIRST-USE-WINS, so binding OTHER here
+    // after the harness bound USER would be a silent no-op and this test would
+    // assert nothing.
+    const { routes, store, broadcasts } = harness({ bind: false });
     store.bindDepositAddress('sub-1', 'testnet', OTHER_ADDRESS);
     const res = await post(routes, pair);
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toBe('address_not_bound');
+    expect(broadcasts).toEqual([]);
+  });
+
+  /**
+   * The guard was `bound && bound !== changeAddress`, so an account with NO
+   * binding skipped it entirely. Nothing forces the deposit route — the only
+   * thing that binds — to run first, so a caller could go straight here, never
+   * bind, and name any change address it liked: the commit change AND the
+   * inscribed sat both pay `changeAddress`. That is the browser-shaped
+   * adversary this whole route exists to stop, so unbound must fail closed.
+   */
+  test('refuses an UNBOUND account outright — an absent binding is not a pass', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ bind: false });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('address_not_bound');
+    // Nothing signed, nothing sent: the refusal precedes any broadcast.
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('an unbound account cannot redirect the money to an address it names', async () => {
+    // The attack the truthiness guard permitted: never bind, then point both
+    // the commit change and the reveal's inscribed sat at your own address.
+    const pair = buildPair('a'.repeat(64), 0, { changeTo: OTHER_ADDRESS, revealTo: OTHER_ADDRESS });
+    const { routes, broadcasts } = harness({ bind: false });
+    const res = await post(routes, { ...pair, changeAddress: OTHER_ADDRESS });
+    expect(res.status).toBe(403);
     expect(broadcasts).toEqual([]);
   });
 

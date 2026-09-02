@@ -1482,8 +1482,23 @@ export function createBitcoinRoutes(deps: {
     } catch {
       return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
     }
-    if (bound && bound !== changeAddress) {
-      return refuse('change_address_not_bound', { error: 'address_not_bound', message: 'changeAddress is not the deposit address bound to this account.' }, 403);
+    // Fail CLOSED on an unbound account. `bound && …` skipped the check
+    // entirely when nothing was bound, and nothing forces the deposit route
+    // (the only thing that binds, `bindDepositAddress` above) to run first — so
+    // a caller could go straight to this route, never bind, and name any
+    // change address it liked. That is precisely the browser-shaped adversary
+    // this route exists to stop, so an absent binding is a refusal, not a pass.
+    if (bound !== changeAddress) {
+      return refuse(
+        'change_address_not_bound',
+        {
+          error: 'address_not_bound',
+          message: bound
+            ? 'changeAddress is not the deposit address bound to this account.'
+            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
+        },
+        403
+      );
     }
     let changeScript: string;
     try {
