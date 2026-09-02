@@ -726,6 +726,18 @@ export function Demo() {
     return { content: artwork.svg, contentType: 'image/svg+xml', filename: 'artwork.svg' };
   }, [sourceKind, uploaded, written, artwork]);
 
+  /**
+   * A new name comes with new art, and only then.
+   *
+   * The title counts as "still generated" while it equals what this exact
+   * (style, nonce) would have produced — so no separate dirty flag is needed,
+   * and a title the visitor typed is never overwritten. Discard and Start over
+   * restore a previous pair and land back in the generated state on their own.
+   */
+  const renameWithArt = (nextStyle: string, nextNonce: number) => {
+    if (title === generateName(style, nonce)) setTitle(generateName(nextStyle, nextNonce));
+  };
+
   const sourceIsImage = source.contentType.startsWith('image/');
   const sourceBytes = byteLength(source.content);
   // Measured on the FINAL bytes, whatever produced them. Checking only at
@@ -1026,7 +1038,16 @@ export function Demo() {
     setDepositError(null);
     setDepositBadge(null);
     depositErrorRef.current = null;
-    setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
+    // Fresh artwork for the next run — and a fresh NAME with it, or the new
+    // piece would inherit the last one's title. The source resets too: an
+    // upload from the previous run is not part of a clean slate.
+    const nextNonce = Math.floor(Math.random() * 1e9);
+    setNonce(nextNonce);
+    setSourceKind('generate');
+    setUploaded(null);
+    setWritten('');
+    setSourceError(null);
+    setTitle(generateName(style, nextNonce));
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new
     // one constructs and re-registers itself, so the hook is never dangling.
@@ -1141,7 +1162,11 @@ export function Demo() {
                         type="button"
                         className="demo-art-refresh"
                         disabled={updating}
-                        onClick={() => setNonce((n) => n + 1)}
+                        onClick={() => {
+                          const next = nonce + 1;
+                          renameWithArt(style, next);
+                          setNonce(next);
+                        }}
                       >
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M13.3 6.6A5.6 5.6 0 0 0 3.1 5.2M2.7 9.4a5.6 5.6 0 0 0 10.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1161,25 +1186,14 @@ export function Demo() {
                   <div className="demo-form" data-disabled={formLocked || undefined}>
                     <label className="demo-field">
                       <span>{demo.form.titleLabel}</span>
-                      <div className="demo-field-row">
-                        <input
-                          type="text"
-                          value={title}
-                          maxLength={80}
-                          placeholder={demo.form.titlePlaceholder}
-                          disabled={formLocked}
-                          onChange={(e) => setTitle(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="demo-name-btn"
-                          disabled={formLocked}
-                          title={demo.form.nameHint}
-                          onClick={() => setTitle(generateName(style, Math.floor(Math.random() * 1e9)))}
-                        >
-                          {demo.form.nameAction}
-                        </button>
-                      </div>
+                      <input
+                        type="text"
+                        value={title}
+                        maxLength={80}
+                        placeholder={demo.form.titlePlaceholder}
+                        disabled={formLocked}
+                        onChange={(e) => setTitle(e.target.value)}
+                      />
                     </label>
                     <div className="demo-field">
                       <span>{demo.form.sourceLabel}</span>
@@ -1213,7 +1227,10 @@ export function Demo() {
                         <select
                           value={style}
                           disabled={formLocked}
-                          onChange={(e) => setStyle(e.target.value)}
+                          onChange={(e) => {
+                            renameWithArt(e.target.value, nonce);
+                            setStyle(e.target.value);
+                          }}
                         >
                           {ART_STYLES.map((s) => (
                             <option key={s}>{s}</option>

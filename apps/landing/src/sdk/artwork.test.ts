@@ -131,3 +131,37 @@ describe('generateName', () => {
     }
   });
 });
+
+/**
+ * The naming rule the UI implements: a new name arrives WITH new art, and only
+ * then. The check is "is the title still what this (style, nonce) generates" —
+ * no dirty flag, so a typed title is never overwritten and a restored one is
+ * recognised as generated again.
+ */
+describe('generated titles track the artwork', () => {
+  const isGenerated = (title: string, style: string, nonce: number) =>
+    title === generateName(style, nonce);
+
+  test('a freshly generated title is recognised as generated', () => {
+    expect(isGenerated(generateName('Orbits', 7), 'Orbits', 7)).toBe(true);
+  });
+
+  test('a title the visitor typed is not, so it survives a regenerate', () => {
+    expect(isGenerated('My Own Name', 'Orbits', 7)).toBe(false);
+  });
+
+  test('new art means a new name: bumping the nonce changes what would be generated', () => {
+    expect(generateName('Orbits', 7)).not.toBe(generateName('Orbits', 8));
+  });
+
+  test('a new style is new art too, so it renames as well', () => {
+    expect(generateName('Orbits', 7)).not.toBe(generateName('Dot Grid', 7));
+  });
+
+  test('restoring a committed (style, nonce) restores a title recognised as generated', () => {
+    // Discard/Start over put back a prior pair; the restored title must be seen
+    // as generated again, or the next regenerate would refuse to rename it.
+    const restored = generateName('Constellation', 42);
+    expect(isGenerated(restored, 'Constellation', 42)).toBe(true);
+  });
+});
