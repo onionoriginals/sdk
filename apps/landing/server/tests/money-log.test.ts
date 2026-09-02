@@ -267,6 +267,8 @@ describe('inscribe-path transitions (R29)', () => {
         async estimateFee() { return 3; },
       } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'],
       inscriptions: store,
+      // Clean coins: the route now classifies the declared outpoints itself (#493).
+      ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
     });
     return { routes, cap };

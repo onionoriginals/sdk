@@ -21,9 +21,10 @@ import {
 } from '../../server/bitcoin';
 
 /**
- * Exactly what GET /api/btc/deposit prices: one input (a fresh deposit
- * address holds nothing yet), and the 8,000-byte content default it falls
- * back to because this client sends no `contentBytes` hint.
+ * Exactly what GET /api/btc/deposit prices for a visitor with no asset yet:
+ * one input (a fresh deposit address holds nothing), and the 8,000-byte
+ * content default the route uses when no `contentBytes` hint is sent. A
+ * signed-in creator's poll sends the real size (inscriptionContentBytes).
  */
 const quote = (feeRate: number) =>
   estimateInscriptionCostSats({

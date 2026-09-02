@@ -514,6 +514,11 @@ export const demo = {
     ordinalCheckUnavailable:
       'We can’t currently check whether the coins at your deposit address carry an inscription of their own, and we won’t spend a coin we can’t check — an inscribed sat spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
     ordinalCheckBadge: 'Can’t check your coins for inscriptions.',
+    // The check ran, but the address holds more outputs than one poll can
+    // classify. The unchecked ones are simply not counted — a block explorer
+    // will show more than the amount above, and this says why.
+    ordinalCheckPartial: (unchecked: number) =>
+      `${unchecked} smaller ${unchecked === 1 ? 'output' : 'outputs'} at your deposit address ${unchecked === 1 ? 'hasn’t' : 'haven’t'} been checked for inscriptions yet, so ${unchecked === 1 ? 'it isn’t' : 'they aren’t'} counted above. Your balance in a block explorer will read higher than the amount we can spend.`,
     // The bindings file — the whole of "this address belongs to this account".
     bindingUnreadable:
       'We can’t confirm which deposit address belongs to your account right now, so we’re not showing one: a wrong address here means BTC sent somewhere this site can never spend from. Anything you’ve already sent is untouched. Try again in a few minutes.',
@@ -975,6 +980,7 @@ export const legal = {
           'deposit_shortfall — the balance changed and still does not cover the quote',
           'deposit_read_failed — an address read, or the address binding, could not be trusted',
           'deposit_ordinal_check_unavailable — coins could not be checked for inscriptions, so none were offered as spendable',
+          'deposit_ordinal_check_partial — the address held more outputs than one check covers; the unchecked ones were not offered as spendable',
           'inscribe_attempted — a signed pair passed validation and is about to broadcast',
           'inscribe_failed — a pair was refused or failed to broadcast',
           'inscribe_broadcast — a pair reached the network',
