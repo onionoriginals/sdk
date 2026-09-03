@@ -119,6 +119,7 @@
   max-width: 56ch;
   font-size: var(--text-sm);
   line-height: 1.6;
+  text-wrap: pretty;
   color: var(--text-tertiary);
   animation: hero-rise 700ms var(--ease) 260ms both;
 }
