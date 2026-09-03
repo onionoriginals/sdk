@@ -81,3 +81,15 @@ describe('the page does not imply did:cel is a standard', () => {
     expect(protocol.standardsNote).toMatch(/not registered|unregistered/i);
   });
 });
+
+describe('the hero lifecycle line stands on its own', () => {
+  // The hero used to draw the did:cel → did:webvh → did:btco pipeline and
+  // caption it; now only the caption ships. Without the diagram beside it the
+  // line has to say, by itself, that there are three steps and that the last
+  // one is Bitcoin — and stay a single line, since it is no longer a figure.
+  test('names the three layers and Bitcoin in one line', () => {
+    expect(hero.caption.toLowerCase()).toContain('three layers');
+    expect(hero.caption).toContain('Bitcoin');
+    expect(hero.caption).not.toContain('\n');
+  });
+});
