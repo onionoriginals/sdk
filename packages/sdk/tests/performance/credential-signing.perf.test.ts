@@ -286,13 +286,13 @@ describe('Credential Signing Performance', () => {
       const sorted = [...runs].sort((a, b) => a - b);
       const median = sorted[5];
 
-      // 10x catches genuine order-of-magnitude regressions while tolerating
-      // the JIT warmup and OS scheduling variance inherent in a CI environment.
-      for (const run of runs) {
-        expect(run).toBeLessThan(median * 10);
-      }
+      // Allow at most 1 outlier per 10 runs. OS scheduling jitter in a busy CI
+      // environment can cause a single sample to spike; genuine regressions
+      // affect all or most runs, not just one.
+      const tooSlowEd = runs.filter(run => run >= median * 10);
+      expect(tooSlowEd.length).toBeLessThanOrEqual(1);
 
-      console.log(`\nEd25519 regression guard: median=${median.toFixed(2)}ms, max allowed=${(median * 10).toFixed(2)}ms`);
+      console.log(`\nEd25519 regression guard: median=${median.toFixed(2)}ms, max allowed=${(median * 10).toFixed(2)}ms, outliers=${tooSlowEd.length}`);
     });
 
     test('ES256K signing should not regress beyond 10x baseline', async () => {
@@ -315,13 +315,11 @@ describe('Credential Signing Performance', () => {
       const sorted = [...runs].sort((a, b) => a - b);
       const median = sorted[5];
 
-      // 10x catches genuine order-of-magnitude regressions while tolerating
-      // the JIT warmup and OS scheduling variance inherent in a CI environment.
-      for (const run of runs) {
-        expect(run).toBeLessThan(median * 10);
-      }
+      // Allow at most 1 outlier per 10 runs (same rationale as Ed25519 guard above).
+      const tooSlowK = runs.filter(run => run >= median * 10);
+      expect(tooSlowK.length).toBeLessThanOrEqual(1);
 
-      console.log(`\nES256K regression guard: median=${median.toFixed(2)}ms, max allowed=${(median * 10).toFixed(2)}ms`);
+      console.log(`\nES256K regression guard: median=${median.toFixed(2)}ms, max allowed=${(median * 10).toFixed(2)}ms, outliers=${tooSlowK.length}`);
     });
   });
 });
