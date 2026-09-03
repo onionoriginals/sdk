@@ -2,6 +2,6 @@
 "@originals/landing": patch
 ---
 
-**The hero ends on one line instead of a diagram.**
+**The hero pipeline drops the DID method names.**
 
-The hero used to close with an animated did:cel → did:webvh → did:btco pipeline inside a card, captioned "One asset, three layers: private draft, public, inscribed on Bitcoin. Each step signed. The path only moves forward." The pipeline is gone from the hero and that line now stands on its own under the calls to action, as plain text with `text-wrap: pretty` so it never orphans its last word. The Protocol section and the live demo still draw the full three-layer pipeline; only the hero's copy is removed. `hero.pipelineCaption` is renamed `hero.caption`, the copy unchanged, and a test pins that the line still names the three layers and Bitcoin in a single line now that nothing sits beside it.
+Each node in the hero's did:cel → did:webvh → did:btco pipeline carried two labels: the mono method name and, under it, the layer's role. A first-time visitor was meeting three DID method names before anything the page had explained. The hero now shows only the role line — Private draft, Public discovery, Bitcoin ownership — via a new `showNames` prop on `Pipeline`, off in the hero and on everywhere else, so the demo's pipeline is unchanged. On narrow screens, where the pipeline previously hid the role and kept the name, the role stays visible when the names are off so each node still has a label.

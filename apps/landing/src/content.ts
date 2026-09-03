@@ -121,13 +121,7 @@ export const hero = {
   /** Interim target: points at the demo until the creator-app upload flow ships. */
   primaryCta: { label: 'Make your first Original', href: '#demo' },
   exampleLink: { label: 'See one that already exists', href: '#example' },
-  /**
-   * The one-line lifecycle summary under the CTAs. It used to caption an
-   * animated did:cel → did:webvh → did:btco pipeline; the pipeline is gone
-   * from the hero (the Protocol section still walks the three layers) and
-   * the line now stands on its own.
-   */
-  caption:
+  pipelineCaption:
     'One asset, three layers: private draft, public, inscribed on Bitcoin. Each step signed. The path only moves forward.'
 };
 
