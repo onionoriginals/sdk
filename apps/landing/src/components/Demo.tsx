@@ -32,8 +32,14 @@ export interface DepositInfo {
   confirmedUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
   /** Everything confirmed at the address, ordinal-bearing outputs included. */
   confirmedSats?: number;
-  /** 'unavailable' = we could not classify the outputs, so none are spendable. */
-  ordinalCheck?: 'ok' | 'unavailable';
+  /**
+   * 'unavailable' = we could not classify the outputs, so none are spendable.
+   * 'partial' = more outputs than the lookup budget; the unchecked ones are
+   * not offered (see uncheckedOutputs), the checked ones are.
+   */
+  ordinalCheck?: 'ok' | 'unavailable' | 'partial';
+  /** Confirmed outputs the server did not classify, and so does not offer. */
+  uncheckedOutputs?: number;
   unconfirmedSats: number;
   estimatedCostSats: number;
   /** Fee facts for a pending deposit, when the server could read them. */
@@ -412,6 +418,27 @@ export function depositBadgeLabel(
     default:
       return copy.waiting;
   }
+}
+
+/**
+ * A content-size hint for GET /api/btc/deposit, so the quote is sized for
+ * what will actually be inscribed. The reveal carries the media bytes plus
+ * CBOR metadata holding the DID document and the WHOLE CEL log — which grows
+ * with every event — and the route's 8,000-byte default under-funds past
+ * ~12.8 KB, stranding a creator after they have deposited (#493). Counted in
+ * UTF-8 bytes, never characters, and biased UP: the excess returns as change.
+ */
+export function inscriptionContentBytes(asset: DemoAssetState): number {
+  const utf8 = (s: string) => new TextEncoder().encode(s).length;
+  // CBOR of the log is no larger than its JSON; the DID document is small and
+  // bounded, so a flat allowance covers it.
+  const DID_DOCUMENT_ALLOWANCE = 1_024;
+  return (
+    utf8(asset.resource.content) +
+    utf8(asset.metadata?.content ?? '') +
+    utf8(JSON.stringify(asset.celLog)) +
+    DID_DOCUMENT_ALLOWANCE
+  );
 }
 
 export function depositReadiness(info: DepositInfo | null): DepositReadiness {
@@ -928,8 +955,9 @@ export function Demo() {
   const readiness = depositReadiness(deposit);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
+    const hint = asset ? `&contentBytes=${inscriptionContentBytes(asset)}` : '';
     const res = await fetch(
-      `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}`,
+      `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}${hint}`,
       { credentials: 'same-origin' }
     );
     if (!res.ok) {
@@ -951,7 +979,7 @@ export function Demo() {
     const info = (await res.json()) as DepositInfo;
     setDeposit(info);
     return info;
-  }, [bitcoin]);
+  }, [bitcoin, asset]);
   useEffect(() => {
     if (networkMismatch) return;
     if (network !== 'mainnet' || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
@@ -1511,6 +1539,11 @@ export function Demo() {
                       )}
                       {deposit?.ordinalCheck === 'unavailable' && (
                         <p className="demo-error" role="alert">{demo.deposit.ordinalCheckUnavailable}</p>
+                      )}
+                      {deposit?.ordinalCheck === 'partial' && (
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.ordinalCheckPartial(deposit.uncheckedOutputs ?? 0)}
+                        </p>
                       )}
                     </div>
                   ) : gate === 'unavailable' ? (

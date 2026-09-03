@@ -13,7 +13,7 @@ import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
-import { createBitcoinRoutes, isAlreadyKnownTxError } from '../bitcoin';
+import { createBitcoinRoutes, isAlreadyKnownTxError, type OrdinalLookup } from '../bitcoin';
 import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
@@ -30,7 +30,11 @@ const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
  * is not what the route checks — the invariants are structural — but signing
  * for real keeps the txs parseable as broadcast-ready raw hex.
  */
-function buildPair(fundingTxid = 'a'.repeat(64), fundingVout = 0) {
+function buildPair(
+  fundingTxid = 'a'.repeat(64),
+  fundingVout = 0,
+  opts: { changeTo?: string; revealTo?: string } = {}
+) {
   const commit = new btc.Transaction();
   commit.addInput({
     txid: fundingTxid,
@@ -39,7 +43,7 @@ function buildPair(fundingTxid = 'a'.repeat(64), fundingVout = 0) {
     witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n },
   });
   commit.addOutputAddress(USER_ADDRESS, 20_000n, btc.TEST_NETWORK); // commit output
-  commit.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK); // change
+  commit.addOutputAddress(opts.changeTo ?? USER_ADDRESS, 29_000n, btc.TEST_NETWORK); // change
   commit.sign(USER_PRIV);
   commit.finalize();
   const signedCommitHex = hex.encode(commit.extract());
@@ -52,7 +56,7 @@ function buildPair(fundingTxid = 'a'.repeat(64), fundingVout = 0) {
     sequence: 0xfffffffd,
     witnessUtxo: { script: USER_P2WPKH.script, amount: 20_000n },
   });
-  reveal.addOutputAddress(USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
+  reveal.addOutputAddress(opts.revealTo ?? USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
   reveal.sign(USER_PRIV);
   reveal.finalize();
   const revealTxHex = hex.encode(reveal.extract());
@@ -122,11 +126,18 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
   });
 }
 
+/** Every outpoint is clean — what a well-behaved lookup says about ordinary coins. */
+const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
+
 function harness(opts?: {
+  /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
+  bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
   txStatus?: { confirmed: boolean } | ((txid: string) => { confirmed: boolean });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
   txStatusDelayMs?: number;
+  /** The ordinal lookup the route classifies with; `null` = none configured. */
+  ordinals?: OrdinalLookup | null;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -151,11 +162,17 @@ function harness(opts?: {
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
   const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
   const store = createInscriptionsStore({ dataDir });
+  // Bind the deposit address up front, as the real flow does when a creator
+  // reads it before funding. Without this the route refuses (#493): an unbound
+  // account may not name its own change address. Cases that need the UNBOUND
+  // state assert it explicitly rather than relying on the harness.
+  if (opts?.bind !== false) store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
+    ordinals: opts?.ordinals === null ? undefined : (opts?.ordinals ?? CLEAN_ORDINALS),
   });
   return { routes, store, broadcasts, dataDir };
 }
@@ -426,6 +443,7 @@ describe('GET /api/btc/inscribe', () => {
     let lookups = 0;
     const pair = buildPair();
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')) });
+    store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS); // #493: unbound cannot inscribe
     const provider = {
       async broadcastTransaction() { return 'f'.repeat(64); },
       async getTransactionStatus() { lookups++; return { confirmed: true }; },
@@ -436,6 +454,7 @@ describe('GET /api/btc/inscribe', () => {
       provider,
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: store,
+      ordinals: CLEAN_ORDINALS,
     });
     await post(routes, pair); // broadcast both → reveal_broadcast
 
@@ -958,6 +977,7 @@ describe('persist-before-broadcast is load-bearing', () => {
       } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'],
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: failing,
+      ordinals: CLEAN_ORDINALS,
     });
     const pair = buildPair();
     const req = authedReq('/api/btc/inscribe', pair);
@@ -1370,5 +1390,117 @@ describe('POST /api/btc/inscribe — multi-input funding', () => {
     const res = await post(routes, { ...rest, fundingUtxo });
     expect(res.status).toBe(200);
     expect(store.get('sub-1', pair.commitTxId)!.fundingOutpoints).toEqual([`${pair.fundingUtxo.txid}:0`]);
+  });
+});
+
+/**
+ * #493 — the checks the browser used to carry alone. Each one is a place the
+ * server trusted the client for a fact it can establish itself.
+ */
+describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () => {
+  const OTHER_PRIV = hex.decode('7'.repeat(64));
+  const OTHER_ADDRESS = btc.p2wpkh(secp256k1.getPublicKey(OTHER_PRIV, true), btc.TEST_NETWORK).address!;
+
+  test('refuses a commit whose declared funding outpoint carries an inscription', async () => {
+    const pair = buildPair();
+    const inscribed: OrdinalLookup = {
+      async outpointInscriptions({ txid, vout }) {
+        return txid === pair.fundingUtxo.txid && vout === pair.fundingUtxo.vout ? [`${txid}i0`] : [];
+      },
+    };
+    const { routes, store, broadcasts } = harness({ ordinals: inscribed });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('funding_outpoint_inscribed');
+    expect(broadcasts).toEqual([]);
+    expect(store.get('sub-1', pair.commitTxId)).toBeNull();
+  });
+
+  test('refuses when no ordinal lookup is configured — unclassified is not clean', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ ordinals: null });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('ordinal_check_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses when the lookup itself fails — a partial classification never broadcasts', async () => {
+    const pair = buildPair();
+    const failing: OrdinalLookup = { outpointInscriptions: async () => { throw new Error('ord down'); } };
+    const { routes, broadcasts } = harness({ ordinals: failing });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a commit whose change output pays somewhere other than changeAddress', async () => {
+    const pair = buildPair('a'.repeat(64), 0, { changeTo: OTHER_ADDRESS });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe('commit_invariant_violation');
+    expect(body.message).toMatch(/change/i);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a reveal whose output pays somewhere other than changeAddress', async () => {
+    const pair = buildPair('a'.repeat(64), 0, { revealTo: OTHER_ADDRESS });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a changeAddress that is not the address bound to this account', async () => {
+    const pair = buildPair();
+    // bind:false — bindDepositAddress is FIRST-USE-WINS, so binding OTHER here
+    // after the harness bound USER would be a silent no-op and this test would
+    // assert nothing.
+    const { routes, store, broadcasts } = harness({ bind: false });
+    store.bindDepositAddress('sub-1', 'testnet', OTHER_ADDRESS);
+    const res = await post(routes, pair);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('address_not_bound');
+    expect(broadcasts).toEqual([]);
+  });
+
+  /**
+   * The guard was `bound && bound !== changeAddress`, so an account with NO
+   * binding skipped it entirely. Nothing forces the deposit route — the only
+   * thing that binds — to run first, so a caller could go straight here, never
+   * bind, and name any change address it liked: the commit change AND the
+   * inscribed sat both pay `changeAddress`. That is the browser-shaped
+   * adversary this whole route exists to stop, so unbound must fail closed.
+   */
+  test('refuses an UNBOUND account outright — an absent binding is not a pass', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ bind: false });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('address_not_bound');
+    // Nothing signed, nothing sent: the refusal precedes any broadcast.
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('an unbound account cannot redirect the money to an address it names', async () => {
+    // The attack the truthiness guard permitted: never bind, then point both
+    // the commit change and the reveal's inscribed sat at your own address.
+    const pair = buildPair('a'.repeat(64), 0, { changeTo: OTHER_ADDRESS, revealTo: OTHER_ADDRESS });
+    const { routes, broadcasts } = harness({ bind: false });
+    const res = await post(routes, { ...pair, changeAddress: OTHER_ADDRESS });
+    expect(res.status).toBe(403);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('an honest pair — clean coins, change and reveal back to the bound address — still broadcasts', async () => {
+    const pair = buildPair();
+    const { routes, store, broadcasts } = harness();
+    store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
   });
 });
