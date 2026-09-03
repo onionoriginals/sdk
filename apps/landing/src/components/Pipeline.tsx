@@ -44,16 +44,20 @@ const glyphs: Record<string, JSX.Element> = {
 /**
  * The lifecycle pipeline: three layer nodes on a track.
  * `active` = index of the current layer (-1 for none), `autoplay` loops the
- * progression for the hero visual.
+ * progression for the hero visual. `showNames` controls the mono did:* label
+ * under each dot; the hero turns it off so a first-time visitor reads the
+ * layer's role ("Private draft") rather than a DID method name.
  */
 export function Pipeline({
   active = -1,
   autoplay = false,
-  busy = false
+  busy = false,
+  showNames = true
 }: {
   active?: number;
   autoplay?: boolean;
   busy?: boolean;
+  showNames?: boolean;
 }) {
   const [autoActive, setAutoActive] = useState(0);
 
@@ -74,7 +78,11 @@ export function Pipeline({
   const fillPct = current <= 0 ? 0 : current === 1 ? 50 : 100;
 
   return (
-    <div className="pipeline" data-resetting={resetting || undefined}>
+    <div
+      className="pipeline"
+      data-resetting={resetting || undefined}
+      data-names-hidden={showNames ? undefined : ''}
+    >
       <div className="pipeline-track" aria-hidden="true">
         <div
           className="pipeline-fill"
@@ -95,7 +103,7 @@ export function Pipeline({
           return (
             <li key={layer.id} className="pipeline-node" data-layer={layer.id} data-state={state}>
               <span className="pipeline-dot">{glyphs[layer.id]}</span>
-              <span className="pipeline-name">{layer.name}</span>
+              {showNames && <span className="pipeline-name">{layer.name}</span>}
               <span className="pipeline-role">{layer.role}</span>
             </li>
           );
