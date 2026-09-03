@@ -3,7 +3,6 @@ import { hero } from '../content';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
 import { IdentityPanel } from './IdentityPanel';
-import { Pipeline } from './Pipeline';
 import './hero.css';
 
 export function Hero() {
@@ -44,10 +43,7 @@ export function Hero() {
             {hero.exampleLink.label}
           </a>
         </div>
-        <figure className="hero-visual card">
-          <Pipeline autoplay />
-          <figcaption>{hero.pipelineCaption}</figcaption>
-        </figure>
+        <p className="hero-caption">{hero.caption}</p>
       </div>
     </section>
   );
