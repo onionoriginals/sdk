@@ -992,7 +992,11 @@ export const legal = {
           'inscribe_failed — a pair was refused or failed to broadcast',
           'inscribe_broadcast — a pair reached the network',
           'deposit_balance_held — the hourly sweep found a bound address still holding confirmed sats',
-          'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance'
+          'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance',
+          'inscription_sweep_completed — we finished your inscription for you: your commit had confirmed, so we broadcast the reveal we already held, with nobody watching',
+          'inscription_sweep_push_failed — that broadcast was refused by the network, and your inscription is still unfinished',
+          'inscription_sweep_lookup_failed — we could not read whether your commit had confirmed, so we pushed nothing',
+          'inscription_sweep_unreadable — an account\u2019s inscription file could not be read, which is where a signed reveal lives'
         ],
         footer: [
           'You are identified by your Turnkey sub-organization id, never by your email address. The formatter enforces that rather than trusting the code calling it: a field named like an email, or any value shaped like an email address, is replaced with [redacted] before the line is written.',
