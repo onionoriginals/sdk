@@ -31,6 +31,7 @@ One-liner from the root for a production build + preview: `bun run landing`.
 | `node scripts/shots.mjs` | 375/1440 screenshots. |
 | `node scripts/tti.mjs` | Throttled time-to-interactive measurement. |
 | `bun scripts/make-example.ts` | Re-mint the "First Light" example Original in `public/example/`. |
+| `bun run dry-run:inscription` | Build and sign a commit + reveal pair through the shipped path and refuse to broadcast it (#526). With `QUICKNODE_ENDPOINT` + `BTC_NETWORK=mainnet` + `DRY_RUN_WIF` it reads mainnet and signs; without an endpoint it runs the mock provider. Prints both raw transactions, fees, inputs and a pass/fail checklist. |
 
 Headless Chromium resolves via `scripts/browser.mjs`: `CHROMIUM_PATH` env →
 `/opt/pw-browsers/chromium` → playwright-core's registry (`bunx
