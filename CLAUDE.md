@@ -300,13 +300,10 @@ const sdk = OriginalsSDK.create({
 });
 ```
 
-When creating or migrating to did:webvh, the SDK will automatically use the configured network's domain. You can also explicitly provide a domain to override:
+When creating or migrating to did:webvh, you MUST pass an explicit `domain`. The SDK does not default one: the `*.originals.build` networks are never stood up (#520) and a did:webvh domain is permanent once published, so an omitted or empty `domain` throws `WEBVH_DOMAIN_REQUIRED` (#531) rather than minting a DID at a host nobody serves.
 
 ```typescript
-// Uses configured network domain (e.g., pichu.originals.build)
-await sdk.did.createDIDWebVH({ paths: ['user', 'alice'] });
-
-// Explicitly override domain
+// Required — omitting `domain` throws WEBVH_DOMAIN_REQUIRED
 await sdk.did.createDIDWebVH({
   domain: 'custom.example.com',
   paths: ['user', 'alice']

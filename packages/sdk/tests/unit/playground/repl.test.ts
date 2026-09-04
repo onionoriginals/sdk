@@ -101,7 +101,7 @@ describe('Playground REPL', () => {
     const output = await runRepl(['create', 'publish a1', 'exit']);
     expect(output).toContain('Published "a1" to web');
     expect(output).toContain('Layer:  did:webvh');
-    expect(output).toContain('Domain: magby.originals.build');
+    expect(output).toContain('Domain: localhost');
   });
 
   test('publish shows error for missing asset', async () => {

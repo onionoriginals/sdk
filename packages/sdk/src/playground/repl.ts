@@ -104,7 +104,10 @@ async function handlePublish(state: SessionState, args: string[]): Promise<void>
     return;
   }
 
-  const targetDomain = domain || 'magby.originals.build';
+  // No default *.originals.build host — those are never stood up (#531). This
+  // scratch REPL uses in-memory storage, so localhost is the honest placeholder
+  // when the caller names no domain.
+  const targetDomain = domain || 'localhost';
   await state.sdk.lifecycle.publishToWeb(asset, targetDomain);
 
   console.log(`\n  Published "${alias}" to web`);
