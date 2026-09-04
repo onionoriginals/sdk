@@ -12,6 +12,9 @@
  * one line they cannot see.
  */
 
+import { isBoundKeyMismatch } from './turnkey-session';
+import { demo } from '../content';
+
 /** Where the bootstrap got to before it threw. */
 export type BootstrapStep = 'open-session-key' | 'otp-login' | 'funding-account';
 
@@ -37,6 +40,16 @@ export function reportBootstrapFailure(
   sink: Pick<Console, 'error'> = console
 ): void {
   sink.error(bootstrapFailureMessage(origin, step), err);
+}
+
+/**
+ * The user-facing line for a bootstrap failure, or null for the generic copy.
+ * Only the refused foreign-key token (#494) earns its own words: every other
+ * cause is on our end, and a person about to send BTC must know this one was
+ * a deliberate refusal. Copy comes from content.ts, never the error text.
+ */
+export function signingFailureNotice(err: unknown): string | null {
+  return isBoundKeyMismatch(err) ? demo.session.boundKeyMismatchBody : null;
 }
 
 /**

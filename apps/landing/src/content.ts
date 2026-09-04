@@ -385,6 +385,9 @@ export const demo = {
     unavailableHeading: 'Signing is unavailable right now',
     unavailableBody:
       'Signing isn’t working on this site right now, so inscribing is paused — this is on our end, not something you can fix by signing in again. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address stays yours, at your own address, under your own key.',
+    // Replaces unavailableBody when this browser refused a foreign-key token (#494); no retry offered, it would meet the same key.
+    boundKeyMismatchBody:
+      'This browser refused to finish signing in: the sign-in token it was handed names a signing key this browser does not hold. That should never happen, so rather than let an unknown key sign for your account, nothing was installed and inscribing is paused. Please tell us before you send any BTC. Your Original is still real and resolvable, and any BTC already at your deposit address stays yours, at your own address, under your own key.',
     reauthCta: 'Sign in again to keep going',
     reauthPending: 'Waiting for you to sign back in…',
     preserved: 'Your Original is held right where you left it — signing back in picks up from here.',

@@ -3,8 +3,11 @@ import {
   bootstrapFailureMessage,
   reportBootstrapFailure,
   prerequisiteFailure,
+  signingFailureNotice,
   type BootstrapStep,
 } from './bootstrap-report';
+import { BoundKeyMismatchError } from './turnkey-session';
+import { demo } from '../content';
 
 const STEPS: BootstrapStep[] = ['open-session-key', 'otp-login', 'funding-account'];
 
@@ -58,5 +61,33 @@ describe('a missing prerequisite is attributed to the step that actually failed'
 
   test('both present is not a failure', () => {
     expect(prerequisiteFailure({ sessionKey: true, verificationToken: true })).toBeNull();
+  });
+});
+
+/**
+ * #494 — a token bound to a foreign key is refused, and the person whose
+ * account it was aimed at must be told THAT, not the generic "signing is
+ * unavailable" every other bootstrap failure shows. Nothing else gets a
+ * user-facing reason: an outage is still on us, and the generic copy is right.
+ */
+describe('a refused foreign-key token reaches the user as its own notice', () => {
+  test('the bound-key refusal maps to its own copy from content.ts', () => {
+    const notice = signingFailureNotice(new BoundKeyMismatchError());
+    expect(notice).toBe(demo.session.boundKeyMismatchBody);
+    expect(notice).not.toContain('Error');
+  });
+
+  test('every other failure stays on the generic unavailable copy', () => {
+    expect(signingFailureNotice(new Error('STAMP_LOGIN failed (503): no message'))).toBeNull();
+    expect(signingFailureNotice('not even an error')).toBeNull();
+    expect(signingFailureNotice(undefined)).toBeNull();
+  });
+
+  test('the copy says what happened, does not offer "sign in again", and says the money is safe', () => {
+    const copy = demo.session.boundKeyMismatchBody.toLowerCase();
+    expect(copy).toContain('key');
+    expect(copy).toContain('this browser');
+    expect(copy).not.toContain('sign in again');
+    expect(copy).toMatch(/deposit|btc|bitcoin/);
   });
 });

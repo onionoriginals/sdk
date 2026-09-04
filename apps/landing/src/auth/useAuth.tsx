@@ -21,7 +21,12 @@ import { browserKeyStorage } from './browser-storage';
 import { DurableHostingStorageAdapter } from '../sdk/durable-hosting-adapter';
 import { endSigningSession, signOutIntent } from './sign-out';
 import { btcNetwork } from '../sdk/network-flag';
-import { reportBootstrapFailure, prerequisiteFailure, type BootstrapStep } from './bootstrap-report';
+import {
+  reportBootstrapFailure,
+  prerequisiteFailure,
+  signingFailureNotice,
+  type BootstrapStep,
+} from './bootstrap-report';
 
 export interface BitcoinSession {
   fundingAddress: string;
@@ -51,6 +56,12 @@ interface AuthContextValue {
   reauth: ReauthState;
   /** Set when sign-out could not revoke the key at Turnkey — or could not erase it here. */
   signOutNotice: string | null;
+  /**
+   * Why `signing` is 'unavailable', when the user should know. Null means the
+   * generic copy is right; set when this browser refused a sign-in token bound
+   * to a key it does not hold (#494). Same shape as signOutNotice.
+   */
+  signingNotice: string | null;
   startOtp: (email: string) => Promise<void>;
   verify: (code: string) => Promise<void>;
   createIdentity: () => Promise<string>;
@@ -72,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signing, setSigning] = useState<SigningStatus>('none');
   const [reauth, setReauth] = useState<ReauthState>({ active: false, fromSubOrgId: null });
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
+  const [signingNotice, setSigningNotice] = useState<string | null>(null);
 
   /**
    * Rebuild the signing capability from what survived the reload: the session's
@@ -105,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       reportBootstrapFailure('reload', step, err);
       setBitcoin(null);
       setSigning('unavailable');
+      setSigningNotice(signingFailureNotice(err));
     }
   }, []);
 
@@ -158,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({ subOrgId: result.subOrgId, email: result.email });
     setSessionId(null);
     setSignOutNotice(null);
+    setSigningNotice(null);
 
     // Track B bootstrap: install the session key on the sub-org (OTP_LOGIN),
     // then build the signing client + ensure the network's funding account.
@@ -213,6 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       reportBootstrapFailure('sign-in', step, err);
       setBitcoin(null);
       setSigning('unavailable');
+      setSigningNotice(signingFailureNotice(err));
     } finally {
       setReauth({ active: false, fromSubOrgId: null });
     }
@@ -296,6 +311,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setBitcoin(null);
     setSigning('none');
+    setSigningNotice(null);
     setReauth({ active: false, fromSubOrgId: null });
     setSignOutNotice(notice);
   }, [user, reauth.active, cancelReauth]);
@@ -311,6 +327,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signing,
         reauth,
         signOutNotice,
+        signingNotice,
         startOtp,
         verify,
         createIdentity,
