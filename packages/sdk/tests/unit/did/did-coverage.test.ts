@@ -113,6 +113,7 @@ describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
 
       let thrown: unknown;
       try {
+        // @ts-expect-error #531: `domain` is required — omitting it is a compile error and a runtime throw
         await manager.migrateToDIDWebVH(sourceDoc); // no explicit domain
       } catch (err) {
         thrown = err;

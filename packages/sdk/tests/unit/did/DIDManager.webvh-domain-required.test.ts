@@ -40,7 +40,10 @@ async function expectDomainRequired(fn: () => Promise<unknown>): Promise<void> {
 describe('#531 — createDIDWebVH refuses to guess a domain', () => {
   test('throws WEBVH_DOMAIN_REQUIRED when domain is omitted', async () => {
     const manager = new DIDManager({ ...baseConfig });
-    await expectDomainRequired(() => manager.createDIDWebVH({ paths: ['user', 'alice'] }));
+    await expectDomainRequired(() =>
+      // @ts-expect-error #531: `domain` is a required option — omitting it is a compile error and a runtime throw
+      manager.createDIDWebVH({ paths: ['user', 'alice'] })
+    );
   });
 
   test('throws WEBVH_DOMAIN_REQUIRED when domain is an empty/whitespace string', async () => {
@@ -55,7 +58,10 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
     'webvhNetwork=%s does not supply a default domain',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
-      await expectDomainRequired(() => manager.createDIDWebVH({ paths: ['user', 'alice'] }));
+      await expectDomainRequired(() =>
+        // @ts-expect-error #531: `domain` is a required option — omitting it is a compile error and a runtime throw
+        manager.createDIDWebVH({ paths: ['user', 'alice'] })
+      );
     }
   );
 
@@ -70,7 +76,10 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
 describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
   test('throws WEBVH_DOMAIN_REQUIRED when domain is omitted', async () => {
     const manager = new DIDManager({ ...baseConfig });
-    await expectDomainRequired(() => manager.migrateToDIDWebVH(sourceDoc()));
+    await expectDomainRequired(() =>
+      // @ts-expect-error #531: `domain` is a required argument — omitting it is a compile error and a runtime throw
+      manager.migrateToDIDWebVH(sourceDoc())
+    );
   });
 
   test('throws WEBVH_DOMAIN_REQUIRED when domain is an empty/whitespace string', async () => {
@@ -82,7 +91,10 @@ describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
     'webvhNetwork=%s does not supply a default domain',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
-      await expectDomainRequired(() => manager.migrateToDIDWebVH(sourceDoc()));
+      await expectDomainRequired(() =>
+        // @ts-expect-error #531: `domain` is a required argument — omitting it is a compile error and a runtime throw
+        manager.migrateToDIDWebVH(sourceDoc())
+      );
     }
   );
 

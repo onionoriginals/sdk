@@ -162,7 +162,7 @@ export class DIDManager {
    */
   async migrateToDIDWebVH(
     didDoc: DIDDocument,
-    domain?: string,
+    domain: string,
     options?: MigrateToWebVHOptions
   ): Promise<MigrateToWebVHResult> {
     return this.track('did.migrateToDIDWebVH', async () => {
@@ -744,7 +744,7 @@ interface DIDLogEntry {
 type DIDLog = DIDLogEntry[];
 
 export interface CreateWebVHOptions {
-  domain?: string; // Required at runtime — an omitted/empty domain throws WEBVH_DOMAIN_REQUIRED (#531)
+  domain: string; // Required — the type enforces it and a blank value throws WEBVH_DOMAIN_REQUIRED at runtime (#531)
   keyPair?: KeyPair;
   paths?: string[];
   portable?: boolean;

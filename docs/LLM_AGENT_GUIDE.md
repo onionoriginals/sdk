@@ -392,7 +392,7 @@ See [LifecycleManager API → Creating Assets](#creating-assets).
 const result = await sdk.did.createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult>
 
 interface CreateWebVHOptions {
-  domain?: string;                    // Required: omitting it throws WEBVH_DOMAIN_REQUIRED (no default host)
+  domain: string;                     // Required: no default host; a blank value throws WEBVH_DOMAIN_REQUIRED
   keyPair?: KeyPair;                  // Auto-generated if not provided
   paths?: string[];                   // URL path segments
   portable?: boolean;                 // Allow DID migration
