@@ -1,4 +1,10 @@
-import { defineRailway, project, service, volume, preserve } from "railway/iac";
+import { defineRailway, github, project, service, volume, preserve } from "railway/iac";
+
+// Scope this file to the `builder` service: the Railway project also hosts
+// services and databases deployed from OTHER repositories, and IaC deletes on
+// omit, so an unscoped file would destroy them on apply (measured with
+// `railway config plan` on 2026-09-04: 9 resources to destroy).
+export const partial = "builder";
 
 // Infrastructure-as-Code for the landing deploy (the `builder` service, custom
 // domain originals.build). Replaces the deprecated root railway.json, whose
@@ -17,12 +23,14 @@ import { defineRailway, project, service, volume, preserve } from "railway/iac";
 //      deletion or rename before `railway config apply`. See DEPLOY.md.
 
 export default defineRailway(() => {
-  // Persistent volume: the only durable store (no Postgres/SQLite/Redis) and the
-  // only copy of signed-but-unbroadcast reveal transactions. Size and region are
-  // existing dashboard state, omitted so the plan does not propose changing them.
-  const builderVolume = volume("builder-volume");
+  // Persistent volume: the only durable store for this service and the only
+  // copy of signed-but-unbroadcast reveal transactions.
+  // Size and region are the live values; omitting them makes the plan null them.
+  const builderVolume = volume("builder-volume", { region: "us-west2", sizeMB: 50000 });
 
   const builder = service("builder", {
+    // Omitting the source makes the plan detach the GitHub repo from the service.
+    source: github("onionoriginals/sdk", { branch: "main" }),
     build: {
       builder: "NIXPACKS",
       buildCommand:
@@ -64,6 +72,9 @@ export default defineRailway(() => {
       TURNKEY_ORGANIZATION_ID: preserve(),
       QUICKNODE_ENDPOINT: preserve(),
       BTC_INDEXER_TOKEN: preserve(),
+      // Set on the live service but read by nothing in this repo; preserved so
+      // apply does not delete it. Decide its fate on the dashboard, not here.
+      TURNKEY_AUTH_PROXY_CONFIG_ID: preserve(),
     },
   });
 

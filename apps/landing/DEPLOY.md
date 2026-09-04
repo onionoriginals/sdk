@@ -65,12 +65,21 @@ that reconciles the file against live state.
 
 **`railway config apply` is a required step, not optional.** Railway reads the
 old `railway.json` automatically on every deploy, but it does **not** read
-`.railway/railway.ts` on push — IaC is applied only through the CLI. Removing
-`railway.json` therefore leaves the service with no config-as-code build or
-start command until you apply the new file (this is why a PR preview built from
-this branch fails to build: it has no build command). Apply the file to the
-target environment and confirm a deploy succeeds; do not merge the
-`railway.json` removal to production without applying in the same change.
+`.railway/railway.ts` on push: IaC is applied only through the CLI. That is why
+`railway.json` is still in the repo: until the new file has been applied to
+production, it is the only thing giving the service (and every PR preview
+environment) a build and start command. The order is: merge this file, run
+`railway config plan` then `railway config apply` against production, confirm a
+deploy succeeds, and only then delete `railway.json` in a follow-up.
+
+The file is scoped with `export const partial = "builder"`. The Railway project
+also hosts services and databases deployed from other repositories, and IaC
+deletes whatever the file omits: an unscoped plan measured on 2026-09-04
+proposed destroying 9 resources (three databases, four services, two
+variables) and nulling the volume's size and region. With the scope, the
+source repo, and the volume size and region pinned, the plan proposes exactly
+one deletion, the dead `WEBVH_DOMAIN` variable, plus moving the build and start
+commands into IaC.
 
 ```bash
 railway config plan     # review the diff; it must propose NO unexpected delete or rename
