@@ -566,7 +566,7 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, backed up on a schedule and kept for as long as this service runs, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
