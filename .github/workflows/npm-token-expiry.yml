@@ -47,11 +47,19 @@ jobs:
             fail=true
             reason="\`NPM_TOKEN_EXPIRES_AT\` (\`$EXPIRES_AT\`) is not a date GNU date can parse. Use an ISO date such as 2026-10-25."
           else
-            now=$(date -u +%s)
-            days=$(( (exp - now) / 86400 ))
+            # Whole-day math from midnight to midnight (UTC), so a date-only
+            # NPM_TOKEN_EXPIRES_AT yields an exact, correctly signed day count.
+            # Plain (exp - now) / 86400 truncates toward zero, so a token that
+            # lapsed a few hours ago (delta between -86399 and 0) would read as
+            # "expires in 0 days" instead of expired.
+            today_mid=$(date -u -d "$(date -u +%Y-%m-%d)" +%s)
+            days=$(( (exp - today_mid) / 86400 ))
             if [ "$days" -lt 0 ]; then
               fail=true
               reason="\`NPM_TOKEN\` expired ${days#-} day(s) ago (\`NPM_TOKEN_EXPIRES_AT=$EXPIRES_AT\`). The next release will fail with the misleading E404 until it is rotated."
+            elif [ "$days" -eq 0 ]; then
+              fail=true
+              reason="\`NPM_TOKEN\` expires today (\`NPM_TOKEN_EXPIRES_AT=$EXPIRES_AT\`). Rotate it before the next release."
             elif [ "$days" -le "$WARN_WITHIN_DAYS" ]; then
               fail=true
               reason="\`NPM_TOKEN\` expires in $days day(s) (\`NPM_TOKEN_EXPIRES_AT=$EXPIRES_AT\`), within the ${WARN_WITHIN_DAYS}-day warning window. Rotate it before the next release."
