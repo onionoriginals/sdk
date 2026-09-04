@@ -18,9 +18,65 @@ inscription path is live it strands real money.
 | Start command | `bun run apps/landing/serve.ts` |
 | Persistent volume | required, mounted, with `ORIGINALS_DATA_DIR` pointing at it |
 
-`/railway.json` at the repo root carries the build and start commands. It does
-**not** declare the volume or any environment variable — those are dashboard
-state, so the checklist below is the only place they are written down.
+`.railway/railway.ts` at the repo root is the reviewable record of this deploy.
+It carries the build and start commands, the restart policy, the persistent
+volume mounted at `/data`, and the **non-secret** environment shape
+(`NODE_ENV`, `BTC_NETWORK`, `ORIGINALS_DATA_DIR`, `TRUSTED_PROXY_HOPS`,
+`BTC_INDEXER_API`, `VITE_BTC_NETWORK`, `VITE_WEBVH_HOST`). It replaced the
+deprecated `railway.json`, whose Config-as-Code format stops working after
+2026-12-01; a service cannot be managed by both formats at once, so the old
+file was removed rather than kept alongside. Secrets and a handful of live-only
+facts stay in the dashboard — see "What stays dashboard-only" below.
+
+## What stays dashboard-only
+
+`.railway/railway.ts` is the desired state of the whole project, and Railway
+IaC reconciles it authoritatively: anything live but absent from the file is
+**deleted on apply**. So the file names every variable the service carries, but
+some values must not live in source and some facts this repo cannot see. Each of
+these is declared with `preserve()` (keep the live value) or omitted on purpose:
+
+| Kept in the dashboard | Why |
+| --- | --- |
+| `JWT_SECRET` | Secret. `preserve()` keeps the live value; it never enters source. |
+| `TURNKEY_API_PUBLIC_KEY` | Secret. `preserve()`. |
+| `TURNKEY_API_PRIVATE_KEY` | Secret. `preserve()`. |
+| `TURNKEY_ORGANIZATION_ID` | Secret. `preserve()`. |
+| `QUICKNODE_ENDPOINT` | Secret (a paid node URL with the key in it). `preserve()`. |
+| `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
+| `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
+| Volume size and region | Existing volume state the repo cannot see. Omitted so the plan does not propose resizing or relocating `builder-volume`. |
+| The Railway project name | The file guesses `originals`; the live name is only visible via `railway status`. If the plan shows a project rename, the name in `railway.ts` is wrong — fix it, do not apply. |
+| Scheduled volume backup | Dashboard-only, opt-in, no published SLA. Record it in the "Volume backup log" at the bottom of this file — the only durable evidence it happened. |
+
+**Delete the stray `WEBVH_DOMAIN` dashboard variable.** The `builder` service
+carries `WEBVH_DOMAIN=https://originals.build`, which **no code reads** (a repo
+grep finds it only in old planning docs; the live did:webvh host is
+`VITE_WEBVH_HOST`, baked into the bundle). It is not in the config contract and
+not in `railway.ts`. Remove it from the dashboard so it cannot be mistaken for a
+live setting: `railway variables --service builder --unset WEBVH_DOMAIN`.
+
+## Applying and verifying the deploy shape
+
+You need the Railway CLI, logged in and linked to the project
+(`railway link`). None of this is checked in CI — the CLI is the only thing
+that reconciles the file against live state.
+
+```bash
+railway config plan     # review the diff; it must propose NO unexpected delete or rename
+railway config apply    # apply only after the plan is clean
+```
+
+Read the plan before applying. Because IaC deletes on omit, treat any proposed
+deletion or project rename as a sign the file is missing a live fact (see the
+table above), not as an expected change. Variable values are redacted in the
+plan, and `preserve()` entries show as kept, not printed.
+
+To cross-check the hand-written file against the live project, run
+`railway config migrate` in a throwaway checkout: it reads the linked project
+and emits an equivalent `.railway/railway.ts`, rendering existing secrets as
+`preserve()`. Diff it against this one to catch any drift (a missing service,
+the real project name, a variable this file does not mention).
 
 ## Environment contract
 
@@ -115,8 +171,9 @@ any of these is outstanding.
 ## Turning on strict mode
 
 `CONFIG_STRICT=1` turns every contract violation into a refusal to start.
-`/railway.json` caps restarts at 5, so flipping it against an environment that
-does not satisfy the contract takes the site down rather than degrading it.
+`.railway/railway.ts` caps restarts at 5 (`restartPolicyMaxRetries`), so
+flipping it against an environment that does not satisfy the contract takes the
+site down rather than degrading it.
 
 Deploy warn-only first, read the boot log, and fix everything it names —
 `NODE_ENV` and `TRUSTED_PROXY_HOPS` in particular are ones Railway does not
