@@ -117,11 +117,13 @@ silent and late.
   weekly job (Monday 08:00 UTC; also runnable via **Run workflow**) reads the
   non-secret `NPM_TOKEN_EXPIRES_AT` repository variable. It fails, and opens or
   refreshes a single tracking issue titled *"NPM_TOKEN expiry guard: rotate the
-  npm publish token"* (matched by exact title so it never files duplicates),
-  when the recorded expiry is **within 14 days or already past**, or when the
-  variable is **unset or unparseable**. Once you rotate and set
-  `NPM_TOKEN_EXPIRES_AT` to a date more than 14 days out (step 8 above), the
-  next run closes that issue automatically. **What its failure means:** either
+  npm publish token"* (matched by exact title so it never files duplicates; its
+  body leads with the currently recorded expiry, not a baked-in date), when the
+  recorded expiry is **within 14 days or already past**, or when the variable is
+  **unset or unparseable**. Once you rotate and set `NPM_TOKEN_EXPIRES_AT` to a
+  date more than 14 days out (step 8 above), the next run closes that issue
+  automatically; if a later expiry approaches it reopens the same tracker rather
+  than filing a new one. **What its failure means:** either
   the token is about to expire (rotate now, ahead of a release, not during
   one), or nobody recorded the expiry after the last rotation (set the
   variable). The guard reads no secret and cannot publish; it only watches the
