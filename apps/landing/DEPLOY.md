@@ -99,6 +99,14 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
+   Then dry-run the inscription itself against those same reads, with zero
+   money at risk (#526): `BTC_NETWORK=mainnet QUICKNODE_ENDPOINT=…
+   DRY_RUN_ADDRESS=<funded bc1q…> DRY_RUN_WIF=<its key> bun run
+   dry-run:inscription` builds and signs the commit and reveal through the
+   real lifecycle against a provider that refuses to broadcast, prints both
+   raw transactions, the live fee and the 1.5x quote, every input with its
+   ordinal classification, the reveal key derivation and where the sat lands,
+   and ends in a PASS/FAIL checklist. Keep the output with the deploy log.
 6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
    check earned its place twice over: the login path was broken the entire time
    it went unrun, in two independent ways, and neither was reachable from any

@@ -515,6 +515,32 @@ export function estimateInscriptionCostSats(opts: {
   return Math.ceil(opts.feeRate * (commitVB + revealVB) * buffer) + (opts.postageSats ?? POSTAGE_SATS);
 }
 
+/**
+ * Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
+ * compromised estimator must not be able to quote an arbitrary number at a
+ * creator. Kept local — the SDK does not export it.
+ */
+export const MAX_FEE_RATE_SAT_VB = 10_000;
+
+/**
+ * The ONE rounding and cap every fee on the money path passes through: the
+ * provider's estimate becomes a whole sat/vB (rounded UP) or throws. Never
+ * floors: a 1 sat/vB fallback would quote a deposit the SDK's
+ * FEE_RATE_REQUIRED path then refuses to spend at. Module-level so the
+ * inscription dry run (scripts/dry-run-inscription.ts) applies the exact rule
+ * the /api/btc/fee route serves rather than a copy of it.
+ */
+export function normalizeFeeRate(estimated: unknown): number {
+  if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+    throw new Error(`Fee estimator returned an unusable rate (${String(estimated)}).`);
+  }
+  const rate = Math.ceil(estimated);
+  if (rate > MAX_FEE_RATE_SAT_VB) {
+    throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
+  }
+  return rate;
+}
+
 /** Signs a built funding tx and returns broadcast-ready raw tx hex. */
 export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 
@@ -691,10 +717,6 @@ export function createBitcoinRoutes(deps: {
   // QuickNode quota once a minute, not once a tick, with an in-flight promise
   // per target so a cold cache under concurrent polls refreshes ONCE.
   const FEE_CACHE_MS = 60_000;
-  // Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
-  // compromised estimator must not be able to quote an arbitrary number at a
-  // creator. Kept local — the SDK does not export it.
-  const MAX_FEE_RATE_SAT_VB = 10_000;
   const feeCache = new Map<number, { at: number; rate: number }>();
   const feeInFlight = new Map<number, Promise<number>>();
 
@@ -705,14 +727,7 @@ export function createBitcoinRoutes(deps: {
     const pending = feeInFlight.get(blocks);
     if (pending) return pending;
     const run = (async () => {
-      const estimated = await provider.estimateFee(blocks);
-      if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
-        throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
-      }
-      const rate = Math.ceil(estimated);
-      if (rate > MAX_FEE_RATE_SAT_VB) {
-        throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
-      }
+      const rate = normalizeFeeRate(await provider.estimateFee(blocks));
       feeCache.set(blocks, { at: now(), rate });
       return rate;
     })();
