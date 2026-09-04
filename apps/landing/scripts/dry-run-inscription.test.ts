@@ -13,10 +13,12 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { generateArtwork } from '../src/sdk/artwork';
+import { cbor } from '@originals/sdk/cel';
 import {
   BROADCAST_REFUSED_SENTINEL,
   DryRunBroadcastRefused,
   decodeEnvelope,
+  didDocumentIdOf,
   mockFixture,
   neverBroadcast,
   p2wpkhAddressOf,
@@ -24,6 +26,8 @@ import {
   renderReport,
   runDryRun,
   summarizeTx,
+  verifyCommitSignatures,
+  verifyRevealSignature,
   type DryRunReport,
 } from './dry-run-inscription';
 
@@ -88,10 +92,13 @@ describe('runDryRun against the mock provider', () => {
     expect(report.reveal!.feeRateSatVb!).toBeGreaterThanOrEqual(report.fee.routeRateSatVb!);
     expect(report.fee.rederivedQuoteSats).toBe(report.fee.quotedCostSats);
 
-    // The envelope carries the payload and names the did:btco of the identity sat.
+    // The envelope carries the payload and its DID document is keyed by the identity sat.
     expect(report.envelope?.bodySha256).toBe(report.payload.sha256);
     expect(report.envelope?.contentType).toBe('image/svg+xml');
     expect(report.expectedDid).toBe(`did:btco:${report.satoshi}`);
+    expect(report.envelope?.metadataDidDocumentId).toBe(report.expectedDid);
+    expect(report.envelope?.signature.ok).toBe(true);
+    expect(byId(report, 'commit.signed').detail).toContain('#1 ECDSA valid');
     expect(report.inscriptionId).toBe(`${report.reveal!.txid}i0`);
 
     // Never broadcast: the route stopped at the provider refusal, the pair is persisted as signed.
@@ -188,7 +195,65 @@ describe('runDryRun against the mock provider', () => {
   }, 30_000);
 });
 
+/**
+ * PASS must mean a node would accept the pair, so a well-shaped witness with a
+ * bad signature has to fail. Take a real pair from a mock run and corrupt one
+ * signature byte; the shape survives, the verification must not.
+ */
+describe('signature verification', () => {
+  const flipByte = (txHex: string, itemHex: string, at: number): string => {
+    const flipped = itemHex.slice(0, at * 2) + ((parseInt(itemHex.slice(at * 2, at * 2 + 2), 16) ^ 0x01).toString(16).padStart(2, '0')) + itemHex.slice(at * 2 + 2);
+    expect(txHex.includes(itemHex)).toBe(true);
+    return txHex.replace(itemHex, flipped);
+  };
+
+  test('a corrupted ECDSA or Schnorr signature fails verification while the shape still parses', async () => {
+    const report = await runDryRun({
+      network: 'mainnet',
+      mode: 'mock',
+      payload,
+      world: (contentBytes) => mockFixture({ network: 'mainnet', contentBytes }),
+      webvhDomain: 'originals.build',
+      dataDir: dataDir(),
+    });
+    expect(report.verdict).toBe('pass');
+    const values = report.candidates.filter((c) => c.selected).sort((a, b) => b.value - a.value).map((c) => c.value);
+    const commitHex = report.commit!.hex;
+    expect(verifyCommitSignatures(commitHex, values, 'mainnet').ok).toBe(true);
+    const commitTx = btc.Transaction.fromRaw(hex.decode(commitHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    const sig0 = hex.encode(commitTx.getInput(0).finalScriptWitness![0]);
+    // Byte 10 sits inside r; the DER framing and the sighash byte are untouched.
+    const badCommit = verifyCommitSignatures(flipByte(commitHex, sig0, 10), values, 'mainnet');
+    expect(badCommit.ok).toBe(false);
+    expect(badCommit.detail).toContain('#0 ECDSA INVALID');
+    // The wrong input value changes the sighash, so it must fail too.
+    expect(verifyCommitSignatures(commitHex, values.map((v) => v + 1), 'mainnet').ok).toBe(false);
+
+    const revealHex = report.reveal!.hex;
+    const commitScript = hex.decode(report.commit!.outputs[0].scriptHex);
+    const amount = report.commit!.outputs[0].value;
+    expect(verifyRevealSignature(revealHex, commitScript, amount).ok).toBe(true);
+    const revealTx = btc.Transaction.fromRaw(hex.decode(revealHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    const rsig = hex.encode(revealTx.getInput(0).finalScriptWitness![0]);
+    const badReveal = verifyRevealSignature(flipByte(revealHex, rsig, 5), commitScript, amount);
+    expect(badReveal.ok).toBe(false);
+    expect(badReveal.detail).toContain('INVALID');
+    expect(verifyRevealSignature(revealHex, commitScript, amount + 1).ok).toBe(false);
+  }, 30_000);
+});
+
 describe('helpers', () => {
+  test('didDocumentIdOf reads the DID document id structurally, not by substring', () => {
+    const did = 'did:btco:123';
+    const right = cbor.encode({ didDocument: { id: did, alsoKnownAs: ['did:cel:x'] }, celLog: { events: [] } });
+    expect(didDocumentIdOf(right)).toBe(did);
+    // The expected DID appears in the bytes, but not as the document id.
+    const elsewhere = cbor.encode({ didDocument: { id: 'did:btco:999', alsoKnownAs: [did] } });
+    expect(didDocumentIdOf(elsewhere)).toBe('did:btco:999');
+    expect(didDocumentIdOf(new Uint8Array([0xff, 0x00]))).toBeNull();
+    expect(didDocumentIdOf(cbor.encode({ celLog: {} }))).toBeNull();
+  });
+
   test('decodeEnvelope reads content type, body and metadata back out of an ord leaf script', () => {
     const body = new TextEncoder().encode('hello, sat');
     const meta = new Uint8Array([0xa1, 0x61, 0x78, 0x01]); // CBOR {"x":1}

@@ -34,8 +34,9 @@ import { extname, join } from 'node:path';
 import * as btc from '@scure/btc-signer';
 import { base58check, hex } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { OriginalsSDK, MemoryStorageAdapter, QuickNodeProvider } from '@originals/sdk';
+import { cbor } from '@originals/sdk/cel';
 import type { BitcoinSigner, OrdinalsProvider } from '@originals/sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
@@ -195,10 +196,13 @@ export interface DryRunReport {
     bodyBytes: number;
     bodySha256: string | null;
     metadataBytes: number;
-    metadataNamesDid: boolean;
+    /** `didDocument.id` decoded from the CBOR metadata; null when absent or undecodable. */
+    metadataDidDocumentId: string | null;
     controlBlockVersion: number | null;
     internalKey: string | null;
     rebuildsCommitOutput: boolean;
+    /** The BIP-341 script-path signature checked against the leaf's key. */
+    signature: { ok: boolean; detail: string; leafKey: string | null };
   } | null;
   freshness: { firstInternalKey: string | null; secondInternalKey: string | null; fundingKeyXOnly: string | null };
   server: {
@@ -334,6 +338,83 @@ export function decodeEnvelope(leafScript: Uint8Array): { contentType: string | 
     return out;
   };
   return { contentType, body: concat(body), metadata: concat(metadata) };
+}
+
+/**
+ * Verify every P2WPKH input signature of a finalized commit against its
+ * BIP-143 sighash. A well-shaped witness with a bad signature must not pass:
+ * the node would reject it, and PASS means "a node would accept this".
+ */
+export function verifyCommitSignatures(
+  txHex: string,
+  inputValues: number[],
+  network: BtcNet
+): { ok: boolean; detail: string } {
+  const tx = parseTx(txHex);
+  const results: string[] = [];
+  let ok = tx.inputsLength === inputValues.length && tx.inputsLength > 0;
+  for (let i = 0; i < tx.inputsLength; i++) {
+    const w = tx.getInput(i).finalScriptWitness;
+    if (!w || w.length !== 2) {
+      ok = false;
+      results.push(`#${i} no 2-item witness`);
+      continue;
+    }
+    const [sigWithType, pubkey] = w;
+    const hashType = sigWithType[sigWithType.length - 1];
+    const der = sigWithType.slice(0, -1);
+    // BIP-143 scriptCode for P2WPKH is the classic P2PKH script of the same key hash.
+    const scriptCode = btc.p2pkh(pubkey, scureNetwork(network)).script;
+    let valid = false;
+    try {
+      const sighash = tx.preimageWitnessV0(i, scriptCode, hashType, BigInt(inputValues[i]));
+      valid = secp256k1.verify(der, sighash, pubkey, { prehash: false, format: 'der' });
+    } catch {
+      valid = false;
+    }
+    ok &&= valid;
+    results.push(`#${i} ECDSA ${valid ? 'valid' : 'INVALID'} (sighash 0x${hashType.toString(16)})`);
+  }
+  return { ok, detail: results.join('; ') };
+}
+
+/**
+ * Verify the reveal's script-path Schnorr signature against the BIP-341
+ * sighash for the leaf it spends. The key is the one the leaf script itself
+ * checks (`<key> CHECKSIG`), not the control block's internal key.
+ */
+export function verifyRevealSignature(
+  txHex: string,
+  commitScript: Uint8Array,
+  commitAmount: number
+): { ok: boolean; detail: string; leafKey: string | null } {
+  const tx = parseTx(txHex);
+  const w = tx.getInput(0)?.finalScriptWitness;
+  if (!w || w.length !== 3) return { ok: false, detail: `witness has ${w?.length ?? 0} items`, leafKey: null };
+  const [sig, leaf, controlBlock] = w;
+  if (sig.length !== 64 && sig.length !== 65) return { ok: false, detail: `signature is ${sig.length} bytes`, leafKey: null };
+  const hashType = sig.length === 65 ? sig[64] : 0;
+  const leafKeyOp = (btc.Script.decode(leaf) as unknown[])[0];
+  if (!(leafKeyOp instanceof Uint8Array) || leafKeyOp.length !== 32) return { ok: false, detail: 'leaf does not start with a 32-byte key', leafKey: null };
+  let valid = false;
+  try {
+    const sighash = tx.preimageWitnessV1(0, [commitScript], hashType, [BigInt(commitAmount)], undefined, leaf, controlBlock[0] & 0xfe);
+    valid = schnorr.verify(sig.slice(0, 64), sighash, leafKeyOp);
+  } catch {
+    valid = false;
+  }
+  return { ok: valid, detail: `Schnorr ${valid ? 'valid' : 'INVALID'} (sighash 0x${hashType.toString(16)})`, leafKey: hexOf(leafKeyOp) };
+}
+
+/** The `didDocument.id` inside the envelope's CBOR metadata, decoded structurally, or null. */
+export function didDocumentIdOf(metadata: Uint8Array): string | null {
+  try {
+    const decoded = cbor.decode<{ didDocument?: { id?: unknown } }>(metadata);
+    const id = decoded?.didDocument?.id;
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A compressed WIF for `network` → 32-byte private key. Mirrors rawKeyFaucetSigner's checks. */
@@ -749,12 +830,13 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   check('commit.feerate', 'Commit pays at least the live rate', commit.feeSats !== null && commit.feeRateSatVb !== null && commit.feeRateSatVb >= feeRate, `${commit.feeSats} sats over ${commit.vsize} vB = ${commit.feeRateSatVb} sat/vB (rate ${feeRate})`);
   const commitTx = parseTx(submitted.signedCommitHex);
   if (world.privateKey) {
-    const signedOk = commit.inputs.every((_, n) => {
+    const keysMatch = commit.inputs.every((_, n) => {
       const w = commitTx.getInput(n).finalScriptWitness;
       if (!w || w.length !== 2) return false;
       return btc.p2wpkh(w[1], net).address === address;
     });
-    check('commit.signed', 'Commit is signed and finalized; witness keys match the deposit address', signedOk, commit.inputs.map((i) => `${i.witnessItems} witness items`).join(', '));
+    const sigs = verifyCommitSignatures(submitted.signedCommitHex, selectedValues, network);
+    check('commit.signed', 'Commit is signed and finalized; witness keys match the deposit address and every ECDSA signature verifies', keysMatch && sigs.ok, `${sigs.detail}; keys match deposit address: ${keysMatch}`);
   } else {
     skip('commit.signed', 'Commit is signed and finalized', 'UNSIGNED: no DRY_RUN_WIF, so the commit carries no witness. Structure only; the txid is unaffected.');
   }
@@ -780,16 +862,16 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
       const p = btc.p2tr(internalKey, { type: 'tr', script: leaf } as never, net, true);
       rebuilt = hexOf(p.script) === out0?.scriptHex;
     } catch { /* rebuilt stays false */ }
-    const metaText = new TextDecoder().decode(decoded.metadata);
     envelope = {
       contentType: decoded.contentType,
       bodyBytes: decoded.body.length,
       bodySha256: sha256Hex(decoded.body),
       metadataBytes: decoded.metadata.length,
-      metadataNamesDid: report.expectedDid !== null && metaText.includes(report.expectedDid),
+      metadataDidDocumentId: didDocumentIdOf(decoded.metadata),
       controlBlockVersion: controlBlock[0],
       internalKey: hexOf(internalKey),
       rebuildsCommitOutput: rebuilt,
+      signature: verifyRevealSignature(submitted.revealTxHex, hex.decode(out0?.scriptHex ?? ''), out0?.value ?? 0),
     };
   }
   report.envelope = envelope;
@@ -797,8 +879,9 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   // The control block's low bit is the output key's parity, so 0xc0 or 0xc1 is tapscript v0.
   const tapscriptV0 = envelope !== null && envelope.controlBlockVersion !== null && (envelope.controlBlockVersion & 0xfe) === 0xc0;
   check('reveal.scriptpath', 'Reveal is a 3-item script-path spend whose leaf + internal key rebuild commit output 0', !!envelope && envelope.rebuildsCommitOutput && tapscriptV0, envelope ? `witness [sig, leaf, control block]; leaf version 0x${((envelope.controlBlockVersion ?? 0) & 0xfe).toString(16)}; internal key ${envelope.internalKey}; rebuild matches: ${envelope.rebuildsCommitOutput}` : `witness has ${witness.length} items`);
+  check('reveal.signed', 'Reveal Schnorr signature verifies against the leaf key over the BIP-341 sighash', !!envelope && envelope.signature.ok && envelope.signature.leafKey === envelope.internalKey, envelope ? `${envelope.signature.detail}; leaf key ${envelope.signature.leafKey}${envelope.signature.leafKey === envelope.internalKey ? ' (= internal key)' : ' (differs from internal key)'}` : 'no envelope');
   check('reveal.envelope', 'Envelope carries the payload bytes and content type unchanged', !!envelope && envelope.contentType === payload.contentType && envelope.bodySha256 === payloadHash, envelope ? `contentType ${envelope.contentType}; body ${envelope.bodyBytes} bytes sha256 ${envelope.bodySha256}; metadata ${envelope.metadataBytes} bytes` : 'no envelope');
-  check('sat.identity', 'Metadata names did:btco:<first sat of identity input>; inscription id is reveal:i0', !!envelope && envelope.metadataNamesDid && report.inscriptionId === `${reveal.txid}i0`, `sat ${report.satoshi} (first sat of ${commit.inputs[0]?.outpoint}) → ${report.expectedDid}; ordinal FIFO: commit vout 0 offset 0 → reveal vout 0 offset 0 → ${report.inscriptionId}`);
+  check('sat.identity', 'Metadata didDocument.id is did:btco:<first sat of identity input>; inscription id is reveal:i0', !!envelope && report.expectedDid !== null && envelope.metadataDidDocumentId === report.expectedDid && report.inscriptionId === `${reveal.txid}i0`, `sat ${report.satoshi} (first sat of ${commit.inputs[0]?.outpoint}) → expected ${report.expectedDid}, metadata didDocument.id ${envelope?.metadataDidDocumentId ?? 'n/a'}; ordinal FIFO: commit vout 0 offset 0 → reveal vout 0 offset 0 → ${report.inscriptionId}`);
 
   // 8. Freshness: build again from the same inputs; the reveal key must differ.
   store.bindDepositAddress('dry-run-2', network, address);
@@ -869,6 +952,7 @@ export function renderReport(r: DryRunReport): string {
   if (r.envelope) {
     L.push(`envelope: ${r.envelope.contentType}, body ${r.envelope.bodyBytes} bytes (sha256 ${r.envelope.bodySha256}), metadata ${r.envelope.metadataBytes} bytes, control block v0x${r.envelope.controlBlockVersion?.toString(16)}`);
     L.push(`leaf + internal key rebuild commit output 0: ${r.envelope.rebuildsCommitOutput}`);
+    L.push(`reveal signature: ${r.envelope.signature.detail}; metadata didDocument.id: ${r.envelope.metadataDidDocumentId ?? 'n/a'}`);
   }
   h('Where the sat lands');
   L.push(`identity input: ${r.commit?.inputs[0]?.outpoint ?? 'n/a'}; its first sat per the sat index: ${r.satoshi ?? 'n/a'}`);
