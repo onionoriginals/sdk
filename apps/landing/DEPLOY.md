@@ -46,7 +46,7 @@ these is declared with `preserve()` (keep the live value) or omitted on purpose:
 | `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
 | `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
 | Volume size and region | Existing volume state the repo cannot see. Omitted so the plan does not propose resizing or relocating `builder-volume`. |
-| The Railway project name | The file guesses `originals`; the live name is only visible via `railway status`. If the plan shows a project rename, the name in `railway.ts` is wrong — fix it, do not apply. |
+| The Railway project name | The file names `Onion / Originals` (the live project name). Confirm with `railway status`; if the plan shows a project rename, the name in `railway.ts` is wrong — fix it, do not apply. |
 | Scheduled volume backup | Dashboard-only, opt-in, no published SLA. Record it in the "Volume backup log" at the bottom of this file — the only durable evidence it happened. |
 
 **Delete the stray `WEBVH_DOMAIN` dashboard variable.** The `builder` service
@@ -61,6 +61,15 @@ live setting: `railway variables --service builder --unset WEBVH_DOMAIN`.
 You need the Railway CLI, logged in and linked to the project
 (`railway link`). None of this is checked in CI — the CLI is the only thing
 that reconciles the file against live state.
+
+**`railway config apply` is a required step, not optional.** Railway reads the
+old `railway.json` automatically on every deploy, but it does **not** read
+`.railway/railway.ts` on push — IaC is applied only through the CLI. Removing
+`railway.json` therefore leaves the service with no config-as-code build or
+start command until you apply the new file (this is why a PR preview built from
+this branch fails to build: it has no build command). Apply the file to the
+target environment and confirm a deploy succeeds; do not merge the
+`railway.json` removal to production without applying in the same change.
 
 ```bash
 railway config plan     # review the diff; it must propose NO unexpected delete or rename

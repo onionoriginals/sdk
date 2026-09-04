@@ -68,9 +68,9 @@ export default defineRailway(() => {
   });
 
   // The project name must match the live Railway project or apply proposes a
-  // rename. This repo cannot read it; confirm with `railway status` and correct
-  // it if the plan shows a rename. See DEPLOY.md ("Not verifiable from here").
-  return project("originals", {
+  // rename. Confirm with `railway status`; if the plan shows a rename, correct
+  // it here. See DEPLOY.md ("What stays dashboard-only").
+  return project("Onion / Originals", {
     resources: [builder, builderVolume],
   });
 });
