@@ -17,6 +17,7 @@
     "verify:browser": "node scripts/check-browser-safety.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",
+    "typecheck:railway": "tsc -p .railway/tsconfig.json",
     "test:coverage": "turbo run test:coverage --filter='./packages/*'",
     "test:ci": "turbo run test:ci --filter='./packages/*'",
     "test:security": "turbo run test:security --filter='./packages/*'",

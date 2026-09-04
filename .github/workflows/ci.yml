@@ -26,6 +26,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Typecheck Railway IaC
+        run: bun run typecheck:railway
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
