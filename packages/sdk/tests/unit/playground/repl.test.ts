@@ -98,15 +98,21 @@ describe('Playground REPL', () => {
   // (did:cel Phase 4·5/5); did:cel genesis is created via `create` (covered above).
 
   test('publishes an asset to web', async () => {
-    const output = await runRepl(['create', 'publish a1', 'exit']);
+    const output = await runRepl(['create', 'publish a1 localhost', 'exit']);
     expect(output).toContain('Published "a1" to web');
     expect(output).toContain('Layer:  did:webvh');
     expect(output).toContain('Domain: localhost');
   });
 
   test('publish shows error for missing asset', async () => {
-    const output = await runRepl(['publish a99', 'exit']);
+    const output = await runRepl(['publish a99 localhost', 'exit']);
     expect(output).toContain('Asset "a99" not found');
+  });
+
+  test('publish refuses without a domain instead of guessing one', async () => {
+    const output = await runRepl(['create', 'publish a1', 'exit']);
+    expect(output).toContain('Usage: publish <id> <domain>');
+    expect(output).not.toContain('Published "a1"');
   });
 
   test('publish shows usage without arguments', async () => {
@@ -115,7 +121,7 @@ describe('Playground REPL', () => {
   });
 
   test('inscribes an asset on Bitcoin', async () => {
-    const output = await runRepl(['create', 'publish a1', 'inscribe a1', 'exit']);
+    const output = await runRepl(['create', 'publish a1 localhost', 'inscribe a1', 'exit']);
     expect(output).toContain('Inscribed "a1" on Bitcoin (regtest)');
     expect(output).toContain('Layer:  did:btco');
     expect(output).toContain('TX:');
@@ -125,7 +131,7 @@ describe('Playground REPL', () => {
   test('full lifecycle: create → publish → inscribe → inspect', async () => {
     const output = await runRepl([
       'create LifecycleTest',
-      'publish a1',
+      'publish a1 localhost',
       'inscribe a1',
       'inspect a1',
       'exit',
