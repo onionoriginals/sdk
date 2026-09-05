@@ -1,6 +1,6 @@
 {
   "name": "@originals/auth",
-  "version": "3.0.0-next.0",
+  "version": "3.0.0-next.1",
   "description": "Turnkey-based authentication for the Originals Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -61,7 +61,7 @@
   "dependencies": {
     "@turnkey/crypto": "^2.10.0",
     "@turnkey/sdk-server": "^7.0.0",
-    "@originals/sdk": "^3.0.0-next.0",
+    "@originals/sdk": "^3.0.0-next.2",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
     "@noble/ed25519": "^3.1.0"
