@@ -1,5 +1,5 @@
 import { DIDDocument, OriginalsConfig, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
-import { getNetworkDomain, DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH } from '../types/network.js';
+import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { BtcoDidResolver } from './BtcoDidResolver.js';
 import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
 import { createBtcoDidDocument } from './createBtcoDidDocument.js';
@@ -93,6 +93,25 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
   return Array.from(byKey.values());
 }
 
+/**
+ * Resolve the caller-supplied did:webvh domain, or throw. The SDK no longer
+ * guesses one: #520 decided the *.originals.build networks are never stood up,
+ * and a did:webvh domain is permanent once published — so an omitted domain
+ * must fail loudly rather than mint a DID at a host nobody serves (#531). The
+ * configured webvhNetwork tier deliberately does NOT supply a default here.
+ */
+function requireWebVHDomain(domain: string | undefined): string {
+  if (typeof domain === 'string' && domain.trim().length > 0) {
+    return domain;
+  }
+  throw new StructuredError(
+    'WEBVH_DOMAIN_REQUIRED',
+    'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
+    '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
+    'networks are not served, and a did:webvh domain is permanent once published.'
+  );
+}
+
 export class DIDManager {
   private webvhManager?: WebVHManager;
   private readonly metrics?: MetricsCollector;
@@ -120,6 +139,10 @@ export class DIDManager {
    * renamed the document id to `did:webvh:{domain}:{slug}`, which no resolver
    * — including this SDK's own — could ever resolve; issue #245.)
    *
+   * `domain` is required: an omitted or empty domain throws
+   * WEBVH_DOMAIN_REQUIRED rather than defaulting to a *.originals.build host
+   * nobody serves (#531).
+   *
    * Returns the FULL migration result — not just the DID document. The signed
    * `log` must be hosted (did.jsonl) for the DID to resolve, and the returned
    * `keyPair` (generated unless a keyPair or externalSigner was supplied via
@@ -139,13 +162,13 @@ export class DIDManager {
    */
   async migrateToDIDWebVH(
     didDoc: DIDDocument,
-    domain?: string,
+    domain: string,
     options?: MigrateToWebVHOptions
   ): Promise<MigrateToWebVHResult> {
     return this.track('did.migrateToDIDWebVH', async () => {
-    // Use provided domain or get default from configured network
-    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
-    const targetDomain = domain || getNetworkDomain(network);
+    // The caller must name the host; an omitted domain throws rather than
+    // defaulting to a *.originals.build network nobody serves (#531).
+    const targetDomain = requireWebVHDomain(domain);
 
     // Flexible domain validation - allow development domains with ports
     const normalized = String(targetDomain || '').trim().toLowerCase();
@@ -589,10 +612,13 @@ export class DIDManager {
   /**
    * Creates a new did:webvh DID with proper cryptographic signing.
    *
-   * Delegates to WebVHManager.createDIDWebVH — the single implementation —
-   * after resolving the default domain from the configured WebVH network.
+   * Delegates to WebVHManager.createDIDWebVH — the single implementation.
    * (This method used to carry a diverged duplicate of that logic which,
    * among other gaps, skipped path-segment validation.)
+   *
+   * `options.domain` is required: an omitted or empty domain throws
+   * WEBVH_DOMAIN_REQUIRED rather than defaulting to a *.originals.build host
+   * nobody serves (#531).
    *
    * Provide either `keyPair` OR `externalSigner`, never both (CLAUDE.md
    * gotcha #7). With an externalSigner the result carries NO `keyPair`.
@@ -601,9 +627,9 @@ export class DIDManager {
    * @returns The created DID, document, log, and key pair (if generated)
    */
   async createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult> {
-    // Use provided domain or get default from configured network
-    const network = this.config.webvhNetwork || DEFAULT_WEBVH_NETWORK;
-    const domain = options.domain || getNetworkDomain(network);
+    // The caller must name the host; an omitted domain throws rather than
+    // defaulting to a *.originals.build network nobody serves (#531).
+    const domain = requireWebVHDomain(options.domain);
     return this.getWebVHManager().createDIDWebVH({ ...options, domain });
   }
 
@@ -718,7 +744,7 @@ interface DIDLogEntry {
 type DIDLog = DIDLogEntry[];
 
 export interface CreateWebVHOptions {
-  domain?: string; // Optional - defaults to configured webvhNetwork domain
+  domain: string; // Required — the type enforces it and a blank value throws WEBVH_DOMAIN_REQUIRED at runtime (#531)
   keyPair?: KeyPair;
   paths?: string[];
   portable?: boolean;

@@ -392,7 +392,7 @@ See [LifecycleManager API → Creating Assets](#creating-assets).
 const result = await sdk.did.createDIDWebVH(options: CreateWebVHOptions): Promise<CreateWebVHResult>
 
 interface CreateWebVHOptions {
-  domain?: string;                    // Defaults to configured webvhNetwork domain
+  domain: string;                     // Required: no default host; a blank value throws WEBVH_DOMAIN_REQUIRED
   keyPair?: KeyPair;                  // Auto-generated if not provided
   paths?: string[];                   // URL path segments
   portable?: boolean;                 // Allow DID migration
@@ -418,9 +418,11 @@ interface CreateWebVHResult {
 // Migrate to did:webvh — returns the FULL result: the migrated document,
 // the signed DID log (host it as did.jsonl or the DID will not resolve),
 // and the generated update key pair (persist it for future rotations).
+// `domain` is required — omitting it throws WEBVH_DOMAIN_REQUIRED (there is no
+// default host; a did:webvh domain is permanent once published).
 const migration = await sdk.did.migrateToDIDWebVH(
   didDoc: DIDDocument,
-  domain?: string,
+  domain: string,
   options?: MigrateToWebVHOptions
 ): Promise<MigrateToWebVHResult>
 // MigrateToWebVHResult: { did, didDocument, log, keyPair, logPath?, previousDid }
@@ -1175,6 +1177,7 @@ interface ExternalVerifier {
 **Usage:**
 ```typescript
 const result = await sdk.did.createDIDWebVH({
+  domain: 'example.com',              // required — no default host (WEBVH_DOMAIN_REQUIRED)
   externalSigner: myPrivySigner,
   externalVerifier: myPrivyVerifier,
   verificationMethods: [{

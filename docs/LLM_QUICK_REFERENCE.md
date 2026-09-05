@@ -227,6 +227,7 @@ interface ExternalSigner {
 }
 
 await sdk.did.createDIDWebVH({
+  domain: 'example.com', // required — no default host (WEBVH_DOMAIN_REQUIRED)
   externalSigner: mySigner,
   verificationMethods: [{ type: 'Multikey', publicKeyMultibase: 'z6Mk...' }],
   updateKeys: ['did:key:z6Mk...']
@@ -238,6 +239,7 @@ await sdk.did.createDIDWebVH({
 | Code | Meaning |
 |------|---------|
 | `ORD_PROVIDER_REQUIRED` | Need `ordinalsProvider` in config |
+| `WEBVH_DOMAIN_REQUIRED` | Pass an explicit `domain` to `createDIDWebVH`/`migrateToDIDWebVH` (no default host) |
 | `INVALID_INPUT` | Bad parameter value |
 | `INVALID_ADDRESS` | Invalid Bitcoin address |
 | `INVALID_SATOSHI` | Bad satoshi identifier |

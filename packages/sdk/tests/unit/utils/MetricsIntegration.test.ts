@@ -101,7 +101,7 @@ describe('Metrics Integration', () => {
 
     test('should track migrateToDIDWebVH operation', async () => {
       const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-webvh' };
-      const migrated = await didManager.migrateToDIDWebVH(sourceDoc);
+      const migrated = await didManager.migrateToDIDWebVH(sourceDoc, 'example.com');
       expect(migrated.didDocument.id).toContain('did:webvh:');
 
       const opMetrics = metrics.getOperationMetrics('did.migrateToDIDWebVH');
@@ -190,7 +190,7 @@ describe('Metrics Integration', () => {
         contentType: 'application/javascript',
         hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
       }]);
-      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-agg' });
+      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-agg' }, 'example.com');
 
       expect(asset).toBeDefined();
 
@@ -224,7 +224,7 @@ describe('Metrics Integration', () => {
       }]);
       // createAsset no longer routes through DIDManager; exercise a DIDManager
       // op directly so the multi-manager Prometheus assertion holds.
-      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-prom' });
+      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-prom' }, 'example.com');
 
       const prometheus = sdk.metrics.export('prometheus');
 

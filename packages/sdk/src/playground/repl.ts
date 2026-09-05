@@ -42,7 +42,7 @@ const HELP = `
 Commands:
 
   create [name]         Create a new asset (did:cel genesis layer)
-  publish <id> [domain] Publish asset to web (did:webvh layer)
+  publish <id> <domain> Publish asset to web (did:webvh layer) at that host
   inscribe <id>         Inscribe asset on Bitcoin (did:btco layer)
   resolve <did>         Resolve a DID to its document
   assets                List all assets in this session
@@ -83,13 +83,15 @@ async function handleCreate(state: SessionState, args: string[]): Promise<void> 
   console.log(`  Alias:  ${alias}`);
   console.log(`  DID:    ${asset.id}`);
   console.log(`  Layer:  ${asset.currentLayer}`);
-  console.log(`\n  Use "publish ${alias}" to publish to web.\n`);
+  console.log(`\n  Use "publish ${alias} <domain>" to publish to web.\n`);
 }
 
 async function handlePublish(state: SessionState, args: string[]): Promise<void> {
   const [alias, domain] = args;
-  if (!alias) {
-    console.log('  Usage: publish <id> [domain]');
+  // A did:webvh domain is permanent once minted, so the SDK no longer guesses
+  // one (#531) and neither does this REPL: name the host you will serve.
+  if (!alias || !domain) {
+    console.log('  Usage: publish <id> <domain>   (e.g. publish a1 localhost)');
     return;
   }
 
@@ -104,7 +106,7 @@ async function handlePublish(state: SessionState, args: string[]): Promise<void>
     return;
   }
 
-  const targetDomain = domain || 'magby.originals.build';
+  const targetDomain = domain;
   await state.sdk.lifecycle.publishToWeb(asset, targetDomain);
 
   console.log(`\n  Published "${alias}" to web`);
