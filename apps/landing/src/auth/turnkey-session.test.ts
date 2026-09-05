@@ -21,6 +21,8 @@ import {
   revokeSessionKey,
   restoreDecision,
   decodeVerificationToken,
+  BoundKeyMismatchError,
+  isBoundKeyMismatch,
   type SigningSessionMeta,
   type SessionKeySigner,
   type TurnkeyRevocationApi,
@@ -382,6 +384,113 @@ describe('U1: STAMP_LOGIN authenticates with Turnkey\u2019s attested stamp', () 
         })) as unknown as typeof fetch,
       })
     ).rejects.toThrow(/did not complete/);
+  });
+});
+
+/**
+ * #494 — the verification token comes back through OUR server. Its `public_key`
+ * claim used to be taken verbatim as the session public key, so a server (or
+ * an edge before TLS terminates) that drove verify-otp with its own key could
+ * have that key installed as this browser's 12-hour session credential. The
+ * browser holds the ground truth and must compare.
+ */
+describe('#494: the verification token must be bound to the key THIS browser holds', () => {
+  const browserKey = '02'.padEnd(66, 'b');
+  const foreignKey = '03'.padEnd(66, 'f');
+
+  function signer(publicKeyHex: string): SessionKeySigner & { signed: string[] } {
+    const signed: string[] = [];
+    return {
+      publicKeyHex,
+      signed,
+      async signDer(payload: string) {
+        signed.push(payload);
+        return '3044' + 'cd'.repeat(68);
+      },
+    };
+  }
+
+  function turnkey() {
+    const calls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          activity: { status: 'ACTIVITY_STATUS_COMPLETED', result: { stampLoginResult: { session: 's' } } },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return { fetchFn, calls };
+  }
+
+  test('a token bound to a foreign key is refused before anything is signed or sent to Turnkey', async () => {
+    const key = signer(browserKey);
+    const { fetchFn, calls } = turnkey();
+    await expect(
+      stampLoginToSession({
+        subOrgId: 'sub-1',
+        verificationToken: fakeVerificationToken({ id: 'tok', public_key: foreignKey }),
+        signer: key,
+        fetchFn,
+      })
+    ).rejects.toThrow('Verification token is bound to a key this browser does not hold');
+    // Fail closed means no signature over the login body and no request:
+    // the attacker's token never gets a stamp from this browser's key.
+    expect(key.signed).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  test('the refusal is a named error the caller can tell apart from a Turnkey outage', async () => {
+    let caught: unknown;
+    try {
+      await stampLoginToSession({
+        subOrgId: 'sub-1',
+        verificationToken: fakeVerificationToken({ id: 'tok', public_key: foreignKey }),
+        signer: signer(browserKey),
+        fetchFn: turnkey().fetchFn,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(BoundKeyMismatchError);
+    expect(isBoundKeyMismatch(caught)).toBe(true);
+    expect(isBoundKeyMismatch(new Error('STAMP_LOGIN failed (503): no message'))).toBe(false);
+  });
+
+  test('a token bound to this browser’s key proceeds, and the session key IS the browser’s key', async () => {
+    const key = signer(browserKey);
+    const { fetchFn, calls } = turnkey();
+    const { meta } = await stampLoginToSession({
+      subOrgId: 'sub-1',
+      verificationToken: fakeVerificationToken({ id: 'tok', public_key: browserKey }),
+      signer: key,
+      fetchFn,
+    });
+    expect(calls).toHaveLength(1);
+    expect(meta.publicKey).toBe(browserKey);
+    expect(JSON.parse(key.signed[0]!).parameters.publicKey).toBe(browserKey);
+  });
+
+  // The ticket asks that an absent bound key fall through to the browser's
+  // key. A token with no `public_key` cannot attest to anything under the
+  // P256_VERIFICATION_TOKEN scheme, so the decoder's existing rejection is the
+  // safer answer: refuse, and do it before a byte reaches Turnkey.
+  test('a token with no bound key is refused rather than silently treated as the browser’s', async () => {
+    const key = signer(browserKey);
+    const { fetchFn, calls } = turnkey();
+    const b64 = btoa(JSON.stringify({ id: 'tok' })).replace(/=+$/, '');
+    await expect(
+      stampLoginToSession({
+        subOrgId: 'sub-1',
+        verificationToken: `eyJhbGciOiJFUzI1NiJ9.${b64}.c2ln`,
+        signer: key,
+        fetchFn,
+      })
+    ).rejects.toThrow(/missing id or public_key/);
+    expect(key.signed).toEqual([]);
+    expect(calls).toEqual([]);
   });
 });
 

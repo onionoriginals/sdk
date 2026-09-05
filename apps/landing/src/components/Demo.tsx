@@ -704,7 +704,7 @@ interface CommittedSource {
 
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
+  const { isAuthenticated, bitcoin, user, signing, signingNotice, reauth, beginReauth } = useAuth();
   const network = btcNetwork();
   // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
   // engine derives its provider from this same value, so an enabled money
@@ -1553,7 +1553,8 @@ export function Demo() {
                       <div className="demo-deposit-head">
                         <strong>{demo.session.unavailableHeading}</strong>
                       </div>
-                      <p className="demo-error" role="alert">{signingGateMessage(gate, network, signing)}</p>
+                      {/* A refusal made on the user's behalf (#494) says so; anything else is on us. */}
+                      <p className="demo-error" role="alert">{signingNotice ?? signingGateMessage(gate, network, signing)}</p>
                       <p className="demo-inscribe-note">{demo.session.preserved}</p>
                     </div>
                   ) : gate === 'reauth' ? (

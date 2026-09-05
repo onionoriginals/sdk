@@ -153,6 +153,23 @@ export function decodeVerificationToken(token: string): { id: string; public_key
 }
 
 /**
+ * The verification token names a key this browser does not hold (#494): a
+ * dishonest relay could otherwise install its own key as the session credential.
+ * Its own class so the UI can tell it from an outage and say what happened.
+ */
+export class BoundKeyMismatchError extends Error {
+  constructor() {
+    super('Verification token is bound to a key this browser does not hold');
+    this.name = 'BoundKeyMismatchError';
+  }
+}
+
+/** `instanceof` survives the dynamic chunk import; the name check covers a duplicated module. */
+export function isBoundKeyMismatch(err: unknown): err is BoundKeyMismatchError {
+  return err instanceof BoundKeyMismatchError || (err as Error | null)?.name === 'BoundKeyMismatchError';
+}
+
+/**
  * Turnkey's ATTESTED stamp: how a request is authenticated for an org that
  * holds no credential yet.
  *
@@ -263,10 +280,9 @@ export async function stampLoginToSession(deps: {
   apiBaseUrl?: string;
 }): Promise<{ session: string; meta: SigningSessionMeta }> {
   const { public_key: boundPublicKey } = decodeVerificationToken(deps.verificationToken);
-  // The token's bound key IS the browser's key (verify-otp bound it to exactly
-  // that), and it is the key the stamp attests to. Prefer the token's copy:
-  // Turnkey checks the stamp against the token, not against our belief.
-  const publicKey = boundPublicKey || deps.signer.publicKeyHex;
+  // The browser's key is the ground truth; the token came back through our server (#494).
+  if (boundPublicKey !== deps.signer.publicKeyHex) throw new BoundKeyMismatchError();
+  const publicKey = deps.signer.publicKeyHex;
   const expirationSeconds = deps.expirationSeconds ?? SESSION_EXPIRATION_SECONDS;
   const requestedAt = (deps.now ?? Date.now)();
 
