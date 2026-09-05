@@ -18,7 +18,7 @@
  * push, skip and failure goes to the money log: the whole pass must be
  * reconstructable afterwards from that log alone.
  */
-import { isAlreadyKnownTxError } from './bitcoin';
+import { isAlreadyKnownTxError, rotate } from './bitcoin';
 import type { InscriptionsStore } from './inscriptions-store';
 import type { MoneyEvent, MoneyFields } from './money-log';
 
@@ -61,6 +61,9 @@ export function createInscriptionCompletionSweep(
   deps: CompletionSweepDeps
 ): () => Promise<CompletionSweepResult> {
   const max = deps.maxPerPass ?? 25;
+  // Same rotating cursor as the deposit sweep: every pending record is examined
+  // within ceil(pending / max) passes, however many ahead of it stay unconfirmed.
+  let cursor = 0;
 
   return async () => {
     const result: CompletionSweepResult = {
@@ -77,8 +80,14 @@ export function createInscriptionCompletionSweep(
       deps.moneyLog('inscription_sweep_unreadable', { subs: unreadable.join(',') });
     }
 
-    for (const { subOrgId, record } of pending) {
-      if (result.examined >= max) break;
+    // Stable order first: the store walks a directory, whose order is not.
+    pending.sort((a, b) =>
+      (a.subOrgId + a.record.commitTxId).localeCompare(b.subOrgId + b.record.commitTxId)
+    );
+    const pass = rotate(pending, cursor).slice(0, max);
+    cursor += pass.length;
+
+    for (const { subOrgId, record } of pass) {
       result.examined++;
 
       // The reveal spends the commit's output 0, so pushing before the commit
@@ -100,7 +109,13 @@ export function createInscriptionCompletionSweep(
       }
 
       if (!confirmed) {
+        // A deliberate no-op is still a decision about someone's money.
         result.waiting++;
+        deps.moneyLog('inscription_sweep_waiting', {
+          sub: subOrgId,
+          commitTxId: record.commitTxId,
+          revealTxId: record.revealTxId,
+        });
         continue;
       }
 

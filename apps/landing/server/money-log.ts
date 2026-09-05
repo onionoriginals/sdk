@@ -42,6 +42,8 @@ export type MoneyEvent =
   | 'inscription_sweep_completed'
   /** The server tried to finish one and the network refused the push. */
   | 'inscription_sweep_push_failed'
+  /** The commit has not confirmed yet, so the held reveal was deliberately not pushed. */
+  | 'inscription_sweep_waiting'
   /** The commit status could not be read, so nothing was pushed. */
   | 'inscription_sweep_lookup_failed'
   /** Records files that could not be parsed — signed reveals unreachable. */

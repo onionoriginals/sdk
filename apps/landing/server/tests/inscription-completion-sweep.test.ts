@@ -25,6 +25,7 @@ function record(over: Partial<InscriptionRecord> = {}): InscriptionRecord {
     status: 'commit_broadcast',
     createdAt: '2026-09-02T07:00:00.000Z',
     updatedAt: '2026-09-02T07:00:00.000Z',
+    ...over,
   } as unknown as InscriptionRecord;
 }
 
@@ -90,6 +91,25 @@ describe('the inscription completion sweep', () => {
     expect(r.completed).toBe(0);
   });
 
+  test('the deliberate skip of an unconfirmed commit is on the money log, per record', async () => {
+    const pending = [
+      { subOrgId: 'sub-a', record: record({ commitTxId: 'a'.repeat(64), revealTxId: '1'.repeat(64) }) },
+      { subOrgId: 'sub-b', record: record({ commitTxId: 'b'.repeat(64), revealTxId: '2'.repeat(64) }) },
+    ];
+    const { sweep, money } = harness({ pending, confirmed: false });
+    await sweep();
+
+    // The pass must be reconstructable from the log alone: a record the server
+    // looked at and chose not to touch is a decision, not an absence of one.
+    const waiting = money.filter((m) => m.event === 'inscription_sweep_waiting');
+    expect(waiting.map((m) => m.fields)).toEqual([
+      { sub: 'sub-a', commitTxId: 'a'.repeat(64), revealTxId: '1'.repeat(64) },
+      { sub: 'sub-b', commitTxId: 'b'.repeat(64), revealTxId: '2'.repeat(64) },
+    ]);
+    // Identifiers only: never the signed reveal itself.
+    for (const m of waiting) expect(JSON.stringify(m.fields)).not.toContain(REVEAL_HEX);
+  });
+
   test('an already-known transaction counts as done: the client poll may have raced us', async () => {
     const { sweep, statuses, money } = harness({
       confirmed: true,
@@ -144,6 +164,31 @@ describe('the inscription completion sweep', () => {
 
     expect(r.examined).toBe(3);
     expect(pushed.length).toBe(3);
+  });
+
+  test('a backlog larger than one pass cannot starve a later confirmed commit', async () => {
+    // Five records, cap of 2. The first four never confirm; only the LAST does.
+    // A fixed prefix would re-examine records 0 and 1 every hour and never
+    // reach it: that creator's reveal is signed, held, and never broadcast.
+    const pending = Array.from({ length: 5 }, (_, i) => ({
+      subOrgId: `sub-${i}`,
+      record: record({ commitTxId: String(i).padStart(64, '0') }),
+    }));
+    const confirmedCommit = pending[4].record.commitTxId;
+    const { sweep, pushed, statuses } = harness({
+      pending,
+      confirmed: (txid) => txid === confirmedCommit,
+      maxPerPass: 2,
+    });
+
+    // ceil(5 / 2) = 3 passes is the bound: every record gets examined once.
+    for (let pass = 0; pass < 3; pass++) {
+      const r = await sweep();
+      expect(r.examined).toBe(2);
+    }
+
+    expect(pushed).toEqual([REVEAL_HEX]);
+    expect(statuses).toEqual([{ sub: 'sub-4', commitTxId: confirmedCommit, status: 'reveal_broadcast' }]);
   });
 
   test('an unreadable records file is reported, never swallowed', async () => {

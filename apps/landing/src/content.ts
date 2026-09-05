@@ -995,6 +995,7 @@ export const legal = {
           'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance',
           'inscription_sweep_completed — we finished your inscription for you: your commit had confirmed, so we broadcast the reveal we already held, with nobody watching',
           'inscription_sweep_push_failed — that broadcast was refused by the network, and your inscription is still unfinished',
+          'inscription_sweep_waiting — your commit had not confirmed yet, so we held the reveal and pushed nothing this hour',
           'inscription_sweep_lookup_failed — we could not read whether your commit had confirmed, so we pushed nothing',
           'inscription_sweep_unreadable — an account\u2019s inscription file could not be read, which is where a signed reveal lives'
         ],
