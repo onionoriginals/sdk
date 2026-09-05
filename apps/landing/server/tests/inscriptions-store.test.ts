@@ -295,3 +295,54 @@ describe('deposit bindings and the cross-user reader', () => {
     expect(out.unreadable).toEqual(['sub-1']);
   });
 });
+
+/**
+ * The cross-user walk behind the completion sweep (#545). It returns the reveal
+ * HEX, not a pointer — the caller broadcasts it — so what it includes and what
+ * it withholds is a money decision, not a convenience.
+ */
+describe('pendingRevealBroadcasts', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'is-pending-'));
+
+  test('returns a commit_broadcast record that still holds its reveal', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+
+    const { pending, unreadable } = store.pendingRevealBroadcasts();
+    expect(unreadable).toEqual([]);
+    expect(pending.length).toBe(1);
+    expect(pending[0].subOrgId).toBe('sub-1');
+    expect(pending[0].record.revealTxHex).toBe('02bb');
+  });
+
+  test('skips a SUPERSEDED record: a live rebuilt pair owns its outpoint', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+    store.supersede('sub-1', 'c'.repeat(64));
+    // Pushing a superseded pair's reveal would race the pair that replaced it.
+    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+  });
+
+  test('skips every status but commit_broadcast', () => {
+    for (const status of ['signed', 'reveal_broadcast', 'confirmed']) {
+      const store = createInscriptionsStore({ dataDir: dir() });
+      store.create('sub-1', rec({ status: status as never }));
+      expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+    }
+  });
+
+  test('skips a record with no reveal artifact — there is nothing to push', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast', revealTxHex: undefined }));
+    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+  });
+
+  test('walks every user, not just one', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+    store.create('sub-2', rec({ status: 'commit_broadcast', commitTxId: 'd'.repeat(64) }));
+
+    const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
+    expect(subs).toEqual(['sub-1', 'sub-2']);
+  });
+});

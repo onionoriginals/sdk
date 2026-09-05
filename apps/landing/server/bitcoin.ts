@@ -746,11 +746,6 @@ export function createBitcoinRoutes(deps: {
     }
     return c;
   }
-  function rotate<T>(arr: T[], cursor: number): T[] {
-    if (arr.length === 0) return arr;
-    const start = cursor % arr.length;
-    return [...arr.slice(start), ...arr.slice(0, start)];
-  }
 
   /** 429 when the per-user QuickNode-quota cap is hit, else null. */
   function quotaCapped(sub: string): Response | null {
@@ -1962,6 +1957,18 @@ export function positiveInt(value: unknown, fallback: number): number {
 }
 
 /**
+ * Start a stably ordered worklist at `cursor % length`. Advancing the cursor by
+ * however many items a pass consumed is what lets a bounded pass cover a
+ * backlog larger than itself over successive passes (both hourly sweeps and
+ * the list poll's reconciliation use this; one idiom, not three).
+ */
+export function rotate<T>(arr: T[], cursor: number): T[] {
+  if (arr.length === 0) return arr;
+  const start = cursor % arr.length;
+  return [...arr.slice(start), ...arr.slice(0, start)];
+}
+
+/**
  * The deposit-balance sweep (R29) — the only instrument that would ever tell
  * the operator a stranger's funds are sitting unspent at an address this app
  * issued. Nothing else in the system looks at a deposit address that no tab is
@@ -2035,8 +2042,7 @@ export function createDepositBalanceSweep(deps: {
     });
     // Stable order + rotating cursor: every candidate gets its turn.
     candidates.sort((a, b) => (a.subOrgId + a.address).localeCompare(b.subOrgId + b.address));
-    const start = candidates.length > 0 ? cursor % candidates.length : 0;
-    const pass = [...candidates.slice(start), ...candidates.slice(0, start)].slice(0, maxPerPass);
+    const pass = rotate(candidates, cursor).slice(0, maxPerPass);
     cursor += pass.length;
 
     let withBalance = 0;

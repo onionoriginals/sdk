@@ -37,7 +37,18 @@ export type MoneyEvent =
   /** Periodic per-address finding: a bound address still holds confirmed sats. */
   | 'deposit_balance_held'
   /** Periodic roll-up of the balance sweep, including the count that matters. */
-  | 'deposit_balance_sweep';
+  | 'deposit_balance_sweep'
+  /** The server finished an inscription itself: a confirmed commit's reveal
+   *  was broadcast with nobody watching (#545). */
+  | 'inscription_sweep_completed'
+  /** The server tried to finish one and the network refused the push. */
+  | 'inscription_sweep_push_failed'
+  /** The commit has not confirmed yet, so the held reveal was deliberately not pushed. */
+  | 'inscription_sweep_waiting'
+  /** The commit status could not be read, so nothing was pushed. */
+  | 'inscription_sweep_lookup_failed'
+  /** Records files that could not be parsed — signed reveals unreachable. */
+  | 'inscription_sweep_unreadable';
 
 export type MoneyFields = Record<string, string | number | boolean | undefined>;
 
