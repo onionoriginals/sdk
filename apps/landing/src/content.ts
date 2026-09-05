@@ -566,7 +566,7 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path and are hosted for keeps, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -716,7 +716,7 @@ export const originalDetail = {
       inscribe: {
         title: 'Inscribed',
         blurb:
-          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free.'
+          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free. The reveal inscription carries the whole signed log in its own metadata, so from here the Original’s provenance survives even this service; a log that stops at did:webvh lasts only as long as this service hosts it.'
       }
     },
     upcomingLabel: 'Up next',
