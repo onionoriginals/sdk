@@ -8,6 +8,38 @@ import {
 let host: ReturnType<typeof installCel3Host>;
 afterEach(() => host?.restore());
 
+for (const switchAt of ["before-publication", "during-publication", "during-account-record"] as const) {
+  test(`account change ${switchAt} stops recovery side effects and retains the signed wrapper`, async () => {
+    host = installCel3Host("sub-1");
+    globalThis.fetch = (async () => new Response("temporarily unavailable", { status: 503 })) as typeof fetch;
+    const { engine } = engineWithSigner("sub-1");
+    await engine.create("Retained Original", "Text", "exact bytes");
+    await expect(engine.publish()).rejects.toThrow(/incomplete/);
+    const [item] = localPublicationRecoveries("sub-1");
+    const retained = localStorage.getItem(item.key);
+    let current = true;
+    let writes = 0;
+    let records = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        writes++;
+        if (switchAt === "during-publication") current = false;
+      }
+      if (String(input) === "/api/originals" && init?.method === "POST") {
+        records++;
+        if (switchAt === "during-account-record") current = false;
+      }
+      return host.fetch(input, init);
+    }) as typeof fetch;
+    const outcome = recoverLocalPublication("sub-1", item.key, localStorage, () => current);
+    if (switchAt === "before-publication") current = false;
+    await expect(outcome).rejects.toThrow(/account is no longer active/);
+    expect(localStorage.getItem(item.key)).toBe(retained);
+    expect(records).toBe(switchAt === "during-account-record" ? 1 : 0);
+    if (switchAt === "before-publication") expect(writes).toBe(0);
+  });
+}
+
 test("a browser restart retries the same partially uploaded WebVH identity without custody", async () => {
   host = installCel3Host("sub-1");
   const originalFetch = host.fetch;

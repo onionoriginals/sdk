@@ -58,8 +58,9 @@ describe('editing an Original by its title', () => {
     expect(third.resource.version).toBe(3);
     expect(JSON.parse(third.metadata!.content).title).toBe('Moonrise');
 
-    // Genesis plus two edits, each edit touching artwork + metadata.
-    expect(third.celLog.filter((e) => e.type === 'update')).toHaveLength(4);
+    // Genesis plus two edits, each signing artwork, metadata and the asset name.
+    expect(third.celLog.filter((e) => e.type === 'update')).toHaveLength(6);
+    expect(third.provenance.name).toBe('Moonrise');
     expect(await engine.asset!.verify()).toBe(true);
   });
 

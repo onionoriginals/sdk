@@ -52,7 +52,11 @@ function resourceUrl(webvhDid: string, hashHex: string): string {
  */
 describe('revise a created asset', () => {
   let restore: () => void;
-  beforeEach(() => { restore = installHostFetch('demo.test'); });
+  beforeEach(() => {
+    (import.meta as unknown as { env: Record<string, string> }).env ??= {};
+    (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = 'demo.test';
+    restore = installHostFetch('demo.test');
+  });
   afterEach(() => restore());
 
   test('a title edit revises BOTH the artwork and the metadata that describes it', async () => {
@@ -67,7 +71,9 @@ describe('revise a created asset', () => {
     expect(updated.resource.content).toBe(SVG_V2);
     // metadata.json embeds the title AND the artwork hash, so it follows —
     // leaving it behind would have the asset describe bytes it no longer holds.
-    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update', 'update']);
+    expect(updated.celLog.map((e) => e.type)).toEqual(['create', 'update', 'update', 'update']);
+    expect(updated.provenance.name).toBe('Second Title');
+    expect(updated.celLog[3].data.name).toBe('Second Title');
     const meta = JSON.parse(updated.metadata!.content) as {
       title: string;
       created: string;
@@ -125,7 +131,7 @@ describe('revise a created asset', () => {
     const v3 = await engine.update('Three', 'Artwork', SVG_V3);
 
     expect(v3.resource.version).toBe(3);
-    const updates = v3.celLog.filter((e) => e.type === 'update' && (e.data.resources as Array<{ id: string }>)[0]?.id === 'artwork.svg');
+    const updates = v3.celLog.filter((e) => e.type === 'update' && (e.data.resources as Array<{ id: string }> | undefined)?.[0]?.id === 'artwork.svg');
     expect(updates).toHaveLength(2);
     expect((updates[1].data.resources as Array<{ previousDigestMultibase: string }>)[0].previousDigestMultibase).toBe(sha256HexToResourceMultibase(v2.resource.hash));
   });
@@ -171,6 +177,8 @@ describe('revise a created asset', () => {
     const asset = engine.asset!;
     const entry = await signEvent({ previousEvent: asset.state.head, operation: { type: 'migrate', data: { profile: 'originals/cel/3', from: asset.state.alias, to: 'did:btco:reg:123', layer: 'btco', migratedAt: new Date().toISOString() } } }, signer);
     engine.asset = new OriginalsAsset({ log: [...asset.celLog.log, entry] }, asset.serialize().resources);
+    expect(engine.snapshot().btcoDid).toBe('did:btco:reg:123');
+    expect(engine.snapshot().webvhDid).toBe(asset.state.alias);
     await expect(engine.update('Two', 'Artwork', SVG_V2)).rejects.toThrow(/on-chain/);
   });
 

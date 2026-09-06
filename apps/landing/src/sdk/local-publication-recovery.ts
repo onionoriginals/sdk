@@ -67,7 +67,13 @@ export async function recoverLocalPublication(
   account: string,
   key: string,
   storage: Storage = localStorage,
+  isCurrentAccount: () => boolean = () => true,
 ): Promise<string> {
+  const assertCurrentAccount = () => {
+    if (!isCurrentAccount())
+      throw new DOMException("The recovery account is no longer active.", "AbortError");
+  };
+  assertCurrentAccount();
   const item = localPublicationRecoveries(account, storage).find(
     (record) => record.key === key,
   );
@@ -80,6 +86,7 @@ export async function recoverLocalPublication(
   const { DurableHostingStorageAdapter } =
     await import("./durable-hosting-adapter");
   const { HttpOrdinalsProvider } = await import("./http-ordinals-provider");
+  assertCurrentAccount();
   const sdk = OriginalsSDK.create({
     storageAdapter: new DurableHostingStorageAdapter(),
     ...(item.kind === "bitcoin"
@@ -94,6 +101,7 @@ export async function recoverLocalPublication(
     item.kind === "web"
       ? await sdk.lifecycle.publishPreparedToWeb(prepared)
       : await sdk.lifecycle.publishPreparedToBitcoin(prepared);
+  assertCurrentAccount();
   const asset = published.asset;
   const did = asset.state.aliases.find((alias) =>
     alias.startsWith("did:webvh:"),
@@ -121,6 +129,7 @@ export async function recoverLocalPublication(
         : {}),
     }),
   });
+  assertCurrentAccount();
   if (!response.ok)
     throw new Error(
       "Publication retained. Your account record could not be saved; retry is safe.",

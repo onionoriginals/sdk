@@ -44,7 +44,8 @@ describe('revising an Original whose controller key is held outside the SDK', ()
     await engine.update('Second Title', 'Artwork', SVG('v2'));
 
     const events = engine.asset!.celLog.log;
-    expect(events.map((e) => e.event.operation.type)).toEqual(['create', 'update', 'update']);
+    expect(events.map((e) => e.event.operation.type)).toEqual(['create', 'update', 'update', 'update']);
+    expect(engine.asset!.state.name).toBe('Second Title');
     for (const e of events) {
       const proof = Array.isArray(e.proof) ? e.proof[0] : e.proof;
       expect(proof.verificationMethod.split('#')[0]).toBe(signer.controller);

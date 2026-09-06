@@ -370,6 +370,7 @@ export class DemoEngine {
       }
     }
 
+    if (asset.state.name !== title) await asset.update({ name: title }, signed);
     this.assetTitle = title;
     if (asset.state.layer === "webvh") await this.publish();
     return this.snapshot();
@@ -562,10 +563,12 @@ export class DemoEngine {
     if (!asset) throw new Error("No asset yet");
     const provenance = asset.state;
     const bindings = Object.fromEntries(
-      asset.state.aliases.map((alias) => [
-        alias.startsWith("did:webvh:") ? "did:webvh" : "did:btco",
-        alias,
-      ]),
+      asset.state.aliases
+        .filter((alias) => alias.startsWith("did:webvh:") || alias.startsWith("did:btco:"))
+        .map((alias) => [
+          alias.startsWith("did:webvh:") ? "did:webvh" : "did:btco",
+          alias,
+        ]),
     );
     const primaryId = asset.resources[0]?.id ?? "";
     const res = latestVersion(asset.resources, primaryId) ?? {

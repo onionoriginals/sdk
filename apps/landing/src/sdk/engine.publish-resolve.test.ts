@@ -65,6 +65,7 @@ describe('publish → resolve roundtrip', () => {
     expect(state.webvhDid).toContain(':published:anonymous:');
     expect(state.layer).toBe('did:webvh');
     expect(state.webvhDid).toContain(`:${host}:`);
+    expect(state.btcoDid).toBeUndefined();
     expect(state.webvhLogUrl).toBe(expectedUrl);
     expect(state.webvhResolved).toBe(true);
 
@@ -85,8 +86,17 @@ describe('publish → resolve roundtrip', () => {
     expect(state.webvhDid).toBe(published.webvhDid);
     expect(state.resource.version).toBe(2);
     expect(state.resource.content).toEqual(next);
+    expect(state.provenance.name).toBe('New PNG');
+    expect(cold.asset!.state.name).toBe('New PNG');
     expect(cold.asset!.resources.filter((r) => r.id === 'mine.png').map((r) => r.content)).toEqual([png, next]);
     expect(state.webvhResolved).toBe(true);
+  });
+
+  test('a local genesis has no hosted or Bitcoin binding', async () => {
+    const state = await new DemoEngine().create('Local', 'Artwork', '<svg/>');
+    expect(state.did).toStartWith('did:cel:');
+    expect(state.webvhDid).toBeUndefined();
+    expect(state.btcoDid).toBeUndefined();
   });
 
 });

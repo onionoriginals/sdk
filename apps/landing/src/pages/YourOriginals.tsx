@@ -7,7 +7,7 @@ import { localPublicationRecoveries, recoverLocalPublication, type LocalPublicat
  * provenance — CEL timeline, signed DID log, sealed resources — is laid out
  * and re-verified in the browser. Empty state links back to the demo.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, originalPath } from '../router';
@@ -237,7 +237,18 @@ async function resolveLive(did: string): Promise<boolean> {
 const isImageType = (contentType: string | undefined) => !!contentType?.startsWith('image/');
 
 export function YourOriginals() {
+  const { isAuthenticated, user } = useAuth();
+  // Account changes discard the old account's rows, notices and pending actions.
+  return <AccountOriginals key={isAuthenticated ? user?.subOrgId : 'signed-out'} />;
+}
+
+function AccountOriginals() {
   const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
+  const recoveryGeneration = useRef(0);
+  useLayoutEffect(() => {
+    recoveryGeneration.current++;
+    return () => { recoveryGeneration.current++; };
+  }, [isAuthenticated, user?.subOrgId]);
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
   const [localRecovery, setLocalRecovery] = useState<LocalPublicationRecovery[]>([]);
   const [recoveringLocal, setRecoveringLocal] = useState<string | null>(null);
@@ -361,18 +372,24 @@ export function YourOriginals() {
   };
 
   const recoverLocal = async (item: LocalPublicationRecovery) => {
-    if (!user?.subOrgId || recoveringLocal) return;
+    if (!isAuthenticated || !user?.subOrgId || recoveringLocal) return;
+    const account = user.subOrgId;
+    const generation = recoveryGeneration.current;
+    const isCurrentAccount = () => generation === recoveryGeneration.current;
     setRecoveringLocal(item.key);
     setLocalRecoveryNote(null);
     try {
-      setLocalRecoveryNote(await recoverLocalPublication(user.subOrgId, item.key));
+      const note = await recoverLocalPublication(account, item.key, localStorage, isCurrentAccount);
+      if (!isCurrentAccount()) return;
+      setLocalRecoveryNote(note);
       const [rows, records] = await Promise.all([fetchOriginals(), fetchInscriptions()]);
+      if (!isCurrentAccount()) return;
       setOriginals(withLiveInscriptionStatus(rows, records.records));
       setUnfinished(unfinishedInscriptions(records.records));
       const known = new Set(records.records.map((record) => record.commitTxId));
-      setLocalRecovery(localPublicationRecoveries(user.subOrgId).filter((record) => !record.commitTxId || !known.has(record.commitTxId)));
-    } catch (error) { setLocalRecoveryNote((error as Error).message); }
-    finally { setRecoveringLocal(null); }
+      setLocalRecovery(localPublicationRecoveries(account).filter((record) => !record.commitTxId || !known.has(record.commitTxId)));
+    } catch (error) { if (isCurrentAccount()) setLocalRecoveryNote((error as Error).message); }
+    finally { if (isCurrentAccount()) setRecoveringLocal(null); }
   };
 
   const view = originalsView({ authLoading, authenticated: isAuthenticated, loaded, originals });
