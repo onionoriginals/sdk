@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-09-06T16:46:33.014Z",
+  "recordedAt": "2026-09-06T16:48:17.973Z",
   "buildHashes": {
     "index.html": "3c904c0800a4d2f2eb5325c8164fbb31dd03d441abb9ff3574f886fc7e15e9a4",
     "assets/Multikey-CKpaij5G.js": "a71d05d433dfbaf9948d87527d50e0b06c33967f295292dae918a4771ce6d138",
@@ -37,8 +37,8 @@
   "url": "https://regtest.localhost:3449/",
   "published": {
     "state": {
-      "did": "did:cel:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
-      "webvhDid": "did:webvh:QmWrLQJJ7ReFUxZfE3dHfSrG8fssHynMZvJf1UaKNkiZEo:regtest.localhost%3A3449:published:anonymous:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
+      "did": "did:cel:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
+      "webvhDid": "did:webvh:QmTbPr85nh7F6ZTmAZ4k9YpKHHeQBJ5u36w5F6b7FcekRm:regtest.localhost%3A3449:published:anonymous:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
       "layer": "did:webvh",
       "resolved": true,
       "bytes": [
@@ -121,9 +121,9 @@
               "type": "create",
               "data": {
                 "profile": "originals/cel/3",
-                "controller": "did:key:z6MkeopCfTWNLd2aZgdn6Yf2QDV16BT3hSFFXvJJTTUWj6qF",
-                "createdAt": "2026-09-06T16:46:29.420Z",
-                "nonce": "jYHk5w_bRr1Y86eBfQL3jg",
+                "controller": "did:key:z6MknEC8XkoRZEYd1XEkLekUBKPuJJLpL2VE1J4snytaNxjq",
+                "createdAt": "2026-09-06T16:48:14.339Z",
+                "nonce": "YewEYvkb83JPv_378xGKXQ",
                 "resources": [
                   {
                     "id": "proof.png",
@@ -133,7 +133,7 @@
                   {
                     "id": "metadata.json",
                     "mediaType": "application/json",
-                    "digestMultibase": "uEiD8d19FVv1GrRxjUsEf2eS2H1sRgJdrf-Mcu9Jpfs-04A"
+                    "digestMultibase": "uEiCWq_bJ-69x8B_5ejAOlqpw3prOe9Q7MI88sUmXQHE4Ig"
                   }
                 ],
                 "name": "Browser PNG Proof"
@@ -144,24 +144,24 @@
             {
               "type": "DataIntegrityProof",
               "cryptosuite": "eddsa-jcs-2022",
-              "verificationMethod": "did:key:z6MkeopCfTWNLd2aZgdn6Yf2QDV16BT3hSFFXvJJTTUWj6qF#z6MkeopCfTWNLd2aZgdn6Yf2QDV16BT3hSFFXvJJTTUWj6qF",
+              "verificationMethod": "did:key:z6MknEC8XkoRZEYd1XEkLekUBKPuJJLpL2VE1J4snytaNxjq#z6MknEC8XkoRZEYd1XEkLekUBKPuJJLpL2VE1J4snytaNxjq",
               "proofPurpose": "assertionMethod",
-              "created": "2026-09-06T16:46:29.422Z",
-              "proofValue": "zJJZet5bk4A7PkTWcZ3vuWrUaGV3n4Yk5maM3Kzcyn6wwCRuKKg1Z4Zug9XraEysjyBUR2nQKi7QupajCZt9GVSx"
+              "created": "2026-09-06T16:48:14.340Z",
+              "proofValue": "z2xCezTSiSRBYFggxVg5YRGjo8njKjyUHJHwwvqhB2pFq5keZYs2PMfLwL7n9vJUo5nBwt9bzA1GLRTGvr1ZMpnGq"
             }
           ]
         },
         {
           "event": {
-            "previousEvent": "uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
+            "previousEvent": "uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
             "operation": {
               "type": "migrate",
               "data": {
                 "profile": "originals/cel/3",
-                "from": "did:cel:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
-                "to": "did:webvh:QmWrLQJJ7ReFUxZfE3dHfSrG8fssHynMZvJf1UaKNkiZEo:regtest.localhost%3A3449:published:anonymous:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
+                "from": "did:cel:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
+                "to": "did:webvh:QmTbPr85nh7F6ZTmAZ4k9YpKHHeQBJ5u36w5F6b7FcekRm:regtest.localhost%3A3449:published:anonymous:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
                 "layer": "webvh",
-                "migratedAt": "2026-09-06T16:46:31.471Z"
+                "migratedAt": "2026-09-06T16:48:15.870Z"
               }
             }
           },
@@ -169,10 +169,10 @@
             {
               "type": "DataIntegrityProof",
               "cryptosuite": "eddsa-jcs-2022",
-              "verificationMethod": "did:key:z6MkeopCfTWNLd2aZgdn6Yf2QDV16BT3hSFFXvJJTTUWj6qF#z6MkeopCfTWNLd2aZgdn6Yf2QDV16BT3hSFFXvJJTTUWj6qF",
+              "verificationMethod": "did:key:z6MknEC8XkoRZEYd1XEkLekUBKPuJJLpL2VE1J4snytaNxjq#z6MknEC8XkoRZEYd1XEkLekUBKPuJJLpL2VE1J4snytaNxjq",
               "proofPurpose": "assertionMethod",
-              "created": "2026-09-06T16:46:31.472Z",
-              "proofValue": "zMWDYenhwcDKFTRXxTmdSVLwEmGG9FqtjXUBXQcU44DzptdGQ8FfqYAMbBFnjWY6cDvgCy2ZnP6dYZTFTRTENGt8"
+              "created": "2026-09-06T16:48:15.870Z",
+              "proofValue": "z3n4a6W9drm7HqEeF2u9hhfNzC4wyp4JfpZP7tqJ7pMQ2DsEGEhJcstvnD6iEC97E9XSwintTigpX1N7NnkZck19G"
             }
           ]
         }
@@ -180,8 +180,8 @@
     }
   },
   "cold": {
-    "did": "did:cel:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
-    "webvhDid": "did:webvh:QmWrLQJJ7ReFUxZfE3dHfSrG8fssHynMZvJf1UaKNkiZEo:regtest.localhost%3A3449:published:anonymous:uEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA",
+    "did": "did:cel:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
+    "webvhDid": "did:webvh:QmTbPr85nh7F6ZTmAZ4k9YpKHHeQBJ5u36w5F6b7FcekRm:regtest.localhost%3A3449:published:anonymous:uEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g",
     "resolved": true,
     "bytes": [
       137,
@@ -256,17 +256,17 @@
     "verified": true
   },
   "writes": [
-    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA%2Fresources%2FuEiB_O2AaOlqcB21l4suMp1nAOOapTwK7AwFeCdNlZxcvMA",
-    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA%2Fresources%2FuEiD8d19FVv1GrRxjUsEf2eS2H1sRgJdrf-Mcu9Jpfs-04A",
-    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA%2Fdid.jsonl",
-    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDe3BLrodaHs49-3lsCt4bWcv0PVCnNlblN9rAv723CuA%2Fcel.json"
+    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g%2Fresources%2FuEiB_O2AaOlqcB21l4suMp1nAOOapTwK7AwFeCdNlZxcvMA",
+    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g%2Fresources%2FuEiCWq_bJ-69x8B_5ejAOlqpw3prOe9Q7MI88sUmXQHE4Ig",
+    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g%2Fdid.jsonl",
+    "https://regtest.localhost:3449/api/host/regtest.localhost%3A3449%2Fpublished%2Fanonymous%2FuEiDisJ0S3c-3qx0ZNWKiKKY0BlqL3qTyO6Qb0GO-bKar3g%2Fcel.json"
   ],
   "pageErrors": [],
   "bitcoinCalls": [],
   "evidence": "Installed Chrome; real built UI create/upload/publish; real HTTPS host store and SDK cold resolution after document reload. No Turnkey or external Bitcoin.",
   "viewport": {
-    "width": 1440,
-    "height": 1050
+    "width": 390,
+    "height": 844
   },
   "testedCommit": "b82aae0ebd357cd5b11d685abed0a3e460e6f39d"
 }

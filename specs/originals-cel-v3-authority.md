@@ -1,6 +1,6 @@
 # Originals CEL 3 authority and publication ordering
 
-Status: design contract; not implemented. On 2026-09-05 the owner answered **yes**
+Status: normative contract, implemented in the SDK 3.0.0 candidate. On 2026-09-05 the owner answered **yes**
 to retiring key A's authority after rotation to B. This resolves
 [Define controller authority and inscription ordering in the new CEL fold](https://github.com/onionoriginals/sdk/issues/560)
 together with the precise consequences below. The [wire/proof contract](originals-cel-v3-profile.md)

@@ -23,13 +23,13 @@
     },
     "sourceTypecheck": "passed after export removal",
     "scopedLint": "passed",
-    "builtPublicTypes": "pending rebuild; added negative import assertions for removed exports"
+    "builtPublicTypes": "passed against final built exports and independently installed stable package"
   },
   "exportCounts": {
-    "root": 283,
+    "root": 284,
     "v3": 34,
     "cel": 52,
-    "types": 85,
+    "types": 86,
     "testing": 2
   },
   "modifiedFiles": [
@@ -59,11 +59,11 @@
     },
     {
       "path": "docs/release/3.0.0-public-api.md",
-      "sha256": "fc586334fbc29acfb2dc8f84cf5a64ddc2b28dfc109bad10a84d197beb5b9b9f"
+      "sha256": "83df7f0c3ee95943facf284f5131a2f177798bd0589d4522a0fc1824a300fea8"
     },
     {
       "path": "packages/sdk/V3.md",
-      "sha256": "6ba7b5ed68a5b0e64868fcccfca09f24a57bacf4fac5d6d2603c229e28b0a1ec"
+      "sha256": "cfcac37f74410039f73fc753a2b00a4ed1c9f98469d75e5d1a3e675c7490250e"
     },
     {
       "path": "packages/sdk/src/did/DIDManager.ts",
@@ -75,7 +75,7 @@
     },
     {
       "path": "packages/sdk/src/index.ts",
-      "sha256": "c0ca46a2a4611cd6debb01a5279d623488b26f330f855e51fc8471e62c5240f8"
+      "sha256": "8f75148751cf70e7c5161f40c7711f42893ffe0b029ac828ca9518207167316f"
     },
     {
       "path": "packages/sdk/src/types/common.ts",
@@ -83,7 +83,7 @@
     },
     {
       "path": "packages/sdk/src/types/public.ts",
-      "sha256": "36de7325cb03c102a07206a79eab12c9235aaa7c00f861dfdf94e1f7cb5f442e"
+      "sha256": "7e2ea4b813ca325acc2a00093c3ad74a0b30bccc2d7e521458657654a43a1c70"
     },
     {
       "path": "packages/sdk/tests/performance/did-creation.perf.test.ts",
@@ -91,7 +91,7 @@
     },
     {
       "path": "packages/sdk/tests/types/public-cel3.ts",
-      "sha256": "0d57b0fdf1d4b328a4ed3ce50dd55cdd07f733e922539e5c2e9e6e4544a217ef"
+      "sha256": "54ecf404f3c519fb622c5c31be5cf84431ac77368df07c45af4e27852d7fa2f9"
     },
     {
       "path": "packages/sdk/tests/unit/did/DIDManager.webvh-domain-required.test.ts",
@@ -125,5 +125,9 @@
       "path": "docs/history/previous-sdk/LLM_TYPE_REFERENCE.md",
       "sha256": "337213bd889961640d1b454083d310ea4775e15288b35dd4923addc7cf3f45c6"
     }
-  ]
+  ],
+  "reviewFixes": {
+    "HostedEvidence": "restored on /types",
+    "validateInscriptionReveal": "supported root helper for the writer single-leaf Taproot inscription witness"
+  }
 }

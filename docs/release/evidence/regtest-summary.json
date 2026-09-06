@@ -1,72 +1,32 @@
 {
-  "result": "pass",
-  "baseCommit": "c975e3fefdab8fe3a8dd5c6f786f8853025603d7",
-  "includesUncommittedChanges": true,
-  "sourceSha256": {
+  "testedCommit": "b82aae0ebd357cd5b11d685abed0a3e460e6f39d",
+  "recordedAt": "2026-09-06T16:46:50.370201+00:00",
+  "sourceFiles": {
     "apps/landing/scripts/regtest-journey.ts": "39c084ecd031143bd803c0b8bc378f7cbf653a2054f13ff5ada02cce6461622f",
-    "apps/landing/server/bitcoin.ts": "6b92b61668dddcfecbf4850abd13a157c43273716112aa47490b4097e5bc9f9e",
+    "apps/landing/server/bitcoin.ts": "0c73f1d4b4ebce9e554fa2596b71eef77dfa5ceee8769595290af32da83ba747",
     "apps/landing/server/reinscription.ts": "60bd19965a3c3041bbf89b52adbeb1f07c440fca264010f12ac9e41c55a23454",
-    "apps/landing/server/tests/bitcoin-reinscription.test.ts": "28c7e4cc82ddbfc7d7415cc9f2937266a2c0ea376ba0e626261b634d9ff085ca",
-    "scripts/regtest/README.md": "5a20a5cf4896542ff327e074a315326fd87b153278c40ec2a8a68a91744af1c2",
-    "scripts/regtest/environment.ts": "80724368a08c7d93348125e492e00ecdaa412055da449617b7f117b6dee1d83e",
-    "packages/sdk/src/v3/bitcoin.ts": "e96a64f5966ff911ea97c83fa58b1e611eb1bb7531d447537d1829dd3b437fa1",
-    "packages/sdk/src/v3/resolution.ts": "bbaf86cf531674df0cb36efb68bd2d352fc3a7d74809e14a4ee10208f5011e74",
-    "packages/sdk/src/adapters/providers/RegtestProvider.ts": "9ca15952dc08597cf4731586942819e26a216d7c39c178f06706a98ed2444edb",
-    "packages/sdk/src/adapters/providers/sat-snapshot.ts": "e3897588c24033a4f802921f5fdcb97eb2863df0984726211c2148d603483e1a"
+    "packages/sdk/src/v3/bitcoin.ts": "87fe0dd096abee753765d28018e4c109d88bf28c166d28799788668122a8aab7",
+    "packages/sdk/src/v3/resolution.ts": "9d0acd888c3d7d1a771f4ec6921bfc7dba805ef67229500b262f439e7f08addb",
+    "packages/sdk/src/v3/hosted.ts": "feae1fa43f952b45af9d9bb35bb3a9847b64791d5c16d944d26e036344eb7104",
+    "packages/sdk/src/bitcoin/inscription-recovery.ts": "04997d3acdadb94568ef01e95b82e394b9ba8a2bb9ac70ed11d9d39c384c1dda",
+    "packages/sdk/src/adapters/providers/sat-snapshot.ts": "5cfe3bd8c1de58062d6145f1e4b55f7f8c450cbb71abfabb5c41504acacfada0"
   },
+  "result": "pass",
   "scenarios": [
     {
-      "scenario": "none",
-      "receipt": "regtest-none.json",
-      "log": "/tmp/originals-release-regtest-none.log",
-      "tip": "346114b33117f0936da15398bd75344dd5fed85a713e40ca38d2aef83ab59adb",
-      "publications": [
-        "f6e4b1dddbd9a2ef9b367f1022fec01cc07667e8a13781356ac567ceedd76ef8i0",
-        "51b343d77df48256b68d5fc586a02128f075da78cfbc04d00313b7489ec8f454i0",
-        "34c20ba04527474e4b880390774fd7ca626fbe91ebfaed673abea97ab38d2aa3i0",
-        "d9c47b928790eb8b3730fc61679dce1f1468fb4186305004c6a133794a1dedc3i0"
-      ],
-      "did": "did:btco:reg:9998999718"
+      "fault": "none",
+      "receipt": "regtest-none.json"
     },
     {
-      "scenario": "reveal-rejected",
-      "receipt": "regtest-reveal-rejected.json",
-      "log": "/tmp/originals-release-regtest-reveal-rejected.log",
-      "tip": "26fdb03b468f002ee40ddd34c4c38f4e73dd5eaafc2ad5aee4ac64fdaf3214c7",
-      "publications": [
-        "ca0e9037a1af052df99331b16a755ca8571e38157cced4680ccb9cc90e23889bi0",
-        "f5dfb4aa375d39ae13b246293c744e9a567d99f126fe6a112f934d39f7530900i0",
-        "9bdd15b7a4246117da0c0ee0dc8b93fbc6a4ffd93dc9ead15fc9b25ec6421ffci0",
-        "e5914746bc6cb7e1673c4e5d69ee536f70441ea6a99275ab5cc2857ae7805272i0"
-      ],
-      "did": "did:btco:reg:5000000000"
+      "fault": "reveal-rejected",
+      "receipt": "regtest-reveal-rejected.json"
     },
     {
-      "scenario": "commit-response-lost",
-      "receipt": "regtest-commit-response-lost.json",
-      "log": "/tmp/originals-release-regtest-commit-response-lost.log",
-      "tip": "7d3a7b76d01ab470ab3528a187422f7bd8d4015bb2e0a6076e43842d2e64e5a1",
-      "publications": [
-        "da6981a3a0c52d2b2dd7dd0aa82c49a6f3d328365a9f12117060c7f27166d1f1i0",
-        "964094cc138c36554485314b204c32625c1babf0b69409f6b2ba7bcc8793bd5ai0",
-        "19004cff55e1f1cacb63b53b2256b52549a6f87387fc460f63bf55b2b701d0edi0",
-        "c39af599191cfebbb420aba2250e82abcd2b17d40909cb82ba7720eb35684d55i0"
-      ],
-      "did": "did:btco:reg:9998999718"
+      "fault": "commit-response-lost",
+      "receipt": "regtest-commit-response-lost.json"
     }
   ],
-  "focusedTests": {
-    "passed": 49,
-    "assertions": 150,
-    "log": "/tmp/originals-release-reinscription-routes.log"
-  },
-  "typechecks": [
-    "/tmp/originals-release-regtest-types.log",
-    "/tmp/originals-release-reinscription-server-types.log"
-  ],
-  "limitations": [
-    "Disposable local Bitcoin and CEL keys; TurnkeySatSigner adapter exercised without Turnkey service.",
-    "SDK and actual server routes exercised; browser engine/UI flow is a separate release check.",
-    "No production hosting, public-chain broadcast, or owner mainnet release proof."
-  ]
+  "command": "BITCOIND_BIN=<pinned31.1binary> ORD_BIN=<pinned0.29.0binary> bun run regtest",
+  "signing": "disposable local keys through TurnkeySatSigner; no live Turnkey request",
+  "scope": "local Core/ord plus actual HTTPS routes; no public network or mainnet proof"
 }

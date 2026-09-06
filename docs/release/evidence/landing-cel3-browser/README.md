@@ -25,3 +25,5 @@ node docs/release/evidence/landing-cel3-browser/browser-qa.mjs
 The script assumes Google Chrome's standard macOS installation path and the repository's existing `playwright-core` dependency. It closes its browser when finished. Stop the disposable server after inspecting the result.
 
 The screenshot is local UI evidence. The receipt's cryptographic checks concern this fixture's hosted CEL and PNG, not Bitcoin acceptance. The separate real regtest journey supplies local-chain evidence.
+
+The final candidate was also exercised at a 390 × 844 viewport using the same driver with the viewport and output directory changed. `mobile-receipt.json` and `published-mobile.png` retain that independent PNG journey. Both screenshots were visually inspected.
