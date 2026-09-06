@@ -62,7 +62,7 @@ const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolve
 // Claim the shared data directory before opening either store. The service's
 // spend guards and read-modify-write serialization are process-local, so a
 // second writer could strand committed BTC behind a double-spent commit.
-const instanceLock = acquireInstanceLock(originalsDataDir, { log: (m) => console.warn(m) });
+const instanceLock = await acquireInstanceLock(originalsDataDir, { log: (m) => console.warn(m) });
 releaseOnExit(instanceLock);
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,

@@ -20,6 +20,7 @@
     "og": "bun scripts/og-image.mjs"
   },
   "dependencies": {
+    "@bybrave/proper-lockfile2": "5.0.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@noble/curves": "^2.2.0",
