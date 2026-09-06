@@ -1,6 +1,6 @@
 # did:btco inscription shape — decision record
 
-**Status:** Decided 2026-09-04 (design only; not implemented)
+**Status:** Decided 2026-09-04. On 2026-09-05 the owner committed it to **3.0.0** (recorded on #521 and the release map #519); not yet implemented or charted into tickets.
 **Supersedes:** the `{ didDocument, celLog | events }` CBOR metadata shape, the `#cel`
 `OriginalsCelAnchor` service, the `WitnessAttestation` content shape, holder appends,
 `data.author`, and the post-anchor `rotateKey`/`deactivate` freeze.
