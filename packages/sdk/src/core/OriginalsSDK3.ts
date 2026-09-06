@@ -1,3 +1,4 @@
+import { BitcoinPublications } from "../v3/bitcoin.js";
 import { HostedAssets } from "../v3/hosted.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
@@ -144,7 +145,19 @@ export class OriginalsSDK {
       local,
       hosted,
     );
-    this.lifecycle = new LifecycleManager(local, resolver, hosted);
+    this.lifecycle = new LifecycleManager(
+      local,
+      resolver,
+      hosted,
+      utilities.ordinalsProvider
+        ? new BitcoinPublications(
+            utilities.ordinalsProvider,
+            network,
+            resolver,
+            local,
+          )
+        : undefined,
+    );
     this.did = new AssetDIDManager(this.config, this.metrics, resolver);
     this.credentials = new CredentialManager(
       this.config,

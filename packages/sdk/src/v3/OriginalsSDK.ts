@@ -1,4 +1,11 @@
 import type {
+  BitcoinPublications,
+  BitcoinPublicationOptions,
+  PreparedBitcoinPublication,
+  BitcoinSubmissionOptions,
+  SubmittedBitcoinAsset,
+} from "./bitcoin.js";
+import type {
   HostedAssets,
   WebPublicationOptions,
   PreparedWebPublication,
@@ -22,13 +29,48 @@ import type {
   OriginalsConfig,
 } from "./types.js";
 
-/** CEL 3 local creation and interchange. Network publication is a separate integration stage. */
+/** CEL 3 creation, authenticated interchange and explicit hosted/Bitcoin publication. */
 export class LifecycleManager {
   constructor(
     private readonly config: OriginalsConfig = {},
     private readonly resolver?: AssetResolver,
     private readonly hosted?: HostedAssets,
+    private readonly bitcoin?: BitcoinPublications,
   ) {}
+
+  private requireBitcoin(): BitcoinPublications {
+    if (!this.bitcoin)
+      throw new CelError(
+        "unsupported",
+        "ASSET_BITCOIN_REQUIRED",
+        "Configure an ordinalsProvider on the full SDK",
+      );
+    return this.bitcoin;
+  }
+  /** Build and sign an exact boundary or delta without broadcasting. */
+  prepareBitcoinPublication(
+    asset: OriginalsAsset,
+    options: BitcoinPublicationOptions,
+  ): Promise<PreparedBitcoinPublication> {
+    return this.requireBitcoin().prepare(asset, options);
+  }
+  /** Submit the saved pair, preserving ambiguous delivery and requiring durable recovery. */
+  publishPreparedToBitcoin(
+    prepared: PreparedBitcoinPublication,
+    options: BitcoinSubmissionOptions = {},
+  ): Promise<SubmittedBitcoinAsset> {
+    return this.requireBitcoin().publish(prepared, options);
+  }
+  /** Prepare and durably submit. Chain acceptance must be checked through a fresh sat resolution. */
+  async publishToBitcoin(
+    asset: OriginalsAsset,
+    options: BitcoinPublicationOptions & BitcoinSubmissionOptions,
+  ): Promise<SubmittedBitcoinAsset> {
+    return this.publishPreparedToBitcoin(
+      await this.prepareBitcoinPublication(asset, options),
+      options,
+    );
+  }
 
   private requireHosted(): HostedAssets {
     if (!this.hosted)

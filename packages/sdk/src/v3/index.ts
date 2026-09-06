@@ -8,3 +8,5 @@ export { ASSET_LIMITS, ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from "./e
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./resolution.js";
 
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from "./hosted.js";
+
+export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./bitcoin.js";
