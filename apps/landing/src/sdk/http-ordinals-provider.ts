@@ -8,47 +8,78 @@
  * QuickNodeProvider's "does not build/sign" contract — so a mislabeled read can
  * never silently fabricate on-chain data in the browser.
  */
-import type { OrdinalsProvider } from '@originals/sdk';
+import type { SatSnapshot } from "@originals/sdk/cel";
+import type { OrdinalsProvider } from "@originals/sdk";
 
 export class HttpOrdinalsProvider implements OrdinalsProvider {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts?: { baseUrl?: string; fetchImpl?: typeof fetch }) {
-    this.baseUrl = opts?.baseUrl ?? '';
+    this.baseUrl = opts?.baseUrl ?? "";
     this.fetchImpl = opts?.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin',
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      let detail = '';
-      try { detail = JSON.stringify(await res.json()); } catch { /* ignore */ }
-      throw new Error(`HttpOrdinalsProvider ${path} failed: ${res.status} ${detail}`);
+      let detail = "";
+      try {
+        detail = JSON.stringify(await res.json());
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        `HttpOrdinalsProvider ${path} failed: ${res.status} ${detail}`,
+      );
     }
     return (await res.json()) as T;
   }
 
-  async getFirstSatOfOutput(outpoint: { txid: string; vout: number }): Promise<string> {
-    const { satoshi } = await this.post<{ satoshi: string }>('/api/btc/sat', outpoint);
+  async getSatSnapshot(sat: string): Promise<SatSnapshot> {
+    if (!/^(0|[1-9][0-9]*)$/.test(sat))
+      throw new Error("Invalid satoshi number");
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/btc/sat-snapshot/${sat}`,
+      { credentials: "same-origin" },
+    );
+    if (!response.ok)
+      throw new Error(`Sat snapshot unavailable: ${response.status}`);
+    return decodeSatSnapshot(await response.json());
+  }
+
+  async getFirstSatOfOutput(outpoint: {
+    txid: string;
+    vout: number;
+  }): Promise<string> {
+    const { satoshi } = await this.post<{ satoshi: string }>(
+      "/api/btc/sat",
+      outpoint,
+    );
     return satoshi;
   }
 
   async estimateFee(blocks = 1): Promise<number> {
-    const { feeRate } = await this.post<{ feeRate: number }>('/api/btc/fee', { blocks });
+    const { feeRate } = await this.post<{ feeRate: number }>("/api/btc/fee", {
+      blocks,
+    });
     return feeRate;
   }
 
   async broadcastTransaction(txHexOrObj: unknown): Promise<string> {
-    if (typeof txHexOrObj !== 'string') {
-      throw new Error('HttpOrdinalsProvider.broadcastTransaction requires raw tx hex');
+    if (typeof txHexOrObj !== "string") {
+      throw new Error(
+        "HttpOrdinalsProvider.broadcastTransaction requires raw tx hex",
+      );
     }
-    const { txid } = await this.post<{ txid: string }>('/api/btc/broadcast', { txHex: txHexOrObj });
+    const { txid } = await this.post<{ txid: string }>("/api/btc/broadcast", {
+      txHex: txHexOrObj,
+    });
     return txid;
   }
 
@@ -62,16 +93,30 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     signedCommitHex: string;
     revealTxHex: string;
     /** Every funding UTXO the commit spends, in input order ([0] is the identity input). */
-    fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+    fundingUtxos: Array<{
+      txid: string;
+      vout: number;
+      value: number;
+      scriptPubKey?: string;
+    }>;
     /** Legacy singular mirror of fundingUtxos[0] — an older server reads this. */
-    fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    fundingUtxo?: {
+      txid: string;
+      vout: number;
+      value: number;
+      scriptPubKey?: string;
+    };
     changeAddress: string;
-  }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }> {
+  }): Promise<{
+    commitTxId: string;
+    revealTxId: string;
+    status: "commit_broadcast" | "reveal_broadcast";
+  }> {
     const result = await this.post<{
       commitTxId: string;
       revealTxId: string;
-      status: 'commit_broadcast' | 'reveal_broadcast';
-    }>('/api/btc/inscribe', params);
+      status: "commit_broadcast" | "reveal_broadcast";
+    }>("/api/btc/inscribe", params);
     // The SDK discards this return value, so the status would otherwise never
     // reach the UI and every 200 would read as "inscribed" — including the
     // commit-only outcome, where the reveal has NOT landed and the recovery
@@ -82,23 +127,77 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
   }
 
   /** What the last submitInscription actually achieved. Null before any. */
-  lastSubmit: { commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' } | null =
-    null;
+  lastSubmit: {
+    commitTxId: string;
+    revealTxId: string;
+    status: "commit_broadcast" | "reveal_broadcast";
+  } | null = null;
 
   // --- Not implemented (the sat-selected inscribe path never calls these). ---
   getInscriptionById(): Promise<never> {
-    return Promise.reject(new Error('HttpOrdinalsProvider.getInscriptionById is not implemented in the browser demo.'));
+    return Promise.reject(
+      new Error(
+        "HttpOrdinalsProvider.getInscriptionById is not implemented in the browser demo.",
+      ),
+    );
   }
   getInscriptionsBySatoshi(): Promise<never> {
-    return Promise.reject(new Error('HttpOrdinalsProvider.getInscriptionsBySatoshi is not implemented in the browser demo.'));
+    return Promise.reject(
+      new Error(
+        "HttpOrdinalsProvider.getInscriptionsBySatoshi is not implemented in the browser demo.",
+      ),
+    );
   }
   getTransactionStatus(): Promise<never> {
-    return Promise.reject(new Error('HttpOrdinalsProvider.getTransactionStatus is not implemented in the browser demo.'));
+    return Promise.reject(
+      new Error(
+        "HttpOrdinalsProvider.getTransactionStatus is not implemented in the browser demo.",
+      ),
+    );
   }
   createInscription(): Promise<never> {
-    return Promise.reject(new Error('HttpOrdinalsProvider.createInscription is not implemented: the commit/reveal are built and signed locally, then broadcast via broadcastTransaction.'));
+    return Promise.reject(
+      new Error(
+        "HttpOrdinalsProvider.createInscription is not implemented: the commit/reveal are built and signed locally, then broadcast via broadcastTransaction.",
+      ),
+    );
   }
   transferInscription(): Promise<never> {
-    return Promise.reject(new Error('HttpOrdinalsProvider.transferInscription is not implemented in the browser demo.'));
+    return Promise.reject(
+      new Error(
+        "HttpOrdinalsProvider.transferInscription is not implemented in the browser demo.",
+      ),
+    );
   }
+}
+
+/** The JSON boundary carries byte arrays, never implicit string encodings. */
+export function decodeSatSnapshot(value: unknown): SatSnapshot {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !Array.isArray((value as SatSnapshot).publications)
+  )
+    throw new Error("Invalid sat snapshot");
+  const snapshot = value as SatSnapshot;
+  const bytes = (input: unknown): Uint8Array => {
+    if (
+      !Array.isArray(input) ||
+      input.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
+    )
+      throw new Error("Invalid sat snapshot byte array");
+    return Uint8Array.from(input);
+  };
+  for (const publication of snapshot.publications) {
+    if (!publication || !publication.body)
+      throw new Error("Invalid publication");
+    if (publication.body.status === "complete") {
+      publication.body.bytes = bytes(publication.body.bytes);
+      publication.body.metadata =
+        publication.body.metadata === null
+          ? null
+          : bytes(publication.body.metadata);
+    }
+  }
+  return snapshot;
 }

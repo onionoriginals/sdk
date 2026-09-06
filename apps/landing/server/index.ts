@@ -35,6 +35,7 @@ export function buildRoutes(deps: {
     // mounted on mainnet (creator-pays deposits replace it — see serve.ts).
     if (deps.bitcoin.funding) routes['POST /api/btc/funding'] = deps.bitcoin.funding;
     routes['POST /api/btc/sat'] = deps.bitcoin.sat;
+    routes['GET /api/btc/sat-snapshot/:sat'] = deps.bitcoin.satSnapshot;
     routes['POST /api/btc/fee'] = deps.bitcoin.fee;
     routes['POST /api/btc/broadcast'] = deps.bitcoin.broadcast;
     routes['GET /api/btc/deposit'] = deps.bitcoin.deposit;

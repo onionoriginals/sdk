@@ -21,6 +21,7 @@
  * fails at signing time.
  */
 import type { OriginalRow, PendingInscription } from './YourOriginals';
+import { validateDocument, verifyHistory } from '@originals/sdk/cel';
 import type { CelLog } from './original-detail-data';
 
 export type InscribeAvailability =
@@ -48,15 +49,12 @@ export type DisabledReason =
   | 'pending-elsewhere';
 
 /**
- * The `did:key` verification method a CEL genesis names as controller, or null.
- * Read from the genesis event's `controller`, which is the model's sole
- * genesis identity.
+ * The current authenticated controller. Retired genesis keys cannot sign.
  */
 export function genesisController(cel: CelLog | null | undefined): string | null {
-  const genesis = cel?.events?.[0];
-  if (genesis?.type !== 'create') return null;
-  const controller = genesis.data?.controller;
-  return typeof controller === 'string' && controller.startsWith('did:key:') ? controller : null;
+  if (!cel) return null;
+  try { return verifyHistory(validateDocument(cel)).state.controller; }
+  catch { return null; }
 }
 
 export interface AvailabilityInput {

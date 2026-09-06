@@ -240,3 +240,19 @@ function noopHostStore() {
     serve() { return null as Response | null; },
   };
 }
+
+
+describe('CEL 3 account namespace', () => {
+  test('an authenticated attacker cannot squat an absent account publication', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const put = (sub: string, key: string) => {
+      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+      return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor(sub) }, body: '{}' }), url, sub);
+    };
+    const key = 'demo.test/published/accounts/victim/uEiExample/cel.json';
+    expect((await put('attacker', key)).status).toBe(403);
+    expect((await put('victim', key)).status).toBe(200);
+    expect((await put('attacker', 'demo.test/assets/cel.json')).status).toBe(403);
+    expect((await put('attacker', 'demo.test/published/anonymous/uEiExample/cel.json')).status).toBe(403);
+  });
+});

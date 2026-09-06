@@ -1,3 +1,5 @@
+import example from '../../public/example/cel-log.json';
+import { validateDocument, verifyHistory } from '@originals/sdk/cel';
 import { describe, test, expect } from 'bun:test';
 import {
   webvhArtifacts,
@@ -15,44 +17,8 @@ import {
 
 const DID = 'did:webvh:QmScid:demo.example.com:user-abc:asset-1';
 
-// Shaped like a real published Original's cel.json (see public/example/cel-log.json).
-const cel: CelLog = {
-  events: [
-    {
-      type: 'create',
-      data: {
-        controller: 'did:key:z6MkhhHvRLSgmvgneytgm64PBFzgrr1maxVjEgCr4gWGZ85p',
-        createdAt: '2026-07-16T05:56:22.011Z',
-        name: 'artwork.svg',
-        resources: [
-          { id: 'artwork.svg', mediaType: 'image/svg+xml', digestMultibase: 'uEiDdigest1' },
-          { id: 'metadata.json', mediaType: 'application/json', digestMultibase: 'uEiDdigest2' }
-        ]
-      },
-      proof: [
-        {
-          created: '2026-07-16T05:56:22.038Z',
-          cryptosuite: 'eddsa-jcs-2022',
-          proofValue: 'z2nTv6dFXWK9…',
-          type: 'DataIntegrityProof',
-          verificationMethod: 'did:key:z6Mkhh…#z6Mkhh…'
-        }
-      ]
-    },
-    {
-      type: 'migrate',
-      data: {
-        domain: 'demo.example.com',
-        layer: 'webvh',
-        migratedAt: '2026-07-16T05:56:22.053Z',
-        sourceDid: 'did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ',
-        targetDid: DID
-      },
-      proof: [{ cryptosuite: 'eddsa-jcs-2022', proofValue: 'z47VVZi…' }],
-      previousEvent: 'uEiD6909…'
-    }
-  ]
-};
+const cel: CelLog = validateDocument(example);
+const exampleState = verifyHistory(cel).state;
 
 describe('webvhArtifacts', () => {
   test('derives artifact URLs from a pathed DID', () => {
@@ -88,11 +54,11 @@ describe('celTimeline', () => {
     const steps = celTimeline(cel);
     expect(steps.map((s) => s.id)).toEqual(['create', 'publish', 'inscribe']);
     expect(steps[0].state).toBe('done');
-    expect(steps[0].at).toBe('2026-07-16T05:56:22.011Z');
+    expect(steps[0].at).toBe(exampleState.createdAt);
     expect(steps[0].proof?.cryptosuite).toBe('eddsa-jcs-2022');
     expect(steps[0].facts.some((f) => f.label === 'Signed by')).toBe(true);
     expect(steps[1].state).toBe('done');
-    expect(steps[1].facts.find((f) => f.label === 'Published as')?.value).toBe(DID);
+    expect(steps[1].facts.find((f) => f.label === 'Published as')?.value).toBe(exampleState.alias);
     expect(steps[2].state).toBe('upcoming');
     expect(steps[2].at).toBeUndefined();
   });
@@ -222,82 +188,7 @@ describe('detailMode', () => {
   });
 });
 
-describe('celCustody (item 5: the custody chain, folded from the CEL)', () => {
-  const CREATOR = 'did:key:z6MkCreatorX';
-  const HOLDER = 'did:key:z6MkHolderY';
-  const log = (events: unknown[]) => ({ events }) as never;
-
-  test('a post-anchor non-lineage update folds into custody; creator entries never do', () => {
-    const rows = celCustody(log([
-      { type: 'create', data: { controller: CREATOR, resources: [] } },
-      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      { type: 'update', data: { author: CREATOR, name: 'renamed' } },
-      { type: 'update', data: { author: HOLDER, statement: 'held it', occurredAt: 't1' } },
-    ]));
-    expect(rows).toEqual([{ author: HOLDER, statement: 'held it', occurredAt: 't1', eventIndex: 3 }]);
-  });
-
-  test('pre-anchor updates are never custody, and a pre-anchor rotation extends the lineage', () => {
-    const ROTATED = 'did:key:z6MkRotatedZ';
-    const rows = celCustody(log([
-      { type: 'create', data: { controller: CREATOR, resources: [] } },
-      { type: 'update', data: { name: 'pre-anchor rename' }, proof: [{ verificationMethod: `${CREATOR}#k` }] },
-      { type: 'rotateKey', data: { newController: ROTATED } },
-      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      { type: 'update', data: { author: ROTATED, name: 'post-anchor, still creator lineage' } },
-    ]));
-    expect(rows).toEqual([]);
-  });
-
-  test('an authorless post-anchor update is custody with the unverified-author placeholder', () => {
-    const rows = celCustody(log([
-      { type: 'create', data: { controller: CREATOR, resources: [] } },
-      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      { type: 'update', data: { statement: 'no author' } },
-    ]));
-    expect(rows).toHaveLength(1);
-    expect(rows[0].author).toBe('(unverified author)');
-  });
-
-  test('a null log folds to no custody', () => {
-    expect(celCustody(null)).toEqual([]);
-  });
-
-  test('a WITNESS-FIRST proof array is not read as the author — the shared signer read skips witness proofs', () => {
-    // The hand-rolled proof[0] read labeled `did:btco:witness` as the author,
-    // which made a creator entry with a witness-first proof array fold into
-    // custody under the witness's name.
-    const rows = celCustody(log([
-      { type: 'create', data: { controller: CREATOR, resources: [] } },
-      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      {
-        type: 'update',
-        data: { name: 'renamed' },
-        proof: [
-          { verificationMethod: 'did:btco:witness', cryptosuite: 'bitcoin-ordinals-2024' },
-          { verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' },
-        ],
-      },
-    ]));
-    expect(rows).toEqual([]);
-  });
-
-  test('a genesis WITHOUT data.controller has no lineage: every post-anchor entry is custody, the create-proof signer\'s included', () => {
-    // Genesis lineage is data.controller only — no fallback to other genesis
-    // fields or the create proof's VM (there is no legacy shape to read).
-    const rows = celCustody(log([
-      {
-        type: 'create',
-        data: { resources: [] },
-        proof: [{ verificationMethod: `${CREATOR}#k`, cryptosuite: 'eddsa-jcs-2022' }],
-      },
-      { type: 'migrate', data: { layer: 'btco', to: 'did:btco:reg:1' } },
-      { type: 'update', data: { author: CREATOR, statement: 'renamed attempt' } },
-      { type: 'update', data: { author: HOLDER, statement: 'held it' } },
-    ]));
-    expect(rows).toEqual([
-      { author: CREATOR, statement: 'renamed attempt', eventIndex: 2 },
-      { author: HOLDER, statement: 'held it', eventIndex: 3 },
-    ]);
-  });
+test('controller history never invents sat custody from CEL entries', () => {
+  expect(celCustody(cel)).toEqual([]);
+  expect(celCustody({ events: [{ type: 'update', data: { author: 'holder', statement: 'I own it' } }] } as never)).toEqual([]);
 });

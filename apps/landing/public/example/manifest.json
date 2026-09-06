@@ -1,39 +1,22 @@
 {
+  "format": "originals/example",
+  "version": 3,
   "title": "First Light",
-  "medium": "Artwork",
+  "style": "Orbits",
   "dids": {
-    "did:cel": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
-    "did:webvh": "did:webvh:QmTmT6hf5tLcf5kjrBUFn5tYc6KcUQcRwvvWGFdtGZ7Lac:magby.originals.build:ueibapl3jud_-pk44pwonlavj-5znsd97opbjyybfpvxe0g"
+    "did:cel": "did:cel:uEiAn7aEMJmHddUREi3phU1plTZA_uJvHKPCpXKhC-LjqAg",
+    "did:webvh": "did:webvh:QmT4gv3FUVitVLeF4exikRXZk6HohqfS8MuwPfkPQqsDCR:magby.originals.build:example:cel3"
   },
   "resources": [
     {
       "id": "artwork.svg",
       "contentType": "image/svg+xml",
-      "hash": "eae362c6d1475379930b62bb1c92a477b27ec308866e015ea79caae7d753605a"
+      "hash": "21f362b1a91d31b8e78777e93d3e513778e023a6566a140378ec6bec55664dac"
     },
     {
       "id": "metadata.json",
       "contentType": "application/json",
-      "hash": "18b1ea736d1ad8b6a0af2aa74a244896c6cfa94f17f3cd5f40a5091cbcfb88e4"
+      "hash": "fe11854b656787b18e53c1b53ef4df7c8da8f078ff74547f2b4ebf2290c4d4f1"
     }
-  ],
-  "provenance": {
-    "createdAt": "2026-08-16T05:28:08.278Z",
-    "creator": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
-    "migrations": [
-      {
-        "from": "did:cel",
-        "to": "did:webvh",
-        "timestamp": "2026-08-16T05:28:08.292Z"
-      }
-    ],
-    "resourceUpdates": []
-  },
-  "generator": {
-    "seed": {
-      "title": "First Light",
-      "medium": "Artwork",
-      "nonce": 20260706
-    }
-  }
+  ]
 }

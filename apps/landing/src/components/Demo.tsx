@@ -387,7 +387,7 @@ export function inscribeDoneView(outcome: SubmitOutcome): {
   showExplorerLink: boolean;
 } {
   const complete =
-    outcome.kind === 'not-observed' ? true : inscribeIsComplete(outcome.status);
+    outcome.kind === 'submitted' && inscribeIsComplete(outcome.status);
   return { claimComplete: complete, showExplorerLink: complete };
 }
 
@@ -438,14 +438,15 @@ export interface InscriptionContentInput {
 
 export function inscriptionContentBytes(asset: InscriptionContentInput): number {
   const utf8 = (s: string) => new TextEncoder().encode(s).length;
-  // CBOR of the log is no larger than its JSON; the DID document is small and
-  // bounded, so a flat allowance covers it.
-  const DID_DOCUMENT_ALLOWANCE = 1_024;
+  // Conservative pre-funding hint: the final signed migrate entry does not
+  // exist until the identity sat is selected. The transaction builder prices
+  // the complete actual media+CBOR envelope before any broadcast.
+  const BITCOIN_MIGRATION_ALLOWANCE = 2_048;
   return (
     contentByteLength(asset.resource.content) +
     utf8(asset.metadata?.content ?? '') +
     utf8(JSON.stringify(asset.celLog)) +
-    DID_DOCUMENT_ALLOWANCE
+    BITCOIN_MIGRATION_ALLOWANCE
   );
 }
 
@@ -712,7 +713,7 @@ interface CommittedSource {
 
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
+  const { isAuthenticated, bitcoin, user, signing, signingNotice, reauth, beginReauth } = useAuth();
   const network = btcNetwork();
   // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
   // engine derives its provider from this same value, so an enabled money
@@ -1028,8 +1029,7 @@ export function Demo() {
         });
         // The server distinguishes commit-only from a complete pair; the SDK
         // discards submitInscription's return, so read it off the provider.
-        const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
-        setSubmitOutcome({ kind: 'submitted', status: submitted?.status ?? null });
+        setSubmitOutcome({ kind: 'submitted', status: engine.lastSubmission?.broadcast ?? null });
         return state;
       }
       // testnet4: ask the server faucet to fund the user's address, then
@@ -1136,7 +1136,8 @@ export function Demo() {
   // Linked so a creator can watch the funding transaction confirm. Uses the
   // same explorer helper as the completed view, so a simulated run — where the
   // helper withholds the URL — offers no link to a transaction that isn't.
-  const commitExplorerUrl = asset?.inscription?.commitTxId
+  const uncertainSubmission = submitOutcome.kind !== 'submitted' || !['commit_broadcast', 'reveal_broadcast'].includes(submitOutcome.status ?? '');
+  const commitExplorerUrl = !uncertainSubmission && asset?.inscription?.commitTxId
     ? btcoExplorerUrl(asset.inscription.commitTxId)
     : undefined;
 
@@ -1357,7 +1358,7 @@ export function Demo() {
                               // the signal has to outlive the run it labels.
                               <span className="demo-sim-badge">
                                 <span className="dot" aria-hidden="true" />
-                                {demo.simulated.badge}
+                                Account required
                               </span>
                             )}
                           </div>
@@ -1377,7 +1378,7 @@ export function Demo() {
                             <button
                               type="button"
                               className={i === 2 ? inscribeView.buttonClass : 'btn btn-primary demo-step-btn'}
-                              disabled={stepButtonDisabled({
+                              disabled={(i === 2 && !real) || stepButtonDisabled({
                                 index: i,
                                 state,
                                 titleEmpty: title.trim().length === 0,
@@ -1552,7 +1553,7 @@ export function Demo() {
                       <div className="demo-deposit-head">
                         <strong>{demo.session.unavailableHeading}</strong>
                       </div>
-                      <p className="demo-error" role="alert">{signingGateMessage(gate, network, signing)}</p>
+                      <p className="demo-error" role="alert">{signingNotice ?? signingGateMessage(gate, network, signing)}</p>
                       <p className="demo-inscribe-note">{demo.session.preserved}</p>
                     </div>
                   ) : gate === 'reauth' ? (
@@ -1560,7 +1561,7 @@ export function Demo() {
                       <div className="demo-deposit-head">
                         <strong>{demo.session.expiredHeading}</strong>
                       </div>
-                      <p className="demo-error" role="alert">{signingGateMessage(gate, network, signing)}</p>
+                      <p className="demo-error" role="alert">{signingNotice ?? signingGateMessage(gate, network, signing)}</p>
                       <p className="demo-inscribe-note">{demo.session.preserved}</p>
                       {reauth.active ? (
                         <p className="demo-inscribe-note">{demo.session.reauthPending}</p>
@@ -1571,7 +1572,7 @@ export function Demo() {
                       )}
                     </div>
                   ) : (
-                    <p className="demo-inscribe-note">{signingGateMessage(gate, network, signing)}</p>
+                    <p className="demo-inscribe-note">{signingNotice ?? signingGateMessage(gate, network, signing)}</p>
                   )
                 )}
 
@@ -1613,8 +1614,8 @@ export function Demo() {
                         nothing on chain to point at. */}
                     {!doneView.claimComplete && (
                       <div className="deposit-funded" role="status">
-                        <strong className="deposit-funded-heading">{demo.deposit.commitOnlyHeading}</strong>
-                        <p className="deposit-funded-body">{demo.deposit.commitOnlyBody}</p>
+                        <strong className="deposit-funded-heading">{uncertainSubmission ? 'Submission status is uncertain' : demo.deposit.commitOnlyHeading}</strong>
+                        <p className="deposit-funded-body">{uncertainSubmission ? 'This browser retained the signed publication. Open Your Originals to retry the same transactions without rebuilding or signing again.' : demo.deposit.commitOnlyBody}</p>
                       </div>
                     )}
                     {/* Both the completion sentence and the explorer link are

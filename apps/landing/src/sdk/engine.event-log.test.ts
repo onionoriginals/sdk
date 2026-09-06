@@ -109,10 +109,10 @@ describe('resource + provenance inspector', () => {
     expect(state.provenance).toBeDefined();
     expect(typeof state.provenance).toBe('object');
     // Ownership is the sat, so provenance carries no transfers before did:btco.
-    const provenance = state.provenance as { createdAt?: string; migrations?: unknown[] };
+    const provenance = state.provenance as { createdAt?: string; aliases?: unknown[] };
     expect(typeof provenance.createdAt).toBe('string');
-    expect(Array.isArray(provenance.migrations)).toBe(true);
-    expect(provenance.migrations).toEqual([]);
+    expect(Array.isArray(provenance.aliases)).toBe(true);
+    expect(provenance.aliases).toEqual([state.did]);
   });
 
   test('metadata rides alongside the artwork as its own resource', async () => {

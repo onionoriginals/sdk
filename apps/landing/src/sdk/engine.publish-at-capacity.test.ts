@@ -14,6 +14,7 @@ function installHostFetch(store: ReturnType<typeof createWebvhHostStore>, client
     const method = (init?.method ?? 'GET').toUpperCase();
     const url = new URL(raw, `http://${host}`);
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       if (method === 'GET' || method === 'HEAD') return store.read(url);
       const req = new Request(url, {
         method,

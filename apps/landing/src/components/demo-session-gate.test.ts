@@ -146,3 +146,11 @@ describe('signingGate: a failed bootstrap is its own state', () => {
     expect(signingGate({ ...base, authenticated: false, status: 'unavailable' })).toBe('sign-in');
   });
 });
+
+
+test('the unavailable panel shows the bound-key refusal when supplied', async () => {
+  const source = await Bun.file(new URL('./Demo.tsx', import.meta.url)).text();
+  const start = source.indexOf("gate === 'unavailable' ? (");
+  const panel = source.slice(start, source.indexOf("gate === 'reauth' ? (", start));
+  expect(panel).toContain('signingNotice ?? signingGateMessage(gate, network, signing)');
+});

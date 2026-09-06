@@ -1,0 +1,60 @@
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const { chromium } = await import(pathToFileURL(join(root, 'apps/landing/node_modules/playwright-core/index.mjs')).href);
+const output = fileURLToPath(new URL('./', import.meta.url));
+import { writeFile } from 'node:fs/promises';
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1050 } });
+const page = await context.newPage();
+const errors = [];
+page.on('pageerror', error => errors.push(error.message));
+const writes = [];
+const bitcoinCalls = [];
+page.on('request', request => { if (request.url().includes('/api/btc/') && !request.url().endsWith('/api/btc/network')) bitcoinCalls.push(request.url()); });
+page.on('request', request => { if (request.method() === 'PUT') writes.push(request.url()); });
+try {
+ await page.goto('https://regtest.localhost:3449/', { waitUntil: 'networkidle' });
+ console.log('TITLE', await page.title());
+ console.log('BUTTONS', await page.getByRole('button').allTextContents());
+ console.log('TABS', await page.getByRole('tab').allTextContents());
+ await page.getByRole('tab', { name: 'Upload', exact: true }).click();
+ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZioAAAAASUVORK5CYII=', 'base64');
+ await page.locator('input[type=file]').setInputFiles({ name: 'proof.png', mimeType: 'image/png', buffer: png });
+ await page.locator('.demo-form input[type=text]').fill('Browser PNG Proof');
+ await page.getByRole('button', { name: 'Create asset', exact: true }).click();
+ await page.waitForFunction(() => globalThis.__originalsDemo?.asset?.celLog?.log?.length === 1);
+ await page.getByRole('button', { name: 'Publish to web', exact: true }).click();
+ await page.waitForFunction(() => globalThis.__originalsDemo?.snapshot()?.webvhResolved === true);
+ const published = await page.evaluate(() => {
+   const engine = globalThis.__originalsDemo;
+   const state = engine.snapshot();
+   return { state: { did: state.did, webvhDid: state.webvhDid, layer: state.layer, resolved: state.webvhResolved, bytes: Array.from(state.resource.content), resourceType: state.resource.contentType }, document: engine.asset.celLog };
+ });
+ if (JSON.stringify(published.state.bytes) !== JSON.stringify(Array.from(png))) throw new Error('Published PNG changed');
+ if (!published.state.webvhDid.includes(':published:anonymous:')) throw new Error('Wrong namespace');
+ await page.locator('#demo').scrollIntoViewIfNeeded();
+ await page.locator('#demo').screenshot({ path: join(output, 'published.png') });
+ const did = published.state.webvhDid;
+ await page.reload({ waitUntil: 'networkidle' });
+ await page.locator('#demo').scrollIntoViewIfNeeded();
+ await page.waitForFunction(() => !!globalThis.__originalsDemo);
+ const cold = await page.evaluate(async (did) => {
+   const engine = globalThis.__originalsDemo;
+   if (engine.asset) throw new Error('Expected fresh engine after reload');
+   const state = await engine.hydrateFromWeb(did);
+   return { did: state.did, webvhDid: state.webvhDid, resolved: state.webvhResolved, bytes: Array.from(state.resource.content), verified: await engine.asset.verify() };
+ }, did);
+ if (!cold.verified || !cold.resolved || JSON.stringify(cold.bytes) !== JSON.stringify(Array.from(png))) throw new Error('Cold PNG verification failed');
+ if (errors.length) throw new Error(`Page errors: ${errors.join('; ')}`);
+ const dist = join(root, 'apps/landing/dist');
+ const builtFiles = await readdir(dist, { recursive: true });
+ const buildHashes = {};
+ for (const file of builtFiles.filter(file => /\.(?:html|js|css)$/.test(file))) buildHashes[file] = createHash('sha256').update(await readFile(join(dist, file))).digest('hex');
+ const result = { recordedAt: new Date().toISOString(), buildHashes, url: page.url(), published, cold, writes, pageErrors: errors, bitcoinCalls, evidence: 'Installed Chrome; real built UI create/upload/publish; real HTTPS host store and SDK cold resolution after document reload. No Turnkey or external Bitcoin.' };
+ await writeFile(join(output, 'receipt.json'), JSON.stringify(result, null, 2));
+ console.log(JSON.stringify(result, null, 2));
+} catch(error) { await page.screenshot({ path: join(output, 'error.png'), fullPage: true }); console.error(error); process.exitCode = 1; }
+finally { await browser.close(); }

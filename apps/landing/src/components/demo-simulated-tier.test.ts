@@ -67,13 +67,11 @@ describe('simulated-tier copy', () => {
     }
   });
 
-  test('the simulated tier names itself and denies the Bitcoin network', () => {
-    expect(demo.simulated.badge.toLowerCase()).toContain('simulat');
-    expect(demo.simulated.description.toLowerCase()).toContain('mock');
-    expect(demo.simulated.note.toLowerCase()).toMatch(/nothing .*reaches|no sats/);
-    for (const s of [demo.simulated.description, demo.simulated.note]) {
-      expect(s).not.toMatch(/broadcasts|spends your|your own btc/i);
-    }
+  test('the unavailable Bitcoin step names the requirements without a fake transaction promise', () => {
+    expect(demo.simulated.badge).toMatch(/account/i);
+    expect(demo.simulated.description).toMatch(/funded address/);
+    expect(demo.simulated.note).toMatch(/published on the web/);
+    expect(demo.simulated.description).not.toMatch(/mock|simulat/i);
   });
 });
 

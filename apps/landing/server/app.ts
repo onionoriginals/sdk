@@ -184,6 +184,11 @@ export function buildFetch(deps: {
       return originals.hostPut(req, url, clientIp);
     }
 
+    if (req.method === 'GET' && path.startsWith('/api/btc/sat-snapshot/')) {
+      const handler = apiRoutes?.['GET /api/btc/sat-snapshot/:sat'];
+      if (handler) return handler(req, url, clientIp);
+    }
+
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
     // (matches main's behavior; never SPA-fallback /api/* to index.html).
     if (path === '/api' || path.startsWith('/api/')) {

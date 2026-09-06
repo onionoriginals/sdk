@@ -16,6 +16,7 @@ function installHostFetch(host: string) {
     const url = new URL(typeof input === 'string' ? input : input.toString(), `http://${host}`);
     const method = (init?.method ?? 'GET').toUpperCase();
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       return store.handlePut(
         new Request(url, { method, headers: init?.headers as HeadersInit, body: init?.body as BodyInit }),
         url

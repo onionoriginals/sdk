@@ -276,8 +276,8 @@ describe('the completion panel shows nothing it cannot back up', () => {
    */
   test('a path with no submit seam is complete, not pending', () => {
     const view = inscribeDoneView({ kind: 'not-observed' });
-    expect(view.claimComplete).toBe(true);
-    expect(view.showExplorerLink).toBe(true);
+    expect(view.claimComplete).toBe(false);
+    expect(view.showExplorerLink).toBe(false);
   });
 
   // The link and the claim move together: a page that links to a reveal it

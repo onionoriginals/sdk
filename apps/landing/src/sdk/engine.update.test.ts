@@ -1,4 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { sha256HexToResourceMultibase } from '../pages/original-detail-data';
+import { signEvent } from '@originals/sdk/cel';
+import { OriginalsAsset } from '@originals/sdk';
+import { engineWithSigner } from './cel3-test-helpers';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
 import { summarize } from '../components/CelChain';
@@ -12,6 +16,7 @@ function installHostFetch(host: string) {
     const method = (init?.method ?? 'GET').toUpperCase();
     const url = new URL(raw, `http://${host}`);
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       return store.handlePut(
         new Request(url, { method, headers: init?.headers as HeadersInit, body: init?.body as BodyInit }),
         url
@@ -85,9 +90,9 @@ describe('revise a created asset', () => {
     expect(event.type).toBe('update');
     expect(event.proof[0]?.proofValue).toBeTruthy();
     expect(event.previousEvent).toBeTruthy();
-    expect(event.data.resourceId).toBe('artwork.svg');
-    expect(event.data.toVersion).toBe(2);
-    expect(event.data.previousVersionHash).toBe(created.resource.hash);
+    const resource = (event.data.resources as Array<{ id: string; previousDigestMultibase: string }>)[0];
+    expect(resource.id).toBe('artwork.svg');
+    expect(resource.previousDigestMultibase).toBe(sha256HexToResourceMultibase(created.resource.hash));
     // The signed body carries the toHash, never the bytes.
     expect(JSON.stringify(event.data)).not.toContain('<svg');
   });
@@ -120,9 +125,9 @@ describe('revise a created asset', () => {
     const v3 = await engine.update('Three', 'Artwork', SVG_V3);
 
     expect(v3.resource.version).toBe(3);
-    const updates = v3.celLog.filter((e) => e.type === 'update' && e.data.resourceId === 'artwork.svg');
+    const updates = v3.celLog.filter((e) => e.type === 'update' && (e.data.resources as Array<{ id: string }>)[0]?.id === 'artwork.svg');
     expect(updates).toHaveLength(2);
-    expect(updates[1].data.previousVersionHash).toBe(v2.resource.hash);
+    expect((updates[1].data.resources as Array<{ previousDigestMultibase: string }>)[0].previousDigestMultibase).toBe(sha256HexToResourceMultibase(v2.resource.hash));
   });
 
   test('the asset still verifies after being revised', async () => {
@@ -160,10 +165,12 @@ describe('revise a created asset', () => {
   });
 
   test('an inscribed asset is refused — that append is paid on-chain', async () => {
-    const engine = new DemoEngine();
+    const { engine, signer } = engineWithSigner();
     await engine.create('One', 'Artwork', SVG);
     await engine.publish();
-    await engine.inscribe();
+    const asset = engine.asset!;
+    const entry = await signEvent({ previousEvent: asset.state.head, operation: { type: 'migrate', data: { profile: 'originals/cel/3', from: asset.state.alias, to: 'did:btco:reg:123', layer: 'btco', migratedAt: new Date().toISOString() } } }, signer);
+    engine.asset = new OriginalsAsset({ log: [...asset.celLog.log, entry] }, asset.serialize().resources);
     await expect(engine.update('Two', 'Artwork', SVG_V2)).rejects.toThrow(/on-chain/);
   });
 
@@ -190,6 +197,6 @@ describe('revise a created asset', () => {
     const updated = await engine.update('Two', 'Artwork', SVG_V2);
     const gloss = summarize(updated.celLog[1]);
     expect(gloss).toContain('artwork.svg');
-    expect(gloss).toContain('v2');
+    expect(gloss).toContain('digest');
   });
 });

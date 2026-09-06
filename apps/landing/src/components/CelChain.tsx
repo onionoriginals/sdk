@@ -92,6 +92,10 @@ export function summarize(entry: CelEntry): string {
   }
   if (entry.type === 'rotateKey') return 'Rotates the controlling key';
   if (entry.type === 'update') {
+    if (Array.isArray(data.resources) && data.resources.length) {
+      const ids = data.resources.map((r: { id: string }) => r.id).join(', ');
+      return `Revises ${truncate(ids, 40)} — new digest chained to the preceding bytes`;
+    }
     // The body is reference-shaped: it carries the signed toHash, never bytes.
     const id = str(data.resourceId);
     const to = typeof data.toVersion === 'number' ? data.toVersion : undefined;
@@ -116,7 +120,7 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
   const accent = accentFor(entry);
   const proof = entry.proof[0];
   const vm = proof?.verificationMethod;
-  const unattributed = isCustody(entry) && !isHolder(entry);
+  const unattributed = !proof?.proofValue;
   return (
     <li className="cel-entry">
       {/* The link renders ABOVE its entry: an entry's previousEvent is a
@@ -169,31 +173,11 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
 }
 
 export function CelChain({ entries }: { entries: CelEntry[] }) {
-  const indexed = entries.map((entry, index) => ({ entry, index }));
-  const authenticity = indexed.filter(({ entry }) => !isCustody(entry));
-  const custody = indexed.filter(({ entry }) => isCustody(entry));
   return (
     <>
-      <ol className="cel-chain" aria-label={demo.eventLog.authenticityTitle}>
-        {custody.length > 0 && (
-          <li className="cel-section-label" aria-hidden="true">
-            {demo.eventLog.authenticityTitle}
-          </li>
-        )}
-        {authenticity.map(({ entry, index }) => (
-          <CelEntryItem key={index} entry={entry} index={index} />
-        ))}
+      <ol className="cel-chain" aria-label="Controller history">
+        {entries.map((entry, index) => <CelEntryItem key={index} entry={entry} index={index} />)}
       </ol>
-      {custody.length > 0 && (
-        <ol className="cel-chain cel-chain-custody" aria-label={demo.eventLog.custodyTitle}>
-          <li className="cel-section-label" aria-hidden="true">
-            {demo.eventLog.custodyTitle}
-          </li>
-          {custody.map(({ entry, index }) => (
-            <CelEntryItem key={index} entry={entry} index={index} />
-          ))}
-        </ol>
-      )}
       <p className="demo-log-source">{demo.eventLog.sourceNote}</p>
     </>
   );

@@ -1,3 +1,4 @@
+import { parseDocument, verifyHistory } from '@originals/sdk/cel';
 /**
  * Durable, filesystem-backed store for signed-in users' Originals.
  *
@@ -183,26 +184,26 @@ export function createOriginalsStore(opts: {
     return segs.length ? `${host}/${segs.join('/')}/resources/` : `${host}/resources/`;
   }
 
-  /** The stored media type for a hosted key, or undefined if the sidecar is gone. */
-  function readContentType(key: string): string | undefined {
-    try {
-      const path = keyToPath(hostedDir, key) + CTYPE_SUFFIX;
-      return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
-    } catch {
-      return undefined; // traversal or unreadable → simply unknown
-    }
-  }
-
   function list(subOrgId: string): OriginalSummary[] {
     const idx = readIndex(subOrgId);
     const keys = Object.keys(idx.sizes);
     return idx.originals.map((o) => {
       const prefix = resourcePrefix(o.did);
-      const resourceKey = prefix ? keys.find((k) => k.startsWith(prefix)) : undefined;
+      let resourceKey: string | undefined;
+      let signedMediaType: string | undefined;
+      if (prefix) {
+        try {
+          const document = parseDocument(new Uint8Array(readFileSync(keyToPath(hostedDir, prefix.replace(/resources\/$/, 'cel.json')))), 'json');
+          const state = verifyHistory(document).state;
+          const primary = state.aliases.includes(o.did) ? state.resources[0] : undefined;
+          const key = primary ? prefix + primary.digestMultibase : undefined;
+          if (key && keys.includes(key)) { resourceKey = key; signedMediaType = primary!.mediaType; }
+        } catch { /* Unverified summaries have no authenticated cover. */ }
+      }
       return {
         ...o,
         resourceUrl: resourceKey ? `https://${resourceKey}` : undefined,
-        resourceContentType: resourceKey ? readContentType(resourceKey) : undefined
+        resourceContentType: signedMediaType
       };
     });
   }

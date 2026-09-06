@@ -1,174 +1,51 @@
-/**
- * Live verification of the shipped real example ("First Light").
- *
- * The artifacts under public/example/ were minted once with the real SDK
- * (scripts/make-example.ts): real Ed25519 keys, a real did:cel genesis with a
- * signed CEL event log, a real did:webvh identity with a signed version-history
- * log, and a signed publication credential. This module re-verifies all of it
- * in the visitor's browser — hash recomputation, did:webvh-log proof-chain
- * verification via didwebvh-ts, and did:cel-log + credential signature
- * verification via the SDK — so the page never asks anyone to take its word.
- */
-import '../shims/buffer-global';
-import { OrdMockProvider } from '@originals/sdk/testing';
-import { MemoryStorageAdapter, Ed25519Verifier } from '@originals/sdk';
-import { OriginalsSDK, resolveDidCel } from './previous-sdk';
-import { resolveDIDFromLog } from 'didwebvh-ts';
-import { sha256 } from '@noble/hashes/sha2.js';
-
-import { realExample } from '../content';
-import manifestJson from '../../public/example/manifest.json';
-import credentialJson from '../../public/example/credential.json';
-import artworkSvg from '../../public/example/artwork.svg?raw';
-import didLogRaw from '../../public/example/did-log.jsonl?raw';
-import celLogJson from '../../public/example/cel-log.json';
+/** Verify the bundled CEL 3 example locally. Its static proofs do not claim live DNS or Bitcoin publication. */
+import "../shims/buffer-global";
+import { validateDocument, verifyHistory } from "@originals/sdk/cel";
+import { verifyOriginal } from "./verify-original";
+import manifest from "../../public/example/manifest.json";
+import artworkSvg from "../../public/example/artwork.svg?raw";
+import didLogRaw from "../../public/example/did-log.jsonl?raw";
+import celLogJson from "../../public/example/cel-log.json";
 
 export interface ExampleCheck {
-  id: 'hash' | 'log' | 'credential';
+  id: "hash" | "log" | "cel";
   ok: boolean;
   detail: string;
 }
-
 export interface VerifiedExample {
   title: string;
-  /** The style label, whichever key the published manifest carried. */
   medium: string;
   artworkDataUri: string;
   dids: { cel: string; webvh: string };
-  credentialTypes: string[];
+  profile: string;
   issuedAt?: string;
   checks: ExampleCheck[];
   allOk: boolean;
 }
-
-interface Manifest {
-  title: string;
-  /** `medium` before the style rename; `style` after. Readers accept either. */
-  medium?: string;
-  style?: string;
-  dids: Record<string, string>;
-  resources: Array<{ id: string; contentType: string; hash: string }>;
-}
-
-const toHex = (bytes: Uint8Array) =>
-  Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-
-const short = (did: string) => (did.length > 42 ? `${did.slice(0, 36)}…` : did);
-
 export async function verifyExample(): Promise<VerifiedExample> {
-  const manifest = manifestJson as unknown as Manifest;
-  const credential = credentialJson as unknown as {
-    type: string[];
-    issuer: string | { id: string };
-    validFrom?: string;
-    issuanceDate?: string;
-    credentialSubject: { id?: string; migratedTo?: string };
-  };
-  const checks: ExampleCheck[] = [];
-
-  // 1 · Content integrity: recompute the artwork's sha-256 from its bytes.
-  const svgBytes = new TextEncoder().encode(artworkSvg);
-  const recomputed = toHex(sha256(svgBytes));
-  const declared = manifest.resources.find((r) => r.id === 'artwork.svg')?.hash;
-  checks.push({
-    id: 'hash',
-    ok: recomputed === declared,
-    detail: `sha-256 recomputed from ${svgBytes.length} bytes → ${recomputed.slice(0, 20)}…`
+  const document = validateDocument(celLogJson);
+  const history = verifyHistory(document, {
+    expectedDid: manifest.dids["did:cel"],
   });
-
-  // 2 · Identity: verify the did:webvh log's SCID + Ed25519 proof chain and
-  //     derive the DID document from it (no server, no trust in this page).
-  const logEntries = didLogRaw
-    .trim()
-    .split('\n')
-    .map((line: string) => JSON.parse(line));
-  let didDocument: Record<string, unknown> | null = null;
-  let resolvedDid = '';
-  try {
-    const resolved = (await resolveDIDFromLog(logEntries as never, {
-      verifier: new Ed25519Verifier()
-    } as never)) as unknown as { did?: string; doc?: Record<string, unknown> };
-    resolvedDid = resolved.did ?? (resolved.doc?.id as string) ?? '';
-    didDocument = resolved.doc ?? null;
-  } catch (err) {
-    console.error('[originals-sdk] example DID log verification failed', err);
-  }
-  // The DID the log resolves to must be the one the asset's own provenance
-  // migrated to. Without this the page verifies a log for one did:webvh and a
-  // CEL log binding the asset to another, and still renders all-green.
-  const celEvents = (celLogJson as unknown as { events?: Array<{ type: string; data?: Record<string, unknown> }> })
-    .events ?? [];
-  const celMigrateTarget = celEvents.find((e) => e.type === 'migrate')?.data?.targetDid;
-  const logOk =
-    !!didDocument &&
-    resolvedDid === manifest.dids['did:webvh'] &&
-    celMigrateTarget === resolvedDid;
-  checks.push({
-    id: 'log',
-    ok: logOk,
-    detail: logOk
-      ? `${logEntries.length} signed log ${logEntries.length === 1 ? 'entry' : 'entries'} verified → ${short(resolvedDid)}`
-      : realExample.checkFailDetails.log
+  const checks = await verifyOriginal({
+    did: manifest.dids["did:webvh"],
+    logEntries: didLogRaw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+    celLog: document,
+    resourceBytes: new TextEncoder().encode(artworkSvg),
+    declaredHash:
+      manifest.resources.find((r) => r.id === "artwork.svg")?.hash ?? null,
   });
-
-  // 3 · Provenance: the publication credential is issued and self-signed by the
-  //     asset's did:cel genesis identity. Re-derive that identity from the
-  //     shipped CEL log — resolveDidCel verifies the WHOLE signed chain and binds
-  //     the DID to it (returns null otherwise) — then verify the credential's
-  //     signature against the derived key material. No server, no trust in us.
-  let credentialOk = false;
-  const celDid = manifest.dids['did:cel'];
-  try {
-    const celDoc = celDid
-      ? await resolveDidCel(celDid, celLogJson as never)
-      : null;
-    if (celDoc) {
-      const sdk = OriginalsSDK.create({
-        network: 'regtest',
-        webvhNetwork: 'magby',
-        defaultKeyType: 'Ed25519',
-        ordinalsProvider: new OrdMockProvider(),
-        storageAdapter: new MemoryStorageAdapter(),
-        enableLogging: false
-      } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
-      await sdk.did.cache.set(celDid, celDoc as never);
-      const signatureOk = await sdk.credentials.verifyCredential(credential as never);
-      const issuer =
-        typeof credential.issuer === 'string' ? credential.issuer : credential.issuer.id;
-      credentialOk =
-        signatureOk &&
-        issuer === celDid &&
-        credential.credentialSubject.id === celDid &&
-        // ...and it must attest the migration to the SAME did:webvh the log above
-        // verified, not some other identity.
-        credential.credentialSubject.migratedTo === manifest.dids['did:webvh'];
-    }
-  } catch (err) {
-    console.error('[originals-sdk] example credential verification failed', err);
-  }
-  checks.push({
-    id: 'credential',
-    ok: credentialOk,
-    detail: credentialOk
-      ? `${credential.type.join(' · ')} — signature valid, issuer matches the verified DID`
-      : realExample.checkFailDetails.credential
-  });
-
-  const result: VerifiedExample = {
+  return {
     title: manifest.title,
-    // `style` since the rename; `medium` for manifests published before it.
-    medium: manifest.style ?? manifest.medium ?? '',
+    medium: manifest.style,
     artworkDataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artworkSvg)}`,
-    dids: { cel: manifest.dids['did:cel'], webvh: manifest.dids['did:webvh'] },
-    credentialTypes: credential.type,
-    issuedAt: credential.validFrom ?? credential.issuanceDate,
+    dids: { cel: history.state.didCel, webvh: manifest.dids["did:webvh"] },
+    profile: "originals/cel/3",
+    issuedAt: history.state.createdAt,
     checks,
-    allOk: checks.every((c) => c.ok)
+    allOk: checks.every((check) => check.ok),
   };
-  console.log(
-    '%c[originals-sdk] real-example verification',
-    'color:#f7931a;font-weight:600;font-family:ui-monospace,monospace',
-    checks
-  );
-  return result;
 }

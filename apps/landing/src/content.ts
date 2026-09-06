@@ -185,11 +185,11 @@ export const demo = {
    * for both tiers; the tail states which of the two is reading it.
    */
   subhead:
-    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, mints its identity, signs its credentials, and publishes it.',
+    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, creates its identity, signs its CEL history, and publishes it.',
   subheadReal:
     'The last step inscribes it on Bitcoin for real: your key signs the transactions in this browser, and your own BTC pays the network fee.',
   subheadSimulated:
-    'The last step is a labelled simulation — the SDK’s built-in mock Ordinals provider stands in for the Bitcoin network, so there’s nothing to install and no wallet to connect.',
+    'The Bitcoin step requires an enabled Bitcoin deployment and a funded account. Creating and publishing the Original remain available.',
   /** Only appended where signing in genuinely buys a real inscription. */
   subheadSignIn: 'Sign in to inscribe for real, with your own key and your own BTC.',
   consoleHint:
@@ -247,51 +247,27 @@ export const demo = {
         'Inscribes the published Original onto a satoshi as did:btco — real Bitcoin transactions, signed by your key in this browser and paid for out of your own deposit.'
     }
   ],
-  /**
-   * What step 3 costs, for everyone who is NOT being handed a live quote — an
-   * anonymous visitor, or any visitor on a deploy with real Bitcoin off. They
-   * used to reach the end of the page without meeting a single number; the
-   * Protocol table's "One-time network fees" is not a price.
-   *
-   * The figures are the server's own deposit quote, not an invention. See
-   * `estimateInscriptionCostSats` in server/bitcoin.ts: a commit of
-   * COMMIT_OVERHEAD_VB + P2TR_OUTPUT_VB + P2WPKH_OUTPUT_VB + one 68 vB input
-   * (153 vB) plus a reveal of REVEAL_BASE_VB + ceil((contentBytes + 300) / 4)
-   * — 2,186 vB at the 8,000-byte default the deposit route quotes when the
-   * client sends no size hint, which this one never does. 2,339 vB total,
-   * times the 1.5x buffer, plus POSTAGE_SATS: 4,055 sats at 1 sat/vB and
-   * 18,089 at 5.
-   *
-   * Rounded, because the input the whole thing multiplies by is a live mempool
-   * reading (`currentFeeRate` -> provider.estimateFee), and quoting four
-   * significant figures off a number that moves would be a more precise lie.
-   * Rounded UP, to 4,100 and 18,100: a price a creator is quoted must never
-   * sit below what they will actually be asked for, and "around 4,000" was
-   * 55 sats under the estimator's own answer. `demo-inscribe-cost.test.ts`
-   * asserts that direction, so re-deriving these after a change to the buffer,
-   * the postage, the default content size or the output set cannot quietly
-   * reintroduce an understatement.
-   */
+  /** Live transaction fees depend on the complete CEL 3 publication. */
   inscribeCost:
-    'Running the simulation is free. Inscribing for real costs around 4,100 sats at 1 sat/vB, or 18,100 at 5 sat/vB, including the 546-sat output the inscription rides on. The rate moves, so you see the exact amount before you commit to it — a one-time on-chain fee paid to the Bitcoin network, and none of it is refundable.',
+    'Creating and publishing on the web require no Bitcoin fee. Bitcoin publication uses a live fee quote based on the resource bytes and signed history. The transaction builder checks the fee before broadcasting; network fees are not refundable.',
   /**
    * The simulated tier (R6). An anonymous visitor CAN complete step 3, so the
    * copy names it a simulation outright rather than promising a real
    * inscription later — the visual treatment carries the same signal.
    */
   simulated: {
-    badge: 'simulated',
-    action: 'Run the simulation',
-    pending: 'Simulating…',
+    badge: 'Account required',
+    action: 'Sign in to inscribe',
+    pending: 'Preparing…',
     description:
-      'The SDK’s built-in mock Ordinals provider runs the commit/reveal flow right here in the tab — the same code path, standing in for the Bitcoin network.',
+      'Bitcoin publication requires a signed-in account, a funded address and an enabled Bitcoin deployment.',
     note:
-      'Nothing in this step reaches Bitcoin and no sats move: the satoshi and transaction id it produces come from the mock provider.'
+      'This Original is published on the web. Sign in on an enabled Bitcoin deployment to fund and sign its Bitcoin publication.'
   },
   revise: {
     heading: 'Edit it — the log keeps every version',
     body:
-      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. At did:cel that is free and offline; once published, the SDK hosts the new bytes before it signs, so the log never names a file this origin won’t serve. Old versions stay resolvable.',
+      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. At did:cel that is free and offline; once published, the SDK uploads each new byte version before replacing the hosted CEL. Old versions stay resolvable.',
     regenerateAction: 'Shuffle artwork',
     action: 'Commit update',
     pending: 'Signing update…',
@@ -310,14 +286,14 @@ export const demo = {
     empty: 'Awaiting genesis event',
     emptyHint: 'Create an asset and its signed event log builds here, entry by entry.',
     emptyUpcoming: ['create', 'migrate', 'migrate'],
-    sourceNote: 'The asset IS this log — signed by @originals/sdk in this browser tab',
+    sourceNote: 'Signed controller history. Bitcoin acceptance is checked separately from these signatures.',
     /** Each entry commits to the hash of the one before it. */
     chainLabel: 'previousEvent',
     genesisLabel: 'genesis · no parent',
     signedBy: 'signed by',
     unsigned: 'unsigned',
     /** Creator entries: the authenticity claim about what the work IS. */
-    authenticityTitle: 'Authenticity — the creator’s record',
+    authenticityTitle: 'Controller history',
     /** Holder entries: chain of custody; can add to the story, never define the work. */
     custodyTitle: 'Custody — holders’ additions',
     heldBy: 'Held by',
@@ -336,10 +312,10 @@ export const demo = {
    */
   done: {
     real: {
-      lead: 'Anchored on Bitcoin.',
-      beforeSatoshi: 'Inscribed on satoshi',
+      lead: 'Bitcoin publication broadcast.',
+      beforeSatoshi: 'The signed publication targets satoshi',
       beforeTx: 'in transaction',
-      after: 'The full history is in the Provenance tab.',
+      after: 'Confirmation and the accepted history must be checked against the Bitcoin network.',
       explorerLabel: 'View the real transaction on mempool.space'
     },
     simulated: {
@@ -362,7 +338,7 @@ export const demo = {
   /** Explicit local chain, separately labelled from the public networks. */
   regtest: {
     subhead: 'The final step inscribes on local Bitcoin regtest using test coins.',
-    done: 'Anchored on local Bitcoin regtest.',
+    done: 'Publication broadcast on local Bitcoin regtest.',
     notice: 'Local regtest · test coins only. This run uses your local Bitcoin Core and ord services.',
     signInPrompt: 'Sign in to inscribe on your local Bitcoin regtest network.',
     stepDescription: 'Inscribes the published Original onto a satoshi on local Bitcoin regtest. Fund the displayed bcrt address with local test coins.',
@@ -387,6 +363,8 @@ export const demo = {
     unavailableHeading: 'Signing is unavailable right now',
     unavailableBody:
       'Signing isn’t working on this site right now, so inscribing is paused — this is on our end, not something you can fix by signing in again. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address stays yours, at your own address, under your own key.',
+    boundKeyMismatchBody:
+      'This browser refused to finish signing in: the sign-in token it was handed names a signing key this browser does not hold. That should never happen, so rather than let an unknown key sign for your account, nothing was installed and inscribing is paused. Please tell us before you send any BTC. Your Original is still real and resolvable, and any BTC already at your deposit address stays yours, at your own address, under your own key.',
     reauthCta: 'Sign in again to keep going',
     reauthPending: 'Waiting for you to sign back in…',
     preserved: 'Your Original is held right where you left it — signing back in picks up from here.',
@@ -775,16 +753,16 @@ export const realExample = {
   eyebrow: 'A real Original',
   headline: 'Don’t take our word for it.',
   subhead:
-    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:cel genesis event log, a did:webvh identity with a signed version history, and a signed publication credential. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
+    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:cel genesis event log, a did:webvh identity with a signed method history and a CEL 3 controller history. These bundled artifacts demonstrate local signature verification; they do not claim a live DNS or Bitcoin publication. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
   checkLabels: {
     hash: 'Artwork bytes match their declared sha-256',
     log: 'did:webvh log — SCID and Ed25519 proof chain verify',
-    credential: 'Publication credential signature verifies'
+    cel: 'CEL controller history signature verifies'
   },
   pendingLabel: 'Verifying in your browser…',
   checkFailDetails: {
     log: 'DID log did not verify, or is not the identity this asset migrated to',
-    credential: 'Credential signature did not verify, or attests a different identity'
+    cel: 'CEL signatures did not verify, or attests a different identity'
   },
   verifiedBadge: 'Verified in this tab',
   failedBadge: 'Verification incomplete',
@@ -796,7 +774,7 @@ export const realExample = {
   fields: {
     identity: 'Identity',
     published: 'Published as',
-    credential: 'Credential',
+    profile: 'CEL profile',
     issued: 'Issued'
   }
 };

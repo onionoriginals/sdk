@@ -12,45 +12,15 @@
  * being threaded fails here rather than in production.
  */
 import { describe, test, expect } from 'bun:test';
-import { ed25519 } from '@noble/curves/ed25519.js';
-import { multikey, signerFromExternalSigner, type OriginalsSigner } from '@originals/sdk';
+import { createLocalSigner, type CelSigner } from '@originals/sdk';
 import { DemoEngine } from './engine';
-
 const SVG = (id: string) => `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"></svg>`;
-
-/**
- * An Ed25519 signer with the shape `resolveAuthorshipSigner` produces — the
- * SDK-owned-preimage `signBytes` seam, not a document-level `sign`. Standing in
- * for Turnkey: what matters is that the key lives OUTSIDE the SDK's keyStore,
- * which is the condition that broke the revise path.
- */
-function externalAuthorshipSigner(): OriginalsSigner {
-  const privateKey = ed25519.utils.randomSecretKey();
-  const publicKeyMultibase = multikey.encodePublicKey(ed25519.getPublicKey(privateKey), 'Ed25519');
-  return signerFromExternalSigner(
-    {
-      getVerificationMethodId: () => `did:key:${publicKeyMultibase}`,
-      sign: async () => {
-        throw new Error('signs SDK-owned preimages via signBytes');
-      },
-      signBytes: async (data: Uint8Array) => ({ signature: ed25519.sign(data, privateKey) }),
-    },
-    { publicKeyMultibase }
-  );
+function externalAuthorshipSigner(): CelSigner {
+  return createLocalSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
 }
-
-/**
- * An engine already holding a resolved authorship signer. The real resolver
- * dynamic-imports the Turnkey browser client, which must not load under
- * `bun test` — so the cached result is seeded directly, which is exactly the
- * state a signed-in browser reaches after its first append.
- */
-function engineAuthoringWith(signer: OriginalsSigner): DemoEngine {
+function engineAuthoringWith(signer: CelSigner): DemoEngine {
   const engine = new DemoEngine({ authed: true, subOrgId: 'sub-1' });
-  Object.assign(engine as unknown as Record<string, unknown>, {
-    authorshipSigner: signer,
-    authorshipResolved: true,
-  });
+  Object.assign(engine, { authorshipSigner: signer });
   return engine;
 }
 
@@ -73,15 +43,11 @@ describe('revising an Original whose controller key is held outside the SDK', ()
     await engine.create('First Title', 'Artwork', SVG('v1'));
     await engine.update('Second Title', 'Artwork', SVG('v2'));
 
-    const events = (engine as unknown as {
-      asset: { celLog?: { events?: Array<{ type: string; proof?: Array<{ verificationMethod?: string }> }> } };
-    }).asset.celLog?.events;
-    expect(events).toBeDefined();
-    expect(events!.map((e) => e.type)).toEqual(['create', 'update', 'update']);
-    // Genesis names this key as controller, and pre-anchor the CEL accepts
-    // only its current controller — so every append must carry the same vm.
-    for (const e of events!) {
-      expect(e.proof?.[0]?.verificationMethod).toContain(signer.publicKeyMultibase);
+    const events = engine.asset!.celLog.log;
+    expect(events.map((e) => e.event.operation.type)).toEqual(['create', 'update', 'update']);
+    for (const e of events) {
+      const proof = Array.isArray(e.proof) ? e.proof[0] : e.proof;
+      expect(proof.verificationMethod.split('#')[0]).toBe(signer.controller);
     }
   });
 

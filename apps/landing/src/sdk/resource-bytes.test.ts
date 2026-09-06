@@ -59,16 +59,16 @@ describe('binary creator resources', () => {
 });
 
 test('hosted PNG bytes become a tagged base64 envelope that verifies in a fresh engine', async () => {
-  const { OriginalsSDK, KeyManager, signerFromKeyPair } = await import('./previous-sdk');
+  const { OriginalsSDK, createLocalSigner } = await import('@originals/sdk');
   const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
-  const signer = signerFromKeyPair(await new KeyManager().generateKeyPair('Ed25519'));
+  const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(1));
   const sdk = OriginalsSDK.create({ signer, network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519', enableLogging: false });
-  const asset = await sdk.lifecycle.createAsset([{ id: 'mine.png', contentType: 'image/png', type: 'image', hash: hex.encode(sha256(png)), content: png }]);
+  const asset = await sdk.lifecycle.createAsset([{ id: 'mine.png', mediaType: 'image/png', content: png }]);
   const cel = JSON.parse(JSON.stringify(asset.celLog));
   const ref = hostedResourceRefs(cel)[0];
   const built = hostedAssetEnvelope(cel, { [ref.segment]: png });
   if ('problem' in built) throw new Error(built.problem.message);
-  expect(built.envelope.version).toBe(2);
+  expect(built.envelope.version).toBe(3);
   expect(built.envelope.resources[0].content).toEqual({ encoding: 'base64', data: btoa(String.fromCharCode(...png)) });
   const engine = new DemoEngine();
   const revived = await engine.hydrate(JSON.parse(JSON.stringify(built.envelope)));
