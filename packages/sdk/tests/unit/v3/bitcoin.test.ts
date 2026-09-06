@@ -183,6 +183,21 @@ test("no inline media uses application/cel JSON without metadata", async () => {
   expect(parseDocument(body.body, "json")).toEqual(p.document);
 });
 
+test("explicit inline selection retains unchanged media in a name-only delta", async () => {
+  const f = await fixture();
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
+  f.accept(boundary);
+  const loaded = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+  if (loaded.status !== "accepted") throw new Error(loaded.status);
+  await loaded.asset.update({ name: "Retitled PNG" });
+  const delta = await f.sdk.lifecycle.prepareBitcoinPublication(loaded.asset, { ...f.options, inlineResourceId: "art" });
+  expect(delta.kind).toBe("delta");
+  expect(delta.document.log).toHaveLength(1);
+  expect(inscription(delta).body).toEqual(png);
+  expect(inscription(delta).tags.contentType).toBe("image/png");
+  expect(inscription(delta).tags.metadata).toEqual(delta.document);
+});
+
 test("cold accepted head produces only a new delta, refusing absent evidence, stale proposals, and misaligned funding", async () => {
   const f = await fixture();
   const p = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);

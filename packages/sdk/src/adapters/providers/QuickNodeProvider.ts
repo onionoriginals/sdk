@@ -1,5 +1,5 @@
 import type { SatSnapshot } from '@originals/cel/v3';
-import { readSatSnapshot } from './sat-snapshot.js';
+import { readSatSnapshot, type SatSnapshotBudget } from './sat-snapshot.js';
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
 import { StructuredError } from '@originals/cel';
@@ -8,6 +8,8 @@ import { decode as decodeCbor } from '@originals/cel/cbor';
 import { hexToBytes } from '@originals/cel/encoding';
 
 export interface QuickNodeProviderOptions {
+  /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
+  snapshotBudget?: SatSnapshotBudget;
   /**
    * Full QuickNode endpoint URL including the token path, e.g.
    * `https://your-endpoint-name.btc.quiknode.pro/<token>/`.
@@ -116,6 +118,8 @@ export class QuickNodeProvider implements OrdinalsProvider {
   private readonly contentBaseUrl?: string;
   private networkCheck: Promise<void> | null = null;
 
+  private readonly snapshotBudget: SatSnapshotBudget;
+
   constructor(options: QuickNodeProviderOptions) {
     if (!options?.endpoint) {
       throw new StructuredError('QUICKNODE_ENDPOINT_REQUIRED', 'QuickNodeProvider requires an endpoint URL');
@@ -132,6 +136,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       throw new StructuredError('QUICKNODE_ENDPOINT_INVALID', `QuickNodeProvider endpoint must be http(s), got ${parsed.protocol}`);
     }
+    this.snapshotBudget = { ...options.snapshotBudget };
     this.endpoint = options.endpoint;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
@@ -188,14 +193,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * status but still send a JSON body; parse the body when possible so the
    * RPC error surfaces instead of an opaque HTTP failure.
    */
-  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number): Promise<T> {
+  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number, signal?: AbortSignal): Promise<T> {
     const cap = maxBytes ?? this.maxJsonBytes;
     const res = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       redirect: 'error',
-      signal: AbortSignal.timeout(this.timeout),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
     });
     const lenHeader = res.headers?.get?.('content-length');
     if (lenHeader && Number(lenHeader) > cap) {
@@ -551,15 +556,15 @@ export class QuickNodeProvider implements OrdinalsProvider {
       'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'CEL 3 snapshots require an explicit contentEncoding wire contract',
     );
     return readSatSnapshot({
-      rpc: (method, params) => this.rpcCall(method, params),
-      status: () => this.rpcCall('ord_getStatus', []),
-      indexHash: height => this.rpcCall('ord_getBlockHash', [height]),
-      sat: sat => this.rpcCall('ord_getSat', [Number(sat)]),
-      inscription: id => this.rpcCall('ord_getInscription', [id]),
-      content: async id => {
+      rpc: (method, params, signal) => this.rpcCall(method, params, undefined, signal),
+      status: signal => this.rpcCall('ord_getStatus', [], undefined, signal),
+      indexHash: (height, signal) => this.rpcCall('ord_getBlockHash', [height], undefined, signal),
+      sat: (sat, signal) => this.rpcCall('ord_getSat', [Number(sat)], undefined, signal),
+      inscription: (id, signal) => this.rpcCall('ord_getInscription', [id], undefined, signal),
+      content: async (id, signal) => {
         if (this.contentBaseUrl) {
           const response = await fetch(this.contentBaseUrl + '/content/' + id, {
-            headers: { Accept: 'application/octet-stream' }, redirect: 'error', signal: AbortSignal.timeout(this.timeout),
+            headers: { Accept: 'application/octet-stream' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
           });
           if (response.status === 404) return null;
           if (!response.ok) throw new StructuredError('QUICKNODE_CONTENT_UNAVAILABLE', 'Raw inscription content request failed');
@@ -568,7 +573,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
           if (bytes.length > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
           return bytes;
         }
-        let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024);
+        let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024, signal);
         // The documented wrapper carries literal content; never re-serialize
         // decoded objects or guess whether an alphanumeric string is base64.
         if (result === null) return null;
@@ -576,8 +581,8 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (typeof result !== 'string') throw new StructuredError('QUICKNODE_CONTENT_UNEXPECTED_SHAPE', 'Snapshot content must use the configured string encoding');
         return this.decodeContent(result);
       },
-      metadata: id => this.rpcCall('ord_getMetadata', [id]),
-    }, satoshi, this.expectedNetwork);
+      metadata: (id, signal) => this.rpcCall('ord_getMetadata', [id], undefined, signal),
+    }, satoshi, this.expectedNetwork, this.snapshotBudget);
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

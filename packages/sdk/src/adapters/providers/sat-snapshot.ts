@@ -4,13 +4,20 @@ import { hexToBytes } from '@originals/cel/encoding';
 
 /** Transport seam for ord's complete /sat, /inscription and raw /r/metadata views. */
 export interface SatSnapshotReader {
-  rpc(method: string, params: unknown[]): Promise<unknown>;
-  status(): Promise<unknown>;
-  indexHash(height: number): Promise<unknown>;
-  sat(satoshi: string): Promise<unknown>;
-  inscription(id: string): Promise<unknown>;
-  content(id: string): Promise<Uint8Array | null>;
-  metadata(id: string): Promise<unknown>;
+  rpc(method: string, params: unknown[], signal?: AbortSignal): Promise<unknown>;
+  status(signal?: AbortSignal): Promise<unknown>;
+  indexHash(height: number, signal?: AbortSignal): Promise<unknown>;
+  sat(satoshi: string, signal?: AbortSignal): Promise<unknown>;
+  inscription(id: string, signal?: AbortSignal): Promise<unknown>;
+  content(id: string, signal?: AbortSignal): Promise<Uint8Array | null>;
+  metadata(id: string, signal?: AbortSignal): Promise<unknown>;
+}
+
+export interface SatSnapshotBudget {
+  /** Total time for one complete observation, including stalled reads (default 30 seconds). */
+  timeoutMs?: number;
+  /** Total upstream requests for one observation (default 512). No partial result is returned. */
+  maxRequests?: number;
 }
 
 const object = (value: unknown): Record<string, unknown> =>
@@ -21,7 +28,47 @@ const chains: Record<string, BitcoinNetwork> = { main: 'mainnet', mainnet: 'main
 const networkOf = (value: unknown): BitcoinNetwork | undefined => typeof value === 'string' && Object.prototype.hasOwnProperty.call(chains, value) ? chains[value] : undefined;
 
 /** No decoded metadata, delegated bytes, incomplete bodies or moving index can attest a CEL 3 head. */
-export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
+export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, budget: SatSnapshotBudget = {}): Promise<SatSnapshot> {
+  const timeoutMs = budget.timeoutMs ?? 30_000;
+  const maxRequests = budget.maxRequests ?? 512;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000 ||
+      !Number.isSafeInteger(maxRequests) || maxRequests <= 0 || maxRequests > 50_000) {
+    throw new Error('Invalid sat snapshot budget');
+  }
+  const exhausted = () => new StructuredError('SAT_SNAPSHOT_BUDGET_EXCEEDED', 'Complete sat observation exceeded its total request or time budget');
+  const controller = new AbortController();
+  const deadline = performance.now() + timeoutMs;
+  const timer = setTimeout(() => controller.abort(exhausted()), timeoutMs);
+  let requests = 0;
+  const call = async <T>(read: () => Promise<T>): Promise<T> => {
+    if (requests >= maxRequests || performance.now() >= deadline) controller.abort(exhausted());
+    controller.signal.throwIfAborted();
+    requests++;
+    // Race also bounds a transport that ignores cancellation. Its completion
+    // cannot resume the scan; compliant transports abort their in-flight read.
+    let onAbort: () => void = () => {};
+    try {
+      return await Promise.race([new Promise<never>((_, reject) => {
+        onAbort = () => reject(exhausted());
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+      }), read()]);
+    } finally { controller.signal.removeEventListener('abort', onAbort); }
+  };
+  const signal = controller.signal;
+  try {
+    return await collectSatSnapshot({
+      rpc: (method, params) => call(() => reader.rpc(method, params, signal)),
+      status: () => call(() => reader.status(signal)),
+      indexHash: height => call(() => reader.indexHash(height, signal)),
+      sat: sat => call(() => reader.sat(sat, signal)),
+      inscription: id => call(() => reader.inscription(id, signal)),
+      content: id => call(() => reader.content(id, signal)),
+      metadata: id => call(() => reader.metadata(id, signal)),
+    }, satoshi, expectedNetwork);
+  } finally { clearTimeout(timer); }
+}
+
+async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
   parseAssetDid('did:btco:' + satoshi);
   const readTip = async () => {
     const info = object(await reader.rpc('getblockchaininfo', []));

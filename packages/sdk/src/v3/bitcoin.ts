@@ -325,7 +325,7 @@ export class BitcoinPublications {
             ? undefined
             : inlineResourceId === undefined
               ? candidates[0]
-              : candidates.find((resource) => resource.id === inlineResourceId);
+              : proposedState.resources.find((resource) => resource.id === inlineResourceId);
         if (!selected)
           return checkedContent(
             document,

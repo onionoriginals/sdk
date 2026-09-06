@@ -13,6 +13,8 @@ import type {
   AssetEnvelope as SubpathEnvelope,
   AssetResourceInput,
   CelSigner,
+  HostedEvidence,
+  AssetVerification,
 } from "@originals/sdk/types";
 import {
   verifyHistory,
@@ -36,6 +38,9 @@ const lifecycle: LifecycleManager = OriginalsSDK.create(options).lifecycle;
 const asset: OriginalsAsset = await lifecycle.createAsset([input]);
 const resource: AssetResource = asset.resources[0];
 const envelope: AssetEnvelope = asset.serialize();
+const hostedEvidence: HostedEvidence | undefined = (await asset.verification()).hosted;
+const hostedVerification: AssetVerification['hosted'] = hostedEvidence;
+void hostedVerification;
 const subpathEnvelope: SubpathEnvelope = envelope;
 const loaded: OriginalsAsset = (
   await SDK.create().lifecycle.loadAsset(subpathEnvelope)

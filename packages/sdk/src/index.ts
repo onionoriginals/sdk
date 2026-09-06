@@ -223,4 +223,5 @@ export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, 
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./v3/bitcoin.js";
 
 export { prepareInscriptionOnSat, submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from './bitcoin/inscribe-on-sat.js';
+export { validateInscriptionReveal } from './bitcoin/inscription-recovery.js';
 export type { InscribeOnSatResult, PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionRecoveryRecord, InscriptionBroadcastState } from './bitcoin/inscribe-on-sat.js';

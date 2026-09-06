@@ -1,4 +1,6 @@
 import * as btc from '@scure/btc-signer';
+import { schnorr } from '@noble/curves/secp256k1.js';
+import { OutOrdinalReveal, parseInscriptions } from 'micro-ordinals';
 import { StructuredError, validateSatoshiNumber } from '@originals/cel';
 import type { OrdinalsProvider } from '../adapters/types.js';
 import type { Utxo } from '../types/bitcoin.js';
@@ -48,6 +50,35 @@ function invalid(message: string): never {
   throw new StructuredError('INVALID_INSCRIPTION_RECOVERY', message);
 }
 
+/** Validate the writer's single-leaf inscription spend; txids do not commit witness bytes. */
+export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.Transaction): void {
+  if (reveal.inputsLength !== 1 || reveal.getInput(0).index !== 0 ||
+      Buffer.from(reveal.getInput(0).txid!).toString('hex') !== commit.id) {
+    invalid('Recovery reveal must spend output zero of the exact commit.');
+  }
+  const witness = reveal.getInput(0).finalScriptWitness;
+  if (!witness || witness.length !== 3) invalid('Recovery reveal must use the inscription script path.');
+  const [signature, script, control] = witness;
+  if (signature.length !== 64 || control.length !== 33 || (control[0] & 0xfe) !== 0xc0) {
+    invalid('Recovery reveal must use the original single-leaf tapscript and default signature hash.');
+  }
+  const decoded = btc.Script.decode(script);
+  const inscriptions = parseInscriptions(decoded, true);
+  const publicKey = decoded[0];
+  if (!(publicKey instanceof Uint8Array) || publicKey.length !== 32 || inscriptions?.length !== 1) {
+    invalid('Recovery reveal must contain exactly one inscription.');
+  }
+  const payment = btc.p2tr(control.slice(1), { type: 'tr', script }, undefined, false, [OutOrdinalReveal]);
+  const expectedControl = btc.TaprootControlBlock.encode(payment.tapLeafScript![0][0]);
+  const output = commit.getOutput(0);
+  if (!output.script || output.amount === undefined || output.amount <= 0n ||
+      !Buffer.from(output.script).equals(payment.script) || !Buffer.from(control).equals(expectedControl)) {
+    invalid('Recovery reveal witness does not open the committed Taproot output.');
+  }
+  const message = reveal.preimageWitnessV1(0, [output.script], btc.SigHash.DEFAULT, [output.amount], undefined, script, 0xc0);
+  if (!schnorr.verify(signature, message, publicKey)) invalid('Recovery reveal signature is invalid.');
+}
+
 /** Check persisted identities and funding order before using stored spending bytes. */
 function validate(prepared: PreparedInscriptionOnSat): void {
   if (!prepared || prepared.version !== 1 || !['mainnet', 'testnet', 'regtest', 'signet'].includes(prepared.network) ||
@@ -76,6 +107,7 @@ function validate(prepared: PreparedInscriptionOnSat): void {
     if (new Set(outpoints).size !== outpoints.length) invalid('Recovery funding inputs contain duplicates.');
     if (reveal.outputsLength !== 1 || Buffer.from(reveal.getOutput(0).script!).toString('hex') !==
         scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.');
+    validateInscriptionReveal(commit, reveal);
   } catch (error) {
     if (error instanceof StructuredError) throw error;
     invalid(`Cannot parse recovery transactions: ${error instanceof Error ? error.message : 'Unknown transaction parse failure'}`);

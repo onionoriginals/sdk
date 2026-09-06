@@ -11,6 +11,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   encoding?: 'auto' | 'utf8' | 'base64'; metadata?: unknown; content?: Uint8Array;
   info?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
   rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
+  snapshotBudget?: { timeoutMs?: number; maxRequests?: number }; delayStatusMs?: number;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   let statuses = 0, tips = 0, indexHashes = 0;
@@ -25,6 +26,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
     if (req.method === 'POST') {
       const { method, params } = await req.json() as { method: string; params: unknown[] };
       calls.push({ method, params });
+      if (method === 'ord_getStatus' && options.delayStatusMs) await Bun.sleep(options.delayStatusMs);
       if (method === options.missingMethod) return Response.json({ error: { code: -32601, message: 'Method not found' } });
       let result: unknown;
       switch (method) {
@@ -43,7 +45,12 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
       return Response.json({ result });
     }
     const path = new URL(req.url).pathname;
-    if (path === '/status') return Response.json(++statuses > 1 ? { ...status, ...options.statusAfter } : status);
+    if (path === '/status') {
+      calls.push({ method: 'status', params: [] });
+      if (options.delayStatusMs) await Bun.sleep(options.delayStatusMs);
+      return Response.json(++statuses > 1 ? { ...status, ...options.statusAfter } : status);
+    }
+    calls.push({ method: path, params: [] });
     if (path.startsWith('/blockhash/')) return new Response(++indexHashes > 1 ? options.indexAfterHash ?? hash : hash);
     if (path === '/sat/123') return Response.json(sat);
     if (path === '/inscription/' + id) return Response.json(info);
@@ -56,12 +63,25 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
     return nativeFetch(input, init);
   }) as typeof fetch;
   const provider = kind === 'regtest'
-    ? new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' })
-    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}) });
+    ? new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only', snapshotBudget: options.snapshotBudget })
+    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}), snapshotBudget: options.snapshotBudget });
   return { provider, calls };
 }
 
 for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} CEL 3 snapshot`, () => {
+  test('fails closed at the total request budget before downloading the enumeration', async () => {
+    const { provider, calls } = fixture(kind, { snapshotBudget: { maxRequests: 4 }, sat: { inscriptions: Array.from({ length: 1000 }, (_, index) => txid + 'i' + index) } });
+    await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
+    expect(calls).toHaveLength(4);
+  });
+  test('bounds a stalled dependency by the snapshot deadline and stops subsequent reads', async () => {
+    const { provider, calls } = fixture(kind, { snapshotBudget: { timeoutMs: 20 }, delayStatusMs: 100 });
+    const started = performance.now();
+    await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
+    expect(performance.now() - started).toBeLessThan(90);
+    await Bun.sleep(110);
+    expect(calls).toHaveLength(2);
+  });
   test('retains exact body and raw CBOR with Core creation order and ownership', async () => {
     const { provider, calls } = fixture(kind);
     const result = await provider.getSatSnapshot('123');
