@@ -41,10 +41,6 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import {
-  createInscriptionCompletionSweep,
-  type SweepProvider,
-} from './server/inscription-completion-sweep';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
