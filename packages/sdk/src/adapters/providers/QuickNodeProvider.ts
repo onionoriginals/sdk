@@ -43,7 +43,7 @@ export interface QuickNodeProviderOptions {
    *   deployments where content hashes matter.
    */
   contentEncoding?: 'base64' | 'utf8' | 'auto';
-  /** Explicit ord-compatible base URL serving raw GET /content/:id bytes. Used for CEL 3 snapshots instead of JSON-RPC content. */
+  /** Explicit ord-compatible base URL serving raw /content/:id and /r/metadata/:id. Used for CEL 3 snapshots instead of their JSON-RPC wrappers. */
   contentBaseUrl?: string;
 }
 
@@ -546,8 +546,10 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * Pin contentEncoding to the endpoint's wire contract: 'utf8' for the
    * documented literal text result, 'base64' only for gateways configured to
    * encode binary content that way. Auto mode
-   * cannot attest exact bytes. ord_getMetadata must return its documented raw
-   * hex string or explicit null; decoded objects and unavailable methods fail.
+   * cannot attest exact bytes. With contentBaseUrl, use ord's raw content and
+   * metadata routes, including its explicit inscription-specific absence marker.
+   * Otherwise ord_getMetadata must return raw hex or explicit null. Decoded
+   * objects, unavailable routes and ambiguous RPC errors fail.
    * https://www.quicknode.com/docs/bitcoin/ord_getMetadata
    * https://www.quicknode.com/docs/bitcoin/ord_getContent
    */
@@ -581,7 +583,23 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (typeof result !== 'string') throw new StructuredError('QUICKNODE_CONTENT_UNEXPECTED_SHAPE', 'Snapshot content must use the configured string encoding');
         return this.decodeContent(result);
       },
-      metadata: (id, signal) => this.rpcCall('ord_getMetadata', [id], undefined, signal),
+      metadata: async (id, signal) => {
+        if (!this.contentBaseUrl) return this.rpcCall('ord_getMetadata', [id], undefined, signal);
+        const response = await fetch(this.contentBaseUrl + '/r/metadata/' + id, {
+          headers: { Accept: 'application/json' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
+        });
+        if (Number(response.headers.get('content-length')) > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+        const text = new TextDecoder().decode(bytes);
+        // A generic gateway 404 can mean the route is unavailable. Only ord's
+        // matching inscription-specific marker attests absent metadata.
+        if (response.status === 404 && text.trim() === `inscription ${id} metadata not found`) return null;
+        if (!response.ok) throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata request failed');
+        const metadata: unknown = JSON.parse(text);
+        if (typeof metadata !== 'string') throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata must be a hex string');
+        return metadata;
+      },
     }, satoshi, this.expectedNetwork, this.snapshotBudget);
   }
 

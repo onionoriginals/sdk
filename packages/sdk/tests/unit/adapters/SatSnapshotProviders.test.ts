@@ -9,14 +9,15 @@ const txid = 'a'.repeat(64), hash = 'b'.repeat(64), id = txid + 'i0';
 
 function fixture(kind: 'quicknode' | 'regtest', options: {
   encoding?: 'auto' | 'utf8' | 'base64'; metadata?: unknown; content?: Uint8Array;
-  info?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
+  info?: Record<string, unknown>; status?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
   rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
   snapshotBudget?: { timeoutMs?: number; maxRequests?: number }; delayStatusMs?: number;
+  metadataHttpStatus?: number; metadataHttpBody?: string; delayMetadataMs?: number; maxJsonBytes?: number;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   let statuses = 0, tips = 0, indexHashes = 0;
   const chain = kind === 'regtest' ? 'regtest' : 'main';
-  const status = { chain: kind === 'regtest' ? 'regtest' : 'mainnet', height: 100, sat_index: true, address_index: true, inscription_index: true, unrecoverably_reorged: false };
+  const status = { chain: kind === 'regtest' ? 'regtest' : 'mainnet', height: 100, sat_index: true, address_index: true, inscription_index: true, unrecoverably_reorged: false, ...options.status };
   const sat = { number: 123, inscriptions: [id], address: 'holder', satpoint: txid + ':0:0', ...options.sat };
   const info = { id, sat: 123, height: 100, content_type: 'image/png', content_length: 3, ...options.info };
   const content = options.content ?? new Uint8Array([0, 255, 1]);
@@ -55,7 +56,11 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
     if (path === '/sat/123') return Response.json(sat);
     if (path === '/inscription/' + id) return Response.json(info);
     if (path === '/content/' + id) return new Response(content);
-    if (path === '/r/metadata/' + id) return metadata === null ? new Response('', { status: 404 }) : Response.json(metadata);
+    if (path === '/r/metadata/' + id) {
+      if (options.delayMetadataMs) await Bun.sleep(options.delayMetadataMs);
+      if (options.metadataHttpStatus) return new Response(options.metadataHttpBody ?? '', { status: options.metadataHttpStatus });
+      return metadata === null ? new Response(`inscription ${id} metadata not found`, { status: 404 }) : Response.json(metadata);
+    }
     return new Response('', { status: 404 });
   } });
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -64,11 +69,28 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   }) as typeof fetch;
   const provider = kind === 'regtest'
     ? new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only', snapshotBudget: options.snapshotBudget })
-    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}), snapshotBudget: options.snapshotBudget });
+    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}), snapshotBudget: options.snapshotBudget, maxJsonBytes: options.maxJsonBytes });
   return { provider, calls };
 }
 
 for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} CEL 3 snapshot`, () => {
+  test('reads complete ownership and publication bytes without the inverse address index', async () => {
+    const { provider, calls } = fixture(kind, { status: { address_index: false } });
+    const result = await provider.getSatSnapshot('123');
+    expect(result.indexHealthy).toBe(true);
+    expect(result.enumerationComplete).toBe(true);
+    expect(result.ownership).toEqual({ owner: 'holder', satpoint: txid + ':0:0' });
+    expect(result.publications[0].body).toMatchObject({ status: 'complete', bytes: new Uint8Array([0, 255, 1]) });
+    expect(calls.some(call => /address/i.test(call.method))).toBe(false);
+  });
+  for (const field of ['address', 'satpoint']) test(`rejects missing ${field} without address indexing`, async () => {
+    const { provider } = fixture(kind, { status: { address_index: false }, sat: { [field]: undefined } });
+    await expect(provider.getSatSnapshot('123')).rejects.toThrow(/ownership/i);
+  });
+  for (const field of ['sat_index', 'inscription_index']) test(`still requires ${field} without address indexing`, async () => {
+    const { provider } = fixture(kind, { status: { address_index: false, [field]: false } });
+    await expect(provider.getSatSnapshot('123')).rejects.toThrow(/index/i);
+  });
   test('fails closed at the total request budget before downloading the enumeration', async () => {
     const { provider, calls } = fixture(kind, { snapshotBudget: { maxRequests: 4 }, sat: { inscriptions: Array.from({ length: 1000 }, (_, index) => txid + 'i' + index) } });
     await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
@@ -170,4 +192,46 @@ test('QuickNode raw content endpoint preserves PNG bytes without guessing JSON s
   const snapshot = await provider.getSatSnapshot('123');
   expect(snapshot.publications[0].body).toMatchObject({ bytes: new Uint8Array([0, 255, 1]) });
   expect(calls.some(call => call.method === 'ord_getContent')).toBe(false);
+});
+
+test('QuickNode raw gateway retains exact CBOR without the RPC metadata wrapper', async () => {
+  const { provider, calls } = fixture('quicknode', { rawContent: true, missingMethod: 'ord_getMetadata' });
+  const snapshot = await provider.getSatSnapshot('123');
+  expect(snapshot.publications[0].body).toMatchObject({ metadata: new Uint8Array([191, 99, 108, 111, 103, 159, 255, 255]) });
+  expect(calls.some(call => call.method === 'ord_getMetadata')).toBe(false);
+});
+
+test('QuickNode raw gateway recognizes explicit metadata absence for the listed inscription', async () => {
+  const { provider } = fixture('quicknode', { rawContent: true, metadata: null, missingMethod: 'ord_getMetadata' });
+  expect((await provider.getSatSnapshot('123')).publications[0].body).toMatchObject({ metadata: null });
+});
+
+for (const [status, body] of [[500, 'Internal error'], [404, 'Not found'], [404, `inscription ${'d'.repeat(64)}i0 metadata not found`]] as const) {
+  test(`QuickNode raw metadata refuses ${status} without the matching absence marker`, async () => {
+    const { provider } = fixture('quicknode', { rawContent: true, metadataHttpStatus: status, metadataHttpBody: body });
+    await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'QUICKNODE_METADATA_UNAVAILABLE' });
+  });
+}
+
+test('QuickNode raw gateway rejects decoded metadata objects', async () => {
+  const { provider } = fixture('quicknode', { rawContent: true, metadata: { log: [] } });
+  await expect(provider.getSatSnapshot('123')).rejects.toThrow(/metadata/i);
+});
+
+test('QuickNode raw gateway rejects a success response with ambiguous null metadata', async () => {
+  const { provider } = fixture('quicknode', { rawContent: true, metadataHttpStatus: 200, metadataHttpBody: 'null' });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'QUICKNODE_METADATA_UNAVAILABLE' });
+});
+
+test('QuickNode raw metadata remains inside the total snapshot deadline', async () => {
+  const { provider, calls } = fixture('quicknode', { rawContent: true, delayMetadataMs: 150, snapshotBudget: { timeoutMs: 100 } });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
+  expect(calls.at(-1)?.method).toBe('/r/metadata/' + id);
+  await Bun.sleep(170);
+  expect(calls.at(-1)?.method).toBe('/r/metadata/' + id);
+});
+
+test('QuickNode raw metadata enforces its configured response size cap', async () => {
+  const { provider } = fixture('quicknode', { rawContent: true, maxJsonBytes: 1024, metadata: 'ab'.repeat(1024) });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'QUICKNODE_RESPONSE_TOO_LARGE' });
 });

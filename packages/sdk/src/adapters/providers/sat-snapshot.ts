@@ -80,9 +80,11 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   const before = await readTip();
   const readIndex = async () => {
     const status = object(await reader.status());
+    // /sat derives ownership from the current output. The address index is
+    // needed for the inverse address-to-outputs lookup, which this scan never uses.
     if (networkOf(status.chain) !== before.network || !integer(status.height) || status.sat_index !== true ||
-        status.address_index !== true || status.inscription_index !== true || status.unrecoverably_reorged !== false)
-      throw new Error('Healthy ord sat and address indexes required');
+        status.inscription_index !== true || status.unrecoverably_reorged !== false)
+      throw new Error('Healthy ord sat and inscription indexes required');
     const indexedHash = await reader.indexHash(status.height);
     if (!hash(indexedHash)) throw new Error('ord index hash unavailable');
     if (status.height !== before.height || indexedHash !== before.hash) throw new StructuredError('SAT_SNAPSHOT_CHAIN_CHANGED', 'ord index is not at the stable Core tip');
