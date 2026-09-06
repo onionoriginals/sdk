@@ -42,19 +42,20 @@ describe('a full anonymous demo run against a store at capacity', () => {
     store = createWebvhHostStore({ maxEntries: 12, maxEntriesPerClient: 6, maxClients: 4 });
     const fill = installHostFetch(store, 'filler');
     for (let i = 0; i < 40; i++) {
-      const key = `other.test/spike${i}/did.jsonl`;
-      await store.handlePut(
+      const key = `other.test/published/anonymous/spike${i}/did.jsonl`;
+      const put = await store.handlePut(
         new Request(`http://host/api/host/${encodeURIComponent(key)}`, {
           method: 'PUT',
           headers: { 'content-type': 'application/jsonl' },
           body: 'filler',
         }),
         new URL(`http://host/api/host/${encodeURIComponent(key)}`),
-        `10.0.0.${i % 8}`
+        `10.0.0.${i % 4}`
       );
+      expect(put.status).toBe(200);
     }
     fill();
-    expect(store.stats().entries).toBeLessThanOrEqual(12);
+    expect(store.stats().entries).toBe(12);
     restore = installHostFetch(store, 'new-visitor');
   });
   afterEach(() => restore());

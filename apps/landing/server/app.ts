@@ -71,7 +71,7 @@ function documentHeaders(): Record<string, string> {
   };
 }
 
-async function serveStatic(url: URL, distDir: string): Promise<Response> {
+async function serveStatic(url: URL, distDir: string, fallback = true): Promise<Response | null> {
   // Reject traversal on the DECODED path before normalize collapses `..`
   // segments (e.g. `%2f..%2f` → `/../` would otherwise normalize past root and
   // slip through). Any `..` segment in the requested path is rejected outright.
@@ -91,6 +91,7 @@ async function serveStatic(url: URL, distDir: string): Promise<Response> {
   if (await f.exists()) {
     return target === 'index.html' ? new Response(f, { headers: documentHeaders() }) : new Response(f);
   }
+  if (!fallback) return null;
   // SPA fallback: client-side routes have no file on disk.
   return new Response(file(distDir + 'index.html'), { headers: documentHeaders() });
 }
@@ -213,13 +214,22 @@ export function buildFetch(deps: {
 
     // 4. WebVH log/resource GETs served at the resolver's exact URLs.
     if (req.method === 'GET' || req.method === 'HEAD') {
-      const served = hostStore.serve(req, url);
-      if (served) return served;
+      // Trusted files and durable publications always win. Anonymous uploads
+      // may only answer in their publication namespace, after these routes.
+      const staticFile = await serveStatic(url, distDir, false);
+      if (staticFile) return staticFile;
       const durable = originals?.serve(url);
       if (durable) return durable;
+      // A missing durable object must never fall through to anonymous content
+      // or the SPA; its URL remains reserved before its first publication.
+      if (path === '/published/accounts' || path.startsWith('/published/accounts/') || /^\/user-[^/]+(?:\/|$)/.test(path)) {
+        return json({ error: 'not_found' }, 404);
+      }
+      const served = hostStore.serve(req, url);
+      if (served) return served;
     }
 
     // 5. Static SPA + fallback (with traversal guard).
-    return serveStatic(url, distDir);
+    return (await serveStatic(url, distDir))!;
   };
 }

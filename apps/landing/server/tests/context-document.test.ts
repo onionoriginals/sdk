@@ -200,7 +200,7 @@ describe('the host store refuses the shadowing key outright', () => {
     expect(res.status).toBe(403);
   });
 
-  test('only an exact match is reserved; ordinary keys still store', async () => {
+  test('nearby application paths are not anonymous publication keys', async () => {
     const store = createWebvhHostStore();
     for (const key of ['originals.build/contextual', 'originals.build/context/x']) {
       const res = await store.handlePut(
@@ -208,7 +208,7 @@ describe('the host store refuses the shadowing key outright', () => {
         new URL(`http://x/api/host/${key}`),
         '1.2.3.4'
       );
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     }
   });
 });
@@ -218,7 +218,7 @@ describe('shadowsReservedPath', () => {
     expect(shadowsReservedPath('originals.build/context')).toBe(true);
     expect(shadowsReservedPath('any.host/context')).toBe(true);
     expect(shadowsReservedPath('originals.build/contextual')).toBe(false);
-    expect(shadowsReservedPath('originals.build/context/x')).toBe(false);
+    expect(shadowsReservedPath('originals.build/context/x')).toBe(true);
     expect(shadowsReservedPath('originals.build/a/context')).toBe(false);
     // A bare key with no host segment addresses nothing servable.
     expect(shadowsReservedPath('context')).toBe(false);

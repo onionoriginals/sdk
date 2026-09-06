@@ -166,11 +166,11 @@ describe('rate limits bind to the resolved client identity', () => {
         peer('10.0.0.1')
       );
 
-    expect((await put('203.0.113.7', 'a/1')).status).toBe(200);
-    expect((await put('203.0.113.7', 'a/2')).status).toBe(200);
-    expect((await put('203.0.113.7', 'a/3')).status).toBe(429);
+    expect((await put('203.0.113.7', 'a/published/anonymous/1/did.jsonl')).status).toBe(200);
+    expect((await put('203.0.113.7', 'a/published/anonymous/2/did.jsonl')).status).toBe(200);
+    expect((await put('203.0.113.7', 'a/published/anonymous/3/did.jsonl')).status).toBe(429);
     // A different client behind the same proxy still has its own bucket.
-    expect((await put('203.0.113.8', 'b/1')).status).toBe(200);
+    expect((await put('203.0.113.8', 'b/published/anonymous/1/did.jsonl')).status).toBe(200);
   });
 
   test('rotating the forwarded header from a non-proxy source does not mint buckets', async () => {
@@ -187,8 +187,8 @@ describe('rate limits bind to the resolved client identity', () => {
         }),
         peer('203.0.113.7')
       );
-    expect((await put('1.1.1.1', 'a/1')).status).toBe(200);
-    expect((await put('2.2.2.2', 'a/2')).status).toBe(429);
-    expect((await put('3.3.3.3', 'a/3')).status).toBe(429);
+    expect((await put('1.1.1.1', 'a/published/anonymous/1/did.jsonl')).status).toBe(200);
+    expect((await put('2.2.2.2', 'a/published/anonymous/2/did.jsonl')).status).toBe(429);
+    expect((await put('3.3.3.3', 'a/published/anonymous/3/did.jsonl')).status).toBe(429);
   });
 });

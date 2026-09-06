@@ -53,37 +53,52 @@ interface Entry {
 const HOST_PREFIX = '/api/host/';
 
 /**
- * Keys this store refuses, because serving them would shadow a canonical route.
- *
- * A stored object is looked up on GET as `${url.host}${url.pathname}`, so the
- * key `<any-host>/context` intercepts `/context` — the JSON-LD context every
- * issued credential resolves through. Writes here are unauthenticated with
- * client-chosen keys, so without this a stranger could define what every
- * Originals credential MEANS to an external verifier, or break all of them at
- * once by storing junk.
- *
- * The store's usual justification for anonymous writes — did:webvh logs are
- * self-certifying, so tampering is caught at verification — does not cover a
- * context document, which certifies nothing and is trusted by construction.
- *
- * This is defence in depth. `buildFetch` resolves `/context` BEFORE this store,
- * which is what actually guarantees the canonical document wins; refusing the
- * key too means a shadowing object never enters the store at all, so no
- * reordering of those routes can quietly reopen the hole.
- */
-const RESERVED_KEY_PATHS = new Set(['context']);
-
-/**
- * Whether a put key would shadow a reserved route.
- *
- * Keys are `${domain}/${relativePath}`; only the path after the host matters,
- * and only an exact match shadows — `serve()` compares `url.pathname` byte for
- * byte, so `context/x` and `contextual` reach nothing and stay allowed.
+ * The permanent DID host is shared, but application and publication paths are
+ * disjoint. New CEL 3 anonymous publications live under
+ * /published/anonymous/<asset digest>/; /published/accounts/ and /user-* are
+ * durable-only, including paths that have not been written yet.
  */
 export function shadowsReservedPath(key: string): boolean {
-  const slash = key.indexOf('/');
-  if (slash < 0) return false;
-  return RESERVED_KEY_PATHS.has(key.slice(slash + 1));
+  const path = key.slice(key.indexOf('/') + 1);
+  if (!key.includes('/')) return false;
+  const first = path.split('/')[0];
+  return first === 'context' || first === 'api' || first === 'assets' ||
+    first.startsWith('user-') ||
+    (first === 'published' && !path.startsWith('published/anonymous/'));
+}
+
+/**
+ * The anonymous host is a publication service, never a general static host.
+ * Compatibility paths below are used by the previous-sdk demo: studio/you,
+ * root DID artifacts/resources and the lowercased did:cel digest asset slug.
+ * Remove that compatibility block when the private adapter is retired; the
+ * new writer must use published/anonymous/<digest> on the same permanent host.
+ */
+function isAnonymousArtifactKey(key: string): boolean {
+  if (shadowsReservedPath(key)) return false;
+  const parts = key.split('/');
+  if (parts.length < 2 || parts.some(part => !part || part === '.' || part === '..') ||
+      /[%\\?#\s]/.test(key)) return false;
+  // Private adapter's logical CEL copy, read by object key only.
+  if (parts.length === 2 && parts[0] === 'cel' && /^u[A-Za-z0-9_-]+\.json$/.test(parts[1])) return true;
+  const path = parts.slice(1);
+  const tail = path.at(-1)!;
+  const resource = path.at(-2) === 'resources' && /^[A-Za-z0-9_-]+$/.test(tail);
+  const artifact = ['did.jsonl', 'did.json', 'cel.jsonl', 'cel.json'].includes(tail);
+  if (!resource && !artifact) return false;
+  if (path[0] === 'published' && path[1] === 'anonymous' && path.length >= 4 &&
+      /^[A-Za-z0-9_-]+$/.test(path[2])) return true;
+  const root = path.slice(0, resource ? -2 : -1).join('/');
+  return root === '' || root === '.well-known' || root === 'studio/you' ||
+    /^uei[a-z0-9_-]{44}$/.test(root) || /^[a-f0-9]{32}$/.test(root);
+}
+
+function decodeKey(url: URL): string | null {
+  try {
+    return decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -254,10 +269,12 @@ export function createWebvhHostStore(opts?: {
       });
     }
 
-    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    const key = decodeKey(url);
+    if (key === null) return json({ error: 'bad_key' }, 400);
     if (!key) return json({ error: 'missing_key' }, 400);
     // Checked on the DECODED key, so `%63ontext` cannot slip past it.
     if (shadowsReservedPath(key)) return json({ error: 'reserved_key' }, 403);
+    if (!isAnonymousArtifactKey(key)) return json({ error: 'forbidden_path' }, 403);
 
     const body = new Uint8Array(await req.arrayBuffer());
     if (body.byteLength > maxObjectBytes) {
@@ -342,7 +359,8 @@ export function createWebvhHostStore(opts?: {
   // reads as a clean miss rather than an error.
   function read(url: URL): Response {
     sweep();
-    const key = decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    const key = decodeKey(url);
+    if (key === null) return json({ error: 'bad_key' }, 400);
     const entry = hit(key);
     if (!entry) return json({ error: 'not_found' }, 404);
     // Copy so the caller can't mutate stored bytes.
@@ -352,6 +370,9 @@ export function createWebvhHostStore(opts?: {
   function serve(_req: Request, url: URL): Response | null {
     sweep();
     const key = `${url.host}${url.pathname}`;
+    // Keep the read boundary even if an older store implementation admitted a
+    // key that the current upload contract rejects.
+    if (!isAnonymousArtifactKey(key) || url.host === 'cel') return null;
     const entry = hit(key);
     if (!entry) return null;
     // Copy so the caller can't mutate stored bytes.
