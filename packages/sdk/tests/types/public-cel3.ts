@@ -79,3 +79,17 @@ const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareB
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
 const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat(prepared.transactions.satoshi);
 void hosted; void submitted; void resolved;
+
+// The 3.0 freeze excludes confirmation hooks and event payloads from the former lifecycle.
+// @ts-expect-error Previous asset-only quote type is not part of the CEL 3 API.
+import type { AppendCostEstimate } from '@originals/sdk';
+// @ts-expect-error Previous asset-only append kind is not part of the CEL 3 API.
+import type { AppendKind } from '@originals/sdk';
+// @ts-expect-error Current publications use explicit preparation and durable submission.
+import type { InscribeConfirm } from '@originals/sdk';
+// @ts-expect-error CEL 3 lifecycle returns explicit results, not these previous payloads.
+import type { AssetTransferredEvent } from '@originals/sdk';
+// @ts-expect-error The types subpath must not revive the removed quote contract.
+import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
+// @ts-expect-error The types subpath must not revive the removed confirmation contract.
+import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';

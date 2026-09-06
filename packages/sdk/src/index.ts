@@ -18,7 +18,12 @@ export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION, ASSET_LIMITS } from './v
 export type { AssetEnvelope, AssetResource, AssetResourceInput, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, LocalResource } from './v3/types.js';
 
 // Type exports
-export * from './types/index.js';
+export type { LayerType, AppendFailurePolicy, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner } from './types/common.js';
+export * from './types/did.js';
+export * from './types/credentials.js';
+export * from './types/bitcoin.js';
+export * from './types/network.js';
+export * from './types/multisig.js';
 
 // Manager exports
 export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager.js';
@@ -107,8 +112,9 @@ export { MockRemoteSigner } from './crypto/MockRemoteSigner.js';
 // Custody backends hand back addresses, not Multikeys (plan 045).
 export { base58AddressToEd25519Multikey } from './crypto/addressToMultikey.js';
 
-// Event system exports
-export * from './events/index.js';
+// Independent typed event utility. The CEL 3 lifecycle returns explicit results
+// and does not emit the preceding implementation's asset lifecycle payloads.
+export { EventEmitter } from './events/EventEmitter.js';
 
 // Migration system (EXPERIMENTAL — intentionally NOT part of the public API).
 //
@@ -119,8 +125,8 @@ export * from './events/index.js';
 // (issue #279). Re-exporting it from the package entry point advertised unused
 // machinery as a supported API, so it is deliberately not exported here. It
 // remains importable from its module path for experimentation, at the caller's
-// own risk. Only `MigrationError` is surfaced, because the public event API
-// (`MigrationFailedEvent.error`) references it.
+// own risk. Only the `MigrationError` type remains for consumers of the independent
+// typed EventEmitter utility; this does not export the migration engine.
 export type { MigrationError } from './migration/types.js';
 
 // Kind system exports

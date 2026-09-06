@@ -1,320 +1,105 @@
 # Originals SDK
 
-![CI](https://github.com/onionoriginals/sdk/actions/workflows/ci.yml/badge.svg)
-![Coverage](https://raw.githubusercontent.com/onionoriginals/sdk/refs/heads/main/badges/coverage.svg)
+Create and recover Originals from authenticated CEL 3 history and exact resource
+bytes. An Original's controller authorizes its history; Bitcoin sat possession is
+a separate concept, established by on-chain observations rather than a signature
+alone.
 
-A TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance.
+SDK 3.0.0 uses CEL 3 throughout local mutation, WebVH publication and cold
+recovery, Bitcoin publication, and fresh asset/DID resolution. Earlier asset
+formats are not accepted. Publishing returns explicit prepared/submitted states;
+only fresh provider evidence establishes an accepted Bitcoin head.
 
-## Overview
+## Create, edit, recover
 
-An Original asset **IS a Cryptographic Event Log (CEL)**: every authorship operation appends a signed, hash-chained event, and that log is the source of provenance truth. The lifecycle moves through three layers:
+```ts
+import { OriginalsSDK, createLocalSigner } from '@originals/sdk';
 
-- **`did:cel`** - Private genesis, created offline (free)
-- **`did:webvh`** - Public discovery via HTTPS hosting
-- **`did:btco`** - Transferable ownership on Bitcoin, where the satoshi itself IS the identity and the ownership
+// secretKeyBytes comes from your custody. A remote signer can implement CelSigner.
+const signer = createLocalSigner('Ed25519', secretKeyBytes);
+const sdk = OriginalsSDK.create({ signer });
+const asset = await sdk.lifecycle.createAsset(
+  [{ id: 'art', mediaType: 'image/png', content: pngBytes }],
+  { name: 'First edition' },
+);
 
-> **`did:cel` is not a registered DID method.** `did:webvh` and `did:btco` are
-> registered in the W3C DID Extensions registry; `cel` is not, no registration
-> has been submitted, and there is no Universal Resolver driver for it. Its
-> verification algorithm is specific to this SDK, so today nothing outside this
-> SDK can resolve or verify a `did:cel`. See
-> [specs/did-cel-method.md](specs/did-cel-method.md).
+await Promise.all([
+  asset.update({ name: 'Revised edition' }),
+  asset.addResourceVersion('art', revisedPngBytes, 'image/png'),
+]);
 
-Assets migrate unidirectionally through these layers, with economic gravity determining when Bitcoin-level security is justified. Ownership is live Bitcoin sat control — never a credential, and never transferred by editing a DID document.
+const saved = JSON.stringify(asset.serialize());
+const { asset: restored, verification } =
+  await OriginalsSDK.create().lifecycle.loadAsset(saved);
 
-## Installation
-
-```bash
-npm install @originals/sdk
+console.log(verification.verified); // complete local history and checked bytes
+console.log(restored.state.resources[0].version); // 2
 ```
 
-## Quick Start
+The SDK copies runtime `Uint8Array` inputs, encodes string inputs once as UTF-8,
+computes resource digests, and serializes byte attachments as explicit base64.
+Every resource version must bind to authenticated history and its actual bytes.
+All mutations share a queue per asset instance; a failed signature leaves its
+previous committed state available and releases that queue.
 
-```typescript
-import { OriginalsSDK } from '@originals/sdk';
-import { OrdMockProvider } from '@originals/sdk/testing';
+## Custody and verification
 
-// For testing/development - use mock provider
-const originals = OriginalsSDK.create({
-  network: 'regtest',
-  enableLogging: true,
-  ordinalsProvider: new OrdMockProvider()
-});
+A `CelSigner` declares `algorithm`, canonical `controller`, and an asynchronous
+`sign(message)` callback. Supported algorithms are Ed25519, P-256 and P-384.
+Every returned signature is checked. The preceding `OriginalsSigner` interface
+is not silently converted into this contract.
 
-// Create a digital asset
-const resources = [{
-  id: 'my-artwork',
-  type: 'image',
-  contentType: 'image/png',
-  hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-}];
+`rotateKey` is signed by the outgoing controller. Later edits require the new
+controller. `deactivate` ends allowable mutations. Reading or verifying an asset
+requires no private key; creating or signing a change requires explicit custody.
 
-const draft = await originals.lifecycle.createDraft(resources);
+An explicit `onAppendFailure: 'skip'` can preserve unsigned resource edits as
+local drafts. They never advance authenticated history or report full
+verification. `retryResourceVersion` signs retained bytes against their exact
+predecessor, and `discardLocalResource` removes a draft deliberately.
+`loadAsset(..., { allowPartial: true })` can retain missing bytes/drafts without
+bypassing signatures or supplied-byte validation.
 
-// Publish for discovery (second arg is the publisher's did:webvh DID or an ExternalSigner)
-const published = await originals.lifecycle.publish(draft, 'did:webvh:my-domain.com:my-user');
+## Modules
 
-// Inscribe on Bitcoin for permanent ownership (mints did:btco:<sat>)
-const inscribed = await originals.lifecycle.inscribe(published);
+- `@originals/sdk`: the default CEL 3 asset SDK plus independent identity,
+  credential, provider, storage, and Bitcoin utilities.
+- `@originals/sdk/v3`: the smaller local-only SDK using the same state verifier.
+- `@originals/sdk/cel`: CEL 3 encoding, signing, proof and history verification.
+- `@originals/sdk/types`: types matching the default public asset API.
+- `@originals/sdk/testing`: explicit provider test doubles.
 
-// Transfer ownership: a pure Bitcoin sat move. Ownership IS live sat control,
-// so this writes NOTHING to the CEL — read the owner back with getCurrentOwner().
-// await originals.lifecycle.transfer(inscribed, 'bc1q...newowner');
+The default SDK retains standalone WebVH identity helpers used by auth. Those
+helpers do not establish an asset's publication. The lifecycle provides explicit
+hosted and Bitcoin writers with durable retry; offline Bitcoin history alone
+cannot establish current ownership or accepted on-sat state.
+
+## Command line
+
+```sh
+originals-cel create --file art.png --media-type image/png --algorithm Ed25519 --key controller.key --output asset.json
+originals-cel verify --asset asset.json
 ```
 
-> **Lifecycle API:** `createDraft` / `publish` / `inscribe` / `transfer` are the
-> primary, ergonomic API (they add progress callbacks, pre-flight validation, and
-> cost estimates). They delegate to the lower-level `createAsset` / `publishToWeb`
-> / `inscribeOnBitcoin` methods, which remain available for direct use. Prefer the
-> `createDraft` family for new code.
-
-## Architecture
-
-### Core Classes
-
-- **OriginalsSDK** - Main entry point and orchestration
-- **OriginalsAsset** - Represents a digital asset through its lifecycle
-- **DIDManager** - DID document creation and resolution (did:cel, did:webvh, did:btco) with external signer support
-- **CredentialManager** - Verifiable Credential handling
-- **LifecycleManager** - Asset migration between layers
-- **BitcoinManager** - Bitcoin/Ordinals integration
-
-### Key Features
-
-- ✅ W3C Verifiable Credential compliance, and W3C DID syntax throughout (`did:webvh` and `did:btco` are registered methods; `did:cel` is not — see above)
-- ✅ Multibase key encoding (no JSON Web Keys)
-- ✅ JSON-LD credential signing (no JWT)
-- ✅ Bitcoin Ordinals inscription support (the inscription's content is the asset media; its CBOR metadata carries the CEL provenance)
-- ✅ Three-layer asset lifecycle management: `did:cel` → `did:webvh` → `did:btco`
-- ✅ Cryptographic provenance verification over the whole signed event chain
-- ✅ First-anchor-wins uniqueness, verified fail-closed at verify time (no "unique satoshi assignment" front-running mechanism)
-- ✅ **DID:WebVH integration with didwebvh-ts** - Full support for creating and managing did:webvh identifiers
-- ✅ **External signer support** - Integrate with Turnkey, AWS KMS, HSMs, and other key management systems
-
-## Use Cases
-
-### Digital Art
-Artists create private assets for experimentation, publish for discovery, and inscribe on Bitcoin upon sale.
-
-### Scientific Data
-Researchers document datasets privately, publish for peer review, and anchor provenance on Bitcoin for permanent record.
-
-### DAO Governance  
-Issue member credentials privately, make public for recognition, and inscribe key decisions for immutable governance record.
-
-### Supply Chain
-Manufacturers create product credentials, publish public registries, and inscribe final ownership for anti-counterfeiting.
-
-## Configuration
-
-### Bitcoin Operations
-
-Bitcoin operations (inscribing and transferring) require an `ordinalsProvider` to be configured. The SDK provides several options:
-
-#### Testing and Development
-
-For testing and local development, use the built-in mock provider:
-
-```typescript
-import { OriginalsSDK } from '@originals/sdk';
-import { OrdMockProvider } from '@originals/sdk/testing';
-
-const sdk = OriginalsSDK.create({
-  network: 'regtest',
-  ordinalsProvider: new OrdMockProvider()
-});
-```
-
-#### Bitcoin Networks
-
-**Mainnet (Production):**
-```typescript
-import { OrdinalsClient } from '@originals/sdk';
-
-const sdk = OriginalsSDK.create({
-  network: 'mainnet',
-  // OrdinalsClient(ordNodeRpcUrl, network)
-  ordinalsProvider: new OrdinalsClient('https://your-ord-node.example', 'mainnet')
-});
-```
-
-**Signet:**
-```typescript
-const sdk = OriginalsSDK.create({
-  network: 'signet',
-  ordinalsProvider: new OrdinalsClient('https://signet.ord-node.example', 'signet')
-});
-```
-
-**Regtest (local development):**
-```typescript
-const sdk = OriginalsSDK.create({
-  network: 'regtest',
-  ordinalsProvider: new OrdinalsClient('http://localhost:3000', 'regtest')
-});
-```
-
-#### Fee Management
-
-Optionally configure a fee oracle for dynamic fee estimation:
-
-```typescript
-const sdk = OriginalsSDK.create({
-  network: 'mainnet',
-  ordinalsProvider: new OrdinalsClient('https://your-ord-node.example', 'mainnet'),
-  feeOracle: {
-    estimateFeeRate: async (targetBlocks: number) => {
-      // Fetch current fee rates from your preferred source
-      const response = await fetch('https://mempool.space/api/v1/fees/recommended');
-      const fees = await response.json();
-      return targetBlocks <= 1 ? fees.fastestFee : fees.halfHourFee;
-    }
-  }
-});
-```
-
-#### Error Handling
-
-If you attempt Bitcoin operations without configuring an `ordinalsProvider`, you'll receive a clear error:
-
-```typescript
-const sdk = OriginalsSDK.create({ network: 'mainnet' });
-
-// This will throw StructuredError with code 'ORD_PROVIDER_REQUIRED'
-await sdk.bitcoin.inscribeData(data, 'application/json');
-// Error: Ordinals provider must be configured to inscribe data on Bitcoin.
-// Please provide an ordinalsProvider in your SDK configuration.
-```
-
-You can also validate the configuration before attempting operations:
-
-```typescript
-try {
-  sdk.validateBitcoinConfig();
-  // Safe to perform Bitcoin operations
-} catch (error) {
-  console.error('Bitcoin operations not available:', error.message);
-}
-```
-
-## DID:WebVH Integration
-
-The SDK provides comprehensive support for creating and managing `did:webvh` identifiers with proper cryptographic signing.
-
-### Create DID with SDK-managed keys
-
-```typescript
-const sdk = OriginalsSDK.create({ network: 'mainnet' });
-
-const result = await sdk.did.createDIDWebVH({
-  domain: 'example.com',
-  paths: ['alice'],
-  outputDir: './public/.well-known',
-});
-
-console.log('DID:', result.did);
-// Store result.keyPair.privateKey securely!
-```
-
-### Create DID with External Key Management (e.g., Turnkey)
-
-```typescript
-import { createTurnkeySigner } from './turnkey-signer';
-
-// Create external signer
-const signer = await createTurnkeySigner(subOrgId, keyId, turnkeyClient, verificationMethodId, publicKeyMultibase);
-
-// Create DID
-const result = await sdk.did.createDIDWebVH({
-  domain: 'example.com',
-  paths: ['alice'],
-  externalSigner: signer,
-  verificationMethods: [{ type: 'Multikey', publicKeyMultibase: '...' }],
-  updateKeys: ['did:key:...'],
-  outputDir: './public/.well-known',
-});
-```
-
-### Update an existing DID
-
-```typescript
-const log = await sdk.did.loadDIDLog('./path/to/did.jsonl');
-
-const result = await sdk.did.updateDIDWebVH({
-  did: 'did:webvh:example.com:alice',
-  currentLog: log,
-  updates: {
-    service: [{ id: '#my-service', type: 'MyService', serviceEndpoint: 'https://...' }]
-  },
-  signer: keyPair, // or externalSigner
-});
-```
-
-For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
+The key file holds raw private-key bytes. Outputs are complete version-3 asset
+envelopes; existing files are not overwritten. `verify --log` instead checks
+controller history only and reports that narrower scope. No command broadcasts
+transactions. See `originals-cel --help` and [the API guide](packages/sdk/V3.md).
 
 ## Documentation
 
-### Upgrading
+[The CEL 3 API guide](packages/sdk/V3.md) describes types, options, limits, recovery, removed
+previous-format exports, and publication/recovery requirements. Protocol rules are in
+[the selected profile](specs/originals-cel-v3-profile.md) and
+[authority contract](specs/originals-cel-v3-authority.md).
 
-- **[docs/MIGRATION_3.0.md](./docs/MIGRATION_3.0.md)** - Upgrading from 2.x to 3.0. Most breaking changes surface as code that used to "work" now throwing — 3.0 makes several silently-broken paths fail loudly.
+[MIT](LICENSE) © Aviary Tech
 
-### For LLM Agents
+## Repository development
 
-If you're an AI/LLM agent working with this SDK, we provide optimized documentation:
-
-- **[docs/LLM_AGENT_GUIDE.md](./docs/LLM_AGENT_GUIDE.md)** - Comprehensive API reference with complete type signatures, method documentation, and working examples
-- **[docs/LLM_QUICK_REFERENCE.md](./docs/LLM_QUICK_REFERENCE.md)** - Compact quick-reference card for rapid lookups
-- **[CLAUDE.md](./CLAUDE.md)** - Development context and project architecture
-
-### Bitcoin Documentation
-
-- **[docs/BITCOIN_INTEGRATION_GUIDE.md](./docs/BITCOIN_INTEGRATION_GUIDE.md)** - Complete guide for Bitcoin integration
-- **[docs/BITCOIN_API_REFERENCE.md](./docs/BITCOIN_API_REFERENCE.md)** - Bitcoin API reference
-- **[docs/BITCOIN_BEST_PRACTICES.md](./docs/BITCOIN_BEST_PRACTICES.md)** - Best practices for production deployments
-- **[docs/BITCOIN_TROUBLESHOOTING.md](./docs/BITCOIN_TROUBLESHOOTING.md)** - Troubleshooting common issues
-
-## Development
-
-This is a monorepo managed with [Turborepo](https://turbo.build/repo) for efficient task orchestration.
-
-```bash
-# Install dependencies
-bun install
-
-# Build all packages (SDK + Apps)
-bun run build
-
-# Test all packages
-bun test
-
-# Lint all packages
-bun run lint
-
-# Start development servers
-bun run dev
-
-# Type check all packages
-bun run check
-```
-
-### Monorepo Structure
-
-```
-sdk/
-├── packages/
-│   └── sdk/                # Main SDK package
-└── apps/
-    └── originals-explorer/ # Explorer application
-```
-
-### Turborepo Benefits
-
-- **Intelligent caching**: Never rebuild the same code twice
-- **Parallel execution**: Run tasks across packages simultaneously
-- **Task dependencies**: Automatically build dependencies before dependents
-
-For detailed information about using Turborepo, see [docs/TURBOREPO.md](./docs/TURBOREPO.md).
-
-## License
-
-MIT License - see LICENSE file for details.
+The monorepo contains the CEL core, SDK, auth package, and landing application.
+Read [CLAUDE.md](CLAUDE.md) for implementation routes and verification requirements.
+Package scripts define build, test, typecheck and lint commands.
+[The regtest guide](scripts/regtest/README.md) describes disposable real Bitcoin
+Core/ord proof; [release preparation](docs/release/3.0.0-readiness.md) tracks the
+remaining owner release gates.

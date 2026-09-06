@@ -68,8 +68,8 @@ export interface AssetTransferredEvent extends BaseEvent {
   /**
    * Best-effort pre-move sat holder; omitted when no owner index is available
    * (never fabricated). Ownership is the sat itself, read live from the chain;
-   * the sat move also hands the recipient the right to append to the log —
-   * recorded there only when the new holder writes their first entry.
+   * CEL 3 controller authorization is separate: a sat move does not grant
+   * the recipient authority to append to the asset history.
    */
   from?: string;
   to: string;

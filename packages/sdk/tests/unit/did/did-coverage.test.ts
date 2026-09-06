@@ -97,48 +97,30 @@ async function buildMockExternalSigner(keyManager: KeyManager): Promise<{
 // did:peer creation path are gone; did:cel is the sole genesis layer.
 
 // ---------------------------------------------------------------------------
-// DID-002 — Migrate did:peer→did:webvh with default domain from network config
+// DID-002 — migrateToDIDWebVH requires an explicit domain (#531)
 // ---------------------------------------------------------------------------
+// The SDK no longer defaults an omitted domain to the configured network's
+// *.originals.build host — those networks are never stood up (#520) and a
+// did:webvh domain is permanent once published, so an omitted domain must
+// throw. The configured webvhNetwork tier never supplies a default domain.
 
-describe('DID-002 — migrateToDIDWebVH uses configured network domain', () => {
-  test('magby config → migrated DID contains magby.originals.build', async () => {
-    const manager = new DIDManager({
-      ...baseConfig,
-      webvhNetwork: 'magby',
-    });
+describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
+  test.each(['magby', 'cleffa', 'pichu'] as const)(
+    'webvhNetwork=%s → omitting domain throws WEBVH_DOMAIN_REQUIRED (no default host)',
+    async (webvhNetwork) => {
+      const manager = new DIDManager({ ...baseConfig, webvhNetwork });
+      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: `did:cel:did002-${webvhNetwork}` };
 
-    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-magby' };
-    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument; // no explicit domain
-
-    expect(webDoc.id).toMatch(/^did:webvh:/);
-    expect(webDoc.id).toContain('magby.originals.build');
-  }, 15000);
-
-  test('cleffa config → migrated DID contains cleffa.originals.build', async () => {
-    const manager = new DIDManager({
-      ...baseConfig,
-      webvhNetwork: 'cleffa',
-    });
-
-    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-cleffa' };
-    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument;
-
-    expect(webDoc.id).toMatch(/^did:webvh:/);
-    expect(webDoc.id).toContain('cleffa.originals.build');
-  }, 15000);
-
-  test('pichu config (production default) → migrated DID contains pichu.originals.build', async () => {
-    const manager = new DIDManager({
-      ...baseConfig,
-      webvhNetwork: 'pichu',
-    });
-
-    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-pichu' };
-    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc)).didDocument;
-
-    expect(webDoc.id).toMatch(/^did:webvh:/);
-    expect(webDoc.id).toContain('pichu.originals.build');
-  }, 15000);
+      let thrown: unknown;
+      try {
+        // @ts-expect-error #531: `domain` is required — omitting it is a compile error and a runtime throw
+        await manager.migrateToDIDWebVH(sourceDoc); // no explicit domain
+      } catch (err) {
+        thrown = err;
+      }
+      expect((thrown as { code?: string })?.code).toBe('WEBVH_DOMAIN_REQUIRED');
+    }
+  );
 
   test('explicit domain overrides network config', async () => {
     const manager = new DIDManager({

@@ -1,0 +1,129 @@
+{
+  "status": "scoped-audit-and-fixes-complete",
+  "releaseReady": false,
+  "publicOwnerProof": "outstanding",
+  "sourceAttribution": "Explicit-domain guard and original12 regression cases integrated from https://github.com/onionoriginals/sdk/pull/554; two default SDK regressions added locally.",
+  "checks": {
+    "domainRed": {
+      "pass": 2,
+      "fail": 10,
+      "log": "/tmp/originals-release-domain-red.log"
+    },
+    "domainAndDidHostedRegression": {
+      "pass": 381,
+      "fail": 0,
+      "assertions": 1109,
+      "log": "/tmp/originals-release-domain-green.log"
+    },
+    "finalEntryAndDomain": {
+      "pass": 19,
+      "fail": 0,
+      "assertions": 57,
+      "log": "/tmp/originals-release-freeze-entry-tests.log"
+    },
+    "sourceTypecheck": "passed after export removal",
+    "scopedLint": "passed",
+    "builtPublicTypes": "pending rebuild; added negative import assertions for removed exports"
+  },
+  "exportCounts": {
+    "root": 283,
+    "v3": 34,
+    "cel": 52,
+    "types": 85,
+    "testing": 2
+  },
+  "modifiedFiles": [
+    {
+      "path": "CLAUDE.md",
+      "sha256": "7e40ac01b6edb98091b0a8e296c0ee945251648dcd4fc1611ec1c763a4952757"
+    },
+    {
+      "path": "README.md",
+      "sha256": "c35b6834f43875c1985f2f195bffc7fdbb17ae6b9fd9354ed9128fd3228705ff"
+    },
+    {
+      "path": "docs/GETTING_STARTED.md",
+      "sha256": "bde079c8c29cfc5752944e051e2c225bca35b4e0b6c1f191e87ff022329159a4"
+    },
+    {
+      "path": "docs/LLM_AGENT_GUIDE.md",
+      "sha256": "f5ee642baa1aa9603f2e7c8050ea336a73130230e7718c537c1d25eb3381fb10"
+    },
+    {
+      "path": "docs/LLM_QUICK_REFERENCE.md",
+      "sha256": "6971a509536c5043d78303777d9d88ca1e529c894a0766f021573ce84ff27249"
+    },
+    {
+      "path": "docs/LLM_TYPE_REFERENCE.md",
+      "sha256": "1169b8f750c6582089056829e2a523f71c12ef34cf7097b055ad972d5b27f6c7"
+    },
+    {
+      "path": "docs/release/3.0.0-public-api.md",
+      "sha256": "fc586334fbc29acfb2dc8f84cf5a64ddc2b28dfc109bad10a84d197beb5b9b9f"
+    },
+    {
+      "path": "packages/sdk/V3.md",
+      "sha256": "6ba7b5ed68a5b0e64868fcccfca09f24a57bacf4fac5d6d2603c229e28b0a1ec"
+    },
+    {
+      "path": "packages/sdk/src/did/DIDManager.ts",
+      "sha256": "9cf4cd8a36b0704f3227ef3056ff9ad73a93085624433949234974a974041046"
+    },
+    {
+      "path": "packages/sdk/src/events/types.ts",
+      "sha256": "b0daba4a09d0340a9308c4a1f5328604d56caae487524b273768cb648c7c4e8d"
+    },
+    {
+      "path": "packages/sdk/src/index.ts",
+      "sha256": "c0ca46a2a4611cd6debb01a5279d623488b26f330f855e51fc8471e62c5240f8"
+    },
+    {
+      "path": "packages/sdk/src/types/common.ts",
+      "sha256": "6a7aad061ffcce7d82a76f3fc192388d9249abb30272613324ac3714d1b29f28"
+    },
+    {
+      "path": "packages/sdk/src/types/public.ts",
+      "sha256": "36de7325cb03c102a07206a79eab12c9235aaa7c00f861dfdf94e1f7cb5f442e"
+    },
+    {
+      "path": "packages/sdk/tests/performance/did-creation.perf.test.ts",
+      "sha256": "6f99ea3ef1de940ec0cc7603d7a591f8ea43fcd987dd9109bee25a65366c1940"
+    },
+    {
+      "path": "packages/sdk/tests/types/public-cel3.ts",
+      "sha256": "0d57b0fdf1d4b328a4ed3ce50dd55cdd07f733e922539e5c2e9e6e4544a217ef"
+    },
+    {
+      "path": "packages/sdk/tests/unit/did/DIDManager.webvh-domain-required.test.ts",
+      "sha256": "276969defdeb83b91e735f427b4b84836b2c3d2236bc8290c0f2f6af38f1a283"
+    },
+    {
+      "path": "packages/sdk/tests/unit/did/did-coverage.test.ts",
+      "sha256": "f7c009b19b5c7625db356ac3b0e96d94d5adfe2d413b54a0b3803eadc65098ef"
+    },
+    {
+      "path": "packages/sdk/tests/unit/utils/MetricsIntegration.test.ts",
+      "sha256": "71117cfa49cee24ef4134a568fb22bd03d7d74f039c265cb150b8db22d55c543"
+    },
+    {
+      "path": "docs/history/previous-sdk/CLAUDE.md",
+      "sha256": "51cc6eaee3d93f280c973f29c401c1e2a2cf16e67d80d9993aa214a93f8c0299"
+    },
+    {
+      "path": "docs/history/previous-sdk/GETTING_STARTED.md",
+      "sha256": "170dd1e5df1a90246a35e5b0b035eeaeb3bcdd74360b355031c19c23e23934cb"
+    },
+    {
+      "path": "docs/history/previous-sdk/LLM_AGENT_GUIDE.md",
+      "sha256": "3a4cac98a44a4af1e957300304ed1101bf1ffd26c59fde592f87d2a558ccc5f6"
+    },
+    {
+      "path": "docs/history/previous-sdk/LLM_QUICK_REFERENCE.md",
+      "sha256": "1555a51c39b0bec269834a220492f7422a0e913083a40db6ba51302564915c5c"
+    },
+    {
+      "path": "docs/history/previous-sdk/LLM_TYPE_REFERENCE.md",
+      "sha256": "337213bd889961640d1b454083d310ea4775e15288b35dd4923addc7cf3f45c6"
+    }
+  ]
+}

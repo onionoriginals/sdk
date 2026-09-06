@@ -155,7 +155,8 @@ export type { KeyStore } from '@originals/cel';
  * layering mistake that produced never-verifying proofs. Adapt an existing
  * implementation with `signerFromExternalSigner`, or produce a didwebvh-
  * compatible signer from an OriginalsSigner with `toExternalSigner`.
- * Removal is planned for 3.0 (plan 041).
+ * Retained in 3.0 for standalone identity and credential integrations; CEL 3
+ * asset custody uses the separate CelSigner contract.
  */
 export interface ExternalSigner {
   /**

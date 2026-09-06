@@ -1,5 +1,10 @@
 /** Public types match the default CEL 3 asset API. */
-export type * from './index.js';
+export type { LayerType, AppendFailurePolicy, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner } from './common.js';
+export type * from './did.js';
+export type * from './credentials.js';
+export type * from './bitcoin.js';
+export type * from './network.js';
+export type * from './multisig.js';
 export type { OriginalsSDKOptions, OriginalsConfig } from '../core/OriginalsSDK3.js';
 export type { AssetResource, AssetResourceInput, AssetEnvelope, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, CreateAssetOptions, LocalResource } from '../v3/types.js';
 export type { CelSigner, AssetState, VerifiedHistory } from '@originals/cel/v3';
