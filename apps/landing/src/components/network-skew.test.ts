@@ -32,7 +32,7 @@ describe('fetchServerNetwork', () => {
   test('fails closed to off when the server is unreachable or nonsensical', async () => {
     const boom = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
     expect(await fetchServerNetwork(boom)).toBe('off');
-    expect(await fetchServerNetwork(respond(200, { network: 'regtest' }))).toBe('off');
+    expect(await fetchServerNetwork(respond(200, { network: 'unknown' }))).toBe('off');
   });
 
   test('a build/runtime skew is detectable in both directions', async () => {
@@ -77,4 +77,19 @@ describe('networkSkewDetected', () => {
     expect(networkSkewDetected('mainnet', null)).toBe(false);
     expect(networkSkewDetected('off', null)).toBe(false);
   });
+});
+
+test('explicit regtest matches only the local regtest server', async () => {
+  expect(expectedServerNetwork('regtest')).toBe('regtest');
+  expect(await fetchServerNetwork(respond(200, { network: 'regtest' }))).toBe('regtest');
+  expect(networkSkewDetected('regtest', 'regtest')).toBe(false);
+  expect(networkSkewDetected('regtest', 'testnet')).toBe(true);
+});
+
+test('regtest completion and description name the local chain and provide no public explorer', async () => {
+  const { completionCopy, demoSubhead, inscribeStepView } = await import('./Demo');
+  expect(completionCopy(false, 'regtest').lead).toMatch(/local.*regtest/i);
+  expect(completionCopy(false, 'regtest').explorerLabel).toBeNull();
+  expect(demoSubhead(true, 'regtest')).toContain('test coins');
+  expect(inscribeStepView(true, 'regtest').description).toContain('bcrt');
 });

@@ -72,8 +72,8 @@ describe('AssetEnvelope + serialize() (#377)', () => {
 
     // Resources include inline content and the post-genesis version.
     const note = env.resources.filter(r => r.id === 'note');
-    expect(note.some(r => r.content === content)).toBe(true);
-    expect(note.some(r => r.content === 'hello originals v2')).toBe(true);
+    expect(note[0].content).toEqual({ encoding: 'base64', data: Buffer.from(content).toString('base64') });
+    expect(note[1].content).toEqual({ encoding: 'base64', data: Buffer.from('hello originals v2').toString('base64') });
 
     // Honesty section: btco IS log-derivable → no advisory bindings. feeRate
     // rides the provenance cache; resourceUpdates is no longer advisory (hard

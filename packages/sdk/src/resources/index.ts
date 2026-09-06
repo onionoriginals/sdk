@@ -10,6 +10,7 @@
 export { ResourceManager } from './ResourceManager.js';
 export type {
   Resource,
+  ResourceSnapshot,
   ResourceOptions,
   ResourceUpdateOptions,
   ResourceVersionHistory,
@@ -19,4 +20,3 @@ export type {
   ResourceType,
 } from './types.js';
 export { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './types.js';
-

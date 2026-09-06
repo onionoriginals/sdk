@@ -430,8 +430,9 @@ describe('DIDCache', () => {
         },
       });
 
-      // Resolve a DID — it should persist to our storage
-      await sdk.did.resolveDID(did);
+      // Test the configured cache adapter directly. Bitcoin asset resolution
+      // deliberately rechecks its witnessed chain instead of caching it.
+      await sdk.did.cache.set(did, makeDIDDoc(did));
 
       expect(storageMap.has(did)).toBe(true);
       const entry = storageMap.get(did)!;

@@ -4,6 +4,7 @@ import { MockKeyStore } from '../mocks/MockKeyStore';
 import { hashResource } from '../../src/utils/validation';
 import type { CelAppendSkippedEvent } from '../../src/events/types';
 
+const encoded = (s: string) => ({ encoding: 'base64' as const, data: Buffer.from(s).toString('base64') });
 const h = (s: string) => hashResource(Buffer.from(s, 'utf-8'));
 
 describe('Resource-update handoff (e2e)', () => {
@@ -24,7 +25,7 @@ describe('Resource-update handoff (e2e)', () => {
     const { asset: loaded, verification } = await buyer.lifecycle.loadAsset(envelope);
     expect(verification?.verified).toBe(true);
     // The folded current resource is v2.
-    expect(loaded.getResourceVersion('note', 2)?.content).toBe('v2');
+    expect(loaded.getResourceVersion('note', 2)?.content).toEqual(new TextEncoder().encode('v2'));
     expect(loaded.getProvenance().resourceUpdates.some(u => u.toVersion === 2)).toBe(true);
   });
 
@@ -52,7 +53,7 @@ describe('Resource-update handoff (e2e)', () => {
     const logSize = (a: typeof small) => JSON.stringify(a.serialize().eventLog).length;
     expect(Math.abs(logSize(large) - logSize(small))).toBeLessThan(200);
     // The envelope's resource BLOB, by contrast, does carry the large content.
-    expect(large.serialize().resources.some(r => r.content && r.content.length >= 50_000)).toBe(true);
+    expect(large.serialize().resources.some(r => typeof r.content === 'object' && Buffer.from(r.content.data, 'base64').length >= 50_000)).toBe(true);
   });
 
   test('content-tamper in the envelope blob (hash(blob) != toHash) is rejected at load', async () => {
@@ -67,7 +68,8 @@ describe('Resource-update handoff (e2e)', () => {
     // content-addressed blob in envelope.resources. Flip that blob (leaving the
     // signed toHash on the log untouched): hash(blob) != toHash → fail closed.
     const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
-    v2.content = 'tampered';
+    v2.content = encoded('tampered');
+    v2.size = Buffer.byteLength('tampered');
 
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
     await expect(buyer.lifecycle.loadAsset(envelope)).rejects.toThrow();
@@ -85,7 +87,7 @@ describe('Resource-update handoff (e2e)', () => {
     ]);
     const envelope = asset.serialize();
     envelope.resources.push({
-      id: 'injected', type: 'text', content: 'attacker-payload',
+      id: 'injected', type: 'text', content: encoded('attacker-payload'),
       contentType: 'text/plain', hash: h('attacker-payload'), version: 1
     } as (typeof envelope.resources)[number]);
 
@@ -106,7 +108,8 @@ describe('Resource-update handoff (e2e)', () => {
     // nor the update toHash → rejected.
     const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
     v2.version = 1;
-    v2.content = 'forged';
+    v2.content = encoded('forged');
+    v2.size = Buffer.byteLength('forged');
     v2.hash = h('forged');
 
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
@@ -150,7 +153,8 @@ describe('Resource-update handoff (e2e)', () => {
     // Log update event is UNTOUCHED (still genuine → verifyEventLog passes).
     // Tamper ONLY the captured v2 resource snapshot, self-consistently.
     const v2 = envelope.resources.find(r => r.id === 'note' && r.version === 2)!;
-    v2.content = 'forged-v2';
+    v2.content = encoded('forged-v2');
+    v2.size = Buffer.byteLength('forged-v2');
     v2.hash = h('forged-v2'); // self-consistent: content matches its own hash
 
     const buyer = OriginalsSDK.create({ network: 'regtest', defaultKeyType: 'Ed25519', keyStore: new MockKeyStore() });
@@ -184,7 +188,7 @@ describe('Resource-update handoff (e2e)', () => {
 
     await asset.addResourceVersion('note', 'v2', 'text/plain');
 
-    expect(asset.getResourceVersion('note', 2)?.content).toBe('v2'); // usable in-memory
+    expect(asset.getResourceVersion('note', 2)?.content).toEqual(new TextEncoder().encode('v2')); // usable in-memory
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false); // not provable
     expect(skipped.length).toBe(1);
     expect(asset.getProvenance().resourceUpdates.length).toBe(0);
@@ -205,7 +209,7 @@ describe('Resource-update handoff (e2e)', () => {
     const saved = ks.getAllKeys();
     ks.clear();
     await asset.addResourceVersion('note', 'v2', 'text/plain', undefined, { onAppendFailure: 'skip' });
-    expect(asset.getResourceVersion('note', 2)?.content).toBe('v2'); // in-memory advanced
+    expect(asset.getResourceVersion('note', 2)?.content).toEqual(new TextEncoder().encode('v2')); // in-memory advanced
     expect(asset.celLog!.events.some(e => e.type === 'update')).toBe(false); // nothing on log
 
     // 2) Key becomes available again; attempting a provable update now would
@@ -243,7 +247,7 @@ describe('Resource-update handoff (e2e)', () => {
     // Both signed appends landed — neither was lost/clobbered.
     const updates = asset.celLog!.events.filter(e => e.type === 'update');
     expect(updates.length).toBe(2);
-    const contents = asset.getAllVersions('note').map(r => r.content);
+    const contents = asset.getAllVersions('note').map(r => new TextDecoder().decode(r.content));
     expect(contents).toContain('v2a');
     expect(contents).toContain('v2b');
 
@@ -268,8 +272,8 @@ describe('Resource-update handoff (e2e)', () => {
 
     const updates = asset.celLog!.events.filter(e => e.type === 'update');
     expect(updates.length).toBe(2);
-    expect(asset.getResourceVersion('a', 2)?.content).toBe('a2');
-    expect(asset.getResourceVersion('b', 2)?.content).toBe('b2');
+    expect(asset.getResourceVersion('a', 2)?.content).toEqual(new TextEncoder().encode('a2'));
+    expect(asset.getResourceVersion('b', 2)?.content).toEqual(new TextEncoder().encode('b2'));
     expect((await asset.verify()).verified).toBe(true);
   });
 });

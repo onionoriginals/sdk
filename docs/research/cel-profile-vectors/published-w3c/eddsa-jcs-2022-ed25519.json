@@ -1,0 +1,77 @@
+{
+  "status": "Published literal vectors; not Originals processor conformance evidence.",
+  "source": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/",
+  "sourcePageSha256": "d404f372131a0e237d85aa3a6887aa54acadb862714d73e7b001ba789b5716eb",
+  "attribution": "Copyright 2025 World Wide Web Consortium. W3C permissive document license.",
+  "license": "https://www.w3.org/copyright/document-license-2023/",
+  "extraction": "HTML character references decoded; whitespace outside each preformatted example trimmed. No canonical strings, digests, keys, or signatures generated.",
+  "suite": "eddsa-jcs-2022-ed25519",
+  "examples": [
+    {
+      "number": 29,
+      "heading": "Example 29: Private and Public keys for Signature",
+      "literal": "{\n  publicKeyMultibase: \"z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\",\n  secretKeyMultibase: \"z3u2en7t5LR2WtQH5PfFqMqwVHBeXouLzo6haApm8XHqvjxq\"\n}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-private-and-public-keys-for-signature-1"
+    },
+    {
+      "number": 30,
+      "heading": "Example 30: Credential without Proof",
+      "literal": "{\n    \"@context\": [\n        \"https://www.w3.org/ns/credentials/v2\",\n        \"https://www.w3.org/ns/credentials/examples/v2\"\n    ],\n    \"id\": \"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33\",\n    \"type\": [\"VerifiableCredential\", \"AlumniCredential\"],\n    \"name\": \"Alumni Credential\",\n    \"description\": \"A minimum viable example of an Alumni Credential.\",\n    \"issuer\": \"https://vc.example/issuers/5678\",\n    \"validFrom\": \"2023-01-01T00:00:00Z\",\n    \"credentialSubject\": {\n        \"id\": \"did:example:abcdefgh\",\n        \"alumniOf\": \"The School of Examples\"\n    }\n}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-credential-without-proof-0"
+    },
+    {
+      "number": 31,
+      "heading": "Example 31: Canonical Credential without Proof",
+      "literal": "{\"@context\":[\"https://www.w3.org/ns/credentials/v2\",\"https://www.w3.org/ns/credentials/examples/v2\"],\"credentialSubject\":{\"alumniOf\":\"The School of Examples\",\"id\":\"did:example:abcdefgh\"},\"description\":\"A minimum viable example of an Alumni Credential.\",\"id\":\"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33\",\"issuer\":\"https://vc.example/issuers/5678\",\"name\":\"Alumni Credential\",\"type\":[\"VerifiableCredential\",\"AlumniCredential\"],\"validFrom\":\"2023-01-01T00:00:00Z\"}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-canonical-credential-without-proof-0"
+    },
+    {
+      "number": 32,
+      "heading": "Example 32: Hash of Canonical Credential without Proof (hex)",
+      "literal": "59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-hash-of-canonical-credential-without-proof-hex-0"
+    },
+    {
+      "number": 33,
+      "heading": "Example 33: Proof Options Document",
+      "literal": "{\n  \"type\": \"DataIntegrityProof\",\n  \"cryptosuite\": \"eddsa-jcs-2022\",\n  \"created\": \"2023-02-24T23:36:38Z\",\n  \"verificationMethod\": \"did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\",\n  \"proofPurpose\": \"assertionMethod\",\n  \"@context\": [\n    \"https://www.w3.org/ns/credentials/v2\",\n    \"https://www.w3.org/ns/credentials/examples/v2\"\n  ]\n}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-proof-options-document-1"
+    },
+    {
+      "number": 34,
+      "heading": "Example 34: Canonical Proof Options Document",
+      "literal": "{\"@context\":[\"https://www.w3.org/ns/credentials/v2\",\"https://www.w3.org/ns/credentials/examples/v2\"],\"created\":\"2023-02-24T23:36:38Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\"}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-canonical-proof-options-document-1"
+    },
+    {
+      "number": 35,
+      "heading": "Example 35: Hash of Canonical Proof Options Document (hex)",
+      "literal": "66ab154f5c2890a140cb8388a22a160454f80575f6eae09e5a097cabe539a1db",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-hash-of-canonical-proof-options-document-hex-1"
+    },
+    {
+      "number": 36,
+      "heading": "Example 36: Combine hashes of Proof Options and Credential (hex)",
+      "literal": "66ab154f5c2890a140cb8388a22a160454f80575f6eae09e5a097cabe539a1db59b7cb6251b8991add1ce0bc83107e3db9dbbab5bd2c28f687db1a03abc92f19",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-combine-hashes-of-proof-options-and-credential-hex-1"
+    },
+    {
+      "number": 37,
+      "heading": "Example 37: Signature of Combined Hashes (hex)",
+      "literal": "407cd12654b33d718ecbb99179a1506daaa849450bf3fc523cce3e1c96f8b80351da3f253d725c6f00b07c9e5448d50b3ef78012b9ab54255116d069c6dd2808",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-signature-of-combined-hashes-hex-1"
+    },
+    {
+      "number": 38,
+      "heading": "Example 38: Signature of Combined Hashes base58-btc",
+      "literal": "z2HnFSSPPBzR36zdDgK8PbEHeXbR56YF24jwMpt3R1eHXQzJDMWS93FCzpvJpwTWd3GAVFuUfjoJdcnTMuVor51aX",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-signature-of-combined-hashes-base58-btc-1"
+    },
+    {
+      "number": 39,
+      "heading": "Example 39: Signed Credential",
+      "literal": "{\n  \"@context\": [\n    \"https://www.w3.org/ns/credentials/v2\",\n    \"https://www.w3.org/ns/credentials/examples/v2\"\n  ],\n  \"id\": \"urn:uuid:58172aac-d8ba-11ed-83dd-0b3aef56cc33\",\n  \"type\": [\n    \"VerifiableCredential\",\n    \"AlumniCredential\"\n  ],\n  \"name\": \"Alumni Credential\",\n  \"description\": \"A minimum viable example of an Alumni Credential.\",\n  \"issuer\": \"https://vc.example/issuers/5678\",\n  \"validFrom\": \"2023-01-01T00:00:00Z\",\n  \"credentialSubject\": {\n    \"id\": \"did:example:abcdefgh\",\n    \"alumniOf\": \"The School of Examples\"\n  },\n  \"proof\": {\n    \"type\": \"DataIntegrityProof\",\n    \"cryptosuite\": \"eddsa-jcs-2022\",\n    \"created\": \"2023-02-24T23:36:38Z\",\n    \"verificationMethod\": \"did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2#z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7XJPt4swbTQ2\",\n    \"proofPurpose\": \"assertionMethod\",\n    \"@context\": [\n      \"https://www.w3.org/ns/credentials/v2\",\n      \"https://www.w3.org/ns/credentials/examples/v2\"\n    ],\n    \"proofValue\": \"z2HnFSSPPBzR36zdDgK8PbEHeXbR56YF24jwMpt3R1eHXQzJDMWS93FCzpvJpwTWd3GAVFuUfjoJdcnTMuVor51aX\"\n  }\n}",
+      "sourceUrl": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#example-signed-credential-0"
+    }
+  ]
+}

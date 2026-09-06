@@ -30,6 +30,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   Resource,
+  ResourceSnapshot,
   ResourceOptions,
   ResourceUpdateOptions,
   ResourceVersionHistory,
@@ -38,7 +39,8 @@ import type {
   ResourceType,
 } from './types.js';
 import { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './types.js';
-import { base64, utf8 } from '@originals/cel/encoding';
+import { base64 } from '@originals/cel/encoding';
+import { normalizeResource, resourceContentBytes } from '../utils/resource-content.js';
 
 /**
  * Regular expression for validating MIME types according to RFC 6838.
@@ -153,11 +155,7 @@ export class ResourceManager {
 
     // Store content if configured to do so
     if (this.config.storeContent) {
-      if (this.isBinaryContent(content)) {
-        resource.contentBase64 = base64.encode(contentBuffer);
-      } else {
-        resource.content = typeof content === 'string' ? content : utf8.decode(contentBuffer);
-      }
+      resource.content = contentBuffer;
     }
 
     // Store in version history
@@ -252,11 +250,7 @@ export class ResourceManager {
 
     // Store content if configured
     if (this.config.storeContent) {
-      if (this.isBinaryContent(newContent)) {
-        newVersion.contentBase64 = base64.encode(contentBuffer);
-      } else {
-        newVersion.content = typeof newContent === 'string' ? newContent : utf8.decode(contentBuffer);
-      }
+      newVersion.content = contentBuffer;
     }
 
     // Add to version history
@@ -438,15 +432,24 @@ export class ResourceManager {
       }
     }
 
-    // Content hash verification (if content is present)
-    if (resource.content || resource.contentBase64) {
-      const content = resource.content
-        ? utf8.encode(resource.content)
-        : base64.decode(resource.contentBase64 || '');
-      const computedHash = this.hashContent(content);
-      
-      if (computedHash !== resource.hash) {
-        errors.push(`Content hash mismatch: expected ${resource.hash}, computed ${computedHash}`);
+    // Bytes must match the claimed hash; malformed or ambiguous encodings fail validation.
+    if (resource.content !== undefined || resource.contentBase64 !== undefined) {
+      try {
+        if (resource.content !== undefined && resource.contentBase64 !== undefined) {
+          throw new Error('Resource cannot carry both content and contentBase64');
+        }
+        const content = resource.content !== undefined
+          ? resourceContentBytes(resource.content)
+          : this.decodeBase64(resource.contentBase64!);
+        const computedHash = this.hashContent(content);
+        if (computedHash !== resource.hash) {
+          errors.push(`Content hash mismatch: expected ${resource.hash}, computed ${computedHash}`);
+        }
+        if (resource.size !== undefined && resource.size !== content.byteLength) {
+          errors.push('Resource size does not match content byte length');
+        }
+      } catch (error) {
+        errors.push((error as Error).message);
       }
     }
 
@@ -577,7 +580,17 @@ export class ResourceManager {
    * @param assetResource - The AssetResource to import
    * @returns The imported Resource
    */
-  importResource(assetResource: Resource): Resource {
+  importResource(input: Resource | ResourceSnapshot): Resource {
+    const { contentBase64, content, ...fields } = input;
+    if (content !== undefined && contentBase64 !== undefined) {
+      throw new Error('Resource cannot carry both content and contentBase64');
+    }
+    const bytes = content !== undefined ? resourceContentBytes(content)
+      : contentBase64 !== undefined ? this.decodeBase64(contentBase64) : undefined;
+    const assetResource: Resource = normalizeResource({ ...fields, ...(bytes !== undefined ? { content: bytes } : {}) });
+    if (bytes !== undefined && this.hashContent(bytes) !== assetResource.hash) {
+      throw new Error('Content hash mismatch while importing resource');
+    }
     const resourceId = assetResource.id;
     
     // Get or create version array
@@ -616,10 +629,13 @@ export class ResourceManager {
    * 
    * @returns Array of all resources (all versions)
    */
-  exportResources(): Resource[] {
-    const allResources: Resource[] = [];
+  exportResources(): ResourceSnapshot[] {
+    const allResources: ResourceSnapshot[] = [];
     for (const versions of this.resources.values()) {
-      allResources.push(...versions);
+      for (const resource of versions) {
+        const { content, contentBase64: _legacy, ...fields } = resource;
+        allResources.push({ ...fields, ...(content !== undefined ? { contentBase64: base64.encode(content) } : {}) });
+      }
     }
     return allResources;
   }
@@ -670,17 +686,15 @@ export class ResourceManager {
    * Normalize content to bytes (browser-safe: no Buffer).
    */
   private toBuffer(content: Uint8Array | string): Uint8Array {
-    if (typeof content === 'string') {
-      return new TextEncoder().encode(content);
-    }
-    return content;
+    return resourceContentBytes(content);
   }
 
-  /**
-   * Check if content is binary (bytes) rather than text.
-   */
-  private isBinaryContent(content: Uint8Array | string): boolean {
-    return typeof content !== 'string';
+  private decodeBase64(value: string): Uint8Array {
+    if (typeof value !== 'string') throw new Error('Resource contentBase64 must be a string');
+    const bytes = base64.decode(value);
+    if (base64.encode(bytes) !== value) throw new Error('Resource contentBase64 must be canonical padded base64');
+    return bytes;
   }
+
+
 }
-

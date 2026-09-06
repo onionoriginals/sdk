@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts/regtest-journey.ts", "../../scripts/regtest/*.ts", "src/vite-env.d.ts"],
+  "exclude": []
+}

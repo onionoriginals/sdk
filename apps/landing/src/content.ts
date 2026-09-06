@@ -203,9 +203,9 @@ export const demo = {
     sourceUpload: 'Upload',
     sourceWrite: 'Write',
     uploadCta: 'Choose a file',
-    uploadHint: 'An SVG or a plain text file, up to 32 KB.',
+    uploadHint: 'A PNG, SVG or plain text file, up to 32 KB.',
     uploadTooBig: 'That file is larger than 32 KB. Inscribing pays by the byte, so the demo keeps uploads small enough to actually reach Bitcoin.',
-    uploadWrongType: 'That file type can’t be carried yet — an SVG or a plain text file, please.',
+    uploadWrongType: 'Choose a PNG, SVG or plain text file.',
     uploadEmpty: 'That file is empty, so there would be nothing to hash.',
     writePlaceholder: 'Type or paste anything. These exact characters get hashed, signed and published.',
     writeEmpty: 'Write something first — an empty asset has nothing to prove.',
@@ -359,12 +359,14 @@ export const demo = {
     linkLabel: 'Open the signed DID log',
     note: 'The SDK’s real resolver fetched this back over HTTP(S). Open it: it’s the signed version history.'
   },
-  /**
-   * Reachable ONLY on a `VITE_BTC_NETWORK=testnet4` build (`real && network
-   * !== 'mainnet'`): faucet-funded, worthless tBTC. Named for the network so
-   * no mainnet surface can borrow a string from here by accident — the mainnet
-   * copy lives in `steps[2]` and `deposit`.
-   */
+  /** Explicit local chain, separately labelled from the public networks. */
+  regtest: {
+    subhead: 'The final step inscribes on local Bitcoin regtest using test coins.',
+    done: 'Anchored on local Bitcoin regtest.',
+    notice: 'Local regtest · test coins only. This run uses your local Bitcoin Core and ord services.',
+    signInPrompt: 'Sign in to inscribe on your local Bitcoin regtest network.',
+    stepDescription: 'Inscribes the published Original onto a satoshi on local Bitcoin regtest. Fund the displayed bcrt address with local test coins.',
+  },
   testnet4: {
     signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
     stepDescription:

@@ -64,6 +64,7 @@ describe('inscriptions-store', () => {
     expect(keys).toEqual(['sub-1:1', 'sub-1:2', 'sub-2:3']);
     // …but not the fresh one, and not anything already retired.
     store.setStatus('sub-1', '2'.repeat(64), 'confirmed');
+    store.retire('sub-1', '2'.repeat(64));
     expect(store.sweepStale(24 * 60 * 60_000).stale.map((s) => s.commitTxId[0]).sort()).toEqual(['1', '3']);
   });
 
@@ -104,10 +105,12 @@ describe('inscriptions-store', () => {
     expect(store.list('sub-9')).toEqual([]);
   });
 
-  test('a confirmed record is retired: hex dropped, row kept as a join key', () => {
+  test('confirmation retains bytes until the reconciler explicitly retires the record', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
+    expect(store.get('sub-1', 'c'.repeat(64))!.revealTxHex).toBe('02bb');
+    store.retire('sub-1', 'c'.repeat(64));
     const r = store.get('sub-1', 'c'.repeat(64))!;
     expect(r.status).toBe('confirmed');
     expect(r.retired).toBe(true);
@@ -127,6 +130,7 @@ describe('inscriptions-store', () => {
       .toThrow('STORE_FULL');
     // Terminal records must never lock a creator out of inscribing again.
     store.setStatus('sub-1', '1'.repeat(64), 'confirmed');
+    store.retire('sub-1', '1'.repeat(64));
     store.create('sub-1', rec({ commitTxId: '3'.repeat(64), fundingOutpoints: ['a:3'] }));
     expect(store.list('sub-1')).toHaveLength(3);
   });
@@ -209,7 +213,7 @@ describe('inscriptions-store', () => {
     // …and it can still be driven to completion.
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
     expect(store.get('sub-1', 'c'.repeat(64))!.status).toBe('confirmed');
-    expect(store.sweepStale(0).stale).toEqual([]); // retired on confirm, as for a new-shape record
+    expect(store.sweepStale(0).stale).toHaveLength(1); // legacy pairs retain recovery bytes too
   });
 });
 

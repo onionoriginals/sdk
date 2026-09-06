@@ -19,6 +19,8 @@ const CONTENT_URL_PREFIX = 'ordinals-provider://content/';
  * through the configured provider instead of a hardcoded HTTP endpoint.
  */
 export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
+  private readonly metadata = new Map<string, Record<string, unknown> | null>();
+
   constructor(private readonly provider: OrdinalsProvider) {}
 
   async getSatInfo(satNumber: string): Promise<{ inscription_ids: string[] }> {
@@ -31,6 +33,7 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
     if (!inscription) {
       throw new Error(`Inscription ${inscriptionId} not found`);
     }
+    this.metadata.set(inscriptionId, inscription.metadata ?? null);
     return {
       id: inscription.inscriptionId,
       sat: Number(inscription.satoshi ?? 0),
@@ -47,11 +50,12 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
     return this.provider.getSatOwnership(satoshi);
   }
 
-  // The adapters/OrdinalsProvider interface exposes no metadata endpoint;
-  // metadata is diagnostic-only in BtcoDidResolver, so report none.
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async getMetadata(_inscriptionId: string): Promise<Record<string, unknown> | null> {
-    return null;
+  // Diagnostic/classification data only. BtcoDidResolver never constructs a
+  // DID from this; SDK CEL assets must pass the lifecycle verification gate.
+  getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
+    // Reuse the record already loaded for classification. A separate fetch
+    // here could fail and be swallowed by the generic resolver as "no metadata".
+    return Promise.resolve(this.metadata.get(inscriptionId) ?? null);
   }
 
   /**

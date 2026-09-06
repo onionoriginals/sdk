@@ -19,7 +19,7 @@ export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
 export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
 export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
 export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
-export type { AssetEnvelope } from './lifecycle/assetEnvelope.js';
+export type { AssetEnvelope, EncodedResourceContent, SerializedAssetResource } from './lifecycle/assetEnvelope.js';
 export { checkGenesisResourceBinding } from './lifecycle/genesisBinding.js';
 export type { VerificationReport, VerificationFailureCode } from './lifecycle/VerificationReport.js';
 
@@ -87,6 +87,7 @@ export * from './storage/index.js';
 export { ResourceManager } from './resources/index.js';
 export type {
   Resource,
+  ResourceSnapshot,
   ResourceOptions,
   ResourceUpdateOptions,
   ResourceVersionHistory,
@@ -221,6 +222,8 @@ export { SignetProvider } from './bitcoin/providers/SignetProvider.js';
 export type { SignetProviderOptions } from './bitcoin/providers/SignetProvider.js';
 export { QuickNodeProvider } from './adapters/providers/QuickNodeProvider.js';
 export type { QuickNodeProviderOptions } from './adapters/providers/QuickNodeProvider.js';
+export { RegtestProvider } from './adapters/providers/RegtestProvider.js';
+export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers/RegtestProvider.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
 // CEL (Cryptographic Event Log) exports

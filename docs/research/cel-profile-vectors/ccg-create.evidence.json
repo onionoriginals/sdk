@@ -1,0 +1,23 @@
+{
+  "status": "Reference-generated CCG-layout example with a standard EdDSA signature construction. Not produced or accepted by the new SDK, and not inscribed on Bitcoin. Its representation is specified in specs/originals-cel-v3-profile.md; production implementation remains pending.",
+  "testKey": "Public RFC 8032 section 7.1 test key 1; nonce is a fixed fixture value. Never use this key or nonce for real assets.",
+  "sources": [
+    "https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1",
+    "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#eddsa-jcs-2022"
+  ],
+  "referenceTools": "json-canonicalize 2.0.0 for JCS; Node crypto for SHA-256 and Pure Ed25519. No Originals implementation imported.",
+  "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+  "expectedEventCanonical": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+  "expectedEventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+  "expectedEventSha256": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+  "expectedProofConfigurationCanonical": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+  "expectedProofConfigurationSha256": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+  "expectedSigningMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+  "expectedSignatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06",
+  "checks": {
+    "rfc8032PrimitiveKnownAnswer": true,
+    "signatureVerifies": true,
+    "changedNameRejected": true,
+    "wrongEventWrapperRejected": true
+  }
+}
