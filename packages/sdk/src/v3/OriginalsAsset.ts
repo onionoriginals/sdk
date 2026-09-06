@@ -366,7 +366,11 @@ export class OriginalsAsset {
       state.layer === "btco" && this.resolver
         ? await this.resolver.check(state.alias, state.didCel)
         : undefined;
-    return summarizeVerification(this, publication);
+    const hosted =
+      state.layer === "webvh" && this.resolver
+        ? await this.resolver.checkWeb(state.alias, state.didCel)
+        : undefined;
+    return summarizeVerification(this, publication, hosted);
   }
 
   /** True only for fully checked local history and resource bytes; never asserts Bitcoin acceptance. */

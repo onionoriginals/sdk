@@ -1,3 +1,5 @@
+import { HostedAssets } from "../v3/hosted.js";
+import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
 import { AssetResolver, type SatProvider } from "../v3/resolution.js";
@@ -22,10 +24,11 @@ export interface OriginalsSDKOptions
   extends
     Omit<
       Partial<ManagerConfig>,
-      "signer" | "onAppendFailure" | "inscribeConfirm"
+      "signer" | "onAppendFailure" | "inscribeConfirm" | "storageAdapter"
     >,
     LocalConfig {
   satProvider?: SatProvider;
+  storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -65,7 +68,13 @@ export class OriginalsSDK {
         "enableLogging",
       ],
     );
-    const { signer, onAppendFailure, satProvider, ...utilities } = options;
+    const {
+      signer,
+      onAppendFailure,
+      satProvider,
+      storageAdapter,
+      ...utilities
+    } = options;
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -98,8 +107,21 @@ export class OriginalsSDK {
         "SDK_NETWORK",
         "Bitcoin and WebVH network selections disagree",
       );
+    const hostedStorage: StorageAdapter | undefined = !storageAdapter
+      ? undefined
+      : "putObject" in storageAdapter
+        ? storageAdapter
+        : {
+            putObject: (domain, path, bytes, options) =>
+              storageAdapter.put(domain + "/" + path, bytes, options),
+            getObject: (domain, path) =>
+              storageAdapter.get(domain + "/" + path),
+            exists: async (domain, path) =>
+              (await storageAdapter.get(domain + "/" + path)) !== null,
+          };
     this.config = {
       ...utilities,
+      ...(storageAdapter && "put" in storageAdapter ? { storageAdapter } : {}),
       network,
       webvhNetwork,
       defaultKeyType: utilities.defaultKeyType ?? "Ed25519",
@@ -107,6 +129,9 @@ export class OriginalsSDK {
     };
     this.metrics = new MetricsCollector();
     this.logger = new Logger("SDK", this.config);
+    const hosted = hostedStorage
+      ? new HostedAssets(hostedStorage, local)
+      : undefined;
     const resolver = new AssetResolver(
       network,
       satProvider ??
@@ -117,8 +142,9 @@ export class OriginalsSDK {
             }
           : undefined),
       local,
+      hosted,
     );
-    this.lifecycle = new LifecycleManager(local, resolver);
+    this.lifecycle = new LifecycleManager(local, resolver, hosted);
     this.did = new AssetDIDManager(this.config, this.metrics, resolver);
     this.credentials = new CredentialManager(
       this.config,

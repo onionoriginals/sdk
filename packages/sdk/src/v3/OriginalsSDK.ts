@@ -1,4 +1,10 @@
 import type {
+  HostedAssets,
+  WebPublicationOptions,
+  PreparedWebPublication,
+  PublishedWebAsset,
+} from "./hosted.js";
+import type {
   AssetResolver,
   AssetResolution,
   AssetResolutionOptions,
@@ -21,7 +27,50 @@ export class LifecycleManager {
   constructor(
     private readonly config: OriginalsConfig = {},
     private readonly resolver?: AssetResolver,
+    private readonly hosted?: HostedAssets,
   ) {}
+
+  private requireHosted(): HostedAssets {
+    if (!this.hosted)
+      throw new CelError(
+        "unsupported",
+        "ASSET_STORAGE_REQUIRED",
+        "Configure a storageAdapter for hosted assets",
+      );
+    return this.hosted;
+  }
+  /** Prepare a retryable, signed hosted publication without storage side effects. */
+  prepareWebPublication(
+    asset: OriginalsAsset,
+    options: WebPublicationOptions,
+  ): Promise<PreparedWebPublication> {
+    return this.requireHosted().prepare(asset, options);
+  }
+  /** Publish the exact prepared method history, CEL and bytes; safe to retry after a partial upload. */
+  publishPreparedToWeb(
+    prepared: PreparedWebPublication,
+  ): Promise<PublishedWebAsset> {
+    return this.requireHosted().publish(prepared, this.resolver);
+  }
+  /** Publish using an explicitly supplied permanent DNS host. Returns a new published asset. */
+  async publishToWeb(
+    asset: OriginalsAsset,
+    options: WebPublicationOptions,
+  ): Promise<PublishedWebAsset> {
+    return this.publishPreparedToWeb(
+      await this.prepareWebPublication(asset, options),
+    );
+  }
+  /** Cold-read separate method and asset histories and every authenticated resource version. */
+  resolveAssetFromWeb(did: string): Promise<LoadedAsset> {
+    if (!this.resolver)
+      throw new CelError(
+        "unsupported",
+        "ASSET_RESOLUTION_UNAVAILABLE",
+        "Use the full SDK for hosted resolution",
+      );
+    return this.requireHosted().resolve(did, this.resolver);
+  }
 
   /** Recover accepted on-sat history and byte attachments from a fresh complete provider snapshot. */
   async resolveAssetFromSat(

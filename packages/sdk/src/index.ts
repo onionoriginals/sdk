@@ -211,3 +211,5 @@ export default OriginalsSDK;
 export * as v3 from './v3/index.js';
 
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./v3/resolution.js";
+
+export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from "./v3/hosted.js";

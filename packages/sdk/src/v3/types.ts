@@ -103,6 +103,7 @@ export interface AssetVerification {
   unverifiedLocalResources: number;
   /** Fresh provider-qualified Bitcoin acceptance, separate from history and byte checks. */
   publication?: SatResolution;
+  hosted?: import("./hosted.js").HostedEvidence;
 }
 
 /** Permit incomplete bytes/local drafts without claiming full verification. Signatures always verify. */

@@ -6,3 +6,5 @@ export { createLocalSigner, type CelSigner } from "@originals/cel/v3";
 export { ASSET_LIMITS, ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from "./envelope.js";
 
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./resolution.js";
+
+export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from "./hosted.js";

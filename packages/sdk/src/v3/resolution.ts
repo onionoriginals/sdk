@@ -1,3 +1,4 @@
+import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
   parseAssetDid,
@@ -70,7 +71,14 @@ export class AssetResolver {
     readonly network: BitcoinNetwork,
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
+    private readonly hosted?: HostedAssets,
   ) {}
+
+  async checkWeb(did: string, expectedDid: string): Promise<HostedEvidence> {
+    return this.hosted
+      ? this.hosted.check(did, expectedDid)
+      : { status: "incomplete", did, reason: "Configure hosted storage" };
+  }
 
   async observe(
     sat: string,

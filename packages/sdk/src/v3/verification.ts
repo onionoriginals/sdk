@@ -1,3 +1,4 @@
+import type { HostedEvidence } from "./hosted.js";
 import { verifyHistory, type SatResolution } from "@originals/cel/v3";
 import type { OriginalsAsset } from "./OriginalsAsset.js";
 import type { AssetVerification } from "./types.js";
@@ -6,6 +7,7 @@ import type { AssetVerification } from "./types.js";
 export function summarizeVerification(
   asset: OriginalsAsset,
   publication?: SatResolution,
+  hosted?: HostedEvidence,
 ): AssetVerification {
   const history = verifyHistory(asset.celLog);
   const missingResources = asset.resources
@@ -17,6 +19,7 @@ export function summarizeVerification(
       missingResources.length === 0 &&
       unverifiedLocalResources === 0 &&
       (history.state.layer === "cel" ||
+        (hosted?.status === "verified" && hosted.head === history.state.head) ||
         (publication?.status === "accepted" &&
           publication.state.head === history.state.head &&
           publication.state.didCel === history.state.didCel)),
@@ -25,5 +28,6 @@ export function summarizeVerification(
     missingResources,
     unverifiedLocalResources,
     ...(publication ? { publication } : {}),
+    ...(hosted ? { hosted } : {}),
   };
 }
