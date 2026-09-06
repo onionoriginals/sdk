@@ -20,12 +20,11 @@ Five gaps, each of which let something real through during run 3. None are
 hypothetical: for each, the bug shipped to a PR and was caught by a human or a
 review bot rather than by CI.
 
-> **Item 1 is DONE** — fixed in the `@originals/cel` PR (#469), because that PR
-> made the gap fatal: the SDK depends on a workspace package for the first time,
-> so its own lint began failing in CI against unbuilt types. The remaining items
-> are still open.
+> **Item 1 remains open** — this branch still defines `lint` without
+> `dependsOn: ["^build"]` in `turbo.json`. Verify the dependency and the
+> clean-build lint check below before marking it complete.
 
-### 1. `turbo run lint` does not depend on `^build` — DONE (#469)
+### 1. `turbo run lint` does not depend on `^build`
 
 `packages/auth` imports types from `@originals/sdk`, which resolve through
 `packages/sdk/dist`. The lint task has no `dependsOn: ["^build"]`, so during lint
@@ -99,8 +98,11 @@ the deploy build died with `MISSING_EXPORT` (fixed in #470). A third instance th
 compiler could not catch — the quickstart sample *rendered on the landing page*
 — was teaching visitors the same dead import.
 
-**Fix**: add a CI job that runs `bun run build && cd apps/landing && bun run
-build` (plus `bun run typecheck`). It need not gate merges, but it must run.
+**Fix**: add a CI job that builds the workspace packages from the repository
+root with `bun run build`, then runs `bun run build` and `bun run typecheck`
+with `working-directory: apps/landing`. The root typecheck script filters to
+`./packages/*` and does not check the app. It need not gate merges, but it must
+run.
 
 ### 5. `bun run test` intermittently exits 1 with every suite reporting `0 fail`
 
@@ -114,21 +116,28 @@ break tests. Signature, identical each time:
   `fetchLogFromIdentifier` appears nearby;
 - **re-running the same commit passes.**
 
-**Diagnosis**: not a network dependency. `tests/setup.bun.ts` installs a `fetch`
-mock in `beforeEach` that returns 404 by design, to fail tests that forget to
-mock. So the 404 is the mock working. The problem is that the rejection escapes
-a test's lifecycle: some DID resolution is started but its promise is not
-awaited (or its rejection not caught), so it settles after the test finishes and
-Bun reports an unhandled rejection at exit — which is nondeterministic, hence
-the flake.
+**Unconfirmed hypothesis**: a rejection may be escaping a test's lifecycle, but
+neither the responsible promise nor the source of this 404 has been established.
+`packages/sdk/tests/setup.bun.ts` installs a fetch mock in `beforeEach` that
+returns 404 by default and restores it in `afterEach`; that is one possible
+source, not proof that the observed request used the mock or that no real
+network call occurred.
 
-**Fix**: find the floating promise rather than suppressing the symptom. Start by
-running with `DEBUG_FETCH=true` (the setup already logs unmocked fetch URLs) to
-identify which resolution is in flight, and check the deferred paths first —
-`LifecycleManager`'s `queueMicrotask` emit and anything calling `resolveDID`
-without `await`. Adding a global unhandled-rejection handler that fails the test
-run loudly, with the offending stack, would make the next occurrence
-self-diagnosing.
+The initially suspected paths already catch the relevant errors:
+`EventEmitter.emit` awaits both regular and once handlers inside `try/catch`,
+and `DIDManager.resolveDID` awaits did:webvh resolution inside `try/catch`.
+The deferred lifecycle emit or an unawaited `resolveDID` call alone therefore
+does not establish how this HTTP rejection escaped.
+
+**Investigation and fix**: reproduce with `DEBUG_FETCH=true` to capture URLs
+handled by the default mock. Preserve the complete failure log, Bun version,
+and test ordering, then correlate the rejection stack and fetch timing with
+the responsible test and its setup/teardown. Narrow to a reproducer before
+changing promise handling. Follow the evidence into test mocks, dependency
+internals, or deferred work as indicated by the stack; do not assume the two
+already-catching SDK paths are responsible. If extra rejection diagnostics
+are needed, ensure they preserve a failing exit status. Fix the demonstrated
+cause and add a regression test that fails before the fix.
 
 **Do NOT** "fix" this by making the suite tolerate unhandled rejections. A
 provenance SDK swallowing a rejected promise is exactly the class of bug this
@@ -142,9 +151,11 @@ repo spent run 3 eliminating.
    fails on a `Buffer` reference in a guarded graph. Verify by temporarily
    reintroducing `Buffer.from` into `turnkeySignBytes` and confirming CI fails.
 3. `bun run lint` in every package lints the entire `src` tree, and passes.
-4. A CI job builds `apps/landing`, and fails if the SDK's public entry breaks it.
-5. `bun run test` exits 0 deterministically; the floating promise is identified
-   and awaited, not suppressed.
+4. A CI job builds and typechecks `apps/landing` from its own directory, and
+   fails if the SDK's public entry breaks it.
+5. The flake's cause is documented with a reproducer and a regression test that
+   fails before the fix and passes after it. Record repeated successful runs of
+   the reproducer and `bun run test`; preserve failure on unhandled rejections.
 
 ## STOP conditions
 
