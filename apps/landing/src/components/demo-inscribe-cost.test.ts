@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { demo } from '../content';
-import { inscribeCostNote } from './Demo';
+import { inscribeCostNote } from './demo-logic';
 
 test('the unavailable Bitcoin step explains costs without quoting a previous-format payload', () => {
   expect(inscribeCostNote(false)).toBe(demo.inscribeCost);

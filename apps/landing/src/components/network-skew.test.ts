@@ -5,7 +5,7 @@
  * address on a deploy whose server can never spend from it.
  */
 import { describe, test, expect } from 'bun:test';
-import { expectedServerNetwork, fetchServerNetwork, networkSkewDetected } from './Demo';
+import { expectedServerNetwork, fetchServerNetwork, networkSkewDetected } from './demo-logic';
 
 const respond = (status: number, body: unknown): typeof fetch =>
   (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -87,7 +87,7 @@ test('explicit regtest matches only the local regtest server', async () => {
 });
 
 test('regtest completion and description name the local chain and provide no public explorer', async () => {
-  const { completionCopy, demoSubhead, inscribeStepView } = await import('./Demo');
+  const { completionCopy, demoSubhead, inscribeStepView } = await import('./demo-logic');
   expect(completionCopy(false, 'regtest').lead).toMatch(/local.*regtest/i);
   expect(completionCopy(false, 'regtest').explorerLabel).toBeNull();
   expect(demoSubhead(true, 'regtest')).toContain('test coins');

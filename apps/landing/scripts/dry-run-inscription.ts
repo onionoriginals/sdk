@@ -63,7 +63,7 @@ import { createMoneyLogger } from '../server/money-log';
 import { HttpOrdinalsProvider } from '../src/sdk/http-ordinals-provider';
 import { TurnkeySatSigner } from '../src/sdk/turnkey-sat-signer';
 import { addNonWitnessUtxos } from '../src/sdk/psbt-prevtx';
-import { selectFundingUtxos, type DepositInfo } from '../src/components/Demo';
+import { selectFundingUtxos, type DepositInfo } from '../src/components/demo-logic';
 import type { TurnkeyBitcoinClient } from '../src/auth/turnkey-session';
 import { generateArtwork } from '../src/sdk/artwork';
 

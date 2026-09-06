@@ -16,7 +16,7 @@ import {
   inscribeStepView,
   publishDurabilityNote,
   resolvedCopy,
-} from './Demo';
+} from './demo-logic';
 import { demoTier } from '../sdk/network-flag';
 import { demo } from '../content';
 

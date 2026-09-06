@@ -11,7 +11,7 @@ import {
   rowAfterInscribe,
   unclaimedInscriptions,
 } from './inscribe-availability';
-import { inscribeIsComplete } from '../components/Demo';
+import { inscribeIsComplete } from '../components/demo-logic';
 import { yourOriginals } from '../content';
 import type { DisabledReason } from './inscribe-availability';
 import type { OriginalRow, PendingInscription } from './YourOriginals';

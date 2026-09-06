@@ -54,11 +54,7 @@ export type { DemoTier } from "./network-flag";
 
 export type LayerId = "did:cel" | "did:webvh" | "did:btco";
 
-export const ANON_IDENTITY = "anon";
-
-export function engineIdentity(authed: boolean, subOrgId?: string): string {
-  return authed ? `authed:${subOrgId ?? ""}` : ANON_IDENTITY;
-}
+export { ANON_IDENTITY, engineIdentity } from "./engine-identity";
 
 export interface DemoEvent {
   type: string;

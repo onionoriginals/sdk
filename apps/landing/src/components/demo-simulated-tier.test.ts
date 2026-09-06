@@ -6,7 +6,7 @@
  * never be mistaken for the signed-in money button.
  */
 import { describe, test, expect } from 'bun:test';
-import { inscribeStepView } from './Demo';
+import { inscribeStepView } from './demo-logic';
 import { demoTier } from '../sdk/network-flag';
 import { demo } from '../content';
 

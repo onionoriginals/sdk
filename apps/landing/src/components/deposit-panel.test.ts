@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView, type SubmitOutcome } from './Demo';
+import { depositDisclosure, quoteForAddress, depositReadiness, depositBadgeLabel, inscribeIsComplete, inscribeDoneView, type SubmitOutcome } from './demo-logic';
 import { bitcoinPaymentUri } from '../sdk/bitcoin-uri';
 
 /**

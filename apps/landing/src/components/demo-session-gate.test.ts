@@ -5,7 +5,7 @@
  * re-authentication dips the auth identity through anonymous.
  */
 import { describe, test, expect } from 'bun:test';
-import { signingGate, signingGateMessage, identityTransition } from './Demo';
+import { signingGate, signingGateMessage, identityTransition } from './demo-logic';
 import { signOutIntent } from '../auth/sign-out';
 import { demo } from '../content';
 

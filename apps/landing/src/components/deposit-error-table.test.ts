@@ -17,7 +17,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositErrorCopy, depositErrorMessage, depositErrorBadge } from './Demo';
+import { depositErrorCopy, depositErrorMessage, depositErrorBadge } from './demo-logic';
 
 /** The default arm, read back through the mapper itself. */
 const UNKNOWN_FALLBACK = () => depositErrorCopy(null);

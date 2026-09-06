@@ -9,7 +9,7 @@
  */
 import { webvhArtifacts, sameOriginUrl, type CelLog } from './original-detail-data';
 import { hostedAssetEnvelope, hostedResourceRefs } from '../sdk/hosted-envelope';
-import { selectFundingUtxos, inscribeIsComplete, type DepositInfo } from '../components/Demo';
+import { selectFundingUtxos, inscribeIsComplete, type DepositInfo } from '../components/demo-logic';
 import { ensureAuthorshipAccount, type TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { authorshipPublicKeyMultibase, canAuthor } from '../sdk/turnkey-cel-signer';
 
