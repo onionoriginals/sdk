@@ -29,12 +29,16 @@ describe('cold CEL 3 inscription recovery gates', () => {
     expect(reads).toBe(0);
     expect(host.requests.some((path) => path.startsWith('/api/btc/'))).toBe(false);
   });
-  test('a verified Original with insufficient or unreadable funds does not submit anything', async () => {
+  // Each case performs real signature verification. Give each cold recovery its
+  // own test budget instead of accumulating three verifications under one timer.
+  test.each([
+    ['unreadable funds', null],
+    ['no confirmed funds', { confirmedUtxos: [], estimatedCostSats: 10000 }],
+    ['insufficient confirmed funds', { confirmedUtxos: [{ txid: 'ab'.repeat(32), vout: 0, value: 500 }], estimatedCostSats: 10000 }],
+  ] as const)('a verified Original with %s does not submit anything', async (_label, deposit) => {
     const { did } = await fixture();
-    for (const deposit of [null, { confirmedUtxos: [], estimatedCostSats: 10000 }, { confirmedUtxos: [{ txid: 'ab'.repeat(32), vout: 0, value: 500 }], estimatedCostSats: 10000 }]) {
-      const result = await resumeInscribe({ did, subOrgId: 'sub-1', fundingAddress: 'bc1qtest', signingClient: {} as never, loadDeposit: async () => deposit as never });
-      expect(result.ok).toBe(false);
-    }
+    const result = await resumeInscribe({ did, subOrgId: 'sub-1', fundingAddress: 'bc1qtest', signingClient: {} as never, loadDeposit: async () => deposit as never });
+    expect(result.ok).toBe(false);
     expect(host.requests.some((path) => path.startsWith('/api/btc/'))).toBe(false);
   });
 });
