@@ -13,19 +13,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { EventLog, DataIntegrityProof } from '../types.js';
-import { WebVHCelManager } from '../layers/WebVHCelManager.js';
-import { BtcoCelManager } from '../layers/BtcoCelManager.js';
-import type { CelSigner } from '../layers/PeerCelManager.js';
-import { parseEventLogJson } from '../serialization/json.js';
-import { parseEventLogCbor } from '../serialization/cbor.js';
-import { serializeEventLogJson } from '../serialization/json.js';
-import { serializeEventLogCbor } from '../serialization/cbor.js';
-import { multikey } from '../../crypto/Multikey.js';
+import type { EventLog, DataIntegrityProof } from '@originals/cel';
+import { WebVHCelManager } from '@originals/cel';
+import { BtcoCelManager } from '@originals/cel';
+import type { CelSigner } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import { parseEventLogCbor } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
-import { CEL_CRYPTOSUITE } from '../proofVerification.js';
-import { btcoDidFromSatoshi } from '../btcoDid.js';
-import { deriveDidCel } from '../celDid.js';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '@originals/cel';
+import { btcoDidFromSatoshi } from '@originals/cel';
+import { deriveDidCel } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments
@@ -217,7 +217,7 @@ async function loadWalletKey(walletPath: string): Promise<{ privateKey: string; 
     } else {
       throw new Error('JSON wallet file must contain "privateKey" field');
     }
-  } catch (e) {
+  } catch (_e) {
     // Not JSON, treat as raw multibase key
     if (content.startsWith('z')) {
       privateKey = content;
@@ -250,7 +250,7 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     
     // The proof configuration is signed along with the event (plan 042).
     const config = {
-      type: 'DataIntegrityProof' as const,
+      type: CEL_PROOF_TYPE,
       cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod: `did:key:${publicKey}#${publicKey}`,
@@ -413,7 +413,7 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
     const ed25519 = await import('@noble/ed25519');
     const privateKeyBytes = ed25519.utils.randomSecretKey();
     const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
-    privateKey = multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519');
+    privateKey = multikey.encodePrivateKey(privateKeyBytes, 'Ed25519');
     publicKey = multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519');
 
     // Never print the private key to a shared stream (stderr lands in shell
@@ -503,9 +503,9 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
   if (flags.output) {
     try {
       if (format === 'cbor') {
-        fs.writeFileSync(flags.output, output as Uint8Array);
+        fs.writeFileSync(flags.output, output);
       } else {
-        fs.writeFileSync(flags.output, output as string, 'utf-8');
+        fs.writeFileSync(flags.output, output, 'utf-8');
       }
     } catch (e) {
       return {
@@ -520,7 +520,7 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
       const base64 = Buffer.from(output as Uint8Array).toString('base64');
       process.stdout.write(base64);
     } else {
-      process.stdout.write(output as string);
+      process.stdout.write(output);
     }
   }
   

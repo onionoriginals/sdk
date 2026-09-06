@@ -5,8 +5,8 @@ import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
-import { deriveDidCel } from '../../../src/cel/celDid';
-import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { deriveDidCel } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 
 const config: OriginalsConfig = {

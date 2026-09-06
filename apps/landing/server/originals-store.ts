@@ -23,17 +23,39 @@ import {
 import { dirname, join, resolve, sep } from 'node:path';
 import { untrustedHeaders } from './webvh-host';
 
-export interface OriginalSummary {
+/** Bitcoin inscription state carried on an Original once it migrates to did:btco. */
+export interface OriginalInscription {
+  btcoDid?: string;
+  inscriptionId?: string;
+  commitTxId?: string;
+  revealTxId?: string;
+  satoshi?: string;
+  /** pending = broadcast, not yet confirmed on-chain. */
+  inscriptionStatus?: 'pending' | 'confirmed';
+}
+
+export interface OriginalSummary extends OriginalInscription {
   did: string;
   title: string;
   resourceHash: string;
   createdAt: string;
   /** Derived (not stored): the resolvable URL of the artwork resource, for the thumbnail. */
   resourceUrl?: string;
+  /**
+   * Derived: the resource's media type, read from its `.ctype` sidecar.
+   *
+   * Callers need this to know whether `resourceUrl` is something they may put
+   * in an `<img>`. A text Original has a perfectly good resource URL that is
+   * not an image, and rendering it as one draws a broken icon over a valid
+   * asset — so the type travels with the URL rather than being assumed.
+   */
+  resourceContentType?: string;
 }
 
 interface UserIndex {
-  originals: Array<{ did: string; title: string; resourceHash: string; createdAt: string }>;
+  originals: Array<
+    { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
+  >;
   sizes: Record<string, number>;
   totalBytes: number;
 }
@@ -42,7 +64,7 @@ export interface OriginalsStore {
   saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void;
   recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string }
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
   ): void;
   list(subOrgId: string): OriginalSummary[];
   serve(url: URL): Response | null;
@@ -128,12 +150,25 @@ export function createOriginalsStore(opts: {
 
   function recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string }
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
   ): void {
     const idx = readIndex(subOrgId);
-    // Idempotent: a best-effort record retry (POST timed out, user re-published)
-    // must not list the same did twice.
-    if (idx.originals.some((e) => e.did === o.did)) return;
+    // Idempotent by did, upsert-merge for the inscription fields: the engine
+    // posts once at publish (no inscription yet) and again after inscribing —
+    // the second post must enrich the SAME row, never list the did twice.
+    // Identity fields (title/hash/createdAt) are set once at publish and are
+    // NOT overwritten by later merges.
+    const existing = idx.originals.find((e) => e.did === o.did);
+    if (existing) {
+      // Generic per-key merge keeps the key↔value correlation TS loses in a
+      // plain indexed loop over the union of keys.
+      const merge = <K extends keyof OriginalInscription>(k: K): void => {
+        if (o[k] !== undefined) existing[k] = o[k];
+      };
+      (['btcoDid', 'inscriptionId', 'commitTxId', 'revealTxId', 'satoshi', 'inscriptionStatus'] as const).forEach(merge);
+      writeIndex(subOrgId, idx);
+      return;
+    }
     if (idx.originals.length >= maxOriginals) throw new Error('STORE_FULL');
     idx.originals.push(o);
     writeIndex(subOrgId, idx);
@@ -148,13 +183,27 @@ export function createOriginalsStore(opts: {
     return segs.length ? `${host}/${segs.join('/')}/resources/` : `${host}/resources/`;
   }
 
+  /** The stored media type for a hosted key, or undefined if the sidecar is gone. */
+  function readContentType(key: string): string | undefined {
+    try {
+      const path = keyToPath(hostedDir, key) + CTYPE_SUFFIX;
+      return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+    } catch {
+      return undefined; // traversal or unreadable → simply unknown
+    }
+  }
+
   function list(subOrgId: string): OriginalSummary[] {
     const idx = readIndex(subOrgId);
     const keys = Object.keys(idx.sizes);
     return idx.originals.map((o) => {
       const prefix = resourcePrefix(o.did);
       const resourceKey = prefix ? keys.find((k) => k.startsWith(prefix)) : undefined;
-      return { ...o, resourceUrl: resourceKey ? `https://${resourceKey}` : undefined };
+      return {
+        ...o,
+        resourceUrl: resourceKey ? `https://${resourceKey}` : undefined,
+        resourceContentType: resourceKey ? readContentType(resourceKey) : undefined
+      };
     });
   }
 

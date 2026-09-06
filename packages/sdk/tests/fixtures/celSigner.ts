@@ -12,10 +12,10 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../src/crypto/signingInput';
-import { CEL_CRYPTOSUITE } from '../../src/cel/proofVerification';
-import type { DataIntegrityProof } from '../../src/cel/types';
+import { CEL_CRYPTOSUITE } from '@originals/cel';
+import type { DataIntegrityProof } from '@originals/cel';
 
 export interface RealCelSigner {
   /** Signs `{ type, data, previousEvent? }` exactly as the CEL verifier expects. */

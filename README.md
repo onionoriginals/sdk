@@ -13,6 +13,13 @@ An Original asset **IS a Cryptographic Event Log (CEL)**: every authorship opera
 - **`did:webvh`** - Public discovery via HTTPS hosting
 - **`did:btco`** - Transferable ownership on Bitcoin, where the satoshi itself IS the identity and the ownership
 
+> **`did:cel` is not a registered DID method.** `did:webvh` and `did:btco` are
+> registered in the W3C DID Extensions registry; `cel` is not, no registration
+> has been submitted, and there is no Universal Resolver driver for it. Its
+> verification algorithm is specific to this SDK, so today nothing outside this
+> SDK can resolve or verify a `did:cel`. See
+> [specs/did-cel-method.md](specs/did-cel-method.md).
+
 Assets migrate unidirectionally through these layers, with economic gravity determining when Bitcoin-level security is justified. Ownership is live Bitcoin sat control — never a credential, and never transferred by editing a DID document.
 
 ## Installation
@@ -74,7 +81,7 @@ const inscribed = await originals.lifecycle.inscribe(published);
 
 ### Key Features
 
-- ✅ W3C DID and Verifiable Credential compliance
+- ✅ W3C Verifiable Credential compliance, and W3C DID syntax throughout (`did:webvh` and `did:btco` are registered methods; `did:cel` is not — see above)
 - ✅ Multibase key encoding (no JSON Web Keys)
 - ✅ JSON-LD credential signing (no JWT)
 - ✅ Bitcoin Ordinals inscription support (the inscription's content is the asset media; its CBOR metadata carries the CEL provenance)
@@ -246,6 +253,10 @@ const result = await sdk.did.updateDIDWebVH({
 For detailed information about the DID:WebVH integration, including Turnkey setup and external signer implementation, see [DIDWEBVH_INTEGRATION.md](./DIDWEBVH_INTEGRATION.md).
 
 ## Documentation
+
+### Upgrading
+
+- **[docs/MIGRATION_3.0.md](./docs/MIGRATION_3.0.md)** - Upgrading from 2.x to 3.0. Most breaking changes surface as code that used to "work" now throwing — 3.0 makes several silently-broken paths fail loudly.
 
 ### For LLM Agents
 

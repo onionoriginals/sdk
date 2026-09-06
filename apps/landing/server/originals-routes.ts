@@ -13,7 +13,7 @@ import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
-import type { OriginalsStore } from './originals-store';
+import type { OriginalsStore, OriginalInscription } from './originals-store';
 
 const HOST_PREFIX = '/api/originals/host/';
 
@@ -23,23 +23,35 @@ const HOST_PREFIX = '/api/originals/host/';
 // users hit.
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
+/** A content digest suffix — multibase base64url, always 'u'-prefixed. */
+const DIGEST_MULTIBASE = /^u[A-Za-z0-9_-]+$/;
+/** The CEL copy's filename: the did:cel digest plus `.json`. */
+const CEL_COPY_FILE = /^u[A-Za-z0-9_-]+\.json$/;
+
 /**
- * A host key must name a did:webvh hosting artifact: `<segs…>/did.jsonl`,
- * `<segs…>/cel.json`, or `<segs…>/resources/<multibase>`. This confines every
- * authed PUT to the shapes the SDK actually publishes and — crucially — makes
- * it impossible to plant bytes at a path that would SHADOW the app's own static
- * assets (`index.html`, `assets/app-*.js`). `buildFetch` runs `originals.serve`
- * before the SPA/static fallback, so an unconfined key like
- * `<host>/assets/app-abc.js` would otherwise be served (as a forced download,
- * via untrustedHeaders) to every visitor, breaking the page. Cross-user
- * OVERWRITE of a claimed key is separately blocked by the store's owner sidecar.
+ * A host key must name an artifact the SDK actually publishes: `<segs…>/did.jsonl`,
+ * `<segs…>/cel.json`, `<segs…>/resources/<multibase>`, or the layer-agnostic CEL
+ * copy `cel/<multibase>.json`. This confines every authed PUT to those shapes
+ * and — crucially — makes it impossible to plant bytes at a path that would
+ * SHADOW the app's own static assets (`index.html`, `assets/app-*.js`).
+ * `buildFetch` runs `originals.serve` before the SPA/static fallback, so an
+ * unconfined key like `<host>/assets/app-abc.js` would otherwise be served (as a
+ * forced download, via untrustedHeaders) to every visitor, breaking the page.
+ * Cross-user OVERWRITE of a claimed key is separately blocked by the store's
+ * owner sidecar.
  */
 function isWebvhArtifactKey(key: string): boolean {
   const segs = key.split('/');
   const last = segs[segs.length - 1];
   if (last === 'did.jsonl' || last === 'cel.json') return true;
+  // The SDK's layer-agnostic CEL copy, `cel/<did:cel digest>.json`
+  // (LifecycleManager.persistCelArtifacts) — the conventional key
+  // DIDManager.resolveDID's did:cel branch reads back. Exactly two segments and
+  // a content-derived digest, so `serve` can only ever reach it as host `cel`
+  // plus `/<digest>.json`: it cannot name a path on the app's own origin.
+  if (segs.length === 2 && segs[0] === 'cel' && CEL_COPY_FILE.test(last)) return true;
   // Published resource: `…/resources/<base64url-multibase>` (multibase 'u' prefix).
-  return segs[segs.length - 2] === 'resources' && /^u[A-Za-z0-9_-]+$/.test(last);
+  return segs[segs.length - 2] === 'resources' && DIGEST_MULTIBASE.test(last);
 }
 
 /** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
@@ -76,6 +88,10 @@ export function createOriginalsRoutes(deps: {
 }): OriginalsRoutes {
   const { store } = deps;
   const now = deps.now ?? (() => Date.now());
+  // 120 writes/min per resolved client identity (client-ip.ts) — never a raw
+  // X-Forwarded-For. A publish issues a handful of writes, so this is ~20
+  // publishes/min for one signed-in creator; the auth gate and the per-user
+  // namespace are the real bounds.
   const putLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
 
   /** Authenticated subOrgId, or null (→ 401). */
@@ -158,16 +174,44 @@ export function createOriginalsRoutes(deps: {
   const record: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const { did, title, resourceHash } = (await req.json().catch(() => ({}))) as {
+    const body = (await req.json().catch(() => ({}))) as {
       did?: string;
       title?: string;
       resourceHash?: string;
+      btcoDid?: unknown;
+      inscriptionId?: unknown;
+      commitTxId?: unknown;
+      revealTxId?: unknown;
+      satoshi?: unknown;
+      status?: unknown;
     };
+    const { did, title, resourceHash } = body;
     if (typeof did !== 'string' || typeof title !== 'string' || typeof resourceHash !== 'string') {
       return json({ error: 'bad_request' }, 400);
     }
+    // Optional inscription fields (posted after the did:btco migrate). Each is
+    // taken only when it is a well-formed string — a malformed value 400s
+    // rather than silently landing in the durable record.
+    const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 256;
+    const inscription: OriginalInscription = {};
+    for (const k of ['btcoDid', 'inscriptionId', 'commitTxId', 'revealTxId', 'satoshi'] as const) {
+      const v = body[k];
+      if (v === undefined) continue;
+      if (!str(v)) return json({ error: 'bad_request' }, 400);
+      inscription[k] = v;
+    }
+    if (body.status !== undefined) {
+      if (body.status !== 'pending' && body.status !== 'confirmed') return json({ error: 'bad_request' }, 400);
+      inscription.inscriptionStatus = body.status;
+    }
     try {
-      store.recordOriginal(sub, { did, title, resourceHash, createdAt: new Date(now()).toISOString() });
+      store.recordOriginal(sub, {
+        did,
+        title,
+        resourceHash,
+        createdAt: new Date(now()).toISOString(),
+        ...inscription,
+      });
     } catch (e) {
       return storeError(e);
     }

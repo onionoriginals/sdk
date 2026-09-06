@@ -103,9 +103,16 @@
   animation: hero-rise 600ms var(--ease) 180ms both;
 }
 
-.hero-or {
+.hero-example-link {
   font-size: var(--text-sm);
   color: var(--text-tertiary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.hero-example-link:hover {
+  color: var(--text-primary);
 }
 
 .hero-visual {

@@ -1,4 +1,4 @@
-import { StructuredError } from './telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 /**
  * A process-local, non-reentrant, keyed mutex. A single shared instance is

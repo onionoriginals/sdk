@@ -2,7 +2,7 @@
 /**
  * CLI Publish Command
  *
- * Publishes a CEL asset to the web by migrating it from did:peer to did:webvh.
+ * Publishes a CEL asset to the web by migrating it from its did:cel genesis to did:webvh.
  * This is a user-friendly wrapper around "migrate --to webvh".
  *
  * Usage: originals-cel publish --log <path> --domain <domain> [options]

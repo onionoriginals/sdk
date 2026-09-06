@@ -33,6 +33,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const nodeModules = join(repoRoot, 'node_modules');
 
 const packages = [
+  { name: '@originals/cel', dir: 'packages/cel' },
   { name: '@originals/sdk', dir: 'packages/sdk' },
   { name: '@originals/auth', dir: 'packages/auth' },
 ];

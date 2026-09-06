@@ -1,6 +1,6 @@
 import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '../../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
 
 // Re-export canonical DataIntegrityProof from shared types

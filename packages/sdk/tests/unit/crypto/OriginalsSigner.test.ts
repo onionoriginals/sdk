@@ -17,9 +17,9 @@ import {
 } from '../../../src/crypto/OriginalsSigner';
 import { MockRemoteSigner } from '../../../src/crypto/MockRemoteSigner';
 import { signingInput } from '../../../src/crypto/signingInput';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '../../../src/cel/proofVerification';
+import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import type { ExternalSigner } from '../../../src/types';
 

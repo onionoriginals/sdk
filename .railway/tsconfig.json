@@ -1,0 +1,13 @@
+{
+  "//": "Typecheck-only config for railway.ts. It is not part of the app or package builds (turbo typecheck filters to packages/*); run it directly with `bunx tsc -p .railway/tsconfig.json`. The Railway CLI evaluates railway.ts with tsx and does not read this file.",
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "module": "esnext",
+    "target": "esnext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "skipLibCheck": true
+  },
+  "include": ["railway.ts"]
+}

@@ -15,11 +15,11 @@ import {
 import { StatusListManager, parseStatusListIndex, type StatusCheckResult } from './StatusListManager.js';
 import { canonicalizeDocument } from '../utils/serialization.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '@originals/cel/encoding';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { signerForKeyType } from '../crypto/Signer.js';
-import { multikey } from '../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
@@ -28,7 +28,7 @@ import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 // ===== Credential Factory Types =====
 

@@ -165,7 +165,7 @@ describe('DIDManager', () => {
 });
 
 /** Inlined from DIDManager.createBtco.part.ts */
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 
 describe('DIDManager.createBtcoDidDocument method', () => {
   test('creates btco DID document via manager wrapper', () => {
@@ -321,7 +321,7 @@ describe('DIDManager.validateDIDDocument false branch', () => {
 });
 
 
-import { createCelDidDocument } from '../../../src/cel/celDid';
+import { createCelDidDocument } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('DIDManager.resolveDID did:cel branch (#Phase2 Task 8)', () => {

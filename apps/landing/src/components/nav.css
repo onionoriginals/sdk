@@ -126,6 +126,18 @@
   border-bottom: none;
 }
 
+/* Signed-out: quiet sign-in beside the primary Start CTA. */
+.nav-signin {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-signin:hover {
+  color: var(--text-primary);
+}
+
 /* Signed-in: lightweight identity status only — the creation CTA lives in the hero. */
 .nav-auth {
   display: flex;
@@ -181,4 +193,20 @@
   .nav-mobile {
     display: none;
   }
+}
+
+/* Sign-out could not revoke the signing key at Turnkey — erased locally, still
+   valid there until it expires. A named state, not a silent failure. */
+.nav-signout-notice {
+  position: fixed;
+  inset: auto var(--sp-4) var(--sp-4) auto;
+  max-width: 32rem;
+  z-index: 60;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-raised, var(--surface));
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }

@@ -392,33 +392,41 @@ describe('Batch Operations Stress Tests', () => {
 
   describe('6. Memory and Resource Tests', () => {
     it('should not leak memory during repeated batch operations', async () => {
-      // When this test runs after the integration/unit/security suites the heap
-      // can be ~80MB from accumulated allocations. Bun's GC is incremental:
-      // Bun.gc(false) advances one GC cycle but cannot force a synchronous
-      // full-heap collection. The deferred major collection can fire at any point
-      // during the measured window, causing a dramatic heap drop (80 → 14MB)
-      // that makes Math.abs(growth) far exceed 50% as a false positive.
+      // What this asserts: repeated batches must not grow RETAINED memory
+      // without bound. Everything below exists to make "retained" measurable.
       //
-      // Fix (supersedes the warmup-only approach from #425): reset the
-      // measurement window whenever a major GC event is detected (>30% heap drop
-      // between consecutive iterations), so the 10 comparison readings all come
-      // from the same post-GC stable phase. A real unbounded leak grows
-      // monotonically, never triggers the reset, and still fails the assertion.
+      // `process.memoryUsage().heapUsed` is not a usable signal in Bun on its
+      // own — it lags reality badly. Holding 300k live Uint8Arrays reports
+      // ~0.2MB, and the same measurement after a synchronous collection reports
+      // ~38MB. Readings taken without forcing collection are therefore noise,
+      // not measurements.
+      //
+      // The previous version called `Bun.gc(false)`, the INCREMENTAL collector,
+      // which cannot force a full collection. Major GCs then fired at arbitrary
+      // points, producing 80MB → 14MB cliffs mid-window, and the test coped by
+      // discarding the window on any >30% drop and restarting — needing 10
+      // consecutive GC-free readings. Under CI memory pressure those resets fire
+      // repeatedly, the run exhausts its 100-iteration cap, and the test throws
+      // "Memory window never stabilised". That is a flake, not a leak, and it
+      // failed unrelated PRs.
+      //
+      // `Bun.gc(true)` runs a SYNCHRONOUS full collection, so every reading is
+      // taken from a settled heap. Collection stops being a random event to
+      // detect and becomes a step in the measurement, which removes the reset
+      // machinery, the iteration cap and the throw path entirely.
       const measuredIterations = 10;
       const batchSize = 100;
-      const GC_DROP_THRESHOLD = 0.30; // 30%+ drop → major GC event
 
-      // Bun.gc() advances the incremental GC; helps but cannot guarantee full
-      // collection. We rely on the reset logic below to handle stragglers.
+      /** Synchronous full collection — see above; `false` here would not settle the heap. */
       const forceGC = () => {
         if (typeof Bun !== 'undefined' && typeof Bun.gc === 'function') {
-          Bun.gc(false);
+          Bun.gc(true);
         } else if (typeof global.gc === 'function') {
           global.gc();
         }
       };
 
-      // 5 un-measured warmup iterations to warm the JIT before measuring.
+      // Warm the JIT so early iterations are not measured against cold code.
       for (let i = 0; i < 5; i++) {
         await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
           maxConcurrent: 5
@@ -426,58 +434,37 @@ describe('Batch Operations Stress Tests', () => {
         forceGC();
       }
 
-      // Collect measuredIterations readings. If a major GC fires mid-window
-      // (detected as a >30% drop from the previous reading), discard accumulated
-      // readings and start over — the post-GC phase is the stable baseline we
-      // actually want to measure.
-      let memoryReadings: number[] = [];
-      let prevMem = process.memoryUsage().heapUsed / 1024 / 1024;
-
-      // Hard cap on total iterations so a pathological GC storm (window resets on
-      // every iteration under heavy memory pressure) fails fast with a clear
-      // message instead of silently running into the 180s test timeout.
-      let totalIterations = 0;
-      const maxTotalIterations = measuredIterations * 10;
-
-      while (memoryReadings.length < measuredIterations) {
-        if (++totalIterations > maxTotalIterations) {
-          throw new Error(
-            `[STRESS] Memory window never stabilised: GC drops kept resetting it after ` +
-              `${maxTotalIterations} iterations (needed ${measuredIterations} consecutive clean readings). ` +
-              `Likely a very memory-pressured agent, not a leak — re-run or raise maxTotalIterations.`
-          );
-        }
+      // Every reading is post-collection, so the series is directly comparable
+      // and the loop runs a fixed number of times.
+      const memoryReadings: number[] = [];
+      for (let i = 0; i < measuredIterations; i++) {
         await sdk.lifecycle.batchCreateAssets(createTestResourcesList(batchSize), {
           maxConcurrent: 5
         });
         forceGC();
-
         const memUsage = process.memoryUsage().heapUsed / 1024 / 1024; // MB
-        const drop = (prevMem - memUsage) / Math.max(prevMem, 1);
-
-        if (drop > GC_DROP_THRESHOLD) {
-          // Major GC fired — discard the pre-GC readings and restart the window.
-          console.log(
-            `[STRESS] GC drop detected (${(drop * 100).toFixed(0)}%) at iteration ${totalIterations}, resetting window`
-          );
-          memoryReadings = [];
-        } else {
-          memoryReadings.push(memUsage);
-        }
-        prevMem = memUsage;
-        console.log(`[STRESS] reading ${memoryReadings.length}/${measuredIterations}: ${memUsage.toFixed(2)}MB`);
+        memoryReadings.push(memUsage);
+        console.log(`[STRESS] reading ${i + 1}/${measuredIterations}: ${memUsage.toFixed(2)}MB`);
       }
 
-      // Compare first half vs second half: a real unbounded leak shows the
-      // second half steadily above the first.
+      // Compare halves by MEDIAN rather than mean: a leak shifts the whole
+      // distribution, while one unusually large iteration shifts only the mean.
+      const median = (xs: number[]) => {
+        const sorted = [...xs].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      };
       const half = Math.floor(measuredIterations / 2);
-      const firstHalf = memoryReadings.slice(0, half).reduce((a, b) => a + b) / half;
-      const secondHalf = memoryReadings.slice(half).reduce((a, b) => a + b) / (measuredIterations - half);
+      const firstHalf = median(memoryReadings.slice(0, half));
+      const secondHalf = median(memoryReadings.slice(half));
       const growth = ((secondHalf - firstHalf) / firstHalf) * 100;
 
-      console.log(`[STRESS] Memory growth: ${growth.toFixed(2)}%`);
-      // A memory leak manifests as POSITIVE growth. GC-driven shrinkage between
-      // halves is normal and not a leak, so we only check the positive direction.
+      console.log(
+        `[STRESS] Retained memory: ${firstHalf.toFixed(2)}MB -> ${secondHalf.toFixed(2)}MB ` +
+          `(${growth.toFixed(2)}%)`
+      );
+      // A leak manifests as POSITIVE growth. Shrinkage is not a leak, so only
+      // the positive direction is asserted.
       expect(growth).toBeLessThan(50); // Memory shouldn't grow > 50%
     }, 180000);
 

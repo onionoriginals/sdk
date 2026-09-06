@@ -3,7 +3,6 @@ import { hero } from '../content';
 import { generateArtwork } from '../sdk/artwork';
 import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
 import { IdentityPanel } from './IdentityPanel';
-import { InstallCommand } from './InstallCommand';
 import { Pipeline } from './Pipeline';
 import './hero.css';
 
@@ -12,7 +11,7 @@ export function Hero() {
   // fresh per visit, live-updated as the visitor edits it in the demo.
   const seed = useSyncExternalStore(subscribeArtSeed, getArtSeed);
   const art = useMemo(
-    () => generateArtwork(seed.title, seed.medium, seed.nonce, { transparent: true }),
+    () => generateArtwork(seed.title, seed.style, seed.nonce, { transparent: true }),
     [seed]
   );
 
@@ -41,8 +40,9 @@ export function Hero() {
               />
             </svg>
           </a>
-          <span className="hero-or">{hero.installHint}</span>
-          <InstallCommand />
+          <a className="hero-example-link" href={hero.exampleLink.href}>
+            {hero.exampleLink.label}
+          </a>
         </div>
         <figure className="hero-visual card">
           <Pipeline autoplay />

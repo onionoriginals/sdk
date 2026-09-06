@@ -1,7 +1,7 @@
 import { OrdinalsInscription, BitcoinTransaction } from '../types/index.js';
-import { decode as decodeCbor } from '../utils/cbor.js';
-import { hexToBytes } from '../utils/encoding.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { decode as decodeCbor } from '@originals/cel/cbor';
+import { hexToBytes } from '@originals/cel/encoding';
+import { StructuredError } from '@originals/cel';
 
 /** Max bytes accepted for a JSON indexer response (default 1 MiB). */
 const DEFAULT_MAX_JSON_BYTES = 1 * 1024 * 1024;

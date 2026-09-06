@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { OrdinalsClient } from '../../../src/bitcoin/OrdinalsClient';
-import { encode as cborEncode } from '../../../src/utils/cbor';
+import { encode as cborEncode } from '@originals/cel/cbor';
 
 const client = new OrdinalsClient('http://localhost:3000', 'regtest');
 

@@ -419,7 +419,7 @@ describe('#334 — relationship arrays reference the published signing VM', () =
       prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>;
     };
     const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-    const { multikey } = await import('../../../src/crypto/Multikey');
+    const { multikey } = await import('@originals/cel');
     const raw = new Ed25519Signer();
     const externalSigner = {
       getVerificationMethodId: () => `did:key:${keyPair.publicKey}`,

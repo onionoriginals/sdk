@@ -63,4 +63,36 @@ describe('authed durable publish', () => {
     const served = store.serve(new URL(state.webvhLogUrl!.replace('https://', 'http://')));
     expect(served).not.toBeNull();
   });
+
+  // The SDK persists a layer-agnostic copy of the CEL at `cel/<did:cel digest>.json`
+  // — the key DIDManager.resolveDID's did:cel branch reads back. The host-key
+  // guard used to reject that shape (403 → a swallowed cel:host-failed warning),
+  // so the copy never landed on the durable path.
+  test('the layer-agnostic CEL copy lands and is refreshed after the migrate append', async () => {
+    const engine = new DemoEngine({ authed: true, subOrgId: 'sub-1' });
+    const sdk = (engine as unknown as {
+      sdk: {
+        lifecycle: { on(t: string, h: (e: unknown) => void): void };
+        did: { resolveDID(did: string, o?: { skipCache?: boolean }): Promise<unknown> };
+      };
+    }).sdk;
+    const hostFailures: unknown[] = [];
+    sdk.lifecycle.on('cel:host-failed', (e) => hostFailures.push(e));
+
+    await engine.create('Copied Piece', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    await engine.publish();
+
+    const didCel = engine.asset!.id;
+    expect(didCel.startsWith('did:cel:')).toBe(true);
+    const res = store.read('sub-1', `cel/${didCel.slice('did:cel:'.length)}.json`);
+    expect(res.status).toBe(200);
+    // Refreshed AFTER the migrate append, not frozen at genesis.
+    expect((JSON.parse(await res.text()) as { events: unknown[] }).events.length).toBe(2);
+    expect(hostFailures).toEqual([]);
+
+    // The point of the copy: did:cel now resolves from storage (network read,
+    // not the in-memory cache) via DIDManager's did:cel branch.
+    const resolved = (await sdk.did.resolveDID(didCel, { skipCache: true })) as { id?: string } | null;
+    expect(resolved?.id).toBe(didCel);
+  });
 });

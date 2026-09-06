@@ -11,7 +11,7 @@
  * updates are signed `update` log events (#Phase 4) — folded from the log, not advisory.
  */
 import type { AssetResource, DIDDocument, VerifiableCredential } from '../types/index.js';
-import type { EventLog } from '../cel/types.js';
+import type { EventLog } from '@originals/cel';
 
 export const ASSET_ENVELOPE_FORMAT = 'originals/asset' as const;
 export const ASSET_ENVELOPE_VERSION = 1;

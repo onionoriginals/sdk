@@ -12,7 +12,29 @@
   margin: var(--sp-8) 0 0;
   display: grid;
   gap: var(--sp-5);
-  grid-template-columns: 1fr;
+  /* minmax(0, ...) rather than a bare `1fr`, whose floor is the content's
+     min-content width — the trap the wider grid audit fixed everywhere else.
+     These cells now carry an action and its explanation, so the floor matters. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The card, then whatever Bitcoin action the row offers, stacked. */
+.your-originals-grid li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.your-original-action {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.your-original-action-note {
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
 }
 
 @media (min-width: 640px) {
@@ -136,3 +158,70 @@
 }
 
 .your-original-card:hover .your-original-view { color: var(--text-primary); gap: 7px; }
+
+/* Inscription state pill (in the card body, unlike the absolutely-positioned
+   cover badge it borrows base styling from). */
+.your-original-inscription {
+  position: static;
+  align-self: flex-start;
+}
+
+/* "Finish inscription" recovery banner — stranded commit+reveal pairs. */
+.your-originals-finish {
+  margin-top: var(--sp-6);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.your-originals-finish-title {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.your-originals-finish ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.your-originals-finish li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+/* Loading state (R20). Deliberately one line high, matching the signed-out note
+   it may resolve into, so no reserved block collapses under the footer; it
+   mirrors the detail page's pulse affordance. */
+.your-originals-loading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: 1.5rem;
+  color: var(--text-secondary);
+}
+
+.your-originals-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--webvh);
+  animation: your-originals-pulse 1.2s var(--ease) infinite;
+  flex-shrink: 0;
+  /* Centre the dot on the text's first line, not on the flex box. */
+  margin-top: 0.5em;
+}
+
+@keyframes your-originals-pulse {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .your-originals-pulse { animation: none; }
+}

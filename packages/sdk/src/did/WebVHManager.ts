@@ -1,9 +1,9 @@
 import { KeyManager } from './KeyManager.js';
-import { multikey } from '../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**

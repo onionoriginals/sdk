@@ -178,40 +178,27 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     expect(est.contentBytes).toBe(Buffer.from(media, 'utf8').byteLength);
   });
 
-  test('rotateBtcoKeys is gated: decline aborts cleanly; a subsequent rotation with true inscribes', async () => {
+  test('rotateBtcoKeys refuses before the gate is ever consulted (removed capability)', async () => {
     const { sdk, ordinalsProvider } = makeSDK();
     const { asset, sat } = await btcoAsset(sdk);
     const eventsBefore = asset.celLog!.events.length;
     const inssBefore = inssOnSat(ordinalsProvider, sat)!.length;
 
-    let declined: any;
-    sdk.lifecycle.on('cel:inscribe-declined', (e: any) => { declined = e; });
-
+    let consulted = false;
     const k1 = await new KeyManager().generateKeyPair('Ed25519');
     await expect(
       sdk.lifecycle.rotateBtcoKeys(
         asset,
         { publicKeyMultibase: k1.publicKey, privateKey: k1.privateKey },
         5,
-        { inscribeConfirm: () => false }
+        { inscribeConfirm: () => { consulted = true; return true; } }
       )
-    ).rejects.toMatchObject({ code: 'PROVENANCE_APPEND_DECLINED' });
+    ).rejects.toMatchObject({ code: 'KEY_ROTATION_NOT_PERMITTED' });
 
-    // Byte-identical: no rotateKey event appended, no reinscription.
+    // Byte-identical: no rotateKey event appended, no reinscription, no prompt.
+    expect(consulted).toBe(false);
     expect(asset.celLog!.events.length).toBe(eventsBefore);
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(inssBefore);
-    expect(declined?.appendKind).toBe('rotate');
-
-    // A subsequent rotation proceeds (concurrency claim was released on abort).
-    const k2 = await new KeyManager().generateKeyPair('Ed25519');
-    const res = await sdk.lifecycle.rotateBtcoKeys(
-      asset,
-      { publicKeyMultibase: k2.publicKey, privateKey: k2.privateKey },
-      5,
-      { inscribeConfirm: () => true }
-    );
-    expect(res.inscriptionId).toBeDefined();
-    expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(inssBefore + 1);
   });
 
   test('off-btco append IGNORES the gate (no inscription, callback never consulted)', async () => {

@@ -52,6 +52,39 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     return txid;
   }
 
+  /**
+   * The stranded-funds fix: one POST carries BOTH signed txs, and the server
+   * persists them before broadcasting — a dying tab can no longer orphan a
+   * broadcast commit. inscribe-on-sat.ts prefers this over two
+   * broadcastTransaction calls whenever a provider implements it.
+   */
+  async submitInscription(params: {
+    signedCommitHex: string;
+    revealTxHex: string;
+    /** Every funding UTXO the commit spends, in input order ([0] is the identity input). */
+    fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+    /** Legacy singular mirror of fundingUtxos[0] — an older server reads this. */
+    fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    changeAddress: string;
+  }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }> {
+    const result = await this.post<{
+      commitTxId: string;
+      revealTxId: string;
+      status: 'commit_broadcast' | 'reveal_broadcast';
+    }>('/api/btc/inscribe', params);
+    // The SDK discards this return value, so the status would otherwise never
+    // reach the UI and every 200 would read as "inscribed" — including the
+    // commit-only outcome, where the reveal has NOT landed and the recovery
+    // sweep still owes the creator an inscription. Kept here so the caller can
+    // read what actually happened.
+    this.lastSubmit = result;
+    return result;
+  }
+
+  /** What the last submitInscription actually achieved. Null before any. */
+  lastSubmit: { commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' } | null =
+    null;
+
   // --- Not implemented (the sat-selected inscribe path never calls these). ---
   getInscriptionById(): Promise<never> {
     return Promise.reject(new Error('HttpOrdinalsProvider.getInscriptionById is not implemented in the browser demo.'));

@@ -6,7 +6,7 @@ import { MigrationAuditRecord, IAuditLogger } from '../types.js';
 import { OriginalsConfig } from '../../types/index.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
-import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '../../utils/encoding.js';
+import { encodeBase64UrlMultibase, base58, MULTIBASE_BASE58BTC_HEADER } from '@originals/cel/encoding';
 import { resolveMigrationStorage, MigrationStorage } from '../storage/MigrationStorage.js';
 
 /**
@@ -149,7 +149,6 @@ export class AuditLogger implements IAuditLogger {
    * signature) used for both signing and verification.
    */
   private canonicalBytes(record: MigrationAuditRecord): Uint8Array {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { signature: _signature, ...recordWithoutSig } = record as any;
     return Buffer.from(JSON.stringify(recordWithoutSig), 'utf8');
   }
@@ -315,7 +314,7 @@ export class AuditLogger implements IAuditLogger {
               }
             }
           }
-        } catch (error) {
+        } catch (_error) {
           // Skip invalid audit records
         }
       }

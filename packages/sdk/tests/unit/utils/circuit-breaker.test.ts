@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { CircuitBreaker, withCircuitBreaker } from '../../../src/utils/circuit-breaker';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { StructuredError } from '@originals/cel';
 
 describe('CircuitBreaker', () => {
   let breaker: CircuitBreaker;

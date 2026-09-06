@@ -7,7 +7,7 @@ import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
 import { OriginalsAsset } from './OriginalsAsset.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { EventEmitter } from '../events/EventEmitter.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import { validateAndNormalizeDomain } from './domainUtils.js';
 import {
   BatchOperationExecutor,

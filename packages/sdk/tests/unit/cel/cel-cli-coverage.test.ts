@@ -26,17 +26,17 @@ import { resolveCommand } from '../../../src/cel/cli/resolve';
 import { main } from '../../../src/cel/cli/index';
 
 // CEL algorithms & serialization helpers
-import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
-import { updateEventLog } from '../../../src/cel/algorithms/updateEventLog';
-import { deactivateEventLog } from '../../../src/cel/algorithms/deactivateEventLog';
-import { serializeEventLogJson } from '../../../src/cel/serialization/json';
+import { createEventLog } from '@originals/cel';
+import { updateEventLog } from '@originals/cel';
+import { deactivateEventLog } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
 
 // Types
-import type { DataIntegrityProof, EventLog } from '../../../src/cel/types';
+import type { DataIntegrityProof, EventLog } from '@originals/cel';
 
 // Multikey + canonicalize for real Ed25519 proofs
-import { multikey } from '../../../src/crypto/Multikey';
-import { canonicalizeEvent } from '../../../src/cel/canonicalize';
+import { multikey } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -90,10 +90,10 @@ function makeMockSigner(_vm?: string): (data: unknown) => Promise<DataIntegrityP
 function makePeerAssetData(name: string) {
   return {
     name,
-    did: 'did:peer:4z123456789abcdef',
+    did: 'did:webvh:legacy.example:4z123456789abcdef',
     layer: 'peer' as const,
     resources: [],
-    creator: 'did:peer:4z123456789abcdef',
+    creator: 'did:webvh:legacy.example:4z123456789abcdef',
     createdAt: new Date().toISOString(),
   };
 }
@@ -214,8 +214,8 @@ describe('CEL-CLI-002/security: verify with invalid proof signature', () => {
 
 describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
   it('shows both layers with a first-class migrate event over a did:cel genesis', async () => {
-    const { appendEvent } = await import('../../../src/cel/algorithms/appendEvent');
-    const { deriveDidCel } = await import('../../../src/cel/celDid');
+    const { appendEvent } = await import('@originals/cel');
+    const { deriveDidCel } = await import('@originals/cel');
     const signer = makeMockSigner();
     const opts = { signer, verificationMethod: 'did:key:z6MkMock#key-1', proofPurpose: 'assertionMethod' };
 
@@ -248,7 +248,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
     // Simulate a webvh migration update event (legacy shape — kept as the
     // legacy-fixture case for the update-sniff fallback).
     log = await updateEventLog(log, {
-      sourceDid: 'did:peer:4z123456789abcdef',
+      sourceDid: 'did:webvh:legacy.example:4z123456789abcdef',
       targetDid: 'did:webvh:example.com:asset1',
       layer: 'webvh',
       domain: 'example.com',
@@ -265,7 +265,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
     // State should reflect the migrated layer and DID.
     expect(result.state?.layer).toBe('webvh');
     expect(result.state?.did).toBe('did:webvh:example.com:asset1');
-    expect(result.state?.metadata?.sourceDid).toBe('did:peer:4z123456789abcdef');
+    expect(result.state?.metadata?.sourceDid).toBe('did:webvh:legacy.example:4z123456789abcdef');
     // The log has 2 events — the create (peer) and the migration update (webvh).
     // extractLayerHistory in inspect.ts picks up both when layerHistory.length > 1.
     // Success without error is sufficient to assert layer history was computed.
@@ -280,7 +280,7 @@ describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
 
     let log = await createEventLog({ ...makePeerAssetData('TS Asset'), createdAt }, opts);
     log = await updateEventLog(log, {
-      sourceDid: 'did:peer:4z123456789abcdef',
+      sourceDid: 'did:webvh:legacy.example:4z123456789abcdef',
       targetDid: 'did:webvh:example.com:ts-asset',
       layer: 'webvh',
       domain: 'example.com',

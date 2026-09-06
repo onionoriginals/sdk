@@ -30,7 +30,9 @@ export class DataIntegrityProofManager {
     // the actual proof's declared type.)
     const declaredType = (options as { type?: unknown }).type;
     if (declaredType !== undefined && declaredType !== 'DataIntegrityProof') {
-      throw new Error(`Unsupported proof type: ${String(declaredType)}`);
+      throw new Error(
+        `Unsupported proof type: ${typeof declaredType === 'string' ? declaredType : JSON.stringify(declaredType)}`
+      );
     }
     const opts: ProofOptions = { ...options, type: 'DataIntegrityProof' };
     // Route bbs-2023 through the BBS backend so createProof is symmetric with

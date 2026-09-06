@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { OrdNodeProvider } from '../../../src/bitcoin/providers/OrdNodeProvider';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { StructuredError } from '@originals/cel';
 
 /**
  * Pre-release blocker (#318 checkbox 3): OrdNodeProvider used to silently

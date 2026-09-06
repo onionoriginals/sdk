@@ -1,6 +1,6 @@
 {
   "name": "@originals/sdk",
-  "version": "2.1.0",
+  "version": "3.0.0-next.1",
   "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
   "type": "module",
   "main": "./dist/index.js",
@@ -40,14 +40,14 @@
   "scripts": {
     "build": "tsc && tsc-alias",
     "typecheck": "tsc --noEmit -p .",
-    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress",
+    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
     "test:coverage": "bun test tests/integration tests/unit --coverage",
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
     "test:ci": "bash -o pipefail -c 'bun test tests/integration tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
     "test:security": "bun test tests/security",
     "test:stress": "bun test tests/stress",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "lint": "eslint \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "keywords": [
     "originals",
@@ -70,9 +70,9 @@
     "access": "public"
   },
   "dependencies": {
-    "@aviarytech/did-peer": "^1.1.2",
     "@digitalbazaar/bbs-signatures": "^3.1.0",
     "@noble/curves": "^2.2.0",
+    "@originals/cel": "^0.2.0-next.1",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.1.0",
@@ -80,7 +80,6 @@
     "@scure/btc-signer": "^2.2.0",
     "b58": "^4.0.3",
     "bitcoinjs-lib": "^6.1.0",
-    "cborg": "^5.1.6",
     "didwebvh-ts": "^2.8.0",
     "fflate": "^0.8.3",
     "jsonld": "^8.3.3",

@@ -9,10 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { publishCommand } from '../../../src/cel/cli/publish';
-import { createEventLog } from '../../../src/cel/algorithms/createEventLog';
-import { serializeEventLogJson } from '../../../src/cel/serialization/json';
-import { parseEventLogJson } from '../../../src/cel/serialization/json';
-import type { DataIntegrityProof } from '../../../src/cel/types';
+import { createEventLog } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { parseEventLogJson } from '@originals/cel';
+import type { DataIntegrityProof } from '@originals/cel';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 
 const realSigner = createRealCelSigner();

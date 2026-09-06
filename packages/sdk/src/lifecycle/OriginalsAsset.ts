@@ -6,7 +6,7 @@ import {
   InscribeConfirm
 } from '../types/index.js';
 import { validateDIDDocument, validateCredential, hashResource } from '../utils/validation.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 import type { OriginalsSigner } from '../crypto/OriginalsSigner.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
 import { DIDManager } from '../did/DIDManager.js';
@@ -14,10 +14,10 @@ import { ProvenanceQuery, Migration } from './ProvenanceQuery.js';
 import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
-import type { EventLog, OrdinalsLookup } from '../cel/types.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
-import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
-import { serializeEventLogJson, parseEventLogJson } from '../cel/serialization/json.js';
+import type { EventLog, OrdinalsLookup } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
+import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
 import type { AppendFailurePolicy } from '../types/common.js';
@@ -53,6 +53,14 @@ export interface ProvenanceChain {
     timestamp: string;
     changes?: string;
   }>;
+  /**
+   * Holder entries (post-anchor updates signed outside the creator lineage):
+   * chain of custody as the log records it. Derived from the CEL at
+   * load/restore (see replayProvenance); it lists holders who WROTE — a silent
+   * holder leaves no entry, and the sat's UTXO history on Bitcoin remains the
+   * complete custody record.
+   */
+  custody?: Array<{ author: string; statement?: string; occurredAt?: string; timestamp: string }>;
 }
 
 export class OriginalsAsset {
@@ -640,6 +648,40 @@ export class OriginalsAsset {
    * @throws StructuredError('BINARY_CONTENT_UNSUPPORTED') for Buffer content (#276)
    * @throws Error if content is unchanged or the resource is not found
    */
+  /**
+   * Append a free-form provenance statement to the asset's CEL — the write a
+   * SAT HOLDER makes (chain of custody: "I held it, here is what I added"),
+   * and equally available to the creator.
+   *
+   * The entry is an `update` event carrying ONLY the holder-safe shape
+   * (`statement`/`occurredAt`/`links`/`ext`; `data.author` is committed
+   * automatically post-anchor). A signer outside the creator lineage is
+   * accepted — on a did:btco asset the append is authorized by its
+   * reinscription on the anchoring sat (sat-gated appends), not by key
+   * lineage — but such a signer could not smuggle authenticity fields here
+   * even by trying: the shape is the allowlist. Statements never touch
+   * name/resources; they fold into `custody`.
+   *
+   * @returns the new head digest, or null when the append degraded (skip policy).
+   */
+  async appendStatement(
+    data: { statement?: string; occurredAt?: string; links?: string[]; ext?: Record<string, unknown> },
+    opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
+  ): Promise<string | null> {
+    if (!this.#celAppender) {
+      throw new StructuredError(
+        'CEL_APPENDER_UNBOUND',
+        'This asset has no bound CEL appender (constructed outside the lifecycle); statements cannot be appended.'
+      );
+    }
+    const entry: Record<string, unknown> = {};
+    if (data.statement !== undefined) entry.statement = data.statement;
+    if (data.occurredAt !== undefined) entry.occurredAt = data.occurredAt;
+    if (data.links !== undefined) entry.links = data.links;
+    if (data.ext !== undefined) entry.ext = data.ext;
+    return this.#celAppender('update', entry, opts);
+  }
+
   async addResourceVersion(
     resourceId: string,
     newContent: string,

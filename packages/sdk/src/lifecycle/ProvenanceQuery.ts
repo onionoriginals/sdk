@@ -2,6 +2,7 @@ import { ProvenanceChain } from './OriginalsAsset.js';
 import { LayerType } from '../types/index.js';
 
 export type Migration = ProvenanceChain['migrations'][number];
+export type CustodyEntry = NonNullable<ProvenanceChain['custody']>[number];
 
 /**
  * Base query class for provenance inspection
@@ -20,6 +21,15 @@ export class ProvenanceQuery {
    */
   migrations(): MigrationQuery {
     return new MigrationQuery(this.provenance, this.afterDate, this.beforeDate);
+  }
+
+  /**
+   * Query the chain of custody (holder entries). Lists holders who WROTE —
+   * a silent holder leaves no entry; the sat's UTXO history on Bitcoin is the
+   * complete custody record.
+   */
+  custody(): CustodyQuery {
+    return new CustodyQuery(this.provenance, this.afterDate, this.beforeDate);
   }
 
   /**
@@ -181,5 +191,79 @@ export class MigrationQuery extends ProvenanceQuery {
    */
   migrations(): MigrationQuery {
     return this;
+  }
+}
+
+/**
+ * Query class for the chain of custody (holder entries), mirroring
+ * MigrationQuery's after/before/count/first/last/all surface.
+ */
+export class CustodyQuery {
+  private provenance: ProvenanceChain;
+  private afterDate?: Date;
+  private beforeDate?: Date;
+  private authorFilter?: string;
+
+  constructor(provenance: ProvenanceChain, afterDate?: Date, beforeDate?: Date) {
+    this.provenance = provenance;
+    this.afterDate = afterDate;
+    this.beforeDate = beforeDate;
+  }
+
+  /** Filter by date range - after a specific date */
+  after(date: Date | string): this {
+    this.afterDate = typeof date === 'string' ? new Date(date) : date;
+    return this;
+  }
+
+  /** Filter by date range - before a specific date */
+  before(date: Date | string): this {
+    this.beforeDate = typeof date === 'string' ? new Date(date) : date;
+    return this;
+  }
+
+  /** Filter by date range - between two dates */
+  between(start: Date | string, end: Date | string): this {
+    this.afterDate = typeof start === 'string' ? new Date(start) : start;
+    this.beforeDate = typeof end === 'string' ? new Date(end) : end;
+    return this;
+  }
+
+  /** Filter by the holder's did:key */
+  byAuthor(author: string): this {
+    this.authorFilter = author;
+    return this;
+  }
+
+  /** Get count of results */
+  count(): number {
+    return this.all().length;
+  }
+
+  /** Get first result */
+  first(): CustodyEntry | null {
+    const results = this.all();
+    return results.length > 0 ? results[0] : null;
+  }
+
+  /** Get last result */
+  last(): CustodyEntry | null {
+    const results = this.all();
+    return results.length > 0 ? results[results.length - 1] : null;
+  }
+
+  /** Get all filtered custody entries (log order preserved for equal timestamps) */
+  all(): CustodyEntry[] {
+    let results = [...(this.provenance.custody ?? [])];
+    if (this.afterDate) {
+      results = results.filter(item => new Date(item.timestamp) > this.afterDate!);
+    }
+    if (this.beforeDate) {
+      results = results.filter(item => new Date(item.timestamp) < this.beforeDate!);
+    }
+    if (this.authorFilter) {
+      results = results.filter(item => item.author === this.authorFilter);
+    }
+    return results;
   }
 }

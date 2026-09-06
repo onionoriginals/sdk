@@ -7,6 +7,8 @@ on:
     paths:
       - 'packages/sdk/src/**'
       - 'packages/sdk/typedoc.json'
+      # The docs build now compiles this too — see the build step below.
+      - 'packages/cel/src/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -34,6 +36,14 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+
+      # typedoc typechecks packages/sdk/src, which imports @originals/cel.
+      # That workspace package resolves through its package.json `exports`,
+      # which points at ./dist — so with nothing built, every one of those
+      # imports is TS2307 "cannot find module" and typedoc exits 3. Build the
+      # workspace packages first, exactly as the ESM job in ci.yml does.
+      - name: Build workspace packages
+        run: bun run build
 
       - name: Generate API docs
         run: cd packages/sdk && bunx typedoc

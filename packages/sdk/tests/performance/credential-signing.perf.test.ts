@@ -14,7 +14,7 @@ import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import { VerifiableCredential, CredentialSubject } from '../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 
 function makeSubject(id: string): CredentialSubject {

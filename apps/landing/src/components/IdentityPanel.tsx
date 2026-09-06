@@ -1,28 +1,70 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/useAuth';
+import { identityPanel } from '../content';
 import './identity-panel.css';
 
 /**
  * Signed-in conversion moment: create your did:webvh, then reveal it.
  * Renders nothing when signed out so the hero stays untouched.
+ *
+ * There is no warning gate and no backup here any more. Both existed because
+ * the DID key lived only in this browser; it is now held at Turnkey and the log
+ * is published (auth/webvh.ts), so creating is reversible-by-signing-in and
+ * there is nothing the user could lose by not saving a file. What replaces them
+ * is a plain statement of who holds the key — see `identityPanel.custodyNote`.
  */
 export function IdentityPanel() {
-  const { isAuthenticated, createIdentity } = useAuth();
+  const { isAuthenticated, user, bitcoin, createIdentity, loadIdentity } = useAuth();
   const [creating, setCreating] = useState(false);
   const [did, setDid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  const subOrgId = user?.subOrgId ?? null;
+
+  // Show a returning user's DID. `loadIdentity`, NOT `createIdentity`: rendering
+  // must never mint an identity nobody asked for. Reading needs no session, so
+  // this runs as soon as there is a user.
+  useEffect(() => {
+    // Clear FIRST, on every account change. This component survives a sign-out
+    // and sign-in, so leaving the previous DID up while the next load resolves
+    // (or fails, or returns none) would show and copy one account's identity
+    // under another's name.
+    setDid(null);
+    setError(null);
+    setCopied(false);
+    if (!subOrgId) return;
+    let cancelled = false;
+    loadIdentity()
+      .then((existing) => {
+        if (!cancelled) setDid(existing);
+      })
+      .catch(() => {
+        /* Idle state is the correct fallback: the button retries out loud. */
+      });
+    // Named, not an inline arrow: the copy-migration guard anchors its JSX scan
+    // on this file's first returned parenthesis, which must be the markup.
+    const cancel = () => {
+      cancelled = true;
+    };
+    return cancel;
+  }, [subOrgId, loadIdentity]);
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
   if (!isAuthenticated) return null;
 
   const create = async () => {
+    // Turnkey custody means creating needs a live session; say which of the two
+    // it is rather than showing one generic failure for both.
+    if (!bitcoin?.signingClient) return setError(identityPanel.sessionRequired);
     setCreating(true);
     setError(null);
     try {
       setDid(await createIdentity());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'DID creation failed — try again.');
+    } catch {
+      setError(identityPanel.createFailed);
     } finally {
       setCreating(false);
     }
@@ -32,12 +74,12 @@ export function IdentityPanel() {
     if (!did) return;
     try {
       await navigator.clipboard.writeText(did);
+      setCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1600);
     } catch {
-      // clipboard can be unavailable — the DID text stays selectable
+      /* A clipboard the browser refuses is not an error worth a banner. */
     }
-    setCopied(true);
-    clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(false), 1800);
   };
 
   return (
@@ -57,10 +99,10 @@ export function IdentityPanel() {
                 />
               </svg>
             </span>
-            <span className="idp-done-title">Your identity is live</span>
+            <span className="idp-done-title">{identityPanel.doneTitle}</span>
             <span className="layer-pill" data-layer="did:webvh">
               <span className="dot" />
-              did:webvh
+              {identityPanel.layerLabel}
             </span>
           </div>
           <div className="idp-did">
@@ -70,7 +112,7 @@ export function IdentityPanel() {
               className="idp-copy-btn"
               data-copied={copied || undefined}
               onClick={copy}
-              aria-label={copied ? 'DID copied' : 'Copy DID'}
+              aria-label={copied ? identityPanel.copiedAria : identityPanel.copyAria}
             >
               {copied ? (
                 <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -94,10 +136,18 @@ export function IdentityPanel() {
                   />
                 </svg>
               )}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
+              <span>{copied ? identityPanel.copied : identityPanel.copy}</span>
             </button>
           </div>
-          <p className="idp-done-note">Anchored to your keys. Resolvable anywhere DIDs are.</p>
+          <p className="idp-done-note">{identityPanel.doneNote}</p>
+          {/* Custody, stated where the user is looking at the thing it applies
+              to — not only in the privacy policy. */}
+          <p className="idp-custody-note">{identityPanel.custodyNote}</p>
+          {error && (
+            <p className="idp-error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -105,12 +155,10 @@ export function IdentityPanel() {
             <div className="idp-lede">
               <span className="layer-pill" data-layer="did:webvh">
                 <span className="dot" />
-                did:webvh
+                {identityPanel.layerLabel}
               </span>
-              <h2 className="idp-title">Your identity, on the open web</h2>
-              <p className="idp-sub">
-                Mint a resolvable DID signed by your own keys — yours to keep, verify, and build on.
-              </p>
+              <h2 className="idp-title">{identityPanel.idleTitle}</h2>
+              <p className="idp-sub">{identityPanel.idleBody}</p>
             </div>
             <button type="button" className="idp-cta" disabled={creating} aria-busy={creating} onClick={create}>
               {creating ? (
@@ -133,9 +181,10 @@ export function IdentityPanel() {
                   <path d="M1.75 8h12.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
                 </svg>
               )}
-              {creating ? 'Creating…' : 'Create your did:webvh'}
+              {creating ? identityPanel.creating : identityPanel.createAction}
             </button>
           </div>
+          <p className="idp-custody-note">{identityPanel.custodyNote}</p>
           {error && (
             <p className="idp-error" role="alert">
               {error}

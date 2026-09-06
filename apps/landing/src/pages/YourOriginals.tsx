@@ -10,7 +10,14 @@ import { useEffect, useState } from 'react';
 import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, originalPath } from '../router';
-import { sameOriginUrl } from './original-detail-data';
+import { sameOriginUrl, type CelLog } from './original-detail-data';
+import {
+  inscribeAvailability,
+  rowAfterInscribe,
+  unclaimedInscriptions,
+  type InscribeAvailability,
+} from './inscribe-availability';
+import { fetchHostedCel, resolveAuthorshipDid, resumeInscribe } from './resume-inscribe';
 import './your-originals.css';
 
 export interface OriginalRow {
@@ -19,16 +26,179 @@ export interface OriginalRow {
   resourceHash: string;
   createdAt: string;
   resourceUrl?: string;
+  /** The resource's media type — only an image may be used as the cover. */
+  resourceContentType?: string;
+  /** Present once the Original migrated to did:btco (real inscription). */
+  btcoDid?: string;
+  inscriptionId?: string;
+  commitTxId?: string;
+  revealTxId?: string;
+  satoshi?: string;
+  inscriptionStatus?: 'pending' | 'confirmed';
+  /**
+   * Whether the REVEAL transaction is actually on the network.
+   *
+   * The commit and reveal are both signed and persisted before either is
+   * broadcast, so `revealTxId` exists long before the transaction does — and
+   * linking it to an explorer while it is still unbroadcast is a 404 handed to
+   * someone who just spent money. `inscriptionStatus` cannot answer this: it is
+   * written 'pending' at inscribe time whichever of the two went out.
+   */
+  revealBroadcast?: boolean;
+}
+
+/**
+ * A persisted "we cannot trust the read behind your deposit address" state,
+ * raised server-side and carried on GET /api/btc/inscribe (R28/R31).
+ *
+ * This exists because the outage is ASYNCHRONOUS: it can begin after a creator
+ * has sent BTC and closed the tab, at which point the deposit screen's copy
+ * and its 15s poll reach nobody. The state is durable on the server, so it is
+ * on screen the next time they open this page.
+ */
+export interface DepositAlert {
+  kind: 'indexer_unavailable' | 'indexer_rate_limited';
+  network: string;
+  address: string;
+  /** Confirmed sats at the address on the last read we could trust (0 if none). */
+  heldSats: number;
+  firstSeenAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The alert as one line of copy, or null when there is nothing to say. The
+ * held balance is appended only when there IS one — telling someone who never
+ * deposited that they hold 0 sats is noise, and the outage itself is the whole
+ * message for them.
+ */
+export function depositAlertMessage(alert: DepositAlert | null | undefined): string | null {
+  if (!alert) return null;
+  const base =
+    alert.kind === 'indexer_rate_limited'
+      ? yourOriginals.depositAlert.busy
+      : yourOriginals.depositAlert.unavailable;
+  if (!alert.heldSats) return base;
+  const { heldPrefix, heldSuffix } = yourOriginals.depositAlert;
+  return `${base} ${heldPrefix} ${alert.heldSats.toLocaleString()} sats ${heldSuffix} ${alert.address}.`;
+}
+
+/** One in-flight inscription record from GET /api/btc/inscribe. */
+export interface PendingInscription {
+  commitTxId: string;
+  revealTxId: string;
+  inscriptionId: string;
+  fundingOutpoint: string;
+  status: 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
+  /** A rebuilt pair took over this record's funding outpoint (kept for recovery, not actionable here). */
+  superseded?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * How long a broadcast-but-unconfirmed reveal may sit before we offer a manual
+ * retry. Well past the server's own 30-minute auto re-push, so the button only
+ * appears for something genuinely wedged — not for every reveal waiting on the
+ * next block.
+ */
+const STALE_REVEAL_MS = 6 * 60 * 60_000;
+
+/**
+ * Records that still need a push to land — the "finish inscription" set:
+ * a commit or reveal that never broadcast, plus a reveal that DID broadcast
+ * but has been unconfirmed for hours (evicted from the mempool, most likely —
+ * the server re-pushes those on its own, this is the manual escape hatch).
+ * Superseded records are excluded: a live rebuilt pair owns their outpoint,
+ * so offering "finish" on them would race it (the server keeps them purely
+ * as recovery artifacts in case their commit landed despite the failure).
+ */
+export function unfinishedInscriptions(
+  records: PendingInscription[],
+  nowMs: number = Date.now()
+): PendingInscription[] {
+  return records.filter((r) => {
+    if (r.superseded) return false;
+    if (r.status === 'signed' || r.status === 'commit_broadcast') return true;
+    return (
+      r.status === 'reveal_broadcast' &&
+      nowMs - Date.parse(r.updatedAt) >= STALE_REVEAL_MS
+    );
+  });
+}
+
+/**
+ * Overlay live confirmation onto stored rows: the durable Original record is
+ * written once as 'pending' at inscribe time, while the inscriptions store
+ * tracks confirmation sticky — join them by commitTxId so /me and the proof
+ * page show 'confirmed' without any re-posting.
+ */
+export function withLiveInscriptionStatus(
+  rows: OriginalRow[],
+  records: PendingInscription[]
+): OriginalRow[] {
+  return rows.map((r) => {
+    // A confirmed Original's record is retired, so there may be nothing to join
+    // against — but a confirmed reveal is certainly on the network.
+    if (r.inscriptionStatus === 'confirmed') return { ...r, revealBroadcast: true };
+    if (!r.commitTxId) return r;
+    const rec = records.find((x) => x.commitTxId === r.commitTxId);
+    if (!rec) return r;
+    // Carry the broadcast state through, not just confirmation: the detail page
+    // needs to know which of the two transactions actually exists before it
+    // offers an explorer link to either.
+    const revealBroadcast = rec.status === 'reveal_broadcast' || rec.status === 'confirmed';
+    return {
+      ...r,
+      revealBroadcast,
+      ...(rec.status === 'confirmed' ? { inscriptionStatus: 'confirmed' as const } : {})
+    };
+  });
+}
+
+/**
+ * The user's inscription records plus any standing deposit alert ([] / null
+ * when signed out or unavailable). One request: the alert rides the fetch this
+ * page already makes on every visit, which is what makes R31's
+ * "reachable after they close the tab" hold without a second poll.
+ */
+export async function fetchInscriptions(): Promise<{
+  records: PendingInscription[];
+  depositAlert: DepositAlert | null;
+}> {
+  try {
+    const res = await fetch('/api/btc/inscribe', { credentials: 'same-origin' });
+    if (!res.ok) return { records: [], depositAlert: null };
+    const body = (await res.json()) as {
+      inscriptions?: PendingInscription[];
+      depositAlert?: DepositAlert;
+    };
+    return { records: body.inscriptions ?? [], depositAlert: body.depositAlert ?? null };
+  } catch {
+    return { records: [], depositAlert: null };
+  }
 }
 
 // Pure view selector — testable without a DOM.
-export function originalsView(input: { authenticated: boolean; originals: OriginalRow[] }): {
-  mode: 'signed-out' | 'empty' | 'list';
+export function originalsView(input: {
+  /** Auth itself is still resolving (session restore) — nothing is known yet. */
+  authLoading: boolean;
+  authenticated: boolean;
+  /** The Originals fetch has settled (even if it returned nothing). */
+  loaded: boolean;
+  originals: OriginalRow[];
+}): {
+  mode: 'loading' | 'signed-out' | 'empty' | 'list';
   rows: OriginalRow[];
 } {
+  // R20: two distinct wrong states to keep out — a signed-out flash while auth
+  // resolves, then a "No Originals yet" flash while the fetch is still in
+  // flight. Neither `authenticated` nor an empty array means what it says yet.
+  if (input.authLoading) return { mode: 'loading', rows: [] };
   if (!input.authenticated) return { mode: 'signed-out', rows: [] };
-  if (input.originals.length === 0) return { mode: 'empty', rows: [] };
-  return { mode: 'list', rows: input.originals };
+  if (input.originals.length > 0) return { mode: 'list', rows: input.originals };
+  if (!input.loaded) return { mode: 'loading', rows: [] };
+  return { mode: 'empty', rows: [] };
 }
 
 /** The signed-in user's Originals, newest first ([] when signed out / on error). */
@@ -64,23 +234,133 @@ async function resolveLive(did: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether a stored resource may be used as a cover image.
+ *
+ * The store derives `resourceUrl` for ANY primary resource, text included, so
+ * presence of a URL is not evidence there is a picture behind it. Unknown types
+ * fall back to the empty cover: a plain tile beats a broken image icon.
+ */
+const isImageType = (contentType: string | undefined) => !!contentType?.startsWith('image/');
+
 export function YourOriginals() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
+  const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
+  const [finishing, setFinishing] = useState<string | null>(null);
+  const [finishNote, setFinishNote] = useState<string | null>(null);
+  const [depositAlert, setDepositAlert] = useState<DepositAlert | null>(null);
+  /**
+   * Each row's hosted CEL, keyed by DID. `undefined` (absent) means "not read
+   * yet" and renders as 'unknown' rather than as inscribable — a row must
+   * never offer to inscribe on a guess about who controls it.
+   */
+  const [cels, setCels] = useState<Record<string, CelLog | null>>({});
+  const [authorshipDid, setAuthorshipDid] = useState<string | null>(null);
+  const [inscribing, setInscribing] = useState<string | null>(null);
+  /** Which half of the inscribe the button is in — rebuild, then broadcast. */
+  const [stage, setStage] = useState<'hydrating' | 'inscribing'>('hydrating');
+  const [inscribeNote, setInscribeNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
     let live = true;
-    fetchOriginals().then((rows) => {
+    setLoaded(false);
+    // Fetch rows + inscription records together: the records carry the live
+    // (sticky) confirmation state that the durable rows only hold as
+    // 'pending', and any record whose reveal never broadcast gets a
+    // "finish inscription" offer — the signed txs are on the server, nothing
+    // needs re-signing (step-1 recovery surface).
+    Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, inscriptions]) => {
       if (!live) return;
-      setOriginals(rows);
-      rows.forEach((r) => resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok }))));
-    });
+      const recs = inscriptions.records;
+      const merged = withLiveInscriptionStatus(rows, recs);
+      setOriginals(merged);
+      setUnfinished(unfinishedInscriptions(recs));
+      setDepositAlert(inscriptions.depositAlert);
+      merged.forEach((r) => {
+        resolveLive(r.did).then((ok) => live && setResolved((m) => ({ ...m, [r.did]: ok })));
+        // One small same-origin read per row, alongside the resolution probe
+        // this page already makes per row. It answers who controls the
+        // Original, which is what decides whether it can still be inscribed.
+        fetchHostedCel(r.did, window.location.host).then(
+          (cel) => live && setCels((m) => ({ ...m, [r.did]: cel }))
+        );
+      });
+    })
+      // Settle in `finally` so an unexpected throw ends on "no Originals yet"
+      // rather than stranding the page on the loading state forever.
+      .finally(() => { if (live) setLoaded(true); });
     return () => { live = false; };
   }, [isAuthenticated]);
 
-  const view = originalsView({ authenticated: isAuthenticated, originals });
+  useEffect(() => {
+    let live = true;
+    void resolveAuthorshipDid(bitcoin?.signingClient, user?.subOrgId).then(
+      (did) => live && setAuthorshipDid(did)
+    );
+    return () => { live = false; };
+  }, [bitcoin?.signingClient, user?.subOrgId]);
+
+  // Pushable records no row accounts for. Computed once per render over ALL
+  // rows: a record is only unattributable if NOTHING claims it.
+  const unclaimed = unclaimedInscriptions(originals, unfinished);
+
+  const startInscribe = async (row: OriginalRow) => {
+    if (!bitcoin) return;
+    setInscribing(row.did);
+    setStage('hydrating');
+    setInscribeNote(null);
+    const outcome = await resumeInscribe({
+      did: row.did,
+      host: window.location.host,
+      subOrgId: user?.subOrgId,
+      fundingAddress: bitcoin.fundingAddress,
+      signingClient: bitcoin.signingClient,
+      cel: cels[row.did],
+      onProgress: (stage) => setStage(stage),
+    });
+    setInscribeNote(
+      outcome.ok
+        ? outcome.complete
+          ? yourOriginals.inscribe.done
+          : yourOriginals.inscribe.commitOnly
+        : outcome.message
+    );
+    if (outcome.ok) {
+      // Reflect it immediately; the durable record catches up on the next load.
+      setOriginals((rows) =>
+        rows.map((r) => (r.did === row.did ? rowAfterInscribe(r, outcome.inscription.commitTxId) : r))
+      );
+    }
+    setInscribing(null);
+  };
+
+  const finishInscription = async (commitTxId: string) => {
+    setFinishing(commitTxId);
+    setFinishNote(null);
+    try {
+      const res = await fetch('/api/btc/inscribe/rebroadcast', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commitTxId }),
+      });
+      const ok = res.ok && ['reveal_broadcast', 'confirmed'].includes(
+        ((await res.json().catch(() => ({}))) as { status?: string }).status ?? ''
+      );
+      setFinishNote(ok ? yourOriginals.finish.done : yourOriginals.finish.failed);
+      if (ok) setUnfinished((u) => u.filter((r) => r.commitTxId !== commitTxId));
+    } catch {
+      setFinishNote(yourOriginals.finish.failed);
+    } finally {
+      setFinishing(null);
+    }
+  };
+
+  const view = originalsView({ authLoading, authenticated: isAuthenticated, loaded, originals });
 
   return (
     <main className="section your-originals">
@@ -89,7 +369,45 @@ export function YourOriginals() {
         <h1>{yourOriginals.heading}</h1>
         <p className="your-originals-sub">{yourOriginals.subhead}</p>
 
+        {view.mode === 'loading' && (
+          <p className="your-originals-note your-originals-loading" role="status">
+            <span className="your-originals-pulse" aria-hidden="true" />
+            {yourOriginals.loading}
+          </p>
+        )}
+
         {view.mode === 'signed-out' && <p className="your-originals-note">{yourOriginals.signedOut}</p>}
+
+        {/* R31: raised while nobody was looking, shown the moment they return. */}
+        {isAuthenticated && depositAlert && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">{yourOriginals.depositAlert.heading}</p>
+            <p>{depositAlertMessage(depositAlert)}</p>
+          </div>
+        )}
+
+        {isAuthenticated && unfinished.length > 0 && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">{yourOriginals.finish.heading}</p>
+            <p>{yourOriginals.finish.body}</p>
+            <ul>
+              {unfinished.map((rec) => (
+                <li key={rec.commitTxId}>
+                  <code title={rec.inscriptionId}>{rec.inscriptionId.slice(0, 16)}…</code>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={finishing === rec.commitTxId}
+                    onClick={() => void finishInscription(rec.commitTxId)}
+                  >
+                    {finishing === rec.commitTxId ? yourOriginals.finish.busy : yourOriginals.finish.cta}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {finishNote && <p className="your-originals-note">{finishNote}</p>}
+          </div>
+        )}
 
         {view.mode === 'empty' && (
           <div className="your-originals-empty">
@@ -106,6 +424,17 @@ export function YourOriginals() {
             {view.rows.map((row) => {
               const href = originalPath(row.did);
               const ok = resolved[row.did];
+              // Finish and Inscribe are decided together, so the same row can
+              // never render both. `cels` being absent for this DID means the
+              // log has not been read yet, which reads as 'unknown'.
+              const action: InscribeAvailability = inscribeAvailability({
+                row,
+                unfinished,
+                unclaimed,
+                authorshipDid,
+                signedIn: isAuthenticated && !!bitcoin,
+                cel: row.did in cels ? cels[row.did] : undefined,
+              });
               return (
                 <li key={row.did}>
                   <a
@@ -118,7 +447,7 @@ export function YourOriginals() {
                     aria-label={`“${row.title}” — ${yourOriginals.viewLabel}`}
                   >
                     <span className="your-original-cover">
-                      {row.resourceUrl ? (
+                      {row.resourceUrl && isImageType(row.resourceContentType) ? (
                         <img src={sameOriginUrl(row.resourceUrl, window.location.host)} alt="" />
                       ) : (
                         <span className="your-original-cover-empty" aria-hidden="true" />
@@ -128,10 +457,20 @@ export function YourOriginals() {
                       </span>
                     </span>
                     <span className="your-original-card-body">
-                      <span className="layer-pill" data-layer="did:webvh">
+                      <span className="layer-pill" data-layer={row.btcoDid ? 'did:btco' : 'did:webvh'}>
                         <span className="dot" />
-                        did:webvh
+                        {row.btcoDid ? 'did:btco' : 'did:webvh'}
                       </span>
+                      {row.btcoDid && (
+                        <span
+                          className="your-original-badge your-original-inscription"
+                          data-ok={row.inscriptionStatus === 'confirmed' || undefined}
+                        >
+                          {row.inscriptionStatus === 'confirmed'
+                            ? yourOriginals.inscribedBadge
+                            : yourOriginals.inscriptionPendingBadge}
+                        </span>
+                      )}
                       <h2>{row.title}</h2>
                       <code className="your-original-did" title={row.did}>{row.did}</code>
                       <span className="your-original-foot">
@@ -147,10 +486,32 @@ export function YourOriginals() {
                       </span>
                     </span>
                   </a>
+                  {action.kind === 'inscribe' && (
+                    <button
+                      type="button"
+                      className="btn btn-primary your-original-action"
+                      disabled={inscribing === row.did}
+                      onClick={() => void startInscribe(row)}
+                    >
+                      {inscribing !== row.did
+                        ? yourOriginals.inscribe.cta
+                        : stage === 'hydrating'
+                          ? yourOriginals.inscribe.hydrating
+                          : yourOriginals.inscribe.busy}
+                    </button>
+                  )}
+                  {action.kind === 'disabled' && action.reason !== 'reading' && (
+                    <p className="your-original-action-note">
+                      {yourOriginals.inscribe.reasons[action.reason]}
+                    </p>
+                  )}
                 </li>
               );
             })}
           </ul>
+        )}
+        {inscribeNote && (
+          <p className="your-originals-note" role="status">{inscribeNote}</p>
         )}
       </div>
     </main>

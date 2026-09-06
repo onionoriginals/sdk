@@ -73,9 +73,16 @@ describe('originals routes — auth gating', () => {
     expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
     // A bare 'resources/<name>' whose name isn't a multibase is refused too.
     expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
+    // A 'cel/…' key that isn't the content-digest copy is refused.
+    expect((await shadow('cel/index.html')).status).toBe(403);
+    expect((await shadow('cel/evil.json')).status).toBe(403); // no 'u' multibase prefix
+    expect((await shadow('cel/uAbc.json/../../index.html')).status).toBe(403);
+    expect((await shadow('magby.originals.build/cel/uAbc.json')).status).toBe(403); // 2 segments only
     // But real did:webvh artifacts are allowed.
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(200);
+    // …as is the SDK's layer-agnostic CEL copy (persistCelArtifacts).
+    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(200);
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
@@ -157,6 +164,49 @@ describe('originals routes — auth gating', () => {
     expect(list.status).toBe(200);
     const body = (await list.json()) as { originals: Array<{ title: string }> };
     expect(body.originals.map((o) => o.title)).toEqual(['Piece']);
+  });
+
+  test('record accepts optional inscription fields and list returns them', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const cookie = cookieFor('sub-1');
+    const did = 'did:webvh:S:demo.example.com:studio:you:abc';
+    const post = (body: unknown) =>
+      routes.record(
+        new Request('http://h/api/originals', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify(body),
+        }),
+        new URL('http://h/api/originals')
+      );
+    expect((await post({ did, title: 'Piece', resourceHash: 'deadbeef' })).status).toBe(200);
+    // Post-inscribe enrichment merges onto the same row.
+    const rec2 = await post({
+      did,
+      title: 'Piece',
+      resourceHash: 'deadbeef',
+      btcoDid: 'did:btco:456',
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      satoshi: '456',
+      status: 'pending',
+    });
+    expect(rec2.status).toBe(200);
+
+    const list = await routes.list(
+      new Request('http://h/api/originals', { headers: { cookie } }),
+      new URL('http://h/api/originals')
+    );
+    const body = (await list.json()) as { originals: Array<Record<string, unknown>> };
+    expect(body.originals).toHaveLength(1);
+    expect(body.originals[0].btcoDid).toBe('did:btco:456');
+    expect(body.originals[0].satoshi).toBe('456');
+    expect(body.originals[0].inscriptionStatus).toBe('pending');
+
+    // Malformed inscription fields are rejected, not silently persisted.
+    expect((await post({ did, title: 'x', resourceHash: 'y', status: 'nonsense' })).status).toBe(400);
+    expect((await post({ did, title: 'x', resourceHash: 'y', satoshi: 42 })).status).toBe(400);
   });
 
   test('PUT host stores durably and buildFetch serves it at the resolver URL', async () => {

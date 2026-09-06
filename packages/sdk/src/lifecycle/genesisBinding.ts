@@ -10,8 +10,8 @@
  * resources do not actually back.
  */
 import type { AssetResource } from '../types/index.js';
-import type { EventLog } from '../cel/types.js';
-import { hexSha256ToDigestMultibase } from '../cel/signerAdapter.js';
+import type { EventLog } from '@originals/cel';
+import { hexSha256ToDigestMultibase } from '@originals/cel';
 
 export function checkGenesisResourceBinding(log: EventLog, resources: AssetResource[]): boolean {
   const genesis = log.events[0]?.data as { resources?: unknown; did?: unknown } | undefined;

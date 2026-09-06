@@ -8,6 +8,7 @@
  */
 
 import * as btc from '@scure/btc-signer';
+import { StructuredError } from '@originals/cel';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
@@ -19,6 +20,21 @@ import { scriptPubKeyForAddress } from '../transfer.js';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
+
+// BIP-125 opt-in replace-by-fee sequence. @scure/btc-signer defaults every
+// input to the final sequence (0xffffffff), which makes the tx non-replaceable;
+// a fee spike would then park a real-BTC commit in the mempool with no bump
+// path. Every input we build signals RBF.
+//
+// Caveat on the REVEAL: signalling is not the same as being bumpable. The
+// reveal is signed with an ephemeral key generated inside
+// createCommitTransaction and never persisted anywhere, so once the signing
+// process is gone nobody — not the creator, not a server holding the signed
+// hex — can produce a replacement. The signal is kept because it costs
+// nothing and keeps the pair uniform, but a wedged reveal is recovered by
+// rebroadcast, or bumped by CPFP on its postage output (which pays to the
+// creator's own address), never by replacement.
+export const RBF_SEQUENCE = 0xfffffffd;
 
 // Maximum iterations for UTXO reselection to prevent infinite loops
 const MAX_SELECTION_ITERATIONS = 5;
@@ -84,6 +100,14 @@ export interface CommitTransactionParams {
   metadata?: Record<string, unknown>;
   /** Optional pointer to target specific satoshi */
   pointer?: number;
+  /**
+   * Spend EXACTLY `utxos`, in the given order, instead of running selection.
+   * The sat-selected inscribe path needs this: ordinary selection sorts
+   * value-descending and stops at the target, so it can reorder or drop the
+   * caller's first UTXO — the one whose first sat becomes the did:btco
+   * identity. Fails closed (throws) if the set is unspendable or short.
+   */
+  exactUtxos?: boolean;
 }
 
 /**
@@ -200,7 +224,6 @@ export async function createRevealTransaction(
 
   const leafScript = inscriptionScript.script;
   const controlBlock = inscriptionScript.controlBlock;
-  const leafVersion = inscriptionScript.leafVersion ?? 0xc0;
 
   // Reveal fee from the real serialized leaf + control block (witness-discounted).
   const revealFee = Number(calculateFee(estimateRevealTxSize(leafScript.length, controlBlock.length), feeRate));
@@ -239,6 +262,7 @@ export async function createRevealTransaction(
   tx.addInput({
     txid: commitTxId,
     index: commitVout,
+    sequence: RBF_SEQUENCE,
     witnessUtxo: { script: commitP2tr.script, amount: BigInt(commitAmount) },
     tapLeafScript: commitP2tr.tapLeafScript
   });
@@ -274,6 +298,64 @@ export async function createRevealTransaction(
  * @param changeOutputVBytes - Size of one change output, per the change address's script class
  * @returns Estimated transaction size in virtual bytes
  */
+/**
+ * The bytes of `utxo.prevTxHex`, once proved to be the transaction this UTXO
+ * says it is.
+ *
+ * A `nonWitnessUtxo` is what a signer reads to learn an input's true value, so
+ * an unverified one is precisely what the fee-inflation attack substitutes:
+ * hand a signer a transaction claiming a larger input and it approves a fee
+ * far bigger than the user agreed to. Returns bytes rather than a boolean so a
+ * caller cannot forget to check the result.
+ */
+function verifiedPrevTx(utxo: Utxo): Uint8Array {
+  const at = `${utxo.txid}:${utxo.vout}`;
+  const raw = utxo.prevTxHex as string;
+  if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${at} is not raw transaction hex.`, { outpoint: at });
+  }
+  const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
+  // Even-length hex can still be anything. Left unguarded, @scure's parser
+  // error ("Reader(inputs/arrayLen): readByte: Unexpected end of buffer")
+  // escapes with no code, so a consumer cannot classify the very failure this
+  // function exists to report.
+  let prev: btc.Transaction;
+  try {
+    prev = btc.Transaction.fromRaw(bytes, { allowUnknownInputs: true, allowUnknownOutputs: true });
+  } catch (e) {
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex for ${at} is not a decodable Bitcoin transaction: ${e instanceof Error ? e.message : String(e)}`,
+      { outpoint: at }
+    );
+  }
+  if (prev.id !== utxo.txid) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex hashes to ${prev.id}, not ${utxo.txid}.`, {
+      outpoint: at, hashedTo: prev.id
+    });
+  }
+  if (utxo.vout < 0 || utxo.vout >= prev.outputsLength) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${utxo.txid} has no output ${utxo.vout}.`, { outpoint: at });
+  }
+  const out = prev.getOutput(utxo.vout);
+  if (!out?.script || typeof out.amount !== 'bigint') {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} is unreadable.`, { outpoint: at });
+  }
+  if (out.amount !== BigInt(utxo.value)) {
+    throw new StructuredError(
+      'INVALID_PREV_TX',
+      `prevTxHex says ${at} is ${out.amount} sats, but the UTXO says ${utxo.value}.`,
+      { outpoint: at, prevTxSats: String(out.amount), utxoSats: utxo.value }
+    );
+  }
+  if (Buffer.from(out.script).toString('hex') !== String(utxo.scriptPubKey).toLowerCase()) {
+    throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} pays a different script than the UTXO.`, {
+      outpoint: at
+    });
+  }
+  return bytes;
+}
+
 function estimateCommitTxSize(inputs: Utxo[], outputCount: number, changeOutputVBytes: number): number {
   // Transaction overhead
   const overhead = 10.5;
@@ -348,7 +430,8 @@ export async function createCommitTransaction(
     network,
     minimumCommitAmount = MIN_DUST_LIMIT,
     metadata,
-    pointer
+    pointer,
+    exactUtxos = false
   } = params;
 
   // Validate inputs
@@ -417,6 +500,18 @@ export async function createCommitTransaction(
   // unsignable by @scure/btc-signer without nonWitnessUtxo.
   const validUtxos = unprotectedUtxos.filter(utxo => isSegwitScriptPubKey(utxo.scriptPubKey!));
   const legacyCount = unprotectedUtxos.length - validUtxos.length;
+
+  // Exact mode: silently narrowing the set is the failure this mode exists to
+  // prevent (a dropped first UTXO moves the DID sat), so refuse instead.
+  if (exactUtxos && validUtxos.length !== utxos.length) {
+    const kept = new Set(validUtxos.map(u => `${u.txid}:${u.vout}`));
+    const dropped = utxos.filter(u => !kept.has(`${u.txid}:${u.vout}`)).map(u => `${u.txid}:${u.vout}`);
+    throw new Error(
+      `exactUtxos: refusing to narrow the caller's funding set. ` +
+      `${dropped.length} of ${utxos.length} UTXO(s) are unspendable here (structurally invalid, ` +
+      `inscription-bearing/locked, or non-segwit): ${dropped.join(', ')}.`
+    );
+  }
 
   if (validUtxos.length === 0) {
     const invalidReasons: string[] = [];
@@ -563,6 +658,10 @@ export async function createCommitTransaction(
   let totalInputValue = 0;
   let estimatedFee = 0;
   let iteration = 0;
+  // The output count the funding decision was made against. Step 8 must reuse
+  // it, not re-derive it: re-deriving from a one-output fee can flip back to
+  // two outputs and price a fee the inputs never covered (issue #C2).
+  let plannedOutputCount = 2;
 
   // Change output sized by the change address's script class (P2WPKH 31 vB,
   // P2TR/P2WSH 43 vB) instead of a flat P2WPKH assumption.
@@ -575,6 +674,27 @@ export async function createCommitTransaction(
   const widestInputVBytes = Math.max(...validUtxos.map(u => inputVBytesForScriptPubKey(u.scriptPubKey)));
   const initialVBytes = Math.ceil(10.5 + widestInputVBytes + 43 + changeOutputVBytes);
   let targetAmount = commitOutputValue + Number(calculateFee(initialVBytes, feeRate));
+
+  if (exactUtxos) {
+    // No selection: the caller's set IS the input list, in the caller's order.
+    selectedUtxos = validUtxos;
+    totalInputValue = selectedUtxos.reduce((sum, u) => sum + u.value, 0);
+    estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 2, changeOutputVBytes), feeRate));
+    if (totalInputValue - commitOutputValue - estimatedFee < MIN_DUST_LIMIT) {
+      // No change output — re-price at one output.
+      plannedOutputCount = 1;
+      estimatedFee = Number(calculateFee(estimateCommitTxSize(selectedUtxos, 1, changeOutputVBytes), feeRate));
+    }
+    const requiredTotal = commitOutputValue + estimatedFee;
+    if (totalInputValue < requiredTotal) {
+      throw new Error(
+        `Insufficient funds. Need ${requiredTotal} sats for commit output (${commitOutputValue} sats) and fees ` +
+        `(${estimatedFee} sats) from the exact funding set. Available: ${totalInputValue} sats from ` +
+        `${selectedUtxos.length} UTXO(s).`
+      );
+    }
+    iteration = MAX_SELECTION_ITERATIONS; // skip the selection loop below
+  }
 
   while (iteration < MAX_SELECTION_ITERATIONS) {
     iteration++;
@@ -604,12 +724,12 @@ export async function createCommitTransaction(
 
     // Check if we need to account for no change output
     const potentialChange = totalInputValue - commitOutputValue - estimatedFee;
-    let finalOutputCount = 2;
+    plannedOutputCount = 2;
 
     if (potentialChange < MIN_DUST_LIMIT) {
       // No change output, recalculate fee with 1 output
-      finalOutputCount = 1;
-      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
+      plannedOutputCount = 1;
+      const adjustedVBytes = estimateCommitTxSize(selectedUtxos, plannedOutputCount, changeOutputVBytes);
       estimatedFee = Number(calculateFee(adjustedVBytes, feeRate));
     }
 
@@ -664,10 +784,19 @@ export async function createCommitTransaction(
     tx.addInput({
       txid: utxo.txid,
       index: utxo.vout,
+      sequence: RBF_SEQUENCE,
       witnessUtxo: {
         script: Buffer.from(utxo.scriptPubKey, 'hex'),
         amount: BigInt(utxo.value)
-      }
+      },
+      // Optional, and only when the caller supplied it (see Utxo.prevTxHex).
+      // Some signers refuse a SegWit v0 input carrying witnessUtxo alone —
+      // Turnkey answers "code 3: input N is missing non_witness_utxo". It is
+      // VERIFIED before being attached; see verifiedPrevTx.
+      // `!== undefined`, not truthiness: prevTxHex: '' is a SUPPLIED value —
+      // a fetch that returned nothing — and skipping it silently produces a
+      // misleading signer-side error later instead of a clear one here.
+      ...(utxo.prevTxHex !== undefined ? { nonWitnessUtxo: verifiedPrevTx(utxo) } : {})
     });
   }
 
@@ -681,10 +810,12 @@ export async function createCommitTransaction(
 
   // Step 8: Calculate final fee based on actual transaction structure
 
-  // Determine if we'll have a change output
-  const preliminaryChange = totalInputValue - commitOutputValue - estimatedFee;
-  const willHaveChange = preliminaryChange >= MIN_DUST_LIMIT;
-  const finalOutputCount = willHaveChange ? 2 : 1;
+  // Reuse the output count the funding decision above was made against. Re-deriving
+  // it here from `estimatedFee` was the #C2 dead end: when that fee was the
+  // one-output price, the leftover can clear dust and flip this to two outputs,
+  // whose fee the inputs were never checked against.
+  const willHaveChange = plannedOutputCount === 2;
+  const finalOutputCount = plannedOutputCount;
 
   // Calculate final fee with correct output count
   const finalVBytes = estimateCommitTxSize(selectedUtxos, finalOutputCount, changeOutputVBytes);
@@ -718,7 +849,10 @@ export async function createCommitTransaction(
   // the keygen/selection/fee work the early validation exists to protect
   // (issue #351). scriptPubKeyForAddress carries the same regtest→testnet
   // decode fallback transfer.ts already uses.
-  if (finalChange >= MIN_DUST_LIMIT) {
+  // Keyed off willHaveChange, not `finalChange >= MIN_DUST_LIMIT`: at a
+  // one-output price the leftover can clear dust, and adding a change output
+  // the fee was not sized for would underpay it.
+  if (willHaveChange) {
     tx.addOutput({
       script: Buffer.from(scriptPubKeyForAddress(changeAddress, network), 'hex'),
       amount: BigInt(finalChange)
@@ -743,7 +877,7 @@ export async function createCommitTransaction(
     selectedUtxos,
     fees: {
       // Include dust in final fee if no change output
-      commit: finalChange >= MIN_DUST_LIMIT ? finalFee : finalFee + finalChange
+      commit: willHaveChange ? finalFee : finalFee + finalChange
     },
     revealPrivateKey: Buffer.from(revealPrivateKey).toString('hex'),
     revealPublicKey: Buffer.from(revealPublicKey).toString('hex'),

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { currentControllerVm } from '../../../src/cel/signerAdapter';
+import { currentControllerVm } from '@originals/cel';
 import type { CelAppendSkippedEvent } from '../../../src/events/types';
 
 /**

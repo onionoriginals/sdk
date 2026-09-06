@@ -51,12 +51,47 @@ export interface OrdinalsProvider {
   getFirstSatOfOutput?(outpoint: { txid: string; vout: number }): Promise<string>;
   /**
    * MUST return inscription ids oldest-first (on-chain inscription order).
-   * The non-cooperative rotation rule's later-than-anchor check depends on
-   * this ordering; a provider violating it can make that check accept
-   * earlier inscriptions.
+   * The verifier's on-chain ordering checks (head freshness, the anchoring
+   * walk) depend on this ordering as a same-block tiebreak; a provider
+   * violating it can make those checks accept earlier inscriptions.
    */
   getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
   broadcastTransaction(txHexOrObj: unknown): Promise<string>;
+  /**
+   * Atomically submit a signed commit + reveal pair for broadcast. Optional:
+   * when present, the sat-selected inscribe path (inscribe-on-sat.ts) calls
+   * this ONCE instead of two broadcastTransaction calls, so an implementation
+   * can persist both signed transactions durably BEFORE anything is broadcast
+   * — the stranded-funds fix: if the caller dies between commit and reveal,
+   * the reveal can still be rebroadcast from the persisted copy. The
+   * implementation must broadcast the commit first, then the reveal, and
+   * treat an already-known transaction as success (idempotent).
+   *
+   * `status` reports how far broadcasting got: 'reveal_broadcast' means both
+   * landed; 'commit_broadcast' means the commit is on-chain and the reveal is
+   * persisted for later rebroadcast (still a success — the inscription will
+   * complete without the caller re-signing anything).
+   */
+  submitInscription?(params: {
+    signedCommitHex: string;
+    revealTxHex: string;
+    /**
+     * Every funding UTXO the commit spends, in input order. `[0]` is the
+     * identity input (its first sat is the did:btco sat). An implementation
+     * that persists for recovery must claim ALL of these, not just the first:
+     * two pairs with overlapping-but-unequal sets both spend the overlap.
+     */
+    fundingUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+    /**
+     * Singular mirror of `fundingUtxos[0]`, for pre-multi-input implementations.
+     * Stays REQUIRED: relaxing a method parameter's property to optional is a
+     * source-breaking change for any external `implements OrdinalsProvider`
+     * (`Property 'fundingUtxo' is optional in ... but required in ...`), which
+     * method bivariance does not forgive. The SDK always populates it.
+     */
+    fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
+    changeAddress: string;
+  }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }>;
   getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
@@ -101,11 +136,28 @@ export interface OrdinalsProvider {
    */
   getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
   /**
-   * Enumerate every on-chain btco DID-doc anchoring whose `alsoKnownAs`
-   * back-links this did:cel (first-anchor-wins uniqueness). Production
-   * providers implement this via a content/metadata index (an `ord` instance
-   * or a service such as the QuickNode Ordinals add-on). `blockHeight` is the
+   * Enumerate on-chain btco DID-doc anchorings whose `alsoKnownAs` back-links
+   * this did:cel (first-anchor-wins uniqueness). `blockHeight` is the
    * canonical ordering signal; a missing height fails uniqueness closed.
+   *
+   * Two conformance tiers (#473):
+   * - FULL: enumerate every back-linked anchoring on ANY sat. Needs an index
+   *   over inscription content/metadata (OrdMockProvider's in-memory state, or
+   *   an app-maintained index). Enables cross-sat legitimate-duplicate
+   *   detection via authenticated competitors (#402).
+   * - SAT-SCOPED: enumerate only the anchorings on `opts.satoshi` — the log's
+   *   own anchored sat, which the verifier always passes. Ord exposes no
+   *   did:cel back-link index, so the shipped production providers
+   *   (QuickNodeProvider, OrdHttpProvider) implement this tier from
+   *   getInscriptionsBySatoshi + getInscriptionById. It proves the claimed
+   *   anchoring EXISTS on-chain, back-linked and height-confirmed; it CANNOT
+   *   see a competing anchoring on another sat, so cross-sat first-anchor
+   *   canonicality is NOT checked. Behaviourally identical to the accepted
+   *   didDocument-omitting degraded mode (see verifyUniqueness): the #402
+   *   anti-front-running property is unaffected (fail-closed, competitors
+   *   never counted); only cross-sat dupe detection is suppressed.
+   * A sat-scoped implementation MUST fail loudly when called without
+   * `opts.satoshi` — never fabricate an empty enumeration.
    *
    * `didDocument` (#402) is the inscribed did:btco document with its
    * DataIntegrityProof, used to authenticate a competing anchoring on a
@@ -113,8 +165,11 @@ export interface OrdinalsProvider {
    * log's authorized-key history). Optional/backward-compatible: an omitted
    * `didDocument` means the competitor cannot be authenticated and does not
    * count toward canonicality.
+   *
+   * KEEP IN SYNC with the identical guarantee on OrdinalsLookup in
+   * packages/cel/src/types.ts.
    */
-  getAnchoringsForDidCel?(didCel: string): Promise<Array<{
+  getAnchoringsForDidCel?(didCel: string, opts?: { satoshi?: string }): Promise<Array<{
     satoshi: string;
     inscriptionId: string;
     blockHeight?: number;
@@ -134,4 +189,17 @@ export interface OrdinalsProvider {
     satoshi?: string;
   }>;
 }
+
+/**
+ * Compile-time guard: `submitInscription`'s `fundingUtxo` must stay REQUIRED.
+ * Making it optional is source-breaking for any external
+ * `implements OrdinalsProvider` written against the earlier shape, and nothing
+ * in this repo implements the method, so only a consumer's `tsc` would notice.
+ * Kept in src/ so `bun run build` fails on the regression.
+ */
+type _AssertTrue<T extends true> = T;
+type _SubmitInscriptionParams = Parameters<NonNullable<OrdinalsProvider['submitInscription']>>[0];
+export type _FundingUtxoStaysRequired = _AssertTrue<
+  undefined extends _SubmitInscriptionParams['fundingUtxo'] ? false : true
+>;
 

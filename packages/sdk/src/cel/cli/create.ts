@@ -10,14 +10,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DataIntegrityProof } from '../types.js';
-import { PeerCelManager, CelSigner } from '../layers/PeerCelManager.js';
-import { createExternalReference } from '../ExternalReferenceManager.js';
-import { serializeEventLogJson } from '../serialization/json.js';
-import { serializeEventLogCbor } from '../serialization/cbor.js';
-import { multikey } from '../../crypto/Multikey.js';
+import type { DataIntegrityProof } from '@originals/cel';
+import { PeerCelManager, CelSigner } from '@originals/cel';
+import { createExternalReference } from '@originals/cel';
+import { serializeEventLogJson } from '@originals/cel';
+import { serializeEventLogCbor } from '@originals/cel';
+import { multikey } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
-import { CEL_CRYPTOSUITE } from '../proofVerification.js';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '@originals/cel';
 
 /**
  * Flags parsed from command line arguments
@@ -88,7 +88,7 @@ async function generateKeyPair(): Promise<{ privateKey: string; publicKey: strin
   const publicKeyBytes = await (ed25519 as any).getPublicKeyAsync(privateKeyBytes);
   
   return {
-    privateKey: multikey.encodePrivateKey(privateKeyBytes as Uint8Array, 'Ed25519'),
+    privateKey: multikey.encodePrivateKey(privateKeyBytes, 'Ed25519'),
     publicKey: multikey.encodePublicKey(publicKeyBytes as Uint8Array, 'Ed25519'),
   };
 }
@@ -114,7 +114,7 @@ async function loadPrivateKey(keyPath: string): Promise<{ privateKey: string; pu
     } else {
       throw new Error('JSON key file must contain "privateKey" field');
     }
-  } catch (e) {
+  } catch (_e) {
     // Not JSON, treat as raw multibase key
     if (content.startsWith('z')) {
       privateKey = content;
@@ -147,7 +147,7 @@ function createSigner(privateKey: string, publicKey: string): CelSigner {
     
     // The proof configuration is signed along with the event (plan 042).
     const config = {
-      type: 'DataIntegrityProof' as const,
+      type: CEL_PROOF_TYPE,
       cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod: `did:key:${publicKey}#${publicKey}`,
@@ -289,9 +289,9 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
   if (flags.output) {
     try {
       if (format === 'cbor') {
-        fs.writeFileSync(flags.output, output as Uint8Array);
+        fs.writeFileSync(flags.output, output);
       } else {
-        fs.writeFileSync(flags.output, output as string, 'utf-8');
+        fs.writeFileSync(flags.output, output, 'utf-8');
       }
     } catch (e) {
       return {
@@ -306,7 +306,7 @@ export async function createCommand(flags: CreateFlags): Promise<CreateResult> {
       const base64 = Buffer.from(output as Uint8Array).toString('base64');
       process.stdout.write(base64);
     } else {
-      process.stdout.write(output as string);
+      process.stdout.write(output);
     }
   }
   

@@ -1,0 +1,374 @@
+/**
+ * CEL (Cryptographic Event Log) Types
+ *
+ * Based on W3C CCG CEL Specification v0.1
+ * @see https://w3c-ccg.github.io/cel-spec/
+ */
+
+// Re-export canonical DataIntegrityProof from shared types
+import type { DataIntegrityProof } from './types/proof.js';
+export type { DataIntegrityProof } from './types/proof.js';
+
+/**
+ * Witness Proof - extends DataIntegrityProof with witness-specific fields
+ * Used when a third party attests to the existence of an event at a point in time
+ */
+export interface WitnessProof extends DataIntegrityProof {
+  /** ISO 8601 timestamp when the witness attested to the event */
+  witnessedAt: string;
+}
+
+/**
+ * External Reference - points to data outside the event log
+ * Used for large resources that shouldn't be embedded in the log
+ */
+export interface ExternalReference {
+  /**
+   * Optional logical resource id (AssetResource.id). When present at genesis it
+   * BINDS this digest to a specific resourceId, so a resource's first on-log
+   * `update` must chain from ITS OWN genesis digest — not any genesis digest
+   * (#401). Omitted by legacy/hand-built geneses, which fall back to unkeyed
+   * matching. Additive: it does not affect the digest, only the did:cel
+   * derivation of assets that include it.
+   */
+  id?: string;
+  /** Optional URLs where the data can be retrieved */
+  url?: string[];
+  /** Optional MIME type of the data */
+  mediaType?: string;
+  /** Required Multibase-encoded (base64url-nopad) Multihash (sha2-256) of the data */
+  digestMultibase: string;
+}
+
+/**
+ * Event type for log entries
+ */
+export type EventType = 'create' | 'update' | 'deactivate' | 'migrate' | 'transfer' | 'rotateKey';
+
+/**
+ * Log Entry - a single event in the cryptographic event log
+ * Contains the event data, proof(s), and chain reference
+ */
+export interface LogEntry {
+  /** The type of event */
+  type: EventType;
+  /** The event data (schema varies by event type) */
+  data: unknown;
+  /** Multibase-encoded hash of the previous event (omitted for first event) */
+  previousEvent?: string;
+  /** One or more proofs attesting to this event (controller proof + optional witness proofs) */
+  proof: (DataIntegrityProof | WitnessProof)[];
+}
+
+/**
+ * Event Log - the complete cryptographic event log
+ * Contains a list of hash-chained events with optional chunking support
+ */
+export interface EventLog {
+  /** The list of events in chronological order */
+  events: LogEntry[];
+  /** Optional reference to a previous log file (for chunking long histories) */
+  previousLog?: string;
+}
+
+/**
+ * Verification result for a single event
+ */
+export interface EventVerification {
+  /** Index of the event in the log */
+  index: number;
+  /** The event type */
+  type: EventType;
+  /** Whether the event's proofs are valid */
+  proofValid: boolean;
+  /** Whether the hash chain link is valid (previousEvent matches) */
+  chainValid: boolean;
+  /**
+   * True when all proofs for this event were cryptographically verified
+   * (e.g. Ed25519 signature checked against the public key in a did:key VM).
+   * False when only structural validation was possible — the proof fields were
+   * well-formed but no signature check was performed.  Absent when a
+   * caller-supplied custom verifier was used.
+   */
+  cryptographicallyVerified?: boolean;
+  /**
+   * Per-witness verification results. Witness proofs are cryptographically
+   * checked when resolvable but are NON-GATING: a failed or unresolvable witness
+   * does not affect `proofValid` / the log's overall `verified`. Empty/absent
+   * when the event carries no witness proofs.
+   */
+  witnessProofs?: { verificationMethod: string; verified: boolean }[];
+  /** The signer's did:key, resolved from the event's controller proof. Absent on the custom-verifier path or when unresolvable. */
+  authorKey?: string;
+  /** Which kind of claim this entry makes (derived, never stored in the log). Absent on the custom-verifier path. */
+  authorClass?: EntryAuthorClass;
+  /** Any errors encountered during verification */
+  errors: string[];
+}
+
+/**
+ * Which kind of claim an entry makes. Derived, never stored in the log.
+ * - `creator`: signed by a key of the creator lineage (genesis controller plus
+ *   pre-anchor rotations) — the authenticity claim about what the work IS.
+ * - `holder`: a post-anchor entry signed by a sat holder outside the creator
+ *   lineage whose sat gate passed — chain of custody, never an authenticity
+ *   claim.
+ * - `unattributed`: the signer's key could not be resolved or no lineage was
+ *   established; always accompanies an event that already failed. Exists so a
+ *   consumer displaying classes has a total function and can never default a
+ *   mystery entry to `creator`.
+ */
+export type EntryAuthorClass = 'creator' | 'holder' | 'unattributed';
+
+/**
+ * Result of verifying an entire event log
+ */
+export interface VerificationResult {
+  /** Whether the entire log is valid */
+  verified: boolean;
+  /** List of errors encountered */
+  errors: string[];
+  /** Per-event verification details */
+  events: EventVerification[];
+  /**
+   * The asset DID this log backs, when derivable from the genesis event:
+   * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
+   * the declared `data.did` for legacy logs. Absent for shapeless logs.
+   * Informational: it is a trust statement only when `verified` is true.
+   */
+  assetDid?: string;
+  /**
+   * The creator lineage as did:keys, genesis controller first, then each
+   * pre-anchor rotation's newController. Frozen at the btco anchor (post-anchor
+   * rotateKey is rejected). Absent on the custom-verifier path.
+   */
+  creatorKeys?: string[];
+  /**
+   * Distinct holder keys (post-anchor `data.author` did:keys outside the
+   * creator lineage) in first-append order — the custody chain as the log
+   * knows it. It lists holders who WROTE: a silent holder leaves no entry, and
+   * the log cannot invent one; the sat's UTXO history on Bitcoin is the
+   * complete custody record. Absent on the custom-verifier path.
+   */
+  holders?: string[];
+}
+
+/**
+ * Options for creating a new event log
+ */
+export interface CreateOptions {
+  /** Signer function that produces a proof */
+  signer: (data: unknown) => Promise<DataIntegrityProof>;
+  /**
+   * The verification method DID URL — advisory: the recorded VM comes from
+   * the signer's proof; managers use this only to construct fallback VM
+   * strings.
+   */
+  verificationMethod: string;
+  /** The proof purpose (defaults to "assertionMethod") */
+  proofPurpose?: string;
+  /**
+   * Verify the signer's proof before sealing it into the log (default `true`).
+   * Set `false` only to deliberately construct an invalid log, e.g. a
+   * tamper-detection fixture. See `algorithms/sealProof.ts`.
+   */
+  verifyOnSign?: boolean;
+}
+
+/**
+ * Options for updating an event log
+ */
+export type UpdateOptions = CreateOptions;
+
+/**
+ * Options for deactivating an event log
+ */
+export type DeactivateOptions = CreateOptions;
+
+/**
+ * Minimal ordinals lookup surface needed to verify bitcoin witness proofs.
+ * Structurally compatible with the SDK's OrdinalsProvider adapter interface.
+ */
+export interface OrdinalsLookup {
+  getInscriptionById(id: string): Promise<{
+    inscriptionId: string;
+    // Optional: deferred-content providers may not echo built content back.
+    content?: Uint8Array;
+    contentType: string;
+    txid?: string;
+    satoshi?: string;
+    blockHeight?: number;
+    // Inscription CBOR metadata (#407 phase 2): carries `{ didDocument, celLog }`
+    // for anchoring inscriptions whose content is the asset media.
+    metadata?: Record<string, unknown>;
+  } | null>;
+  /**
+   * MUST return inscription ids oldest-first (on-chain inscription order).
+   * The on-chain ordering checks (head freshness, the anchoring walk) order
+   * inscriptions primarily by their confirmed block heights (via
+   * getInscriptionById, provider-order-independent) and trust this list order
+   * only as a same-block tiebreak. Providers whose getInscriptionById results
+   * omit `blockHeight` cannot prove ordering at all: those checks then fail
+   * closed.
+   */
+  getInscriptionsBySatoshi?(satoshi: string): Promise<Array<{ inscriptionId: string }>>;
+  /**
+   * Enumerate on-chain btco DID-doc anchorings whose `alsoKnownAs` back-links
+   * this did:cel. `blockHeight` is the canonical ordering signal
+   * (first-anchor-wins). Required for btco-anchored did:cel verification: a
+   * btco log already needs a provider, so a provider that cannot enumerate
+   * fails uniqueness CLOSED (`UNIQUENESS_UNVERIFIABLE`). Multiple inscriptions
+   * on the SAME sat (migrate + rotation reinscriptions) are expected and do
+   * not compete — only a different, earlier sat wins.
+   *
+   * Two conformance tiers (#473):
+   * - FULL: enumerate every back-linked anchoring on ANY sat. Needs an index
+   *   over inscription content/metadata (OrdMockProvider's in-memory state, or
+   *   an app-maintained index). Enables cross-sat legitimate-duplicate
+   *   detection via authenticated competitors (#402).
+   * - SAT-SCOPED: enumerate only the anchorings on `opts.satoshi` — the log's
+   *   own anchored sat, which the verifier always passes. Ord exposes no
+   *   did:cel back-link index, so the shipped production providers
+   *   (QuickNodeProvider, OrdHttpProvider) implement this tier from
+   *   getInscriptionsBySatoshi + getInscriptionById. It proves the claimed
+   *   anchoring EXISTS on-chain, back-linked and height-confirmed; it CANNOT
+   *   see a competing anchoring on another sat, so cross-sat first-anchor
+   *   canonicality is NOT checked. Behaviourally identical to the accepted
+   *   didDocument-omitting degraded mode (see verifyUniqueness): the #402
+   *   anti-front-running property is unaffected (fail-closed, competitors
+   *   never counted); only cross-sat dupe detection is suppressed.
+   * A sat-scoped implementation MUST fail loudly when called without
+   * `opts.satoshi` — never fabricate an empty enumeration.
+   *
+   * `didDocument` (#402) is the inscribed did:btco document carrying its
+   * DataIntegrityProof. Uniqueness uses it to AUTHENTICATE a competing anchoring
+   * on a DIFFERENT sat: a competitor counts only if its doc is signed by a key
+   * in the verified log's authorized-key history — otherwise a non-controller
+   * could inscribe a bare `alsoKnownAs` back-link on an earlier sat and deny an
+   * honest mint. Optional/backward-compatible: an omitted `didDocument` simply
+   * means that competitor cannot be authenticated and does not count.
+   *
+   * KEEP IN SYNC with the identical guarantee on OrdinalsProvider in
+   * packages/sdk/src/adapters/types.ts.
+   */
+  getAnchoringsForDidCel?(didCel: string, opts?: { satoshi?: string }): Promise<Array<{
+    satoshi: string;
+    inscriptionId: string;
+    blockHeight?: number;
+    didDocument?: Record<string, unknown>;
+  }>>;
+}
+
+/**
+ * Structural slice of the SDK's BitcoinManager used by the btco write paths
+ * (BtcoCelManager, BitcoinWitness, OriginalsCel). Kept structural so this
+ * package carries no compile-time edge to the Bitcoin stack; the SDK's
+ * BitcoinManager satisfies it as-is.
+ */
+export interface CelBitcoinManager {
+  /** Bitcoin network; scopes did:btco identifier prefixes. */
+  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  /** Provider used for read-side verification (witness proofs, uniqueness). */
+  ordinalsProvider?: OrdinalsLookup;
+  inscribeData(
+    data: unknown,
+    contentType: string,
+    feeRate?: number,
+    options?: { targetSatoshi?: string; lockKey?: string; metadata?: Record<string, unknown> }
+  ): Promise<{ inscriptionId: string; txid: string; satoshi?: string; blockHeight?: number }>;
+  getSatoshiFromInscription(inscriptionId: string): Promise<string | null>;
+}
+
+/**
+ * Options for verifying an event log
+ */
+export interface VerifyOptions {
+  /**
+   * Optional custom proof verifier.
+   *
+   * UNSAFE FOR BTCO LOGS: the custom path owns proof semantics entirely and
+   * never establishes the on-chain authority anchor, so NONE of the btco
+   * authority machinery runs — no sat gate on post-anchor events, no
+   * post-anchor type rejections, no head freshness, no uniqueness walk, and no
+   * author classes (`authorKey`/`authorClass`/`creatorKeys`/`holders` are all
+   * absent, never guessed). A btco-anchored log verified this way is checked
+   * only as far as the supplied verifier checks it.
+   */
+  verifier?: (proof: DataIntegrityProof, data: unknown) => Promise<boolean>;
+  /**
+   * Resolves the Ed25519 public key bytes for a proof's verificationMethod.
+   * Required to verify proofs whose key is NOT embedded in the identifier
+   * (did:webvh, did:btco, did:peer). Return null when the method cannot be
+   * resolved or its key is not Ed25519 — the proof then fails closed.
+   */
+  resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
+  /**
+   * Ordinals provider used to verify `bitcoin-ordinals-2024` witness proofs
+   * against the Bitcoin chain. btco anchoring is GATING: a log that carries a
+   * bitcoin witness proof fails verification unless the proof's inscription
+   * exists, is carried by the claimed satoshi, and its content commits to the
+   * event's digest — and that check requires this provider. Logs without
+   * bitcoin witness proofs verify without it. (Skipped on the custom
+   * `verifier` path, where the caller owns proof semantics.)
+   */
+  ordinalsProvider?: OrdinalsLookup;
+  /**
+   * When set, the log must back this exact asset DID or verification fails.
+   * did:cel expected DIDs are compared via suffix derivation
+   * (`didCelMatchesLog`); legacy DIDs by string equality against `data.did`.
+   * Ignored on the custom `verifier` path (which owns proof semantics).
+   */
+  expectedDid?: string;
+  /**
+   * Truncated-log defense (#366). Default FALSE — pure-algorithm semantics are
+   * preserved for existing callers. When TRUE and the walk anchored the log to
+   * a satoshi, the NEWEST OriginalsCelAnchor DID document on that sat must
+   * commit (via `headDigestMultibase`) to the chain digest of SOME event
+   * PRESENT in the log; otherwise verification fails with a `STALE_LOG`-coded
+   * error. This closes the seller-hands-buyer-a-pre-rotation-prefix attack: the
+   * prefix verifies on its own, but the on-chain head betrays the omission.
+   *
+   * The rule is present-in-log, not is-the-head — a legitimate holder may have
+   * appended events not yet re-inscribed, so a mid-log match passes. Fail-closed
+   * on inability to check (no provider, no enumeration capability, a throwing
+   * lookup, or no anchor doc on the sat): the caller ASKED for freshness. A log
+   * that never anchored to a sat has nothing to be fresh against — the flag is a
+   * no-op. Incompatible with a custom `verifier` (which skips the authority walk
+   * head freshness is checked against): requesting both fails closed.
+   */
+  checkHeadFreshness?: boolean;
+}
+
+/**
+ * Asset state derived from replaying event log
+ */
+export interface AssetState {
+  /** Current DID of the asset */
+  did: string;
+  /** Asset name */
+  name?: string;
+  /** Current layer (peer, webvh, btco) */
+  layer: 'peer' | 'webvh' | 'btco';
+  /** External resources associated with the asset */
+  resources: ExternalReference[];
+  /** Creator DID */
+  creator?: string;
+  /** Current controller key DID: genesis `controller`, handed off by rotateKey */
+  controller?: string;
+  /** Creation timestamp */
+  createdAt?: string;
+  /** Last update timestamp */
+  updatedAt?: string;
+  /** Whether the asset has been deactivated */
+  deactivated: boolean;
+  /** Custom metadata */
+  metadata?: Record<string, unknown>;
+  /**
+   * Holder entries (post-anchor updates signed outside the creator lineage),
+   * in log order. Holder entries fold ONLY here — never into name/resources/
+   * creator/controller/metadata, which are creator claims.
+   */
+  custody?: Array<{ author: string; statement?: string; occurredAt?: string; eventIndex: number }>;
+  /** Distinct custody authors in first-append order (derived from `custody`). */
+  holders?: string[];
+}

@@ -17,7 +17,7 @@ import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager, type DataIntegrityProof } from './cryptosuites/eddsa.js';
-import { multikey } from '../crypto/Multikey.js';
+import { multikey } from '@originals/cel';
 import { describeMultiSigProofFailure } from './multiSigProofFormat.js';
 
 /**

@@ -1,23 +1,27 @@
 /**
  * Shared artwork seed — keeps the hero halo and the demo's asset in sync.
  *
- * The demo owns the seed (title + medium + regenerate nonce); the hero
+ * The demo owns the seed (title + style + regenerate nonce); the hero
  * subscribes and renders the same artwork as an ambient halo. On first load
  * both show the same fresh piece (random nonce per visit); every edit,
  * regenerate, or start-over in the demo updates the hero too.
  */
-import { demo } from '../content';
+import { ART_STYLES, generateName } from './artwork';
 
 export interface ArtSeed {
   title: string;
-  medium: string;
+  style: string;
   nonce: number;
 }
 
+const initialNonce = Math.floor(Math.random() * 1e9); // a fresh original per visit
+
 let seed: ArtSeed = {
-  title: demo.form.defaultTitle,
-  medium: demo.form.mediums[0],
-  nonce: Math.floor(Math.random() * 1e9) // a fresh original per visit
+  // Named from the same seed as the picture, so the first thing a visitor sees
+  // is a titled piece rather than a placeholder asking them to invent one.
+  title: generateName(ART_STYLES[0], initialNonce),
+  style: ART_STYLES[0],
+  nonce: initialNonce
 };
 
 const listeners = new Set<() => void>();
@@ -29,7 +33,7 @@ export function getArtSeed(): ArtSeed {
 export function setArtSeed(next: ArtSeed): void {
   if (
     next.title === seed.title &&
-    next.medium === seed.medium &&
+    next.style === seed.style &&
     next.nonce === seed.nonce
   ) {
     return;

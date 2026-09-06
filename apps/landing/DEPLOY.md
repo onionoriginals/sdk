@@ -1,87 +1,340 @@
 # Deploying the landing page
 
-The site is a fully static Vite build with **no server component, no
-environment variables, no secrets, and zero external runtime dependencies**
-(fonts self-hosted, demo runs the real `@originals/sdk` client-side against
-its mock Ordinals provider). Any static host + CDN works. This documents the
-exact settings per host (issue #330); the only open item is the hosting /
-domain decision itself.
+The site is a **long-lived Bun server**, not a static bundle. It holds a
+mounted volume, needs secrets, and talks to Turnkey and a Bitcoin node. A
+static host cannot run it.
 
-## The two settings every host needs
+That matters more than it sounds: the volume is the entire database — there is
+no Postgres, SQLite or Redis anywhere in this app — and it holds the only
+copies of signed-but-unbroadcast Bitcoin transactions. Deploying this as a
+static publish directory drops the server, and after the creator-pays
+inscription path is live it strands real money.
+
+## What the deploy actually is
 
 | Setting | Value |
 | ------- | ----- |
-| Build command | `bun install && bun run build && cd apps/landing && bunx vite build` |
-| Publish directory | `apps/landing/dist` |
+| Build command | `bun install && bun run build && cd apps/landing && bun run build` |
+| Start command | `bun run apps/landing/serve.ts` |
+| Persistent volume | required, mounted, with `ORIGINALS_DATA_DIR` pointing at it |
 
-The `bun run build` step compiles the workspace packages (the app bundles
-`@originals/sdk` from its dist); `vite build` then emits the site.
+`.railway/railway.ts` at the repo root is the reviewable record of this deploy.
+It carries the build and start commands, the restart policy, the persistent
+volume mounted at `/data`, and the **non-secret** environment shape
+(`NODE_ENV`, `BTC_NETWORK`, `ORIGINALS_DATA_DIR`, `TRUSTED_PROXY_HOPS`,
+`BTC_INDEXER_API`, `VITE_BTC_NETWORK`, `VITE_WEBVH_HOST`). It replaced the
+deprecated `railway.json`, whose Config-as-Code format stops working after
+2026-12-01; a service cannot be managed by both formats at once, so the old
+file was removed rather than kept alongside. Secrets and a handful of live-only
+facts stay in the dashboard — see "What stays dashboard-only" below.
 
-## CI gate (run before every deploy)
+## What stays dashboard-only
+
+`.railway/railway.ts` is the desired state of the whole project, and Railway
+IaC reconciles it authoritatively: anything live but absent from the file is
+**deleted on apply**. So the file names every variable the service carries, but
+some values must not live in source and some facts this repo cannot see. Each of
+these is declared with `preserve()` (keep the live value) or omitted on purpose:
+
+| Kept in the dashboard | Why |
+| --- | --- |
+| `JWT_SECRET` | Secret. `preserve()` keeps the live value; it never enters source. |
+| `TURNKEY_API_PUBLIC_KEY` | Secret. `preserve()`. |
+| `TURNKEY_API_PRIVATE_KEY` | Secret. `preserve()`. |
+| `TURNKEY_ORGANIZATION_ID` | Secret. `preserve()`. |
+| `QUICKNODE_ENDPOINT` | Secret (a paid node URL with the key in it). `preserve()`. |
+| `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
+| `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
+| Volume size and region | Now pinned in `railway.ts` (`sizeMB: 50000`, `region: us-west2`) to the live values, because IaC nulls a volume's size and region when the file omits them. Confirm they still match the live volume before applying; the plan shows a resize or relocate if they have drifted. |
+| The Railway project name | The file names `Onion / Originals` (the live project name). Confirm with `railway status`; if the plan shows a project rename, the name in `railway.ts` is wrong — fix it, do not apply. |
+| The `originals.build` custom-domain binding | Railway routing, not modelled here. `VITE_WEBVH_HOST` only bakes the hostname into the SPA; it does not point the domain at the service. Canonical did:webvh resolution depends on this binding, so `railway.ts` does not touch networking and the plan must NOT propose removing the custom domain (or the generated `*.up.railway.app` host the server 301s from). If a plan would drop it, model the domain in `railway.ts` (`domains: ["originals.build"]`) before applying. |
+| Scheduled volume backup | Dashboard-only, opt-in, no published SLA. Record it in the "Volume backup log" at the bottom of this file — the only durable evidence it happened. |
+
+**Delete the stray `WEBVH_DOMAIN` dashboard variable.** The `builder` service
+carries `WEBVH_DOMAIN=https://originals.build`, which **no code reads** (a repo
+grep finds it only in old planning docs; the live did:webvh host is
+`VITE_WEBVH_HOST`, baked into the bundle). It is not in the config contract and
+not in `railway.ts`. Remove it from the dashboard so it cannot be mistaken for a
+live setting: `railway variables --service builder --unset WEBVH_DOMAIN`.
+
+## Applying and verifying the deploy shape
+
+You need the Railway CLI, logged in and linked to the project
+(`railway link`). None of this is checked in CI — the CLI is the only thing
+that reconciles the file against live state.
+
+**`railway config apply` is a required step, not optional.** Railway reads the
+old `railway.json` automatically on every deploy, but it does **not** read
+`.railway/railway.ts` on push: IaC is applied only through the CLI. That is why
+`railway.json` is still in the repo: until the new file has been applied to
+production, it is the only thing giving the service (and every PR preview
+environment) a build and start command. The order is: merge this file, run
+`railway config plan` then `railway config apply` against production, confirm a
+deploy succeeds, and only then delete `railway.json` in a follow-up.
+
+The file is scoped with `export const partial = "builder"`. The Railway project
+also hosts services and databases deployed from other repositories, and IaC
+deletes whatever the file omits: an unscoped plan measured on 2026-09-04
+proposed destroying 9 resources (three databases, four services, two
+variables) and nulling the volume's size and region. With the scope, the
+source repo, and the volume size and region pinned, the plan proposes exactly
+one deletion, the dead `WEBVH_DOMAIN` variable, plus moving the build and start
+commands into IaC.
+
+```bash
+railway config plan     # review the diff; it must propose NO unexpected delete or rename
+railway config apply    # apply only after the plan is clean
+```
+
+Read the plan before applying. Because IaC deletes on omit, treat any proposed
+deletion or project rename as a sign the file is missing a live fact (see the
+table above), not as an expected change. Variable values are redacted in the
+plan, and `preserve()` entries show as kept, not printed.
+
+To cross-check the hand-written file against the live project, run
+`railway config migrate` in a throwaway checkout: it reads the linked project
+and emits an equivalent `.railway/railway.ts`, rendering existing secrets as
+`preserve()`. Diff it against this one to catch any drift (a missing service,
+the real project name, a variable this file does not mention).
+
+## Environment contract
+
+`apps/landing/server/config.ts` validates this at boot and reports every
+violation by name. It is **warn-only** unless `CONFIG_STRICT=1`. See
+"Turning on strict mode" before you set that flag.
+
+### Server, read at runtime
+
+| Variable | Required when | Missing behaviour |
+| --- | --- | --- |
+| `NODE_ENV=production` | always, on a deploy | auth cookie loses `Secure` |
+| `JWT_SECRET` (≥32 chars) | always | auth API silently unmounts; a short value makes every login fail with a generic message |
+| `TURNKEY_API_PUBLIC_KEY` | always | auth API silently unmounts |
+| `TURNKEY_API_PRIVATE_KEY` | always | ” |
+| `TURNKEY_ORGANIZATION_ID` | always | ” |
+| `BTC_NETWORK` | always | silently inherits the `testnet4` default |
+| `QUICKNODE_ENDPOINT` | `BTC_NETWORK=mainnet` | real inscription silently stays mock |
+| `BTC_INDEXER_API` | never (has a default) | deposit reads run against the **free public** mempool.space API — unauthenticated, rate-limited at their discretion. Warned at boot on a mainnet deploy; never an error, because shipping on the free tier is the sanctioned choice (KTD4) |
+| `BTC_INDEXER_TOKEN` | with a paid/private `BTC_INDEXER_API` | the read goes out unauthenticated and the paid tier rejects or throttles it |
+| `BTC_INDEXER_AUTH_HEADER` | when the index wants something other than `Authorization: Bearer` | token is sent as a bearer token |
+| `ORIGINALS_DATA_DIR` | always | users' Originals **and signed reveal transactions** land on an ephemeral path and are wiped on the next redeploy |
+| `TRUSTED_PROXY_HOPS` | behind a proxy | every visitor collapses into one shared rate-limit bucket |
+| `CONFIG_STRICT` | opt-in | see below |
+
+### Browser, baked at build time
+
+`VITE_BTC_NETWORK` is compiled into the SPA by Vite. **Changing it at runtime
+does nothing** — the value is already in the bundle. It must match
+`BTC_NETWORK`, and changing it means a rebuild, not a restart. The server
+compares the two at boot and the browser compares them again before any
+real-money action; a mismatch is reported in both directions.
+
+`VITE_WEBVH_HOST` is the same shape of value and the more permanent one. It is
+the single host every `did:webvh` identifier this site publishes will name,
+**forever** — a did:webvh domain cannot be changed after publication. Unset, the
+SPA falls back to `window.location.host`, so a visitor who arrives on the
+Railway-generated `*.up.railway.app` hostname mints DIDs pinned to it. Set it to
+the canonical domain (`originals.build`) as a **bare hostname** — no scheme, no
+port, no path. Required on a mainnet deploy and reported by name at boot; the
+server also reads it at runtime and 301s document requests from any other host,
+so the redirect and the DID cannot disagree. `/api/*` is exempt from that
+redirect, so publishing writes and platform probes are unaffected.
+
+## Before enabling mainnet
+
+Run one deploy with the code as-is and read the boot log. Do not proceed while
+any of these is outstanding.
+
+1. **`VITE_WEBVH_HOST` set to the canonical domain, and the SPA rebuilt with
+   it.** The boot log names it if it is missing. Verify it reached the bundle,
+   not just the dashboard: `curl -s https://<host>/assets/engine-*.js | grep -o
+   'VITE_WEBVH_HOST:`[^`]*`'` — Vite deletes the branch entirely when the value
+   is absent at build time, so an unset var leaves no trace to grep for and the
+   only evidence is the value being present.
+2. **Volume attached and mounted.** The log must not say the data directory is
+   writable but not a mounted volume. Writability alone passes on exactly the
+   ephemeral path this check exists to catch.
+3. **Scheduled backup enabled.** Railway backups are opt-in and there is no
+   published durability SLA. Record the schedule and who enabled it in the log
+   at the bottom of this file — the setting is dashboard-only and cannot
+   appear in a commit, so that line is the only evidence it happened.
+4. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
+   per-client rate limits are inert and everyone shares one bucket. Confirm it
+   from the `[landing] proxy sample:` line the server logs once per process:
+   the resolved identity must be your address, not the proxy's.
+5. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
+   add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
+   and inscription is impossible. `bun scripts/check:ordinals` — i.e.
+   `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
+   also exercises the deposit indexer seam when given an address
+   (`BTC_CHECK_ADDRESS`) and can probe the add-on alone from any confirmed
+   mainnet outpoint (`BTC_CHECK_OUTPOINT=txid:vout`).
+   Note the two reads are **separate vendors on purpose**: QuickNode has no
+   address→UTXO surface (Core there has no address index, `scantxoutset` is
+   blocked at the edge, and the Ordinals add-on maps outpoint→address and
+   sat→address only), so deposit polling costs no QuickNode quota and lives
+   behind `BTC_INDEXER_API` instead.
+6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+   check earned its place twice over: the login path was broken the entire time
+   it went unrun, in two independent ways, and neither was reachable from any
+   test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
+   (both are plain hex strings, so nothing local could tell them apart), and
+   underneath that it called the wrong activity entirely — an ordinary stamp on
+   `otp_login`, which Turnkey answers with `PUBLIC_KEY_NOT_FOUND` because the
+   credential being installed cannot already exist. It now runs STAMP_LOGIN
+   with the attested stamp, which is what `@turnkey/core` does. The only thing
+   that proves it works is running it against a real org.
+7. **One complete mainnet inscription by a human**, from a cold browser,
+   before anyone else is invited.
+
+## Turning on strict mode
+
+`CONFIG_STRICT=1` turns every contract violation into a refusal to start.
+`.railway/railway.ts` caps restarts at 5 (`restartPolicyMaxRetries`), so
+flipping it against an environment that does not satisfy the contract takes the
+site down rather than degrading it.
+
+Deploy warn-only first, read the boot log, and fix everything it names —
+`NODE_ENV` and `TRUSTED_PROXY_HOPS` in particular are ones Railway does not
+set for you. Only when the final line reads `config contract: clean` should
+you set the flag.
+
+**Rollback is unsetting `CONFIG_STRICT` and restarting.** No redeploy, no
+revert.
+
+## Runbook: a stuck inscription
+
+The commit and reveal are both signed and persisted before either is
+broadcast, so a dead browser tab cannot strand funds on its own. Recovery runs
+automatically on the `/me` list poll: a superseded pair whose commit actually
+won is reinstated, a pair stuck at `commit_broadcast` completes once its commit
+confirms, and a reveal still unconfirmed after 30 minutes is re-pushed from the
+persisted copy.
+
+**When the reveal is wedged by fees, rebroadcast and wait is the whole
+remedy.** Replace-by-fee is impossible — the reveal's key is ephemeral by
+design, so there is no way to re-sign a replacement. Child-pays-for-parent is
+*also* not available to the operator: the postage output pays the user's own
+address, whose key lives only inside that user's Turnkey session. Nobody
+holding this runbook can build that transaction. If a real CPFP path is
+wanted, it is a feature, not a runbook step.
+
+An hourly sweep logs any inscription older than 24 hours still holding
+un-landed recovery artifacts. That log line is the alert; there is no alerting
+stack by design.
+
+## Money-path logging and the deposit-balance sweep
+
+Every state transition where a stranger's BTC moves or gets stuck emits one
+line, prefixed `[landing][money] ` and followed by JSON. Grep that prefix.
+
+| `event` | Emitted when |
+| --- | --- |
+| `deposit_address_issued` | An address is bound to an account for the first time |
+| `deposit_seen` | A confirmed balance appears at a bound address |
+| `deposit_shortfall` | The balance changed and still does not cover the quote |
+| `deposit_read_failed` | An address read, or the address binding, could not be trusted |
+| `deposit_ordinal_check_unavailable` | Outputs could not be classified, so none were offered as spendable |
+| `inscribe_attempted` | A signed pair passed validation and is about to broadcast |
+| `inscribe_failed` | A pair was refused or failed to broadcast (`reason` says which) |
+| `inscribe_broadcast` | A pair reached the network |
+| `deposit_balance_held` | A bound address still holds confirmed sats (per address) |
+| `deposit_balance_sweep` | The hourly roll-up, including `withBalance` and `heldSats` |
+
+**Users are identified by Turnkey sub-org id only.** These lines link an
+account to on-chain activity and land in a third-party log sink, so an email
+address is redacted by the formatter even if a call site passes one.
+
+**`deposit_balance_sweep` is the only instrument that sees a stranger's funds
+sitting unspent at an address nobody is polling.** `withBalance` going up and
+staying up is the signal to look. Its read budget:
+
+- **Cadence:** hourly, on the same timer as the stale-inscription sweep above.
+  There is no second timer.
+- **Ceiling:** 50 indexer reads per pass (`DEPOSIT_SWEEP_MAX_PER_PASS`), taken
+  from a rotating cursor over a stably ordered list, so a backlog larger than
+  one pass is covered across successive passes rather than starving behind the
+  same head addresses.
+- **Drop-out:** an address leaves the scan once it has nothing in flight, its
+  last trusted read was zero confirmed sats, and that read is over 24h old.
+  Without that the scan would grow with all-time signups. An address holding a
+  balance never drops out — each pass re-reads it and records the read.
+- **Known gap:** a deposit that first arrives more than 24h after its address
+  went quiet is not seen by the sweep. The creator's own poll still sees it.
+
+## Runbook: turning the money path off
+
+Conditions that should trigger it:
+
+- a stranded inscription the automatic passes cannot clear;
+- a QuickNode or Turnkey outage;
+- a volume-mount failure after a redeploy.
+
+**Mechanism:** set `BTC_NETWORK` to `testnet4` (or unset `QUICKNODE_ENDPOINT`)
+and restart. The `/api/btc/*` routes stop serving the mainnet path.
+
+**What this does not do:** it does not reach users who already hold a confirmed
+deposit. Their balance stays at an address derived from their own Turnkey
+account, reachable only through this app's inscribe flow — so switching off
+strands anyone mid-flow until it is switched back on. Before flipping it,
+check the sweep log for pending inscriptions, and expect to tell those users
+directly. There is no withdrawal path.
+
+## Local development
+
+```bash
+bun install            # repo root
+bun run build          # workspace packages
+cd apps/landing
+bun run dev:all        # vite + the API server
+```
+
+With nothing configured the server still starts and serves the SPA; the auth
+and Bitcoin surfaces stay unmounted and the demo runs against the mock
+Ordinals provider. The boot log names what is missing.
+
+## CI gate
 
 ```bash
 bun run landing:ci        # from the repo root
-# = bun apps/landing/scripts/ci.mjs
 ```
 
-Builds packages + app, serves the production bundle, and runs
-`scripts/smoke.mjs` in headless Chromium: the full real-SDK lifecycle
-(`did:peer → did:webvh → did:btco`) must complete with **zero console
-errors or pageerrors**, else the script exits non-zero.
+Builds the packages and the app, serves the **built static bundle** under
+`vite preview`, and drives it headless asserting zero console errors and a
+throttled time-to-interactive under 3s.
+
+Two things to know about it:
+
+- It exercises the **anonymous mock path only**. There is no server and no
+  secret involved, so the signed-in mainnet path has no automated gate at all
+  — it is covered solely by the manual checks above.
+- **It is currently red on `main`**, independently of any change in this
+  branch: `scripts/ci.mjs` proxies `/api/host/*` to `localhost:8787` without
+  starting a server, so the smoke publish 502s. Fix that before treating this
+  as a deploy gate; a gate that is red on arrival gets ignored.
 
 Chromium on a fresh runner: `bunx playwright-core install --with-deps
-chromium` (version-matched to the pinned `playwright-core` devDependency),
-or point `CHROMIUM_PATH` at an existing binary. Do not add the full
-`playwright` package — `playwright-core` is already a devDependency and its
-CLI installs browsers.
+chromium`, or point `CHROMIUM_PATH` at an existing binary. Do not add the full
+`playwright` package.
 
-## Per-host settings
+## Production URL
 
-### Vercel
+`src/content.ts` → `site.url` is the single production-URL constant, injected
+at build time into the canonical link, `og:url`, `og:image` and
+`twitter:image`. `public/robots.txt` and `public/sitemap.xml` must carry the
+same origin — the build fails with a pointed error if they drift, so a
+half-swap cannot ship.
 
-- Framework preset: **Vite** (or Other) · Root directory: repo root
-- Install command: `bun install`
-- Build command: `bun run build && cd apps/landing && bunx vite build`
-- Output directory: `apps/landing/dist`
-- Bun is available on Vercel builders by default; no `vercel.json` needed.
+Changing it does **not** change any already-minted DID: asset DIDs are
+published against the request host, and identity DIDs carry their own
+hardcoded domain. Changing *that* would re-mint every existing user's
+identity, which is why it is deliberately untouched.
 
-### Netlify
+## Volume backup log
 
-- Base directory: repo root · Publish directory: `apps/landing/dist`
-- Build command: `bun install && bun run build && cd apps/landing && bunx vite build`
-- Or commit a `netlify.toml` at the repo root:
+Record each change here. This is the only durable evidence, since the setting
+lives in the Railway dashboard.
 
-  ```toml
-  [build]
-  command = "bun install && bun run build && cd apps/landing && bunx vite build"
-  publish = "apps/landing/dist"
-  ```
-
-### Cloudflare Pages
-
-- Build command: `bun install && bun run build && cd apps/landing && bunx vite build`
-- Build output directory: `apps/landing/dist`
-- Root directory: repo root (build system v2/v3 ships bun).
-
-### GitHub Pages
-
-No build settings — deploy from an Actions workflow: `oven-sh/setup-bun`,
-run the build command above (plus `bun run landing:ci` as the gate, after
-`bunx playwright-core install --with-deps chromium`), then
-`actions/upload-pages-artifact` with `path: apps/landing/dist` and
-`actions/deploy-pages`.
-
-**Caveat:** a project page serves from `https://<org>.github.io/sdk/`, so
-`vite build` needs `--base=/sdk/` (or a `base` entry in `vite.config.ts`)
-unless a custom domain is attached at the root. The other three hosts serve
-from `/` and need no change.
-
-## When the domain is decided (the rest of #330)
-
-1. Swap the placeholder in **`src/content.ts` → `site.url`** — the single
-   production-URL constant. It is injected at build time into the canonical
-   link, `og:url`, `og:image`, and `twitter:image`.
-2. Update the matching absolute URLs in `public/robots.txt` and
-   `public/sitemap.xml` — **the build fails with a pointed error if these
-   drift from `site.url`**, so a half-swap cannot ship.
-3. Rebuild and deploy. Nothing else references the domain.
+| Date | Schedule | Enabled by |
+| --- | --- | --- |
+| _(not yet enabled — see "Before enabling mainnet" item 2)_ | | |

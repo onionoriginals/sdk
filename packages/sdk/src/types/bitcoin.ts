@@ -41,6 +41,21 @@ export interface Utxo {
   vout: number;
   value: number; // satoshis
   scriptPubKey?: string;
+  /**
+   * The whole previous transaction, hex, OPTIONAL.
+   *
+   * BIP-143 computes a SegWit v0 sighash from `witnessUtxo` alone, so the
+   * commit PSBT does not need this and most callers will not supply it. Some
+   * signers require it regardless — Turnkey answers
+   * `code 3: input N is missing non_witness_utxo for SegWit v0 input`, and
+   * hardware wallets have historically demanded it too, as their only defence
+   * against being lied to about an input's value (the fee-inflation attack).
+   *
+   * Supply it and the commit builder attaches `nonWitnessUtxo`, after checking
+   * it hashes to `txid` and that output `vout` matches this UTXO. Omit it and
+   * nothing changes.
+   */
+  prevTxHex?: string;
   address?: string;
   inscriptions?: string[]; // inscription ids located on this outpoint
   locked?: boolean; // if true, cannot be spent due to wallet locks
@@ -93,10 +108,8 @@ export interface ResourceUtxoSelectionResult {
 
 export const DUST_LIMIT_SATS = 546;
 
-export interface KeyPair {
-  privateKey: string; // multibase encoded
-  publicKey: string;  // multibase encoded
-}
+// Canonical definition lives in @originals/cel (signer adapters take it).
+export type { KeyPair } from '@originals/cel';
 
 export type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 

@@ -229,7 +229,7 @@ describe('StatusListManager', () => {
       const { validateCredential } = await import('../../../src/utils/validation');
       const v2 = manager.createStatusListCredential({
         id: 'https://example.com/status/legacy',
-        issuer: 'did:peer:issuer',
+        issuer: 'did:key:issuer',
         statusPurpose: 'revocation',
       });
       // Simulate a status list minted before the 2.0 standardization: 1.1
@@ -837,7 +837,7 @@ describe('StatusListManager', () => {
       // would treat a possibly-revoked credential as valid. It must fail closed,
       // mirroring the Data Integrity path (Verifier.verifyCredential).
       const { OriginalsSDK } = await import('../../../src');
-      const { multikey } = await import('../../../src/crypto/Multikey');
+      const { multikey } = await import('@originals/cel');
       const ed = await import('@noble/ed25519');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
 

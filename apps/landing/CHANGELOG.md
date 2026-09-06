@@ -1,5 +1,73 @@
 # @originals/landing
 
+## 0.1.3-next.2
+
+### Patch Changes
+
+- 2c931ca: Let the SDK's layer-agnostic CEL copy through the durable host-key guard, so `did:cel` resolves from storage for signed-in users.
+
+  `LifecycleManager.persistCelArtifacts` writes two copies after genesis and after every append: the webvh-hosted `<host>/<path>/cel.json`, and `cel/<did:cel digest>.json` — the conventional key `DIDManager.resolveDID`'s `did:cel` branch reads back. `isWebvhArtifactKey` only recognised `…/did.jsonl`, `…/cel.json` and `…/resources/<multibase>`, so the second key was rejected as `forbidden_path` (403), swallowed as a `cel:host-failed` warning. On the durable path that copy never landed and `did:cel` never resolved from storage. (The anonymous ephemeral host has no key guard, so only signed-in users were affected.)
+
+  The allowance is tight: exactly two segments, the first literally `cel`, the second `u<base64url>.json`. `serve()` keys on `${url.host}${url.pathname}`, so this key is only reachable as host `cel` plus `/<digest>.json` — it cannot name a path on the app's own origin, which is the static-asset shadowing the guard exists to prevent.
+
+- 2c931ca: Fix `/me/<did>` verification going red on every Original that was inscribed on Bitcoin.
+
+  `verifyOriginal` resolved the CEL through `resolveDidCel` with no `ordinalsProvider`. Inscribing appends a `migrate`/`btco` event carrying a `bitcoin-ordinals-2024` witness proof, which `verifyEventLog` fails closed on without one — so the check reported `CEL event chain did not verify` and the page showed "Verification incomplete", even though nothing was wrong with the chain. No provider can fix this in the browser: this origin proxies `/api/btc/sat|fee|broadcast`, not inscription lookups, so `HttpOrdinalsProvider.getInscriptionById` rejects by design.
+
+  The check now verifies the chain with `verifyEventLog` directly, and when the _only_ failures are anchor lookups on events **after** the `did:webvh` migrate, it re-verifies the log up to that migrate — which is exactly the claim the page makes (genesis → this `did:webvh`) — and says how much it proved: `2 of 4 signed events verified → did:cel:… · the Bitcoin anchor needs an on-chain lookup this page can't make`. A tampered genesis, a bad signature, or an error on an earlier event still fails the check. A CEL whose migrate targets a different DID is now called out separately rather than being conflated with "could not be fetched".
+
+- c9f0842: Let the demo revise an asset after creating it — a real signed `update` event appended to its event log.
+
+  Once an asset exists, a **Revise artwork** control regenerates the SVG and **Commit update** calls `asset.addResourceVersion(...)`, which appends a signed `update` event chaining the new bytes to the version before them. Revisions stack, and each one shows up in the Event log panel alongside `create` and `migrate` — the chain visibly grows rather than just the preview image changing.
+
+  Revising works at `did:cel` (free and offline, nothing hosted yet) and at `did:webvh`: the SDK now hosts the new bytes before it signs, so a published revision is fetchable at the URL its DID implies and earlier versions stay resolvable. An **inscribed** asset is refused with a stated reason — that append writes a new inscription on its satoshi, which is a paid on-chain operation rather than a demo click.
+
+  While a regenerated preview is uncommitted it is badged `not in the log yet`, Publish is disabled (publishing then would publish bytes other than the ones on screen), and a Discard control restores the committed artwork. Revising is modelled as a flag rather than a lifecycle phase, since it is authorship _at_ the current layer and never moves the asset on; the pipeline holds its current stage instead of lighting up the layer the asset hasn't reached.
+
+  Also fixes a latent bug this surfaced: `DemoAssetState` was read out of `asset.resources` **by index**, but `addResourceVersion` _appends_ a new version rather than replacing the old one — so the Resource tab and the `/me` summary hash would have stayed pinned to genesis after any revision. The snapshot now selects the newest version of each logical resource by id, and reports `resource.version`.
+
+- Updated dependencies [5f0788f]
+- Updated dependencies [c9f0842]
+  - @originals/sdk@3.0.0-next.1
+
+## 0.1.3-next.1
+
+### Patch Changes
+
+- 1b8717a: Show the asset's real Cryptographic Event Log in the live demo, replacing the SDK emitter-event stream.
+
+  The demo's first tab streamed `asset:created` / `resource:published` / `asset:migrated` — app-level notifications the SDK emits to your code. Those are not the provenance record. The asset **is** its CEL, and the landing page never showed it: the signed chain only appeared on the authenticated `/me/<did>` page.
+
+  The tab now renders the log itself, built entry by entry as the pipeline runs: each event's type, a plain-English gloss of what its signed body asserts, the `did:key` that signed it, its proof value, and — drawn _between_ entries, because it is entry N's claim about entry N-1 — the `previousEvent` digest that chains them. Entries are accented by destination layer, matching the pipeline above.
+
+  `DemoAssetState` gains a `celLog` field, read defensively from `OriginalsAsset.celLog` so an unexpected shape degrades to an empty chain rather than breaking a lifecycle step.
+
+## 0.1.3-next.0
+
+### Patch Changes
+
+- 71e5f19: **Fix: the shipped "First Light" example's credential no longer verifies — regenerated.**
+
+  The landing page's whole claim is that the visitor's browser re-checks the example rather than trusting the page. Since 2026-07-26 it had been rendering "Credential signature did not verify" to every visitor.
+
+  Cause: the example was minted 2026-07-15, and #445 then added `migratedTo`, `resourceId`, `fromLayer`, `toLayer` and `migratedAt` to `contexts/originals.json` — the exact five terms this credential's `credentialSubject` uses. Before that change `@vocab` absorbed them into `…/vocab#X`; after it they expand to `Originals:X`. `eddsa-rdfc-2022` signs over the RDF canonicalization of the _expanded_ document, so the signing bytes changed and the existing signature stopped verifying. #445's "no signature impact" note held for credentials signed and verified against the same context version, but not for ones already signed.
+
+  The example is regenerated with the current SDK, and `verifyExample()` now has a test asserting every check passes — the gap that let this ship, since all three checks fail _softly_ into a red row rather than throwing.
+
+  Worth noting for consumers generally: changing a JSON-LD context that credentials reference by URL invalidates signatures over already-issued credentials.
+
+- Updated dependencies [18fb3bf]
+- Updated dependencies [636417c]
+- Updated dependencies [ae9f8cb]
+- Updated dependencies [5e89cba]
+- Updated dependencies [00d0c07]
+- Updated dependencies [ae9f8cb]
+- Updated dependencies [0d241bc]
+- Updated dependencies [636417c]
+- Updated dependencies [ed327d9]
+  - @originals/sdk@3.0.0-next.0
+  - @originals/auth@3.0.0-next.0
+
 ## 0.1.2
 
 ### Patch Changes

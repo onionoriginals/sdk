@@ -267,3 +267,17 @@
     padding-left: var(--sp-3);
   }
 }
+
+/* ——— Custody, stated on the panel ——— */
+
+/* Neutral, not amber: this is a fact about who holds the key, not a warning.
+   The block it replaced was amber because the step was irreversible. */
+.idp-custody-note {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 62ch;
+}

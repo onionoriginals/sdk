@@ -11,11 +11,11 @@
  * resolution is described in the design doc but not wired here.
  */
 import { Verifier } from '../vc/Verifier.js';
-import { verifyEventLog } from '../cel/algorithms/verifyEventLog.js';
-import { createDidManagerKeyResolver } from '../cel/keyResolver.js';
+import { verifyEventLog } from '@originals/cel';
+import { createDidManagerKeyResolver } from '@originals/cel';
 import type { DIDManager } from '../did/DIDManager.js';
 import type { VerifiableCredential } from '../types/index.js';
-import type { EventLog, OrdinalsLookup } from '../cel/types.js';
+import type { EventLog, OrdinalsLookup } from '@originals/cel';
 
 export type VerifiableKind = 'credential' | 'eventLog' | 'unknown';
 

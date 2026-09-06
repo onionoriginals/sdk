@@ -88,6 +88,21 @@ if (smoke.status !== 0) {
 // Throttled-network TTI budget check (tti.mjs). Runs against the same preview
 // server as the smoke test so the CI gate actually enforces the interactivity
 // floor (issue #362 / LANDING-011) instead of the script only existing on disk.
+// Narrow-viewport overflow check (viewport.mjs). The demo card and the footer
+// both overflowed on phones while every other gate — which only ever looks at
+// 1440px — stayed green.
+console.log('\n[landing-ci] narrow-viewport overflow check');
+const viewport = spawnSync(
+  process.execPath,
+  [fileURLToPath(new URL('./viewport.mjs', import.meta.url)), base],
+  { cwd: appDir, stdio: 'inherit' }
+);
+if (viewport.status !== 0) {
+  stopServer();
+  console.error('[landing-ci] FAILED: narrow-viewport overflow check');
+  process.exit(viewport.status ?? 1);
+}
+
 console.log('\n[landing-ci] throttled-network TTI budget check');
 const tti = spawnSync(
   process.execPath,
@@ -99,4 +114,4 @@ if (tti.status !== 0) {
   console.error('[landing-ci] FAILED: TTI budget check');
   process.exit(tti.status ?? 1);
 }
-console.log('\n[landing-ci] PASS — build clean, lifecycle ran, zero console errors, TTI within budget');
+console.log('\n[landing-ci] PASS — build clean, lifecycle ran, zero console errors, nothing clips at 320/375/414, TTI within budget');

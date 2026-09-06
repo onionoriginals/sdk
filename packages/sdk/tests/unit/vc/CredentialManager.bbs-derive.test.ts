@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import * as bbs from '@digitalbazaar/bbs-signatures';
 import { CredentialManager, type VerifiableCredential } from '../../../src';
 import { BBSCryptosuiteManager } from '../../../src/vc/cryptosuites/bbsCryptosuite';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import { PRELOADED_CONTEXTS } from '../../../src/utils/serialization';
 
 const CIPHERSUITE = 'BLS12-381-SHA-256';

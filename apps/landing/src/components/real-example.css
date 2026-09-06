@@ -1,6 +1,8 @@
 .example-shell {
   display: grid;
-  grid-template-columns: 1fr;
+  /* Same automatic-minimum trap as .demo-body — and the same overflow:hidden
+     waiting to slice whatever exceeds it. */
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -61,9 +63,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
+  flex-wrap: wrap;
 }
 
 .example-head h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--text-lg);
 }
 

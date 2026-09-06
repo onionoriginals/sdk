@@ -50,9 +50,9 @@ Free       Hosted     Permanent + ownership
 | Layer 3 | `did:btco` | Permanent on Bitcoin; the sat IS ownership | Transferable ownership |
 
 > **Genesis is `did:cel`, not `did:peer`.** `createAsset` mints a `did:cel` from the
-> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` is `'did:cel'`. **`createDIDPeer` no longer exists** — the verifier keeps a
-> read-only path for pre-existing `did:peer:4` logs, but new assets are never created as
-> did:peer. Once an asset reaches `did:btco` there is **no `did:webvh` fallback**.
+> create-event hash (`asset.id` is that did:cel), while `asset.currentLayer` is `'did:cel'`. **`did:peer` support is removed entirely** — no creation, no
+> resolution, and no verifier read path; pre-existing `did:peer` logs no longer
+> verify. Once an asset reaches `did:btco` there is **no `did:webvh` fallback**.
 
 ### Network Mapping
 
@@ -437,7 +437,7 @@ const btcoDoc = await sdk.did.migrateToDIDBTCO(
 
 ```typescript
 const didDoc = await sdk.did.resolveDID(did: string): Promise<DIDDocument | null>
-// Supports: did:cel:*, did:webvh:*, did:btco:* (+ legacy did:peer:4 read path)
+// Supports: did:cel:*, did:webvh:*, did:btco:* (did:peer is not supported)
 ```
 
 ### Validating DID Documents
@@ -693,20 +693,16 @@ append signed events the new holder must establish a signing key in the log.
 await sdk.lifecycle.transferOwnership(asset, newOwnerBtcAddress);
 const owner = await sdk.lifecycle.getCurrentOwner(asset);  // { address, outpoint }
 
-// AUTHORING (optional) — COOPERATIVE: the outgoing controller signs the rotateKey,
-// rotating the incoming key in so the new holder can author.
-await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase, privateKey });
+// AUTHORING is sat-gated: the holder appends with their OWN key. The entry
+// commits data.author inside the signed data and is authorized by its
+// reinscription on the anchoring sat — no rotation, no key-set change.
+await asset.appendStatement({ statement: 'acquired' }, { signer: holderSigner });
 
-// AUTHORING (optional) — NON-COOPERATIVE: the new holder cannot get the seller's
-// signature. authorizeSigner reinscribes the did:btco doc with THEIR key and
-// SELF-SIGNS the rotateKey; the reinscription witness proves sat control, so the
-// verifier accepts the otherwise-unauthorized rotation. privateKey is REQUIRED.
-// It does NOT grant ownership (the sat already does) — it enables authoring.
-const { inscriptionId, did } = await sdk.lifecycle.authorizeSigner(asset, {
-  publicKeyMultibase, privateKey
-});
-// After authorizeSigner the holder is the current controller: their subsequent
-// CEL appends (e.g. update, further rotation) SIGN instead of degrading.
+// There is NO rotation on did:btco: rotateBtcoKeys always throws
+// KEY_ROTATION_NOT_PERMITTED (the controller key lineage is frozen at
+// inscription time), and the non-cooperative authorizeSigner is removed.
+// Holder entries carry ONLY statement/occurredAt/links/ext; authenticity
+// fields are creator-lineage only (CEL_HOLDER_FIELD_NOT_PERMITTED).
 ```
 
 A holder who owns the sat but has not enabled authoring (holds no controller key)

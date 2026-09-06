@@ -6,7 +6,7 @@ import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
+import { verifyEventLog } from '@originals/cel';
 
 function buildDid(id: string): DIDDocument {
   return {

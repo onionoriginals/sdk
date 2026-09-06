@@ -41,16 +41,26 @@ const privateKey = ed.utils.randomPrivateKey();
 const publicKey = await ed.getPublicKeyAsync(privateKey);
 
 // 2. Create a signer function
+//
+// The proof configuration is built FIRST and signed along with the event, so
+// build it, then hash with `celProofSigningInput`. Do not sign
+// `JSON.stringify(data)` or any other hand-rolled preimage: the log will seal
+// (or fail seal-time self-verification) and never verify.
 const signer = async (data: unknown) => {
-  const dataBytes = new TextEncoder().encode(JSON.stringify(data));
-  const signature = await ed.signAsync(dataBytes, privateKey);
-  
-  return {
-    type: 'DataIntegrityProof',
-    cryptosuite: 'eddsa-jcs-2022',
+  const config = {
+    type: CEL_PROOF_TYPE,          // 'OriginalsCelProof'
+    cryptosuite: CEL_CRYPTOSUITE,  // 'originals-cel-ed25519-jcs-v1'
     created: new Date().toISOString(),
     verificationMethod: `did:key:z${Buffer.from(publicKey).toString('base64url')}#key-0`,
     proofPurpose: 'assertionMethod',
+  };
+  const signature = await ed.signAsync(
+    celProofSigningInput(committedFields(data), config),
+    privateKey
+  );
+
+  return {
+    ...config,
     proofValue: `z${Buffer.from(signature).toString('base64url')}`,
   };
 };
@@ -139,8 +149,8 @@ Assets exist in one of three **trust layers**, each providing different levels o
    │  • No external witnesses                                 │
    │  • Instant, free, offline creation                       │
    │  • Verification: cryptographic proof only                │
-   │  • (did:peer is deprecated as a creation method;         │
-   │     verifiers keep a read-only path for legacy logs)     │
+   │  • (did:peer support is removed entirely — no read     │
+   │     path; legacy did:peer logs no longer verify)         │
    │                                                          │
    └───────────────────────────┬──────────────────────────────┘
                                │ migrate()
@@ -174,7 +184,7 @@ Assets exist in one of three **trust layers**, each providing different levels o
 **Witnesses** are third-party services that attest to an event's existence at a specific point in time. They add independent verification without requiring trust in the asset controller.
 
 ```typescript
-// WitnessProof extends DataIntegrityProof with a timestamp
+// WitnessProof extends the proof envelope with a timestamp
 interface WitnessProof extends DataIntegrityProof {
   witnessedAt: string;  // ISO 8601 timestamp from witness
 }
@@ -254,10 +264,12 @@ A transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership`) th
 accept it in old logs, but the SDK no longer emits it. Ownership is never a credential
 and is never transferred by editing a DID document.
 
-A new sat holder who wants to *author* provenance but can't get the seller's signature
-uses `authorizeSigner` (renamed from `claimOwnership`, #366): they reinscribe the
-did:btco doc with their key and self-sign a `rotateKey`. This establishes a signing key —
-it does not grant ownership, because the sat already is ownership.
+There is no rotation after the btco anchor at all: `rotateKey` is rejected
+post-anchor (so `rotateBtcoKeys` always throws, and the former non-cooperative
+`authorizeSigner` is removed). Holding the sat grants the right to APPEND —
+the holder writes with their own key, committing it in `data.author`, authorized
+by the reinscription on the anchoring sat — never control of the key set. The
+controller key lineage is frozen once the asset is inscribed.
 
 ---
 
@@ -280,7 +292,7 @@ const cel = new OriginalsCel({
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `layer` | `'peer' \| 'webvh' \| 'btco'` | Target layer for operations |
-| `signer` | `CelSigner` | Function that produces DataIntegrityProofs |
+| `signer` | `CelSigner` | Function that produces CEL proofs |
 | `config` | `OriginalsCelConfig` | Optional layer-specific configuration |
 
 #### CelSigner Type
@@ -1030,8 +1042,8 @@ The `previousEvent` hash doesn't match the actual hash of the previous event. Th
 ### "Verification failed: Invalid proof structure"
 
 Check that proofs have all required fields:
-- `type`: "DataIntegrityProof"
-- `cryptosuite`: e.g., "eddsa-jcs-2022"
+- `type`: "OriginalsCelProof" (logs sealed before the rename carry "DataIntegrityProof" and are still accepted)
+- `cryptosuite`: "originals-cel-ed25519-jcs-v1" (or "eddsa-jcs-2022" on pre-rename logs)
 - `created`: ISO 8601 timestamp
 - `verificationMethod`: DID URL
 - `proofPurpose`: e.g., "assertionMethod"

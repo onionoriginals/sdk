@@ -4,8 +4,8 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { OriginalsSDK } from '../../../src';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { verifyEventLog } from '../../../src/cel/algorithms/verifyEventLog';
-import { serializeEventLogJson, parseEventLogJson } from '../../../src/cel/serialization/json';
+import { verifyEventLog } from '@originals/cel';
+import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 
 describe('publishToWeb mints a real did:webvh (#376)', () => {
   test('binding is a SCID DID owned by the asset, not the publisher shorthand', async () => {

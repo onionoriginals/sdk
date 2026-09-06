@@ -1,5 +1,5 @@
 import type { ResourceProvider, LinkedResource, ResourceInfo, Inscription, ResourceCrawlOptions, InscriptionRefWithLocation } from './types.js';
-import { StructuredError } from '../../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 export interface OrdNodeProviderOptions {
   nodeUrl: string;
@@ -60,12 +60,16 @@ export class OrdNodeProvider implements ResourceProvider {
     return Promise.reject(this.notImplemented('getMetadata', 'refusing to report missing metadata as if resolved.'));
   }
 
-  // eslint-disable-next-line require-yield
+  // Signature is the OrdinalsProvider contract; this provider refuses rather
+  // than crawl, so it neither yields nor awaits.
+  // eslint-disable-next-line require-yield, @typescript-eslint/require-await
   async *getAllResources(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
     throw this.notImplemented('getAllResources', 'refusing to report an empty resource set as if crawled.');
   }
 
-  // eslint-disable-next-line require-yield
+  // Signature is the OrdinalsProvider contract; this provider refuses rather
+  // than crawl, so it neither yields nor awaits.
+  // eslint-disable-next-line require-yield, @typescript-eslint/require-await
   async *getAllResourcesChronological(_options: ResourceCrawlOptions = {}): AsyncGenerator<LinkedResource[]> {
     throw this.notImplemented('getAllResourcesChronological', 'refusing to report an empty resource set as if crawled.');
   }

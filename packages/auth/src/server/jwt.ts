@@ -145,10 +145,18 @@ export function getAuthCookieConfig(
 
 /**
  * Get cookie configuration for logout (clears the auth cookie)
+ *
+ * `secure` mirrors getAuthCookieConfig: a clear that drops the flag would be
+ * sent — and could be intercepted — over a channel the original never used, so
+ * a deployment that pins `secure: true` on the set must pin it here too.
  * @param cookieName - Name of the cookie to clear
+ * @param options - Cookie options; `secure` defaults to NODE_ENV === 'production'
  * @returns Cookie configuration for clearing
  */
-export function getClearAuthCookieConfig(cookieName?: string): AuthCookieConfig {
+export function getClearAuthCookieConfig(
+  cookieName?: string,
+  options?: { secure?: boolean }
+): AuthCookieConfig {
   const isProduction = process.env.NODE_ENV === 'production';
 
   return {
@@ -156,7 +164,7 @@ export function getClearAuthCookieConfig(cookieName?: string): AuthCookieConfig 
     value: '',
     options: {
       httpOnly: true,
-      secure: isProduction,
+      secure: options?.secure ?? isProduction,
       sameSite: 'strict',
       maxAge: 0, // Expire immediately
       path: '/',

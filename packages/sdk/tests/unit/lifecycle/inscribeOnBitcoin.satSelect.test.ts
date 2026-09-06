@@ -68,6 +68,47 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     expect(migration.satoshi).toBe('1777');
   });
 
+  test('accepts a MULTI-UTXO funding set and pins the identity to the first (R26)', async () => {
+    const provider = new SatSelectProvider();
+    const queried: Array<{ txid: string; vout: number }> = [];
+    provider.getFirstSatOfOutput = async (o: { txid: string; vout: number }) => { queried.push(o); return '1777'; };
+    const broadcasts: string[] = [];
+    provider.broadcastTransaction = async (hexOrObj: unknown) => { broadcasts.push(hexOrObj as string); return 'bb'.repeat(32); };
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
+    const asset = createAsset();
+
+    // The identity UTXO is the SMALLER of the two: value-descending selection
+    // would move it out of input[0] and change the DID sat.
+    const identity = { ...sampleUtxo, txid: `${'1'.repeat(62)}00`, vout: 0, value: 3_000 };
+    const topUp = { ...sampleUtxo, txid: `${'2'.repeat(62)}01`, vout: 1, value: 90_000 };
+
+    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, {
+      fundingUtxos: [identity, topUp],
+      satSigner,
+      changeAddress: sampleChangeAddress,
+      feeRate: 2
+    });
+
+    expect(result.currentLayer).toBe('did:btco');
+    expect(queried).toEqual([{ txid: identity.txid, vout: 0 }]);
+    const commit = btc.Transaction.fromRaw(Buffer.from(broadcasts[0], 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    expect(commit.inputsLength).toBe(2);
+    expect(Buffer.from(commit.getInput(0)!.txid!).toString('hex')).toBe(identity.txid);
+  });
+
+  test('rejects fundingUtxo and fundingUtxos together (INVALID_INPUT)', async () => {
+    const sdk = createSDK();
+    await expect(
+      sdk.lifecycle.inscribeOnBitcoin(createAsset(), {
+        fundingUtxo: sampleUtxo,
+        fundingUtxos: [sampleUtxo],
+        satSigner,
+        changeAddress: sampleChangeAddress,
+        feeRate: 2
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
   test('rejects fundingUtxo without satSigner/changeAddress (INVALID_INPUT)', async () => {
     const sdk = createSDK();
     const asset = createAsset();

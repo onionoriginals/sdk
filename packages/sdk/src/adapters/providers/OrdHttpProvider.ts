@@ -1,8 +1,9 @@
 /* istanbul ignore file */
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
-import { StructuredError } from '../../utils/telemetry.js';
-import { decode as decodeCbor } from '../../utils/cbor.js';
-import { hexToBytes } from '../../utils/encoding.js';
+import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
+import { StructuredError } from '@originals/cel';
+import { decode as decodeCbor } from '@originals/cel/cbor';
+import { hexToBytes } from '@originals/cel/encoding';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -224,6 +225,16 @@ export class OrdHttpProvider implements OrdinalsProvider {
     return ids
       .filter((inscriptionId) => typeof inscriptionId === 'string' && INSCRIPTION_ID_RE.test(inscriptionId))
       .map((inscriptionId) => ({ inscriptionId }));
+  }
+
+  /**
+   * SAT-SCOPED tier of the OrdinalsProvider contract (#473): enumerates only
+   * the anchorings on `opts.satoshi` via /sat/:sat + /inscription/:id.
+   * Proves the claimed anchoring exists back-linked and confirmed on that sat;
+   * does NOT check cross-sat canonicality. Throws without a sat scope.
+   */
+  async getAnchoringsForDidCel(didCel: string, opts?: { satoshi?: string }): Promise<DidCelAnchoring[]> {
+    return enumerateAnchoringsOnSat(this, didCel, opts?.satoshi, 'OrdHttpProvider');
   }
 
   // Transaction submission, status, fee estimation and inscription

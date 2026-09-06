@@ -2,7 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { GetObjectResult, LocalStorageAdapterOptions, StorageAdapter } from './StorageAdapter.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 /**
  * Node-only modules, loaded on first use rather than at import time. This

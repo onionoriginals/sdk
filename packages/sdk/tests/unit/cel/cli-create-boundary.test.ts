@@ -18,9 +18,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createCommand } from '../../../src/cel/cli/create';
-import { parseEventLogJson } from '../../../src/cel/serialization/json';
-import { createExternalReference, verifyExternalReference } from '../../../src/cel/ExternalReferenceManager';
-import { multikey } from '../../../src/crypto/Multikey';
+import { parseEventLogJson } from '@originals/cel';
+import { createExternalReference, verifyExternalReference } from '@originals/cel';
+import { multikey } from '@originals/cel';
 
 describe('CLI create command - boundary [CEL-CLI-001 / CEL-CLI-014]', () => {
   let tempDir: string;

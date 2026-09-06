@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { QuickNodeProvider } from '../../../src/adapters/providers/QuickNodeProvider';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { StructuredError } from '@originals/cel';
 
 /**
  * QuickNodeProvider speaks JSON-RPC 2.0 against a single QuickNode endpoint:

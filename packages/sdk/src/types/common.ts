@@ -1,5 +1,6 @@
 import { StorageAdapter, FeeOracleAdapter, OrdinalsProvider } from '../adapters/index.js';
-import { TelemetryHooks } from '../utils/telemetry.js';
+import type { KeyStore } from '@originals/cel';
+import { TelemetryHooks } from '@originals/cel';
 import type { LogLevel, LogOutput } from '../utils/Logger.js';
 import type { EventLoggingConfig } from '../utils/EventLogger.js';
 import type { WebVHNetworkName } from './network.js';
@@ -131,8 +132,7 @@ export interface AssetResource {
 }
 
 /**
- * Key-persistence interface: stores and retrieves multibase-encoded private
- * keys by verification method id.
+ * Key-persistence interface: canonical definition lives in @originals/cel.
  *
  * As a SIGNING authority, KeyStore is deprecated (plan 039): it requires the
  * private key to be exportable, which locks out Turnkey/KMS/HSM/passkey
@@ -140,10 +140,7 @@ export interface AssetResource {
  * per-call `{ signer }`) — or wrap a KeyStore entry via `signerFromKeyStore`.
  * KeyStore itself survives as the key-persistence interface.
  */
-export interface KeyStore {
-  getPrivateKey(verificationMethodId: string): Promise<string | null>;
-  setPrivateKey(verificationMethodId: string, privateKey: string): Promise<void>;
-}
+export type { KeyStore } from '@originals/cel';
 
 /**
  * External signer interface for DID operations (compatible with didwebvh-ts)

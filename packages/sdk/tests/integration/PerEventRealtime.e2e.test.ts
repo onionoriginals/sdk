@@ -34,7 +34,7 @@ const recOf = (p: OrdMockProvider, id: string) =>
   (p as any)['state'].inscriptionsById.get(id);
 
 describe('per-event real-time chain recovery (#407 phase 3)', () => {
-  test('real-time round-trip: create → publish → inscribe → addResourceVersion (inscribes) → rotateKey (inscribes) rebuilds the FULL current log from the sat alone', async () => {
+  test('real-time round-trip: create → publish → inscribe → addResourceVersion → appendStatement (each inscribes) rebuilds the FULL current log from the sat alone', async () => {
     const { sdk, ordinalsProvider } = makeSDK();
     const asset = await sdk.lifecycle.createAsset([
       { id: 'art', type: 'image', contentType: 'image/png', hash: contentHash('v1'), content: 'v1' }
@@ -50,9 +50,8 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     await asset.addResourceVersion('art', 'v3', 'image/png', 'to v3');
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(afterMigrate + 2);
 
-    // A cooperative rotation also inscribes.
-    const newKey = await new KeyManager().generateKeyPair('Ed25519');
-    await sdk.lifecycle.rotateBtcoKeys(asset, { publicKeyMultibase: newKey.publicKey, privateKey: newKey.privateKey }, 5);
+    // A creator statement is a sat-gated append too — it also inscribes.
+    await asset.appendStatement({ statement: 'exhibited at the gallery' });
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(afterMigrate + 3);
 
     // Fresh resolver: only the sat + provider.
@@ -62,14 +61,12 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     expect(verification?.verified).toBe(true);
     expect(recovered.id).toBe(asset.id);
     expect(recovered.currentLayer).toBe('did:btco');
-    // The reconstructed log is a PREFIX of the live hosted log — it may omit only
-    // a trailing witness-ack update that was appended AFTER (not inscribed by) the
-    // last inscription. Every authorship event is present, in order.
+    // Every post-anchor append is inscribed as it happens, so the
+    // reconstructed log is the COMPLETE live log — nothing rides off-chain.
     const recTypes = recovered.celLog!.events.map(e => e.type);
     const hostTypes = asset.celLog!.events.map(e => e.type);
-    expect(hostTypes.slice(0, recTypes.length)).toEqual(recTypes);
-    expect(recTypes).toEqual(expect.arrayContaining(['migrate', 'rotateKey']));
-    expect(recTypes.filter(t => t === 'update').length).toBeGreaterThanOrEqual(2);
+    expect(recTypes).toEqual(hostTypes);
+    expect(recTypes.filter(t => t === 'update').length).toBe(3);
     // Current media is v3 (the most-recent resource update).
     expect(recovered.resources.find(r => r.hash === contentHash('v3'))?.content).toBe('v3');
   });

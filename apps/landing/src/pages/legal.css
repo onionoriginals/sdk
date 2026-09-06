@@ -1,0 +1,48 @@
+/* '/privacy' and '/terms' — a single prose column. Type scale, spacing and
+   container all come from the tokens, so the craft bar holds unchanged. */
+
+.legal {
+  padding-top: var(--sp-24);
+}
+
+.legal-inner {
+  /* Body copy line length stays inside the 45–75ch band at every width. */
+  max-width: 68ch;
+}
+
+.legal-sub {
+  margin-top: var(--sp-4);
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+}
+
+.legal-updated {
+  margin-top: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.legal-section {
+  margin-top: var(--sp-12);
+}
+
+.legal-section h2 {
+  font-size: var(--text-lg);
+  margin-bottom: var(--sp-4);
+}
+
+.legal-section p {
+  margin-top: var(--sp-4);
+  color: var(--text-secondary);
+}
+
+.legal-list {
+  margin: var(--sp-4) 0 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  color: var(--text-secondary);
+  /* Event names are identifiers; they must not wrap mid-token at 375px. */
+  overflow-wrap: anywhere;
+}

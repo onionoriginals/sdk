@@ -3,8 +3,8 @@ import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { OriginalsSDK } from '../../../src';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey } from '../../../src/crypto/Multikey';
-import { StructuredError } from '../../../src/utils/telemetry';
+import { multikey } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 import type { ExternalSigner, ExternalVerifier } from '../../../src/types';
 
 /**

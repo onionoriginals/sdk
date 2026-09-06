@@ -12,7 +12,7 @@ import { DIDManager } from '../../src/did/DIDManager';
 import { KeyManager } from '../../src/did/KeyManager';
 import { AuditLogger } from '../../src/migration/audit/AuditLogger';
 import { validateAndNormalizeDomain } from '../../src/lifecycle/domainUtils';
-import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../../src/utils/satoshi-validation';
+import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '@originals/cel';
 import { MetricsCollector } from '../../src/utils/MetricsCollector';
 import type { DIDDocument } from '../../src/types';
 import type { MultiSigPolicy, OriginalsConfig, VerifiableCredential } from '../../src/types';

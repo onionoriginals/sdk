@@ -6,7 +6,7 @@ import { StatusListManager } from '../vc/StatusListManager.js';
 import { OriginalsConfig, KeyStore, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { DIDDocument, VerificationMethod, ServiceEndpoint } from '../types/did.js';
 import { DEFAULT_WEBVH_NETWORK, getBitcoinNetworkForWebVH, getWebVHNetworkForBitcoin } from '../types/network.js';
-import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
+import { emitTelemetry, StructuredError } from '@originals/cel';
 import { Logger } from '../utils/Logger.js';
 import { MetricsCollector } from '../utils/MetricsCollector.js';
 import { EventLogger } from '../utils/EventLogger.js';

@@ -285,3 +285,36 @@ describe('jwt', () => {
     });
   });
 });
+
+/**
+ * SEC-1 — `secure` is inferred from NODE_ENV, and the platforms this ships to
+ * do not set it. An HTTPS-only deployment must be able to say so outright
+ * rather than hope an env var is present, on BOTH halves of the cookie's life.
+ */
+describe('cookie Secure is an explicit choice, not an inference', () => {
+  const restore = process.env.NODE_ENV;
+  afterEach(() => {
+    if (restore === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = restore;
+  });
+
+  test('an explicit secure:true wins with NODE_ENV unset', () => {
+    delete process.env.NODE_ENV;
+    expect(getAuthCookieConfig('t', { secure: true }).options.secure).toBe(true);
+  });
+
+  test('the CLEAR config takes the same override — a clear must not drop the flag', () => {
+    delete process.env.NODE_ENV;
+    expect(getClearAuthCookieConfig(undefined, { secure: true }).options.secure).toBe(true);
+    expect(getClearAuthCookieConfig(undefined, { secure: true }).options.httpOnly).toBe(true);
+  });
+
+  test('without an override both still fall back to NODE_ENV', () => {
+    delete process.env.NODE_ENV;
+    expect(getAuthCookieConfig('t').options.secure).toBe(false);
+    expect(getClearAuthCookieConfig().options.secure).toBe(false);
+    process.env.NODE_ENV = 'production';
+    expect(getAuthCookieConfig('t').options.secure).toBe(true);
+    expect(getClearAuthCookieConfig().options.secure).toBe(true);
+  });
+});

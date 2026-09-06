@@ -10,7 +10,6 @@
 
 | Package | Version | Purpose | Vulnerability |
 |---------|---------|---------|---------------|
-| `@aviarytech/did-peer` | ^1.1.2 | did:peer creation | None |
 | `@noble/curves` | ^1.6.0 | Elliptic curve crypto | None |
 | `@noble/ed25519` | ^2.0.0 | Ed25519 signatures | None |
 | `@noble/hashes` | ^2.0.1 | SHA-256, SHA-512 | None |

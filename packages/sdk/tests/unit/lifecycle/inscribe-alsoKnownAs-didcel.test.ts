@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../../src';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { deriveDidCel } from '../../../src/cel/celDid';
+import { deriveDidCel } from '@originals/cel';
 
 describe('inscribeOnBitcoin — did:cel back-link in alsoKnownAs', () => {
   test('inscribed btco doc back-links the did:cel; enumerable via getAnchoringsForDidCel', async () => {

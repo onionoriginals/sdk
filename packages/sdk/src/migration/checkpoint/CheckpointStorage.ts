@@ -97,7 +97,7 @@ export class CheckpointStorage {
           this.checkpoints.set(checkpointId, checkpoint);
           return checkpoint;
         }
-      } catch (error) {
+      } catch (_error) {
         // Checkpoint not found in storage
       }
     }

@@ -18,7 +18,7 @@ import { describe, test, expect } from 'bun:test';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 import type { VerifiableCredential, ExternalSigner, OriginalsConfig } from '../../../src/types';
 
 const defaultConfig: OriginalsConfig = {

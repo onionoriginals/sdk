@@ -38,7 +38,7 @@ import type {
   ResourceType,
 } from './types.js';
 import { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './types.js';
-import { base64, utf8 } from '../utils/encoding.js';
+import { base64, utf8 } from '@originals/cel/encoding';
 
 /**
  * Regular expression for validating MIME types according to RFC 6838.

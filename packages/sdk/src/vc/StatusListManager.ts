@@ -5,7 +5,7 @@ import {
   StatusPurpose,
 } from '../types/index.js';
 import { gzipBytes, boundedGunzip } from './utils/bounded-decompress.js';
-import { base64url } from '../utils/encoding.js';
+import { base64url } from '@originals/cel/encoding';
 
 /**
  * Options for creating a new status list.

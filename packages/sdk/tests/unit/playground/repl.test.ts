@@ -154,7 +154,11 @@ describe('Playground REPL', () => {
   test('does not show SDK info logs', async () => {
     const output = await runRepl(['create', 'exit']);
     expect(output).not.toContain('[SDK]');
-    expect(output).not.toContain('INFO');
+    // Match the logger's line shape (`[<iso>] INFO  [Component]`), not the bare
+    // word: `create` prints a base64url did:cel, and one in a few hundred of
+    // those contains "INFO" by chance. That lost a CI run — the DID was
+    // did:cel:uEiCcv2y53h9ih_LH2oyuI3tmINFOuLGs2PewprnrXlF-KQ.
+    expect(output).not.toMatch(/\]\s+(INFO|DEBUG|WARN|ERROR)\s+\[/);
     expect(output).not.toContain('Initializing Originals SDK');
   });
 

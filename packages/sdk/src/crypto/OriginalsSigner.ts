@@ -6,15 +6,15 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { multikey } from './Multikey.js';
+import { multikey } from '@originals/cel';
 import { signerForKeyType } from './Signer.js';
 import { signingInput } from './signingInput.js';
-import { CEL_CRYPTOSUITE } from '../cel/proofVerification.js';
-import { StructuredError } from '../utils/telemetry.js';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '@originals/cel';
+import { StructuredError } from '@originals/cel';
 import type { KeyStore, ExternalSigner } from '../types/common.js';
 import type { KeyPair } from '../types/bitcoin.js';
-import type { DataIntegrityProof } from '../cel/types.js';
-import type { CelSigner } from '../cel/layers/PeerCelManager.js';
+import type { DataIntegrityProof } from '@originals/cel';
+import type { CelSigner } from '@originals/cel';
 
 export interface OriginalsSigner {
   /** Absolute verification method id, e.g. "did:key:z6Mk…#z6Mk…". */
@@ -158,7 +158,7 @@ export function toCelSigner(s: OriginalsSigner): CelSigner {
   return async (data: unknown): Promise<DataIntegrityProof> => {
     // Config first, then sign over config + event (plan 042).
     const config = {
-      type: 'DataIntegrityProof' as const,
+      type: CEL_PROOF_TYPE,
       cryptosuite: CEL_CRYPTOSUITE,
       created: new Date().toISOString(),
       verificationMethod,

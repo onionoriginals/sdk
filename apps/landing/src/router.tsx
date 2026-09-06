@@ -1,16 +1,22 @@
 /**
- * Minimal client-side routing — no react-router. Three views: the landing page
- * ('/'), Your Originals ('/me'), and a single Original's detail page
- * ('/me/<encoded did>'). navigate() pushes history and notifies subscribers;
- * useLocationPath() re-renders on navigate + browser back/forward.
+ * Minimal client-side routing — no react-router. Five views: the landing page
+ * ('/'), Your Originals ('/me'), a single Original's detail page
+ * ('/me/<encoded did>'), and the two legal pages ('/privacy', '/terms').
+ * navigate() pushes history and notifies subscribers; useLocationPath()
+ * re-renders on navigate + browser back/forward.
+ *
+ * There is no not-found state, by design: anything unrecognised is the landing
+ * page, so a mistyped URL lands somewhere useful rather than on an error.
  */
 import { useEffect, useState } from 'react';
 
-export type RouteName = 'landing' | 'your-originals' | 'original-detail';
+export type RouteName = 'landing' | 'your-originals' | 'original-detail' | 'privacy' | 'terms';
 
 export function routeForPath(pathname: string): RouteName {
   if (pathname === '/me') return 'your-originals';
   if (pathname.startsWith('/me/') && didFromPath(pathname)) return 'original-detail';
+  if (pathname === '/privacy') return 'privacy';
+  if (pathname === '/terms') return 'terms';
   return 'landing';
 }
 

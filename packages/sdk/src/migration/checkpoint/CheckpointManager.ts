@@ -14,7 +14,7 @@ import { CredentialManager } from '../../vc/CredentialManager.js';
 import { CheckpointStorage, TOMBSTONE_MARKER, CHECKPOINT_KEY_PREFIX } from './CheckpointStorage.js';
 import { resolveMigrationStorage } from '../storage/MigrationStorage.js';
 import { Logger } from '../../utils/Logger.js';
-import { emitTelemetry, emitError, StructuredError } from '../../utils/telemetry.js';
+import { emitTelemetry, emitError, StructuredError } from '@originals/cel';
 
 /**
  * Prefix under which pending-deletion markers live. Each marker is ONE

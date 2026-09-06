@@ -2,8 +2,8 @@
   "title": "First Light",
   "medium": "Artwork",
   "dids": {
-    "did:cel": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
-    "did:webvh": "did:webvh:QmWFcneg2iKFwgbqDVCVTDmk3snraYH8TJRiqsBX3SLz9c:magby.originals.build:examples:first-light"
+    "did:cel": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
+    "did:webvh": "did:webvh:QmTmT6hf5tLcf5kjrBUFn5tYc6KcUQcRwvvWGFdtGZ7Lac:magby.originals.build:ueibapl3jud_-pk44pwonlavj-5znsd97opbjyybfpvxe0g"
   },
   "resources": [
     {
@@ -18,13 +18,13 @@
     }
   ],
   "provenance": {
-    "createdAt": "2026-07-16T05:56:22.039Z",
-    "creator": "did:cel:uEiD6909LPnH10_myIoEODhInq6jVmhbAl0hR_i0bpUpDKQ",
+    "createdAt": "2026-08-16T05:28:08.278Z",
+    "creator": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
     "migrations": [
       {
         "from": "did:cel",
         "to": "did:webvh",
-        "timestamp": "2026-07-16T05:56:22.055Z"
+        "timestamp": "2026-08-16T05:28:08.292Z"
       }
     ],
     "resourceUpdates": []

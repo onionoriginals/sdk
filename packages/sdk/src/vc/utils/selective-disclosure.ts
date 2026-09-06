@@ -11,7 +11,7 @@
 import jsonld from 'jsonld';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { base64url } from '../../utils/encoding.js';
+import { base64url } from '@originals/cel/encoding';
 
 // Specification default recommended URN scheme to use for skolemization
 const CUSTOM_URN_SCHEME = 'custom-scheme';
@@ -496,10 +496,11 @@ export const canonicalizeAndGroup = async (
     await skolemizeCompactJsonLd(document, CUSTOM_URN_SCHEME, options);
   const deskolemizedNQuads = await toDeskolemizedNQuads(skolemizedCompactDocument, options);
 
-  let { nquads, labelMap } =
+  // Only labelMap is reassigned below; nquads is not.
+  const { nquads, labelMap: canonicalLabelMap } =
     await labelReplacementCanonicalizeNQuads(labelMapFactoryFunction, deskolemizedNQuads, options);
 
-  labelMap = stripBlankNodePrefixes(labelMap);
+  const labelMap = stripBlankNodePrefixes(canonicalLabelMap);
   const selections = new Map<string, SelectionResult>();
   for (const [name, pointers] of Object.entries(groupDefinitions)) {
     selections.set(name, await selectCanonicalNQuads(

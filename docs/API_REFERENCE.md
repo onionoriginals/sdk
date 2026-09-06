@@ -112,8 +112,8 @@ Manages Decentralized Identifier operations across all three protocol layers.
 > **Genesis is not created here.** Assets are minted offline via
 > `sdk.lifecycle.createAsset(...)`, which appends a `create` event to the asset's
 > CEL and derives a `did:cel` genesis identifier (`asset.id`). There is no
-> `createDIDPeer` — `did:peer` is deprecated as a creation method (the verifier
-> keeps a read-only path for pre-existing `did:peer:4` logs). `DIDManager` covers
+> `createDIDPeer` — `did:peer` support is removed entirely (no creation,
+> resolution, or verifier read path). `DIDManager` covers
 > the public/on-chain layers (`did:webvh`, `did:btco`) and resolution.
 
 #### `createDIDWebVH(options)`
@@ -193,7 +193,7 @@ const document = await sdk.did.resolveDID('did:webvh:example.com:alice');
 ```
 
 **Supported Methods:** `did:cel` (genesis), `did:webvh`, `did:btco`, `did:key`
-(`did:peer` resolves for legacy read only).
+(`did:peer` is not supported and resolves to null).
 
 #### `loadDIDLog(path)`
 
@@ -358,24 +358,25 @@ Read ownership **live** from Bitcoin (never from a log event). Returns
 const owner = await sdk.lifecycle.getCurrentOwner(asset);
 ```
 
-#### `rotateBtcoKeys(asset, newVerificationMethod, feeRate?)`
+#### `rotateBtcoKeys(asset, newVerificationMethod, feeRate?)` — removed capability
 
-Cooperative key rotation: reinscribe the same-id did:btco doc with a new key, signed by
-the outgoing controller (appends a `rotateKey` event). `privateKey` is optional here.
+Always throws `KEY_ROTATION_NOT_PERMITTED`: `rotateKey` is rejected after the
+btco anchor, and a did:btco asset is definitionally past it. The controller key
+lineage is FROZEN at inscription time. A sat holder authors with their OWN key
+via `asset.appendStatement(...)` — a sat-gated append, no rotation involved.
 
-#### `authorizeSigner(asset, newVerificationMethod, feeRate?)`
+> **Also removed:** `authorizeSigner` (formerly `claimOwnership`, #366) — the
+> non-cooperative rotation path. Holding the sat grants the right to APPEND,
+> never control of the key set.
 
-Author-enablement (renamed from `claimOwnership`, #366). Does **not** grant or claim
-ownership — the sat is ownership. It lets a sat holder who cannot obtain the seller's
-signature establish a signing key so they can author new provenance: they reinscribe the
-did:btco doc with THEIR key and **self-sign** the `rotateKey`. `privateKey` is REQUIRED.
+#### `asset.appendStatement(data, opts?)`
 
-```typescript
-await sdk.lifecycle.authorizeSigner(asset, {
-  publicKeyMultibase: 'z6Mk...',
-  privateKey: 'z...'  // required — self-signs the rotation
-});
-```
+Append a free-form provenance statement (`{ statement?, occurredAt?, links?,
+ext? }`) — the write a sat holder makes. On a did:btco asset the entry commits
+the signer's `data.author` and is inscribed on the anchoring sat (the sat gate
+is its authorization); a non-lineage signer attempting authenticity fields
+(e.g. via `addResourceVersion`) fails locally with
+`CEL_HOLDER_FIELD_NOT_PERMITTED` before anything is paid.
 
 #### `resolveAssetFromSat(sat)`
 

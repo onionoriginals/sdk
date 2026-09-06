@@ -4,7 +4,7 @@ import { describe, test, expect } from 'bun:test';
 
 /** Inlined from bbs.utils.part.ts */
 import { BBSCryptosuiteUtils } from '../../../src';
-import * as cbor from '../../../src/utils/cbor';
+import * as cbor from '@originals/cel/cbor';
 
 function u8(len: number, start: number = 0): Uint8Array {
   const a = new Uint8Array(len);

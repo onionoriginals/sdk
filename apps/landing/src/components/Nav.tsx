@@ -19,7 +19,7 @@ function Wordmark() {
     <a
       className="nav-wordmark"
       href="#top"
-      aria-label={`${site.wordmark} — home`}
+      aria-label={`${site.wordmark} ${nav.homeAriaSuffix}`}
       onClick={(e) => onSectionClick(e, '#top')}
     >
       <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -34,8 +34,14 @@ function Wordmark() {
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { isAuthenticated, user, signOut } = useAuth();
+  const { isAuthenticated, user, signOut, reauth, cancelReauth, signOutNotice } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+
+  // A signing-session refresh drives the same modal: beginReauth() has already
+  // sent the code, so the modal opens straight on the OTP step.
+  useEffect(() => {
+    if (reauth.active) setLoginOpen(true);
+  }, [reauth.active]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -48,7 +54,7 @@ export function Nav() {
     <header className="nav" data-scrolled={scrolled || undefined}>
       <div className="container nav-inner">
         <Wordmark />
-        <nav className="nav-links" aria-label="Primary">
+        <nav className="nav-links" aria-label={nav.primaryAria}>
           {nav.links.map((link) => (
             <a key={link.href} href={link.href} onClick={(e) => onSectionClick(e, link.href)}>
               {link.label}
@@ -83,18 +89,38 @@ export function Nav() {
                 <span className="nav-email-dot" aria-hidden="true" />
                 {user!.email}
               </span>
-              <button className="nav-signout" onClick={() => signOut()}>Sign out</button>
+              {/* Gated on a refresh in flight: the creator may have BTC at a
+                  deposit address for the in-flight Original, and signing out
+                  resets the demo out from under it. signOut() guards this too,
+                  for every other surface. */}
+              <button
+                className="nav-signout"
+                disabled={reauth.active}
+                title={reauth.active ? nav.signOutBlocked : undefined}
+                onClick={() => signOut()}
+              >
+                {nav.signOut}
+              </button>
             </div>
           ) : (
-            <button className="btn btn-primary nav-cta" onClick={() => setLoginOpen(true)}>
-              Sign in
-            </button>
+            <>
+              <button className="nav-signin" onClick={() => setLoginOpen(true)}>
+                {nav.signIn}
+              </button>
+              <a
+                className="btn btn-primary nav-cta"
+                href={nav.cta.href}
+                onClick={(e) => onSectionClick(e, nav.cta.href)}
+              >
+                {nav.cta.label}
+              </a>
+            </>
           )}
           <button
             type="button"
             className="nav-menu-btn"
             aria-expanded={open}
-            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-label={open ? nav.closeMenu : nav.openMenu}
             onClick={() => setOpen((v) => !v)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -108,7 +134,18 @@ export function Nav() {
         </div>
       </div>
       {open && (
-        <nav className="nav-mobile" aria-label="Mobile">
+        <nav className="nav-mobile" aria-label={nav.mobileAria}>
+          {!isAuthenticated && (
+            <a
+              href={nav.cta.href}
+              onClick={(e) => {
+                setOpen(false);
+                onSectionClick(e, nav.cta.href);
+              }}
+            >
+              {nav.cta.label}
+            </a>
+          )}
           {nav.links.map((link) => (
             <a
               key={link.href}
@@ -126,7 +163,16 @@ export function Nav() {
           </a>
         </nav>
       )}
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      {signOutNotice && (
+        <p className="nav-signout-notice" role="status">{signOutNotice}</p>
+      )}
+      <LoginModal
+        open={loginOpen}
+        onClose={() => {
+          setLoginOpen(false);
+          if (reauth.active) cancelReauth();
+        }}
+      />
     </header>
   );
 }

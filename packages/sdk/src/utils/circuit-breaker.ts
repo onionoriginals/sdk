@@ -1,4 +1,4 @@
-import { StructuredError } from './telemetry.js';
+import { StructuredError } from '@originals/cel';
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 

@@ -2,7 +2,7 @@
 /**
  * CLI Resolve Command
  *
- * Resolves a DID (did:peer, did:webvh, or did:btco) and outputs the DID Document.
+ * Resolves a DID (did:webvh or did:btco) and outputs the DID Document.
  *
  * Usage: originals-cel resolve <did> [options]
  */
@@ -54,7 +54,7 @@ export async function resolveCommand(flags: ResolveFlags): Promise<ResolveResult
   if (!did.startsWith('did:')) {
     return {
       success: false,
-      message: 'Error: Invalid DID format. Must start with "did:" (e.g., did:peer:..., did:webvh:..., did:btco:...)',
+      message: 'Error: Invalid DID format. Must start with "did:" (e.g., did:webvh:..., did:btco:...)',
     };
   }
 

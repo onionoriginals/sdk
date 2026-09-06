@@ -27,8 +27,8 @@ import {
   type CelSigner,
   type ExternalReference,
 } from '../../src';
-import { multikey } from '../../src/crypto/Multikey';
-import { canonicalizeEvent } from '../../src/cel/canonicalize';
+import { multikey } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel';
 
 /**
  * Creates a real Ed25519 signer so that verifyEventLog performs full

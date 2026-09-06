@@ -4,7 +4,7 @@ import * as secp256k1 from '@noble/secp256k1';
 import { p256 } from '@noble/curves/nist.js';
 import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '../../../src/crypto/Multikey';
+import { multikey } from '@originals/cel';
 
 const secpPrivMb = (bytes: Uint8Array) => multikey.encodePrivateKey(bytes, 'Secp256k1');
 const secpPubMb = (bytes: Uint8Array) => multikey.encodePublicKey(bytes, 'Secp256k1');
