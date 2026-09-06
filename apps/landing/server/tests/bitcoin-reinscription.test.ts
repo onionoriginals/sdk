@@ -26,12 +26,12 @@ async function fixture() {
   const blockHash = '11'.repeat(32), previousTxid = '22'.repeat(32), feeTxid = '44'.repeat(32);
   const snapshot: SatSnapshot = { network: 'regtest', sat: '5000000000', tipBefore: { height: 101, hash: blockHash }, tipAfter: { height: 101, hash: blockHash }, indexTip: { height: 101, hash: blockHash }, indexHealthy: true, enumerationComplete: true,
     blocks: [{ height: 101, hash: blockHash, txids: [previousTxid] }], ownership: { owner: payment.address!, satpoint: previousTxid + ':0:0' }, publications: [{ id: previousTxid + 'i0', revealTxid: previousTxid, network: 'regtest', sat: '5000000000', confirmed: true, creation: { height: 101, blockHash, transactionIndex: 0, inscriptionIndex: 0 }, body: { status: 'complete', mediaType: 'application/cel', bytes: encodeDocument(history, 'json'), metadata: null } }] };
-  let broadcasts = 0;
-  const provider = { getFirstSatOfOutput: async () => snapshot.sat, getSatSnapshot: async () => snapshot, broadcastTransaction: async (raw: unknown) => { broadcasts++; return btc.Transaction.fromRaw(Buffer.from(raw as string, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true }).id; }, getTransactionStatus: async () => ({ confirmed: false }) } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+  let broadcasts = 0, scans = 0, classifications = 0;
+  const provider = { getFirstSatOfOutput: async () => snapshot.sat, getSatSnapshot: async () => { scans++; return snapshot; }, broadcastTransaction: async (raw: unknown) => { broadcasts++; return btc.Transaction.fromRaw(Buffer.from(raw as string, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true }).id; }, getTransactionStatus: async () => ({ confirmed: false }) } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
   const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'cel3-reinscription-')) });
   store.bindDepositAddress('creator', 'regtest', payment.address!);
   let feeInscribed = false, extraIdentitySat = false;
-  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, ordinals: { outpointInscriptions: async outpoint => outpoint.txid === previousTxid || feeInscribed ? [outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])] : [] } });
+  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, ordinals: { outpointInscriptions: async outpoint => { classifications++; return outpoint.txid === previousTxid || feeInscribed ? [outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])] : []; } } });
   const invoke = async (document = delta, metadata = false, alter?: (raw: string) => string) => {
     const prepared = await prepareInscriptionOnSat({ provider, network: 'regtest', fundingUtxos: [{ txid: previousTxid, vout: 0, value: 546, scriptPubKey: Buffer.from(payment.script).toString('hex') }, { txid: feeTxid, vout: 0, value: 100000, scriptPubKey: Buffer.from(payment.script).toString('hex') }], changeAddress: payment.address!, feeRate: 2,
       satSigner: { signAndFinalizeCommitPsbt: async psbt => { const tx = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), { allowUnknownOutputs: true }); tx.sign(key); tx.finalize(); return tx.hex; } },
@@ -39,7 +39,11 @@ async function fixture() {
     const request = new Request('http://localhost/api/btc/inscribe', { method: 'POST', headers: { 'content-type': 'application/json', cookie: serializeCookie(getAuthCookieConfig(signToken('creator', 'local@example.com', undefined, { secret: jwtSecret }))) }, body: JSON.stringify({ ...prepared, revealTxHex: alter ? alter(prepared.revealTxHex) : prepared.revealTxHex }) });
     return routes.inscribe(request, new URL(request.url));
   };
-  return { invoke, history, delta, snapshot, broadcasts: () => broadcasts, inscribeFee: () => { feeInscribed = true; }, extraSat: () => { extraIdentitySat = true; } };
+  const quotaRequest = async (clientIp: string) => {
+    const req = new Request('http://localhost/api/btc/fee', { headers: { cookie: serializeCookie(getAuthCookieConfig(signToken('creator', 'local@example.com', undefined, { secret: jwtSecret }))) } });
+    return routes.fee(req, new URL(req.url), clientIp);
+  };
+  return { invoke, quotaRequest, stored: () => store.list('creator'), scans: () => scans, classifications: () => classifications, history, delta, snapshot, broadcasts: () => broadcasts, inscribeFee: () => { feeInscribed = true; }, extraSat: () => { extraIdentitySat = true; } };
 }
 
 test('accepts current-controller CEL delta on the first inscribed input and persists before submission', async () => {
@@ -79,4 +83,50 @@ test('rejects holder-only signatures and ambiguous inscription scripts before br
     });
     expect(response.status).toBe(400); expect(f.broadcasts()).toBe(0);
   }
+});
+
+
+test('bounds refused controller continuations before expensive ordinal classification and full sat scans', async () => {
+  const f = await fixture();
+  const holder = createLocalSigner('Ed25519', new Uint8Array(32).fill(9));
+  const forged = { log: [await signEvent(f.delta.log[0].event, holder)] };
+  for (let i = 0; i < 10; i++) expect((await f.invoke(forged)).status).toBe(400);
+  expect(f.scans()).toBe(10);
+  const classifications = f.classifications();
+  const refused = await f.invoke(forged);
+  expect(refused.status).toBe(429);
+  expect((await refused.json()).error).toBe('inscribe_user_cap');
+  expect(f.scans()).toBe(10);
+  expect(f.classifications()).toBe(classifications);
+  expect(f.broadcasts()).toBe(0);
+});
+
+test('inscription admission shares the authenticated provider quota with adjacent routes', async () => {
+  const f = await fixture();
+  for (let i = 0; i < 120; i++) await f.quotaRequest(`192.0.2.${i}`);
+  const response = await f.invoke();
+  expect(response.status).toBe(429);
+  expect((await response.json()).error).toBe('user_quota_cap');
+  expect(f.scans()).toBe(0);
+  expect(f.classifications()).toBe(0);
+  expect(f.broadcasts()).toBe(0);
+});
+
+
+test('direct HTTP submission rejects witness signature corruption with unchanged transaction ids before persistence', async () => {
+  const f = await fixture();
+  const response = await f.invoke(f.delta, false, raw => {
+    const tx = btc.Transaction.fromRaw(Buffer.from(raw, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    const id = tx.id;
+    const witness = tx.getInput(0).finalScriptWitness!.map(item => new Uint8Array(item));
+    witness[0][0] ^= 1;
+    tx.updateInput(0, { finalScriptWitness: witness }, true);
+    expect(tx.id).toBe(id);
+    return tx.hex;
+  });
+  expect(response.status).toBe(400);
+  expect((await response.json()).error).toBe('invalid_inscription_reveal');
+  expect(f.broadcasts()).toBe(0);
+  expect(f.stored()).toHaveLength(0);
+  expect(f.classifications()).toBe(0);
 });

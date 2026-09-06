@@ -10,6 +10,7 @@
  * identifier is part of the contract: Turnkey sub-org id, never an email.
  */
 import { describe, test, expect } from 'bun:test';
+import { inscriptionFixture } from './inscription-pair-fixture';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -221,6 +222,7 @@ describe('inscribe-path transitions (R29)', () => {
   const USER_P2WPKH = btc.p2wpkh(USER_PUB, btc.TEST_NETWORK);
   const USER_ADDRESS = USER_P2WPKH.address!;
   const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
+  const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
   function buildPair(fundingTxid = 'a'.repeat(64)) {
     const commit = new btc.Transaction();
@@ -230,7 +232,7 @@ describe('inscribe-path transitions (R29)', () => {
       sequence: 0xfffffffd,
       witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n },
     });
-    commit.addOutputAddress(USER_ADDRESS, 20_000n, btc.TEST_NETWORK);
+    commit.addOutputAddress(INSCRIPTION.address, 20_000n, btc.TEST_NETWORK);
     commit.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
     commit.sign(USER_PRIV);
     commit.finalize();
@@ -239,11 +241,10 @@ describe('inscribe-path transitions (R29)', () => {
       txid: commit.id,
       index: 0,
       sequence: 0xfffffffd,
-      witnessUtxo: { script: USER_P2WPKH.script, amount: 20_000n },
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
     });
     reveal.addOutputAddress(USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
-    reveal.sign(USER_PRIV);
-    reveal.finalize();
+    INSCRIPTION.finalize(reveal, commit);
     return {
       signedCommitHex: hex.encode(commit.extract()),
       commitTxId: commit.id,

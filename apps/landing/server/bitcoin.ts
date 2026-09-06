@@ -15,7 +15,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
-import { isValidBitcoinAddress, validateSatoshiNumber } from '@originals/sdk';
+import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
@@ -1425,7 +1425,7 @@ export function createBitcoinRoutes(deps: {
   const inscribe: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(clientIp);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
@@ -1557,6 +1557,25 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal output must pay changeAddress.' }, 400);
     }
 
+    // Transaction ids exclude witness bytes. Validate the committed script and
+    // reveal signature before persisting or exposing the parent to the network.
+    try {
+      validateInscriptionReveal(commit, reveal);
+    } catch {
+      return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
+    }
+
+    // Cheap syntax, transaction shape and bound-address checks precede this
+    // slot. Every provider-backed attempt consumes it, including refused
+    // continuations, so invalid controller proofs cannot trigger unlimited
+    // full sat scans.
+    const perUser = inscribeUserLimiter.check(sub);
+    if (!perUser.allowed) {
+      return json({ error: 'inscribe_user_cap' }, 429, {
+        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+      });
+    }
+
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
     // client can declare any outpoint, and an inscribed one becomes the new DID sat or burns as fee.
     const declaredUtxos = declared.map((u) => ({ txid: u.txid!, vout: u.vout!, value: typeof u.value === 'number' ? u.value : 0 }));
@@ -1574,16 +1593,6 @@ export function createBitcoinRoutes(deps: {
         inscriptionIds: () => deps.ordinals!.outpointInscriptions(declaredUtxos[0]),
       });
       if (!authorized) return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'An inscribed input requires an authorized CEL continuation on the identity sat; fee inputs must carry no inscriptions.' }, 400);
-    }
-
-    // Consume a per-user slot only now that the request has proven valid —
-    // malformed submissions must not burn the hourly cap for free (mirrors
-    // the funding route's validate-before-consuming rule).
-    const perUser = inscribeUserLimiter.check(sub);
-    if (!perUser.allowed) {
-      return json({ error: 'inscribe_user_cap' }, 429, {
-        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
-      });
     }
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry
@@ -1734,7 +1743,7 @@ export function createBitcoinRoutes(deps: {
    *    rebroadcast. Retire the artifacts only at the retention horizon.
    *    One that is STILL unconfirmed
    *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
-   *    copy — a reveal evicted from the mempool has no other way back.
+   *    pair, commit first — either or both may have left the mempool.
    */
   const inscribeList: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
@@ -1899,6 +1908,10 @@ export function createBitcoinRoutes(deps: {
       const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
       if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
         store.markRebroadcast(sub, r.commitTxId);
+        // Both transactions can disappear from the mempool. Replaying the
+        // exact retained parent first also works when it is already known;
+        // an ambiguous parent failure retains the pair for the next attempt.
+        if (r.signedCommitHex && await broadcastIdempotent(r.signedCommitHex)) continue;
         await broadcastIdempotent(r.revealTxHex);
       }
     }
