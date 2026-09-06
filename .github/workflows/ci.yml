@@ -110,7 +110,9 @@ jobs:
           node-version: "20.10.0"
 
       - name: Verify built packages import under Node ESM
-        run: node scripts/verify-esm.mjs
+        run: |
+          node --test scripts/verify-esm.test.mjs
+          node scripts/verify-esm.mjs
 
       - name: Verify SDK public types match the default CEL 3 API
         working-directory: packages/sdk
