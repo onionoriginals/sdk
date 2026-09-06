@@ -213,7 +213,10 @@ export class BitcoinPublications {
         // prepareInscriptionOnSat has already derived this boundary sat from
         // the selected output's exact sat ranges. Later publications must
         // additionally match the accepted inscription's observed location.
-        if ((state.layer === "btco" || snapshot.ownership.satpoint !== null) && snapshot.ownership.satpoint !== expectedPoint)
+        if (
+          (state.layer === "btco" || snapshot.ownership.satpoint !== null) &&
+          snapshot.ownership.satpoint !== expectedPoint
+        )
           invalid(
             "ASSET_SAT_ALIGNMENT",
             "Identity funding input must contain the observed identity sat as its first sat",
@@ -294,18 +297,22 @@ export class BitcoinPublications {
           document,
           ...(baseHead ? { baseHead } : {}),
         };
-        const candidates = proposed.state.resources.filter(
-          (resource) =>
-            !accepted ||
-            accepted.resources.find((previous) => previous.id === resource.id)
-              ?.digestMultibase !== resource.digestMultibase ||
-            accepted.resources.find((previous) => previous.id === resource.id)
-              ?.mediaType !== resource.mediaType,
+        const proposedState = proposed.state;
+        const previousResources = new Map(
+          accepted?.resources.map((resource) => [resource.id, resource]),
         );
+        const candidates = proposedState.resources.filter((resource) => {
+          const previous = previousResources.get(resource.id);
+          return (
+            !previous ||
+            previous.digestMultibase !== resource.digestMultibase ||
+            previous.mediaType !== resource.mediaType
+          );
+        });
         if (
           inlineResourceId !== undefined &&
           inlineResourceId !== null &&
-          !proposed.state.resources.some(
+          !proposedState.resources.some(
             (resource) => resource.id === inlineResourceId,
           )
         )

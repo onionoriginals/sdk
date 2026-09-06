@@ -58,3 +58,24 @@ const previousSigner: CelSigner = {
 };
 void previousInput;
 void previousSigner;
+
+
+// Network types must be reachable through the supported /types export map.
+import type {
+  SatProvider,
+  AssetResolution,
+  PreparedWebPublication,
+  BitcoinPublicationOptions,
+  PreparedBitcoinPublication,
+  SubmittedBitcoinAsset,
+  InscriptionRecoveryStore,
+} from "@originals/sdk/types";
+declare const satProvider: SatProvider;
+declare const publicationOptions: BitcoinPublicationOptions;
+declare const recoveryStore: InscriptionRecoveryStore;
+const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider });
+const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
+const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
+const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
+const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat(prepared.transactions.satoshi);
+void hosted; void submitted; void resolved;

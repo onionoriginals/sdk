@@ -5,11 +5,10 @@ bytes. An Original's controller authorizes its history; Bitcoin sat possession i
 a separate concept, established by on-chain observations rather than a signature
 alone.
 
-This development snapshot makes CEL 3 the default local SDK API. Network
-publication, asset resolution, and the landing's new-format journey are still
-being integrated. Use a matching source build during this transition; previously
-published packages can expose the preceding API. This is not a completed Bitcoin
-issuance or release flow.
+SDK 3.0.0 uses CEL 3 throughout local mutation, WebVH publication and cold
+recovery, Bitcoin publication, and fresh asset/DID resolution. Earlier asset
+formats are not accepted. Publishing returns explicit prepared/submitted states;
+only fresh provider evidence establishes an accepted Bitcoin head.
 
 ## Create, edit, recover
 
@@ -71,9 +70,9 @@ bypassing signatures or supplied-byte validation.
 - `@originals/sdk/testing`: explicit provider test doubles.
 
 The default SDK retains standalone WebVH identity helpers used by auth. Those
-helpers do not establish an asset's publication. The new lifecycle has no network
-writer or previous-format fallback; offline Bitcoin history cannot establish
-current ownership or accepted on-sat state.
+helpers do not establish an asset's publication. The lifecycle provides explicit
+hosted and Bitcoin writers with durable retry; offline Bitcoin history alone
+cannot establish current ownership or accepted on-sat state.
 
 ## Command line
 
@@ -90,7 +89,7 @@ transactions. See `originals-cel --help` and [the API guide](V3.md).
 ## Documentation
 
 [The CEL 3 API guide](V3.md) describes types, options, limits, recovery, removed
-previous-format exports, and remaining integration work. Protocol rules are in
+previous-format exports, and publication/recovery requirements. Protocol rules are in
 [the selected profile](../../specs/originals-cel-v3-profile.md) and
 [authority contract](../../specs/originals-cel-v3-authority.md).
 

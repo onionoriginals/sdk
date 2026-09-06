@@ -81,7 +81,7 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
     const metadataHex = await reader.metadata(id);
     if (metadataHex !== null && (typeof metadataHex !== 'string' || !/^(?:[0-9a-fA-F]{2})*$/.test(metadataHex)))
       throw new Error('Raw metadata bytes unavailable');
-    const metadata = metadataHex === null ? null : hexToBytes(metadataHex as string);
+    const metadata = metadataHex === null ? null : hexToBytes(metadataHex);
     contentBytes += (content?.length ?? 0) + (metadata?.length ?? 0);
     if (contentBytes > 32 * 1024 * 1024) throw new Error('Sat observation exceeds 32 MiB');
     publications.push({ id, revealTxid: txid, network: before.network, sat: satoshi, confirmed: true,

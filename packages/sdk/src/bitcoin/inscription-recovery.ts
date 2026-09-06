@@ -78,7 +78,7 @@ function validate(prepared: PreparedInscriptionOnSat): void {
         scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.');
   } catch (error) {
     if (error instanceof StructuredError) throw error;
-    invalid(`Cannot parse recovery transactions: ${error instanceof Error ? error.message : String(error)}`);
+    invalid(`Cannot parse recovery transactions: ${error instanceof Error ? error.message : 'Unknown transaction parse failure'}`);
   }
 }
 
@@ -89,7 +89,7 @@ function result(record: InscriptionRecoveryRecord, error?: unknown): InscribeOnS
     satoshi: prepared.satoshi, inscriptionId: prepared.inscriptionId,
     commitTxId: prepared.commitTxId, revealTxId: prepared.revealTxId,
     broadcast: record.broadcast, recoveryId, prepared,
-    ...(error === undefined ? {} : { error: error instanceof Error ? error.message : String(error) })
+    ...(error === undefined ? {} : { error: error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown broadcast failure' })
   };
 }
 

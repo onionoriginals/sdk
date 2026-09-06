@@ -80,9 +80,19 @@ export class AssetResolver {
       : { status: "incomplete", did, reason: "Configure hosted storage" };
   }
 
-  async observe(sat: string, options: AssetResolutionOptions = {}): Promise<{ snapshot?: SatSnapshot; resolution: SatResolution }> {
+  async observe(
+    sat: string,
+    options: AssetResolutionOptions = {},
+  ): Promise<{ snapshot?: SatSnapshot; resolution: SatResolution }> {
     let result = await this.observeOnce(sat, options);
-    for (let attempt = 1; attempt < 3 && ["chain-changed", "inconsistent-evidence"].includes(result.resolution.status); attempt++) {
+    for (
+      let attempt = 1;
+      attempt < 3 &&
+      ["chain-changed", "inconsistent-evidence"].includes(
+        result.resolution.status,
+      );
+      attempt++
+    ) {
       result = await this.observeOnce(sat, options);
     }
     return result;
@@ -113,7 +123,12 @@ export class AssetResolver {
     } catch (error) {
       return {
         resolution: failure(
-          error !== null && typeof error === "object" && "code" in error && error.code === "SAT_SNAPSHOT_CHAIN_CHANGED" ? "chain-changed" : "incomplete",
+          error !== null &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === "SAT_SNAPSHOT_CHAIN_CHANGED"
+            ? "chain-changed"
+            : "incomplete",
           "The provider could not obtain a complete sat snapshot",
         ) as SatResolution,
       };
@@ -139,10 +154,14 @@ export class AssetResolver {
     if (resolution.status !== "accepted") return resolution;
     // Reconstruct only entries selected by the core, in its accepted publication order.
     // Fully inspected unrelated/invalid publications can never supply authority or media.
+    const observations = new Map(
+      snapshot!.publications.map((publication) => [
+        publication.id,
+        publication,
+      ]),
+    );
     const entries = resolution.publications.flatMap((publication) => {
-      const observation = snapshot!.publications.find(
-        (p) => p.id === publication.inscriptionId,
-      )!;
+      const observation = observations.get(publication.inscriptionId)!;
       if (observation.body.status !== "complete")
         throw new CelError(
           "invalid",
@@ -159,27 +178,24 @@ export class AssetResolver {
     const document = validateDocument({ log: entries });
     const catalog = resourceCatalog(document);
     const attachments: ResourceAttachment[] = [];
+    const inlineBytes = new Map<string, Uint8Array>();
+    for (const publication of resolution.publications) {
+      const body = observations.get(publication.inscriptionId)!.body;
+      if (
+        body.status !== "complete" ||
+        body.metadata === null ||
+        publication.inlineContentStatus !== "matched"
+      )
+        continue;
+      const key = JSON.stringify([body.mediaType, digestBytes(body.bytes)]);
+      if (!inlineBytes.has(key)) inlineBytes.set(key, body.bytes);
+    }
     for (const resource of catalog) {
-      for (const publication of resolution.publications) {
-        const body = snapshot!.publications.find(
-          (p) => p.id === publication.inscriptionId,
-        )!.body;
-        if (
-          body.status !== "complete" ||
-          body.metadata === null ||
-          publication.inlineContentStatus !== "matched"
-        )
-          continue;
-        if (
-          body.mediaType === resource.mediaType &&
-          digestBytes(body.bytes) === resource.digestMultibase
-        ) {
-          attachments.push(
-            attachment(resource.id, resource.version, body.bytes),
-          );
-          break;
-        }
-      }
+      const bytes = inlineBytes.get(
+        JSON.stringify([resource.mediaType, resource.digestMultibase]),
+      );
+      if (bytes)
+        attachments.push(attachment(resource.id, resource.version, bytes));
     }
     const asset = new OriginalsAsset(
       document,
