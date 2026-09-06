@@ -102,7 +102,8 @@ export class DIDManager {
     private readonly resolveVerifiedBtco?: (
       did: string,
       resolveKey: (verificationMethod: string) => Promise<Uint8Array | null>
-    ) => Promise<DIDDocument | null>) {
+    ) => Promise<DIDDocument | null>,
+    private readonly capabilities?: { assetResolution: 'unavailable' }) {
     this.metrics = metrics;
     this.cache = new DIDCache({
       ...(config.didCache || {}),
@@ -423,6 +424,9 @@ export class DIDManager {
     btcoPath: ReadonlySet<string>
   ): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
+      if (this.capabilities?.assetResolution === 'unavailable' && (did.startsWith('did:cel:') || did.startsWith('did:btco:'))) {
+        throw new StructuredError('ASSET_RESOLUTION_UNAVAILABLE', 'CEL 3 asset DID resolution is not yet connected; load an asset envelope to verify local history');
+      }
       // Network guard must precede the cache read (issue #312).
       this.assertBtcoNetworkMatchesProvider(did);
 

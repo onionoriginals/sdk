@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * MigrationManager.migrateBatch — per-item option merging and fail-fast behavior.
@@ -13,7 +14,7 @@
  * MigrationResult{success:false} instead of rejecting.
  */
 import { describe, it, expect, afterEach } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import type { MigrationOptions, MigrationResult } from '../../../src/migration/types';
 import { MigrationStateEnum } from '../../../src/migration/types';

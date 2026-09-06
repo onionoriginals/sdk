@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Integration tests for Migration lifecycle events and scenarios
@@ -13,7 +14,7 @@
  *   CORE-MIG-EVENTS-020 — batch continueOnError=true/false, concurrency cap
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import { MigrationStateEnum } from '../../../src/migration/types';
 import { EventEmitter } from '../../../src/events/EventEmitter';

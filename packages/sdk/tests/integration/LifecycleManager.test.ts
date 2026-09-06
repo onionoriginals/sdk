@@ -1,8 +1,9 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from LifecycleManager.btco.integration.part.ts */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MockKeyStore } from '../mocks/MockKeyStore';

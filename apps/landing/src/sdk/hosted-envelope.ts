@@ -18,13 +18,8 @@ import { contentBytes, type ResourceContent } from './resource-view';
  * DID-doc↔fold cross-checks, all fail-closed. Getting a field wrong makes the
  * load fail; it cannot make an unverified asset look verified.
  */
-import {
-  ASSET_ENVELOPE_FORMAT,
-  ASSET_ENVELOPE_VERSION,
-  createCelDidDocument,
-  deriveDidCel,
-} from '@originals/sdk';
-import type { AssetEnvelope } from '@originals/sdk';
+import { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION, createCelDidDocument, deriveDidCel } from './previous-sdk';
+import type { AssetEnvelope } from './previous-sdk';
 import type { CelLog } from '../pages/original-detail-data';
 import { digestMultibaseSha256Hex, sha256HexToResourceMultibase } from '../pages/original-detail-data';
 

@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Phase-3 Task 1: AssetEnvelope + serialize() + per-layer DID-document capture (#377).
  *
@@ -8,7 +9,7 @@
  * CelConvergence.e2e — then assert the serialized shape.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import {
   ASSET_ENVELOPE_FORMAT,
   ASSET_ENVELOPE_VERSION,

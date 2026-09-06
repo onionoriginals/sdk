@@ -10,7 +10,8 @@
  * not a hand-written approximation.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, signerFromKeyPair } from '@originals/sdk';
+import { signerFromKeyPair } from '@originals/sdk';
+import { OriginalsSDK } from './previous-sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { hostedAssetEnvelope, hostedResourceRefs, resourceKind } from './hosted-envelope';
 import type { CelLog } from '../pages/original-detail-data';
@@ -149,7 +150,7 @@ describe('hostedAssetEnvelope', () => {
  */
 describe('hydrate then inscribe', () => {
   async function publishOne() {
-    const { KeyManager } = await import('@originals/sdk');
+    const { KeyManager } = await import('./previous-sdk');
     const controllerKp = await new KeyManager().generateKeyPair('Ed25519');
     const signer = signerFromKeyPair(controllerKp);
     const hosted: Record<string, string> = {};
@@ -242,7 +243,7 @@ describe('hydrate then inscribe', () => {
  */
 describe('a revised Original', () => {
   test('rebuilds with every version, not just genesis', async () => {
-    const { KeyManager } = await import('@originals/sdk');
+    const { KeyManager } = await import('./previous-sdk');
     const { sha256 } = await import('@noble/hashes/sha2.js');
     const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
     const kp = await new KeyManager().generateKeyPair('Ed25519');

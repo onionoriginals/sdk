@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /* istanbul ignore file */
 /**
  * CEL Lifecycle Integration Tests
@@ -26,7 +27,7 @@ import {
   type DataIntegrityProof,
   type CelSigner,
   type ExternalReference,
-} from '../../src';
+} from '../previous-sdk';
 import { multikey } from '@originals/cel';
 import { canonicalizeEvent } from '@originals/cel';
 

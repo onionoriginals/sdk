@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Unit tests for RollbackManager
@@ -7,7 +8,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { RollbackManager } from '../../../src/migration/rollback/RollbackManager';
 import { CheckpointManager } from '../../../src/migration/checkpoint/CheckpointManager';
 import { MigrationStateEnum, MigrationErrorType } from '../../../src/migration/types';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

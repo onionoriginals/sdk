@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CEL 3 routing during the implementation transition
+
+For asset API work, read [packages/sdk/V3.md](packages/sdk/V3.md): the default
+SDK is now `src/core/OriginalsSDK3.ts`, composed around `src/v3/OriginalsSDK.ts`
+and its shared CEL 3 state. The public `/cel`, `/types`, and CLI entries follow
+that representation. Static identity helpers live in `src/did/identity-operations.ts`.
+
+The lifecycle descriptions below refer to the preceding implementation retained
+for baseline regression tests and the landing's private `previous-sdk` adapter.
+Treat that adapter as pending release integration (#563–565, #570), not a public
+SDK compatibility path or new-format evidence. The selected profile and authority
+contracts govern CEL 3. Record previous-format and new-format test evidence
+separately; complete the new regtest journey before claiming release readiness.
+
 ## LLM Agent Documentation
 
 For comprehensive API reference optimized for code generation, see:

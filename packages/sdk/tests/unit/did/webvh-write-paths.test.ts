@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for the did:webvh write-path cluster (issues #338, #339,
  * #334): WebVHManager's calls into didwebvh-ts must match the options the
@@ -20,7 +21,7 @@ import { describe, test, expect, spyOn } from 'bun:test';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import type { DIDDocument, VerifiableCredential } from '../../../src/types';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

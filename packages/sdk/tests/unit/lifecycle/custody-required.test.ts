@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Plan 041 — the defaults flip.
  *
@@ -11,7 +12,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
@@ -173,7 +174,7 @@ describe('a provenance append that cannot be signed throws [plan 041]', () => {
   test('a legacy asset with no CEL log still degrades — it is not a custody fault', async () => {
     // NO_CEL_LOG cannot be fixed by configuring anything, so gating on it would
     // refuse to operate on pre-CEL assets entirely.
-    const { OriginalsAsset } = await import('../../../src');
+    const { OriginalsAsset } = await import('../../previous-sdk');
     const sdk = makeSdk({ keyStore: new MockKeyStore() });
     const legacy = new OriginalsAsset(
       RES,

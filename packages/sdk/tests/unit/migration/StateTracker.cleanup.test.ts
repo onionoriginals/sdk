@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Item 6: StateTracker.cleanupOldStates never reclaimed FAILED/QUARANTINED
@@ -8,7 +9,7 @@
  * MIGRATION_IN_PROGRESS rejection that never actually started.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import { StateTracker } from '../../../src/migration/state/StateTracker';
 import { MigrationStateEnum, MigrationState } from '../../../src/migration/types';

@@ -10,7 +10,8 @@
  * checks are the proof, and each one reports exactly what it proved.
  */
 import '../shims/buffer-global';
-import { Ed25519Verifier, verifyEventLog } from '@originals/sdk';
+import { Ed25519Verifier } from '@originals/sdk';
+import { verifyEventLog } from './previous-sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type { CelLog } from '../pages/original-detail-data';

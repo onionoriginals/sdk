@@ -1,5 +1,6 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, spyOn } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { DIDDocument, AssetResource } from '../../../src/types';
 
 const resources: AssetResource[] = [

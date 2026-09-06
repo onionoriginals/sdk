@@ -1,8 +1,9 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from CredentialManager.integration.part.ts */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import * as ed25519 from '@noble/ed25519';
 import { multikey } from '@originals/cel';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../src/vc/documentLoader';

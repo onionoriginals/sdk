@@ -112,6 +112,10 @@ jobs:
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
 
+      - name: Verify SDK public types match the default CEL 3 API
+        working-directory: packages/sdk
+        run: bun run typecheck:public
+
       # Node-only features must load their modules lazily so browser/edge
       # consumers can still import the package. One static `import 'node:fs'`
       # in the graph breaks that for everyone and is invisible until bundling.

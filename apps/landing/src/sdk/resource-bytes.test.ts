@@ -59,7 +59,7 @@ describe('binary creator resources', () => {
 });
 
 test('hosted PNG bytes become a tagged base64 envelope that verifies in a fresh engine', async () => {
-  const { OriginalsSDK, KeyManager, signerFromKeyPair } = await import('@originals/sdk');
+  const { OriginalsSDK, KeyManager, signerFromKeyPair } = await import('./previous-sdk');
   const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
   const signer = signerFromKeyPair(await new KeyManager().generateKeyPair('Ed25519'));
   const sdk = OriginalsSDK.create({ signer, network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519', enableLogging: false });

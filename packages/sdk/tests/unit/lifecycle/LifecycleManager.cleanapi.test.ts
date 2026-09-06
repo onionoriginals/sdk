@@ -1,5 +1,6 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, LifecycleManager, type LifecycleProgress, type CostEstimate, type MigrationValidation } from '../../../src';
+import { OriginalsSDK, LifecycleManager, type LifecycleProgress, type CostEstimate, type MigrationValidation } from '../../previous-sdk';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';

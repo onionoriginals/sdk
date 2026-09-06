@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * did:key-only controllers — did:peer support is removed ENTIRELY (maintainer
  * ruling, PR #508).
@@ -11,7 +12,7 @@
  * did-peer library is no longer a dependency and nothing resolves them.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';

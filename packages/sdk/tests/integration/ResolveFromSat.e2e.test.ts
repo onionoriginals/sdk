@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Bare-sat resolution (#407 phase 2). A resolver with ONLY the satoshi + an
  * ordinals provider reconstructs an asset's provenance (from inscription
@@ -5,7 +6,7 @@
  * envelope and NO host. Provenance is recoverable from Bitcoin alone.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

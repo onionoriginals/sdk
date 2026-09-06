@@ -2,25 +2,20 @@
 // No side-effect imports here: noble sync-hash config happens at point of use
 // (crypto/Signer.ts, did/KeyManager.ts), so `sideEffects: false` holds.
 
-import { OriginalsSDK } from './core/OriginalsSDK.js';
+import { OriginalsSDK } from './core/OriginalsSDK3.js';
 
 // Main exports
-export { OriginalsSDK } from './core/OriginalsSDK.js';
+export { OriginalsSDK } from './core/OriginalsSDK3.js';
 export type { 
-  OriginalsSDKOptions,
   OriginalResult,
   CreateOriginalOptions,
   UpdateOriginalOptions,
   CreateDIDOriginalOptions,
   UpdateDIDOriginalOptions
-} from './core/OriginalsSDK.js';
-export { OriginalsAsset } from './lifecycle/OriginalsAsset.js';
-export type { ProvenanceChain } from './lifecycle/OriginalsAsset.js';
-export { replayProvenance, BTCO_SATOSHI_UNKNOWN } from './lifecycle/replayProvenance.js';
-export type { ReplayedProvenance } from './lifecycle/replayProvenance.js';
-export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from './lifecycle/assetEnvelope.js';
-export type { AssetEnvelope, EncodedResourceContent, SerializedAssetResource } from './lifecycle/assetEnvelope.js';
-export { checkGenesisResourceBinding } from './lifecycle/genesisBinding.js';
+} from './did/identity-operations.js';
+export { OriginalsAsset } from './v3/OriginalsAsset.js';
+export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION, ASSET_LIMITS } from './v3/envelope.js';
+export type { AssetEnvelope, AssetResource, AssetResourceInput, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, LocalResource } from './v3/types.js';
 
 // Type exports
 export * from './types/index.js';
@@ -48,16 +43,10 @@ export {
   type StatusCheckResult,
 } from './vc/StatusListManager.js';
 export { BitstringStatusList } from './vc/BitstringStatusList.js';
-export {
-  LifecycleManager,
-  type CostEstimate,
-  type MigrationValidation,
-  type LifecycleProgress,
-  type ProgressCallback,
-  type LifecycleOperationOptions,
-  type CreateAssetOptions,
-  type InscribeOnBitcoinOptions
-} from './lifecycle/LifecycleManager.js';
+export { LifecycleManager } from './v3/OriginalsSDK.js';
+export type { CreateAssetOptions } from './v3/types.js';
+export type { OriginalsSDKOptions, OriginalsConfig } from './core/OriginalsSDK3.js';
+export { createLocalSigner, type CelSigner } from '@originals/cel/v3';
 export { BitcoinManager } from './bitcoin/BitcoinManager.js';
 export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
 export { buildTransferTransaction } from './bitcoin/transfer.js';
@@ -110,7 +99,6 @@ export {
   signerFromKeyPair,
   signerFromKeyStore,
   signerFromExternalSigner,
-  toCelSigner,
   toExternalSigner,
 } from './crypto/OriginalsSigner.js';
 export { signingInput, type SigningDocumentLoader } from './crypto/signingInput.js';
@@ -134,18 +122,6 @@ export * from './events/index.js';
 // own risk. Only `MigrationError` is surfaced, because the public event API
 // (`MigrationFailedEvent.error`) references it.
 export type { MigrationError } from './migration/types.js';
-
-// Batch operations exports
-export {
-  BatchOperationExecutor,
-  BatchValidator,
-  BatchError,
-  type BatchResult,
-  type BatchOperationOptions,
-  type BatchInscriptionOptions,
-  type BatchInscriptionResult,
-  type ValidationResult as BatchValidationResult
-} from './lifecycle/BatchOperations.js';
 
 // Kind system exports
 export {
@@ -225,94 +201,11 @@ export { RegtestProvider } from './adapters/providers/RegtestProvider.js';
 export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers/RegtestProvider.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
-// CEL (Cryptographic Event Log) exports
-export {
-  OriginalsCel,
-  type CelLayer,
-  type CelSigner,
-  type OriginalsCelConfig,
-  type OriginalsCelOptions,
-} from '@originals/cel';
-export type {
-  EventLog,
-  LogEntry,
-  EventType,
-  DataIntegrityProof,
-  WitnessProof,
-  ExternalReference,
-  VerificationResult,
-  EventVerification,
-  AssetState,
-  CreateOptions,
-  UpdateOptions,
-  DeactivateOptions,
-  VerifyOptions,
-} from '@originals/cel';
-export {
-  createEventLog,
-  updateEventLog,
-  deactivateEventLog,
-  verifyEventLog,
-  witnessEvent,
-} from '@originals/cel';
-export {
-  computeDigestMultibase,
-  verifyDigestMultibase,
-  decodeDigestMultibase,
-  digestMultibaseEquals,
-} from '@originals/cel';
-export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel';
-// The CEL proof labels: one written, one accepted for logs sealed under the
-// previous name. The suite pair is plan 042; the type pair renames the claim
-// `DataIntegrityProof` made and never implemented.
-export {
-  CEL_CRYPTOSUITE,
-  CEL_CRYPTOSUITE_LEGACY,
-  CEL_PROOF_TYPE,
-  CEL_PROOF_TYPE_LEGACY,
-  CEL_PROOF_TYPES,
-  isCelProofType,
-  verifyDidKeyProof,
-  structuralCheckReason,
-} from '@originals/cel';
-export {
-  DID_CEL_PREFIX,
-  deriveDidCel,
-  deriveDidCelFromGenesis,
-  isDidCel,
-  didCelMatchesLog,
-  createCelDidDocument,
-  resolveDidCel,
-} from '@originals/cel';
-export {
-  createExternalReference,
-  verifyExternalReference,
-} from '@originals/cel';
-export {
-  PeerCelManager,
-  type CelAssetData,
-  type PeerAssetData,
-  type PeerCelConfig,
-} from '@originals/cel';
-export { WebVHCelManager } from '@originals/cel';
-export { BtcoCelManager } from '@originals/cel';
-export type { WitnessService } from '@originals/cel';
-export { HttpWitness, HttpWitnessError } from '@originals/cel';
-export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from '@originals/cel';
-export {
-  serializeEventLogJson,
-  parseEventLogJson,
-} from '@originals/cel';
-export {
-  serializeEventLogCbor,
-  parseEventLogCbor,
-} from '@originals/cel';
-export {
-  celSignerFromKeyPair,
-  createKeyStoreCelSigner,
-  currentControllerVm,
-  hexSha256ToDigestMultibase,
-} from '@originals/cel';
+// One public CEL 3 parser, proof verifier and state fold.
+export { verifyHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
+export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
 
 // Default export
 export default OriginalsSDK;
+/** Minimal local-only entry using the same CEL 3 lifecycle as the default SDK. */
+export * as v3 from './v3/index.js';

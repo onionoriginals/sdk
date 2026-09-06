@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Phase-2 Task 9: CEL-convergence end-to-end.
  *
@@ -10,7 +11,7 @@
  * the log tells the whole story and verifies against the chain at the end.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

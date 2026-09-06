@@ -8,10 +8,11 @@
   "files": [
     "dist",
     "README.md",
+    "V3.md",
     "LICENSE"
   ],
   "bin": {
-    "originals-cel": "./dist/cel/cli/index.js"
+    "originals-cel": "./dist/v3/cli.js"
   },
   "sideEffects": false,
   "exports": {
@@ -32,14 +33,20 @@
       "default": "./dist/testing/index.js"
     },
     "./types": {
-      "types": "./dist/types/index.d.ts",
-      "import": "./dist/types/index.js",
-      "default": "./dist/types/index.js"
+      "types": "./dist/types/public.d.ts",
+      "import": "./dist/types/public.js",
+      "default": "./dist/types/public.js"
+    },
+    "./v3": {
+      "types": "./dist/v3/index.d.ts",
+      "import": "./dist/v3/index.js",
+      "default": "./dist/v3/index.js"
     }
   },
   "scripts": {
     "build": "tsc && tsc-alias",
     "typecheck": "tsc --noEmit -p .",
+    "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-cel3.ts",
     "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
     "test:coverage": "bun test tests/integration tests/unit --coverage",
     "check-coverage": "bun run ../../scripts/check-coverage.ts",

@@ -1,0 +1,96 @@
+import { createNonce, signEvent, CelError } from "@originals/cel/v3";
+import { OriginalsAsset } from "./OriginalsAsset.js";
+import { readEnvelope, record, fields, requireAsset } from "./envelope.js";
+import { mutationOptions, captureSigner } from "./options.js";
+import { prepareResources } from "./resources.js";
+import type {
+  AssetResourceInput,
+  CreateAssetOptions,
+  LoadAssetOptions,
+  LoadedAsset,
+  OriginalsConfig,
+} from "./types.js";
+
+/** CEL 3 local creation and interchange. Network publication is a separate integration stage. */
+export class LifecycleManager {
+  constructor(private readonly config: OriginalsConfig = {}) {}
+
+  /** Create a new identity using copied bytes and explicit controller custody. */
+  async createAsset(
+    inputs: AssetResourceInput[],
+    options: CreateAssetOptions = {},
+  ): Promise<OriginalsAsset> {
+    fields(record(options), [], ["signer", "name", "metadata"]);
+    const { descriptors, attachments } = prepareResources(inputs);
+    const custody = options.signer ?? this.config.signer;
+    if (!custody)
+      throw new CelError(
+        "invalid",
+        "NO_CUSTODY",
+        "Pass a CEL 3 signer per call or configure one before creating an asset",
+      );
+    const signer = captureSigner(custody);
+    const entry = await signEvent(
+      {
+        operation: {
+          type: "create",
+          data: {
+            profile: "originals/cel/3",
+            controller: signer.controller,
+            createdAt: new Date().toISOString(),
+            nonce: createNonce(),
+            resources: descriptors,
+            ...(options.name !== undefined ? { name: options.name } : {}),
+            ...(options.metadata !== undefined
+              ? { metadata: options.metadata }
+              : {}),
+          },
+        },
+      },
+      signer,
+    );
+    return new OriginalsAsset({ log: [entry] }, attachments, this.config);
+  }
+
+  /** Authenticate the same state and byte bindings as asset.verify(); no legacy fallback. */
+  async loadAsset(
+    input: unknown,
+    options: LoadAssetOptions = {},
+  ): Promise<LoadedAsset> {
+    fields(record(options), [], ["allowPartial"]);
+    requireAsset(
+      options.allowPartial === undefined ||
+        typeof options.allowPartial === "boolean",
+      "ASSET_OPTIONS",
+      "allowPartial must be a boolean",
+    );
+    const envelope = readEnvelope(input);
+    const asset = new OriginalsAsset(
+      envelope.eventLog,
+      envelope.resources,
+      this.config,
+      envelope.assetDid,
+      envelope.unverified?.localResources,
+    );
+    const verification = await asset.verification();
+    if (!verification.verified && !options.allowPartial)
+      throw new CelError(
+        "invalid",
+        "ASSET_LOAD_VERIFICATION_FAILED",
+        "Asset is not fully verified; allowPartial retains authenticated history with explicitly incomplete verification",
+      );
+    return { asset, verification };
+  }
+}
+
+/** SDK entry point for the selected CEL 3 profile. Never invokes previous-format writers or resolvers. */
+export class OriginalsSDK {
+  readonly lifecycle: LifecycleManager;
+  private constructor(config: OriginalsConfig) {
+    this.lifecycle = new LifecycleManager(mutationOptions(config));
+  }
+  /** Construct a fresh CEL 3 SDK; a signer is required only for creation and mutation. */
+  static create(config: OriginalsConfig = {}): OriginalsSDK {
+    return new OriginalsSDK(config);
+  }
+}

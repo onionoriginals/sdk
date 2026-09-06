@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Per-event real-time chain-recoverability (#407 phase 3). Once an asset is on
  * did:btco, every authorship append (addResourceVersion, rotateKey) inscribes on
@@ -7,7 +8,7 @@
  * host.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

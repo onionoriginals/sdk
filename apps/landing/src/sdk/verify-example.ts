@@ -11,12 +11,8 @@
  */
 import '../shims/buffer-global';
 import { OrdMockProvider } from '@originals/sdk/testing';
-import {
-  OriginalsSDK,
-  MemoryStorageAdapter,
-  Ed25519Verifier,
-  resolveDidCel
-} from '@originals/sdk';
+import { MemoryStorageAdapter, Ed25519Verifier } from '@originals/sdk';
+import { OriginalsSDK, resolveDidCel } from './previous-sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 

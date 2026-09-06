@@ -1,5 +1,6 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

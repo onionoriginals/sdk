@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Fee preview + confirm for did:btco appends (#407 phase 4). estimateAppendCost
  * previews the unavoidable inscription cost without committing; an inscribeConfirm
@@ -6,7 +7,7 @@
  * inscribed, a follow-up append still works.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

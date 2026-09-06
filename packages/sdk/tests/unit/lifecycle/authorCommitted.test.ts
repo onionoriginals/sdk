@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Stage 3 of the ownership-model spec: the author's key is committed INSIDE
  * the signed data of every post-anchor append. Chain digests exclude proofs,
@@ -7,7 +8,7 @@
  * announces the same appending key the entry commits to.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

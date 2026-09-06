@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * SDK write side of sat-gated appends: a btco append signs with the CALLER's
  * configured signer (which does not have to be in the log), writes
@@ -5,7 +6,7 @@
  * an inscription, and surfaces live ownership on resolveAssetFromSat.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

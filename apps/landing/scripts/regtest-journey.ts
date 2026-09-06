@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { OriginalsSDK, RegtestProvider } from '@originals/sdk';
+import { RegtestProvider } from '@originals/sdk';
+import { OriginalsSDK } from '../src/sdk/previous-sdk';
 import type { TurnkeyBitcoinClient } from '../src/auth/turnkey-session';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../server/cookies';
@@ -97,7 +98,7 @@ try {
   assert.equal((await freshWeb.did.resolveDID(webDid))?.id, webDid, 'fresh HTTPS DID resolution');
   const parts = webDid.split(':');
   const webPath = parts.slice(4).join('/');
-  const resourceUrl = `${origin}/${webPath}/resources/${(await import('@originals/sdk/cel')).resourcePathSegment(hashResource(png))}`;
+  const resourceUrl = `${origin}/${webPath}/resources/${(await import('../src/sdk/previous-sdk')).resourcePathSegment(hashResource(png))}`;
   const served = await fetch(resourceUrl);
   assert.equal(served.status, 200);
   assert.deepEqual(new Uint8Array(await served.arrayBuffer()), png, 'HTTP host bytes');

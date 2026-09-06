@@ -10,7 +10,8 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { OriginalsSDK, MemoryStorageAdapter } from '@originals/sdk';
+import { MemoryStorageAdapter } from '@originals/sdk';
+import { OriginalsSDK } from '../src/sdk/previous-sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { generateArtwork } from '../src/sdk/artwork';

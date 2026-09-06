@@ -3,12 +3,11 @@ import { contentBytes, contentText, resourceView, type ResourceContent } from '.
 /**
  * The live engine behind the landing-page demo.
  *
- * Everything here calls the real @originals/sdk — the same package a
- * developer gets from `npm install @originals/sdk`. Nothing is canned:
- * DIDs, hashes, credentials, events and provenance all come back from
- * actual SDK calls. Publishing hosts the signed did:webvh log at this origin
- * over real HTTP(S) and the SDK's real resolver fetches it back. Bitcoin
- * operations still run against OrdMockProvider (no wallet or node needed).
+ * This engine currently uses the private previous-sdk adapter while CEL 3
+ * network publication and recovery are integrated (#563–565, #570). Its bytes,
+ * signatures and regtest transactions are real, but they use the preceding
+ * inscription representation. The default published SDK interface now creates
+ * CEL 3 assets and must not be described as this engine's current interface.
  *
  * Every SDK event is mirrored to the browser console (prefixed
  * "[originals-sdk]") so anyone can open devtools and watch the protocol
@@ -17,14 +16,9 @@ import { contentBytes, contentText, resourceView, type ResourceContent } from '.
 import '../shims/buffer-global';
 import { short } from './format';
 export { short };
-import {
-  OriginalsSDK,
-  signerFromExternalSigner,
-  type AssetEnvelope,
-  type OriginalsAsset,
-  type OriginalsSigner
-} from '@originals/sdk';
-import { classifyLogEntries, type EntryAuthorClass } from '@originals/sdk/cel';
+import { signerFromExternalSigner, type OriginalsSigner } from '@originals/sdk';
+import { OriginalsSDK, type AssetEnvelope, type OriginalsAsset } from './previous-sdk';
+import { classifyLogEntries, type EntryAuthorClass } from './previous-sdk';
 export type { EntryAuthorClass };
 // Test doubles moved out of the root entry in plan 043 so they are not shipped
 // to production consumers.

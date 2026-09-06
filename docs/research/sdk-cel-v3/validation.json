@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-06T04:26:19.278568+00:00",
+  "worktree": "/Users/brian/Projects/onionoriginals/sdk/.worktrees/codex/sdk-cel-v3",
+  "branch": "codex/sdk-cel-v3",
+  "baseCommit": "08a9981e22fbcb16e31495bd35344cd0016a11d7",
+  "reviewedSnapshot": "Uncommitted packages/sdk diff against baseCommit; exact content identified below. Not included in PR 574.",
+  "implementationDiffSha256": "47146acb35f5cf932b26f2b93565cc966c37af883a8d37c1d71b3110c00fb402",
+  "implementationDiffCommand": [
+    "git",
+    "diff",
+    "--binary",
+    "08a9981e22fbcb16e31495bd35344cd0016a11d7",
+    "--",
+    "packages/sdk"
+  ],
+  "files": {
+    "packages/sdk/V3.md": "b3b88bbb360121bc233f765c18375fafed2d73958693059d3f422f39f0f37b2b",
+    "packages/sdk/package.json": "fa7ba7df511c1e589a806e1bb67ef90943d66980fde29a1cf51ac6a735cac65e",
+    "packages/sdk/src/index.ts": "89bb7cc1cfb5f506b4f77ce24ef4beb3a47086305c2b0894ae0825a2b6b77e58",
+    "packages/sdk/src/v3/OriginalsAsset.ts": "4b6c39a318c3eb2f9768773fea32d3b4dbdbd851f2bd51b315f02be0a5ba2555",
+    "packages/sdk/src/v3/OriginalsSDK.ts": "19a86b5069fe413deede29f421418e25342ca83c6136a140a34f905a80e88eba",
+    "packages/sdk/src/v3/envelope.ts": "1b76870b63e6ceb32ac073d2fb446937bfead27797854d753963057bd22aaae3",
+    "packages/sdk/src/v3/index.ts": "2d7dc8cb73d5394e04cadeef2be19796308b005cea7dc827238cc115f9897a19",
+    "packages/sdk/src/v3/options.ts": "1d253acc225b5dc60e4e278aefa41d94d852f9f81c0eaad2c1ee6265b049e479",
+    "packages/sdk/src/v3/resources.ts": "c81975fb06687bd60b2996c5edae083ba5d6c7fea69f50a55be20a8a927c6b1e",
+    "packages/sdk/src/v3/types.ts": "2c9f8b2f7337e859dc9311c2d1e9d92006b308127f2da62de5ac65d3eb00a683",
+    "packages/sdk/tests/integration/CelV3LocalJourney.test.ts": "cdaca24cfdc36cb02d65c5911c65f714eac9b6b9956c01e2effdd37c4ccbb877",
+    "packages/sdk/tests/unit/v3/asset.test.ts": "e2e5ee19ce9be03e42f8177cd45e349cc29a153a87367605be692347ae272cf4",
+    "packages/sdk/tests/unit/v3/recovery-limits.test.ts": "af17b3ccc00c43fd7283386fd4d30bdc09760a6870721693795c217d91e1bc7d",
+    "packages/sdk/tests/unit/v3/validation.test.ts": "2d489bdca61024e0bfe417a10704ed6249b4331b53ce9ed22d7a1f628868a14c"
+  },
+  "runtime": {
+    "bun": "1.3.5",
+    "node": "v25.2.1",
+    "python": "3.14.6",
+    "platform": "macOS-15.3.1-arm64-arm-64bit-Mach-O"
+  },
+  "results": {
+    "allSdk": {
+      "command": "cd packages/sdk && bun test tests/",
+      "exitCode": 0,
+      "passed": 3199,
+      "skipped": 245,
+      "failed": 0,
+      "files": 240,
+      "expectCalls": 51203,
+      "elapsedSeconds": 70.19,
+      "includesNewTests": 36
+    },
+    "recoveryRegression": {
+      "command": "cd packages/sdk && bun test tests/unit/v3/recovery-limits.test.ts",
+      "exitCode": 0,
+      "passed": 4,
+      "failed": 0,
+      "elapsedSeconds": 4.7
+    },
+    "build": {
+      "command": "bun run build",
+      "exitCode": 0,
+      "tasksSuccessful": 3,
+      "tasksCached": 1
+    },
+    "sdkTypecheck": {
+      "command": "cd packages/sdk && bun run typecheck",
+      "exitCode": 0
+    },
+    "newSdkLint": {
+      "command": "cd packages/sdk && bunx eslint src/v3 --max-warnings 0",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    "esm": {
+      "command": "bun run verify:esm",
+      "exitCode": 0,
+      "exportedEntryPoints": 24
+    },
+    "browserGuard": {
+      "command": "bun run verify:browser",
+      "exitCode": 0,
+      "existingAdvisory": "Buffer globals reachable in prior SDK Bitcoin modules; new v3 entry is separately bundled and smoked below."
+    },
+    "browserBundle": {
+      "command": "bun build packages/sdk/src/v3/index.ts --target=browser --format=esm --outfile=/tmp/originals-sdk-v3-browser.mjs",
+      "exitCode": 0,
+      "modules": 56,
+      "displayedSize": "169.33 KB"
+    },
+    "browserBundleNodeSmoke": {
+      "command": "node /tmp/originals-sdk-v3-smoke.mjs",
+      "exitCode": 0,
+      "scope": "Browser-target bundle in Node with Buffer/process globals removed; not actual browser E2E.",
+      "scriptSha256": "eb0aebc33f04e45cbe9996dd9d86f6fdc207423fb41d8a43cc4b784a1e9b9b70"
+    },
+    "packDryRun": {
+      "command": "cd packages/sdk && npm pack --dry-run --json --ignore-scripts",
+      "exitCode": 0,
+      "verifiedFiles": [
+        "V3.md",
+        "dist/v3/index.js",
+        "dist/v3/index.d.ts",
+        "dist/v3/OriginalsSDK.js",
+        "dist/v3/OriginalsAsset.js",
+        "dist/v3/envelope.js"
+      ],
+      "published": false
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  },
+  "localLogHashes": {
+    "allSdk": {
+      "path": "/tmp/originals-sdk-v3-final-all-sdk.log",
+      "sha256": "32a838da622d68f0fc2b425570d0dba4999f21fba336d381a632028b089592ec",
+      "note": "Local temporary log; not committed."
+    },
+    "recoveryRegression": {
+      "path": "/tmp/originals-sdk-v3-token-green.log",
+      "sha256": "7cab0ed2490d5a40791903b765ec39af137aff3be8609f3148de6e71de03c535",
+      "note": "Local temporary log; not committed."
+    },
+    "build": {
+      "path": "/tmp/originals-sdk-v3-final-build.log",
+      "sha256": "47ddf88ab7548051e12681125d47db04e463e423e64fb54e87cc33fa2cb28265",
+      "note": "Local temporary log; not committed."
+    },
+    "sdkTypecheck": {
+      "path": "/tmp/originals-sdk-v3-final-typecheck.log",
+      "sha256": "3d3c45ecc39fd091f458f3c9ac69950e524cbbf36b64ebe261d051ca9be68c6d",
+      "note": "Local temporary log; not committed."
+    },
+    "newSdkLint": {
+      "path": "/tmp/originals-sdk-v3-final-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "note": "Local temporary log; not committed."
+    },
+    "esm": {
+      "path": "/tmp/originals-sdk-v3-final-esm.log",
+      "sha256": "699c159f2721a920e58fac36a4c03aeeb7568d35532cc2fbe2209219d688294c",
+      "note": "Local temporary log; not committed."
+    },
+    "browserGuard": {
+      "path": "/tmp/originals-sdk-v3-final-browser.log",
+      "sha256": "637e733a176ed7b18555eb8a2f4f43c5ec535d5f3c5034775d01b74bc74b6584",
+      "note": "Local temporary log; not committed."
+    },
+    "browserBundleNodeSmoke": {
+      "path": "/tmp/originals-sdk-v3-smoke.log",
+      "sha256": "bc499436d9a69215841d128cd5f46b2b7e0de8091d1311a40875ea759beef331",
+      "note": "Local temporary log; not committed."
+    },
+    "packDryRun": {
+      "path": "/tmp/originals-sdk-v3-final-pack.json",
+      "sha256": "8eded594c28bd73d2e61cce9758459434508c3843f545495d451aa52f7b76f7d",
+      "note": "Local temporary log; not committed."
+    }
+  },
+  "reviews": {
+    "standards": "Three demonstrated recovery/budget issues fixed and independently rechecked; no remaining findings in this local runtime scope.",
+    "specification": "Long resource ID recovery issue fixed and independently rechecked; default SDK migration remains incomplete."
+  },
+  "scopeLimits": [
+    "Issue 562 stays open: new opt-in local API only; default SDK and landing retain prior implementation.",
+    "No new-format real regtest, WebVH publication/restoration, Bitcoin writer/resolver integration or live custody provider validation.",
+    "Per-instance queue does not coordinate separate loaded instances or external publication retries.",
+    "No package publication, merge or mainnet activity performed for this SDK slice.",
+    "This branch predates the later release/download/CI fixes on PR 574."
+  ],
+  "priorPr": {
+    "url": "https://github.com/onionoriginals/sdk/pull/574",
+    "head": "3efe35117fc2ebb94a04250e6110ffe58d5c685b",
+    "stateAtCheck": "OPEN",
+    "mergeStateAtCheck": "CLEAN",
+    "regtestRun": "https://github.com/onionoriginals/sdk/actions/runs/34010722623",
+    "regtestArtifacts": "https://github.com/onionoriginals/sdk/actions/runs/34010722623/artifacts/9982369961",
+    "scope": "All three prior-format regtest scenarios pass on Linux; not CEL 3 inscription evidence."
+  }
+}

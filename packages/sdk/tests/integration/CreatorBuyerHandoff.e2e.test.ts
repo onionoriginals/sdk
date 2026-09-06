@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * The creator→buyer hand-off — the protocol's promise as ONE test, driven
  * through REAL flows under the sat-gated ownership model:
@@ -25,7 +26,7 @@
  *   + truncation guard: a prefix without B's entry fails STALE_LOG
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

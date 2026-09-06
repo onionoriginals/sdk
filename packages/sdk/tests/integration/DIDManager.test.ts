@@ -1,8 +1,9 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /** Canonical test aggregator created by combine-tests script. */
 
 /** Inlined from DIDManager.btco.integration.part.ts */
 import { describe, test, expect, afterEach, spyOn } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('Integration: DIDManager btco resolve via OrdinalsClient adapter', () => {

@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Phase-3 Task 2: loadAsset + OriginalsAsset.restore + genesis-binding extraction.
  *
@@ -6,7 +7,7 @@
  * the asset via the @internal OriginalsAsset.restore() factory.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

@@ -13,7 +13,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { generateArtwork } from '../src/sdk/artwork';
-import { cbor } from '@originals/sdk/cel';
+import { cbor } from '../src/sdk/previous-sdk';
 import {
   BROADCAST_REFUSED_SENTINEL,
   DryRunBroadcastRefused,

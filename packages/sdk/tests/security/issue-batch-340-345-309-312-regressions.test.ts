@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Security regressions for the 2026-07 issue batch:
  *
@@ -20,7 +21,7 @@ import { Issuer, isSecuritySigningRefusal } from '../../src/vc/Issuer';
 import { multikey } from '@originals/cel';
 import { registerVerificationMethod } from '../../src/vc/documentLoader';
 import { DIDManager } from '../../src/did/DIDManager';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { StructuredError } from '@originals/cel';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';

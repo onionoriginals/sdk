@@ -6,7 +6,7 @@
  * and a summary of the signed did:webvh version-history log.
  */
 import type { OriginalRow } from './YourOriginals';
-import { claimedSignerDid } from '@originals/sdk/cel';
+import { claimedSignerDid } from '../sdk/previous-sdk';
 
 /* ——— CEL log shapes (what LifecycleManager publishes as cel.json) ——— */
 
