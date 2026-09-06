@@ -8,11 +8,16 @@
 ## Wire shape
 
 - The log is the CCG Cryptographic Event Log data model, media type `application/cel`:
-  `{ log: [{ event: { previousEvent, operation: { type, data, dataReference } }, proof }] }`.
+  `{ log: [{ event: { previousEvent, operation: { type, data } }, proof }] }`.
 - `did:cel` = multihash of the canonicalized genesis `event` object. Every existing
   did:cel changes. Clean cut, no migration: the one mainnet Original (did:btco:321959825736830, 2026-08-21) already fails to verify under current code, so nothing that works today breaks.
-- Resources live under `operation.dataReference`. Operation types: create, update,
-  rotateKey, deactivate, migrate.
+- **CCG conformance clarification, 2026-09-05 (owner selected):** the Original
+  description, including controller information and its `resources` array, lives
+  under `operation.data`. Do not combine it with `operation.dataReference`; that
+  field retains CCG's meaning of one external reference used instead of inline data.
+  This supersedes the earlier resource-placement sketch. Operation types: create,
+  update, rotateKey, deactivate, migrate. The [wire/proof contract](originals-cel-v3-profile.md)
+  and [JSON Schema](originals-cel-v3.schema.json) record the precise representation.
 
 ## What gets inscribed
 
@@ -33,9 +38,13 @@
 
 ## Authority post-anchor
 
-- Append = creator-lineage signature AND inscription on the anchoring sat strictly after
-  the current anchor by block height. Only the holder can inscribe, so the log freezes at
-  sale and thaws if a lineage keyholder re-acquires the sat.
+- Append = current-controller signature AND inscription on the anchoring sat strictly
+  after the current accepted publication by block height. The owner clarified that
+  rotation A → B retires A's authority for future entries; old signatures remain
+  valid for their historical entries. Reacquiring the sat does not reactivate A.
+  The holder cannot independently author changes, but can publish bytes already
+  authorized by the current controller. The [authority and ordering contract](originals-cel-v3-authority.md)
+  defines this distinction and applies the height gate once per whole publication.
 - No holder writes. Author classes, the holder allowlist, and `holders` in the verify
   result are removed.
 - update, rotateKey, deactivate allowed post-anchor; migrate is not (btco is terminal).
@@ -44,8 +53,10 @@
 
 - Enumerate the sat oldest → newest. An inscription is part of the log iff it parses as
   `application/cel` entries, chains by previousEvent from the current verified head, and
-  is signed by a lineage key. Everything else on the sat is invisible (never poison).
-  Earliest valid inscription wins on a fork.
+  is signed by the controller authorized at each entry. Inspected invalid bytes
+  are invisible; unavailable or incomplete evidence is not treated as junk.
+  Earliest valid whole publication wins on a fork, ordered by creation block,
+  transaction position, then numeric inscription index.
 - The DID document is emitted from the fold: id, verificationMethod = fold controller,
   alsoKnownAs = did:cel + did:webvh, live sat ownership in didDocumentMetadata.
 - Entries may be read from provider metadata (they are signed and chained), so the

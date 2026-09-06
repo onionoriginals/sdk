@@ -47,7 +47,7 @@ describe('resolveAssetFromSat — bare-sat chain recovery (#407 phase 2)', () =>
     expect(verification?.verified).toBe(true);
     // The recovered current media is v2 (the most-recent resource).
     const head = recovered.resources.find(r => r.hash === contentHash('v2-bytes'));
-    expect(head?.content).toBe('v2-bytes');
+    expect(head?.content).toEqual(new TextEncoder().encode('v2-bytes'));
     // No spurious verification warnings about the head blob.
     expect(warnings.some(w => /has no backing blob/.test(w))).toBe(false);
   });
@@ -62,7 +62,7 @@ describe('resolveAssetFromSat — bare-sat chain recovery (#407 phase 2)', () =>
 
     const { asset: recovered, verification } = await sdk.lifecycle.resolveAssetFromSat(sat);
     expect(verification?.verified).toBe(true);
-    expect(recovered.resources.find(r => r.hash === contentHash('{"k":1}'))?.content).toBe('{"k":1}');
+    expect(recovered.resources.find(r => r.hash === contentHash('{"k":1}'))?.content).toEqual(new TextEncoder().encode('{"k":1}'));
   });
 
   test('tampered on-chain media content → resolution fails closed', async () => {

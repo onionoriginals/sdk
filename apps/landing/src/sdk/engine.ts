@@ -1,3 +1,5 @@
+import { fundingSignerAddress } from '../auth/turnkey-session';
+import { contentBytes, contentText, resourceView, type ResourceContent } from './resource-view';
 /**
  * The live engine behind the landing-page demo.
  *
@@ -102,7 +104,7 @@ export interface DemoAssetState {
     id: string;
     hash: string;
     contentType: string;
-    content: string;
+    content: ResourceContent;
     /** 1 at genesis; bumped by each signed `update` event. */
     version: number;
   };
@@ -178,7 +180,7 @@ export class DemoEngine {
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     const keys = this.keys;
     // Real signing over the /api/btc/* QuickNode proxies needs BOTH: a deploy
-    // that enables it (VITE_BTC_NETWORK=testnet4|mainnet) AND a signed-in
+    // that enables it (VITE_BTC_NETWORK=testnet4|mainnet|regtest) AND a signed-in
     // visitor with a key to sign with. Anonymous visitors keep the
     // self-contained OrdMockProvider on every network — the flag alone used to
     // hand them an enabled money button that errored (R5/KTD2). The flag is
@@ -328,12 +330,12 @@ export class DemoEngine {
 
   /**
    * Step 1 — create a did:cel asset. The primary resource is the artwork
-   * itself: a real SVG file whose exact bytes are hashed and carried through
+   * itself: a file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
    */
   async create(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     const src = asSource(source);
-    const svgBytes = new TextEncoder().encode(src.content);
+    const svgBytes = contentBytes(src.content);
     const svgHash = toHex(sha256(svgBytes));
 
     const metadata = buildMetadata({
@@ -414,7 +416,7 @@ export class DemoEngine {
 
     const current = this.snapshot();
     const src = asSource(source);
-    const svgHash = toHex(sha256(new TextEncoder().encode(src.content)));
+    const svgHash = toHex(sha256(contentBytes(src.content)));
 
     // The SAME controller that signed genesis. An `update` is a signed CEL
     // append like any other, and supplying a signer to `createAsset` means the
@@ -428,7 +430,7 @@ export class DemoEngine {
     // The artwork is generated FROM the title, so a text edit changes these
     // bytes — that is the edit. Skip when identical: addResourceVersion refuses
     // a no-op version rather than logging one.
-    if (src.content !== current.resource.content) {
+    if (svgHash !== current.resource.hash || src.contentType !== current.resource.contentType) {
       await asset.addResourceVersion(
         current.resource.id,
         src.content,
@@ -592,6 +594,8 @@ export class DemoEngine {
       fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
       changeAddress: string;
       signingClient: TurnkeyBitcoinClient;
+      /** Optional signer account identifier when it differs from the output address. */
+      signWith?: string;
     };
   }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
@@ -600,7 +604,7 @@ export class DemoEngine {
       // Real sat-selected path: the user's Turnkey key signs the commit.
       const satSigner = new TurnkeySatSigner({
         client: opts.funding.signingClient,
-        signWith: opts.funding.changeAddress, // the user's funding address IS signWith
+        signWith: opts.funding.signWith ?? fundingSignerAddress(opts.funding.changeAddress),
       });
       const fundingUtxos =
         opts.funding.fundingUtxos ?? (opts.funding.fundingUtxo ? [opts.funding.fundingUtxo] : []);
@@ -694,11 +698,11 @@ export class DemoEngine {
         id: res.id,
         hash: res.hash,
         contentType: res.contentType,
-        content: res.content ?? '',
+        content: resourceView(res.content, res.contentType),
         version: res.version ?? 1
       },
       metadata: meta
-        ? { id: meta.id, hash: meta.hash, content: meta.content ?? '' }
+        ? { id: meta.id, hash: meta.hash, content: contentText(meta.content ?? new Uint8Array()) }
         : undefined,
       credentials: asset.credentials.length,
       celLog: celEntries(asset),
@@ -724,17 +728,11 @@ export class DemoEngine {
 /**
  * What the asset is made of: the primary resource's bytes and how to publish
  * them. Generated artwork is the default, but a visitor can now bring their own
- * SVG or type raw text, and those travel the same lifecycle.
- *
- * Text-only, deliberately: `AssetResource.content` is a string and the SDK
- * hashes it as `TextEncoder().encode(content)`, so a PNG cannot round-trip
- * without either corrupting or being re-encoded into something whose hash no
- * longer belongs to the user's file. SVG and plain text are text, so they carry
- * exactly.
+ * PNG, SVG or text file, and those travel the same lifecycle byte-for-byte.
  */
 export interface AssetSource {
-  /** The exact bytes, as text. What gets hashed, signed, hosted and inscribed. */
-  content: string;
+  /** Exact content. Strings are UTF-8 convenience input; files use Uint8Array. */
+  content: ResourceContent;
   contentType: string;
   /** The resource id — also the filename it is published under. */
   filename: string;
@@ -794,7 +792,7 @@ interface VersionedResource {
   id: string;
   hash: string;
   contentType: string;
-  content?: string;
+  content?: Uint8Array;
   version?: number;
 }
 

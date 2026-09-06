@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 /** Serve a fixed map of path → body; anything else 404s. */
-function serve(routes: Record<string, string>) {
+function serve(routes: Record<string, string | Uint8Array>) {
   const seen: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === 'string' ? input : input.toString(), `https://${HOST}`);
@@ -213,4 +213,11 @@ describe('refusing before anything is built or spent', () => {
     expect(out.ok).toBe(false);
     expect(asked).toBe(false);
   });
+});
+
+test('hosted recovery reads binary bytes without a text decode', async () => {
+  const bytes = Uint8Array.from([137, 80, 78, 71, 0, 255, 128]);
+  serve({ [RESOURCE_PATH]: bytes });
+  const contents = await fetchHostedResources(DID, CEL, HOST);
+  expect(Object.values(contents)).toEqual([bytes]);
 });

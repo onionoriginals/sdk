@@ -61,7 +61,7 @@ describe('issue #347: content/hash verification', () => {
 
     // Simulate a content swap between creation and publication (the exact
     // gap the publish-time check closes).
-    (asset.resources[0] as { content?: string }).content = 'swapped bytes';
+    asset.resources[0].content![0] ^= 1;
 
     // MemoryStorageAdapter shares one global store across instances, so use
     // a domain no other test publishes to.
@@ -92,7 +92,7 @@ describe('issue #347: content/hash verification', () => {
     const asset = await sdk.lifecycle.createAsset([goodResource()]);
     await sdk.lifecycle.publishToWeb(asset, 'example.com');
 
-    (asset.resources[0] as { content?: string }).content = 'swapped bytes';
+    asset.resources[0].content![0] ^= 1;
 
     await expect(sdk.lifecycle.inscribeOnBitcoin(asset, 5)).rejects.toThrow(/RESOURCE_HASH_MISMATCH|does not match its declared hash/);
     expect(asset.currentLayer).toBe('did:webvh');

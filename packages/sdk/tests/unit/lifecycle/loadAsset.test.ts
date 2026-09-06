@@ -140,10 +140,10 @@ describe('loadAsset — fail-closed verification', () => {
     expect(String(err.message)).toMatch(/createdAt/);
   });
 
-  test('version 2 envelope -> ENVELOPE_VERSION_UNSUPPORTED', async () => {
+  test('version 3 envelope -> ENVELOPE_VERSION_UNSUPPORTED', async () => {
     const { sdk } = makeSDK();
     const asset = await createGenesisAsset(sdk);
-    const envelope = { ...asset.serialize(), version: 2 } as AssetEnvelope;
+    const envelope = { ...asset.serialize(), version: 3 } as AssetEnvelope;
     let err: any;
     try { await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
     expect(err?.code).toBe('ENVELOPE_VERSION_UNSUPPORTED');
@@ -182,7 +182,7 @@ describe('loadAsset — fail-closed verification', () => {
     ]);
     const envelope = asset.serialize();
     // Keep the honest hash (genesis binding still passes) but tamper the bytes.
-    envelope.resources[0].content = 'goodbye world';
+    envelope.resources[0].content = { encoding: 'base64', data: Buffer.from('other world').toString('base64') };
     let err: any;
     try { await sdk.lifecycle.loadAsset(envelope); } catch (e) { err = e; }
     expect(err?.code).toBe('ASSET_LOAD_VERIFICATION_FAILED');
@@ -210,10 +210,10 @@ describe('loadAsset — skipVerification', () => {
     expect(err).toBeDefined();
   });
 
-  test('structural validation still runs: version 2 throws ENVELOPE_VERSION_UNSUPPORTED', async () => {
+  test('structural validation still runs: version 3 throws ENVELOPE_VERSION_UNSUPPORTED', async () => {
     const { sdk } = makeSDK();
     const asset = await createGenesisAsset(sdk);
-    const envelope = { ...asset.serialize(), version: 2 } as AssetEnvelope;
+    const envelope = { ...asset.serialize(), version: 3 } as AssetEnvelope;
     let err: any;
     try { await sdk.lifecycle.loadAsset(envelope, { skipVerification: true }); } catch (e) { err = e; }
     expect(err?.code).toBe('ENVELOPE_VERSION_UNSUPPORTED');

@@ -39,7 +39,7 @@ describe('addResourceVersion: injected CEL appender', () => {
     expect(calls[0].data.contentType).toBe('text/plain');
     expect(calls[0].data.toVersion).toBe(2);
     // In-memory resources updated.
-    expect(asset.getResourceVersion('r', 2)?.content).toBe('v2');
+    expect(asset.getResourceVersion('r', 2)?.content).toEqual(new TextEncoder().encode('v2'));
   });
 
   test('degrades: no appender bound emits cel:append-skipped and does NOT record provenance', async () => {
@@ -58,7 +58,7 @@ describe('addResourceVersion: injected CEL appender', () => {
     const asset = makeAsset();
     asset._bindCelAppender(async () => null); // signer unavailable
     await asset.addResourceVersion('r', 'v2', 'text/plain');
-    expect(asset.getResourceVersion('r', 2)?.content).toBe('v2');
+    expect(asset.getResourceVersion('r', 2)?.content).toEqual(new TextEncoder().encode('v2'));
     expect(asset.getProvenance().resourceUpdates.length).toBe(0);
   });
 });

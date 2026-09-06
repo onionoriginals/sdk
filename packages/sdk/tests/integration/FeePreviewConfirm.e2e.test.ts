@@ -104,7 +104,7 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     expect(seen).toBeDefined();
     expect(seen!.contentBytes).toBe(Buffer.from('v2', 'utf8').byteLength);
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(before + 1);
-    expect(asset.resources.find(r => r.hash === contentHash('v2'))?.content).toBe('v2');
+    expect(asset.resources.find(r => r.hash === contentHash('v2'))?.content).toEqual(new TextEncoder().encode('v2'));
   });
 
   test('inscribeConfirm → false ABORTS cleanly: no event, nothing inscribed, byte-identical; a follow-up still works', async () => {
@@ -137,7 +137,7 @@ describe('fee preview + confirm (#407 phase 4)', () => {
     // No poisoned state: a subsequent append proceeds and inscribes normally.
     await asset.addResourceVersion('art', 'v2b', 'image/png', 'to v2b');
     expect(inssOnSat(ordinalsProvider, sat)!.length).toBe(inssBefore + 1);
-    expect(asset.resources.find(r => r.hash === contentHash('v2b'))?.content).toBe('v2b');
+    expect(asset.resources.find(r => r.hash === contentHash('v2b'))?.content).toEqual(new TextEncoder().encode('v2b'));
   });
 
   test('config-level inscribeConfirm default gates all btco appends unless overridden', async () => {
@@ -214,7 +214,7 @@ describe('fee preview + confirm (#407 phase 4)', () => {
       inscribeConfirm: () => { consulted = true; return false; }
     });
     expect(consulted).toBe(false);
-    expect(res.content).toBe('v2');
-    expect(asset.resources.find(r => r.hash === contentHash('v2'))?.content).toBe('v2');
+    expect(res.content).toEqual(new TextEncoder().encode('v2'));
+    expect(asset.resources.find(r => r.hash === contentHash('v2'))?.content).toEqual(new TextEncoder().encode('v2'));
   });
 });

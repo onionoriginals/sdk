@@ -13,7 +13,8 @@
  * setting QUICKNODE_ENDPOINT + BTC_FAUCET_WALLET_ID + BTC_FAUCET_ADDRESS.
  */
 import { createInMemorySessionStorage } from '@originals/auth/server';
-import { QuickNodeProvider } from '@originals/sdk';
+import { QuickNodeProvider, RegtestProvider } from '@originals/sdk';
+import { regtestOrdinalLookup } from './server/regtest';
 import { buildFetch } from './server/app';
 import { createWebvhHostStore } from './server/webvh-host';
 import { buildRoutes } from './server/index';
@@ -72,7 +73,10 @@ const inscriptionsStore = createInscriptionsStore({ dataDir: originalsDataDir })
 // this on first RPC (the CHAIN_TO_NETWORK guard from issue #350) and fails
 // loudly on a mismatch — the seatbelt against a wrong-network endpoint.
 const btcNet = serverBtcNetwork();
-const providerNetwork = btcNet === 'mainnet' ? 'mainnet' : 'testnet';
+const providerNetwork = btcNet === 'testnet4' ? 'testnet' : btcNet;
+const regtestProvider = btcNet === 'regtest' ? new RegtestProvider({
+  rpcUrl: process.env.REGTEST_RPC_URL!, ordUrl: process.env.REGTEST_ORD_URL!, rpcAuth: process.env.REGTEST_RPC_AUTH!,
+}) : undefined;
 // The deposit indexer seam (KTD4): ONE configurable, optionally authenticated
 // Esplora-shaped base URL behind every address->UTXO read in this process —
 // the creator-pays deposit route AND the testnet4 faucet alike. Defaults to
@@ -88,7 +92,7 @@ const money = createMoneyLogger();
 // pay a call per UTXO per tick. ABSENT without a QuickNode endpoint, which
 // makes the deposit route offer NOTHING as spendable — fail closed, because a
 // 546-sat ordinal pulled in as a top-up is an inscription burned as fees.
-const ordinals: OrdinalLookup | undefined = process.env.QUICKNODE_ENDPOINT
+const ordinals: OrdinalLookup | undefined = regtestProvider ? regtestOrdinalLookup(regtestProvider) : process.env.QUICKNODE_ENDPOINT
   ? cachedOrdinalLookup(quickNodeOrdinalLookup({ endpoint: process.env.QUICKNODE_ENDPOINT }))
   : undefined;
 
@@ -96,10 +100,10 @@ const ordinals: OrdinalLookup | undefined = process.env.QUICKNODE_ENDPOINT
 // reads are NOT QuickNode: its Ordinals add-on has no address surface and Core
 // there has no address index — see resolveIndexer in server/bitcoin.ts.
 function createFaucetProviderFromEnv(): FaucetProvider {
-  const provider = new QuickNodeProvider({
+  const provider = (regtestProvider ?? new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: providerNetwork,
-  }) as unknown as FaucetProvider;
+  })) as unknown as FaucetProvider;
   // Network threaded through so the P2WPKH script derivation matches the
   // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
   // calls this today, but a mainnet caller must not hit the tb1q-only path.
@@ -119,21 +123,21 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   const turnkey = getTurnkey();
   let bitcoin;
   if (isBitcoinConfigured()) {
-    if (btcNet === 'mainnet') {
+    if (btcNet === 'mainnet' || btcNet === 'regtest') {
       // Creator-pays mainnet: NO faucet — the creator deposits to their own
       // Turnkey-derived bc1q address and the inscription spends their UTXO.
       // The funding route is stripped entirely (not merely disabled).
       const routes = createBitcoinRoutes({
         jwtSecret,
         provider: createFaucetProviderFromEnv(),
-        network: 'mainnet',
+        network: providerNetwork,
         indexer,
         ordinals,
         moneyLog: money,
         inscriptions: inscriptionsStore,
       });
       bitcoin = { ...routes, funding: undefined };
-      console.log('[landing] MAINNET inscription configured — /api/btc/* live (creator-pays, no faucet)');
+      console.log(`[landing] ${btcNet} inscription configured — /api/btc/* live (creator-pays, no faucet)`);
       // Which index a stranger's deposit is actually read from, on one line.
       console.log(
         `[landing] deposit indexer: ${indexer.api}${indexer.authToken ? ' (authenticated)' : ' (no token — free public tier)'}`

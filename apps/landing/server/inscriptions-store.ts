@@ -65,10 +65,10 @@ export interface InscriptionRecord {
    */
   superseded?: boolean;
   /**
-   * The recovery artifacts have been dropped because the record is TERMINAL:
-   * either its own reveal confirmed, or it is a superseded pair whose funding
-   * outpoint was won by a record that confirmed (its commit double-spends a
-   * confirmed tx and can never land). The row itself is kept forever — /me
+   * Recovery artifacts were explicitly dropped by the reconciler after its
+   * confirmation horizon, or when a competing pair won the funding outpoint.
+   * This is a retention policy, not a guarantee against deeper reorganizations.
+   * The row is retained subject to the store's capacity limit — /me
    * joins on it to show a confirmed inscription — but it no longer carries
    * broadcastable hex, so it stops counting against the pending cap and stops
    * costing disk. Retiring is the ONLY way hex ever leaves this store.
@@ -118,7 +118,8 @@ export interface InscriptionsStore {
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
   /**
-   * Stamp a re-push of an already-broadcast reveal. Touches ONLY
+   * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
+   * Touches ONLY
    * `rebroadcastAt` — the status did not change, and `updatedAt` is what the
    * UI's staleness clock reads.
    */
@@ -280,7 +281,7 @@ function subFile(dataDir: string, dir: string, subOrgId: string): string {
   return join(dataDir, dir, `${subOrgId}.json`);
 }
 
-/** A record still carries a broadcastable pair (i.e. it is not terminal). */
+/** A record still carries a broadcastable pair. Confirmation alone does not retire it. */
 function isPending(r: InscriptionRecord): boolean {
   return !r.retired && !!r.revealTxHex;
 }
@@ -492,8 +493,8 @@ export function createInscriptionsStore(opts: {
       if (!rec) throw new Error('NOT_FOUND');
       rec.status = status;
       rec.updatedAt = new Date(now()).toISOString();
-      // Confirmed is terminal: the pair landed, so the hex is dead weight.
-      if (status === 'confirmed') retireInPlace(rec);
+      // Confirmation is reversible. The reconciler explicitly retires the
+      // pair only after its configured recovery horizon has elapsed.
       writeAll(subOrgId, recs);
     },
     markRebroadcast(subOrgId, commitTxId) {

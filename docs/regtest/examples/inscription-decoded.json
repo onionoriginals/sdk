@@ -1,0 +1,134 @@
+{
+  "note": "Actual mined regtest inscription using the current media + didDocument/celLog metadata representation. This is not the proposed application/cel representation. Content base64 below is a display encoding; the inscribed body is raw PNG bytes. Metadata is shown as decoded JSON; the inscribed metadata is CBOR.",
+  "inscriptionId": "8e6a917c16bc08d5af801ffeae837f5201e3bade9be2d2c80e58d8a3d94c0966i0",
+  "did": "did:btco:reg:5000000000",
+  "containingBlock": "0c1f1249349bbd572e328cddc2aaee982ab6dd4d60e856b0c2193e95c92d46bd",
+  "contentType": "image/png",
+  "contentBytes": 68,
+  "contentSha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+  "contentBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+  "metadataBytes": 3195,
+  "metadata": {
+    "didDocument": {
+      "@context": [
+        "https://www.w3.org/ns/did/v1",
+        "https://w3id.org/security/multikey/v1"
+      ],
+      "id": "did:btco:reg:5000000000",
+      "verificationMethod": [
+        {
+          "id": "did:btco:reg:5000000000#0",
+          "type": "Multikey",
+          "controller": "did:btco:reg:5000000000",
+          "publicKeyMultibase": "z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM"
+        }
+      ],
+      "authentication": [
+        "did:btco:reg:5000000000#0"
+      ],
+      "assertionMethod": [
+        "did:btco:reg:5000000000#0"
+      ],
+      "alsoKnownAs": [
+        "did:cel:uEiAq5j9xB6PwBax1uwS2SOy-BhuvCbeb3z1_aFV-n9Rp1w",
+        "did:webvh:QmR45Km1pNk4PJQJk6z7SU3HvfrhxKnxXSwc3dYQ1KfceE:localhost%3A59910:ueiaq5j9xb6pwbax1uws2soy-bhuvcbeb3z1_afv-n9rp1w"
+      ],
+      "service": [
+        {
+          "id": "did:btco:reg:5000000000#resources",
+          "type": "OriginalsResourceManifest",
+          "serviceEndpoint": {
+            "resources": [
+              {
+                "id": "art.png",
+                "hash": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+                "contentType": "image/png",
+                "url": "did:webvh:QmR45Km1pNk4PJQJk6z7SU3HvfrhxKnxXSwc3dYQ1KfceE:localhost%3A59910:ueiaq5j9xb6pwbax1uws2soy-bhuvcbeb3z1_afv-n9rp1w/resources/uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+              }
+            ],
+            "timestamp": "2026-09-05T22:22:23.144Z"
+          }
+        },
+        {
+          "id": "did:btco:reg:5000000000#cel",
+          "type": "OriginalsCelAnchor",
+          "serviceEndpoint": {
+            "headDigestMultibase": "uEiAZ4wg57bVnwR3KXcPjoaQgwsekzOO9t8j1C4ADuMv3lg"
+          }
+        }
+      ]
+    },
+    "celLog": {
+      "events": [
+        {
+          "data": {
+            "controller": "did:key:z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM",
+            "createdAt": "2026-09-05T22:22:23.053Z",
+            "name": "art.png",
+            "nonce": "u_RrpIq5A-ci7wCYokZnIiw",
+            "resources": [
+              {
+                "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ",
+                "id": "art.png",
+                "mediaType": "image/png"
+              }
+            ]
+          },
+          "proof": [
+            {
+              "created": "2026-09-05T22:22:23.053Z",
+              "cryptosuite": "originals-cel-ed25519-jcs-v1",
+              "proofPurpose": "assertionMethod",
+              "proofValue": "z3QA9d9UfS6F6XPNitSXScRqVjdFWBZfZDergkRuEhBgK1V9kQ631sCXpQ7spaUTqmd5kEb8wLPfj9Wq9yZJYBbEv",
+              "type": "OriginalsCelProof",
+              "verificationMethod": "did:key:z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM#z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM"
+            }
+          ],
+          "type": "create"
+        },
+        {
+          "data": {
+            "domain": "localhost:59910",
+            "layer": "webvh",
+            "migratedAt": "2026-09-05T22:22:23.099Z",
+            "sourceDid": "did:cel:uEiAq5j9xB6PwBax1uwS2SOy-BhuvCbeb3z1_aFV-n9Rp1w",
+            "targetDid": "did:webvh:QmR45Km1pNk4PJQJk6z7SU3HvfrhxKnxXSwc3dYQ1KfceE:localhost%3A59910:ueiaq5j9xb6pwbax1uws2soy-bhuvcbeb3z1_afv-n9rp1w"
+          },
+          "previousEvent": "uEiAq5j9xB6PwBax1uwS2SOy-BhuvCbeb3z1_aFV-n9Rp1w",
+          "proof": [
+            {
+              "created": "2026-09-05T22:22:23.099Z",
+              "cryptosuite": "originals-cel-ed25519-jcs-v1",
+              "proofPurpose": "assertionMethod",
+              "proofValue": "z4tsuUui31dWXawQV5qnc2doJQsBKcuhLurdb2sc3vniBs5SqbBVtkHTpXE8GgCiDZwJRaMvxMdhFE4SceH4i5bWP",
+              "type": "OriginalsCelProof",
+              "verificationMethod": "did:key:z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM#z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM"
+            }
+          ],
+          "type": "migrate"
+        },
+        {
+          "data": {
+            "layer": "btco",
+            "migratedAt": "2026-09-05T22:22:23.140Z",
+            "network": "regtest",
+            "sourceDid": "did:webvh:QmR45Km1pNk4PJQJk6z7SU3HvfrhxKnxXSwc3dYQ1KfceE:localhost%3A59910:ueiaq5j9xb6pwbax1uws2soy-bhuvcbeb3z1_afv-n9rp1w",
+            "to": "did:btco:reg:5000000000"
+          },
+          "previousEvent": "uEiDOxHe7lg9s1lALE8FbzuYvVEM09WjpXR4HBGnCDX2TGw",
+          "proof": [
+            {
+              "created": "2026-09-05T22:22:23.140Z",
+              "cryptosuite": "originals-cel-ed25519-jcs-v1",
+              "proofPurpose": "assertionMethod",
+              "proofValue": "z4o27x2JsbApDo9E8tQ27DgJVLYkkGoZqArm4SJNPTHq81zE1ydwgA8wj44fM5HUHAz5PJadoLFkUcmLVvjPVLdVg",
+              "type": "OriginalsCelProof",
+              "verificationMethod": "did:key:z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM#z6Mkk4aT96DTphnDQcSCy2SS1BEXBfpBuADc9ZAPnk3uvJJM"
+            }
+          ],
+          "type": "migrate"
+        }
+      ]
+    }
+  }
+}

@@ -54,7 +54,7 @@ describe('demoTier', () => {
 
   test('the webvh tier always matches the network handed to the SDK', () => {
     const pairs: Record<string, string> = { mainnet: 'pichu', testnet: 'cleffa', regtest: 'magby' };
-    for (const flag of ['mainnet', 'testnet4', 'off'] as const) {
+    for (const flag of ['mainnet', 'testnet4', 'regtest', 'off'] as const) {
       for (const authed of [true, false]) {
         const tier = demoTier(flag, authed);
         expect(tier.webvhNetwork).toBe(pairs[tier.network] as never);
@@ -87,4 +87,10 @@ describe('smokeAutoRunAllowed', () => {
     // This test env sets no VITE_BTC_NETWORK, so the default read is the mock.
     expect(smokeAutoRunAllowed()).toBe(true);
   });
+});
+
+test('signed-in regtest is a real local provider on the regtest SDK tier', () => {
+  expect(demoTier('regtest', true)).toEqual({ real: true, network: 'regtest', webvhNetwork: 'magby' });
+  expect(demoTier('regtest', false).real).toBe(false);
+  expect(smokeAutoRunAllowed('regtest')).toBe(false);
 });

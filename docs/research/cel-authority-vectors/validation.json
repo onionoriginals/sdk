@@ -1,0 +1,33 @@
+{
+  "checkedAt": "2026-09-06T00:23:10.045800+00:00",
+  "baseRevision": "071b898420dd1052f4e4d34a27e59bea167784d0",
+  "branch": "codex/regtest-flow",
+  "runtime": "v25.2.1",
+  "ownerDecision": "Rotation A to B retires A for future entries. Only the currently authorized controller can authorize subsequent changes; anchored changes also require publication on the sat.",
+  "checks": {
+    "signedEntries": 24,
+    "workedHistories": 42,
+    "reversedProviderOrderCases": 42,
+    "result": "passed",
+    "sourceConsistencyReview": "scoped pass after resolving four ambiguities",
+    "localLinks": "pass"
+  },
+  "scope": "Signed reference entries and hand-worked authority/state histories against declared observations. No production implementation or actual Bitcoin evidence.",
+  "notVerified": [
+    "Provider completeness/snapshots",
+    "Real creation-position extraction",
+    "Bitcoin publications/transfers/reorganizations",
+    "WebVH method binding",
+    "New-format SDK and regtest journey"
+  ],
+  "preservedImplementationDiffSha256": "a78b7d8f5fa017432560fe4af4be7ef13f76c7ac0dda5864f4c3f256a50789ab",
+  "sha256": {
+    "specs/originals-cel-v3-authority.md": "b9161d93d0d6421d648c4a35be56389946d988a348cdcf722b6b8d431bdc25bf",
+    "docs/research/2026-09-05-cel-ordering-primary-sources.md": "c0b0e89197ed70e6f1f6abe25b9a8358c10d320647499d887728cb9df1368ad5",
+    "docs/research/cel-authority-vectors/README.md": "62b739e6db5b73e98ddd7ff9e1c83e4c5328bfd7ad10778a9c7e5ab1fb04b2d1",
+    "docs/research/cel-authority-vectors/check-histories.mjs": "5974c4937f3a6f073bed598457eb3344fafce02ba3ca9abfe26fb9ae4351be40",
+    "docs/research/cel-authority-vectors/generate-histories.mjs": "4bf952edf47e584711c371ac999ca3d0a7d8197754ff0cf13b6534a43ebb6a96",
+    "docs/research/cel-authority-vectors/histories.json": "1a3107074e313197a5cda8038e3c6190744e4e3f24fb9cd81ef0604ad8cf8e3e",
+    "docs/research/cel-authority-vectors/walkthrough.md": "f7c0eda913404568ae5450a3ef8bafe0a34669ebff3aa231c246ff6bdc26517a"
+  }
+}

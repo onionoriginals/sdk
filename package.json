@@ -28,7 +28,9 @@
     "check": "turbo run check --filter='./packages/*'",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "regtest": "bun scripts/regtest/run.ts",
+    "regtest:install": "bun scripts/regtest/install.ts"
   },
   "author": "Aviary Tech",
   "license": "MIT",

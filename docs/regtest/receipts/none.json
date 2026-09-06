@@ -1,0 +1,33 @@
+{
+  "result": "pass",
+  "chain": "regtest",
+  "fault": "none",
+  "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+  "ord": "ord 0.29.0",
+  "did": "did:btco:reg:5000000000",
+  "webDid": "did:webvh:QmR45Km1pNk4PJQJk6z7SU3HvfrhxKnxXSwc3dYQ1KfceE:localhost%3A59910:ueiaq5j9xb6pwbax1uws2soy-bhuvcbeb3z1_afv-n9rp1w",
+  "commitTxId": "38d13afdb905a93a58a4fb49e3ff6ac3fb85947ca9c2aa0b4023449d020b46ae",
+  "revealTxId": "8e6a917c16bc08d5af801ffeae837f5201e3bade9be2d2c80e58d8a3d94c0966",
+  "inscriptionId": "8e6a917c16bc08d5af801ffeae837f5201e3bade9be2d2c80e58d8a3d94c0966i0",
+  "orphanedBlock": "607a5a8382f763ebdc73435b846b1a8ed46e47549d9f1766a0e0f2f75c3eb513",
+  "activeTip": "5b7c9f3c54ddc3b0da227127321eaef0ce2a333dde41315f15965e7b27b077e9",
+  "pngBytes": 68,
+  "pngHash": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+  "dataDir": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-regtest-dyQZyk",
+  "checks": [
+    "HTTPS publication",
+    "fresh WebVH resolution",
+    "HTTP deposit/fee/sat/prevtx",
+    "SDK commit/reveal",
+    "persistence before broadcast",
+    "selected sat preserved",
+    "route/store recreation from disk",
+    "confirmation",
+    "one-block reorg and re-confirmation",
+    "fresh sat recovery",
+    "fresh btco DID resolution",
+    "v2 JSON reload",
+    "six-confirmation retention horizon"
+  ],
+  "signer": "disposable local key through TurnkeySatSigner; no Turnkey service call"
+}

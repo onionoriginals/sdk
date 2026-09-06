@@ -98,7 +98,11 @@ export class DIDManager {
   private readonly metrics?: MetricsCollector;
   public readonly cache: DIDCache;
 
-  constructor(private config: OriginalsConfig, metrics?: MetricsCollector) {
+  constructor(private config: OriginalsConfig, metrics?: MetricsCollector,
+    private readonly resolveVerifiedBtco?: (
+      did: string,
+      resolveKey: (verificationMethod: string) => Promise<Uint8Array | null>
+    ) => Promise<DIDDocument | null>) {
     this.metrics = metrics;
     this.cache = new DIDCache({
       ...(config.didCache || {}),
@@ -410,9 +414,48 @@ export class DIDManager {
   }
 
   async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
+    return this.resolveDIDWithPath(did, options, new Set());
+  }
+
+  private async resolveDIDWithPath(
+    did: string,
+    options: { skipCache?: boolean } | undefined,
+    btcoPath: ReadonlySet<string>
+  ): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
       // Network guard must precede the cache read (issue #312).
       this.assertBtcoNetworkMatchesProvider(did);
+
+      // SDK assets use media content plus a witnessed CEL in ordinal metadata.
+      // Share the asset reader's verification gate and re-read Bitcoin state:
+      // a cached document must not survive a removed inscription after a reorg.
+      if (did.startsWith('did:btco:') && this.config.ordinalsProvider && this.resolveVerifiedBtco) {
+        if (btcoPath.has(did)) return null;
+        // This path belongs to one verification chain. A manager-wide in-flight
+        // set would incorrectly reject independent concurrent reads of one DID.
+        const nextPath = new Set(btcoPath).add(did);
+        try {
+          const adapter = new OrdinalsProviderResolverAdapter(this.config.ordinalsProvider);
+          const resolved = await new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent }).resolve(did);
+          const hasAnchor = (document: unknown): boolean => {
+            if (!document || typeof document !== 'object') return false;
+            const service = (document as { service?: unknown }).service;
+            return Array.isArray(service) && service.some((s: unknown) =>
+              typeof s === 'object' && s !== null && 'type' in s && s.type === 'OriginalsCelAnchor');
+          };
+          // Even a malformed CEL claim must not downgrade to ordinary DID
+          // resolution. Inspect the whole sat history, not just the selected doc.
+          const hasCelClaim = resolved.inscriptions?.some(inscription => {
+            const metadata = inscription.metadata;
+            return hasAnchor(inscription.didDocument) || (metadata !== null &&
+              ('celLog' in metadata || 'events' in metadata || hasAnchor(metadata.didDocument)));
+          });
+          if (resolved.didDocument && !hasCelClaim) return resolved.didDocument;
+          return await this.resolveVerifiedBtco(did, createDidManagerKeyResolver({
+            resolveDID: nestedDid => this.resolveDIDWithPath(nestedDid, { skipCache: true }, nextPath)
+          }));
+        } catch { return null; }
+      }
 
       // Check cache first (unless skipCache is set). The read is best-effort:
       // a throwing storage adapter must not crash resolution — treat it as a miss.
@@ -784,5 +827,3 @@ export type {
   RecoverWebVHResult,
   KeyRecoveryCredential,
 } from './WebVHManager.js';
-
-

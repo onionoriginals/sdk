@@ -1,3 +1,5 @@
+import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, type ResourceContent } from '../sdk/resource-view';
+import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
 import { DepositFeeNotice } from './DepositFeeNotice';
@@ -59,7 +61,7 @@ export interface DepositInfo {
  * address on a deploy whose server can never spend from it. 'off' means the
  * Bitcoin routes are not mounted at all (GET /api/btc/network 404s).
  */
-type ServerNetwork = 'mainnet' | 'testnet' | 'off';
+type ServerNetwork = 'mainnet' | 'testnet' | 'regtest' | 'off';
 
 export async function fetchServerNetwork(
   fetchImpl: typeof fetch = fetch
@@ -68,15 +70,15 @@ export async function fetchServerNetwork(
     const res = await fetchImpl('/api/btc/network', { credentials: 'same-origin' });
     if (!res.ok) return 'off';
     const body = (await res.json()) as { network?: string };
-    return body.network === 'mainnet' ? 'mainnet' : body.network === 'testnet' ? 'testnet' : 'off';
+    return body.network === 'regtest' ? 'regtest' : body.network === 'mainnet' ? 'mainnet' : body.network === 'testnet' ? 'testnet' : 'off';
   } catch {
     return 'off';
   }
 }
 
 /** The server network a given browser flag REQUIRES. */
-export function expectedServerNetwork(flag: 'mainnet' | 'testnet4' | 'off'): ServerNetwork {
-  return flag === 'mainnet' ? 'mainnet' : flag === 'testnet4' ? 'testnet' : 'off';
+export function expectedServerNetwork(flag: BtcNetworkFlag): ServerNetwork {
+  return flag === 'regtest' ? 'regtest' : flag === 'mainnet' ? 'mainnet' : flag === 'testnet4' ? 'testnet' : 'off';
 }
 
 /**
@@ -126,7 +128,7 @@ export function signingGateMessage(
   if (gate === 'ok') return null;
   if (gate === 'unavailable') return demo.session.unavailableBody;
   if (gate === 'reauth') return status === 'expired' ? demo.session.expiredBody : demo.session.missingBody;
-  return network === 'mainnet' ? demo.deposit.signInPrompt : demo.testnet4.signInPrompt;
+  return network === 'regtest' ? demo.regtest.signInPrompt : network === 'mainnet' ? demo.deposit.signInPrompt : demo.testnet4.signInPrompt;
 }
 
 /**
@@ -176,7 +178,7 @@ export function inscribeStepView(
         // steps[2] states the mainnet truth (own key, own deposit); a
         // testnet4 build is faucet-funded and must say so instead.
         description:
-          network === 'mainnet' ? demo.steps[2].description : demo.testnet4.stepDescription,
+          network === 'regtest' ? demo.regtest.stepDescription : network === 'mainnet' ? demo.steps[2].description : demo.testnet4.stepDescription,
         buttonClass: 'btn btn-primary demo-step-btn'
       }
     : {
@@ -193,7 +195,7 @@ export function inscribeStepView(
  * so the one thing it must never do is describe the OTHER tier's Bitcoin step.
  */
 export function demoSubhead(real: boolean, network: BtcNetworkFlag = 'off'): string {
-  if (real) return `${demo.subhead} ${demo.subheadReal}`;
+  if (real) return `${demo.subhead} ${network === 'regtest' ? demo.regtest.subhead : demo.subheadReal}`;
   // "Sign in to inscribe for real" is only true on a build that HAS a real
   // path. On a mock build signing in changes nothing, so it stays unsaid.
   return network === 'off'
@@ -215,10 +217,10 @@ export interface CompletionCopy {
   explorerLabel: string | null;
 }
 
-export function completionCopy(simulated: boolean): CompletionCopy {
+export function completionCopy(simulated: boolean, network: BtcNetworkFlag = 'mainnet'): CompletionCopy {
   return simulated
     ? { ...demo.done.simulated, explorerLabel: null }
-    : demo.done.real;
+    : network === 'regtest' ? { ...demo.done.real, lead: demo.regtest.done, explorerLabel: null } : demo.done.real;
 }
 
 /** The published-log block. An anonymous log is served here only for a while. */
@@ -428,13 +430,19 @@ export function depositBadgeLabel(
  * ~12.8 KB, stranding a creator after they have deposited (#493). Counted in
  * UTF-8 bytes, never characters, and biased UP: the excess returns as change.
  */
-export function inscriptionContentBytes(asset: DemoAssetState): number {
+export interface InscriptionContentInput {
+  resource: { content: ResourceContent };
+  metadata?: { content: string };
+  celLog: readonly unknown[];
+}
+
+export function inscriptionContentBytes(asset: InscriptionContentInput): number {
   const utf8 = (s: string) => new TextEncoder().encode(s).length;
   // CBOR of the log is no larger than its JSON; the DID document is small and
   // bounded, so a flat allowance covers it.
   const DID_DOCUMENT_ALLOWANCE = 1_024;
   return (
-    utf8(asset.resource.content) +
+    contentByteLength(asset.resource.content) +
     utf8(asset.metadata?.content ?? '') +
     utf8(JSON.stringify(asset.celLog)) +
     DID_DOCUMENT_ALLOWANCE
@@ -683,14 +691,14 @@ function useEngine(authed: boolean, subOrgId?: string) {
  * actually cover. A larger cap would let someone build an asset they can never
  * afford to put on Bitcoin, which is a dead end on the money path.
  */
-const MAX_SOURCE_BYTES = 32 * 1024;
+
 
 /**
  * The published length, in BYTES. `String.length` counts UTF-16 code units, so
  * it under-counts every emoji and CJK character — the bytes that get hashed and
  * paid for on-chain are UTF-8, and that is what the cap has to measure.
  */
-const byteLength = (text: string) => new TextEncoder().encode(text).length;
+const byteLength = contentByteLength;
 
 /** What was committed to the log, including WHICH source produced it. */
 interface CommittedSource {
@@ -698,7 +706,7 @@ interface CommittedSource {
   style: string;
   nonce: number;
   sourceKind: 'generate' | 'upload' | 'write';
-  uploaded: { name: string; content: string; contentType: string } | null;
+  uploaded: { name: string; content: ResourceContent; contentType: string } | null;
   written: string;
 }
 
@@ -714,17 +722,16 @@ export function Demo() {
   // Every tier-dependent string, resolved once from the same `real` /
   // `isAuthenticated` values the behavior is driven by, so copy and behavior
   // cannot drift apart (KTD9).
-  const done = completionCopy(inscribeView.simulated);
+  const done = completionCopy(inscribeView.simulated, network);
   const resolved = resolvedCopy(isAuthenticated);
   const durabilityNote = publishDurabilityNote(isAuthenticated);
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [style, setStyle] = useState<string>(getArtSeed().style);
   // Where the asset's bytes come from. Generated artwork is the default; a
-  // visitor can bring an SVG or type raw text instead. All three travel the
-  // same lifecycle, because all three are text (see AssetSource in engine.ts).
+  // visitor can bring PNG, SVG or text bytes through the same lifecycle.
   const [sourceKind, setSourceKind] = useState<'generate' | 'upload' | 'write'>('generate');
-  const [uploaded, setUploaded] = useState<{ name: string; content: string; contentType: string } | null>(null);
+  const [uploaded, setUploaded] = useState<{ name: string; content: ResourceContent; contentType: string } | null>(null);
   const [written, setWritten] = useState('');
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
@@ -773,27 +780,18 @@ export function Demo() {
   const sourceTooBig = sourceBytes > MAX_SOURCE_BYTES;
   // Empty bytes are refused rather than hashed: an asset with nothing in it can
   // be created, but it proves nothing, and the wording says so.
-  const sourceReady = source.content.trim().length > 0 && !sourceTooBig;
+  const sourceReady = (source.content instanceof Uint8Array ? sourceBytes > 0 : source.content.trim().length > 0) && !sourceTooBig;
 
   const onPickFile = async (file: File | undefined) => {
     setSourceError(null);
     if (!file) return;
-    if (file.size > MAX_SOURCE_BYTES) return setSourceError(demo.form.uploadTooBig);
-    const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
-    const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name);
-    if (!isSvg && !isText) return setSourceError(demo.form.uploadWrongType);
-    const content = await file.text();
-    if (!content.trim()) return setSourceError(demo.form.uploadEmpty);
-    // Re-check after decoding: `file.size` counts bytes, and a multi-byte file
-    // could pass the byte check yet still be what we publish.
-    if (new TextEncoder().encode(content).length > MAX_SOURCE_BYTES) {
-      return setSourceError(demo.form.uploadTooBig);
+    try {
+      const source = await readAssetFile(file);
+      setUploaded({ name: source.filename, content: source.content, contentType: source.contentType });
+    } catch (error) {
+      const reason = error instanceof SourceFileError ? error.reason : 'wrong-type';
+      setSourceError(reason === 'too-big' ? demo.form.uploadTooBig : reason === 'empty' ? demo.form.uploadEmpty : demo.form.uploadWrongType);
     }
-    setUploaded({
-      name: file.name,
-      content,
-      contentType: isSvg ? 'image/svg+xml' : 'text/plain'
-    });
   };
   // The title/style/nonce whose artwork is actually committed to the log —
   // what Discard restores to. Divergence is detected from the BYTES, not from
@@ -982,7 +980,7 @@ export function Demo() {
   }, [bitcoin, asset]);
   useEffect(() => {
     if (networkMismatch) return;
-    if (network !== 'mainnet' || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
+    if ((network !== 'mainnet' && network !== 'regtest') || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
     void fetchDeposit();
     const t = setInterval(() => void fetchDeposit(), 15_000);
     return () => clearInterval(t);
@@ -1000,7 +998,7 @@ export function Demo() {
       // confirmation wait, and the user has already sent BTC by then.
       const blocked = signingGateMessage(gate, network, signing);
       if (blocked || !bitcoin) throw new DemoCopyError(blocked ?? demo.session.missingBody);
-      if (network === 'mainnet') {
+      if (network === 'mainnet' || network === 'regtest') {
         // Creator-pays: spend the user's OWN confirmed deposit UTXO. Re-fetch
         // at click time — a 15s-old snapshot must not pick a spent outpoint.
         const info = await fetchDeposit();
@@ -1117,7 +1115,7 @@ export function Demo() {
   // Compare the BYTES on screen against the bytes in the log. Retyping the
   // title back to its committed value therefore clears the pending state, and
   // a nonce bump that happened to reproduce the same art would too.
-  const pendingRevision = canRevise && !!asset && source.content !== asset.resource.content;
+  const pendingRevision = canRevise && !!asset && !resourceMatchesSource(source, asset.resource);
   const discardRevision = () => {
     if (!committed) return;
     setTitle(committed.title);
@@ -1156,6 +1154,7 @@ export function Demo() {
           <p className="eyebrow">{demo.eyebrow}</p>
           <h2>{demo.headline}</h2>
           <p>{demoSubhead(real, network)}</p>
+          {network === 'regtest' && <p className="demo-inscribe-note">{demo.regtest.notice}</p>}
           <p className="demo-console-hint">
             <svg viewBox="0 0 16 16" aria-hidden="true" width="14" height="14">
               <path d="m3 4 4 4-4 4M8.5 12H13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -1185,12 +1184,12 @@ export function Demo() {
                         src={
                           sourceKind === 'generate'
                             ? artwork.dataUri
-                            : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source.content)}`
+                            : resourceDataUrl(source.content, source.contentType)
                         }
                         alt={`Artwork for “${title || demo.form.defaultTitle}”`}
                       />
                     ) : (
-                      <pre className="demo-art-text">{source.content || demo.form.writePlaceholder}</pre>
+                      <pre className="demo-art-text">{contentText(source.content) || demo.form.writePlaceholder}</pre>
                     )}
                     {sourceKind === 'generate' && (phase === 'idle' || canRevise) && (
                       <button
@@ -1279,7 +1278,7 @@ export function Demo() {
                         <span>{demo.form.uploadCta}</span>
                         <input
                           type="file"
-                          accept=".svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
+                          accept=".png,image/png,.svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
                           disabled={formLocked}
                           onChange={(e) => void onPickFile(e.target.files?.[0])}
                         />
@@ -1466,7 +1465,7 @@ export function Demo() {
                   <p className="demo-inscribe-note demo-sim-note">{demo.simulated.note}</p>
                 )}
 
-                {phase === 'published' && real && network !== 'mainnet' && (
+                {phase === 'published' && real && network === 'testnet4' && (
                   <p className="demo-inscribe-note">
                     {gate === 'ok'
                       ? demo.testnet4.yourKeyNote
@@ -1478,7 +1477,7 @@ export function Demo() {
                   <p className="demo-error" role="alert">{demo.deposit.networkMismatch}</p>
                 )}
 
-                {phase === 'published' && network === 'mainnet' && !networkMismatch && (
+                {phase === 'published' && (network === 'mainnet' || network === 'regtest') && !networkMismatch && (
                   gate === 'ok' && bitcoin ? (
                     <div className="demo-deposit">
                       <div className="demo-deposit-head">
@@ -1764,7 +1763,7 @@ export function Demo() {
                         <div className="demo-resource-head">
                           <img
                             className="demo-resource-thumb"
-                            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(asset.resource.content)}`}
+                            src={resourceDataUrl(asset.resource.content, asset.resource.contentType)}
                             alt="The asset's artwork resource"
                           />
                           <dl className="demo-kv">
@@ -1796,7 +1795,7 @@ export function Demo() {
                         </div>
                         <pre>
                           <code>{asset.metadata?.content}
-{'\n'}{asset.resource.content}</code>
+{'\n'}{asset.resource.content instanceof Uint8Array ? `${asset.resource.content.byteLength} binary bytes · ${asset.resource.contentType}` : asset.resource.content}</code>
                         </pre>
                       </>
                     ) : (

@@ -122,7 +122,8 @@ export interface AssetResource {
   id: string;                      // Logical resource ID (stable across versions)
   type: string;                    // 'image', 'text', 'code', 'data', etc.
   url?: string;
-  content?: string;
+  /** Raw resource bytes. SDK input boundaries also accept UTF-8 strings. */
+  content?: Uint8Array;
   contentType: string;
   hash: string;                    // Content hash (unique per version)
   size?: number;
@@ -130,6 +131,9 @@ export interface AssetResource {
   previousVersionHash?: string;    // Link to previous version (by content hash)
   createdAt?: string;              // ISO timestamp of when this version was created
 }
+
+/** Creation input. Strings are UTF-8 encoded once; all returned resources contain bytes. */
+export type AssetResourceInput = Omit<AssetResource, 'content'> & { content?: Uint8Array | string };
 
 /**
  * Key-persistence interface: canonical definition lives in @originals/cel.
@@ -216,4 +220,3 @@ export interface BitcoinSigner {
    */
   signAndFinalizeCommitPsbt(psbtBase64: string): Promise<string>;
 }
-

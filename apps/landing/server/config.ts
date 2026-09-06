@@ -20,7 +20,7 @@
 import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
-import { isBitcoinConfigured, serverBtcNetwork } from './bitcoin';
+import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl } from './bitcoin';
 
 /** Block notifications are hints; QuickNode still verifies commit confirmation. */
 export function resolveBlockEventsUrl(env: Record<string, string | undefined>): string | undefined {
@@ -200,13 +200,13 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     if (deployed) {
       report(
         'BTC_NETWORK',
-        'BTC_NETWORK is not set — a deploy must name its chain (mainnet|testnet4) rather than inherit the testnet4 default.'
+        'BTC_NETWORK is not set — a deploy must name its chain (mainnet|testnet4|regtest) rather than inherit the testnet4 default.'
       );
     }
-  } else if (btcNetwork !== 'mainnet' && btcNetwork !== 'testnet4') {
+  } else if (btcNetwork !== 'mainnet' && btcNetwork !== 'testnet4' && btcNetwork !== 'regtest') {
     report(
       'BTC_NETWORK',
-      `BTC_NETWORK="${btcNetwork}" is not a network this server speaks (mainnet|testnet4) — it silently falls back to testnet4.`
+      `BTC_NETWORK="${btcNetwork}" is not a network this server speaks (mainnet|testnet4|regtest) — it silently falls back to testnet4.`
     );
   }
 
@@ -229,8 +229,17 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
   // The deposit indexer seam (R4/KTD4). Every address→UTXO read a creator's
   // money depends on goes through one base URL; this makes WHICH one, and
   // whether it is authenticated, legible at boot.
+  if (btcNetwork === 'regtest') {
+    for (const key of ['REGTEST_RPC_URL', 'REGTEST_ORD_URL', 'BTC_INDEXER_API']) {
+      if (!env[key] || !isLoopbackServiceUrl(env[key]!)) issues.push({ key, severity: 'error', message: `${key} must name an explicit loopback service for regtest.` });
+      else if (key !== 'BTC_INDEXER_API' && new URL(env[key]!).protocol !== 'http:') {
+        issues.push({ key, severity: 'error', message: `${key} must use HTTP, as required by RegtestProvider.` });
+      }
+    }
+    if (!env.REGTEST_RPC_AUTH) issues.push({ key: 'REGTEST_RPC_AUTH', severity: 'error', message: 'REGTEST_RPC_AUTH is required for the local Bitcoin Core RPC.' });
+  }
   const indexerApi = env.BTC_INDEXER_API;
-  if (indexerApi && !/^https:\/\/\S+$/.test(indexerApi)) {
+  if (indexerApi && !(btcNetwork === 'regtest' && isLoopbackServiceUrl(indexerApi)) && !/^https:\/\/\S+$/.test(indexerApi)) {
     // Not gated on `deployed`: a token over http leaks wherever it runs.
     issues.push({
       key: 'BTC_INDEXER_API',
@@ -280,7 +289,7 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
   } else if (browserFlag !== 'off' && !serverReal) {
     report(
       'VITE_BTC_NETWORK',
-      `VITE_BTC_NETWORK="${browserFlag}" but the server's Bitcoin routes are not mounted (QUICKNODE_ENDPOINT${serverChain === 'mainnet' ? '' : '/BTC_FAUCET_*'} absent) — inscribing is blocked for every visitor.`
+      `VITE_BTC_NETWORK="${browserFlag}" but the server's Bitcoin routes are not mounted (${serverChain === 'regtest' ? 'REGTEST_* or BTC_INDEXER_API' : `QUICKNODE_ENDPOINT${serverChain === 'mainnet' ? '' : '/BTC_FAUCET_*'}`} absent) — inscribing is blocked for every visitor.`
     );
   } else if (browserFlag === 'off' && serverReal) {
     report(
@@ -373,9 +382,9 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
  */
 export function browserBtcFlag(
   env: Record<string, string | undefined>
-): 'mainnet' | 'testnet4' | 'off' {
+): 'mainnet' | 'testnet4' | 'regtest' | 'off' {
   const v = env.VITE_BTC_NETWORK;
-  if (v === 'mainnet' || v === 'testnet4') return v;
+  if (v === 'mainnet' || v === 'testnet4' || v === 'regtest') return v;
   if (v === undefined || v === '') return env.VITE_BTC_TESTNET === '1' ? 'testnet4' : 'off';
   return 'off';
 }
