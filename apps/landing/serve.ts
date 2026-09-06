@@ -34,6 +34,7 @@ import {
   type FaucetTxSigner,
   type OrdinalLookup,
 } from './server/bitcoin';
+import { startBlockCompletion } from './server/block-completion';
 import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
@@ -43,7 +44,7 @@ import {
   createInscriptionCompletionSweep,
   type SweepProvider,
 } from './server/inscription-completion-sweep';
-import { checkConfig, isStrictConfig, resolveDataDir, isBareHost } from './server/config';
+import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
@@ -254,17 +255,23 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
   });
+  const complete = async () => {
+    const r = await completionSweep();
+    if (r.completed > 0 || r.failed > 0) {
+      console.warn(
+        `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
+          `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
+      );
+    }
+  };
+  const blockCompletion = startBlockCompletion({
+    url: resolveBlockEventsUrl(process.env),
+    complete,
+    onError: (error) => console.warn(`[landing] ${error.message}`),
+  });
+  process.once('exit', () => blockCompletion.stop());
   const sweep = () => {
-    void completionSweep()
-      .then((r) => {
-        if (r.completed > 0 || r.failed > 0) {
-          console.warn(
-            `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
-              `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
-          );
-        }
-      })
-      .catch((err) => console.warn('[landing] inscription completion sweep failed', err));
+    void blockCompletion.request();
     try {
       const { stale, unreadable } = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {
