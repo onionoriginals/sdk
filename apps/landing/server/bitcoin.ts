@@ -1717,7 +1717,7 @@ export function createBitcoinRoutes(deps: {
 
   /**
    * GET /api/btc/inscribe — the user's inscription records (no tx hex; ids +
-   * status only). Three best-effort reconciliation passes ride on this poll,
+   * status only). Three bounded reconciliation passes ride on this poll,
    * in priority order under one shared lookup budget, so EVERY stranded state
    * converges automatically — the manual Finish button is a shortcut, never
    * the only path:
@@ -1745,6 +1745,20 @@ export function createBitcoinRoutes(deps: {
   };
 
   async function reconcileUser(sub: string): Promise<Response> {
+    try {
+      return await reconcileRecords(sub);
+    } catch (error) {
+      const unreadable = unreadableRecords(sub, error);
+      if (unreadable) return unreadable;
+      // Provider status failures are handled separately below. A persistence
+      // failure must reach both the caller and the background sweep; it must
+      // never become a successful response containing stale record state.
+      money('inscribe_failed', { sub, reason: 'reconciliation_store_failed' });
+      return json({ error: 'inscription_reconciliation_failed', message: 'Recovery records could not be reconciled durably. Retry when storage is available.' }, 503);
+    }
+  }
+
+  async function reconcileRecords(sub: string): Promise<Response> {
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
     // A torn file must not surface as a bare, unnamed 500: this route IS the
@@ -1760,9 +1774,9 @@ export function createBitcoinRoutes(deps: {
     }
     // Bound the per-request provider fan-out on top of the per-user quota cap
     // above. The worklist is PRIORITIZED: superseded reconciliation goes
-    // first — those pairs carry committed funds and have NO manual recovery
-    // surface (the UI hides them by design), so ordinary confirmation polling
-    // for newer records must never starve them. Within each pass a ROTATING
+    // first, while reserving reads for later nonempty categories. Contested
+    // pairs, stranded live commits and confirmations must all make progress.
+    // Within each pass a ROTATING
     // cursor picks where the scan starts, so even a backlog larger than the
     // whole budget is fully covered across successive polls — no record can
     // sit permanently behind the budget.
@@ -1809,53 +1823,54 @@ export function createBitcoinRoutes(deps: {
       newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),
       cursors.confirm
     );
+    // Reserve one read for each later nonempty category. Priority and each
+    // category's rotating cursor remain, but an unresolved contested backlog
+    // can no longer consume all five reads forever.
+    const supersededLimit = 5 - Number(liveStuck.length > 0) - Number(liveUnconfirmed.length > 0);
+    const stuckLimit = 5 - Number(liveUnconfirmed.length > 0);
+    const readStatus = async (txid: string) => {
+      try { return await provider.getTransactionStatus(txid); }
+      catch { return null; } // A provider outage preserves the last observed state.
+    };
     let lookups = 0;
     for (const r of supersededPending) {
-      if (lookups >= 5) break;
+      if (lookups >= supersededLimit) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || !current.superseded || current.retired) continue;
       lookups++;
       cursors.superseded++;
-      try {
-        // ONE question decides a contested outpoint, whatever the pair's
-        // stored status: did THIS pair's commit confirm? (A reveal can only
-        // ever confirm on top of its own commit, so the commit check covers
-        // every superseded state — including reveal_broadcast pairs whose
-        // reveal never actually landed.) If yes: retire the rival (its commit
-        // conflicts with a confirmed tx), reinstate this pair, and complete
-        // it by (re)broadcasting the persisted reveal idempotently; the next
-        // poll's confirmation pass then walks it to 'confirmed'.
-        const st = await provider.getTransactionStatus(r.commitTxId);
-        if (!st?.confirmed) continue;
-        reclaimOutpoint(store, sub, r);
-        const revealErr = await broadcastIdempotent(r.revealTxHex);
-        store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
-        changed = true;
-      } catch {
-        // Lookup unsupported/down — leave the record as stored.
-      }
+      const st = await readStatus(r.commitTxId);
+      if (!st?.confirmed) continue;
+      // Reclaim and journal the attempt durably before sending the exact
+      // stored reveal. A failed write stops this pass before another side effect.
+      reclaimOutpoint(store, sub, r);
+      store.markRebroadcast(sub, r.commitTxId);
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
+      changed = true;
     }
     for (const r of liveStuck) {
-      if (lookups >= 5) break;
+      if (lookups >= stuckLimit) break;
       const current = store.get(sub, r.commitTxId);
       if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.stuck++;
-      try {
-        const st = await provider.getTransactionStatus(r.commitTxId);
-        if (!st?.confirmed) {
-          const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
-          if (!r.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
-          store.markRebroadcast(sub, r.commitTxId);
-          if (await broadcastIdempotent(r.signedCommitHex)) continue;
-          store.setStatus(sub, r.commitTxId, 'commit_broadcast');
-          changed = true;
-        }
-        const revealErr = await broadcastIdempotent(r.revealTxHex);
-        if (!revealErr) {
-          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-          changed = true;
-        }
-      } catch {
-        // Lookup unsupported/down — the manual Finish button still covers it.
+      const st = await readStatus(r.commitTxId);
+      if (!st) continue;
+      if (!st.confirmed) {
+        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+        if (!r.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
+      }
+      store.markRebroadcast(sub, r.commitTxId);
+      if (!st.confirmed) {
+        if (await broadcastIdempotent(r.signedCommitHex!)) continue;
+        store.setStatus(sub, r.commitTxId, 'commit_broadcast');
+        changed = true;
+      }
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      if (!revealErr) {
+        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+        changed = true;
       }
     }
     for (const r of liveUnconfirmed) {
@@ -1864,40 +1879,27 @@ export function createBitcoinRoutes(deps: {
       if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.confirm++;
-      try {
-        const st = await provider.getTransactionStatus(r.revealTxId);
-        if (st?.confirmed) {
-          if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
-          if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
-          continue;
-        }
-        if (r.status === 'confirmed') {
-          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-          changed = true;
-          if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
-          if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
-          store.markRebroadcast(sub, r.commitTxId);
-          continue;
-        }
-        // Not confirmed, and nothing else in the system ever re-pushes a
-        // reveal once it is marked broadcast. A reveal built at a rate that a
-        // fee spike leaves behind gets EVICTED from the mempool and would
-        // then never land — the commit's funds sit in a P2TR output nobody
-        // can reach (the reveal key is ephemeral, so it can never be replaced
-        // either). Re-push the persisted copy periodically: idempotent, free,
-        // and a no-op for a reveal that is simply waiting for a block.
-        // Throttle on rebroadcastAt, NOT updatedAt: updatedAt is how long the
-        // record has been stuck at this status, which is what the UI reads to
-        // decide whether to offer a manual retry. Refreshing it here would
-        // reset that clock every 30 minutes and the manual path would never
-        // surface. The status has not changed, so neither should updatedAt.
-        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
-        if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
-          await broadcastIdempotent(r.revealTxHex);
-          store.markRebroadcast(sub, r.commitTxId);
-        }
-      } catch {
-        // Lookup unsupported/down — report the stored status.
+      const st = await readStatus(r.revealTxId);
+      if (!st) continue;
+      if (st.confirmed) {
+        if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
+        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
+        continue;
+      }
+      if (r.status === 'confirmed') {
+        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+        changed = true;
+        store.markRebroadcast(sub, r.commitTxId);
+        if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
+        if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
+        continue;
+      }
+      // Keep the manual-retry status clock unchanged; the independent durable
+      // attempt timestamp throttles resubmission even after ambiguous delivery.
+      const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+      if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
+        store.markRebroadcast(sub, r.commitTxId);
+        await broadcastIdempotent(r.revealTxHex);
       }
     }
     if (changed) {

@@ -1649,3 +1649,76 @@ test('a superseded prior confirmation is still reconciled when its commit wins a
   expect(h.broadcasts).toEqual([pair.revealTxHex]);
   expect(h.store.get('sub-1', rival.commitTxId)?.revealTxHex).toBe(rival.revealTxHex);
 });
+
+describe('bounded durable reconciliation across recovery categories (#496)', () => {
+  function seed(h: ReturnType<typeof harness>, index: number, status: InscriptionRecord['status'], superseded = false) {
+    const pair = buildPair(index.toString(16).padStart(64, '0'));
+    const at = new Date(Date.now() - 45 * 60_000).toISOString();
+    h.store.create('sub-1', { ...pair, inscriptionId: pair.revealTxId + 'i0', fundingOutpoints: [pair.fundingUtxo.txid + ':0'], status, createdAt: at, updatedAt: at, ...(superseded ? { superseded: true } : {}) });
+    return pair;
+  }
+  async function poll(h: ReturnType<typeof harness>) {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    return h.routes.inscribeList(req, new URL(req.url));
+  }
+
+  test('a permanent superseded backlog cannot starve stuck commits or retained confirmations under five reads', async () => {
+    const committed = new Set<string>(), confirmed = new Set<string>();
+    let reads = 0;
+    const h = harness({ txStatus: txid => { reads++; return { confirmed: committed.has(txid) || confirmed.has(txid), confirmations: confirmed.has(txid) ? 6 : 1 }; } });
+    for (let i = 1; i <= 6; i++) seed(h, i, 'signed', true);
+    const stuck = Array.from({ length: 6 }, (_, i) => seed(h, i + 20, 'commit_broadcast'));
+    const reveals = Array.from({ length: 6 }, (_, i) => seed(h, i + 40, 'reveal_broadcast'));
+    stuck.forEach(pair => committed.add(pair.commitTxId));
+    reveals.forEach(pair => confirmed.add(pair.revealTxId));
+    // Allow two rotations while completed commits enter the confirmation list.
+    for (let pass = 0; pass < 24; pass++) {
+      reads = 0;
+      expect((await poll(h)).status).toBe(200);
+      expect(reads).toBeLessThanOrEqual(5);
+    }
+    expect(stuck.every(pair => h.store.get('sub-1', pair.commitTxId)?.status === 'reveal_broadcast')).toBe(true);
+    expect(reveals.every(pair => h.store.get('sub-1', pair.commitTxId)?.retired)).toBe(true);
+  });
+
+  test('reorg demotion and rebroadcast-journal write failures surface as 503 before any broadcast', async () => {
+    for (const operation of ['setStatus', 'markRebroadcast', 'retire', 'reinstate'] as const) {
+      const h = harness({ txStatus: { confirmed: operation === 'retire' || operation === 'reinstate', confirmations: 6 } });
+      const pair = seed(h, 80, operation === 'setStatus' || operation === 'retire' ? 'confirmed' : 'reveal_broadcast', operation === 'reinstate');
+      h.store[operation] = () => { throw new Error('simulated disk full'); };
+      const response = await poll(h);
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toBe('inscription_reconciliation_failed');
+      expect(h.broadcasts).toEqual([]);
+      expect(createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+      expect((await h.routes.sweepInscriptions()).unreadable).toEqual(['sub-1']);
+    }
+  });
+
+  test('provider status outages preserve observations without being reported as store failures', async () => {
+    const h = harness({ txStatus: () => { throw new Error('provider unavailable'); } });
+    const pair = seed(h, 85, 'confirmed');
+    expect((await poll(h)).status).toBe(200);
+    expect((await h.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(h.broadcasts).toEqual([]);
+    expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
+    expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+  });
+
+  test('a failed status write after delivery remains an explicit failure and restart retries the durable pair', async () => {
+    const h = harness({ txStatus: { confirmed: true, confirmations: 1 } });
+    const pair = seed(h, 90, 'commit_broadcast');
+    h.store.setStatus = () => { throw new Error('simulated disk full after delivery'); };
+    const response = await poll(h);
+    expect(response.status).toBe(503);
+    expect(h.broadcasts).toEqual([pair.revealTxHex]);
+    const saved = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
+    expect(saved.status).toBe('commit_broadcast');
+    expect(saved.rebroadcastAt).toBeDefined();
+    expect(saved.revealTxHex).toBe(pair.revealTxHex);
+    const restarted = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
+    expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
+    expect(restarted.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+  });
+});
