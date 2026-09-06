@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { downloadArchive } from './download';
 
 // Official release artifacts, pinned independently of the download response.
 const releases = {
@@ -25,11 +26,12 @@ export async function installRegtestTools() {
     const archive = Bun.file(join(directory, filename));
     if (!await archive.exists()) {
       console.log(`Downloading ${filename}`);
-      const response = await fetch(base + filename, { signal: AbortSignal.timeout(120_000) });
-      if (!response.ok) throw new Error(`Download failed: ${response.status} ${filename}`);
-      await Bun.write(archive, response);
+      await downloadArchive(base + filename, archive.name!, expected);
+      console.log(`Downloaded and verified ${filename}`);
     }
-    const actual = createHash('sha256').update(new Uint8Array(await archive.arrayBuffer())).digest('hex');
+    // Refresh the file view after a download: exists() can cache a missing
+    // archive's zero-byte size on the original BunFile instance.
+    const actual = createHash('sha256').update(new Uint8Array(await Bun.file(archive.name!).arrayBuffer())).digest('hex');
     if (actual !== expected) throw new Error(`SHA256 mismatch: ${archive.name}; remove it before retrying.`);
     const extract = Bun.spawn(['tar', '-xzf', archive.name!, '-C', directory], { stdout: 'ignore', stderr: 'inherit' });
     if (await extract.exited) throw new Error(`Extraction failed: ${filename}`);
