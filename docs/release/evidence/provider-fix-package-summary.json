@@ -1,0 +1,65 @@
+{
+  "testedCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+  "versionCommand": "changeset version (isolated git archive; no publication)",
+  "versions": {
+    "@originals/cel": "1.0.0",
+    "@originals/sdk": "3.0.0",
+    "@originals/auth": "3.0.0"
+  },
+  "privateLandingVersion": "0.2.0",
+  "verifiedAt": "2026-09-06T17:59:07.613491+00:00",
+  "checks": {
+    "freshFrozenInstall": true,
+    "freshBuild": {
+      "passed": true,
+      "tasks": 3,
+      "cached": 0
+    },
+    "stableChangesetVersion": true,
+    "freshTarballConsumerInstall": true,
+    "node": "v20.10.0",
+    "packedEntryPoints": 29,
+    "localBinaryJourney": true,
+    "concurrentEvents": 3,
+    "coldLoadVerification": true,
+    "privatePathsDenied": true,
+    "strictPublicTypes": true,
+    "cliVersion": "3.0.0",
+    "publication": false
+  },
+  "packages": [
+    {
+      "name": "@originals/cel",
+      "version": "1.0.0",
+      "filename": "originals-cel-1.0.0.tgz",
+      "sha256": "0c9e019b2b7ea5dc114688b0ad8de87c0261c512e92cf64215032916d795f27f",
+      "integrity": "sha512-jvVs2nAB221wiOvqXbIUwDEpt6Ljs+5mzRZ4onCo5+twfpaiMJ7bNUFGWwXtbjZVAyzI2Gu43l6ACN/Xiujc2g==",
+      "size": 137634,
+      "entryCount": 116
+    },
+    {
+      "name": "@originals/sdk",
+      "version": "3.0.0",
+      "filename": "originals-sdk-3.0.0.tgz",
+      "sha256": "5688f45e95fd75cb057e42cc1aa78b39e010bef46da6aae09a10c247f5556baa",
+      "integrity": "sha512-jSM5ssLUPflgcl/9If8ldSY3GLSdgim6Cds6d97eqV3k+qzCmIGbUaMUl4mj6PXNH6k+jgKs677OjSKDx7hDYA==",
+      "size": 496908,
+      "entryCount": 327
+    },
+    {
+      "name": "@originals/auth",
+      "version": "3.0.0",
+      "filename": "originals-auth-3.0.0.tgz",
+      "sha256": "05ed82b4ec3e9b0831df6631319feedd427de63aa01b3c42bec43913a0a69af3",
+      "integrity": "sha512-H24Sp5CV0JvKIMXXnkaf7BEyZDtyi+smmbl8LjHYrsmpZeiP4j50sJX530JGnjuBD2Zqf+Kf0TKKL16W/6pjTw==",
+      "size": 40302,
+      "entryCount": 59
+    }
+  ],
+  "artifacts": {
+    "preview": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-provider-preview-1x1hxy8y",
+    "artifacts": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-provider-artifacts-l3c3wqa0",
+    "consumer": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-provider-consumer-4gwas4sv",
+    "commit": "71e57306ed08aa50ab1954c459a0fa9b8631471d"
+  }
+}

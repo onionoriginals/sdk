@@ -1,0 +1,24 @@
+{
+  "recordedAt": "2026-09-06T18:03:37.382527+00:00",
+  "deploymentId": "12730c33-396a-4ba4-8db3-622da700e392",
+  "status": "SUCCESS",
+  "runtimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+  "imageDigest": "sha256:de8e0eb1c5dc5f92c236b9018a43285b969733ca46ca313961ae5a2518d096ae",
+  "volumeMounts": [
+    "/data"
+  ],
+  "startup": {
+    "configClean": true,
+    "mainnet": true,
+    "authEnabled": true,
+    "durablePath": true
+  },
+  "configuration": "Existing railway.json build/start configuration retained; IaC plan preview only (two safe property updates, no deletions)",
+  "ownerJourneyComplete": false,
+  "bitcoinTransactionsSubmitted": 0,
+  "proxySampleObserved": true,
+  "volumeId": "3a0145a7-8320-4e9b-8b64-f0d010bc7977",
+  "volumeInstanceId": "208e7a40-bc01-4a77-aba5-edd3f0b718f7",
+  "originalVolumePreserved": true,
+  "startupUnhandledErrors": 0
+}

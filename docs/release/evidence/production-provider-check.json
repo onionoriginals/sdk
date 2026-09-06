@@ -1,0 +1,7 @@
+{
+  "recordedAt": "2026-09-06T17:55:02.843Z",
+  "readOnly": true,
+  "exitCode": 0,
+  "passed": true,
+  "output": "Checking a mainnet deploy.\n  QuickNode: [provider host]\n  Deposit indexer: https://mempool.space/api (no token — free public tier)\n✅ Ordinals & Runes add-on works on mainnet.\n   first sat of 717d25914a1191c30f4c1d709e3ec0e1fab79cc7bf92cd12a93bed68db63416a:0 = 1252201400444387\n   complete CEL 3 snapshot at height 965814: 1 publication(s)\n✅ Known PNG raw bytes match the supplied digest in a complete snapshot. This is provider-read evidence only.\n"
+}

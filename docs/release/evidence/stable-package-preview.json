@@ -1,5 +1,5 @@
 {
-  "testedCommit": "f8932f61be1107d8d955501fc7fc339ee1802205",
+  "testedCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
   "versionCommand": "changeset version (isolated git archive; no publication)",
   "versions": {
     "@originals/cel": "1.0.0",
@@ -139,9 +139,9 @@
       "name": "@originals/sdk",
       "version": "3.0.0",
       "filename": "originals-sdk-3.0.0.tgz",
-      "sha256": "3d85188f640701224856d545e1e962e117d3fdca8d44def8266bb9d858b0b404",
-      "integrity": "sha512-gE2mRsQe8q1jX+B3Bs8t8Qxsz3knsjN7YxWsqTU/4So+TbTGnz3XZHy1RP2wmspIkdoa+6//ljXDvsxixmpaXg==",
-      "size": 496312,
+      "sha256": "5688f45e95fd75cb057e42cc1aa78b39e010bef46da6aae09a10c247f5556baa",
+      "integrity": "sha512-jSM5ssLUPflgcl/9If8ldSY3GLSdgim6Cds6d97eqV3k+qzCmIGbUaMUl4mj6PXNH6k+jgKs677OjSKDx7hDYA==",
+      "size": 496908,
       "entryCount": 327,
       "files": [
         "LICENSE",
@@ -544,49 +544,24 @@
       ]
     }
   ],
-  "consumer": {
+  "verifiedAt": "2026-09-06T17:59:07.613491+00:00",
+  "checks": {
+    "freshFrozenInstall": true,
+    "freshBuild": {
+      "passed": true,
+      "tasks": 3,
+      "cached": 0
+    },
+    "stableChangesetVersion": true,
+    "freshTarballConsumerInstall": true,
     "node": "v20.10.0",
-    "imports": [
-      "@originals/cel",
-      "@originals/cel/package.json",
-      "@originals/cel/encoding",
-      "@originals/cel/cbor",
-      "@originals/cel/testing",
-      "@originals/cel/v3",
-      "@originals/sdk",
-      "@originals/sdk/package.json",
-      "@originals/sdk/cel",
-      "@originals/sdk/testing",
-      "@originals/sdk/types",
-      "@originals/sdk/v3",
-      "@originals/auth",
-      "@originals/auth/package.json",
-      "@originals/auth/server",
-      "@originals/auth/server/email-auth",
-      "@originals/auth/server/index",
-      "@originals/auth/server/jwt",
-      "@originals/auth/server/middleware",
-      "@originals/auth/server/turnkey-client",
-      "@originals/auth/server/turnkey-signer",
-      "@originals/auth/client",
-      "@originals/auth/server/email-auth",
-      "@originals/auth/server/index",
-      "@originals/auth/server/jwt",
-      "@originals/auth/server/middleware",
-      "@originals/auth/server/turnkey-client",
-      "@originals/auth/server/turnkey-signer",
-      "@originals/auth/types"
-    ],
-    "localJourney": true,
+    "packedEntryPoints": 29,
+    "localBinaryJourney": true,
     "concurrentEvents": 3,
-    "binaryBytes": true,
+    "coldLoadVerification": true,
     "privatePathsDenied": true,
-    "publicTypes": "passed",
+    "strictPublicTypes": true,
     "cliVersion": "3.0.0",
-    "installation": "fresh directory; local file overrides for the unpublished stable dependencies only"
-  },
-  "published": false,
-  "packageSourceCommit": "f8932f61be1107d8d955501fc7fc339ee1802205",
-  "releaseRuntimeCommit": "b82aae0ebd357cd5b11d685abed0a3e460e6f39d",
-  "packageSourceUnchangedAfterPreview": true
+    "publication": false
+  }
 }

@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-09-06T17:56:20.005Z",
+  "readOnly": true,
+  "inscriptionId": "b1ef66c2d1a047cbaa6260b74daac43813924378fe08ef8545da4cb79e8fcf00i0",
+  "witnessMetadataBytes": 418,
+  "metadataSha256": "782a7f195d2d97b20a833f60a6f5863e24680960b1866b386b302e7303d8643b",
+  "httpStatus": 200,
+  "matchesWitness": true,
+  "route": "/addon/679/r/metadata/:id"
+}

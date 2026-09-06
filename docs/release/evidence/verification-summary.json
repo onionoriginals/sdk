@@ -46,16 +46,42 @@
     10
   ],
   "remaining": [
-    "provider complete address index",
-    "live Turnkey OTP",
-    "release candidate deployment and owner-funded mainnet/public-host proof"
+    "live Turnkey OTP and owner-bound browser session",
+    "owner mainnet/public-host proof within US$20 total cap, including six confirmations"
   ],
   "operatorPreflightUpdate": {
     "recordedAt": "2026-09-06T17:38:01.052342+00:00",
     "productionPreflightAndDeploymentAuthorized": true,
     "contentTransport": "verified against transaction witness and configured",
     "backupRestore": "daily backups, native snapshot, isolated restore and cleanup verified",
-    "productionCandidateDeployed": false,
-    "details": "../3.0.0-operator-preflight.md"
+    "productionCandidateDeployed": true,
+    "details": "../3.0.0-operator-preflight.md",
+    "deploymentId": "12730c33-396a-4ba4-8db3-622da700e392",
+    "deployedRuntimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+    "remoteChecks": "health, mainnet/no-faucet, auth rejection, canonical redirect and startup passed",
+    "browserBlocker": "Mac locked; owner away"
+  },
+  "providerFixUpdate": {
+    "runtimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+    "recordedAt": "2026-09-06T17:57:59.848348+00:00",
+    "adapterTests": {
+      "passed": 170,
+      "failed": 0
+    },
+    "regtest": "all three creator scenarios plus ownership transfer without address indexing passed",
+    "productionProvider": "complete known-PNG snapshot and exact digest passed",
+    "metadata": "418 raw CBOR bytes match original witness; exact inscription-specific 404 required for absence",
+    "review": "bounded review completed; HTTP200 null rejection added",
+    "stableArtifacts": "fresh stable tarballs, Node20.10 all29 exports, public types, binary/concurrent/cold-load and CLI passed",
+    "ci": "all required checks passed on 71e57306; CodeRabbit review disabled and Macroscope skipped on draft",
+    "ciCounts": {
+      "packagePassed": 4651,
+      "packageSkipped": 210,
+      "packageFailed": 0,
+      "landingPassed": 1023,
+      "landingFailed": 0,
+      "sdkCoverageFunctions": 88.84,
+      "sdkCoverageLines": 88.44
+    }
   }
 }

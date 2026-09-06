@@ -43,7 +43,7 @@ these is declared with `preserve()` (keep the live value) or omitted on purpose:
 | `TURNKEY_API_PRIVATE_KEY` | Secret. `preserve()`. |
 | `TURNKEY_ORGANIZATION_ID` | Secret. `preserve()`. |
 | `QUICKNODE_ENDPOINT` | Secret (a paid node URL with the key in it). `preserve()`. |
-| `QUICKNODE_CONTENT_BASE_URL`, `QUICKNODE_CONTENT_ENCODING` | Operator-selected byte-exact content transport. Preserved across apply; configure and verify the gateway before the CEL 3 mainnet journey. |
+| `QUICKNODE_CONTENT_BASE_URL`, `QUICKNODE_CONTENT_ENCODING` | Operator-selected byte-exact content transport. The ord-compatible base URL serves both `/content/:id` and `/r/metadata/:id`; explicit encoding selects the RPC-only path when no raw base is set. Preserved across apply; verify PNG and metadata bytes before the CEL 3 mainnet journey. |
 | `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
 | `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
 | Volume size and region | Now pinned in `railway.ts` (`sizeMB: 50000`, `region: us-west2`) to the live values, because IaC nulls a volume's size and region when the file omits them. Confirm they still match the live volume before applying; the plan shows a resize or relocate if they have drifted. |

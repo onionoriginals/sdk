@@ -1,0 +1,11 @@
+{
+  "recordedAt": "2026-09-06T17:53:52.645Z",
+  "readOnly": true,
+  "network": "mainnet",
+  "contentBaseConfigured": true,
+  "sat": "1252201400444387",
+  "complete": true,
+  "publications": 1,
+  "testedCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+  "resolvesPriorFailure": "production-snapshot-preflight.json"
+}
