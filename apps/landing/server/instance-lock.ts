@@ -33,7 +33,6 @@
  */
 import {
   closeSync,
-  existsSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -44,6 +43,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 
 export const LOCK_FILENAME = '.instance.lock';
+const TAKEOVER_FILENAME = '.instance.lock.takeover';
 
 /** How often the holder proves it is still alive. */
 export const HEARTBEAT_MS = 10_000;
@@ -191,11 +191,14 @@ export function acquireInstanceLock(
     log?: (message: string) => void;
     setInterval?: (fn: () => void, ms: number) => { unref?: () => void };
     clearInterval?: (handle: unknown) => void;
+    /** Fatal handler for a process that discovers it no longer owns the lock. */
+    onOwnershipLost?: (message: string) => void;
   } = {}
 ): InstanceLock {
   const env = opts.env ?? systemEnvironment;
   const log = opts.log ?? ((m: string) => console.warn(m));
   const path = join(dataDir, LOCK_FILENAME);
+  const takeoverPath = join(dataDir, TAKEOVER_FILENAME);
 
   mkdirSync(dataDir, { recursive: true });
 
@@ -223,33 +226,61 @@ export function acquireInstanceLock(
         holder
       );
     }
-    if (holder) {
-      log(
-        `[landing] taking over an abandoned instance lock at ${path} — previous holder ${describe(holder)}.`
-      );
-    } else {
-      log(`[landing] replacing an unreadable instance lock at ${path}.`);
-    }
-    writeRecord(path, record, false);
-
-    // Two processes can both find the lock abandoned and both rewrite it. The
-    // exclusive create cannot arbitrate that, so the owner id does: re-read,
-    // and whoever is not in the file steps aside. One of them always is.
-    const settled = readLock(path);
-    if (!settled || settled.owner !== record.owner) {
+    // Serialize the read-check-replace sequence with a second O_EXCL claim.
+    // Without this guard, two contenders can each overwrite and read back
+    // their own owner id, allowing both to return successfully.
+    if (!writeRecord(takeoverPath, record, true)) {
+      const contender = readLock(takeoverPath);
       throw new MultipleInstanceError(
-        `[landing] Refusing to start: lost a race for the instance lock at ${path} — ` +
-          `${settled ? describe(settled) : 'another process'} claimed it. This is the correct outcome; ` +
+        `[landing] Refusing to start: another process is already taking over the instance lock at ${path} — ` +
+          `${contender ? describe(contender) : 'another process'} claimed the takeover guard. ` +
           `only one process may write to ${dataDir}.`,
-        settled ?? record
+        contender ?? holder ?? record
       );
+    }
+    try {
+      const current = readLock(path);
+      if (current && !isAbandoned(current, env)) {
+        throw new MultipleInstanceError(
+          `[landing] Refusing to start: the instance lock at ${path} became live during takeover — ${describe(current)}.`,
+          current
+        );
+      }
+      if (current) {
+        log(
+          `[landing] taking over an abandoned instance lock at ${path} — previous holder ${describe(current)}.`
+        );
+      } else {
+        log(`[landing] replacing an unreadable instance lock at ${path}.`);
+      }
+      writeRecord(path, record, false);
+    } finally {
+      if (readLock(takeoverPath)?.owner === record.owner) unlinkSync(takeoverPath);
     }
   }
 
   const schedule = opts.setInterval ?? ((fn, ms) => setInterval(fn, ms));
   const cancel = opts.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
+  const onOwnershipLost =
+    opts.onOwnershipLost ??
+    ((message: string) => {
+      console.error(message);
+      process.exit(1);
+    });
 
-  const timer = schedule(() => {
+  let ownershipLost = false;
+  let timer: { unref?: () => void } | undefined;
+  timer = schedule(() => {
+    const holder = readLock(path);
+    if (!holder || holder.owner !== record.owner) {
+      if (ownershipLost) return;
+      ownershipLost = true;
+      if (timer) cancel(timer);
+      onOwnershipLost(
+        `[landing] instance-lock ownership lost at ${path}; refusing to continue as a second writer.`
+      );
+      return;
+    }
     record.heartbeatAt = stamp();
     try {
       writeRecord(path, record, false);
@@ -271,7 +302,7 @@ export function acquireInstanceLock(
     try {
       // Only remove a lock that is still OURS — a takeover after a stale
       // window must not have its lock deleted by the process it replaced.
-      if (existsSync(path) && readLock(path)?.owner === record.owner) unlinkSync(path);
+      if (readLock(path)?.owner === record.owner) unlinkSync(path);
     } catch {
       // Best effort: a lock left behind goes stale on its own.
     }

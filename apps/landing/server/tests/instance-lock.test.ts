@@ -177,6 +177,28 @@ describe('an abandoned lock is taken over', () => {
     expect(readRecord().owner).toBe(lock.record.owner);
     expect(lines.join('\n')).toContain('unreadable');
   });
+
+  test('only one contender can enter an abandoned-lock takeover', () => {
+    const stale: LockRecord = {
+      owner: 'dead-container',
+      pid: 7,
+      hostname: 'old-container',
+      startedAt: new Date(0).toISOString(),
+      heartbeatAt: new Date(0).toISOString(),
+    };
+    writeFileSync(lockPath(), JSON.stringify(stale));
+
+    writeFileSync(join(dir, '.instance.lock.takeover'), JSON.stringify({ ...stale, owner: 'winner' }));
+
+    expect(() =>
+      acquireInstanceLock(dir, {
+        env: makeEnv({ host: 'new-b', pid: 200 }),
+        log: () => {},
+        ...noTimers,
+      })
+    ).toThrow(MultipleInstanceError);
+    expect(readRecord()).toEqual(stale);
+  });
 });
 
 describe('release only removes a lock we still hold', () => {
@@ -192,6 +214,46 @@ describe('release only removes a lock we still hold', () => {
 
     lockA.release();
     expect(readRecord().owner).toBe(lockB.record.owner);
+  });
+});
+
+describe('heartbeat ownership', () => {
+  test('a displaced holder never overwrites its successor', () => {
+    let heartbeat: (() => void) | undefined;
+    let ownershipLost = false;
+    let cancelled = 0;
+    const timers = {
+      setInterval: (fn: () => void) => {
+        heartbeat = fn;
+        return { unref: () => {} };
+      },
+      clearInterval: () => {
+        cancelled++;
+      },
+    };
+    acquireInstanceLock(dir, {
+      env: makeEnv({ pid: 100 }),
+      log: () => {},
+      onOwnershipLost: () => {
+        ownershipLost = true;
+      },
+      ...timers,
+    });
+
+    const successor: LockRecord = {
+      owner: 'successor',
+      pid: 200,
+      hostname: 'host-b',
+      startedAt: new Date(1_700_000_000_000).toISOString(),
+      heartbeatAt: new Date(1_700_000_000_000).toISOString(),
+    };
+    writeFileSync(lockPath(), JSON.stringify(successor));
+
+    heartbeat?.();
+    heartbeat?.();
+    expect(readRecord()).toEqual(successor);
+    expect(ownershipLost).toBe(true);
+    expect(cancelled).toBe(1);
   });
 });
 
