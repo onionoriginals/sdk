@@ -1,4 +1,5 @@
 import { test, expect, afterEach } from "bun:test";
+import { Buffer as BrowserBuffer } from "buffer/";
 import { installCel3Host, engineWithSigner } from "./cel3-test-helpers";
 import {
   localPublicationRecoveries,
@@ -86,7 +87,7 @@ test("a storage failure prevents every publication upload", async () => {
   expect(host.writes).toEqual([]);
 });
 
-test("a cold retry after a lost submission response reuses both exact signed transactions", async () => {
+test.each(["native", "browser"] as const)("a cold retry with %s Buffer reuses both exact signed transactions after a lost response", async (runtime) => {
   host = installCel3Host("sub-1");
   const { OriginalsSDK } = await import("@originals/sdk");
   const { DurableHostingStorageAdapter } =
@@ -170,17 +171,23 @@ test("a cold retry after a lost submission response reuses both exact signed tra
     }
     return host.fetch(input, init);
   }) as typeof fetch;
-  expect(await recoverLocalPublication("sub-1", storageKey)).toContain(
-    "commit_broadcast_unknown",
-  );
-  expect(localPublicationRecoveries("sub-1")[0].commitTxId).toBe(
-    prepared.transactions.commitTxId,
-  );
-  expect(await recoverLocalPublication("sub-1", storageKey)).toContain(
-    "reveal_broadcast",
-  );
-  expect(submissions).toHaveLength(2);
-  expect(submissions[1].signedCommitHex).toBe(submissions[0].signedCommitHex);
-  expect(submissions[1].revealTxHex).toBe(submissions[0].revealTxHex);
-  expect(signatures).toBe(1);
+  const nativeBuffer = globalThis.Buffer;
+  if (runtime === "browser") globalThis.Buffer = BrowserBuffer as unknown as typeof Buffer;
+  try {
+    expect(await recoverLocalPublication("sub-1", storageKey)).toContain(
+      "commit_broadcast_unknown",
+    );
+    expect(localPublicationRecoveries("sub-1")[0].commitTxId).toBe(
+      prepared.transactions.commitTxId,
+    );
+    expect(await recoverLocalPublication("sub-1", storageKey)).toContain(
+      "reveal_broadcast",
+    );
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1].signedCommitHex).toBe(submissions[0].signedCommitHex);
+    expect(submissions[1].revealTxHex).toBe(submissions[0].revealTxHex);
+    expect(signatures).toBe(1);
+  } finally {
+    globalThis.Buffer = nativeBuffer;
+  }
 });

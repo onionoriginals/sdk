@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1.js';
+import { equalBytes } from '@noble/curves/utils.js';
 import { OutOrdinalReveal, parseInscriptions } from 'micro-ordinals';
 import { StructuredError, validateSatoshiNumber } from '@originals/cel';
 import type { OrdinalsProvider } from '../adapters/types.js';
@@ -72,7 +73,7 @@ export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.T
   const expectedControl = btc.TaprootControlBlock.encode(payment.tapLeafScript![0][0]);
   const output = commit.getOutput(0);
   if (!output.script || output.amount === undefined || output.amount <= 0n ||
-      !Buffer.from(output.script).equals(payment.script) || !Buffer.from(control).equals(expectedControl)) {
+      !equalBytes(output.script, payment.script) || !equalBytes(control, expectedControl)) {
     invalid('Recovery reveal witness does not open the committed Taproot output.');
   }
   const message = reveal.preimageWitnessV1(0, [output.script], btc.SigHash.DEFAULT, [output.amount], undefined, script, 0xc0);
