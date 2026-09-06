@@ -14,17 +14,9 @@
  * CONFIG_STRICT=1. Rollback is unsetting that one variable — no redeploy of
  * code.
  *
- * ONE exception, and it is deliberately not on that ladder: the durable data
- * directory. `ORIGINALS_DATA_DIR` holds the only copy of signed reveal
- * transactions — the single artifact standing between a dead browser tab and a
- * creator's permanently committed BTC. A deployed instance that boots without a
- * real volume there accepts money it cannot let anyone recover, and it does so
- * silently, because a warning on a platform where nobody reads boot logs is
- * indistinguishable from silence. Those issues are `fatal`: they refuse the
- * boot on a deployed instance regardless of CONFIG_STRICT. A service that is
- * down is recoverable in minutes. Reveal hex written to a tmpfs that a redeploy
- * wipes is not recoverable at all. Locally they stay warnings — CONFIG_STRICT's
- * meaning is unchanged for every other rule.
+ * Durable-data failures are the exception to that ladder. A deployed instance
+ * without a real writable volume would accept BTC while persisting the only
+ * reveal-recovery copy to ephemeral storage, so those issues are always fatal.
  *
  * Every rule is a pure function over an env snapshot plus a data-dir probe, so
  * "writable but not a mounted volume" is testable without a container.
@@ -34,16 +26,6 @@ import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
 import { isBitcoinConfigured, serverBtcNetwork } from './bitcoin';
 
-/**
- * - `warn`  — degrading as configured; never fatal.
- * - `error` — a deployed instance is misconfigured; fatal only under CONFIG_STRICT.
- * - `fatal` — fatal on a deployed instance NO MATTER WHAT CONFIG_STRICT says.
- *
- * `fatal` exists for exactly one class of misconfiguration: the one where
- * booting anyway destroys something that cannot be recovered. Everything else
- * stays on the warn-then-strict ladder the module header describes, and
- * CONFIG_STRICT keeps its meaning for all of it.
- */
 export type ConfigSeverity = 'error' | 'warn' | 'fatal';
 
 export interface ConfigIssue {
@@ -290,25 +272,44 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     );
   }
 
+  // The did:webvh host (#529). `demoHost()` in the SPA falls back to
+  // `window.location.host`, so an unset VITE_WEBVH_HOST means whichever
+  // hostname the visitor arrived on is baked into their DID — and a did:webvh
+  // domain cannot be changed after publication. Railway keeps its generated
+  // *.up.railway.app hostname reachable alongside the custom domain, so the
+  // wrong host is one bookmark away. Gated on mainnet: only there does a
+  // mis-pinned DID cost anything that cannot be thrown away.
+  const webvhHost = env.VITE_WEBVH_HOST;
+  if (btcNetwork === 'mainnet') {
+    if (!webvhHost) {
+      report(
+        'VITE_WEBVH_HOST',
+        'VITE_WEBVH_HOST is unset with BTC_NETWORK=mainnet — every published DID is pinned to whatever hostname the visitor arrived on, permanently. Set it and REBUILD the SPA (Vite bakes it at build time).'
+      );
+    } else if (!isBareHost(webvhHost)) {
+      report(
+        'VITE_WEBVH_HOST',
+        `VITE_WEBVH_HOST="${webvhHost}" is not a bare lowercase hostname — a did:webvh domain carries no scheme, port or path, and must be lowercase (e.g. "originals.build").`
+      );
+    }
+  }
+
   // Durable data. Only signed-in users have any, so this follows the auth
-  // surface. On a DEPLOYED instance every one of these is `fatal`, not `error`:
-  // see the module header. Each is the same failure — this process is about to
-  // accept a stranger's Bitcoin and write the only copy of the signed reveal
-  // somewhere that does not survive — and none of them is a judgement call an
-  // operator should be able to defer by leaving CONFIG_STRICT unset.
+  // surface. On a deployed instance these failures are fatal regardless of
+  // CONFIG_STRICT: this directory carries the only recovery copy of a signed
+  // reveal transaction after its commit has spent real BTC.
   if (authIntended(env)) {
     const dataDirSeverity: ConfigSeverity = deployed ? 'fatal' : 'warn';
     const reportDataDir = (message: string) =>
       issues.push({ key: 'ORIGINALS_DATA_DIR', severity: dataDirSeverity, message });
-    const RECOVERY_STAKES =
+    const recoveryStakes =
       'This path holds the only copies of signed reveal transactions — the one thing standing between a ' +
-      'dead browser tab and a creator\'s permanently committed BTC.';
-
+      "dead browser tab and a creator's permanently committed BTC.";
     const { explicit } = resolveDataDir(env);
     if (!explicit) {
       reportDataDir(
         `ORIGINALS_DATA_DIR is not set — durable Originals fall back to ${DEFAULT_DATA_DIR}, which is inside ` +
-          `the container and which every redeploy wipes. ${RECOVERY_STAKES} Attach a persistent volume and set ` +
+          `the container and which every redeploy wipes. ${recoveryStakes} Attach a persistent volume and set ` +
           `ORIGINALS_DATA_DIR to its mount path.`
       );
     }
@@ -316,13 +317,13 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     if (probe) {
       if (!probe.writable) {
         reportDataDir(
-          `ORIGINALS_DATA_DIR (${probe.path}) is not writable — nothing can be persisted at all. ${RECOVERY_STAKES}`
+          `ORIGINALS_DATA_DIR (${probe.path}) is not writable — nothing can be persisted at all. ${recoveryStakes}`
         );
       } else if (deployed && explicit && !isMountedVolume(probe.path, probe.mountPoints)) {
         reportDataDir(
           `ORIGINALS_DATA_DIR (${probe.path}) is writable but is not a mounted volume — attach a persistent ` +
             `volume and point it at the mount path. Writability alone survives nothing: a redeploy deletes this ` +
-            `path. ${RECOVERY_STAKES}`
+            `path. ${recoveryStakes}`
         );
       }
     }
@@ -375,6 +376,23 @@ export function browserBtcFlag(
   return 'off';
 }
 
+/**
+ * A bare hostname, as a did:webvh domain must be: no scheme, no port, no path,
+ * and LOWERCASE. The DID string embeds this verbatim, so anything else mints an
+ * identifier that cannot resolve.
+ *
+ * Case is not cosmetic here. `URL` lowercases the host it parses, so a
+ * mixed-case value diverges from every request the server sees, twice over:
+ * the canonical redirect would bounce forever (the parsed host never equals
+ * the configured one), and the hosting store — which puts under
+ * `${domain}/${path}` and looks up `${url.host}${url.pathname}` — would file
+ * published logs under a key no GET can reach. DNS being case-insensitive is
+ * what makes that failure silent rather than obvious.
+ */
+export function isBareHost(value: string): boolean {
+  return /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value);
+}
+
 /** Warn-only unless explicitly opted in. See the module header for why. */
 export function isStrictConfig(env: Record<string, string | undefined> = process.env): boolean {
   const v = env.CONFIG_STRICT;
@@ -393,14 +411,8 @@ export function formatConfigReport(issues: ConfigIssue[], refusing: boolean): st
 }
 
 /**
- * Report the issues, and refuse the boot when they include either a `fatal`
- * issue (always) or, under CONFIG_STRICT, a deployed-environment `error`. Pure
- * over its `log` sink so a test never writes to the console.
- *
- * `strict` does NOT gate `fatal`. That is the whole point of the severity: a
- * missing data volume is not a policy question, and leaving CONFIG_STRICT unset
- * must not be a way to boot past it. CONFIG_STRICT's meaning for `error` is
- * exactly what it was.
+ * Report issues, refusing for every fatal issue and for ordinary deployed
+ * errors only when strict mode is enabled.
  */
 export function enforceConfig(
   issues: ConfigIssue[],

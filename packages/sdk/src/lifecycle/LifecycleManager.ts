@@ -31,6 +31,7 @@ import { hashResource, validateCredential } from '../utils/validation.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
 import { parseSatoshiIdentifier, validateSatoshiNumber } from '@originals/cel';
 import { btcoDidPrefix, btcoDidFromSatoshi } from '@originals/cel';
+import { CEL_PROOF_TYPE } from '@originals/cel';
 import { KeyManager } from '../did/KeyManager.js';
 import { celSignerFromKeyPair, hexSha256ToDigestMultibase, createKeyStoreCelSigner, currentControllerVm } from '@originals/cel';
 import { toCelSigner, canonicalDidKeyVm, type OriginalsSigner } from '../crypto/OriginalsSigner.js';
@@ -1124,7 +1125,7 @@ export class LifecycleManager {
       const evIdx = eventDigests.findIndex(d => digestMultibaseEquals(linkAnchor, d));
       if (evIdx < 0) continue; // anchor commits to an event not in the reconstructed log
       const witness: WitnessProof & { txid?: string; satoshi: string; inscriptionId: string } = {
-        type: 'DataIntegrityProof',
+        type: CEL_PROOF_TYPE,
         cryptosuite: 'bitcoin-ordinals-2024',
         created: new Date().toISOString(),
         verificationMethod: 'did:btco:witness',
@@ -3319,7 +3320,7 @@ export class LifecycleManager {
       const migrateIdx = log.events.length - 1;
       const witnessedAt = new Date().toISOString();
       const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
-        type: 'DataIntegrityProof',
+        type: CEL_PROOF_TYPE,
         cryptosuite: 'bitcoin-ordinals-2024',
         created: witnessedAt,
         verificationMethod: 'did:btco:witness',
@@ -3697,7 +3698,7 @@ export class LifecycleManager {
     const headIdx = log.events.length - 1;
     const witnessedAt = new Date().toISOString();
     const witnessProof: WitnessProof & { txid: string; satoshi: string; inscriptionId: string } = {
-      type: 'DataIntegrityProof',
+      type: CEL_PROOF_TYPE,
       cryptosuite: 'bitcoin-ordinals-2024',
       created: witnessedAt,
       verificationMethod: 'did:btco:witness',

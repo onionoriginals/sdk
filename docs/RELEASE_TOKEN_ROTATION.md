@@ -51,6 +51,16 @@ none of which should be rushed through days before a token expiry. Rotate now
    ```
    (paste the token when prompted, or pipe it in).
 7. Verify (see below) — do **not** trigger a real publish to test it.
+8. Record the new expiry so the scheduled guard resets (see
+   ["The two CI guards"](#the-two-ci-guards) below). Set it to the expiration
+   you chose in step 2, as an ISO date:
+   ```
+   gh variable set NPM_TOKEN_EXPIRES_AT --repo onionoriginals/sdk --body 2027-01-23
+   ```
+   This is a **non-secret repository variable**, not a secret; it holds only a
+   date. GitHub secret metadata never exposes npm's real expiry, so this
+   variable is the only place CI can learn when to nag. Leave it unset and the
+   guard fails every week until it is set.
 
 ### `@originals/cel` caveat
 
@@ -82,6 +92,42 @@ npm access list packages --registry=https://registry.npmjs.org/ \
 If both succeed, the secret is good. The token's first real use will be the
 next `release.yml` run that has a version to publish (i.e. after a Version
 Packages PR merges) — no need to force one.
+
+## The two CI guards
+
+Two workflow guards exist so a dead token can never again surface only as a
+misleading E404 mid-release. Neither can rotate the token (that stays the
+human chore above), but together they make expiry loud and early instead of
+silent and late.
+
+- **Preflight in `release.yml` (fails the release, at publish time).** The
+  `publish` job runs `npm whoami` immediately before the publish step, using
+  the same `NODE_AUTH_TOKEN`/`.npmrc` the publish uses. If the token is expired
+  or invalid, `whoami` cannot authenticate and the job stops **before** the
+  publish and before provenance signing, with an error that names the token as
+  the cause, points at this runbook, and states that the misleading
+  `E404 Not Found - PUT https://registry.npmjs.org/@originals%2fsdk` is what
+  would have happened next. `whoami` prints only the account name, never the
+  token, so nothing leaks into the logs. **What its failure means:** the token
+  is dead (or was never valid); rotate it per the steps above and re-run the
+  publish job (`changeset publish` is idempotent, so a re-run after a failed
+  publish is safe).
+
+- **Scheduled check in `npm-token-expiry.yml` (nags before the deadline).** A
+  weekly job (Monday 08:00 UTC; also runnable via **Run workflow**) reads the
+  non-secret `NPM_TOKEN_EXPIRES_AT` repository variable. It fails, and opens or
+  refreshes a single tracking issue titled *"NPM_TOKEN expiry guard: rotate the
+  npm publish token"* (matched by exact title so it never files duplicates; its
+  body leads with the currently recorded expiry, not a baked-in date), when the
+  recorded expiry is **within 14 days or already past**, or when the variable is
+  **unset or unparseable**. Once you rotate and set `NPM_TOKEN_EXPIRES_AT` to a
+  date more than 14 days out (step 8 above), the next run closes that issue
+  automatically; if a later expiry approaches it reopens the same tracker rather
+  than filing a new one. **What its failure means:** either
+  the token is about to expire (rotate now, ahead of a release, not during
+  one), or nobody recorded the expiry after the last rotation (set the
+  variable). The guard reads no secret and cannot publish; it only watches the
+  date you record.
 
 ## Why not OIDC yet: evidence
 

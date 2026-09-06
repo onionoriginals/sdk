@@ -39,17 +39,13 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
+import { checkConfig, isStrictConfig, resolveDataDir, isBareHost } from './server/config';
 import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
 // served. Warn-only until CONFIG_STRICT=1 — see server/config.ts for why —
-// EXCEPT the durable data directory, which THROWS here on a deployed instance
-// no matter what CONFIG_STRICT says. That directory holds the only copies of
-// signed reveal transactions; a process that boots without it takes strangers'
-// Bitcoin and writes the one artifact that could recover it to storage a
-// redeploy deletes. Crash-looping is the better failure.
+// except for durable-data failures, which always refuse a deployed boot.
 const configIssues = checkConfig();
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
@@ -63,15 +59,11 @@ const hostStore = createWebvhHostStore();
 // deploy that dir is ephemeral and every redeploy silently wipes signed-in
 // users' Originals (checkConfig() above reports exactly that, by name).
 const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolveDataDir(process.env);
-// Single-instance enforcement, BEFORE any store opens the directory. This
-// process is single-instance by construction — the double-spend guard, every
-// rate limiter and both file stores coordinate through in-process state — and
-// railway.json pins numReplicas to 1, but a dashboard click or an autoscale
-// rule can still put a second writer on this volume. Refuse rather than let two
-// commits go live against one funding set. Throws MultipleInstanceError.
+// Claim the shared data directory before opening either store. The service's
+// spend guards and read-modify-write serialization are process-local, so a
+// second writer could strand committed BTC behind a double-spent commit.
 const instanceLock = acquireInstanceLock(originalsDataDir, { log: (m) => console.warn(m) });
 releaseOnExit(instanceLock);
-
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,
 // same JWT-sub namespacing) so a dead tab can never strand committed funds.
@@ -190,6 +182,16 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   };
 }
 
+/**
+ * The canonical host for did:webvh (#529). Bare hostname only — the DID embeds
+ * it verbatim, so a scheme or path here would mint identifiers that cannot
+ * resolve. Unset (dev, tests) means no redirect and no pinning.
+ */
+function canonicalWebvhHost(): string | undefined {
+  const v = process.env.VITE_WEBVH_HOST?.trim();
+  return v && isBareHost(v) ? v : undefined;
+}
+
 const api = buildApiRoutes();
 
 const server = Bun.serve({
@@ -200,6 +202,10 @@ const server = Bun.serve({
     hostStore,
     distDir: DIST,
     originals: api?.originals ?? null,
+    // The one host did:webvh identifiers may name (#529). Same value the SPA
+    // bakes in, read at runtime here so the redirect and the DID agree; a bad
+    // value is already a named violation in the boot config report.
+    canonicalHost: canonicalWebvhHost(),
   }),
   // Last line of defence (R3): a handler that throws must not reach a client
   // as an untyped 500 with nothing in the log. One named JSON body, one
@@ -219,9 +225,6 @@ console.log(
 );
 console.log(
   `[landing] durable Originals dir: ${originalsDataDir}${originalsDataDirIsExplicit ? '' : ' (default — NOT set via ORIGINALS_DATA_DIR)'}`
-);
-console.log(
-  `[landing] sole writer to that dir (instance lock ${instanceLock.path}, owner ${instanceLock.record.owner})`
 );
 
 // Monitoring sweep (stranger-safe checklist): any inscription still holding

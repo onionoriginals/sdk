@@ -27,6 +27,7 @@ export type MoneyEvent =
   | 'deposit_read_failed'
   /** Per-candidate ordinal classification was unavailable — selection refused. */
   | 'deposit_ordinal_check_unavailable'
+  | 'deposit_ordinal_check_partial'
   /** A signed commit+reveal pair passed validation and is about to broadcast. */
   | 'inscribe_attempted'
   /** A submitted pair was refused or failed to broadcast, with the reason. */

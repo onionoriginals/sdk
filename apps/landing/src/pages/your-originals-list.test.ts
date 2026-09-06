@@ -130,4 +130,61 @@ describe('withLiveInscriptionStatus', () => {
     const [same] = withLiveInscriptionStatus([row], []);
     expect(same.inscriptionStatus).toBe('pending');
   });
+
+  /**
+   * `revealBroadcast` exists so the detail page never links a transaction that
+   * is not on the network. The commit and reveal are both signed and persisted
+   * BEFORE either is broadcast, so `revealTxId` is known while the transaction
+   * does not exist — a live mainnet run hit exactly that and got a 404 from an
+   * explorer, moments after paying.
+   */
+  describe('revealBroadcast — which transactions actually exist', () => {
+    const row = (extra: Partial<OriginalRow> = {}): OriginalRow => ({
+      did: 'did:webvh:S:h:studio:you:abc',
+      title: 'Piece',
+      resourceHash: 'aa',
+      createdAt: '2026-08-18T00:00:00.000Z',
+      btcoDid: 'did:btco:1',
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionStatus: 'pending',
+      ...extra,
+    });
+    const rec = (status: PendingInscription['status']): PendingInscription => ({
+      commitTxId: 'c'.repeat(64),
+      revealTxId: 'r'.repeat(64),
+      inscriptionId: `${'r'.repeat(64)}i0`,
+      fundingOutpoint: 'a:0',
+      status,
+      createdAt: '2026-08-18T00:00:00.000Z',
+    });
+
+    test('signed, and commit-only, are NOT broadcast — the reveal must not be linked', async () => {
+      const { withLiveInscriptionStatus } = await import('./YourOriginals');
+      for (const status of ['signed', 'commit_broadcast'] as const) {
+        const [merged] = withLiveInscriptionStatus([row()], [rec(status)]);
+        expect(merged.revealBroadcast).toBe(false);
+      }
+    });
+
+    test('reveal_broadcast and confirmed are on the network', async () => {
+      const { withLiveInscriptionStatus } = await import('./YourOriginals');
+      for (const status of ['reveal_broadcast', 'confirmed'] as const) {
+        const [merged] = withLiveInscriptionStatus([row()], [rec(status)]);
+        expect(merged.revealBroadcast).toBe(true);
+      }
+    });
+
+    test('an already-confirmed row needs no record: its record is retired', async () => {
+      const { withLiveInscriptionStatus } = await import('./YourOriginals');
+      const [merged] = withLiveInscriptionStatus([row({ inscriptionStatus: 'confirmed' })], []);
+      expect(merged.revealBroadcast).toBe(true);
+    });
+
+    test('no record and not confirmed leaves it unknown, which reads as not-broadcast', async () => {
+      const { withLiveInscriptionStatus } = await import('./YourOriginals');
+      const [merged] = withLiveInscriptionStatus([row()], []);
+      expect(merged.revealBroadcast).toBeUndefined();
+    });
+  });
 });

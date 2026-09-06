@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BitcoinWitness, BitcoinWitnessError } from '../../src/witnesses/BitcoinWitness';
+import { CEL_PROOF_TYPE } from '../../src/proofVerification';
 import type { BitcoinWitnessProof } from '../../src/witnesses/BitcoinWitness';
 import type { CelBitcoinManager } from '../../src/types';
 import type { OrdinalsInscription } from '../../src/types';
@@ -112,7 +113,9 @@ describe('BitcoinWitness', () => {
       
       const proof = await witness.witness(testDigest);
 
-      expect(proof.type).toBe('DataIntegrityProof');
+      // Not 'DataIntegrityProof': the suite is ours and unregistered, so no
+      // conforming Data Integrity implementation can verify this proof.
+      expect(proof.type).toBe(CEL_PROOF_TYPE);
       expect(proof.cryptosuite).toBe('bitcoin-ordinals-2024');
       expect(proof.proofPurpose).toBe('assertionMethod');
       expect(proof.witnessedAt).toBeDefined();

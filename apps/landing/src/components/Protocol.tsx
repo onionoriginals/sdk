@@ -50,6 +50,15 @@ export function Protocol() {
             {protocol.migrationNote}
           </p>
         </Reveal>
+        <Reveal>
+          <p className="protocol-note">
+            <svg viewBox="0 0 16 16" aria-hidden="true" width="15" height="15">
+              <path d="M8 1.8 1.8 13.4h12.4L8 1.8Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              <path d="M8 6.4v3.4m0 1.9v.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+            {protocol.standardsNote}
+          </p>
+        </Reveal>
       </div>
     </section>
   );

@@ -1,4 +1,11 @@
 /**
+ * Renaming what a CEL proof CLAIMS, without changing what it signs.
+ *
+ * Two passes, same shape: plan 042 renamed the cryptosuite and bound the proof
+ * configuration into the signature; the rename below does the same for `type`.
+ * Both replaced a borrowed W3C label with an Originals one, both keep the old
+ * label readable forever, and neither touches the cryptography.
+ *
  * Plan 042 — renaming the CEL cryptosuite and binding the proof configuration.
  *
  * The old label was `eddsa-jcs-2022`, but the construction was not that suite:
@@ -21,6 +28,8 @@ import {
   verifyDidKeyProof,
   CEL_CRYPTOSUITE,
   CEL_CRYPTOSUITE_LEGACY,
+  CEL_PROOF_TYPE,
+  CEL_PROOF_TYPE_LEGACY,
 } from '../../src/proofVerification';
 import { canonicalizeEvent } from '../../src/canonicalize';
 import { multikey } from '../../src/crypto/Multikey';
@@ -192,5 +201,68 @@ describe('seal-time self-verification covers the new construction', () => {
     const { verified, reason } = await verifyDidKeyProof(proof, { type: 'create', data: {} });
     expect(verified).toBe(false);
     expect(reason).toContain('made-up-suite');
+  });
+});
+
+/**
+ * The same move, applied to the `type` field.
+ *
+ * `DataIntegrityProof` is W3C's type, and carrying it asserted that a
+ * conforming Data Integrity implementation could verify these proofs. None
+ * can: the suite is bespoke and unregistered, so a conforming verifier reads
+ * the cryptosuite, fails to recognise it, and rejects. Naming the envelope
+ * after the spec only moved that discovery one field later.
+ *
+ * Renaming a label that already-sealed logs carry is only safe if those logs
+ * keep verifying — the mainnet asset among them — and if accepting both labels
+ * opens no door. Both are asserted here.
+ */
+describe('the proof type names an Originals construction, not a W3C one', () => {
+  test('new proofs are written with the honest type', async () => {
+    const real = createRealCelSigner();
+    const log = await createEventLog(
+      { name: 'a', controller: real.controller },
+      { signer: real.signer, verificationMethod: real.verificationMethod }
+    );
+    expect(log.events[0].proof[0].type).toBe(CEL_PROOF_TYPE);
+    expect(CEL_PROOF_TYPE).not.toBe('DataIntegrityProof');
+  });
+
+  test('a log sealed under the old type still verifies — nothing already minted breaks', async () => {
+    // The property that made the rename shippable at one mainnet asset.
+    const legacy = legacySigner();
+    const log = await createEventLog(
+      { name: 'a', controller: legacy.controller },
+      { signer: legacy.signer, verificationMethod: legacy.verificationMethod }
+    );
+
+    expect(log.events[0].proof[0].type).toBe(CEL_PROOF_TYPE_LEGACY);
+    expect((await verifyEventLog(log)).verified).toBe(true);
+  });
+
+  test('a made-up type is still refused', async () => {
+    const real = createRealCelSigner();
+    const log = await createEventLog(
+      { name: 'a', controller: real.controller },
+      { signer: real.signer, verificationMethod: real.verificationMethod }
+    );
+    log.events[0].proof[0].type = 'SomeOtherProof';
+
+    expect((await verifyEventLog(log)).verified).toBe(false);
+  });
+
+  test('accepting both types opens no door: the type is inside the signature', async () => {
+    // Why dual-accept is safe rather than a downgrade. `type` is part of the
+    // proof configuration the new construction signs, so relabelling a
+    // current-suite proof to the legacy type breaks it, even though the
+    // verifier would otherwise accept that label.
+    const real = createRealCelSigner();
+    const log = await createEventLog(
+      { name: 'a', controller: real.controller },
+      { signer: real.signer, verificationMethod: real.verificationMethod }
+    );
+    log.events[0].proof[0].type = CEL_PROOF_TYPE_LEGACY;
+
+    expect((await verifyEventLog(log)).verified).toBe(false);
   });
 });

@@ -19,6 +19,7 @@ import { btcoDidPrefix, btcoDidFromSatoshi } from '../btcoDid.js';
 import { deriveDidCel } from '../celDid.js';
 import { computeDigestMultibase } from '../hash.js';
 import { canonicalizeEntryForChain } from '../canonicalize.js';
+import { CEL_PROOF_TYPE } from '../proofVerification.js';
 import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
 
 /**
@@ -342,7 +343,7 @@ export class BtcoCelManager {
       inscriptionId: string;
       blockHeight?: number;
     } = {
-      type: 'DataIntegrityProof',
+      type: CEL_PROOF_TYPE,
       cryptosuite: 'bitcoin-ordinals-2024',
       created: now,
       verificationMethod: this.config.verificationMethod ?? 'did:btco:witness',

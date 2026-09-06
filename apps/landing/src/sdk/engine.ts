@@ -17,7 +17,10 @@ import { short } from './format';
 export { short };
 import {
   OriginalsSDK,
-  type OriginalsAsset
+  signerFromExternalSigner,
+  type AssetEnvelope,
+  type OriginalsAsset,
+  type OriginalsSigner
 } from '@originals/sdk';
 import { classifyLogEntries, type EntryAuthorClass } from '@originals/sdk/cel';
 export type { EntryAuthorClass };
@@ -31,6 +34,8 @@ import { TurnkeySatSigner } from './turnkey-sat-signer';
 import { userWebvhSlug } from '../auth/webvh';
 import { btcNetwork, btcoExplorerUrl, demoTier, type BtcNetworkFlag, type DemoTier } from './network-flag';
 import type { TurnkeyBitcoinClient } from '../auth/turnkey-session';
+import { ensureAuthorshipAccount } from '../auth/turnkey-session';
+import { TurnkeyCelSigner, authorshipPublicKeyMultibase } from './turnkey-cel-signer';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export { btcNetwork, btcRealEnabled, btcRealFor, btcoExplorerUrl, demoTier } from './network-flag';
@@ -146,6 +151,14 @@ export class DemoEngine {
   private readonly subOrgId?: string;
   private assetTitle = '';
   private assetResourceHash = '';
+  /**
+   * The Turnkey-held key that authors this user's Originals, resolved once and
+   * reused. Null until resolved; `authorshipResolved` distinguishes "not tried
+   * yet" from "tried and there is none" so a failure is not retried on every
+   * lifecycle call.
+   */
+  private authorshipSigner: OriginalsSigner | null = null;
+  private authorshipResolved = false;
   asset: OriginalsAsset | null = null;
   /**
    * The tier this engine runs at (R5) — real Bitcoin only when the deploy
@@ -243,28 +256,106 @@ export class DemoEngine {
   }
 
   /**
+   * The key that authors this user's Originals, resolved once per engine.
+   *
+   * Turnkey-held and Ed25519: CEL is Ed25519-only, and a key in custody comes
+   * back with the session on any device. That is the whole point — an
+   * Original whose controller key lived in a tab could never be inscribed
+   * after a reload, which is the pre-broadcast resume gap.
+   *
+   * Returns null for an anonymous visitor (there is no sub-org to hold a key)
+   * and for any failure to reach Turnkey. Callers pass the result straight to
+   * the SDK, which falls back to generating a controller into the in-memory
+   * keyStore — the old behaviour, correct for a throwaway anonymous run and
+   * honestly un-resumable.
+   */
+  private async resolveAuthorshipSigner(): Promise<OriginalsSigner | null> {
+    if (this.authorshipResolved) return this.authorshipSigner;
+    this.authorshipResolved = true;
+    if (!this.authed || !this.subOrgId) return null;
+    try {
+      // Dynamic: @turnkey/sdk-browser pulls a browser-only dependency graph
+      // that must not load under `bun test` (same reason useAuth defers it).
+      const { openSessionKey } = await import('../auth/turnkey-browser-client');
+      const handle = await openSessionKey(this.subOrgId);
+      const client = handle.client as unknown as TurnkeyBitcoinClient;
+      const address = await ensureAuthorshipAccount(client, this.subOrgId);
+      const publicKeyMultibase = authorshipPublicKeyMultibase(address);
+      if (!publicKeyMultibase) {
+        log('authorship:unavailable', `authorship account ${address} is not an Ed25519 key`);
+        return null;
+      }
+      const external = new TurnkeyCelSigner({
+        client,
+        subOrgId: this.subOrgId,
+        signWith: address,
+        publicKeyMultibase,
+      });
+      this.authorshipSigner = signerFromExternalSigner(external, { publicKeyMultibase });
+      this.emit(
+        'authorship:key',
+        `Authoring as ${short(this.authorshipSigner.verificationMethodId)} — a Turnkey-held key, not this browser's`,
+        { verificationMethodId: this.authorshipSigner.verificationMethodId }
+      );
+      return this.authorshipSigner;
+    } catch (err) {
+      // Never fatal: losing custody means this run is un-resumable, not that
+      // it cannot happen at all.
+      log('authorship:unavailable', err);
+      return null;
+    }
+  }
+
+  /**
+   * Rebuild a previously published Original from the artifacts it hosts, so
+   * the rest of this engine can act on it exactly as if it had just been made
+   * here. `loadAsset` verifies the whole signed chain fail-closed, so a log
+   * that does not hold up throws rather than producing a usable asset.
+   */
+  async hydrate(envelope: AssetEnvelope): Promise<DemoAssetState> {
+    const { asset } = await this.sdk.lifecycle.loadAsset(envelope);
+    this.asset = asset;
+    const primary = asset.resources[0];
+    this.assetResourceHash = primary?.hash ?? '';
+    this.assetTitle = this.assetTitle || (primary?.id ?? '');
+    this.emit('asset:hydrated', `Rebuilt ${short(asset.id)} from its hosted event log`, {
+      assetId: asset.id,
+      layer: asset.currentLayer,
+      events: asset.celLog?.events?.length ?? 0,
+    });
+    return this.snapshot();
+  }
+
+  /**
    * Step 1 — create a did:cel asset. The primary resource is the artwork
    * itself: a real SVG file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
    */
-  async create(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
-    const svgBytes = new TextEncoder().encode(artworkSvg);
+  async create(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
+    const src = asSource(source);
+    const svgBytes = new TextEncoder().encode(src.content);
     const svgHash = toHex(sha256(svgBytes));
 
     const metadata = buildMetadata({
       title,
-      medium,
+      style,
       created: new Date().toISOString(),
-      artworkHash: svgHash
+      artworkHash: svgHash,
+      artworkFile: src.filename
     });
     const metaBytes = new TextEncoder().encode(metadata);
 
+    // The controller this asset is minted under. With a Turnkey signer the
+    // asset is authorable again after this tab closes; without one the SDK
+    // generates a key into the in-memory keyStore, which is correct for an
+    // anonymous throwaway run and honestly un-resumable.
+    const authorship = await this.resolveAuthorshipSigner();
     const asset = await this.sdk.lifecycle.createAsset([
       {
-        id: 'artwork.svg',
-        type: 'image',
-        content: artworkSvg,
-        contentType: 'image/svg+xml',
+        id: src.filename,
+        type: resourceKind(src.contentType),
+        content: src.content,
+        contentType: src.contentType,
         hash: svgHash,
         size: svgBytes.length
       },
@@ -276,7 +367,7 @@ export class DemoEngine {
         hash: toHex(sha256(metaBytes)),
         size: metaBytes.length
       }
-    ]);
+    ], authorship ? { signer: authorship } : undefined);
     this.asset = asset;
     this.assetTitle = title;
     this.assetResourceHash = svgHash;
@@ -312,7 +403,7 @@ export class DemoEngine {
    * never names a resource URL that 404s. did:btco is refused here because an
    * update there is a PAID on-chain append — real sats, not a demo click.
    */
-  async update(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
+  async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     const asset = this.asset;
     if (!asset) throw new Error('Create an asset first');
     if (asset.currentLayer === 'did:btco') {
@@ -322,38 +413,51 @@ export class DemoEngine {
     }
 
     const current = this.snapshot();
-    const svgHash = toHex(sha256(new TextEncoder().encode(artworkSvg)));
+    const src = asSource(source);
+    const svgHash = toHex(sha256(new TextEncoder().encode(src.content)));
+
+    // The SAME controller that signed genesis. An `update` is a signed CEL
+    // append like any other, and supplying a signer to `createAsset` means the
+    // SDK generated no key and put nothing in the keyStore — so leaving these
+    // appends to the keyStore fallback finds nothing and throws
+    // CEL_APPEND_FAILED (NO_SIGNING_KEY). Cached, so this is not a second
+    // Turnkey round-trip.
+    const authorship = await this.resolveAuthorshipSigner();
+    const signed = authorship ? { signer: authorship } : undefined;
 
     // The artwork is generated FROM the title, so a text edit changes these
     // bytes — that is the edit. Skip when identical: addResourceVersion refuses
     // a no-op version rather than logging one.
-    if (artworkSvg !== current.resource.content) {
+    if (src.content !== current.resource.content) {
       await asset.addResourceVersion(
         current.resource.id,
-        artworkSvg,
-        'image/svg+xml',
-        `Artwork regenerated for "${title}"`
+        src.content,
+        src.contentType,
+        `Artwork regenerated for "${title}"`,
+        signed
       );
       this.assetResourceHash = svgHash; // the /me summary posts this on publish
     }
 
-    // metadata.json embeds the title, the medium AND the artwork's sha-256, so
+    // metadata.json embeds the title, the style AND the artwork's sha-256, so
     // leaving it at v1 would have the asset's own metadata describe bytes it no
     // longer carries. Genesis `created` is preserved — it is when the asset was
     // made, not when it was last edited.
     if (current.metadata) {
       const next = buildMetadata({
         title,
-        medium,
+        style,
         created: createdAtOf(current.metadata.content),
-        artworkHash: svgHash
+        artworkHash: svgHash,
+        artworkFile: current.resource.id
       });
       if (next !== current.metadata.content) {
         await asset.addResourceVersion(
           current.metadata.id,
           next,
           'application/json',
-          `Metadata follows the artwork to "${title}"`
+          `Metadata follows the artwork to "${title}"`,
+          signed
         );
       }
     }
@@ -405,7 +509,14 @@ export class DemoEngine {
       );
     }
 
-    await this.sdk.lifecycle.publishToWeb(this.asset, this.publisherDid);
+    // Same key that authored genesis, or the append is refused: pre-anchor,
+    // the CEL only accepts its current controller as signer.
+    const publishSigner = await this.resolveAuthorshipSigner();
+    await this.sdk.lifecycle.publishToWeb(
+      this.asset,
+      this.publisherDid,
+      publishSigner ? { signer: publishSigner } : undefined
+    );
 
     // Prove REAL resolution: publishToWeb hosts the ASSET's did:webvh log (+ cel
     // + resources) at this origin. Fetch that log back over the network via the
@@ -484,6 +595,7 @@ export class DemoEngine {
     };
   }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
+    const inscribeSigner = await this.resolveAuthorshipSigner();
     if (opts?.funding) {
       // Real sat-selected path: the user's Turnkey key signs the commit.
       const satSigner = new TurnkeySatSigner({
@@ -496,6 +608,7 @@ export class DemoEngine {
       await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
         fundingUtxos,
         satSigner,
+        ...(inscribeSigner ? { signer: inscribeSigner } : {}),
         changeAddress: opts.funding.changeAddress,
         // No default here: real BTC must be built at the LIVE rate. Left
         // undefined, the SDK resolves it from the provider's estimateFee
@@ -504,8 +617,11 @@ export class DemoEngine {
         feeRate: opts.feeRate,
       });
     } else {
-      // Mock path (unchanged): fixed demo feeRate against OrdMockProvider.
-      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, opts?.feeRate ?? 7);
+      // Mock path: fixed demo feeRate against OrdMockProvider.
+      await this.sdk.lifecycle.inscribeOnBitcoin(this.asset, {
+        feeRate: opts?.feeRate ?? 7,
+        ...(inscribeSigner ? { signer: inscribeSigner } : {}),
+      });
     }
     const state = this.snapshot();
     if (state.inscription) {
@@ -606,22 +722,57 @@ export class DemoEngine {
 
 
 /**
+ * What the asset is made of: the primary resource's bytes and how to publish
+ * them. Generated artwork is the default, but a visitor can now bring their own
+ * SVG or type raw text, and those travel the same lifecycle.
+ *
+ * Text-only, deliberately: `AssetResource.content` is a string and the SDK
+ * hashes it as `TextEncoder().encode(content)`, so a PNG cannot round-trip
+ * without either corrupting or being re-encoded into something whose hash no
+ * longer belongs to the user's file. SVG and plain text are text, so they carry
+ * exactly.
+ */
+export interface AssetSource {
+  /** The exact bytes, as text. What gets hashed, signed, hosted and inscribed. */
+  content: string;
+  contentType: string;
+  /** The resource id — also the filename it is published under. */
+  filename: string;
+}
+
+/** A bare string is legacy shorthand for generated SVG artwork. */
+function asSource(source: string | AssetSource): AssetSource {
+  return typeof source === 'string'
+    ? { content: source, contentType: 'image/svg+xml', filename: 'artwork.svg' }
+    : source;
+}
+
+/** The SDK's coarse resource `type`, from the media type it carries. */
+function resourceKind(contentType: string): string {
+  return contentType.startsWith('image/') ? 'image' : 'text';
+}
+
+/**
  * The asset's metadata resource. One builder for genesis and every revision —
  * two shapes here would let an edit silently change a field it never meant to.
  */
 function buildMetadata(input: {
   title: string;
-  medium: string;
+  style: string;
   created: string;
   artworkHash: string;
+  artworkFile: string;
 }): string {
   return JSON.stringify(
     {
       title: input.title,
-      medium: input.medium,
+      // Renamed from `medium`: the value names the generative style, which is
+      // what it always actually described. Readers fall back to `medium` so
+      // assets published before the rename still show their label.
+      style: input.style,
       creator: 'you',
       created: input.created,
-      artwork: { file: 'artwork.svg', sha256: input.artworkHash }
+      artwork: { file: input.artworkFile, sha256: input.artworkHash }
     },
     null,
     2

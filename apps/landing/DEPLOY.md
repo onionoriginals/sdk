@@ -18,48 +18,104 @@ inscription path is live it strands real money.
 | Start command | `bun run apps/landing/serve.ts` |
 | Persistent volume | required, mounted, with `ORIGINALS_DATA_DIR` pointing at it |
 
-`/railway.json` at the repo root carries the build and start commands, and pins
-**`numReplicas: 1`**. It does **not** declare the volume or any environment
-variable — those are dashboard state, so the checklist below is the only place
-they are written down.
+`.railway/railway.ts` at the repo root is the reviewable record of this deploy.
+It carries the build and start commands, the restart policy, the persistent
+volume mounted at `/data`, and the **non-secret** environment shape
+(`NODE_ENV`, `BTC_NETWORK`, `ORIGINALS_DATA_DIR`, `TRUSTED_PROXY_HOPS`,
+`BTC_INDEXER_API`, `VITE_BTC_NETWORK`, `VITE_WEBVH_HOST`). It will replace the
+deprecated `railway.json`, whose Config-as-Code format stops working after
+2026-12-01, once the IaC file has been applied successfully; until then the
+legacy file remains the active deploy configuration. Secrets and a handful of
+live-only facts stay in the dashboard — see "What stays dashboard-only" below.
 
-### Why one replica, and why the process now enforces it
+### Why one replica, and why the process enforces it
 
-`numReplicas: 1` is load-bearing, not a cost setting. Everything on the money
-path coordinates through in-process state: the double-spend guard is a promise
-chain keyed by JWT sub, every rate limiter is an in-memory Map, the deposit
-sweep walks a process-local cursor, and both file stores serialize their
-read-modify-write on the single-threaded event loop. Each is correct for
-exactly one writer.
+The legacy `railway.json` pins `numReplicas: 1` until the Railway IaC migration
+is applied. That is load-bearing, not a cost setting: the double-spend guard,
+rate limiters, deposit sweep cursor, and file-store serialization are all
+process-local. Two replicas can build competing commits against the same
+funding outpoint and strand the losing reveal.
 
-Two writers is not a degraded version of that. Two replicas polling the same
-user's inscription both see the same funding outpoint as unspent, both build a
-commit against it, and the loser's reveal is stranded on a double-spent commit
-— a creator's BTC committed to an inscription that can never land.
+A dashboard change can bypass the pin, so the server also claims
+`$ORIGINALS_DATA_DIR/.instance.lock` before opening either store and refuses to
+start while another holder owns it. Remove that lock manually only after
+confirming no other instance is using the volume.
 
-JSON has no comments, so the reason lives here. And because a dashboard click or
-an autoscale rule can override the pin regardless, the process no longer trusts
-it: on boot it claims a heartbeat lock file in the data directory
-(`.instance.lock`) and **refuses to start if another live process already holds
-it**, logging the holder's pid and host. A crashed holder is detected by PID on
-the same host, or after 60 quiet seconds across a restart, and the next start
-takes over. If you ever need to clear one by hand, delete
-`$ORIGINALS_DATA_DIR/.instance.lock` — but only once you are certain no other
-instance is running.
+## What stays dashboard-only
+
+`.railway/railway.ts` is the desired state of the whole project, and Railway
+IaC reconciles it authoritatively: anything live but absent from the file is
+**deleted on apply**. So the file names every variable the service carries, but
+some values must not live in source and some facts this repo cannot see. Each of
+these is declared with `preserve()` (keep the live value) or omitted on purpose:
+
+| Kept in the dashboard | Why |
+| --- | --- |
+| `JWT_SECRET` | Secret. `preserve()` keeps the live value; it never enters source. |
+| `TURNKEY_API_PUBLIC_KEY` | Secret. `preserve()`. |
+| `TURNKEY_API_PRIVATE_KEY` | Secret. `preserve()`. |
+| `TURNKEY_ORGANIZATION_ID` | Secret. `preserve()`. |
+| `QUICKNODE_ENDPOINT` | Secret (a paid node URL with the key in it). `preserve()`. |
+| `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
+| `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
+| Volume size and region | Now pinned in `railway.ts` (`sizeMB: 50000`, `region: us-west2`) to the live values, because IaC nulls a volume's size and region when the file omits them. Confirm they still match the live volume before applying; the plan shows a resize or relocate if they have drifted. |
+| The Railway project name | The file names `Onion / Originals` (the live project name). Confirm with `railway status`; if the plan shows a project rename, the name in `railway.ts` is wrong — fix it, do not apply. |
+| The `originals.build` custom-domain binding | Railway routing, not modelled here. `VITE_WEBVH_HOST` only bakes the hostname into the SPA; it does not point the domain at the service. Canonical did:webvh resolution depends on this binding, so `railway.ts` does not touch networking and the plan must NOT propose removing the custom domain (or the generated `*.up.railway.app` host the server 301s from). If a plan would drop it, model the domain in `railway.ts` (`domains: ["originals.build"]`) before applying. |
+| Scheduled volume backup | Dashboard-only, opt-in, no published SLA. Record it in the "Volume backup log" at the bottom of this file — the only durable evidence it happened. |
+
+**Delete the stray `WEBVH_DOMAIN` dashboard variable.** The `builder` service
+carries `WEBVH_DOMAIN=https://originals.build`, which **no code reads** (a repo
+grep finds it only in old planning docs; the live did:webvh host is
+`VITE_WEBVH_HOST`, baked into the bundle). It is not in the config contract and
+not in `railway.ts`. Remove it from the dashboard so it cannot be mistaken for a
+live setting: `railway variables --service builder --unset WEBVH_DOMAIN`.
+
+## Applying and verifying the deploy shape
+
+You need the Railway CLI, logged in and linked to the project
+(`railway link`). None of this is checked in CI — the CLI is the only thing
+that reconciles the file against live state.
+
+**`railway config apply` is a required step, not optional.** Railway reads the
+old `railway.json` automatically on every deploy, but it does **not** read
+`.railway/railway.ts` on push: IaC is applied only through the CLI. That is why
+`railway.json` is still in the repo: until the new file has been applied to
+production, it is the only thing giving the service (and every PR preview
+environment) a build and start command. The order is: merge this file, run
+`railway config plan` then `railway config apply` against production, confirm a
+deploy succeeds, and only then delete `railway.json` in a follow-up.
+
+The file is scoped with `export const partial = "builder"`. The Railway project
+also hosts services and databases deployed from other repositories, and IaC
+deletes whatever the file omits: an unscoped plan measured on 2026-09-04
+proposed destroying 9 resources (three databases, four services, two
+variables) and nulling the volume's size and region. With the scope, the
+source repo, and the volume size and region pinned, the plan proposes exactly
+one deletion, the dead `WEBVH_DOMAIN` variable, plus moving the build and start
+commands into IaC.
+
+```bash
+railway config plan     # review the diff; it must propose NO unexpected delete or rename
+railway config apply    # apply only after the plan is clean
+```
+
+Read the plan before applying. Because IaC deletes on omit, treat any proposed
+deletion or project rename as a sign the file is missing a live fact (see the
+table above), not as an expected change. Variable values are redacted in the
+plan, and `preserve()` entries show as kept, not printed.
+
+To cross-check the hand-written file against the live project, run
+`railway config migrate` in a throwaway checkout: it reads the linked project
+and emits an equivalent `.railway/railway.ts`, rendering existing secrets as
+`preserve()`. Diff it against this one to catch any drift (a missing service,
+the real project name, a variable this file does not mention).
 
 ## Environment contract
 
 `apps/landing/server/config.ts` validates this at boot and reports every
-violation by name. It is **warn-only** unless `CONFIG_STRICT=1`, with one
-exception: **the durable data directory is always fatal on a deploy.**
-
-`ORIGINALS_DATA_DIR` unset, unwritable, or writable-but-not-a-mounted-volume
-**refuses the boot regardless of `CONFIG_STRICT`.** That path holds the only
-copies of signed reveal transactions, so booting past it means accepting a
-stranger's Bitcoin while writing the one artifact that could recover it to
-storage a redeploy deletes. A service that is down is recoverable in minutes;
-that data is not recoverable at all. Every other rule is unchanged — see
-"Turning on strict mode" before you set that flag.
+violation by name. It is **warn-only** unless `CONFIG_STRICT=1`, except that a
+deployed instance always refuses to boot without a writable mounted data
+volume. See "Turning on strict mode" before you set that flag.
 
 ### Server, read at runtime
 
@@ -87,31 +143,43 @@ does nothing** — the value is already in the bundle. It must match
 compares the two at boot and the browser compares them again before any
 real-money action; a mismatch is reported in both directions.
 
+`VITE_WEBVH_HOST` is the same shape of value and the more permanent one. It is
+the single host every `did:webvh` identifier this site publishes will name,
+**forever** — a did:webvh domain cannot be changed after publication. Unset, the
+SPA falls back to `window.location.host`, so a visitor who arrives on the
+Railway-generated `*.up.railway.app` hostname mints DIDs pinned to it. Set it to
+the canonical domain (`originals.build`) as a **bare hostname** — no scheme, no
+port, no path. Required on a mainnet deploy and reported by name at boot; the
+server also reads it at runtime and 301s document requests from any other host,
+so the redirect and the DID cannot disagree. `/api/*` is exempt from that
+redirect, so publishing writes and platform probes are unaffected.
+
 ## Before enabling mainnet
 
 Run one deploy with the code as-is and read the boot log. Do not proceed while
 any of these is outstanding.
 
-1. **Volume attached and mounted.** Enforced at boot: the server now refuses
-   to start if the data directory is unset, unwritable, or writable but not a
-   mounted volume — regardless of `CONFIG_STRICT`. Writability alone passes on
-   exactly the ephemeral path this check exists to catch, which is why the
-   mount check and not the write probe is the gate. If the deploy is crash-
-   looping with `[fatal] ORIGINALS_DATA_DIR`, the volume is the problem; attach
-   it and point `ORIGINALS_DATA_DIR` at its mount path.
-2. **Scheduled backup enabled.** Railway backups are opt-in and there is no
+1. **`VITE_WEBVH_HOST` set to the canonical domain, and the SPA rebuilt with
+   it.** The boot log names it if it is missing. Verify it reached the bundle,
+   not just the dashboard: `curl -s https://<host>/assets/engine-*.js | grep -o
+   'VITE_WEBVH_HOST:`[^`]*`'` — Vite deletes the branch entirely when the value
+   is absent at build time, so an unset var leaves no trace to grep for and the
+   only evidence is the value being present.
+2. **Volume attached and mounted.** The log must not say the data directory is
+   writable but not a mounted volume. Writability alone passes on exactly the
+   ephemeral path this check exists to catch.
+3. **Scheduled backup enabled.** Railway backups are opt-in and there is no
    published durability SLA. Record the schedule and who enabled it in the log
    at the bottom of this file — the setting is dashboard-only and cannot
    appear in a commit, so that line is the only evidence it happened.
-3. **One replica.** `railway.json` pins `numReplicas: 1` and the boot log must
-   read `sole writer to that dir`. If a deploy is refusing to start with
-   "another process is already writing", the service is scaled above one —
-   scale it back rather than deleting the lock.
-4. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
+4. **One replica.** The boot log must say this process is the sole writer. If it
+   refuses because another process holds the instance lock, scale back to one;
+   do not delete the lock while another instance may still be live.
+5. **`TRUSTED_PROXY_HOPS` set** (Railway edge = `1`). Until it is, the
    per-client rate limits are inert and everyone shares one bucket. Confirm it
    from the `[landing] proxy sample:` line the server logs once per process:
    the resolved identity must be your address, not the proxy's.
-5. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
+6. **`QUICKNODE_ENDPOINT` reaches a mainnet node with the Ordinals & Runes
    add-on.** Without the add-on, sat lookup returns `SAT_INDEX_UNAVAILABLE`
    and inscription is impossible. `bun scripts/check:ordinals` — i.e.
    `bun scripts/check-quicknode-ordinals.ts` — is the pre-deploy probe; it
@@ -123,7 +191,7 @@ any of these is outstanding.
    blocked at the edge, and the Ordinals add-on maps outpoint→address and
    sat→address only), so deposit polling costs no QuickNode quota and lives
    behind `BTC_INDEXER_API` instead.
-6. **One live Turnkey OTP verification.** Outstanding since PR #356. This
+7. **One live Turnkey OTP verification.** Outstanding since PR #356. This
    check earned its place twice over: the login path was broken the entire time
    it went unrun, in two independent ways, and neither was reachable from any
    test. It first sent a DER signature where OTP_LOGIN wants raw IEEE-P1363
@@ -133,18 +201,18 @@ any of these is outstanding.
    credential being installed cannot already exist. It now runs STAMP_LOGIN
    with the attested stamp, which is what `@turnkey/core` does. The only thing
    that proves it works is running it against a real org.
-7. **One complete mainnet inscription by a human**, from a cold browser,
+8. **One complete mainnet inscription by a human**, from a cold browser,
    before anyone else is invited.
 
 ## Turning on strict mode
 
-`CONFIG_STRICT=1` turns every remaining contract violation into a refusal to
-start. `/railway.json` caps restarts at 5, so flipping it against an environment
-that does not satisfy the contract takes the site down rather than degrading it.
+`CONFIG_STRICT=1` turns every contract violation into a refusal to start.
+`.railway/railway.ts` caps restarts at 5 (`restartPolicyMaxRetries`), so
+flipping it against an environment that does not satisfy the contract takes the
+site down rather than degrading it.
 
-It does **not** govern the data directory: those violations are fatal either
-way (see "Environment contract"), so unsetting `CONFIG_STRICT` is not a way to
-boot past a missing volume, and was never meant to be.
+The durable-data checks are fatal regardless of `CONFIG_STRICT`; unsetting the
+flag cannot make an ephemeral or unwritable recovery directory safe.
 
 Deploy warn-only first, read the boot log, and fix everything it names —
 `NODE_ENV` and `TRUSTED_PROXY_HOPS` in particular are ones Railway does not

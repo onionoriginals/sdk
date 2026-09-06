@@ -24,7 +24,6 @@ import { routeForPath } from '../router';
 import { isInternalHref } from '../components/Footer';
 import { formatMoneyLog } from '../../server/money-log';
 import { SESSION_STORAGE_KEY } from '../auth/turnkey-session';
-import { KEY_STORAGE_PREFIX, DID_LOG_STORAGE_PREFIX } from '../auth/authorship-key';
 
 const ALL = legalStrings().join('\n');
 
@@ -142,9 +141,7 @@ describe('the disclosed categories match what the code stores', () => {
   });
 
   test('the browser-storage section names the keys the app writes', () => {
-    for (const key of [SESSION_STORAGE_KEY, KEY_STORAGE_PREFIX, DID_LOG_STORAGE_PREFIX]) {
-      expect(key.length).toBeGreaterThan(0);
-    }
+    expect(SESSION_STORAGE_KEY.length).toBeGreaterThan(0);
     expect(/localStorage/i.test(ALL)).toBe(true);
     expect(/IndexedDB/i.test(ALL)).toBe(true);
     expect(/non-extractable/i.test(ALL)).toBe(true);

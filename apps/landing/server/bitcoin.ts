@@ -447,10 +447,10 @@ export async function classifySpendableUtxos<T extends { txid: string; vout: num
   utxos: T[],
   lookup: OrdinalLookup | undefined,
   maxLookups = 25
-): Promise<{ ok: boolean; spendable: T[]; ordinalBearing: number; reason?: string }> {
-  if (utxos.length === 0) return { ok: true, spendable: [], ordinalBearing: 0 };
+): Promise<{ ok: boolean; spendable: T[]; ordinalBearing: number; unchecked: number; reason?: string }> {
+  if (utxos.length === 0) return { ok: true, spendable: [], ordinalBearing: 0, unchecked: 0 };
   if (!lookup) {
-    return { ok: false, spendable: [], ordinalBearing: 0, reason: 'no ordinal lookup configured' };
+    return { ok: false, spendable: [], ordinalBearing: 0, unchecked: utxos.length, reason: 'no ordinal lookup configured' };
   }
   // Largest first: the same order selection walks, so the bounded budget is
   // spent on the outputs a commit would actually reach for.
@@ -465,12 +465,13 @@ export async function classifySpendableUtxos<T extends { txid: string; vout: num
       // One unanswerable candidate poisons the whole selection: a partial
       // classification is exactly the state where a top-up silently burns an
       // inscribed sat.
-      return { ok: false, spendable: [], ordinalBearing: 0, reason: (e as Error).message };
+      return { ok: false, spendable: [], ordinalBearing: 0, unchecked: utxos.length, reason: (e as Error).message };
     }
     if (inscriptions.length > 0) ordinalBearing++;
     else spendable.push(u);
   }
-  return { ok: true, spendable, ordinalBearing };
+  // Past the budget is unclassified, not clean; the caller must be able to say so (#493).
+  return { ok: true, spendable, ordinalBearing, unchecked: Math.max(0, utxos.length - maxLookups) };
 }
 
 /**
@@ -1080,6 +1081,14 @@ export function createBitcoinRoutes(deps: {
         candidates: utxos.confirmed.length,
         reason: classified.reason,
       });
+    } else if (classified.unchecked > 0) {
+      money('deposit_ordinal_check_partial', {
+        sub,
+        network,
+        address,
+        candidates: utxos.confirmed.length,
+        unchecked: classified.unchecked,
+      });
     }
     const confirmedUtxos = classified.spendable;
     // The commit's outputs are priced INDIVIDUALLY (R25): this deploy builds
@@ -1191,7 +1200,13 @@ export function createBitcoinRoutes(deps: {
        * only the spend is withheld (R25 keeps the shape open: the quote does
        * not assume a single spend output).
        */
-      ordinalCheck: classified.ok ? ('ok' as const) : ('unavailable' as const),
+      ordinalCheck: !classified.ok
+        ? ('unavailable' as const)
+        : classified.unchecked > 0
+          ? ('partial' as const)
+          : ('ok' as const),
+      /** Confirmed outputs past the lookup budget: unclassified, so not offered. Present only when 'partial'. */
+      ...(classified.ok && classified.unchecked > 0 ? { uncheckedOutputs: classified.unchecked } : {}),
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
       /**
@@ -1453,6 +1468,61 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
+
+    // Where the money goes (#493): step 5b never looked at output 1, so a signer that
+    // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
+    const network = deps.network ?? 'testnet';
+    if (!isValidBitcoinAddress(changeAddress, network)) {
+      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
+    }
+    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
+    let bound: string | null;
+    try {
+      bound = store.depositBinding(sub, network);
+    } catch {
+      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
+    }
+    // Fail CLOSED on an unbound account. `bound && …` skipped the check
+    // entirely when nothing was bound, and nothing forces the deposit route
+    // (the only thing that binds, `bindDepositAddress` above) to run first — so
+    // a caller could go straight to this route, never bind, and name any
+    // change address it liked. That is precisely the browser-shaped adversary
+    // this route exists to stop, so an absent binding is a refusal, not a pass.
+    if (bound !== changeAddress) {
+      return refuse(
+        'change_address_not_bound',
+        {
+          error: 'address_not_bound',
+          message: bound
+            ? 'changeAddress is not the deposit address bound to this account.'
+            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
+        },
+        403
+      );
+    }
+    let changeScript: string;
+    try {
+      changeScript = p2wpkhScriptHex(changeAddress, network);
+    } catch (e) {
+      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
+    }
+    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
+    }
+    if (reveal.outputsLength < 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal output must pay changeAddress.' }, 400);
+    }
+
+    // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
+    // client can declare any outpoint, and an inscribed one becomes the new DID sat or burns as fee.
+    const declaredUtxos = declared.map((u) => ({ txid: u.txid!, vout: u.vout!, value: typeof u.value === 'number' ? u.value : 0 }));
+    const ordinalCheck = await classifySpendableUtxos(declaredUtxos, deps.ordinals, declaredUtxos.length);
+    if (!ordinalCheck.ok) {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the funding outputs carry no inscription.' }, 503);
+    }
+    if (ordinalCheck.ordinalBearing > 0) {
+      return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'A declared funding output carries an inscription and must not be spent.' }, 400);
+    }
 
     // Consume a per-user slot only now that the request has proven valid —
     // malformed submissions must not burn the hourly cap for free (mirrors

@@ -5,7 +5,7 @@ import { verifyEventLog } from '../../src/algorithms/verifyEventLog';
 import { deactivateEventLog } from '../../src/algorithms/deactivateEventLog';
 import { deriveDidCel } from '../../src/celDid';
 import { createRealCelSigner } from '../fixtures/celSigner';
-import { CEL_CRYPTOSUITE } from '../../src/proofVerification';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '../../src/proofVerification';
 
 // Real Ed25519 did:key signer — seal-time self-verification (plan 034) rejects
 // proofs that don't verify, so tests sign for real.
@@ -163,12 +163,12 @@ describe('PeerCelManager', () => {
       expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
     });
 
-    test('proof has type DataIntegrityProof', async () => {
+    test('proof has the CEL proof type', async () => {
       const resources: ExternalReference[] = [];
       const { log } = await manager.create('Test Asset', resources);
       const proof = log.events[0].proof[0];
 
-      expect(proof.type).toBe('DataIntegrityProof');
+      expect(proof.type).toBe(CEL_PROOF_TYPE);
     });
 
     test('no witness proofs are added (empty for peer layer)', async () => {
@@ -440,7 +440,7 @@ describe('PeerCelManager', () => {
       const updatedLog = await manager.update(log, { name: 'New Name' });
 
       const proof = updatedLog.events[1].proof[0];
-      expect(proof.type).toBe('DataIntegrityProof');
+      expect(proof.type).toBe(CEL_PROOF_TYPE);
       expect(proof.cryptosuite).toBe(CEL_CRYPTOSUITE);
       expect(proof.proofValue).toBeDefined();
     });

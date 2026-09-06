@@ -1,12 +1,12 @@
 /**
  * Bridges the SDK's keyStore/KeyManager world (multibase Multikey strings)
- * to CelSigner (eddsa-jcs-2022 DataIntegrityProof over JCS bytes).
+ * to CelSigner (an `originals-cel-ed25519-jcs-v1` proof over JCS bytes).
  * CEL verification is Ed25519-only end-to-end — non-Ed25519 keys throw.
  */
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { multikey } from './crypto/Multikey.js';
 import { celProofSigningInput, committedFields } from './canonicalize.js';
-import { CEL_CRYPTOSUITE } from './proofVerification.js';
+import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from './proofVerification.js';
 import { StructuredError } from './utils/telemetry.js';
 import { multibase } from './utils/encoding.js';
 import type { KeyStore, KeyPair } from './types/keys.js';
@@ -29,7 +29,7 @@ function buildProof(secret: Uint8Array, verificationMethod: string, data: unknow
   // 042), so `created`/`verificationMethod`/`proofPurpose`/`cryptosuite` are
   // attested rather than editable metadata riding alongside the signature.
   const config = {
-    type: 'DataIntegrityProof' as const,
+    type: CEL_PROOF_TYPE,
     cryptosuite: CEL_CRYPTOSUITE,
     created: new Date().toISOString(),
     verificationMethod,

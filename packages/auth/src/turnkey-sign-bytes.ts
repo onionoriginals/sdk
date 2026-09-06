@@ -2,7 +2,7 @@
  * The one place Turnkey actually signs (plan 045).
  *
  * Both the server and client signers had their own copy of this — hex-encode,
- * `HASH_FUNCTION_NO_OP`, concatenate r‖s, check 64 bytes — kept in sync by
+ * pick a hash function, concatenate r‖s, check 64 bytes — kept in sync by
  * comment. They now share it, and because it is byte-level it satisfies
  * `OriginalsSigner.signBytes` / `ExternalSigner.signBytes` directly, so a
  * Turnkey key can author CEL events and sign credentials rather than only
@@ -27,9 +27,17 @@ export interface TurnkeySignBytesOptions {
 /**
  * Signs exactly `data` with a Turnkey-held Ed25519 key.
  *
- * The payload is sent pre-hashed with `HASH_FUNCTION_NO_OP`: the caller (the
- * SDK) owns canonicalization and hashing, so Turnkey must sign the bytes
- * verbatim and hash nothing itself.
+ * `HASH_FUNCTION_NOT_APPLICABLE`, and the choice is not cosmetic: Turnkey
+ * REJECTS `HASH_FUNCTION_NO_OP` on an Ed25519 key with
+ * `cannot use hash function NoOp to produce ed25519 signature`, which is a
+ * hard failure at sign time, not a warning. Ed25519 takes the message itself
+ * and hashes internally as part of the signature scheme, so there is no
+ * pre-hash slot to declare as a no-op — that enum belongs to the ECDSA curves,
+ * where a caller may hand over a digest.
+ *
+ * The intent is unchanged and is what NOT_APPLICABLE expresses here: the
+ * caller (the SDK) owns canonicalization, and Turnkey signs the bytes it is
+ * given verbatim rather than transforming them.
  *
  * @returns the raw 64-byte Ed25519 signature
  */
@@ -42,7 +50,7 @@ export async function turnkeySignBytes(
     signWith,
     payload: `0x${bytesToHex(data)}`,
     encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-    hashFunction: 'HASH_FUNCTION_NO_OP',
+    hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE',
   });
 
   // Turnkey nests the signature under activity.result.signRawPayloadResult;

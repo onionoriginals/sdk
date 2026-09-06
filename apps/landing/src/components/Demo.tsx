@@ -5,10 +5,11 @@ import { explorerTxUrl } from '../sdk/explorer';
 import { demo } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity, ANON_IDENTITY } from '../sdk/engine';
-import { btcNetwork, demoTier, type BtcNetworkFlag } from '../sdk/network-flag';
+import { btcNetwork, demoTier, type BtcNetworkFlag, btcoExplorerUrl } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
 import type { SigningStatus } from '../auth/turnkey-session';
-import { generateArtwork } from '../sdk/artwork';
+import { generateArtwork, generateName, ART_STYLES } from '../sdk/artwork';
+import type { AssetSource } from '../sdk/engine';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { CelChain } from './CelChain';
 import { Pipeline } from './Pipeline';
@@ -31,8 +32,14 @@ export interface DepositInfo {
   confirmedUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
   /** Everything confirmed at the address, ordinal-bearing outputs included. */
   confirmedSats?: number;
-  /** 'unavailable' = we could not classify the outputs, so none are spendable. */
-  ordinalCheck?: 'ok' | 'unavailable';
+  /**
+   * 'unavailable' = we could not classify the outputs, so none are spendable.
+   * 'partial' = more outputs than the lookup budget; the unchecked ones are
+   * not offered (see uncheckedOutputs), the checked ones are.
+   */
+  ordinalCheck?: 'ok' | 'unavailable' | 'partial';
+  /** Confirmed outputs the server did not classify, and so does not offer. */
+  uncheckedOutputs?: number;
   unconfirmedSats: number;
   estimatedCostSats: number;
   /** Fee facts for a pending deposit, when the server could read them. */
@@ -413,6 +420,27 @@ export function depositBadgeLabel(
   }
 }
 
+/**
+ * A content-size hint for GET /api/btc/deposit, so the quote is sized for
+ * what will actually be inscribed. The reveal carries the media bytes plus
+ * CBOR metadata holding the DID document and the WHOLE CEL log — which grows
+ * with every event — and the route's 8,000-byte default under-funds past
+ * ~12.8 KB, stranding a creator after they have deposited (#493). Counted in
+ * UTF-8 bytes, never characters, and biased UP: the excess returns as change.
+ */
+export function inscriptionContentBytes(asset: DemoAssetState): number {
+  const utf8 = (s: string) => new TextEncoder().encode(s).length;
+  // CBOR of the log is no larger than its JSON; the DID document is small and
+  // bounded, so a flat allowance covers it.
+  const DID_DOCUMENT_ALLOWANCE = 1_024;
+  return (
+    utf8(asset.resource.content) +
+    utf8(asset.metadata?.content ?? '') +
+    utf8(JSON.stringify(asset.celLog)) +
+    DID_DOCUMENT_ALLOWANCE
+  );
+}
+
 export function depositReadiness(info: DepositInfo | null): DepositReadiness {
   if (!info) return 'waiting';
   if (info.ordinalCheck === 'unavailable') return 'unspendable';
@@ -649,6 +677,31 @@ function useEngine(authed: boolean, subOrgId?: string) {
   return { getEngine, discardEngine };
 }
 
+/**
+ * The upload ceiling. Inscription pays by the byte — witness data is roughly a
+ * vbyte per four bytes — so 32 KB is about 8,000 vB, a cost a visitor can
+ * actually cover. A larger cap would let someone build an asset they can never
+ * afford to put on Bitcoin, which is a dead end on the money path.
+ */
+const MAX_SOURCE_BYTES = 32 * 1024;
+
+/**
+ * The published length, in BYTES. `String.length` counts UTF-16 code units, so
+ * it under-counts every emoji and CJK character — the bytes that get hashed and
+ * paid for on-chain are UTF-8, and that is what the cap has to measure.
+ */
+const byteLength = (text: string) => new TextEncoder().encode(text).length;
+
+/** What was committed to the log, including WHICH source produced it. */
+interface CommittedSource {
+  title: string;
+  style: string;
+  nonce: number;
+  sourceKind: 'generate' | 'upload' | 'write';
+  uploaded: { name: string; content: string; contentType: string } | null;
+  written: string;
+}
+
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, reauth, beginReauth } = useAuth();
@@ -666,23 +719,86 @@ export function Demo() {
   const durabilityNote = publishDurabilityNote(isAuthenticated);
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
-  const [medium, setMedium] = useState(demo.form.mediums[0]);
+  const [style, setStyle] = useState<string>(getArtSeed().style);
+  // Where the asset's bytes come from. Generated artwork is the default; a
+  // visitor can bring an SVG or type raw text instead. All three travel the
+  // same lifecycle, because all three are text (see AssetSource in engine.ts).
+  const [sourceKind, setSourceKind] = useState<'generate' | 'upload' | 'write'>('generate');
+  const [uploaded, setUploaded] = useState<{ name: string; content: string; contentType: string } | null>(null);
+  const [written, setWritten] = useState('');
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
-  // The artwork is the asset: regenerated live from title/medium/nonce while
+  // The artwork is the asset: regenerated live from title/style/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
   const artwork = useMemo(
-    () => generateArtwork(title.trim() || demo.form.defaultTitle, medium, nonce),
-    [title, medium, nonce]
+    () => generateArtwork(title.trim() || demo.form.defaultTitle, style, nonce),
+    [title, style, nonce]
   );
 
   // Keep the hero halo in sync: it renders this exact seed.
   useEffect(() => {
-    setArtSeed({ title: title.trim() || demo.form.defaultTitle, medium, nonce });
-  }, [title, medium, nonce]);
-  // The title/medium/nonce whose artwork is actually committed to the log —
+    setArtSeed({ title: title.trim() || demo.form.defaultTitle, style, nonce });
+  }, [title, style, nonce]);
+
+  // The asset's actual bytes — whichever source is selected.
+  const source = useMemo<AssetSource>(() => {
+    if (sourceKind === 'upload' && uploaded) {
+      return { content: uploaded.content, contentType: uploaded.contentType, filename: uploaded.name };
+    }
+    if (sourceKind === 'write') {
+      // Bare `text/plain`, no charset parameter: the SDK's resource validator
+      // accepts `type/subtype` only and refuses media-type parameters.
+      return { content: written, contentType: 'text/plain', filename: 'asset.txt' };
+    }
+    return { content: artwork.svg, contentType: 'image/svg+xml', filename: 'artwork.svg' };
+  }, [sourceKind, uploaded, written, artwork]);
+
+  /**
+   * A new name comes with new art, and only then.
+   *
+   * The title counts as "still generated" while it equals what this exact
+   * (style, nonce) would have produced — so no separate dirty flag is needed,
+   * and a title the visitor typed is never overwritten. Discard and Start over
+   * restore a previous pair and land back in the generated state on their own.
+   */
+  const renameWithArt = (nextStyle: string, nextNonce: number) => {
+    if (title === generateName(style, nonce)) setTitle(generateName(nextStyle, nextNonce));
+  };
+
+  const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceBytes = byteLength(source.content);
+  // Measured on the FINAL bytes, whatever produced them. Checking only at
+  // upload time missed the Write tab entirely, where multibyte text can pass a
+  // code-unit limit and still exceed the cap that is actually charged for.
+  const sourceTooBig = sourceBytes > MAX_SOURCE_BYTES;
+  // Empty bytes are refused rather than hashed: an asset with nothing in it can
+  // be created, but it proves nothing, and the wording says so.
+  const sourceReady = source.content.trim().length > 0 && !sourceTooBig;
+
+  const onPickFile = async (file: File | undefined) => {
+    setSourceError(null);
+    if (!file) return;
+    if (file.size > MAX_SOURCE_BYTES) return setSourceError(demo.form.uploadTooBig);
+    const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
+    const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name);
+    if (!isSvg && !isText) return setSourceError(demo.form.uploadWrongType);
+    const content = await file.text();
+    if (!content.trim()) return setSourceError(demo.form.uploadEmpty);
+    // Re-check after decoding: `file.size` counts bytes, and a multi-byte file
+    // could pass the byte check yet still be what we publish.
+    if (new TextEncoder().encode(content).length > MAX_SOURCE_BYTES) {
+      return setSourceError(demo.form.uploadTooBig);
+    }
+    setUploaded({
+      name: file.name,
+      content,
+      contentType: isSvg ? 'image/svg+xml' : 'text/plain'
+    });
+  };
+  // The title/style/nonce whose artwork is actually committed to the log —
   // what Discard restores to. Divergence is detected from the BYTES, not from
   // these, so any route to new artwork counts as a revision.
-  const [committed, setCommitted] = useState<{ title: string; medium: string; nonce: number } | null>(null);
+  const [committed, setCommitted] = useState<CommittedSource | null>(null);
   const [updating, setUpdating] = useState(false);
   const [asset, setAsset] = useState<DemoAssetState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -748,14 +864,35 @@ export function Demo() {
     });
   };
 
-  const create = () =>
-    run('idle', 'creating', 'created', async (engine) => {
-      const state = await engine.create(title.trim() || demo.form.defaultTitle, medium, artwork.svg);
-      setCommitted({ title, medium, nonce }); // what's on screen is now what's in the log
+  const create = () => {
+    // Refuse to hash nothing. An empty upload or a blank textarea would mint a
+    // genesis whose resource proves nothing, which is worse than a refusal.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
+    if (!sourceReady) {
+      setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
+      return;
+    }
+    return run('idle', 'creating', 'created', async (engine) => {
+      const state = await engine.create(title.trim() || demo.form.defaultTitle, style, source);
+      setCommitted({ title, style, nonce, sourceKind, uploaded, written }); // on screen == in the log
       return state;
     });
+  };
   // Revising leaves `phase` alone — the asset stays exactly where it was.
   const update = async () => {
+    // A revision can grow past the cap just as a genesis can — the Write box is
+    // still editable after create, so the same byte gate applies here.
+    if (sourceTooBig) {
+      setSourceError(demo.form.uploadTooBig);
+      return;
+    }
+    if (!sourceReady) {
+      setSourceError(sourceKind === 'write' ? demo.form.writeEmpty : demo.form.uploadEmpty);
+      return;
+    }
     // Same gate as the pipeline steps: a revision and a publish must not both
     // be appending to the log at once.
     await runExclusive(runningRef, async () => {
@@ -763,8 +900,8 @@ export function Demo() {
       setUpdating(true);
       try {
         const engine = await getEngine();
-        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, medium, artwork.svg));
-        setCommitted({ title, medium, nonce });
+        setAsset(await engine.update(title.trim() || demo.form.defaultTitle, style, source));
+        setCommitted({ title, style, nonce, sourceKind, uploaded, written });
       } catch (err) {
         console.error('[originals-demo]', err);
         setError(demoFailureMessage(err));
@@ -818,8 +955,9 @@ export function Demo() {
   const readiness = depositReadiness(deposit);
   const fetchDeposit = useCallback(async (): Promise<DepositInfo | null> => {
     if (!bitcoin) return null;
+    const hint = asset ? `&contentBytes=${inscriptionContentBytes(asset)}` : '';
     const res = await fetch(
-      `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}`,
+      `/api/btc/deposit?address=${encodeURIComponent(bitcoin.fundingAddress)}${hint}`,
       { credentials: 'same-origin' }
     );
     if (!res.ok) {
@@ -841,7 +979,7 @@ export function Demo() {
     const info = (await res.json()) as DepositInfo;
     setDeposit(info);
     return info;
-  }, [bitcoin]);
+  }, [bitcoin, asset]);
   useEffect(() => {
     if (networkMismatch) return;
     if (network !== 'mainnet' || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
@@ -928,7 +1066,16 @@ export function Demo() {
     setDepositError(null);
     setDepositBadge(null);
     depositErrorRef.current = null;
-    setNonce(Math.floor(Math.random() * 1e9)); // fresh artwork for the next run
+    // Fresh artwork for the next run — and a fresh NAME with it, or the new
+    // piece would inherit the last one's title. The source resets too: an
+    // upload from the previous run is not part of a clean slate.
+    const nextNonce = Math.floor(Math.random() * 1e9);
+    setNonce(nextNonce);
+    setSourceKind('generate');
+    setUploaded(null);
+    setWritten('');
+    setSourceError(null);
+    setTitle(generateName(style, nextNonce));
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
     // window.__originalsDemo keeps pointing at the old engine until the new
     // one constructs and re-registers itself, so the hook is never dangling.
@@ -970,17 +1117,31 @@ export function Demo() {
   // Compare the BYTES on screen against the bytes in the log. Retyping the
   // title back to its committed value therefore clears the pending state, and
   // a nonce bump that happened to reproduce the same art would too.
-  const pendingRevision = canRevise && !!asset && artwork.svg !== asset.resource.content;
+  const pendingRevision = canRevise && !!asset && source.content !== asset.resource.content;
   const discardRevision = () => {
     if (!committed) return;
     setTitle(committed.title);
-    setMedium(committed.medium);
+    setStyle(committed.style);
     setNonce(committed.nonce);
+    // The SOURCE is part of what was committed. Restoring only title/style/
+    // nonce would leave an alternate source selected, so the revision stayed
+    // pending and publishing stayed disabled with no way back but by hand.
+    setSourceKind(committed.sourceKind);
+    setUploaded(committed.uploaded);
+    setWritten(committed.written);
+    setSourceError(null);
   };
   // The form is the edit surface once an asset exists: typing a new title
   // regenerates the artwork, which IS the new version. Locked only while an
   // operation is in flight, or once inscribed (that append costs sats).
   const formLocked = busy || phase === 'inscribed';
+  // Linked so a creator can watch the funding transaction confirm. Uses the
+  // same explorer helper as the completed view, so a simulated run — where the
+  // helper withholds the URL — offers no link to a transaction that isn't.
+  const commitExplorerUrl = asset?.inscription?.commitTxId
+    ? btcoExplorerUrl(asset.inscription.commitTxId)
+    : undefined;
+
   const stepActions = [create, publish, inscribe];
   const stepPhases: Phase[][] = [
     ['creating'],
@@ -1019,13 +1180,28 @@ export function Demo() {
               <div className="demo-controls">
                 <div className="demo-asset" data-layer={asset?.layer ?? 'draft'}>
                   <div className="demo-art">
-                    <img src={artwork.dataUri} alt={`Generated artwork for “${title || demo.form.defaultTitle}”`} />
-                    {(phase === 'idle' || canRevise) && (
+                    {sourceIsImage ? (
+                      <img
+                        src={
+                          sourceKind === 'generate'
+                            ? artwork.dataUri
+                            : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source.content)}`
+                        }
+                        alt={`Artwork for “${title || demo.form.defaultTitle}”`}
+                      />
+                    ) : (
+                      <pre className="demo-art-text">{source.content || demo.form.writePlaceholder}</pre>
+                    )}
+                    {sourceKind === 'generate' && (phase === 'idle' || canRevise) && (
                       <button
                         type="button"
                         className="demo-art-refresh"
                         disabled={updating}
-                        onClick={() => setNonce((n) => n + 1)}
+                        onClick={() => {
+                          const next = nonce + 1;
+                          renameWithArt(style, next);
+                          setNonce(next);
+                        }}
                       >
                         <svg viewBox="0 0 16 16" aria-hidden="true">
                           <path d="M13.3 6.6A5.6 5.6 0 0 0 3.1 5.2M2.7 9.4a5.6 5.6 0 0 0 10.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1054,19 +1230,93 @@ export function Demo() {
                         onChange={(e) => setTitle(e.target.value)}
                       />
                     </label>
-                    <label className="demo-field">
-                      <span>{demo.form.mediumLabel}</span>
-                      <select
-                        value={medium}
-                        disabled={formLocked}
-                        onChange={(e) => setMedium(e.target.value)}
-                      >
-                        {demo.form.mediums.map((m) => (
-                          <option key={m}>{m}</option>
+                    <div className="demo-field">
+                      <span>{demo.form.sourceLabel}</span>
+                      <div className="demo-source-tabs" role="tablist">
+                        {([
+                          ['generate', demo.form.sourceGenerate],
+                          ['upload', demo.form.sourceUpload],
+                          ['write', demo.form.sourceWrite]
+                        ] as const).map(([kind, label]) => (
+                          <button
+                            key={kind}
+                            type="button"
+                            role="tab"
+                            aria-selected={sourceKind === kind}
+                            data-active={sourceKind === kind || undefined}
+                            disabled={formLocked}
+                            onClick={() => {
+                              setSourceKind(kind);
+                              setSourceError(null);
+                            }}
+                          >
+                            {label}
+                          </button>
                         ))}
-                      </select>
-                    </label>
-                    <p className="demo-art-hint">{demo.form.artHint}</p>
+                      </div>
+                    </div>
+
+                    {sourceKind === 'generate' && (
+                      <label className="demo-field">
+                        <span>{demo.form.styleLabel}</span>
+                        <select
+                          value={style}
+                          disabled={formLocked}
+                          onChange={(e) => {
+                            renameWithArt(e.target.value, nonce);
+                            setStyle(e.target.value);
+                          }}
+                        >
+                          {ART_STYLES.map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {sourceKind === 'upload' && (
+                      <label className="demo-field">
+                        <span>{demo.form.uploadCta}</span>
+                        <input
+                          type="file"
+                          accept=".svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
+                          disabled={formLocked}
+                          onChange={(e) => void onPickFile(e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+
+                    {sourceKind === 'write' && (
+                      <label className="demo-field">
+                        <span>{demo.form.sourceWrite}</span>
+                        <textarea
+                          className="demo-source-text"
+                          value={written}
+                          rows={5}
+                          placeholder={demo.form.writePlaceholder}
+                          disabled={formLocked}
+                          onChange={(e) => setWritten(e.target.value)}
+                        />
+                      </label>
+                    )}
+
+                    {sourceKind === 'write' && written.length > 0 && (
+                      <p className="demo-source-count" data-over={sourceTooBig || undefined}>
+                        {sourceBytes.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes
+                      </p>
+                    )}
+                    {(sourceError ?? (sourceTooBig ? demo.form.uploadTooBig : null)) && (
+                      <p className="demo-source-error">
+                        {sourceError ?? demo.form.uploadTooBig}
+                      </p>
+                    )}
+                    <p className="demo-art-hint">
+                      {sourceKind === 'generate'
+                        ? demo.form.artHint
+                        : sourceKind === 'upload'
+                          ? demo.form.uploadHint
+                          : demo.form.writeHint}
+                    </p>
                   </div>
                 </div>
 
@@ -1290,6 +1540,11 @@ export function Demo() {
                       {deposit?.ordinalCheck === 'unavailable' && (
                         <p className="demo-error" role="alert">{demo.deposit.ordinalCheckUnavailable}</p>
                       )}
+                      {deposit?.ordinalCheck === 'partial' && (
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.ordinalCheckPartial(deposit.uncheckedOutputs ?? 0)}
+                        </p>
+                      )}
                     </div>
                   ) : gate === 'unavailable' ? (
                     // No re-auth CTA here on purpose: signing in is what
@@ -1369,10 +1624,38 @@ export function Demo() {
                         on claiming completion — and link to a reveal txid that
                         404s — while saying above that it had not finished. */}
                     {!doneView.claimComplete ? (
-                      <p className="demo-inscribe-note">
-                        {demo.deposit.commitOnlySatPrefix}{' '}
-                        <code>{asset.inscription?.satoshi}</code>.
-                      </p>
+                      <>
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.commitOnlySatPrefix}{' '}
+                          <code>{asset.inscription?.satoshi}</code>.
+                        </p>
+                        {/* The funding txid, linked. Without it this step says
+                            "wait" and gives no way to watch — which reads as
+                            nothing having happened, at the exact moment real
+                            money just moved. */}
+                        {commitExplorerUrl && (
+                          <p className="demo-inscribe-note">
+                            {demo.deposit.commitOnlyTxLabel}{' '}
+                            <a
+                              className="demo-explorer-link"
+                              href={commitExplorerUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <code>{asset.inscription?.commitTxId}</code>
+                            </a>
+                            {asset.inscription?.feeRate
+                              ? ` — ${demo.deposit.commitOnlyFeeLabel} ${asset.inscription.feeRate} sat/vB`
+                              : ''}
+                          </p>
+                        )}
+                        <p className="demo-inscribe-note">
+                          {demo.deposit.commitOnlyRevealPending}
+                        </p>
+                        <a className="demo-explorer-link" href="/me">
+                          {demo.deposit.commitOnlyTrackLink}
+                        </a>
+                      </>
                     ) : (
                       <>
                         <p>

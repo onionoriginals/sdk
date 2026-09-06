@@ -1,6 +1,7 @@
 import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, json, type Handler } from './router';
+import { serveContextDocument, CONTEXT_PATH } from './context-document';
 import type { OriginalsRoutes } from './originals-routes';
 import {
   resolveClientIp,
@@ -107,9 +108,18 @@ export function buildFetch(deps: {
   // How many proxies sit in front of this process. Snapshotted at construction
   // from TRUSTED_PROXY_HOPS; tests pass it explicitly.
   trustedProxyHops?: number;
+  // The one hostname did:webvh identifiers may be pinned to (#529). Document
+  // requests on any other host are redirected here. Undefined in dev and tests,
+  // where no redirect happens at all.
+  canonicalHost?: string;
   log?: (message: string) => void;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
   const { apiRoutes, hostStore, distDir, originals } = deps;
+  // Lowercased once, not per request: `URL` lowercases the host it parses, so
+  // comparing against a mixed-case value would never match and every document
+  // request would redirect forever. config.ts rejects a non-lowercase value at
+  // boot; this makes the loop unreachable for any caller, however wired.
+  const canonicalHost = deps.canonicalHost?.toLowerCase();
   const hops = deps.trustedProxyHops ?? trustedProxyHops();
   const log = deps.log ?? ((m: string) => console.log(m));
   // One sample per process so the hop count can be checked against the live
@@ -120,6 +130,36 @@ export function buildFetch(deps: {
   return async (req, server?: BunServerLike) => {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    // 0. Canonical host (#529). A visitor on the Railway-generated hostname
+    // would mint did:webvh identifiers pinned to it, permanently — `demoHost()`
+    // reads window.location.host. Bounce documents to the one host DIDs may
+    // name, before anything can serve them the SPA.
+    //
+    // /api/* is deliberately exempt: a 301 on a PUT is not safely replayable,
+    // publishing writes to whichever origin the page is on (the KEY carries the
+    // canonical domain, so the object still serves correctly), and a platform
+    // probe must not have to chase a redirect to find a healthy process.
+    //
+    // /context is exempt for a different reason: it is host-agnostic BY DESIGN
+    // (see context-document.ts) so that every context URL in the wild resolves
+    // to the same bytes on whatever origin answers. A JSON-LD document loader
+    // is not obliged to follow redirects, so bouncing it could break credential
+    // verification for an external verifier — the one thing that route exists
+    // to keep working.
+    if (
+      canonicalHost &&
+      url.host !== canonicalHost &&
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      path !== CONTEXT_PATH &&
+      path !== '/api' &&
+      !path.startsWith('/api/')
+    ) {
+      const to = new URL(url.toString());
+      to.protocol = 'https:';
+      to.host = canonicalHost;
+      return new Response(null, { status: 301, headers: { location: to.toString() } });
+    }
 
     // ONE client identity per request, shared by every rate-limited route.
     const clientIp = resolveClientIp(req, server, { hops });
@@ -153,7 +193,25 @@ export function buildFetch(deps: {
       );
     }
 
-    // 3. WebVH log/resource GETs served at the resolver's exact URLs.
+    // 3. The JSON-LD context every issued credential points at.
+    //
+    // Ahead of the host stores, not after them, and that ORDER IS THE SECURITY
+    // PROPERTY. `/api/host/*` is unauthenticated with client-chosen keys, and
+    // hostStore.serve() looks a request up as `${url.host}${url.pathname}` —
+    // so a stranger who PUTs `originals.build/context` would otherwise shadow
+    // this route and hand every external verifier bytes of their choosing.
+    //
+    // That store's usual defence does not apply here. Anonymous writes are
+    // acceptable for did:webvh logs because those are self-certifying: tamper
+    // with one and it fails verification. A JSON-LD context certifies nothing.
+    // It DEFINES the terms every credential is read through, so replacing it
+    // silently changes what those credentials mean — or, served as garbage,
+    // breaks every verification at once. It must not be shadowable, so it is
+    // resolved first and the write path refuses the key (see webvh-host.ts).
+    const context = serveContextDocument(req, url);
+    if (context) return context;
+
+    // 4. WebVH log/resource GETs served at the resolver's exact URLs.
     if (req.method === 'GET' || req.method === 'HEAD') {
       const served = hostStore.serve(req, url);
       if (served) return served;
@@ -161,7 +219,7 @@ export function buildFetch(deps: {
       if (durable) return durable;
     }
 
-    // 4. Static SPA + fallback (with traversal guard).
+    // 5. Static SPA + fallback (with traversal guard).
     return serveStatic(url, distDir);
   };
 }

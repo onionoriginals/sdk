@@ -13,9 +13,9 @@ export const site = {
    * methods before it named anything a creator wants. Title stays under 60
    * characters and description under 155 so neither is truncated in search.
    */
-  title: 'Originals — Proof you made it, carved into Bitcoin',
+  title: 'Originals — Proof you published it first, on Bitcoin',
   description:
-    'Screenshots are free. Provenance is not. Give your work a signed history of who made it and who owns it — anchored on Bitcoin, verifiable by anyone.',
+    'Screenshots are free. Provenance is not. Timestamp your work on Bitcoin the moment you publish it, so you can show you were first — and who owns it now.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -85,89 +85,39 @@ export const login = {
 };
 
 /**
- * The signed-in hero panel. The DID it makes is signed by a browser-local
- * Ed25519 key and stored in localStorage (auth/webvh.ts) — created and shown,
- * never hosted. Nothing here may call it live, hosted or resolvable (R9).
+ * The signed-in hero panel. The DID it makes is signed by a Turnkey-held
+ * Ed25519 key and its log is published to this origin (auth/webvh.ts), so it
+ * resolves and it survives this browser. Custody is stated, never implied: the
+ * old copy promised "we never get a copy", and quietly downgrading that to
+ * custody is the kind of thing a user should never discover on their own.
  */
 export const identityPanel = {
   layerLabel: 'did:webvh',
-  idleTitle: 'Your own DID, signed in this browser',
+  idleTitle: 'Your own DID — no key to lose',
   idleBody:
-    'Mint a did:webvh signed by a key only this browser holds — yours to keep, and yours to sign your work with.',
+    'Mint a did:webvh signed by a key held in your name, so signing in is all it takes to be you again. No seed phrase, no backup file, nothing to write down.',
   createAction: 'Create your did:webvh',
   creating: 'Creating…',
   createFailed: 'DID creation failed — try again.',
   doneTitle: 'Your DID is signed',
   doneNote:
-    'Signed by a key this browser holds, and stored here beside it. It isn’t published anywhere yet, so nothing else can look it up — and clearing this browser’s storage takes the key with it.',
+    'Signed by your key at Turnkey, our custody provider, and published where DIDs resolve — so it comes back on any browser or device you sign in from. Nothing to back up.',
+  /** The custody fact itself, stated plainly rather than buried in legal. */
+  custodyNote:
+    'Turnkey holds the key; we can ask it to sign only while you are signed in. That is the trade for never having a key to lose — if you would rather hold your own, the SDK signs locally and never talks to us.',
+  /** Creating needs a live signing session (auth/webvh.ts TurnkeyWebVHSigner). */
+  sessionRequired: 'Your signing session has expired — sign in again to create your DID.',
   copy: 'Copy',
   copied: 'Copied',
   copyAria: 'Copy DID',
-  copiedAria: 'DID copied',
-  /**
-   * U10 / R17 — shown BEFORE the key exists. Creating used to be one click, so
-   * any warning beside the finished state arrived after the irreversible step.
-   * `warning.reminder` is the same fact restated for a returning user.
-   */
-  warning: {
-    title: 'First, the part nobody can undo for you',
-    body:
-      'Creating your DID generates a signing key that only this browser will hold. It signs everything you make with Originals, and we never get a copy — so if this browser’s storage is cleared, or you move to another browser or device, the key is gone and no one can reissue it.',
-    remedy:
-      'Save an encrypted backup as soon as it exists. That file, plus the passphrase you pick for it, is what carries your work to another browser.',
-    acknowledge: 'I understand this key will exist only in this browser',
-    confirm: 'Create my DID',
-    cancel: 'Go back',
-    reminder:
-      'Your signing key is still only in this browser. Clearing site data, moving to another browser, or a browser evicting storage all take it with them — and it cannot be reissued.',
-    notAcknowledged: 'Confirm you understand before your key is created.'
-  },
-  /** U10 / R18 — the export half. Passphrase-wrapped; nothing is uploaded. */
-  backup: {
-    open: 'Save a backup',
-    title: 'Save an encrypted backup',
-    body:
-      'Wraps your signing key and your DID into one file, encrypted with a passphrase you choose. Keep both — the file is useless without the passphrase, and no one can reset it for you.',
-    passphraseLabel: 'Backup passphrase',
-    passphrasePlaceholder: 'At least 10 characters',
-    confirmLabel: 'Repeat passphrase',
-    action: 'Download backup',
-    working: 'Encrypting…',
-    done: 'Backup downloaded. Store it somewhere you will still have next year.',
-    mismatch: 'The two passphrases don’t match.',
-    weak: 'Use a passphrase of at least 10 characters.',
-    failed: 'Couldn’t create the backup — try again.',
-    cancel: 'Cancel'
-  },
-  /** U10 / R18 — the import half, including the replace warning. */
-  restore: {
-    open: 'Restore from a backup',
-    title: 'Restore from a backup',
-    body:
-      'Choose the backup file you saved and enter its passphrase. It is unwrapped here in your browser and never sent anywhere.',
-    fileLabel: 'Backup file',
-    passphraseLabel: 'Backup passphrase',
-    action: 'Restore',
-    working: 'Restoring…',
-    done: 'Restored. This browser can sign as you again.',
-    replaceTitle: 'This browser already holds a different key',
-    replaceBody:
-      'Restoring replaces it. Anything signed by the key that is here now can no longer be added to from this browser unless you also kept a backup of that one.',
-    replaceAcknowledge: 'I understand the key in this browser will be replaced',
-    replaceBlocked: 'Confirm the replacement before restoring.',
-    noFile: 'Choose your backup file first.',
-    wrongPassphrase: 'That passphrase doesn’t match this file.',
-    malformed: 'That file isn’t an Originals backup.',
-    failed: 'Couldn’t restore that backup — try again.',
-    cancel: 'Cancel'
-  }
+  copiedAria: 'DID copied'
 };
 
 export const hero = {
-  eyebrow: 'Anchored on Bitcoin · Yours even if we disappear',
-  headline: 'Proof you made it. Carved into Bitcoin.',
+  eyebrow: 'Anchored on Bitcoin · Timestamped the moment you publish',
+  headline: 'Proof you published it first. Carved into Bitcoin.',
   subhead:
-    'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed, verifiable history of who made it, where it lives, and who owns it — from private draft to Bitcoin-anchored original.',
+    'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed history of when it was published, where it lives, and who owns it now — from private draft to Bitcoin-anchored original.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
   primaryCta: { label: 'Make your first Original', href: '#demo' },
   exampleLink: { label: 'See one that already exists', href: '#example' },
@@ -205,13 +155,13 @@ export const layers = [
 export const why = {
   id: 'why',
   eyebrow: 'Why it matters',
-  headline: 'The internet copies. Originals prove.',
+  headline: 'The internet copies. Originals prove who was first.',
   subhead:
-    'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail.',
+    'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail, timestamped on Bitcoin.',
   cards: [
     {
       title: 'Provenance you can hand to anyone',
-      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can verify the whole chain — without trusting you, us, or any platform.'
+      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can re-check every signature themselves — no account, no permission, nothing to ask us for. One honest caveat: the Bitcoin facts (which satoshi, which block, who holds it) are read from an Ordinals index, not from block headers your browser checked. The signatures need no one’s word. The chain data is as good as that index.'
     },
     {
       title: 'A lifecycle, not a lock-in',
@@ -219,7 +169,7 @@ export const why = {
     },
     {
       title: 'Rails that outlive companies',
-      body: 'Built on W3C DIDs, Verifiable Credentials, and Bitcoin Ordinals. No proprietary registry, no token. If we vanish tomorrow, your provenance still verifies.'
+      body: 'Built on W3C DIDs, Verifiable Credentials, and Bitcoin Ordinals. No proprietary registry, no token. Inscribe it and keep a copy of the log, and it still verifies the day we vanish. Before you inscribe, it lives on this host and leaves with it — so export it.'
     }
   ]
 };
@@ -248,10 +198,21 @@ export const demo = {
     titleLabel: 'Asset title',
     titlePlaceholder: 'e.g. Genesis Artwork #001',
     defaultTitle: 'Genesis Artwork #001',
-    mediumLabel: 'Medium',
-    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
+    sourceLabel: 'Source',
+    sourceGenerate: 'Generate',
+    sourceUpload: 'Upload',
+    sourceWrite: 'Write',
+    uploadCta: 'Choose a file',
+    uploadHint: 'An SVG or a plain text file, up to 32 KB.',
+    uploadTooBig: 'That file is larger than 32 KB. Inscribing pays by the byte, so the demo keeps uploads small enough to actually reach Bitcoin.',
+    uploadWrongType: 'That file type can’t be carried yet — an SVG or a plain text file, please.',
+    uploadEmpty: 'That file is empty, so there would be nothing to hash.',
+    writePlaceholder: 'Type or paste anything. These exact characters get hashed, signed and published.',
+    writeEmpty: 'Write something first — an empty asset has nothing to prove.',
+    writeHint: 'These exact characters are what get hashed, signed and published.',
+    styleLabel: 'Style',
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed, signed and published.'
+    artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
   },
   steps: [
     {
@@ -476,6 +437,14 @@ export const demo = {
     // The sat is decided by the commit's first input, so it IS known already;
     // the inscription that will ride on it is not on chain yet.
     commitOnlySatPrefix: 'It will land on satoshi',
+    // The commit txid is the ONE thing that lets someone watch their own money
+    // land. Withholding it while telling them to wait is what made this step
+    // feel like nothing happened.
+    commitOnlyTxLabel: 'Funding transaction:',
+    commitOnlyFeeLabel: 'paid at',
+    commitOnlyTrackLink: 'Track it on Your Originals',
+    commitOnlyRevealPending:
+      'The inscription transaction is signed and saved; it broadcasts as soon as the one above confirms.',
     commitOnlyBody:
       'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
     balanceReuse:
@@ -553,6 +522,11 @@ export const demo = {
     ordinalCheckUnavailable:
       'We can’t currently check whether the coins at your deposit address carry an inscription of their own, and we won’t spend a coin we can’t check — an inscribed sat spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
     ordinalCheckBadge: 'Can’t check your coins for inscriptions.',
+    // The check ran, but the address holds more outputs than one poll can
+    // classify. The unchecked ones are simply not counted — a block explorer
+    // will show more than the amount above, and this says why.
+    ordinalCheckPartial: (unchecked: number) =>
+      `${unchecked} smaller ${unchecked === 1 ? 'output' : 'outputs'} at your deposit address ${unchecked === 1 ? 'hasn’t' : 'haven’t'} been checked for inscriptions yet, so ${unchecked === 1 ? 'it isn’t' : 'they aren’t'} counted above. Your balance in a block explorer will read higher than the amount we can spend.`,
     // The bindings file — the whole of "this address belongs to this account".
     bindingUnreadable:
       'We can’t confirm which deposit address belongs to your account right now, so we’re not showing one: a wrong address here means BTC sent somewhere this site can never spend from. Anything you’ve already sent is untouched. Try again in a few minutes.',
@@ -592,7 +566,7 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path and are hosted for keeps, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -624,6 +598,64 @@ export const yourOriginals = {
     busy: 'Finishing…',
     done: 'Inscription broadcast — it will confirm on-chain shortly.',
     failed: 'Could not finish the inscription — try again in a moment.',
+  },
+  /**
+   * The pre-broadcast resume gap: a published Original that was never
+   * inscribed. Distinct from `finish` above, which recovers an inscription
+   * that WAS built and signed — these two never appear on the same row.
+   *
+   * The disabled reasons are the honest half. Inscribing appends a signed
+   * migrate event, and pre-anchor the CEL accepts only its current controller
+   * as signer, so an Original minted before authorship moved into Turnkey
+   * custody answers to a key that lived in a tab and is gone. That cannot be
+   * fixed by signing in again on another device, and the copy must not imply
+   * it can.
+   */
+  inscribe: {
+    cta: 'Inscribe on Bitcoin',
+    /**
+     * The detail-page section heading. Neutral on purpose, and never the CTA
+     * text: the same section carries the reason an Original CANNOT be
+     * inscribed, where "Inscribe on Bitcoin" would read as an offer being
+     * withdrawn — and above the button it would just say the same thing twice.
+     */
+    sectionEyebrow: 'Bitcoin',
+    busy: 'Inscribing…',
+    hydrating: 'Rebuilding from its signed log…',
+    done: 'Inscribed — the transactions are on their way to the network.',
+    /**
+     * Only the commit reached the network. The reveal carries the inscription,
+     * so until it propagates there is nothing on chain — saying "inscribed"
+     * here is the same lie #506 removed from the demo. Nothing more is owed;
+     * the server re-pushes the reveal on its own.
+     */
+    commitOnly:
+      'Your funding transaction is on the network. The second transaction — the one that carries the inscription — has not propagated yet, which is expected while the first is unconfirmed. It is signed and saved, and goes out automatically. Nothing is stuck and nothing more is owed.',
+    /** Shown under a disabled action, keyed by `DisabledReason`. */
+    reasons: {
+      'signed-out': 'Sign in to inscribe this Original on Bitcoin.',
+      'no-authorship-key':
+        'This browser can’t reach your signing key right now, so it can’t sign the event inscribing adds. Sign in again and it will come back.',
+      'foreign-controller':
+        'This Original was made before signing keys were kept for you, so the key that could add to its history only ever existed in the browser that created it — and it’s gone. Everything already in its history stays signed, verifiable and hosted; it just can’t be carried on to Bitcoin. Anything you make from now on can be.',
+      /**
+       * Not fetched yet. Rendered as NOTHING, not as this text: on first paint
+       * no row's log has been read, so showing it flashed a note under every
+       * card. Kept as a string for a caller that wants to say it out loud.
+       */
+      reading: 'Reading this Original’s signed log…',
+      /** Fetched, and it did not come back readable. A real answer, so it shows. */
+      unreadable:
+        'This Original’s signed log could not be read from where it is hosted, so there is nothing to carry to Bitcoin yet. Reloading may fix it.',
+      /**
+       * An inscription is already built and paid for and waiting to be pushed,
+       * and we cannot tell which Original it belongs to. Rebuilding would
+       * replace it, so the copy points at the thing that clears it rather than
+       * describing the ambiguity — finishing it is one click away, above.
+       */
+      'pending-elsewhere':
+        'You have an inscription that’s already built and waiting to be sent. Finish that one first — until it lands, starting another could replace it.',
+    },
   },
   /**
    * R31 — a deposit-read outage is asynchronous: it can start after a creator
@@ -684,7 +716,7 @@ export const originalDetail = {
       inscribe: {
         title: 'Inscribed',
         blurb:
-          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free.'
+          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free. The reveal inscription carries the whole signed log in its own metadata, so from here the Original’s provenance survives even this service; a log that stops at did:webvh lasts only as long as this service hosts it.'
       }
     },
     upcomingLabel: 'Up next',
@@ -725,9 +757,14 @@ export const originalDetail = {
     inscriptionLabel: 'Inscription',
     satoshiLabel: 'Satoshi',
     txLabel: 'Reveal transaction',
+    // The reveal is signed and saved before it is broadcast, so its id exists
+    // while the transaction does not. Say so rather than linking a 404.
+    txNotBroadcastNote: 'Signed and saved, not yet broadcast — it goes out once the funding transaction confirms.',
+    commitTxLabel: 'Funding transaction',
     pendingBadge: 'awaiting confirmation',
     confirmedBadge: 'confirmed on-chain',
-    explorerLabel: 'View on mempool.space'
+    explorerLabel: 'View on mempool.space',
+    commitExplorerLabel: 'View the funding transaction on mempool.space'
   }
 };
 
@@ -770,6 +807,15 @@ export const protocol = {
     'Assets migrate unidirectionally — did:cel → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
   migrationNote:
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
+  /**
+   * Which of the three method names are actually standards (protocol design
+   * review, 2026-08). "Built on W3C DIDs" is true of the syntax and of two of
+   * the three methods; did:cel is ours, unregistered, and verifiable today only
+   * by an implementation of our own algorithm. Saying so here is cheaper than
+   * having a W3C reader discover it — it is the first thing they check.
+   */
+  standardsNote:
+    'On standards: did:webvh and did:btco are registered DID methods. did:cel is ours — it follows DID syntax but is not registered, and for now only this SDK can verify one.',
   columns: [
     {
       layer: 'did:cel',
@@ -920,7 +966,8 @@ export const legal = {
       {
         heading: 'Keys held in your browser',
         body: [
-          'The Ed25519 key that signs everything you author lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
+          'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
+          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, that key does not exist and the Original is signed by a key generated in the page and discarded with it.',
           'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.'
         ]
@@ -946,6 +993,7 @@ export const legal = {
           'deposit_shortfall — the balance changed and still does not cover the quote',
           'deposit_read_failed — an address read, or the address binding, could not be trusted',
           'deposit_ordinal_check_unavailable — coins could not be checked for inscriptions, so none were offered as spendable',
+          'deposit_ordinal_check_partial — the address held more outputs than one check covers; the unchecked ones were not offered as spendable',
           'inscribe_attempted — a signed pair passed validation and is about to broadcast',
           'inscribe_failed — a pair was refused or failed to broadcast',
           'inscribe_broadcast — a pair reached the network',
