@@ -26,6 +26,23 @@ import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
 import { isBitcoinConfigured, serverBtcNetwork } from './bitcoin';
 
+/** Block notifications are hints; QuickNode still verifies commit confirmation. */
+export function resolveBlockEventsUrl(env: Record<string, string | undefined>): string | undefined {
+  const configured = env.BTC_BLOCKS_WS_URL;
+  if (configured === 'off') return undefined;
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      return url.protocol === 'wss:' ? url.href : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return serverBtcNetwork(env) === 'mainnet'
+    ? 'wss://mempool.space/api/v1/ws'
+    : 'wss://mempool.space/testnet4/api/v1/ws';
+}
+
 export type ConfigSeverity = 'error' | 'warn' | 'fatal';
 
 export interface ConfigIssue {
@@ -207,6 +224,10 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
   }
   if (env.QUICKNODE_ENDPOINT && !/^https:\/\/\S+$/.test(env.QUICKNODE_ENDPOINT)) {
     report('QUICKNODE_ENDPOINT', 'QUICKNODE_ENDPOINT is not an https:// URL.');
+  }
+
+  if (env.BTC_BLOCKS_WS_URL && env.BTC_BLOCKS_WS_URL !== 'off' && !resolveBlockEventsUrl(env)) {
+    report('BTC_BLOCKS_WS_URL', 'BTC_BLOCKS_WS_URL must be a wss:// URL or "off"; in non-strict mode block notifications are disabled and hourly completion remains active.');
   }
 
   // The deposit indexer seam (R4/KTD4). Every address→UTXO read a creator's

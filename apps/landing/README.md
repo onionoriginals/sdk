@@ -67,3 +67,28 @@ scripts; any client-side option must be cookie-less and self-hosted.
 See [`DEPLOY.md`](./DEPLOY.md) — exact build command + publish directory for
 Vercel / Netlify / Cloudflare Pages / GitHub Pages, the CI gate
 (`bun run landing:ci`), and the domain-swap checklist for when #330 lands.
+
+
+### Completing inscriptions after a block
+
+The server subscribes to Bitcoin block notifications over the
+[mempool WebSocket protocol](https://mempool.space/docs/api/websocket).
+Each new block wakes the bounded inscription completion sweep; QuickNode still
+checks that each commit is confirmed before its persisted reveal is broadcast.
+The feed receives only a blocks subscription, with no user addresses or transaction
+IDs sent to it. It defaults to mempool.space on `BTC_NETWORK` (mainnet or testnet4).
+
+Set `BTC_BLOCKS_WS_URL` to a mempool-compatible `wss://` endpoint to use your own
+feed, or `off` to disable it. Connections reconnect automatically and run a catch-up
+pass when restored. Startup and hourly passes remain as fallback. Concurrent triggers
+are coalesced and serialized, and `INSCRIBE_SWEEP_MAX_PER_PASS` (default 25) still
+bounds each pass. A backlog larger than that rotates fairly across subsequent
+passes; block notifications do not bypass the confirmation check or per-pass cap.
+Deposit-balance and stale-record monitoring retain their hourly cadence.
+
+After deploying, watch `inscription_sweep_completed`, `inscription_sweep_waiting`
+and `Bitcoin block feed unavailable` in server logs over the next two blocks.
+Confirmed commits should advance to `reveal_broadcast` without a browser tab.
+If the feed repeatedly fails, set `BTC_BLOCKS_WS_URL=off` while diagnosing it;
+the hourly recovery path stays active. Public feed availability and QuickNode's
+view of confirmation determine how quickly a received block can lead to completion.

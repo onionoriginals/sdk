@@ -34,12 +34,17 @@ import {
   type FaucetTxSigner,
   type OrdinalLookup,
 } from './server/bitcoin';
+import { startBlockCompletion } from './server/block-completion';
 import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { checkConfig, isStrictConfig, resolveDataDir, isBareHost } from './server/config';
+import {
+  createInscriptionCompletionSweep,
+  type SweepProvider,
+} from './server/inscription-completion-sweep';
+import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
@@ -246,7 +251,34 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
+  // Finish what can be finished (#545), BEFORE reporting what is stuck: a
+  // record this pass completes should not also be warned about as stranded.
+  // Its own provider instance: the routes build theirs inside buildApiRoutes
+  // and never expose it, and a sweep that only reads status and broadcasts
+  // needs nothing the routes' instance holds. Same endpoint, same network.
+  const completionSweep = createInscriptionCompletionSweep({
+    store: inscriptionsStore,
+    provider: createFaucetProviderFromEnv() as unknown as SweepProvider,
+    moneyLog: money,
+    maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
+  });
+  const complete = async () => {
+    const r = await completionSweep();
+    if (r.completed > 0 || r.failed > 0) {
+      console.warn(
+        `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
+          `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
+      );
+    }
+  };
+  const blockCompletion = startBlockCompletion({
+    url: resolveBlockEventsUrl(process.env),
+    complete,
+    onError: (error) => console.warn(`[landing] ${error.message}`),
+  });
+  process.once('exit', () => blockCompletion.stop());
   const sweep = () => {
+    void blockCompletion.request();
     try {
       const { stale, unreadable } = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {

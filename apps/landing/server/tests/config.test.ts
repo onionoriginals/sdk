@@ -6,6 +6,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   validateConfig,
+  resolveBlockEventsUrl,
   isMountedVolume,
   isStrictConfig,
   enforceConfig,
@@ -485,5 +486,25 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
 
   test('not required on testnet4 — a throwaway chain does not mint permanent DIDs worth protecting', () => {
     expect(errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }))).toEqual([]);
+  });
+});
+
+
+describe('block completion feed configuration', () => {
+  test('defaults to the configured Bitcoin network and supports explicit opt-out', () => {
+    expect(resolveBlockEventsUrl({ BTC_NETWORK: 'mainnet' })).toBe('wss://mempool.space/api/v1/ws');
+    expect(resolveBlockEventsUrl({ BTC_NETWORK: 'testnet4' })).toBe('wss://mempool.space/testnet4/api/v1/ws');
+    expect(resolveBlockEventsUrl({ BTC_BLOCKS_WS_URL: 'off' })).toBeUndefined();
+    expect(resolveBlockEventsUrl({ BTC_BLOCKS_WS_URL: 'wss://index.example/blocks' })).toBe('wss://index.example/blocks');
+  });
+
+  test('invalid feed URLs disable the listener and report the key without exposing credentials', () => {
+    for (const url of ['https://host/secret', 'ws://host/secret', 'not-a-url']) {
+      const env = { ...GOOD, BTC_BLOCKS_WS_URL: url };
+      expect(resolveBlockEventsUrl(env)).toBeUndefined();
+      const issue = validateConfig({ env, dataDir: mounted }).find((i) => i.key === 'BTC_BLOCKS_WS_URL');
+      expect(issue).toBeDefined();
+      expect(issue!.message).not.toContain(url);
+    }
   });
 });
