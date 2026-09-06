@@ -1,3 +1,4 @@
+import { bech32 } from '@scure/base';
 /**
  * Turnkey session helpers for Track B (real-network Bitcoin signing).
  *
@@ -117,7 +118,7 @@ export interface TurnkeyBitcoinClient {
   }>;
 }
 
-export type FundingNetwork = 'testnet4' | 'mainnet';
+export type FundingNetwork = 'testnet4' | 'mainnet' | 'regtest';
 
 // ⚠️ A user's testnet path and mainnet path are DIFFERENT accounts on the same
 // Turnkey wallet (BIP-84 coin type 1' vs 0'): anywhere a funding address is
@@ -127,6 +128,7 @@ const P2WPKH_ACCOUNTS: Record<FundingNetwork, {
   addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH' | 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH';
   prefix: string;
 }> = {
+  regtest: { path: "m/84'/1'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH', prefix: 'tb1' },
   testnet4: { path: "m/84'/1'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_BITCOIN_TESTNET_P2WPKH', prefix: 'tb1' },
   mainnet: { path: "m/84'/0'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2WPKH', prefix: 'bc1' },
 };
@@ -421,6 +423,11 @@ export async function ensureBitcoinFundingAccount(
   network: FundingNetwork = 'testnet4'
 ): Promise<string> {
   const account = P2WPKH_ACCOUNTS[network];
+  const checked = (address: string | undefined): string => {
+    const verified = verifyFundingAddress(address, account.prefix);
+    if (network !== 'regtest') return verified;
+    return reencodeFundingAddress(verified, 'tb', 'bcrt');
+  };
 
   const findExisting = async (): Promise<string | undefined> => {
     const { accounts } = await client.getWalletAccounts({ organizationId: subOrgId });
@@ -428,7 +435,7 @@ export async function ensureBitcoinFundingAccount(
   };
 
   const already = await findExisting();
-  if (already) return verifyFundingAddress(already, account.prefix);
+  if (already) return checked(already);
 
   const { wallets } = await client.getWallets({ organizationId: subOrgId });
   const wallet = wallets[0];
@@ -456,10 +463,10 @@ export async function ensureBitcoinFundingAccount(
     if (!/already exists/i.test(String((err as Error)?.message ?? err))) throw err;
     const recovered = await findExisting();
     if (!recovered) throw err;
-    return verifyFundingAddress(recovered, account.prefix);
+    return checked(recovered);
   }
 
-  return verifyFundingAddress(addresses[0], account.prefix);
+  return checked(addresses[0]);
 }
 
 /**
@@ -578,4 +585,18 @@ async function ensureEd25519Account(
   const address = addresses[0];
   if (!address) throw new Error(`Turnkey returned no address for account path ${spec.path}.`);
   return address;
+}
+
+/** Turnkey identifies the same regtest funding key by its testnet account address. */
+export function fundingSignerAddress(address: string): string {
+  if (!address.startsWith('bcrt1')) return address;
+  return reencodeFundingAddress(address, 'bcrt', 'tb');
+}
+
+function reencodeFundingAddress(address: string, expectedPrefix: string, targetPrefix: string): string {
+  const decoded = bech32.decode(address as `${string}1${string}`);
+  if (decoded.prefix !== expectedPrefix || decoded.words[0] !== 0 || bech32.fromWords(decoded.words.slice(1)).length !== 20) {
+    throw new Error('Regtest funding requires a checksummed P2WPKH address');
+  }
+  return bech32.encode(targetPrefix, decoded.words);
 }

@@ -1,3 +1,4 @@
+import type { AssetResourceInput } from '../types/common.js';
 /**
  * Batch Operations for Originals SDK
  * 
@@ -10,7 +11,6 @@
  */
 
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
-import type { AssetResource } from '../types/index.js';
 import type { OriginalsAsset } from './OriginalsAsset.js';
 
 /**
@@ -433,7 +433,7 @@ export class BatchValidator {
   /**
    * Validate batch of resources for asset creation
    */
-  validateBatchCreate(resourcesList: AssetResource[][]): ValidationResult[] {
+  validateBatchCreate(resourcesList: AssetResourceInput[][]): ValidationResult[] {
     return resourcesList.map((resources, index) => {
       const errors: string[] = [];
       

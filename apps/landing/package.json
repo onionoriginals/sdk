@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
+    "typecheck:regtest": "tsc --noEmit -p tsconfig.regtest.json",
     "smoke": "node scripts/smoke.mjs",
     "check:ordinals": "bun scripts/check-quicknode-ordinals.ts",
     "dry-run:inscription": "bun scripts/dry-run-inscription.ts",

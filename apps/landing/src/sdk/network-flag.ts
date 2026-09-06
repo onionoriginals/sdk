@@ -6,17 +6,18 @@
  * `VITE_BTC_NETWORK` selects the deploy's Bitcoin surface:
  *   - 'mainnet'  — real inscriptions, creator-pays deposits (no faucet)
  *   - 'testnet4' — real inscriptions on testnet4, faucet-funded (worthless tBTC)
+ *   - 'regtest' — real inscriptions against explicitly configured local nodes
  *   - 'off' / unset — the self-contained OrdMockProvider mock
  *
  * The legacy `VITE_BTC_TESTNET=1` flag is honored as an alias for 'testnet4'
  * so existing deploys don't silently fall back to mock on upgrade.
  */
-export type BtcNetworkFlag = 'mainnet' | 'testnet4' | 'off';
+export type BtcNetworkFlag = 'mainnet' | 'testnet4' | 'regtest' | 'off';
 
 export function btcNetwork(): BtcNetworkFlag {
   const env = (import.meta as unknown as { env?: Record<string, string> }).env ?? {};
   const v = env.VITE_BTC_NETWORK;
-  if (v === 'mainnet' || v === 'testnet4') return v;
+  if (v === 'mainnet' || v === 'testnet4' || v === 'regtest') return v;
   if (v === undefined || v === '' ) {
     return env.VITE_BTC_TESTNET === '1' ? 'testnet4' : 'off';
   }
@@ -46,7 +47,7 @@ export function smokeAutoRunAllowed(flag: BtcNetworkFlag = btcNetwork()): boolea
 // pulling in the heavy engine module.
 export function btcoExplorerUrl(txid: string): string | undefined {
   const net = btcNetwork();
-  if (net === 'off' || !txid) return undefined;
+  if (net === 'off' || net === 'regtest' || !txid) return undefined;
   return net === 'mainnet'
     ? `https://mempool.space/tx/${txid}`
     : `https://mempool.space/testnet4/tx/${txid}`;
@@ -80,7 +81,7 @@ export interface DemoTier {
  */
 export function demoTier(flag: BtcNetworkFlag, authed: boolean): DemoTier {
   const real = flag !== 'off' && authed;
-  const network: SdkNetwork = !real ? 'regtest' : flag === 'mainnet' ? 'mainnet' : 'testnet';
+  const network: SdkNetwork = !real || flag === 'regtest' ? 'regtest' : flag === 'mainnet' ? 'mainnet' : 'testnet';
   const webvhNetwork: WebvhTier =
     network === 'mainnet' ? 'pichu' : network === 'testnet' ? 'cleffa' : 'magby';
   return { real, network, webvhNetwork };

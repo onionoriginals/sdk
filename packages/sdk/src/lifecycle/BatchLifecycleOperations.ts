@@ -1,6 +1,6 @@
+import type { AssetResourceInput } from '../types/common.js';
 import {
   OriginalsConfig,
-  AssetResource,
   BitcoinTransaction,
 } from '../types/index.js';
 import { BitcoinManager } from '../bitcoin/BitcoinManager.js';
@@ -26,7 +26,7 @@ import type { InscribeOnBitcoinOptions } from './LifecycleManager.js';
  * exact same per-asset behavior.
  */
 export interface LifecycleCoreOperations {
-  createAsset(resources: AssetResource[]): Promise<OriginalsAsset>;
+  createAsset(resources: AssetResourceInput[]): Promise<OriginalsAsset>;
   publishToWeb(asset: OriginalsAsset, publisherDidOrSigner: any): Promise<OriginalsAsset>;
   inscribeOnBitcoin(asset: OriginalsAsset, opts?: number | InscribeOnBitcoinOptions): Promise<OriginalsAsset>;
   transferOwnership(asset: OriginalsAsset, to: string): Promise<BitcoinTransaction>;
@@ -75,7 +75,7 @@ export class BatchLifecycleOperations {
    * Create multiple assets in batch
    */
   async batchCreateAssets(
-    resourcesList: AssetResource[][],
+    resourcesList: AssetResourceInput[][],
     options?: BatchOperationOptions
   ): Promise<BatchResult<OriginalsAsset>> {
     const batchId = this.batchExecutor.generateBatchId();

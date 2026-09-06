@@ -14,7 +14,8 @@ import {
 import { BitcoinManager, MAX_REASONABLE_FEE_RATE } from '../bitcoin/BitcoinManager.js';
 import { inscribeOnSat } from '../bitcoin/inscribe-on-sat.js';
 import type { Utxo, KeyPair } from '../types/bitcoin.js';
-import type { BitcoinSigner, AppendFailurePolicy } from '../types/common.js';
+import type { BitcoinSigner, AppendFailurePolicy, AssetResourceInput } from '../types/common.js';
+import { normalizeResource, resourceContentBytes, encodeResource, decodeResource } from '../utils/resource-content.js';
 import { DIDManager } from '../did/DIDManager.js';
 import type { CredentialManager } from '../vc/CredentialManager.js';
 import { OriginalsAsset, type ProvenanceChain } from './OriginalsAsset.js';
@@ -363,16 +364,17 @@ export class LifecycleManager {
     return this.injectedKeyStore ?? this.config.keyStore;
   }
 
-  async createAsset(resources: AssetResource[], options?: CreateAssetOptions): Promise<OriginalsAsset> {
+  async createAsset(resourceInputs: AssetResourceInput[], options?: CreateAssetOptions): Promise<OriginalsAsset> {
     const stopTimer = this.logger.startTimer('createAsset');
     const metricsStart = performance.now();
-    this.logger.info('Creating asset', { resourceCount: resources.length });
+    this.logger.info('Creating asset', { resourceCount: Array.isArray(resourceInputs) ? resourceInputs.length : 0 });
     
     try {
       // Input validation
-      if (!Array.isArray(resources)) {
+      if (!Array.isArray(resourceInputs)) {
         throw new StructuredError('INVALID_INPUT', 'Resources must be an array. Provide an array of AssetResource objects.');
       }
+      const resources = resourceInputs.map(normalizeResource);
       if (resources.length === 0) {
         throw new StructuredError('INVALID_INPUT', 'At least one resource is required');
       }
@@ -553,7 +555,7 @@ export class LifecycleManager {
     return asset;
     } catch (error) {
       stopTimer();
-      this.logger.error('Asset creation failed', error as Error, { resourceCount: resources.length });
+      this.logger.error('Asset creation failed', error as Error, { resourceCount: Array.isArray(resourceInputs) ? resourceInputs.length : 0 });
       this.metrics.recordOperation('lifecycle.createAsset', performance.now() - metricsStart, false);
       this.metrics.recordError('ASSET_CREATION_FAILED', 'createAsset');
       throw error;
@@ -589,7 +591,12 @@ export class LifecycleManager {
    */
   async loadAsset(
     envelope: AssetEnvelope | string,
-    opts?: { skipVerification?: boolean; ordinalsProvider?: OrdinalsLookup }
+    opts?: {
+      skipVerification?: boolean;
+      ordinalsProvider?: OrdinalsLookup;
+      /** @internal Preserve the calling DID resolution path while verifying nested keys. */
+      resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
+    }
   ): Promise<{ asset: OriginalsAsset; verification?: VerificationResult; warnings: string[] }> {
     // 1) Structural validation (ALWAYS runs, even under skipVerification).
     let env: AssetEnvelope;
@@ -611,8 +618,8 @@ export class LifecycleManager {
     if (!Number.isInteger(env.version)) {
       throw new StructuredError('ENVELOPE_INVALID', `Envelope version must be an integer; got ${String(env.version)}.`);
     }
-    if (env.version > ASSET_ENVELOPE_VERSION) {
-      throw new StructuredError('ENVELOPE_VERSION_UNSUPPORTED', `Envelope version ${env.version} is newer than this SDK supports (max ${ASSET_ENVELOPE_VERSION}).`);
+    if (env.version < 1 || env.version > ASSET_ENVELOPE_VERSION) {
+      throw new StructuredError('ENVELOPE_VERSION_UNSUPPORTED', `Envelope version ${env.version} is unsupported (supported: 1 through ${ASSET_ENVELOPE_VERSION}).`);
     }
     if (typeof env.assetDid !== 'string' || !env.assetDid) {
       throw new StructuredError('ENVELOPE_INVALID', 'Envelope is missing a valid assetDid.');
@@ -634,6 +641,7 @@ export class LifecycleManager {
         throw new StructuredError('ENVELOPE_INVALID', `Envelope resource ${typeof resId === 'string' ? resId : '(unknown)'} is missing a string hash.`);
       }
     }
+    const resources = env.resources.map(resource => decodeResource(resource, env.version));
     // Credentials, when present, must be an array (else map() throws a raw
     // TypeError); their contents are validated after the fold (step 6).
     if (env.credentials !== undefined && !Array.isArray(env.credentials)) {
@@ -665,7 +673,7 @@ export class LifecycleManager {
     if (!opts?.skipVerification) {
       verification = await verifyEventLog(log, {
         expectedDid: env.assetDid,
-        resolveKey: createDidManagerKeyResolver(this.didManager),
+        resolveKey: opts?.resolveKey ?? createDidManagerKeyResolver(this.didManager),
         ordinalsProvider: provider,
         // A provider lets us reject a truncated pre-rotation log (#366); its
         // on-chain head betrays the omission. Off the ownership path — this is
@@ -681,16 +689,16 @@ export class LifecycleManager {
       }
 
       // 4) Resource↔genesis binding (shared helper) + inline-content hashes.
-      if (!checkGenesisResourceBinding(log, env.resources)) {
+      if (!checkGenesisResourceBinding(log, resources)) {
         throw new StructuredError(
           'ASSET_LOAD_VERIFICATION_FAILED',
           'Envelope resources do not back the log genesis (a genesis resource digest is missing).',
           { verification }
         );
       }
-      for (const res of env.resources) {
-        if (typeof res.content === 'string') {
-          const computed = hashResource(new TextEncoder().encode(res.content));
+      for (const res of resources) {
+        if (res.content !== undefined) {
+          const computed = hashResource(res.content);
           if (computed.toLowerCase() !== String(res.hash).toLowerCase()) {
             throw new StructuredError(
               'ASSET_LOAD_VERIFICATION_FAILED',
@@ -714,7 +722,7 @@ export class LifecycleManager {
       // via the envelope-controlled res.hash): a forged blob (hash(content) ≠
       // toHash), a self-consistent forgery (content and res.hash both swapped),
       // and an unprovable degraded version (no backing event) all fail closed.
-      for (const res of env.resources) {
+      for (const res of resources) {
         const version = typeof res.version === 'number' ? res.version : 1;
         if (version < 2) continue;
         const match = folded.resourceUpdates.find(
@@ -737,8 +745,8 @@ export class LifecycleManager {
         // Bind the actual blob to the signed toHash. The content-addressed store
         // carries the bytes inline (AssetResource.content); a resource that omits
         // them is a pure reference and rides on the res.hash↔toHash match above.
-        if (typeof res.content === 'string') {
-          const computed = hashResource(new TextEncoder().encode(res.content));
+        if (res.content !== undefined) {
+          const computed = hashResource(res.content);
           if (computed.toLowerCase() !== match.toHash.toLowerCase()) {
             throw new StructuredError(
               'ASSET_LOAD_VERIFICATION_FAILED',
@@ -771,7 +779,7 @@ export class LifecycleManager {
           if (typeof id === 'string' && id.length > 0) genesisDigestById.set(id, dm);
           else genesisDigestsIdless.add(dm);
         }
-        for (const res of env.resources) {
+        for (const res of resources) {
           const version = typeof res.version === 'number' ? res.version : 1;
           if (version >= 2) continue; // bound version-exactly by 4b above
           const resDigest = hexSha256ToDigestMultibase(String(res.hash));
@@ -843,7 +851,7 @@ export class LifecycleManager {
       const headByResource = new Map<string, string>();
       for (const u of folded.resourceUpdates) headByResource.set(u.resourceId, u.toHash);
       for (const [resourceId, headHash] of headByResource) {
-        const backed = env.resources.some(
+        const backed = resources.some(
           r => r.id === resourceId && String(r.hash).toLowerCase() === headHash.toLowerCase()
         );
         if (!backed) {
@@ -924,7 +932,7 @@ export class LifecycleManager {
     }
 
     const asset = OriginalsAsset.restore(
-      env.resources.map(r => ({ ...r })),
+      resources,
       celDidDocument,
       credentials,
       log,
@@ -966,7 +974,11 @@ export class LifecycleManager {
    */
   async resolveAssetFromSat(
     satoshi: string,
-    opts?: { ordinalsProvider?: OrdinalsLookup }
+    opts?: {
+      ordinalsProvider?: OrdinalsLookup;
+      /** @internal Preserve the calling DID resolution path while verifying nested keys. */
+      resolveKey?: (verificationMethod: string) => Promise<Uint8Array | null>;
+    }
   ): Promise<{
     asset: OriginalsAsset;
     verification?: VerificationResult;
@@ -1185,13 +1197,13 @@ export class LifecycleManager {
         'did:cel': celDoc,
         'did:btco': btcoDoc as DIDDocument
       },
-      resources
+      resources: resources.map(encodeResource)
     };
 
     // 6) loadAsset runs the full verification gate (incl. content-as-ordinal via
     // the head blob's hash binding). checkHeadFreshness is engaged by the
     // provider passthrough.
-    const loaded = await this.loadAsset(envelope, { ordinalsProvider: provider });
+    const loaded = await this.loadAsset(envelope, { ordinalsProvider: provider, resolveKey: opts?.resolveKey });
 
     // Surface LIVE ownership beside the verified asset: best-effort, read at
     // call time, never cached. A missing owner index or a failed lookup leaves
@@ -1228,7 +1240,7 @@ export class LifecycleManager {
    * Only the head resource gets inline content (the on-chain media), and only
    * when it hashes to the log's most-recent-resource hash — so loadAsset's
    * blob↔toHash gate (which independently re-checks it) passes; a
-   * non-utf8-roundtrippable or mismatched blob is left as a pure reference.
+   * mismatched blob is left as a pure reference. Binary media is never decoded.
    */
   private reconstructResourcesFromLog(log: EventLog, headContent: Uint8Array | undefined): AssetResource[] {
     const resources: AssetResource[] = [];
@@ -1270,10 +1282,9 @@ export class LifecycleManager {
     // head hash (loadAsset re-verifies hash(content) == signed toHash).
     const head = mostRecentResourceHead(log);
     if (headContent && head) {
-      const contentStr = new TextDecoder().decode(headContent);
-      if (hashResource(new TextEncoder().encode(contentStr)).toLowerCase() === head.hash.toLowerCase()) {
+      if (hashResource(headContent).toLowerCase() === head.hash.toLowerCase()) {
         const target = resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash && r.content === undefined);
-        if (target) target.content = contentStr;
+        if (target) { target.content = new Uint8Array(headContent); target.size = headContent.byteLength; }
       }
     }
     return resources;
@@ -1585,7 +1596,7 @@ export class LifecycleManager {
       if (resource.size) {
         dataSize += resource.size;
       } else if (resource.content) {
-        dataSize += new TextEncoder().encode(resource.content).length;
+        dataSize += resourceContentBytes(resource.content).byteLength;
       } else {
         // Estimate based on hash length (assume average resource size)
         dataSize += 1000;
@@ -1989,7 +2000,7 @@ export class LifecycleManager {
   /**
    * Verify that a resource's inline content actually hashes to its declared
    * hash. The SDK's integrity semantics (OriginalsAsset.verify,
-   * addResourceVersion) define a resource hash as sha256 over the UTF-8
+   * addResourceVersion) define a resource hash as sha256 over the raw
    * bytes of `content`. Publication writes content to a key derived from the
    * DECLARED hash, sets resource.url, and mints a signed ResourceMigrated
    * credential — none of which is sound if the bytes don't match (issue
@@ -1997,8 +2008,14 @@ export class LifecycleManager {
    * and are skipped.
    */
   private assertContentMatchesDeclaredHash(resource: AssetResource, operation: string): void {
-    if (typeof resource.content !== 'string') return;
-    const computed = hashResource(new TextEncoder().encode(resource.content));
+    if (resource.content === undefined) return;
+    if (!(resource.content instanceof Uint8Array)) {
+      throw new StructuredError('INVALID_RESOURCE_CONTENT', 'Stored resource content must be a Uint8Array.');
+    }
+    if (resource.size !== undefined && resource.size !== resource.content.byteLength) {
+      throw new StructuredError('RESOURCE_SIZE_MISMATCH', `Resource ${resource.id}: declared size does not match its byte length.`);
+    }
+    const computed = hashResource(resource.content);
     if (computed.toLowerCase() !== resource.hash.toLowerCase()) {
       throw new StructuredError(
         'RESOURCE_HASH_MISMATCH',
@@ -2259,11 +2276,11 @@ export class LifecycleManager {
   private async writeResourceBytes(
     domain: string,
     relativePath: string,
-    content: string,
+    content: Uint8Array,
     contentType: string
   ): Promise<boolean> {
     const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
-    const data = new TextEncoder().encode(content);
+    const data = new Uint8Array(content);
     const withPut = storage as { put?: (key: string, data: Uint8Array, options: { contentType: string }) => Promise<void> } | undefined;
     const withPutObject = storage as { putObject?: (domain: string, path: string, data: Uint8Array) => Promise<void> } | undefined;
 
@@ -3003,14 +3020,14 @@ export class LifecycleManager {
     const pending = asset.pendingHeadMedia;
     if (pending && pending.hash === head.hash && (!head.resourceId || pending.resourceId === head.resourceId)) {
       return {
-        content: new TextEncoder().encode(pending.content),
+        content: new Uint8Array(pending.content),
         contentType: pending.contentType ?? head.contentType ?? 'application/octet-stream'
       };
     }
     const res = asset.resources.find(r => (!head.resourceId || r.id === head.resourceId) && r.hash === head.hash);
-    if (!res || typeof res.content !== 'string') return null;
+    if (!res || res.content === undefined) return null;
     return {
-      content: new TextEncoder().encode(res.content),
+      content: new Uint8Array(res.content),
       contentType: res.contentType ?? head.contentType ?? 'application/octet-stream'
     };
   }
@@ -3766,7 +3783,7 @@ export class LifecycleManager {
    * Create multiple assets in batch
    */
   async batchCreateAssets(
-    resourcesList: AssetResource[][],
+    resourcesList: AssetResourceInput[][],
     options?: BatchOperationOptions
   ): Promise<BatchResult<OriginalsAsset>> {
     return this.batchOps.batchCreateAssets(resourcesList, options);
@@ -3828,7 +3845,7 @@ export class LifecycleManager {
    * ```
    */
   async createDraft(
-    resources: AssetResource[],
+    resources: AssetResourceInput[],
     options?: LifecycleOperationOptions & CreateAssetOptions
   ): Promise<OriginalsAsset> {
     const onProgress = options?.onProgress;
@@ -4241,7 +4258,7 @@ export class LifecycleManager {
       return buf.byteLength;
     }
     if (appendKind === 'update' && asset.pendingHeadMedia) {
-      return new TextEncoder().encode(asset.pendingHeadMedia.content).byteLength;
+      return asset.pendingHeadMedia.content.byteLength;
     }
     // Head media is the inscribed CONTENT for BOTH kinds when present (update:
     // reinscribeCelAppend; rotate: reinscribeRotatedDoc) — so this is the paid size.
@@ -4513,5 +4530,4 @@ export class LifecycleManager {
     };
   }
 }
-
 

@@ -68,7 +68,7 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     expect(recTypes).toEqual(hostTypes);
     expect(recTypes.filter(t => t === 'update').length).toBe(3);
     // Current media is v3 (the most-recent resource update).
-    expect(recovered.resources.find(r => r.hash === contentHash('v3'))?.content).toBe('v3');
+    expect(recovered.resources.find(r => r.hash === contentHash('v3'))?.content).toEqual(new TextEncoder().encode('v3'));
   });
 
   test('immediacy: an addResourceVersion is recoverable IMMEDIATELY, before any later append', async () => {
@@ -83,7 +83,7 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     // Resolve right now — no rotation, no further appends.
     const { asset: recovered, verification } = await sdk.lifecycle.resolveAssetFromSat(sat);
     expect(verification?.verified).toBe(true);
-    expect(recovered.resources.find(r => r.hash === contentHash('b'))?.content).toBe('b');
+    expect(recovered.resources.find(r => r.hash === contentHash('b'))?.content).toEqual(new TextEncoder().encode('b'));
   });
 
   test('ordering: several appends reconstruct events in the correct order across the chain', async () => {
@@ -103,7 +103,7 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     expect(updates.map(e => (e.data as any).toHash)).toEqual(
       ['1', '2', '3', '4'].map(contentHash)
     );
-    expect(recovered.resources.find(r => r.hash === contentHash('4'))?.content).toBe('4');
+    expect(recovered.resources.find(r => r.hash === contentHash('4'))?.content).toEqual(new TextEncoder().encode('4'));
   });
 
   test('gap: a removed middle inscription breaks continuity → resolution fails closed', async () => {
@@ -180,7 +180,7 @@ describe('per-event real-time chain recovery (#407 phase 3)', () => {
     const sat = asset.bindings!['did:btco'].split(':').pop()!;
     const { asset: recovered, verification } = await sdk.lifecycle.resolveAssetFromSat(sat);
     expect(verification?.verified).toBe(true);
-    expect(recovered.resources.find(r => r.hash === contentHash('r1'))?.content).toBe('r1');
+    expect(recovered.resources.find(r => r.hash === contentHash('r1'))?.content).toEqual(new TextEncoder().encode('r1'));
   });
 
   test('tail truncation (fable I2): a listed-but-unfetchable newest inscription fails closed, not a stale resolve', async () => {

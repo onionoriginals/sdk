@@ -20,7 +20,8 @@ import { createDidManagerKeyResolver } from '@originals/cel';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import { replayProvenance } from './replayProvenance.js';
 import { checkGenesisResourceBinding } from './genesisBinding.js';
-import type { AppendFailurePolicy } from '../types/common.js';
+import type { AppendFailurePolicy, AssetResourceInput } from '../types/common.js';
+import { normalizeResource, resourceContentBytes, encodeResource } from '../utils/resource-content.js';
 import {
   ASSET_ENVELOPE_FORMAT,
   ASSET_ENVELOPE_VERSION,
@@ -126,22 +127,22 @@ export class OriginalsAsset {
   // new resource, so the per-event inscription can carry the new media as
   // content). Set before the appender, cleared in a finally — so a failed append
   // never leaves resources/pending advanced past the log.
-  #pendingHeadMedia?: { resourceId: string; hash: string; content: string; contentType: string };
+  #pendingHeadMedia?: { resourceId: string; hash: string; content: Uint8Array; contentType: string };
 
   /** #407 phase 3: the pending new-version media, if an append is in flight. */
-  get pendingHeadMedia(): { resourceId: string; hash: string; content: string; contentType: string } | undefined {
-    return this.#pendingHeadMedia;
+  get pendingHeadMedia(): { resourceId: string; hash: string; content: Uint8Array; contentType: string } | undefined {
+    return this.#pendingHeadMedia && { ...this.#pendingHeadMedia, content: new Uint8Array(this.#pendingHeadMedia.content) };
   }
 
   constructor(
-    resources: AssetResource[],
+    resources: AssetResourceInput[],
     did: DIDDocument,
     credentials: VerifiableCredential[],
     eventLog?: EventLog
   ) {
     this.id = did.id;
     this.#celLog = eventLog;
-    this.resources = resources;
+    this.resources = resources.map(normalizeResource);
     this.did = did;
     this.credentials = credentials;
     this.currentLayer = this.determineCurrentLayer(did.id);
@@ -157,7 +158,7 @@ export class OriginalsAsset {
     // Initialize version manager with existing resources
     // Group resources by ID and sort each group by version to handle unsorted persisted data
     const resourcesByIdMap = new Map<string, AssetResource[]>();
-    for (const resource of resources) {
+    for (const resource of this.resources) {
       const existing = resourcesByIdMap.get(resource.id) || [];
       existing.push(resource);
       resourcesByIdMap.set(resource.id, existing);
@@ -200,7 +201,7 @@ export class OriginalsAsset {
    * own logic reads NO clock — the restored state is a pure function of the log.
    */
   static restore(
-    resources: AssetResource[],
+    resources: AssetResourceInput[],
     did: DIDDocument,
     credentials: VerifiableCredential[],
     log: EventLog,
@@ -316,7 +317,7 @@ export class OriginalsAsset {
       assetDid: this.id,
       eventLog,
       didDocuments,
-      resources: this.resources.map(r => ({ ...r }))
+      resources: this.resources.map(encodeResource)
     };
     if (this.credentials.length > 0) {
       envelope.credentials = this.credentials.map(c => ({ ...c }));
@@ -510,8 +511,10 @@ export class OriginalsAsset {
         }
 
         // If inline content is present, verify by hashing it
-        if (typeof res.content === 'string') {
-          const data = new TextEncoder().encode(res.content);
+        if (res.content !== undefined) {
+          if (!(res.content instanceof Uint8Array)) return false;
+          const data = res.content;
+          if (res.size !== undefined && res.size !== data.byteLength) return false;
           const computed = hashResource(data);
           const expected = (res.hash || '').toLowerCase();
           if (computed.toLowerCase() !== expected) {
@@ -637,15 +640,10 @@ export class OriginalsAsset {
    * body is fixed — see the design contract).
    *
    * @param resourceId - The logical resource ID
-   * @param newContent - The new content. Must be a string: AssetResource can
-   *   only carry inline string content, so Buffer input is rejected rather
-   *   than silently reduced to a hash-only version (issue #276). For binary
-   *   resources, pass the content as a string in a text-safe encoding you
-   *   control, or manage the bytes externally and reference them by hash.
+   * @param newContent - Raw bytes, or a string encoded as UTF-8 at the input boundary.
    * @param contentType - The content type
    * @param changes - Optional description of changes
    * @returns The newly created AssetResource
-   * @throws StructuredError('BINARY_CONTENT_UNSUPPORTED') for Buffer content (#276)
    * @throws Error if content is unchanged or the resource is not found
    */
   /**
@@ -684,24 +682,12 @@ export class OriginalsAsset {
 
   async addResourceVersion(
     resourceId: string,
-    newContent: string,
+    newContent: Uint8Array | string,
     contentType: string,
     changes?: string,
     opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
   ): Promise<AssetResource> {
-    // AssetResource.content is a string; a Buffer used to be silently dropped
-    // (only its hash was stored), unrecoverably losing the binary content
-    // while the caller believed it was versioned (issue #276). The parameter
-    // is now declared `string` so TypeScript callers get a compile-time error
-    // (issue #311); the runtime guard stays for JS callers.
-    if (typeof newContent !== 'string') {
-      throw new StructuredError(
-        'BINARY_CONTENT_UNSUPPORTED',
-        'addResourceVersion cannot store binary (Buffer) content inline: AssetResource.content is a string. ' +
-        'Encode the content as a string (e.g. base64) and handle decoding at publish time, ' +
-        'or host the bytes externally and reference them by hash.'
-      );
-    }
+    const bytes = resourceContentBytes(newContent);
     // Serialize the whole read-modify-write of #celLog per asset via the shared
     // lock: acquire this asset's append turn, run the critical section to
     // completion, release. A second queued call (another addResourceVersion OR a
@@ -709,7 +695,7 @@ export class OriginalsAsset {
     // from the first call's committed result rather than a stale snapshot
     // (Finding 2 / #400).
     return this.runExclusive(() =>
-      this.#addResourceVersionCritical(resourceId, newContent, contentType, changes, opts)
+      this.#addResourceVersionCritical(resourceId, bytes, contentType, changes, opts)
     );
   }
 
@@ -736,7 +722,7 @@ export class OriginalsAsset {
   /** Critical section of addResourceVersion — runs one-at-a-time via #appendChain. */
   async #addResourceVersionCritical(
     resourceId: string,
-    newContent: string,
+    newContent: Uint8Array,
     contentType: string,
     changes?: string,
     opts?: { inscribeConfirm?: InscribeConfirm; signer?: OriginalsSigner; onAppendFailure?: AppendFailurePolicy }
@@ -756,7 +742,7 @@ export class OriginalsAsset {
     })[0];
 
     // Compute new hash
-    const contentBuffer = new TextEncoder().encode(newContent);
+    const contentBuffer = newContent;
     const newHash = hashResource(contentBuffer);
 
     // Check if content has actually changed
@@ -914,5 +900,4 @@ export class OriginalsAsset {
     throw new Error('Unknown DID method');
   }
 }
-
 

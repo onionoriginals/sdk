@@ -1,11 +1,4 @@
-/**
- * AssetSource (#demo uploads): the asset's bytes can come from generated
- * artwork, an uploaded SVG, or typed text. All three are TEXT — the SDK hashes
- * `AssetResource.content` as `TextEncoder().encode(content)`, so anything
- * binary would either corrupt or be re-encoded into bytes whose hash no longer
- * belongs to the user's file. These assert the three sources travel the same
- * lifecycle and that the resource carries what was actually supplied.
- */
+/** Asset inputs from generated art, uploaded files and text share the same lifecycle. */
 import { describe, test, expect } from 'bun:test';
 import { DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
@@ -84,7 +77,7 @@ describe('the asset source', () => {
  */
 describe('the source byte cap', () => {
   const MAX_SOURCE_BYTES = 32 * 1024;
-  const byteLength = (t: string) => new TextEncoder().encode(t).length;
+  const byteLength = (t: string | Uint8Array) => typeof t === 'string' ? new TextEncoder().encode(t).length : t.byteLength;
 
   test('ASCII: code units and bytes agree', () => {
     const text = 'a'.repeat(MAX_SOURCE_BYTES);

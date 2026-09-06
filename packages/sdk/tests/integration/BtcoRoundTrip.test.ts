@@ -143,8 +143,9 @@ describe('inscribeOnBitcoin commits to the CEL head digest (#365)', () => {
     expect(asset.celLog).toBe(logBefore);
 
     const doc = await sdk.did.resolveDID(asset.bindings!['did:btco']!);
-    expect((doc!.service || []).some(s => s.type === 'OriginalsCelAnchor')).toBe(false);
-    expect((doc!.service || []).some(s => s.type === 'OriginalsResourceManifest')).toBe(true);
+    // A skipped CEL anchor is not a verified SDK identity, even if the
+    // provider accepted its legacy inscription payload.
+    expect(doc).toBeNull();
   });
 
   test('inscription failure restores the pre-append CEL log', async () => {

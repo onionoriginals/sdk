@@ -24,18 +24,21 @@ import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store'
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 
 /**
- * The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4).
+ * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
  * Env is a parameter so the boot-time config contract can judge a snapshot.
  */
 export function serverBtcNetwork(
   env: Record<string, string | undefined> = process.env
-): 'mainnet' | 'testnet4' {
-  return env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
+): 'mainnet' | 'testnet4' | 'regtest' {
+  return env.BTC_NETWORK === 'regtest' ? 'regtest' : env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
 }
 
 export function isBitcoinConfigured(
   env: Record<string, string | undefined> = process.env
 ): boolean {
+  if (serverBtcNetwork(env) === 'regtest') {
+    return !!env.REGTEST_RPC_URL && !!env.REGTEST_ORD_URL && !!env.REGTEST_RPC_AUTH && !!env.BTC_INDEXER_API;
+  }
   if (!env.QUICKNODE_ENDPOINT) return false;
   // Mainnet is creator-pays: no faucet env needed (and none is mounted).
   if (serverBtcNetwork(env) === 'mainnet') return true;
@@ -54,13 +57,25 @@ export interface FaucetProvider extends OrdinalsProvider {
   >;
 }
 
-export type BtcNet = 'mainnet' | 'testnet';
+export type BtcNet = 'mainnet' | 'testnet' | 'regtest';
+
+export function bitcoinSigningNetwork(network: BtcNet) {
+  return network === 'regtest' ? { ...btc.TEST_NETWORK, bech32: 'bcrt' } : network === 'mainnet' ? btc.NETWORK : btc.TEST_NETWORK;
+}
+
+/** Local regtest services must never silently read a public chain. */
+export function isLoopbackServiceUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.username && !url.password;
+  } catch { return false; }
+}
 
 /** The scriptPubKey (hex) for a bech32 P2WPKH address (`tb1q…` or `bc1q…`). */
 export function p2wpkhScriptHex(address: string, network: BtcNet = 'testnet'): string {
-  const decoded = btc.Address(network === 'mainnet' ? btc.NETWORK : btc.TEST_NETWORK).decode(address);
+  const decoded = btc.Address(bitcoinSigningNetwork(network)).decode(address);
   if (!decoded || decoded.type !== 'wpkh') {
-    throw new Error(`Address must be P2WPKH (${network === 'mainnet' ? 'bc1q' : 'tb1q'}…): ${address}`);
+    throw new Error(`Address must be P2WPKH (${network === 'regtest' ? 'bcrt1q' : network === 'mainnet' ? 'bc1q' : 'tb1q'}…): ${address}`);
   }
   // Cast: the narrowed wpkh shape is a valid OutScript input; the union type on
   // encode() otherwise widens to include undefined and fails to match.
@@ -105,8 +120,13 @@ const stripTrailingSlash = (u: string) => u.replace(/\/+$/, '');
  */
 export function resolveIndexer(
   env: Record<string, string | undefined> = process.env,
-  network: BtcNet = serverBtcNetwork(env) === 'mainnet' ? 'mainnet' : 'testnet'
+  network: BtcNet = serverBtcNetwork(env) === 'testnet4' ? 'testnet' : serverBtcNetwork(env) as BtcNet
 ): IndexerConfig {
+  if (network === 'regtest') {
+    if (!env.BTC_INDEXER_API) throw new Error('regtest requires an explicit BTC_INDEXER_API');
+    if (!isLoopbackServiceUrl(env.BTC_INDEXER_API)) throw new Error('regtest BTC_INDEXER_API must use a loopback service');
+    return { api: stripTrailingSlash(env.BTC_INDEXER_API), ...(env.BTC_INDEXER_TOKEN ? { authToken: env.BTC_INDEXER_TOKEN } : {}), ...(env.BTC_INDEXER_AUTH_HEADER ? { authHeader: env.BTC_INDEXER_AUTH_HEADER } : {}) };
+  }
   const legacy = network === 'mainnet' ? env.MEMPOOL_API : env.MEMPOOL_TESTNET4_API ?? env.MEMPOOL_API;
   const api = stripTrailingSlash(env.BTC_INDEXER_API || legacy || DEFAULT_INDEXER_API[network]);
   const cfg: IndexerConfig = { api };
@@ -680,6 +700,9 @@ export function createBitcoinRoutes(deps: {
   // on every poll; short enough that an evicted one is back in the mempool
   // within the hour.
   const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
+  // Application recovery horizon, not a Bitcoin finality guarantee. Retain
+  // both signed transactions and recheck the chain until six confirmations.
+  const RECOVERY_CONFIRMATIONS = 6;
 
   // ONE fee source for the money path (R3/KTD3). The deposit quote, the
   // /api/btc/fee estimate the browser builds the inscription against, and the
@@ -1677,10 +1700,10 @@ export function createBitcoinRoutes(deps: {
    * 2. LIVE pairs stuck at commit_broadcast (reveal broadcast failed at some
    *    point) get their reveal completed from the persisted copy once their
    *    commit confirms.
-   * 3. Broadcast-but-unconfirmed reveals get a confirmation check; a
-   *    confirmed reveal is persisted as 'confirmed' (sticky, and its recovery
-   *    artifacts are dropped), so each record costs at most a handful of
-   *    provider lookups over its lifetime. One that is STILL unconfirmed
+   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS. An earlier confirmation
+   *    remains reversible: retain both transactions, demote after a reorg, and
+   *    rebroadcast. Retire the artifacts only at the retention horizon.
+   *    One that is STILL unconfirmed
    *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
    *    copy — a reveal evicted from the mempool has no other way back.
    */
@@ -1717,7 +1740,7 @@ export function createBitcoinRoutes(deps: {
     // land — so it is excluded from reconciliation instead of costing a
     // pointless provider lookup on every poll for the rest of time.
     const confirmedOutpoints = new Set(
-      newestFirst.filter((r) => r.status === 'confirmed').flatMap(outpointsOf)
+      newestFirst.filter((r) => r.status === 'confirmed' && r.retired).flatMap(outpointsOf)
     );
     // Any single spent input is enough to kill a rival commit for good.
     const isDead = (r: InscriptionRecord) => outpointsOf(r).some((o) => confirmedOutpoints.has(o));
@@ -1751,7 +1774,7 @@ export function createBitcoinRoutes(deps: {
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
-      newestFirst.filter((r) => !r.superseded && r.status === 'reveal_broadcast'),
+      newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),
       cursors.confirm
     );
     let lookups = 0;
@@ -1801,8 +1824,16 @@ export function createBitcoinRoutes(deps: {
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
         if (st?.confirmed) {
-          store.setStatus(sub, r.commitTxId, 'confirmed');
+          if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
+          if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
+          continue;
+        }
+        if (r.status === 'confirmed') {
+          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
           changed = true;
+          if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
+          if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
+          store.markRebroadcast(sub, r.commitTxId);
           continue;
         }
         // Not confirmed, and nothing else in the system ever re-pushes a
@@ -1882,7 +1913,7 @@ export function createBitcoinRoutes(deps: {
       throw e;
     }
     if (!rec) return json({ error: 'not_found' }, 404);
-    if (rec.status === 'confirmed') {
+    if (rec.status === 'confirmed' && rec.retired) {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
@@ -1911,13 +1942,14 @@ export function createBitcoinRoutes(deps: {
       if (st?.confirmed) {
         reclaimIfSuperseded();
         store.setStatus(sub, commitTxId, 'confirmed');
+        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
         return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
       }
     } catch {
       // No lookup support / transport failure — fall through to rebroadcast.
     }
 
-    if (rec.status === 'signed' && rec.signedCommitHex) {
+    if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
       reclaimIfSuperseded();
