@@ -1,0 +1,110 @@
+{
+  "recordedAt": "2026-09-06T16:02:21.691741+00:00",
+  "readOnly": true,
+  "config": {
+    "public": {
+      "NODE_ENV": "production",
+      "BTC_NETWORK": "mainnet",
+      "VITE_BTC_NETWORK": "mainnet",
+      "VITE_WEBVH_HOST": "originals.build",
+      "ORIGINALS_DATA_DIR": "/data",
+      "TRUSTED_PROXY_HOPS": "1",
+      "CONFIG_STRICT": null
+    },
+    "configured": {
+      "QUICKNODE_ENDPOINT": true,
+      "QUICKNODE_CONTENT_BASE_URL": false,
+      "QUICKNODE_CONTENT_ENCODING": false,
+      "JWT_SECRET": true,
+      "TURNKEY_API_PUBLIC_KEY": true,
+      "TURNKEY_API_PRIVATE_KEY": true,
+      "TURNKEY_ORGANIZATION_ID": true,
+      "BTC_INDEXER_API": true,
+      "BTC_INDEXER_TOKEN": false
+    }
+  },
+  "deployment": {
+    "project": "Onion / Originals",
+    "builder": [
+      {
+        "environment": "production",
+        "serviceId": "9111f770-8b24-4699-8566-e3014e0e8679",
+        "deploymentId": "888b9f4c-0ec7-4858-a02f-2b368b3317d6",
+        "status": "SUCCESS",
+        "createdAt": "2026-09-06T12:08:48.134Z",
+        "commitHash": "9116ce2c364872f7993336050786e722da86c2e2",
+        "domains": {
+          "customDomains": [
+            {
+              "domain": "originals.build",
+              "id": "fa0a001e-6002-4ce1-afc0-b669405dd40f",
+              "targetPort": 8080
+            }
+          ],
+          "serviceDomains": [
+            {
+              "domain": "builder-production-2757.up.railway.app",
+              "id": "646f6e14-f090-4ea3-a914-b65844510ca0",
+              "targetPort": 8080
+            }
+          ]
+        },
+        "mounts": [
+          "/data"
+        ]
+      }
+    ],
+    "volumes": [
+      {
+        "currentSizeMB": 800.19456,
+        "deletedAt": null,
+        "environmentId": "0e309dd4-d8a8-4d8f-ba6a-3afde7f29dd4",
+        "id": "208e7a40-bc01-4a77-aba5-edd3f0b718f7",
+        "isPendingDeletion": false,
+        "mountPath": "/data",
+        "serviceId": "9111f770-8b24-4699-8566-e3014e0e8679",
+        "sizeMB": 50000,
+        "state": "READY",
+        "volume": {
+          "id": "3a0145a7-8320-4e9b-8b64-f0d010bc7977",
+          "name": "builder-volume"
+        }
+      }
+    ]
+  },
+  "backupObservation": {
+    "volumeInstanceBackupList": [],
+    "volumeInstanceBackupScheduleList": []
+  },
+  "infrastructurePlan": {
+    "ok": true,
+    "changes": [
+      {
+        "summary": "Update builder build.buildCommand",
+        "severity": "safe",
+        "kind": "resource.update",
+        "details": [
+          "build.buildCommand (null \u2192 \"bun install && bun run build && cd apps/landing && bun run build\")"
+        ]
+      },
+      {
+        "summary": "Update builder deploy.restartPolicyMaxRetries, deploy.restartPolicyType, deploy.startCommand",
+        "severity": "safe",
+        "kind": "resource.update",
+        "details": [
+          "deploy.restartPolicyMaxRetries (null \u2192 5)",
+          "deploy.restartPolicyType (null \u2192 \"ON_FAILURE\")",
+          "deploy.startCommand (null \u2192 \"bun run apps/landing/serve.ts\")"
+        ]
+      }
+    ],
+    "diagnostics": []
+  },
+  "actionsApplied": [],
+  "limitations": [
+    "No byte-exact content transport configured",
+    "No backup schedule or snapshot",
+    "No live Turnkey OTP exercised",
+    "No release deployment or mainnet transaction performed"
+  ]
+}

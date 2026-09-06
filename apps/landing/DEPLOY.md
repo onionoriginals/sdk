@@ -43,6 +43,7 @@ these is declared with `preserve()` (keep the live value) or omitted on purpose:
 | `TURNKEY_API_PRIVATE_KEY` | Secret. `preserve()`. |
 | `TURNKEY_ORGANIZATION_ID` | Secret. `preserve()`. |
 | `QUICKNODE_ENDPOINT` | Secret (a paid node URL with the key in it). `preserve()`. |
+| `QUICKNODE_CONTENT_BASE_URL`, `QUICKNODE_CONTENT_ENCODING` | Operator-selected byte-exact content transport. Preserved across apply; configure and verify the gateway before the CEL 3 mainnet journey. |
 | `BTC_INDEXER_TOKEN` | Secret (paid-indexer credential). `preserve()`. |
 | `BTC_INDEXER_API` value | Non-secret, but its live value is not recorded anywhere in this repo, so the file `preserve()`s it rather than assert a wrong URL and downgrade a paid endpoint to the free tier on apply. The sanctioned default (KTD4) is the free public mempool.space API. To put the real value in the diff, inline it in `railway.ts`; keep `BTC_INDEXER_TOKEN` a secret. |
 | Volume size and region | Now pinned in `railway.ts` (`sizeMB: 50000`, `region: us-west2`) to the live values, because IaC nulls a volume's size and region when the file omits them. Confirm they still match the live volume before applying; the plan shows a resize or relocate if they have drifted. |
@@ -50,12 +51,12 @@ these is declared with `preserve()` (keep the live value) or omitted on purpose:
 | The `originals.build` custom-domain binding | Railway routing, not modelled here. `VITE_WEBVH_HOST` only bakes the hostname into the SPA; it does not point the domain at the service. Canonical did:webvh resolution depends on this binding, so `railway.ts` does not touch networking and the plan must NOT propose removing the custom domain (or the generated `*.up.railway.app` host the server 301s from). If a plan would drop it, model the domain in `railway.ts` (`domains: ["originals.build"]`) before applying. |
 | Scheduled volume backup | Dashboard-only, opt-in, no published SLA. Record it in the "Volume backup log" at the bottom of this file — the only durable evidence it happened. |
 
-**Delete the stray `WEBVH_DOMAIN` dashboard variable.** The `builder` service
+**Historical `WEBVH_DOMAIN` dashboard variable.** The `builder` service
 carries `WEBVH_DOMAIN=https://originals.build`, which **no code reads** (a repo
 grep finds it only in old planning docs; the live did:webvh host is
-`VITE_WEBVH_HOST`, baked into the bundle). It is not in the config contract and
-not in `railway.ts`. Remove it from the dashboard so it cannot be mistaken for a
-live setting: `railway variables --service builder --unset WEBVH_DOMAIN`.
+`VITE_WEBVH_HOST`, baked into the bundle). It is not a supported setting.
+The release IaC preserves it to avoid deleting operator state; a later explicit
+cleanup can remove it.
 
 ## Applying and verifying the deploy shape
 
@@ -337,4 +338,4 @@ lives in the Railway dashboard.
 
 | Date | Schedule | Enabled by |
 | --- | --- | --- |
-| _(not yet enabled — see "Before enabling mainnet" item 2)_ | | |
+| 2026-09-06 read-only API check | No schedules and no backup snapshots on the production builder volume. Enable and verify before release. | Not enabled |
