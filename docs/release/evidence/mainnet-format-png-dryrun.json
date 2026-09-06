@@ -1,0 +1,282 @@
+{
+  "format": "originals/cel3-dry-run-receipt",
+  "version": 1,
+  "generatedAt": "2026-09-06T15:37:13.533712+00:00",
+  "scope": "Mainnet-format fixture; no chain acceptance, real funding, public WebVH hosting, or Turnkey service interaction",
+  "baseCommit": "4ad4a1df55d1a4076aaed5790bfd815b821800f2",
+  "sourceFiles": {
+    "apps/landing/scripts/dry-run-inscription.ts": "d3f1235977be9b4e7341e077d621b5cf2b695bd20e73038732f1358813448638",
+    "apps/landing/scripts/dry-run-inscription.test.ts": "12c007e325c5c0ca965a86ab81497b3f6e85e859fdc4109f772cde40af439cf5",
+    "packages/sdk/src/v3/bitcoin.ts": "e96a64f5966ff911ea97c83fa58b1e611eb1bb7531d447537d1829dd3b437fa1",
+    "packages/sdk/src/bitcoin/inscribe-on-sat.ts": "43e4f07507cc1a7dd06a63bd39bb9c918b94b8039507c9c8ceaa39af0080334b",
+    "packages/sdk/src/bitcoin/inscription-recovery.ts": "6ec4e2a601313def9291b69af9b082173c85639e39556d60cf58bbafcfc9c7e1",
+    "apps/landing/server/bitcoin.ts": "9f73abec41a6118e37f74aebd829ad7cd04a37cc8030214d4e29e834324dce5c",
+    "apps/landing/src/sdk/http-ordinals-provider.ts": "aa1b91549f20f9dee0c41d7705647a057a167f9164bd4cb7a857b6059df0d140"
+  },
+  "tests": {
+    "passed": 14,
+    "assertions": 104,
+    "failed": 0,
+    "log": "/tmp/dryrun-v3-tests.log"
+  },
+  "targetedTypecheck": {
+    "passed": true,
+    "log": "/tmp/dryrun-v3-types.log"
+  },
+  "network": "mainnet",
+  "mode": "mock",
+  "signing": "local-key",
+  "payload": {
+    "filename": "originals-release-dryrun.png",
+    "contentType": "image/png",
+    "bytes": 68,
+    "sha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15"
+  },
+  "asset": {
+    "didCel": "did:cel:uEiD-I7NlclBWhSMVe6e6RWF70rH4PSecxZ9GjT1YsbRXNw",
+    "didWebvh": "did:webvh:Qmd8TSZFTyuNBvzgoQLjRs37Ki6d9Dn3fgenUxZkDJxavW:originals.build:published:anonymous:uEiD-I7NlclBWhSMVe6e6RWF70rH4PSecxZ9GjT1YsbRXNw",
+    "contentBytesHint": 3672
+  },
+  "fee": {
+    "rawEstimateSatVb": 5,
+    "routeRateSatVb": 5,
+    "bufferMultiplier": 1.5,
+    "quotedCostSats": 10484,
+    "rederivedQuoteSats": 10484
+  },
+  "envelope": {
+    "contentType": "image/png",
+    "bodyBytes": 68,
+    "bodySha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+    "metadataBytes": 2116,
+    "metadataBoundaryDid": "did:btco:2924685272",
+    "controlBlockVersion": 192,
+    "internalKey": "349cdd8f4ce70d8729e375deee7ffe0c0ab302c926c935692d4a76432dd2ed6a",
+    "rebuildsCommitOutput": true,
+    "signature": {
+      "ok": true,
+      "detail": "Schnorr valid (sighash 0x0)",
+      "leafKey": "349cdd8f4ce70d8729e375deee7ffe0c0ab302c926c935692d4a76432dd2ed6a"
+    }
+  },
+  "transactions": {
+    "commit": {
+      "txid": "c159f0d5bf063c93082b56378d2a47d30490e18370ac3f38aee2032189fe3508",
+      "vsize": 221,
+      "weight": 882,
+      "sizeEstimated": false,
+      "inputs": [
+        {
+          "outpoint": "43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:0",
+          "value": 7980,
+          "sequence": 4294967293,
+          "witnessItems": 2
+        },
+        {
+          "outpoint": "43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:1",
+          "value": 4004,
+          "sequence": 4294967293,
+          "witnessItems": 2
+        }
+      ],
+      "outputs": [
+        {
+          "vout": 0,
+          "value": 4061,
+          "address": "bc1pg504je7yje3x20u2ppjh8wjdljmgj5yreff9vs7t8df02x8alk7qwgh68s",
+          "scriptType": "tr",
+          "scriptHex": "5120451f5967c49662653f8a086573ba4dfcb6895083ca525643cb3b52f518fdfdbc"
+        },
+        {
+          "vout": 1,
+          "value": 6818,
+          "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+          "scriptType": "wpkh",
+          "scriptHex": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+        }
+      ],
+      "feeSats": 1105,
+      "feeRateSatVb": 5
+    },
+    "reveal": {
+      "txid": "47a8c4f4c1acf655ce5f2231f72acc9a3cc725aa7e02970e636c4321deed808a",
+      "vsize": 674,
+      "weight": 2695,
+      "sizeEstimated": false,
+      "inputs": [
+        {
+          "outpoint": "c159f0d5bf063c93082b56378d2a47d30490e18370ac3f38aee2032189fe3508:0",
+          "value": 4061,
+          "sequence": 4294967293,
+          "witnessItems": 3
+        }
+      ],
+      "outputs": [
+        {
+          "vout": 0,
+          "value": 546,
+          "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+          "scriptType": "wpkh",
+          "scriptHex": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+        }
+      ],
+      "feeSats": 3515,
+      "feeRateSatVb": 5.22
+    }
+  },
+  "broadcast": {
+    "guardRefusals": [
+      "broadcastTransaction"
+    ],
+    "broadcastRouteCalls": 0,
+    "durableRecordStatus": "signed",
+    "inscribeStatus": 502
+  },
+  "checks": [
+    {
+      "id": "fee.source",
+      "label": "Live fee estimate is readable and sane (1..10000 sat/vB)",
+      "result": "pass",
+      "detail": "raw estimate 5 sat/vB \u2192 route serves ceil = 5 sat/vB"
+    },
+    {
+      "id": "deposit.read",
+      "label": "Deposit route serves an ordinal-checked spendable set",
+      "result": "pass",
+      "detail": "ordinalCheck=ok, 2 spendable of 3 confirmed, quote 10484 sats for 3672 content bytes"
+    },
+    {
+      "id": "selection.funded",
+      "label": "Largest-first selection covers the buffered quote",
+      "result": "pass",
+      "detail": "2 input(s), 11984 sats against a 10484 sat quote"
+    },
+    {
+      "id": "selection.clean",
+      "label": "No selected input carries an inscription; the inscribed one is excluded",
+      "result": "pass",
+      "detail": "43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:0 7980 sats clean SELECTED(identity); 43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:1 4004 sats clean SELECTED(fee); 43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:2 546 sats inscribed"
+    },
+    {
+      "id": "never.broadcast",
+      "label": "The exact signed pair returns broadcast-unknown after the guarded server refuses delivery",
+      "result": "pass",
+      "detail": "provider refusals: broadcastTransaction; /api/btc/broadcast calls: 0; status: broadcast-unknown; SDK error: none ()"
+    },
+    {
+      "id": "server.invariants",
+      "label": "Inscribe route accepted the pair (inputs, outputs, change, ordinal check, binding)",
+      "result": "pass",
+      "detail": "route answered 502 {\"error\":\"commit_broadcast_failed\",\"message\":\"DRY RUN: broadcast refused by construction; nothing was sent to the network (broadcastTransaction)\"}"
+    },
+    {
+      "id": "server.persisted",
+      "label": "Pair persisted as status=signed before any broadcast was attempted",
+      "result": "pass",
+      "detail": "record c159f0d5bf063c93082b56378d2a47d30490e18370ac3f38aee2032189fe3508 status=signed at /var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/dry-run-inscription-Xr7sVf"
+    },
+    {
+      "id": "commit.inputs",
+      "label": "Commit spends exactly the selected set, identity input first",
+      "result": "pass",
+      "detail": "#0 43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:0 (7980 sats); #1 43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:1 (4004 sats)"
+    },
+    {
+      "id": "commit.rbf",
+      "label": "Every commit input signals RBF (sequence 0xfffffffd)",
+      "result": "pass",
+      "detail": "0xfffffffd, 0xfffffffd"
+    },
+    {
+      "id": "commit.output0",
+      "label": "Commit output 0 is P2TR and funds reveal fee + postage",
+      "result": "pass",
+      "detail": "vout 0 \u2192 bc1pg504je7yje3x20u2ppjh8wjdljmgj5yreff9vs7t8df02x8alk7qwgh68s (tr) 4061 sats"
+    },
+    {
+      "id": "commit.change",
+      "label": "Change (if any) returns to the deposit address; no third output",
+      "result": "pass",
+      "detail": "vout 1 \u2192 bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk 6818 sats"
+    },
+    {
+      "id": "commit.feerate",
+      "label": "Commit pays at least the live rate",
+      "result": "pass",
+      "detail": "1105 sats over 221 vB = 5 sat/vB (rate 5)"
+    },
+    {
+      "id": "commit.signed",
+      "label": "Commit is signed and finalized; witness keys match the deposit address and every ECDSA signature verifies",
+      "result": "pass",
+      "detail": "#0 ECDSA valid (sighash 0x1); #1 ECDSA valid (sighash 0x1); keys match deposit address: true"
+    },
+    {
+      "id": "reveal.spends",
+      "label": "Reveal spends commit:0 as its only input",
+      "result": "pass",
+      "detail": "c159f0d5bf063c93082b56378d2a47d30490e18370ac3f38aee2032189fe3508:0"
+    },
+    {
+      "id": "reveal.rbf",
+      "label": "Reveal input signals RBF",
+      "result": "pass",
+      "detail": "0xfffffffd"
+    },
+    {
+      "id": "reveal.postage",
+      "label": "Inscribed sat lands at the deposit address with at least dust postage",
+      "result": "pass",
+      "detail": "vout 0 \u2192 bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk 546 sats"
+    },
+    {
+      "id": "reveal.feerate",
+      "label": "Reveal pays at least the live rate",
+      "result": "pass",
+      "detail": "3515 sats over 674 vB = 5.22 sat/vB (rate 5)"
+    },
+    {
+      "id": "fee.quote",
+      "label": "What the pair actually costs sits inside the 1.5x-buffered quote",
+      "result": "pass",
+      "detail": "commit fee 1105 + reveal fee 3515 + postage 546 = 5166 sats; quote 10484 (re-derived 10484) = ceil(5 sat/vB \u00d7 est. vB \u00d7 1.5) + 546"
+    },
+    {
+      "id": "reveal.scriptpath",
+      "label": "Reveal is a 3-item script-path spend whose leaf + internal key rebuild commit output 0",
+      "result": "pass",
+      "detail": "witness [sig, leaf, control block]; leaf version 0xc0; internal key 349cdd8f4ce70d8729e375deee7ffe0c0ab302c926c935692d4a76432dd2ed6a; rebuild matches: true"
+    },
+    {
+      "id": "reveal.signed",
+      "label": "Reveal Schnorr signature verifies against the leaf key over the BIP-341 sighash",
+      "result": "pass",
+      "detail": "Schnorr valid (sighash 0x0); leaf key 349cdd8f4ce70d8729e375deee7ffe0c0ab302c926c935692d4a76432dd2ed6a (= internal key)"
+    },
+    {
+      "id": "reveal.envelope",
+      "label": "Envelope carries the payload bytes and content type unchanged",
+      "result": "pass",
+      "detail": "contentType image/png; body 68 bytes sha256 5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15; metadata 2116 bytes"
+    },
+    {
+      "id": "sat.identity",
+      "label": "Verified CEL boundary alias is did:btco:<first sat of identity input>; inscription id is reveal:i0",
+      "result": "pass",
+      "detail": "sat 2924685272 (first sat of 43939441a027beed306f35d6e301dbf7601815f7772c6ae48cdbe9e63188711c:0) \u2192 expected did:btco:2924685272, metadata CEL boundary alias did:btco:2924685272; ordinal FIFO: commit vout 0 offset 0 \u2192 reveal vout 0 offset 0 \u2192 47a8c4f4c1acf655ce5f2231f72acc9a3cc725aa7e02970e636c4321deed808ai0"
+    },
+    {
+      "id": "reveal.freshkey",
+      "label": "Reveal address derives from a fresh random keypair, not the funding key",
+      "result": "pass",
+      "detail": "build 1 internal key 349cdd8f4ce70d8729e375deee7ffe0c0ab302c926c935692d4a76432dd2ed6a; build 2 4b5e587ea3c5e53dcf6889a30b2f70eb172d1cf78aac225daee8b9e31c391036; funding key (x-only) 9ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b"
+    },
+    {
+      "id": "never.broadcast.second",
+      "label": "Second preparation performs no additional submission or broadcast",
+      "result": "pass",
+      "detail": "provider refusals so far: 1; broadcast route calls: 0"
+    }
+  ],
+  "verdict": "pass"
+}

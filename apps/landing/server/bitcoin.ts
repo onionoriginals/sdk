@@ -17,6 +17,7 @@ import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
 import { isValidBitcoinAddress, validateSatoshiNumber } from '@originals/sdk';
 import { json, type Handler } from './router';
+import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
@@ -1564,7 +1565,15 @@ export function createBitcoinRoutes(deps: {
       return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the funding outputs carry no inscription.' }, 503);
     }
     if (ordinalCheck.ordinalBearing > 0) {
-      return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'A declared funding output carries an inscription and must not be spent.' }, 400);
+      // Only a verified continuation may deliberately spend an inscribed input.
+      // Fee inputs remain strictly ordinal-free; no client-provided flag can
+      // bypass the fresh controller, sat alignment and exact delta checks.
+      const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);
+      const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({
+        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,
+        inscriptionIds: () => deps.ordinals!.outpointInscriptions(declaredUtxos[0]),
+      });
+      if (!authorized) return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'An inscribed input requires an authorized CEL continuation on the identity sat; fee inputs must carry no inscriptions.' }, 400);
     }
 
     // Consume a per-user slot only now that the request has proven valid —
