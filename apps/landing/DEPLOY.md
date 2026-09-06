@@ -339,3 +339,4 @@ lives in the Railway dashboard.
 | Date | Schedule | Enabled by |
 | --- | --- | --- |
 | 2026-09-06 read-only API check | No schedules and no backup snapshots on the production builder volume. Enable and verify before release. | Not enabled |
+| 2026-09-06 authorized preflight | Daily, six-day retention; manual pre-release backup and isolated native restore verified (361 files, 50 valid JSON files). Temporary restore resources removed; original production volume retained. See `docs/release/evidence/production-backup-restore.json`. | Codex, with owner authorization |

@@ -47,9 +47,15 @@
   ],
   "remaining": [
     "provider complete address index",
-    "verified binary content transport",
-    "durable backup and isolated restore",
     "live Turnkey OTP",
-    "approved deployment and owner-funded mainnet/public-host proof"
-  ]
+    "release candidate deployment and owner-funded mainnet/public-host proof"
+  ],
+  "operatorPreflightUpdate": {
+    "recordedAt": "2026-09-06T17:38:01.052342+00:00",
+    "productionPreflightAndDeploymentAuthorized": true,
+    "contentTransport": "verified against transaction witness and configured",
+    "backupRestore": "daily backups, native snapshot, isolated restore and cleanup verified",
+    "productionCandidateDeployed": false,
+    "details": "../3.0.0-operator-preflight.md"
+  }
 }
