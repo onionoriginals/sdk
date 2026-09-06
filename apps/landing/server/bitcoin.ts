@@ -15,7 +15,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
-import { isValidBitcoinAddress } from '@originals/sdk';
+import { isValidBitcoinAddress, validateSatoshiNumber } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
@@ -656,6 +656,7 @@ export function createBitcoinRoutes(deps: {
 }): {
   funding: Handler;
   sat: Handler;
+  satSnapshot: Handler;
   fee: Handler;
   broadcast: Handler;
   deposit: Handler;
@@ -664,6 +665,7 @@ export function createBitcoinRoutes(deps: {
   inscribe: Handler;
   inscribeList: Handler;
   inscribeRebroadcast: Handler;
+  sweepInscriptions: () => Promise<{ processed: number; unreadable: string[] }>;
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
   const now = deps.now ?? (() => Date.now());
@@ -829,6 +831,29 @@ export function createBitcoinRoutes(deps: {
       return json({ satoshi });
     } catch (e) {
       return json({ error: 'sat_lookup_failed', message: (e as Error).message }, 502);
+    }
+  };
+
+  const satSnapshot: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const satoshi = url.pathname.slice('/api/btc/sat-snapshot/'.length);
+    if (!/^(0|[1-9]\d*)$/.test(satoshi) || !validateSatoshiNumber(satoshi).valid) return json({ error: 'bad_request' }, 400);
+    if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
+    try {
+      const snapshot = await provider.getSatSnapshot(satoshi);
+      return json({ ...snapshot, publications: snapshot.publications.map((publication) => ({
+        ...publication,
+        body: publication.body.status === 'complete' ? {
+          ...publication.body,
+          bytes: Array.from(publication.body.bytes),
+          metadata: publication.body.metadata === null ? null : Array.from(publication.body.metadata),
+        } : publication.body,
+      })) });
+    } catch {
+      return json({ error: 'sat_snapshot_unavailable' }, 502);
     }
   };
 
@@ -1707,6 +1732,10 @@ export function createBitcoinRoutes(deps: {
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
+    return reconcileUser(sub);
+  };
+
+  async function reconcileUser(sub: string): Promise<Response> {
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
     // A torn file must not surface as a bare, unnamed 500: this route IS the
@@ -1764,7 +1793,7 @@ export function createBitcoinRoutes(deps: {
     // once THEIR commit confirms, the persisted reveal is completed here
     // automatically, so no state depends on the manual Finish button.
     const liveStuck = rotate(
-      newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast' && !!r.revealTxHex),
+      newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'signed' || r.status === 'commit_broadcast') && !!r.revealTxHex),
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
@@ -1797,11 +1826,20 @@ export function createBitcoinRoutes(deps: {
     }
     for (const r of liveStuck) {
       if (lookups >= 5) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.stuck++;
       try {
         const st = await provider.getTransactionStatus(r.commitTxId);
-        if (!st?.confirmed) continue;
+        if (!st?.confirmed) {
+          const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+          if (!r.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
+          store.markRebroadcast(sub, r.commitTxId);
+          if (await broadcastIdempotent(r.signedCommitHex)) continue;
+          store.setStatus(sub, r.commitTxId, 'commit_broadcast');
+          changed = true;
+        }
         const revealErr = await broadcastIdempotent(r.revealTxHex);
         if (!revealErr) {
           store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
@@ -1813,6 +1851,8 @@ export function createBitcoinRoutes(deps: {
     }
     for (const r of liveUnconfirmed) {
       if (lookups >= 5) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.confirm++;
       try {
@@ -1881,7 +1921,27 @@ export function createBitcoinRoutes(deps: {
     // rather than only in a 15s poll on a tab that is long closed.
     const depositAlert = store.getDepositAlert(sub);
     return json({ inscriptions, ...(depositAlert ? { depositAlert } : {}) });
-  };
+  }
+
+  let sweepRunning = false;
+  let sweepCursor = 0;
+  // Uses the same bounded reconciliation as an authenticated poll. No HTTP
+  // token is synthesized and no signed pair is rebuilt by this background job.
+  async function sweepInscriptions(): Promise<{ processed: number; unreadable: string[] }> {
+    if (!deps.inscriptions || sweepRunning) return { processed: 0, unreadable: [] };
+    sweepRunning = true;
+    try {
+      const { stale, unreadable } = deps.inscriptions.sweepStale(0);
+      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, 10);
+      const failures = [...unreadable];
+      for (const sub of subs) {
+        try { if (!(await reconcileUser(sub)).ok) failures.push(sub); }
+        catch { failures.push(sub); }
+      }
+      sweepCursor += subs.length;
+      return { processed: subs.length, unreadable: [...new Set(failures)] };
+    } finally { sweepRunning = false; }
+  }
 
   /**
    * POST /api/btc/inscribe/rebroadcast { commitTxId } — finish a stranded
@@ -1978,7 +2038,7 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  return { funding, sat, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
+  return { funding, sat, satSnapshot, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast, sweepInscriptions };
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;

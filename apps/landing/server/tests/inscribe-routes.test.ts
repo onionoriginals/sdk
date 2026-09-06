@@ -1083,6 +1083,26 @@ describe('evicted-reveal recovery', () => {
     expect(rec.revealTxHex).toBeUndefined(); // artifacts dropped once terminal
   });
 
+  test('background sweep recovers without an authenticated browser poll and retains reorg bytes', async () => {
+    const h = harness();
+    parked(h.store, 45 * 60_000, { status: 'confirmed' });
+    const first = await h.routes.sweepInscriptions();
+    expect(first.processed).toBe(1);
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.revealTxHex).toBe('02bb');
+    await h.routes.sweepInscriptions();
+    expect(h.broadcasts).toHaveLength(2);
+  });
+
+  test('background sweep replays a stranded signed pair after a lost commit acknowledgement', async () => {
+    const h = harness();
+    parked(h.store, 45 * 60_000, { status: 'signed' });
+    await h.routes.sweepInscriptions();
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.status).toBe('reveal_broadcast');
+  });
+
   test('a stale reveal is surfaced to the monitoring sweep', () => {
     const h = harness();
     parked(h.store, 48 * 60 * 60_000);

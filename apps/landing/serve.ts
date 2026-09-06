@@ -112,7 +112,7 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   return provider;
 }
 
-function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes } | null {
+function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes; sweepInscriptions?: () => Promise<{ processed: number; unreadable: string[] }> } | null {
   const jwtSecret = process.env.JWT_SECRET;
   const configured =
     jwtSecret &&
@@ -181,6 +181,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
+    sweepInscriptions: bitcoin?.sweepInscriptions,
   };
 }
 
@@ -248,24 +249,12 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
-  // Finish what can be finished (#545), BEFORE reporting what is stuck: a
-  // record this pass completes should not also be warned about as stranded.
-  // Its own provider instance: the routes build theirs inside buildApiRoutes
-  // and never expose it, and a sweep that only reads status and broadcasts
-  // needs nothing the routes' instance holds. Same endpoint, same network.
-  const completionSweep = createInscriptionCompletionSweep({
-    store: inscriptionsStore,
-    provider: createFaucetProviderFromEnv() as unknown as SweepProvider,
-    moneyLog: money,
-    maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
-  });
+  // Block notifications and the hourly fallback share the route reconciler's
+  // durable writes, bounded rotating budget and reorg recovery policy.
   const complete = async () => {
-    const r = await completionSweep();
-    if (r.completed > 0 || r.failed > 0) {
-      console.warn(
-        `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
-          `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
-      );
+    const result = await api.sweepInscriptions?.();
+    if (result?.unreadable.length) {
+      console.warn(`[landing] inscription recovery sweep could not reconcile ${result.unreadable.length} account(s)`);
     }
   };
   const blockCompletion = startBlockCompletion({

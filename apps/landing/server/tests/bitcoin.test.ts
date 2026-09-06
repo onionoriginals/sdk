@@ -97,6 +97,31 @@ describe('bitcoin routes', () => {
     expect((await res.json()).satoshi).toBe('5000000000');
   });
 
+  test('sat snapshot proxy authenticates, validates identity, and preserves binary bytes', async () => {
+    let reads = 0;
+    const provider = { ...fakeProvider(), async getSatSnapshot(sat: string) {
+      reads++;
+      return { sat, publications: [{ body: { status: 'complete', bytes: new Uint8Array([0, 128, 255]), metadata: new Uint8Array([161, 0]) } }] };
+    } } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    const routes = createBitcoinRoutes({ ...deps(), provider });
+    const invoke = (value: string, auth = true) => {
+      const path = '/api/btc/sat-snapshot/' + value;
+      const req = auth ? authedReq(path, {}) : new Request('http://host' + path);
+      return routes.satSnapshot(req, new URL(req.url));
+    };
+    expect((await invoke('5000000000', false)).status).toBe(401);
+    expect((await invoke('01')).status).toBe(400);
+    expect((await invoke('2099999997690000')).status).toBe(400);
+    expect(reads).toBe(0);
+    const res = await invoke('5000000000');
+    expect(res.status).toBe(200);
+    expect((await res.json()).publications[0].body).toEqual({ status: 'complete', bytes: [0, 128, 255], metadata: [161, 0] });
+    expect(reads).toBe(1);
+    const unsupported = createBitcoinRoutes(deps());
+    const req = authedReq('/api/btc/sat-snapshot/0', {});
+    expect((await unsupported.satSnapshot(req, new URL(req.url))).status).toBe(501);
+  });
+
   test('POST /api/btc/fee proxies estimateFee', async () => {
     const r = createBitcoinRoutes(deps());
     const req = authedReq('/api/btc/fee', { blocks: 1 });
