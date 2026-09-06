@@ -110,6 +110,7 @@ describe('inscriptions-store', () => {
     store.create('sub-1', rec({}));
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
     expect(store.get('sub-1', 'c'.repeat(64))!.revealTxHex).toBe('02bb');
+    expect(store.sweepStale(0).stale.map((r) => r.status)).toEqual(['confirmed']);
     store.retire('sub-1', 'c'.repeat(64));
     const r = store.get('sub-1', 'c'.repeat(64))!;
     expect(r.status).toBe('confirmed');
@@ -117,6 +118,7 @@ describe('inscriptions-store', () => {
     expect(r.revealTxHex).toBeUndefined();   // dead weight — the pair landed
     expect(r.signedCommitHex).toBeUndefined();
     expect(store.list('sub-1')).toHaveLength(1); // /me still joins on it
+    expect(store.sweepStale(0).stale).toEqual([]);
   });
 
   test('the pending cap counts only records still holding hex — retiring frees the slot', () => {

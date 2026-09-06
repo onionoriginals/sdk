@@ -130,6 +130,7 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
 
 function harness(opts?: {
+  dataDir?: string;
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
@@ -160,7 +161,7 @@ function harness(opts?: {
     },
     async estimateFee() { return 3; },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-  const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+  const dataDir = opts?.dataDir ?? mkdtempSync(join(tmpdir(), 'insc-'));
   const store = createInscriptionsStore({ dataDir });
   // Bind the deposit address up front, as the real flow does when a creator
   // reads it before funding. Without this the route refuses (#493): an unbound
@@ -1509,35 +1510,39 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
 
 test('one confirmation survives a restart, demotes on reorg, and retires only at six', async () => {
   let confirmations = 1;
-  const h = harness({ txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
+  let h = harness({ txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
   const pair = buildPair();
   await post(h.routes, pair);
   const poll = async () => {
     const req = authedReq('/api/btc/inscribe', undefined, 'GET');
-    return h.routes.inscribeList(req, new URL(req.url));
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { inscriptions: Array<{ status: string }> }).inscriptions[0].status;
   };
-  await poll();
-  const reloaded = createInscriptionsStore({ dataDir: h.dataDir });
+  expect(await poll()).toBe('confirmed');
+  h = harness({ dataDir: h.dataDir, txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
+  const reloaded = h.store;
   expect(reloaded.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   confirmations = 0;
-  await poll();
+  expect(await poll()).toBe('reveal_broadcast');
   expect(reloaded.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
   expect(h.broadcasts.slice(-2)).toEqual([pair.signedCommitHex, pair.revealTxHex]);
   confirmations = 5;
-  await poll();
+  expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   confirmations = 6;
-  await poll();
+  expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
 });
 
-test('failed reorg rebroadcasts keep the pair recoverable for a later manual retry', async () => {
+test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(
+  'failed reorg rebroadcasts retain the exact pair for manual retry: %s', async (rejection) => {
   let confirmations = 1;
   let unavailable = false;
   const h = harness({
     txStatus: () => ({ confirmed: confirmations > 0, confirmations }),
     broadcast: async () => {
-      if (unavailable) throw new Error('local node temporarily unavailable');
+      if (unavailable) throw new Error(rejection);
       return 'f'.repeat(64);
     },
   });
@@ -1568,4 +1573,59 @@ test('failed reorg rebroadcasts keep the pair recoverable for a later manual ret
   await poll();
   expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
   expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+});
+
+
+test('manual recovery demotes a prior confirmation even when the original commit now conflicts', async () => {
+  let confirmed = true;
+  let conflict = false;
+  const attempts: string[] = [];
+  const h = harness({
+    txStatus: () => ({ confirmed, confirmations: confirmed ? 1 : 0 }),
+    broadcast: async (txHex) => {
+      attempts.push(txHex);
+      if (conflict) throw new Error('txn-mempool-conflict');
+      return 'f'.repeat(64);
+    },
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const listReq = authedReq('/api/btc/inscribe', undefined, 'GET');
+  await h.routes.inscribeList(listReq, new URL(listReq.url));
+  expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
+  confirmed = false;
+  conflict = true;
+  attempts.length = 0;
+  const retry = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+  const response = await h.routes.inscribeRebroadcast(retry, new URL(retry.url));
+  expect(response.status).toBe(502);
+  const reloaded = createInscriptionsStore({ dataDir: h.dataDir });
+  const pending = reloaded.get('sub-1', pair.commitTxId)!;
+  expect(pending.status).toBe('reveal_broadcast');
+  expect(pending.signedCommitHex).toBe(pair.signedCommitHex);
+  expect(pending.revealTxHex).toBe(pair.revealTxHex);
+  expect(pending.retired).not.toBe(true);
+  expect(attempts).toEqual([pair.signedCommitHex]);
+});
+
+test('a superseded prior confirmation is still reconciled when its commit wins after a reorg', async () => {
+  const pair = buildPair();
+  const rival = buildMultiPair([{ txid: pair.fundingUtxo.txid, vout: 0, value: 50_000 }], 25_000);
+  const h = harness({ txStatus: (txid) => ({ confirmed: txid === pair.commitTxId || txid === pair.revealTxId, confirmations: 1 }) });
+  const at = new Date().toISOString();
+  const record = (p: typeof pair | typeof rival, extra: Partial<InscriptionRecord>): InscriptionRecord => ({
+    commitTxId: p.commitTxId, revealTxId: p.revealTxId, inscriptionId: `${p.revealTxId}i0`,
+    signedCommitHex: p.signedCommitHex, revealTxHex: p.revealTxHex,
+    fundingOutpoints: [`${pair.fundingUtxo.txid}:0`], changeAddress: USER_ADDRESS,
+    status: 'reveal_broadcast', createdAt: at, updatedAt: at, ...extra,
+  });
+  h.store.create('sub-1', record(pair, { status: 'confirmed', superseded: true }));
+  h.store.create('sub-1', record(rival, {}));
+  const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+  const response = await h.routes.inscribeList(req, new URL(req.url));
+  expect(response.status).toBe(200);
+  expect(h.store.get('sub-1', pair.commitTxId)?.superseded).not.toBe(true);
+  expect(h.store.get('sub-1', rival.commitTxId)?.superseded).toBe(true);
+  expect(h.broadcasts).toEqual([pair.revealTxHex]);
+  expect(h.store.get('sub-1', rival.commitTxId)?.revealTxHex).toBe(rival.revealTxHex);
 });

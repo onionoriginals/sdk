@@ -1753,7 +1753,6 @@ export function createBitcoinRoutes(deps: {
       newestFirst.filter(
         (r) =>
           r.superseded &&
-          r.status !== 'confirmed' &&
           !r.retired &&
           !!r.revealTxHex &&
           !isDead(r)
@@ -1932,16 +1931,23 @@ export function createBitcoinRoutes(deps: {
     // unknown or merely-unconfirmed reveal falls through to the (idempotent)
     // rebroadcast below — QuickNode reports both as { confirmed: false }, so
     // presence alone cannot distinguish "in mempool" from "never broadcast".
+    let revealStatus: Awaited<ReturnType<typeof provider.getTransactionStatus>> | undefined;
     try {
-      const st = await provider.getTransactionStatus(rec.revealTxId);
-      if (st?.confirmed) {
-        reclaimIfSuperseded();
-        store.setStatus(sub, commitTxId, 'confirmed');
-        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
-        return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
-      }
+      revealStatus = await provider.getTransactionStatus(rec.revealTxId);
     } catch {
       // No lookup support / transport failure — fall through to rebroadcast.
+    }
+    if (revealStatus?.confirmed) {
+      reclaimIfSuperseded();
+      store.setStatus(sub, commitTxId, 'confirmed');
+      if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
+      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+    }
+    if (revealStatus && rec.status === 'confirmed') {
+      // Persist the lost confirmation before attempting recovery. A conflict
+      // or an unavailable broadcaster must not leave a stale confirmed row.
+      // Keep rec's prior status below so the exact commit is retried first.
+      store.setStatus(sub, commitTxId, 'reveal_broadcast');
     }
 
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
