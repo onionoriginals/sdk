@@ -2027,11 +2027,17 @@ export function createBitcoinRoutes(deps: {
       if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
     }
-    if (revealStatus && rec.status === 'confirmed') {
-      // Persist the lost confirmation before attempting recovery. A conflict
-      // or an unavailable broadcaster must not leave a stale confirmed row.
-      // Keep rec's prior status below so the exact commit is retried first.
-      store.setStatus(sub, commitTxId, 'reveal_broadcast');
+    try {
+      if (revealStatus && rec.status === 'confirmed') {
+        // Persist the lost confirmation before attempting recovery. A conflict
+        // or an unavailable broadcaster must not leave a stale confirmed row.
+        // Keep rec's prior status below so the exact commit is retried first.
+        store.setStatus(sub, commitTxId, 'reveal_broadcast');
+      }
+      store.markRebroadcast(sub, commitTxId);
+    } catch {
+      money('inscribe_failed', { sub, commitTxId, reason: 'reconciliation_store_failed' });
+      return json({ error: 'inscription_reconciliation_failed', message: 'Recovery attempt could not be recorded durably. Retry when storage is available.' }, 503);
     }
 
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
@@ -2046,10 +2052,11 @@ export function createBitcoinRoutes(deps: {
     // there is no CPFP to pull it back: it never confirms, so the list poll's
     // confirmed-commit gate never fires, and the reveal is rejected for
     // missing inputs forever while the creator's rebuild 409s on a live
-    // record. Re-push the persisted commit, then retry. Re-pushing a commit
+    // record. Both transactions can also be evicted after a successful reveal
+    // broadcast. Re-push the persisted commit, then retry. Re-pushing a commit
     // that is still in the mempool is a harmless no-op — which is why this is
     // the safe direction.
-    if (revealErr && rec.status === 'commit_broadcast' && rec.signedCommitHex && isMissingInputsError(revealErr)) {
+    if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (!commitErr) revealErr = await broadcastIdempotent(rec.revealTxHex);

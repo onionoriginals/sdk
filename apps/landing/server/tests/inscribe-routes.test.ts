@@ -890,6 +890,58 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
   });
 
+  test('manual retry restores both evicted transactions from a previously broadcast pair after restart', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    expect((await post(initial.routes, pair)).status).toBe(200);
+    expect(initial.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+    let commitPresent = false;
+    const attempts: string[] = [];
+    const restarted = harness({ dataDir: initial.dataDir, broadcast: async raw => {
+      attempts.push(raw);
+      if (raw === pair.signedCommitHex) commitPresent = true;
+      else if (!commitPresent) throw new Error('bad-txns-inputs-missingorspent');
+      return raw === pair.signedCommitHex ? pair.commitTxId : pair.revealTxId;
+    } });
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const response = await restarted.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(response.status).toBe(200);
+    expect((await response.json()).status).toBe('reveal_broadcast');
+    expect(attempts).toEqual([pair.revealTxHex, pair.signedCommitHex, pair.revealTxHex]);
+    expect(restarted.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(restarted.store.get('sub-1', pair.commitTxId)?.rebroadcastAt).toBeDefined();
+  });
+
+  test('manual retry journals the attempt before exposing either retained transaction', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    await post(initial.routes, pair);
+    const restarted = harness({ dataDir: initial.dataDir, broadcast: async raw => {
+      expect(restarted.store.get('sub-1', pair.commitTxId)?.rebroadcastAt).toBeDefined();
+      return raw === pair.signedCommitHex ? pair.commitTxId : pair.revealTxId;
+    } });
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    expect((await restarted.routes.inscribeRebroadcast(req, new URL(req.url))).status).toBe(200);
+    expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
+  });
+
+  test('manual retry stops before broadcast when the durable attempt journal fails', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    await post(initial.routes, pair);
+    const restarted = harness({ dataDir: initial.dataDir });
+    restarted.store.markRebroadcast = () => { throw new Error('disk unavailable'); };
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const response = await restarted.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe('inscription_reconciliation_failed');
+    expect(restarted.broadcasts).toEqual([]);
+    const retained = restarted.store.get('sub-1', pair.commitTxId)!;
+    expect(retained.signedCommitHex).toBe(pair.signedCommitHex);
+    expect(retained.revealTxHex).toBe(pair.revealTxHex);
+    expect(retained.rebroadcastAt).toBeUndefined();
+  });
+
   test('a reveal rejected for an unrelated reason does NOT re-push the commit', async () => {
     const pair = buildPair();
     let failReveal = true;
