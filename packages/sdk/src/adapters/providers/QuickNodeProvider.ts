@@ -33,7 +33,7 @@ export interface QuickNodeProviderOptions {
   expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
   /**
    * How `ord_getContent` results are encoded (issue #350):
-   * - 'base64' (recommended): always base64-decode; malformed base64 fails loudly.
+   * - 'base64': only for a gateway explicitly configured to base64-encode; malformed base64 fails loudly.
    * - 'utf8': treat the result as literal UTF-8 text.
    * - 'auto' (default, for backwards compatibility): heuristic — base64-shaped
    *   content is decoded, anything else is treated as literal UTF-8. Ambiguous
@@ -41,6 +41,8 @@ export interface QuickNodeProviderOptions {
    *   deployments where content hashes matter.
    */
   contentEncoding?: 'base64' | 'utf8' | 'auto';
+  /** Explicit ord-compatible base URL serving raw GET /content/:id bytes. Used for CEL 3 snapshots instead of JSON-RPC content. */
+  contentBaseUrl?: string;
 }
 
 /** getblockchaininfo.chain values mapped to SDK network names. */
@@ -111,6 +113,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
   private readonly maxContentBytes: number;
   private readonly expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
   private readonly contentEncoding: 'base64' | 'utf8' | 'auto';
+  private readonly contentBaseUrl?: string;
   private networkCheck: Promise<void> | null = null;
 
   constructor(options: QuickNodeProviderOptions) {
@@ -135,6 +138,13 @@ export class QuickNodeProvider implements OrdinalsProvider {
     this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
     this.expectedNetwork = options.expectedNetwork;
     this.contentEncoding = options.contentEncoding ?? 'auto';
+    if (options.contentBaseUrl !== undefined) {
+      try {
+        const content = new URL(options.contentBaseUrl);
+        if (!['http:', 'https:'].includes(content.protocol) || content.search || content.hash || content.username || content.password) throw new Error();
+        this.contentBaseUrl = content.href.replace(/\/$/, '');
+      } catch { throw new StructuredError('QUICKNODE_CONTENT_ENDPOINT_INVALID', 'contentBaseUrl must be an HTTP(S) base URL without query, fragment or userinfo'); }
+    }
   }
 
   /**
@@ -537,7 +547,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * https://www.quicknode.com/docs/bitcoin/ord_getContent
    */
   async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
-    if (this.contentEncoding === 'auto') throw new StructuredError(
+    if (!this.contentBaseUrl && this.contentEncoding === 'auto') throw new StructuredError(
       'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'CEL 3 snapshots require an explicit contentEncoding wire contract',
     );
     return readSatSnapshot({
@@ -547,6 +557,17 @@ export class QuickNodeProvider implements OrdinalsProvider {
       sat: sat => this.rpcCall('ord_getSat', [Number(sat)]),
       inscription: id => this.rpcCall('ord_getInscription', [id]),
       content: async id => {
+        if (this.contentBaseUrl) {
+          const response = await fetch(this.contentBaseUrl + '/content/' + id, {
+            headers: { Accept: 'application/octet-stream' }, redirect: 'error', signal: AbortSignal.timeout(this.timeout),
+          });
+          if (response.status === 404) return null;
+          if (!response.ok) throw new StructuredError('QUICKNODE_CONTENT_UNAVAILABLE', 'Raw inscription content request failed');
+          if (Number(response.headers.get('content-length')) > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
+          return bytes;
+        }
         let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024);
         // The documented wrapper carries literal content; never re-serialize
         // decoded objects or guess whether an alphanumeric string is base64.

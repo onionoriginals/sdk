@@ -226,6 +226,21 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     report('BTC_BLOCKS_WS_URL', 'BTC_BLOCKS_WS_URL must be a wss:// URL or "off"; in non-strict mode block notifications are disabled and hourly completion remains active.');
   }
 
+  if (env.QUICKNODE_ENDPOINT) {
+    if (!env.QUICKNODE_CONTENT_BASE_URL && env.QUICKNODE_CONTENT_ENCODING !== 'base64') {
+      report('QUICKNODE_CONTENT_BASE_URL', 'CEL 3 PNG reads require an HTTPS raw-content base URL, or QUICKNODE_CONTENT_ENCODING=base64 for a gateway verified to encode binary content. Text/auto encoding cannot establish byte-safe PNG retrieval.');
+    }
+    if (env.QUICKNODE_CONTENT_BASE_URL) {
+      try {
+        const url = new URL(env.QUICKNODE_CONTENT_BASE_URL);
+        if (url.protocol !== 'https:' || url.search || url.hash || url.username || url.password) throw new Error();
+      } catch { report('QUICKNODE_CONTENT_BASE_URL', 'QUICKNODE_CONTENT_BASE_URL must be an HTTPS base URL without query, fragment or userinfo.'); }
+    }
+    if (env.QUICKNODE_CONTENT_ENCODING && !['base64', 'utf8'].includes(env.QUICKNODE_CONTENT_ENCODING)) {
+      report('QUICKNODE_CONTENT_ENCODING', 'QUICKNODE_CONTENT_ENCODING must be base64 or utf8 and must match the verified gateway contract.');
+    }
+  }
+
   // The deposit indexer seam (R4/KTD4). Every address→UTXO read a creator's
   // money depends on goes through one base URL; this makes WHICH one, and
   // whether it is authenticated, legible at boot.

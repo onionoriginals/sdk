@@ -104,3 +104,20 @@ existing inscription's sat can never be consumed as funding for a new one.
 
 Everything is gated: with any of the above absent, `/api/btc/*` is unmounted and
 the demo silently falls back to the mock path.
+
+
+### CEL 3 provider bytes
+
+Set `QUICKNODE_CONTENT_BASE_URL` to an HTTPS ord-compatible base URL whose
+`GET /content/<inscription-id>` returns the original raw body, including binary
+PNGs. It may include a private token path; do not print that value in logs.
+The SDK sends no redirects and bounds accepted response size. Enumeration,
+metadata, active block order and index health still come from the configured
+QuickNode/Core provider. Missing content or mismatched bytes fail verification.
+
+Alternatively set `QUICKNODE_CONTENT_ENCODING=base64` only after confirming that
+your JSON-RPC gateway explicitly base64-encodes binary inscription content.
+QuickNode's documented literal text response is not such a guarantee. An unset
+or text-only configuration is reported by the boot contract for the PNG journey.
+The operator must verify a known binary inscription before deployment; local
+loopback tests establish adapter behavior, not the production gateway contract.

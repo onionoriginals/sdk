@@ -1,10 +1,38 @@
 # Originals Protocol v1.0 Specification
 
 **Version:** 1.0-DRAFT
-**Status:** Approved for Implementation
+**Status:** Historical draft; superseded for SDK 3.0.0 asset behavior
 **Authors:** Originals Team
-**Last Updated:** August 24, 2026
+**Last Updated:** September 6, 2026
 **Reference:** SDK Assessment at ORIGINALS_SDK_ASSESSMENT.md
+
+---
+
+## SDK 3.0.0 conformance amendment
+
+For SDK 3.0.0, the normative asset contract is the
+[CEL wire and proof profile](specs/originals-cel-v3-profile.md),
+[controller authority and publication fold](specs/originals-cel-v3-authority.md),
+and [Bitcoin inscription shape](specs/btco-inscription-shape.md).
+The remaining v1.0 draft below is historical context, not additional 3.0.0
+requirements. In particular, the following earlier requirements are retracted:
+
+| Earlier draft claim | SDK 3.0.0 contract |
+| --- | --- |
+| A Bitcoin Anchoring Credential MUST be issued on every migration | The asset lifecycle does not automatically issue or reissue VCs. The independent credential utility APIs retain their existing behavior; CEL proofs and provider observations establish asset history/publication. Credential derivation is deferred. |
+| Migration is atomic across every side effect and fully rolled back | Hosted writes and Bitcoin submission can partially succeed. Prepared publications and durable exact signed pairs support explicit retry; broadcast uncertainty is retained. No rollback of published Bitcoin transactions is promised. |
+| Direct `did:cel → did:btco` migration | The asset sequence is `cel → webvh → btco`. |
+| Creator key lineage is frozen and holders may append allowlisted claims | Only the current CEL controller authorizes edits. Rotation retires the old key for future events. Sat possession is separate and does not authorize holder-only writes. |
+| DID documents/manifests and derived Bitcoin witnesses are inscribed | Raw media carries CEL CBOR metadata, or log-only content is `application/cel` JSON. The boundary contains full history ending in migration; later publications contain only a delta from the accepted sat head. Readers derive Bitcoin evidence. |
+| Every valid offline signed history is verified as the current Original | Publication and resource-byte coverage are checked separately. Incomplete, unstable or conflicting provider evidence cannot establish an accepted head. |
+| A default WebVH service domain, fixed fees, or a fixed confirmation time | Hosted publication requires an explicit permanent host. Actual serialized payloads and current fee rates determine transaction costs. Submission is not confirmation or finality. |
+
+No earlier-format asset verification or writer fallback is part of the SDK
+3.0.0 public lifecycle. Previously inscribed assets must be read using their
+original protocol implementation; the new implementation does not rewrite them.
+The [SDK guide](packages/sdk/V3.md) describes the implemented public interfaces
+and their limitations. Real regtest and release receipts provide implementation
+evidence; this amendment alone is not release certification.
 
 ---
 

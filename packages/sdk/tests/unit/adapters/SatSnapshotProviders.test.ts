@@ -10,7 +10,7 @@ const txid = 'a'.repeat(64), hash = 'b'.repeat(64), id = txid + 'i0';
 function fixture(kind: 'quicknode' | 'regtest', options: {
   encoding?: 'auto' | 'utf8' | 'base64'; metadata?: unknown; content?: Uint8Array;
   info?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
-  missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
+  rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   let statuses = 0, tips = 0, indexHashes = 0;
@@ -57,7 +57,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   }) as typeof fetch;
   const provider = kind === 'regtest'
     ? new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' })
-    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64' });
+    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}) });
   return { provider, calls };
 }
 
@@ -142,4 +142,12 @@ test('QuickNode accepts its documented literal UTF-8 content wrapper without gue
   const { provider } = fixture('quicknode', { encoding: 'utf8', wrapContent: true, content, info: { content_type: 'text/plain', content_length: 4 } });
   const snapshot = await provider.getSatSnapshot('123');
   expect(snapshot.publications[0].body).toMatchObject({ status: 'complete', bytes: content });
+});
+
+
+test('QuickNode raw content endpoint preserves PNG bytes without guessing JSON string encoding', async () => {
+  const { provider, calls } = fixture('quicknode', { rawContent: true, encoding: 'auto' });
+  const snapshot = await provider.getSatSnapshot('123');
+  expect(snapshot.publications[0].body).toMatchObject({ bytes: new Uint8Array([0, 255, 1]) });
+  expect(calls.some(call => call.method === 'ord_getContent')).toBe(false);
 });

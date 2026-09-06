@@ -988,7 +988,7 @@ async function main(): Promise<void> {
       world: {
         address: env.DRY_RUN_ADDRESS,
         privateKey,
-        readProvider: new QuickNodeProvider({ endpoint: env.QUICKNODE_ENDPOINT, expectedNetwork: network }),
+        readProvider: new QuickNodeProvider({ endpoint: env.QUICKNODE_ENDPOINT, expectedNetwork: network, contentBaseUrl: env.QUICKNODE_CONTENT_BASE_URL, contentEncoding: env.QUICKNODE_CONTENT_ENCODING === 'base64' ? 'base64' : env.QUICKNODE_CONTENT_ENCODING === 'utf8' ? 'utf8' : 'auto' }),
         ordinals: cachedOrdinalLookup(quickNodeOrdinalLookup({ endpoint: env.QUICKNODE_ENDPOINT })),
         indexer,
       },

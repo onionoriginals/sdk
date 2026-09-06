@@ -25,6 +25,7 @@ const GOOD = {
   TURNKEY_API_PRIVATE_KEY: 'priv',
   TURNKEY_ORGANIZATION_ID: 'org',
   BTC_NETWORK: 'testnet4',
+  QUICKNODE_CONTENT_BASE_URL: 'https://ord.example.com/',
   ORIGINALS_DATA_DIR: '/data',
   TRUSTED_PROXY_HOPS: '1',
   RAILWAY_VOLUME_MOUNT_PATH: '/data',
@@ -460,4 +461,12 @@ describe('block completion feed configuration', () => {
       expect(issue!.message).not.toContain(url);
     }
   });
+});
+
+test('CEL 3 QuickNode deployment names missing or invalid byte transport configuration', () => {
+  const env = { ...without(GOOD, 'QUICKNODE_CONTENT_BASE_URL'), QUICKNODE_ENDPOINT: 'https://example.com/token/' };
+  expect(keys(validateConfig({ env, dataDir: mounted }))).toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_BASE_URL: 'https://ord.example.com/' }, dataDir: mounted }))).not.toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_ENCODING: 'base64' }, dataDir: mounted }))).not.toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_BASE_URL: 'http://ord.example.com/' }, dataDir: mounted }))).toContain('QUICKNODE_CONTENT_BASE_URL');
 });

@@ -103,6 +103,8 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   const provider = (regtestProvider ?? new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: providerNetwork,
+    contentBaseUrl: process.env.QUICKNODE_CONTENT_BASE_URL,
+    contentEncoding: process.env.QUICKNODE_CONTENT_ENCODING === 'base64' ? 'base64' : process.env.QUICKNODE_CONTENT_ENCODING === 'utf8' ? 'utf8' : 'auto',
   })) as unknown as FaucetProvider;
   // Network threaded through so the P2WPKH script derivation matches the
   // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
