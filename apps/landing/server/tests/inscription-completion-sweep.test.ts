@@ -191,6 +191,55 @@ describe('the inscription completion sweep', () => {
     expect(statuses).toEqual([{ sub: 'sub-4', commitTxId: confirmedCommit, status: 'reveal_broadcast' }]);
   });
 
+  test('removing examined records cannot skip the next waiting record', async () => {
+    const pending = ['a', 'b', 'c', 'd'].map((id) => ({
+      subOrgId: `sub-${id}`,
+      record: record({ commitTxId: id.repeat(64) }),
+    }));
+    const examined: string[] = [];
+    const { sweep } = harness({
+      pending,
+      maxPerPass: 1,
+      confirmed: (txid) => {
+        examined.push(txid[0]);
+        return false;
+      },
+    });
+
+    expect((await sweep()).examined).toBe(1);
+    pending.splice(0, 1); // The client completes a between server passes.
+    expect((await sweep()).examined).toBe(1);
+    expect(examined).toEqual(['a', 'b']);
+  });
+
+  test('continuous arrivals cannot displace existing records awaiting their turn', async () => {
+    const pending = ['b', 'c', 'd'].map((id) => ({
+      subOrgId: `sub-${id}`,
+      record: record({ commitTxId: id.repeat(64) }),
+    }));
+    const examined: string[] = [];
+    const { sweep } = harness({
+      pending,
+      maxPerPass: 1,
+      confirmed: (txid) => {
+        examined.push(txid[0]);
+        return false;
+      },
+    });
+
+    for (let pass = 0; pass < 3; pass++) {
+      expect((await sweep()).examined).toBe(1);
+      // Every newcomer sorts before the existing backlog. A positional cursor
+      // would keep selecting b as each insertion shifts it one place right.
+      pending.push({
+        subOrgId: `sub-a-${pass}`,
+        record: record({ commitTxId: String(pass).repeat(64) }),
+      });
+      pending.reverse(); // Store directory order can also change independently.
+    }
+    expect(examined).toEqual(['b', 'c', 'd']);
+  });
+
   test('an unreadable records file is reported, never swallowed', async () => {
     const { sweep, money } = harness({ pending: [], unreadable: ['sub-torn'] });
     const r = await sweep();

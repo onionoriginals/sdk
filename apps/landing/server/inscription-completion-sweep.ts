@@ -18,7 +18,7 @@
  * push, skip and failure goes to the money log: the whole pass must be
  * reconstructable afterwards from that log alone.
  */
-import { isAlreadyKnownTxError, rotate } from './bitcoin';
+import { isAlreadyKnownTxError } from './bitcoin';
 import type { InscriptionsStore } from './inscriptions-store';
 import type { MoneyEvent, MoneyFields } from './money-log';
 
@@ -61,9 +61,9 @@ export function createInscriptionCompletionSweep(
   deps: CompletionSweepDeps
 ): () => Promise<CompletionSweepResult> {
   const max = deps.maxPerPass ?? 25;
-  // Same rotating cursor as the deposit sweep: every pending record is examined
-  // within ceil(pending / max) passes, however many ahead of it stay unconfirmed.
-  let cursor = 0;
+  // Preserve waiting order across passes even when the store membership changes.
+  // New records join the tail, so they cannot displace records already waiting.
+  let queue: string[] = [];
 
   return async () => {
     const result: CompletionSweepResult = {
@@ -84,8 +84,20 @@ export function createInscriptionCompletionSweep(
     pending.sort((a, b) =>
       (a.subOrgId + a.record.commitTxId).localeCompare(b.subOrgId + b.record.commitTxId)
     );
-    const pass = rotate(pending, cursor).slice(0, max);
-    cursor += pass.length;
+    const candidates = new Map(
+      pending.map((candidate) => [
+        JSON.stringify([candidate.subOrgId, candidate.record.commitTxId]),
+        candidate,
+      ])
+    );
+    queue = queue.filter((key) => candidates.has(key));
+    const queued = new Set(queue);
+    for (const key of candidates.keys()) {
+      if (!queued.has(key)) queue.push(key);
+    }
+    const selected = queue.splice(0, max);
+    queue.push(...selected);
+    const pass = selected.map((key) => candidates.get(key)!);
 
     for (const { subOrgId, record } of pass) {
       result.examined++;
