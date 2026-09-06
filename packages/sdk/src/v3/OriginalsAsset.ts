@@ -1,3 +1,5 @@
+import type { AssetResolver } from "./resolution.js";
+import { summarizeVerification } from "./verification.js";
 import { base64 } from "@scure/base";
 import {
   copyValue,
@@ -49,6 +51,7 @@ export class OriginalsAsset {
     config: OriginalsConfig = {},
     expectedDid?: string,
     localResources: LocalResourceAttachment[] = [],
+    private readonly resolver?: AssetResolver,
   ) {
     this.#document = validateDocument(document);
     verifyHistory(this.#document, { expectedDid });
@@ -357,22 +360,13 @@ export class OriginalsAsset {
   }
 
   /** Inspect local history and bytes. Publication and ownership require their separate adapters. */
-  verification(): Promise<AssetVerification> {
-    const history = verifyHistory(this.#document),
-      resources = this.resources;
-    const missingResources = resources
-      .filter((r) => r.content === undefined)
-      .map(({ id, version }) => ({ id, version }));
-    return Promise.resolve({
-      verified:
-        missingResources.length === 0 &&
-        this.#localResources.length === 0 &&
-        history.state.layer === "cel",
-      history,
-      resources: missingResources.length ? "incomplete" : "verified",
-      missingResources,
-      unverifiedLocalResources: this.#localResources.length,
-    });
+  async verification(): Promise<AssetVerification> {
+    const state = this.state;
+    const publication =
+      state.layer === "btco" && this.resolver
+        ? await this.resolver.check(state.alias, state.didCel)
+        : undefined;
+    return summarizeVerification(this, publication);
   }
 
   /** True only for fully checked local history and resource bytes; never asserts Bitcoin acceptance. */

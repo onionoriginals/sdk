@@ -209,3 +209,5 @@ export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, Verif
 export default OriginalsSDK;
 /** Minimal local-only entry using the same CEL 3 lifecycle as the default SDK. */
 export * as v3 from './v3/index.js';
+
+export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./v3/resolution.js";

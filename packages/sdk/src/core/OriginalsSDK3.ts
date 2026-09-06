@@ -1,5 +1,6 @@
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
-import { DIDManager } from "../did/DIDManager.js";
+import { AssetDIDManager } from "../did/AssetDIDManager.js";
+import { AssetResolver, type SatProvider } from "../v3/resolution.js";
 import { CredentialManager } from "../vc/CredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
@@ -23,13 +24,15 @@ export interface OriginalsSDKOptions
       Partial<ManagerConfig>,
       "signer" | "onAppendFailure" | "inscribeConfirm"
     >,
-    LocalConfig {}
+    LocalConfig {
+  satProvider?: SatProvider;
+}
 export type OriginalsConfig = OriginalsSDKOptions;
 
 /** The default SDK. All asset creation, mutations and recovery use the CEL 3 lifecycle. */
 export class OriginalsSDK {
   readonly lifecycle: LifecycleManager;
-  readonly did: DIDManager;
+  readonly did: AssetDIDManager;
   readonly credentials: CredentialManager;
   readonly bitcoin: BitcoinManager;
   readonly statusList: StatusListManager;
@@ -43,6 +46,7 @@ export class OriginalsSDK {
       input,
       [],
       [
+        "satProvider",
         "signer",
         "onAppendFailure",
         "keyStore",
@@ -61,7 +65,7 @@ export class OriginalsSDK {
         "enableLogging",
       ],
     );
-    const { signer, onAppendFailure, ...utilities } = options;
+    const { signer, onAppendFailure, satProvider, ...utilities } = options;
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -103,12 +107,19 @@ export class OriginalsSDK {
     };
     this.metrics = new MetricsCollector();
     this.logger = new Logger("SDK", this.config);
-    this.lifecycle = new LifecycleManager(local);
-    // Identity utilities remain independent of asset provenance. Until the new
-    // Bitcoin resolver is connected, never fall through to the previous processor.
-    this.did = new DIDManager(this.config, this.metrics, undefined, {
-      assetResolution: "unavailable",
-    });
+    const resolver = new AssetResolver(
+      network,
+      satProvider ??
+        (utilities.ordinalsProvider?.getSatSnapshot
+          ? {
+              getSatSnapshot: (sat) =>
+                utilities.ordinalsProvider!.getSatSnapshot!(sat),
+            }
+          : undefined),
+      local,
+    );
+    this.lifecycle = new LifecycleManager(local, resolver);
+    this.did = new AssetDIDManager(this.config, this.metrics, resolver);
     this.credentials = new CredentialManager(
       this.config,
       this.did,

@@ -1,3 +1,8 @@
+import type {
+  AssetResolver,
+  AssetResolution,
+  AssetResolutionOptions,
+} from "./resolution.js";
 import { createNonce, signEvent, CelError } from "@originals/cel/v3";
 import { OriginalsAsset } from "./OriginalsAsset.js";
 import { readEnvelope, record, fields, requireAsset } from "./envelope.js";
@@ -13,7 +18,24 @@ import type {
 
 /** CEL 3 local creation and interchange. Network publication is a separate integration stage. */
 export class LifecycleManager {
-  constructor(private readonly config: OriginalsConfig = {}) {}
+  constructor(
+    private readonly config: OriginalsConfig = {},
+    private readonly resolver?: AssetResolver,
+  ) {}
+
+  /** Recover accepted on-sat history and byte attachments from a fresh complete provider snapshot. */
+  async resolveAssetFromSat(
+    sat: string,
+    options: AssetResolutionOptions = {},
+  ): Promise<AssetResolution> {
+    if (!this.resolver)
+      throw new CelError(
+        "unsupported",
+        "ASSET_RESOLUTION_UNAVAILABLE",
+        "Configure a sat provider on the full SDK",
+      );
+    return this.resolver.resolve(sat, options);
+  }
 
   /** Create a new identity using copied bytes and explicit controller custody. */
   async createAsset(
@@ -49,7 +71,14 @@ export class LifecycleManager {
       },
       signer,
     );
-    return new OriginalsAsset({ log: [entry] }, attachments, this.config);
+    return new OriginalsAsset(
+      { log: [entry] },
+      attachments,
+      this.config,
+      undefined,
+      [],
+      this.resolver,
+    );
   }
 
   /** Authenticate the same state and byte bindings as asset.verify(); no legacy fallback. */
@@ -71,6 +100,7 @@ export class LifecycleManager {
       this.config,
       envelope.assetDid,
       envelope.unverified?.localResources,
+      this.resolver,
     );
     const verification = await asset.verification();
     if (!verification.verified && !options.allowPartial)

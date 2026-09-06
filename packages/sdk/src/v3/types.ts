@@ -1,4 +1,5 @@
 import type {
+  SatResolution,
   CelDocument,
   CelSigner,
   JsonObject,
@@ -100,6 +101,8 @@ export interface AssetVerification {
   resources: "verified" | "incomplete";
   missingResources: { id: string; version: number }[];
   unverifiedLocalResources: number;
+  /** Fresh provider-qualified Bitcoin acceptance, separate from history and byte checks. */
+  publication?: SatResolution;
 }
 
 /** Permit incomplete bytes/local drafts without claiming full verification. Signatures always verify. */

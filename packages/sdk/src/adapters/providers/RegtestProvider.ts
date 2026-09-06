@@ -1,3 +1,4 @@
+import { parseAssetDid, type SatSnapshot, type PublicationObservation } from "@originals/cel/v3";
 import type { OrdinalsProvider } from '../types.js';
 import { enumerateAnchoringsOnSat } from '../anchoring-enumeration.js';
 import { decode as decodeCbor } from '@originals/cel/cbor';
@@ -149,6 +150,64 @@ export class RegtestProvider implements OrdinalsProvider {
     const sat = result.sat_ranges?.[0]?.[0];
     if (result.spent || !Number.isSafeInteger(sat) || sat! < 0) throw new Error('Unspent output sat ranges unavailable');
     return String(sat);
+  }
+
+  /** Complete, stable CEL 3 observation using ord 0.29's sat enumeration and raw CBOR endpoint.
+   * Block creation order comes from Core's active blocks, never inscription numbers or current location.
+   */
+  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+    parseAssetDid('did:btco:reg:' + satoshi);
+    await this.assertNetwork();
+    const before = await this.rpc<{ chain: string; blocks: number; bestblockhash: string }>('getblockchaininfo');
+    if (before.chain !== 'regtest') throw new Error('Bitcoin Core must report regtest');
+    const status = await this.ord<{ chain: string; height: number; sat_index: boolean; address_index: boolean; unrecoverably_reorged?: boolean }>('/status');
+    if (!status || !Number.isSafeInteger(status.height)) throw new Error('ord status unavailable');
+    const indexedHash = await this.bytes(`${this.ordUrl}/blockhash/${status.height}`);
+    if (!indexedHash) throw new Error('ord index hash unavailable');
+    const sat = await this.ord<{ number: number; inscriptions: string[]; address: string | null; satpoint: string | null }>(`/sat/${satoshi}`);
+    if (!sat || String(sat.number) !== satoshi || !Array.isArray(sat.inscriptions) || sat.inscriptions.length > 10000 ||
+        !(sat.address === null || typeof sat.address === 'string') || !(sat.satpoint === null || typeof sat.satpoint === 'string'))
+      throw new Error('Complete sat enumeration and ownership required');
+    const blocks = new Map<number, SatSnapshot['blocks'][number]>();
+    const publications: PublicationObservation[] = [];
+    let contentBytes = 0;
+    for (const id of sat.inscriptions) {
+      if (!/^([0-9a-f]{64})i(0|[1-9]\d*)$/.test(id)) throw new Error('Invalid inscription id');
+      const info = await this.ord<{ id: string; sat: number | null; height: number; content_type: string | null; content_length: number | null }>(`/inscription/${id}`);
+      if (!info || info.id !== id || !Number.isSafeInteger(info.sat) || !Number.isSafeInteger(info.height) || info.height < 0)
+        throw new Error('Listed inscription observation unavailable');
+      let block = blocks.get(info.height);
+      if (!block) {
+        const hash = await this.rpc<string>('getblockhash', [info.height]);
+        const observed = await this.rpc<{ hash: string; height: number; confirmations: number; tx: string[] }>('getblock', [hash, 1]);
+        if (observed.hash !== hash || observed.height !== info.height || observed.confirmations < 1 || !Array.isArray(observed.tx))
+          throw new Error('Active block observation unavailable');
+        block = { height: info.height, hash, txids: observed.tx };
+        blocks.set(info.height, block);
+      }
+      const txid = id.split('i')[0];
+      const content = await this.bytes(`${this.ordUrl}/content/${id}`);
+      // A bodyless unrelated inscription is inspectable; a missing promised body is not.
+      if (content === null && info.content_length !== null && info.content_length !== 0)
+        throw new Error('Listed inscription content unavailable');
+      const metadataHex = await this.ord<string>(`/r/metadata/${id}`);
+      if (metadataHex !== null && (typeof metadataHex !== 'string' || !/^(?:[0-9a-fA-F]{2})*$/.test(metadataHex)))
+        throw new Error('Raw metadata bytes unavailable');
+      const metadata = metadataHex === null ? null : hexToBytes(metadataHex);
+      contentBytes += (content?.length ?? 0) + (metadata?.length ?? 0);
+      if (contentBytes > 32 * 1024 * 1024) throw new Error('Sat observation exceeds 32 MiB');
+      publications.push({ id, revealTxid: txid, network: 'regtest', sat: String(info.sat), confirmed: true,
+        creation: { height: info.height, blockHash: block.hash, transactionIndex: block.txids.indexOf(txid), inscriptionIndex: Number(id.split('i')[1]) },
+        body: { status: 'complete', mediaType: info.content_type ?? 'application/octet-stream', bytes: content ?? new Uint8Array(), metadata } });
+    }
+    const after = await this.rpc<{ chain: string; blocks: number; bestblockhash: string }>('getblockchaininfo');
+    if (after.chain !== 'regtest') throw new Error('Bitcoin Core changed network');
+    return { network: 'regtest', sat: satoshi,
+      tipBefore: { height: before.blocks, hash: before.bestblockhash }, tipAfter: { height: after.blocks, hash: after.bestblockhash },
+      indexTip: { height: status.height, hash: new TextDecoder().decode(indexedHash).trim() },
+      indexHealthy: status.chain === 'regtest' && status.sat_index && status.address_index && !status.unrecoverably_reorged,
+      enumerationComplete: true, blocks: [...blocks.values()], publications,
+      ownership: { owner: sat.address, satpoint: sat.satpoint } };
   }
 
   async getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>> {
