@@ -1,0 +1,47 @@
+{
+  "scope": "Published W3C cryptographic vector behavior only; not whole processor conformance.",
+  "runtime": "Bun 1.3.5",
+  "libraries": {
+    "@noble/curves": "2.2.0",
+    "json-canonicalize": "2.0.0"
+  },
+  "results": [
+    {
+      "suite": "ecdsa-jcs-2019-p256",
+      "publishedSource": "https://www.w3.org/TR/2025/REC-vc-di-ecdsa-20250515/",
+      "firstExample": 49,
+      "finalExample": 59,
+      "canonicalStringsAndHashesMatch": true,
+      "publishedSignatureVerifies": true,
+      "deterministicSignatureMatches": true,
+      "messageBytes": 64,
+      "signatureBytes": 64,
+      "withoutEcdsaMessageHashVerifies": false,
+      "withLowSRestrictionVerifies": true
+    },
+    {
+      "suite": "ecdsa-jcs-2019-p384",
+      "publishedSource": "https://www.w3.org/TR/2025/REC-vc-di-ecdsa-20250515/",
+      "firstExample": 60,
+      "finalExample": 70,
+      "canonicalStringsAndHashesMatch": true,
+      "publishedSignatureVerifies": true,
+      "deterministicSignatureMatches": true,
+      "messageBytes": 96,
+      "signatureBytes": 96,
+      "withoutEcdsaMessageHashVerifies": false,
+      "withLowSRestrictionVerifies": false
+    },
+    {
+      "suite": "eddsa-jcs-2022-ed25519",
+      "publishedSource": "https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/",
+      "firstExample": 29,
+      "finalExample": 39,
+      "canonicalStringsAndHashesMatch": true,
+      "publishedSignatureVerifies": true,
+      "deterministicSignatureMatches": true,
+      "messageBytes": 64,
+      "signatureBytes": 64
+    }
+  ]
+}

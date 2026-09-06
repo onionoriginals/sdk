@@ -1,0 +1,68 @@
+{
+  "checkedAt": "2026-09-05T23:43:35.591268+00:00",
+  "baseRevision": "071b898420dd1052f4e4d34a27e59bea167784d0",
+  "branch": "codex/regtest-flow",
+  "runtime": "Node v25.2.1; Python 3.14.6",
+  "referenceDependencies": {
+    "json-canonicalize": "2.0.0",
+    "@noble/curves": "2.2.0",
+    "cborg": "5.1.7",
+    "ajv": "8.20.0"
+  },
+  "checks": {
+    "acceptedSignedDocuments": 14,
+    "rejectedDocuments": 40,
+    "jsonTextCases": 9,
+    "cborSubsetCases": 16,
+    "literalPreferredCborEncodings": 5,
+    "publishedW3CSuites": [
+      "P-256",
+      "P-384",
+      "Ed25519"
+    ],
+    "publishedLiteralExamples": 33,
+    "canonicalJsonLiteralCases": 7,
+    "singleExampleKnownAnswerAndSignatureChecks": 4,
+    "localLinksResolve": true,
+    "gitDiffCheck": true
+  },
+  "status": "passed for stated reference scope",
+  "scope": "Representation, schema, selected semantic checks, signatures, event digests, internal previousEvent links and genesis DID binding. Expectations are independent of Originals production code.",
+  "notVerified": [
+    "Production new-format implementation",
+    "Controller succession/retired-key policy",
+    "Full state fold",
+    "WebVH SCID/identity validation",
+    "Bitcoin publication, ordering, completeness, ownership or reorganization",
+    "Complete runtime input-object validation",
+    "Every size/depth/count boundary",
+    "Resource retrieval"
+  ],
+  "existingImplementationDiffSha256": "a78b7d8f5fa017432560fe4af4be7ef13f76c7ac0dda5864f4c3f256a50789ab",
+  "implementationDiffExpression": "git diff --binary HEAD -- . :!docs/regtest/** :!specs/btco-inscription-shape.md",
+  "implementationStage": "Unchanged from completed bytes/regtest slice. No package source changes in this profile stage; no new-format regtest claim.",
+  "sha256": {
+    "specs/originals-cel-v3-profile.md": "1b9d269e88222bf5c034df243de28a5b87f13ffb013041c0ccbb14de67d217ca",
+    "specs/originals-cel-v3.schema.json": "11b410f7110d960d2cd03dbadd068ef2562f921532a8dcf7404fe5fda5e5c024",
+    "docs/research/cel-profile-vectors/README.md": "fb721a13f2ca7aeeb45e8e1d9ab9e91d5244757edfa9a17c76ba294273ef0995",
+    "docs/research/cel-profile-vectors/canonical-json.json": "aa90b446011e55db00998e0bc5e4c5c409265dc77f3de58cd2bd303f2edae969",
+    "docs/research/cel-profile-vectors/ccg-create.evidence.json": "0d321c58600feaa1bd05ea50066081ab17e8e8e6db52e6c97c229ffa419d1502",
+    "docs/research/cel-profile-vectors/ccg-create.example.json": "94e0b9dfdf4d8af69340f7b7a6f6f68e19786e1214d232d62796b085f99db42e",
+    "docs/research/cel-profile-vectors/check-json-inputs.py": "1eb14cf64cf5c7eeedb71fc4d47820c58b82a03b3270697afc92164d73190c98",
+    "docs/research/cel-profile-vectors/check-profile-corpus.mjs": "63f774415188fd1d4484d8141fc56d357b3b755c343f08f835bef5aecceb9065",
+    "docs/research/cel-profile-vectors/create-ccg-example.mjs": "6e822100bc4a944de16c1fb7c376fc997cd461e0da9e75630c47d948e26e3878",
+    "docs/research/cel-profile-vectors/current-implementation-observation.json": "35e7617815adb347507aa9c6174a271573a6fa5e839bb933fd7e6107d6fdd83e",
+    "docs/research/cel-profile-vectors/generate-independent.py": "e04d0f28fd16428cdefe3ba2893c8965a2867fe9cccd2de8495b9c5d17fa296c",
+    "docs/research/cel-profile-vectors/generate-profile-corpus.mjs": "ff8987e95da192dbc4dcadc50c0bb431c9e352a2ac906940e3c36c479fcdbf9c",
+    "docs/research/cel-profile-vectors/profile-documents.json": "a051de0a3ee9b6b6eca381079dca2a605877cc0dd33d25410a1d133357c6e0e4",
+    "docs/research/cel-profile-vectors/profile-reference.mjs": "d0d1c6bb86d1e669259fddee87a577241ed0c2354a8c8307474f6d4fbc22919a",
+    "docs/research/cel-profile-vectors/published-w3c/README.md": "f19103bd998a1e970dc28214fcfd1004e20cbe4df4655d31e938bd12ed698720",
+    "docs/research/cel-profile-vectors/published-w3c/compare.mjs": "76a874adfc582af85edd3a093f520751adb798812b4b74a603b8da221b1a0f92",
+    "docs/research/cel-profile-vectors/published-w3c/ecdsa-jcs-2019-p256.json": "3f032c50a52d2dcaa5a483d8fc1a9978023980f685bf3e050ed8061984efee0b",
+    "docs/research/cel-profile-vectors/published-w3c/ecdsa-jcs-2019-p384.json": "3ec0cd38315634c9cfff34e09938ac6a33e31d0dcf4f63e18166e42e75ca9734",
+    "docs/research/cel-profile-vectors/published-w3c/eddsa-jcs-2022-ed25519.json": "9e77c5713b478d0b3b5d3ffc9cd5e8151c226e585a7127838babcc5e02751b71",
+    "docs/research/cel-profile-vectors/published-w3c/extract-published.py": "0c54dcc6e18e81080dcd7abb7b2c13b04a1efe4a36be264bb35489643804583f",
+    "docs/research/cel-profile-vectors/published-w3c/validation.json": "61a8c25e0600786262d80bb1c7c6be5dd92a0ef9be5aef7fc0be8ee0735bfdf8",
+    "docs/research/cel-profile-vectors/transport-inputs.json": "6de4aca1942094ee8409f538fa61a0b0b52253d224f4ca8a44aa48f4dd4be609"
+  }
+}

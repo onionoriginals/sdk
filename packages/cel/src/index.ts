@@ -55,3 +55,6 @@ export * as cbor from './utils/cbor.js';
 export type { DataIntegrityProof } from './types/proof.js';
 export type { DIDDocument, VerificationMethod, ServiceEndpoint } from './types/did.js';
 export type { KeyStore, KeyPair } from './types/keys.js';
+
+// The explicit new-format core. Existing consumers move here in the SDK migration stage.
+export * as celV3 from './v3/index.js';
