@@ -138,6 +138,23 @@ export interface InscriptionsStore {
    * silently accumulate. Read-only; acting on them stays with the per-user
    * rebroadcast route.
    */
+  /**
+   * Every record across ALL users that is waiting on a reveal broadcast:
+   * status `commit_broadcast`, a persisted reveal, not superseded.
+   *
+   * Exists so the server can finish an inscription without a browser tab
+   * (#545). The per-user list poll already does this, but it only runs when a
+   * creator is looking — so a confirmed commit whose creator closed the tab is
+   * spent money and no inscription until they happen to return.
+   *
+   * Returns the reveal hex: the caller broadcasts it, so it needs the artifact,
+   * not just a pointer to it. Unreadable files are reported, never swallowed —
+   * that file holds the only copy of a signed reveal.
+   */
+  pendingRevealBroadcasts(): {
+    pending: Array<{ subOrgId: string; record: InscriptionRecord }>;
+    unreadable: string[];
+  };
   sweepStale(olderThanMs: number): {
     stale: Array<{
       subOrgId: string;
@@ -495,6 +512,35 @@ export function createInscriptionsStore(opts: {
     findByOutpoints(subOrgId, outpoints) {
       const wanted = new Set(outpoints);
       return readAll(subOrgId).filter((r) => !r.superseded && outpointsOf(r).some((o) => wanted.has(o)));
+    },
+    pendingRevealBroadcasts() {
+      const dir = join(opts.dataDir, 'inscriptions');
+      const unreadable: string[] = [];
+      const pending: Array<{ subOrgId: string; record: InscriptionRecord }> = [];
+      if (!existsSync(dir)) return { pending, unreadable };
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.json')) continue;
+        const subOrgId = file.slice(0, -'.json'.length);
+        let recs: InscriptionRecord[];
+        try {
+          const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as unknown;
+          if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+          recs = parsed as InscriptionRecord[];
+        } catch {
+          unreadable.push(subOrgId);
+          continue;
+        }
+        for (const r of recs) {
+          // Superseded pairs are excluded: a live rebuilt pair owns their
+          // funding outpoint, and pushing theirs would race it. The list poll
+          // reinstates those on evidence; this sweep does not adjudicate.
+          if (r.superseded) continue;
+          if (r.status !== 'commit_broadcast') continue;
+          if (!r.revealTxHex) continue;
+          pending.push({ subOrgId, record: r });
+        }
+      }
+      return { pending, unreadable };
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');

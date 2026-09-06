@@ -39,6 +39,10 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
+import {
+  createInscriptionCompletionSweep,
+  type SweepProvider,
+} from './server/inscription-completion-sweep';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
@@ -239,7 +243,28 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
+  // Finish what can be finished (#545), BEFORE reporting what is stuck: a
+  // record this pass completes should not also be warned about as stranded.
+  // Its own provider instance: the routes build theirs inside buildApiRoutes
+  // and never expose it, and a sweep that only reads status and broadcasts
+  // needs nothing the routes' instance holds. Same endpoint, same network.
+  const completionSweep = createInscriptionCompletionSweep({
+    store: inscriptionsStore,
+    provider: createFaucetProviderFromEnv() as unknown as SweepProvider,
+    moneyLog: money,
+    maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
+  });
   const sweep = () => {
+    void completionSweep()
+      .then((r) => {
+        if (r.completed > 0 || r.failed > 0) {
+          console.warn(
+            `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
+              `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
+          );
+        }
+      })
+      .catch((err) => console.warn('[landing] inscription completion sweep failed', err));
     try {
       const { stale, unreadable } = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {
