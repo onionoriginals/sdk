@@ -39,9 +39,9 @@ describe('raw resource bytes', () => {
     const { asset: loaded, verification } = await sdk.lifecycle.loadAsset(JSON.stringify(env));
     expect(verification?.verified).toBe(true);
     expect(loaded.resources[0].content).toEqual(png());
-    expect(await loaded.verify()).toBe(true);
+    expect((await loaded.verify()).verified).toBe(true);
     loaded.resources[0].content![0] ^= 1;
-    expect(await loaded.verify()).toBe(false);
+    expect((await loaded.verify()).verified).toBe(false);
     expect(asset.resources[0].content).toEqual(png());
   });
 
