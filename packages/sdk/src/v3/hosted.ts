@@ -84,7 +84,7 @@ export class HostedAssets {
   ): Promise<PreparedWebPublication> {
     if (
       !["cel", "webvh"].includes(asset.state.layer) ||
-      !asset.state.active ||
+      (asset.state.layer === "cel" && !asset.state.active) ||
       asset.localResources.length
     )
       return error(
@@ -268,7 +268,7 @@ export class HostedAssets {
         await write(
           prefix + "resources/" + resource.digestMultibase,
           resource.content,
-          resource.mediaType,
+          "application/octet-stream",
         );
       }
       await write(
@@ -339,11 +339,8 @@ export class HostedAssets {
         );
       total += body.content.length;
       byteBudget(total);
-      if (body.contentType && body.contentType !== resource.mediaType)
-        return error(
-          "ASSET_RESOURCE_TYPE",
-          "Hosted media type differs from the signed descriptor",
-        );
+      // The signed descriptor owns media interpretation. Transport metadata
+      // is unsigned and can be shared by equal bytes used under different types.
       resources.push(attachment(resource.id, resource.version, body.content));
     }
     const envelope: AssetEnvelope = {

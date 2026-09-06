@@ -80,7 +80,15 @@ export class AssetResolver {
       : { status: "incomplete", did, reason: "Configure hosted storage" };
   }
 
-  async observe(
+  async observe(sat: string, options: AssetResolutionOptions = {}): Promise<{ snapshot?: SatSnapshot; resolution: SatResolution }> {
+    let result = await this.observeOnce(sat, options);
+    for (let attempt = 1; attempt < 3 && ["chain-changed", "inconsistent-evidence"].includes(result.resolution.status); attempt++) {
+      result = await this.observeOnce(sat, options);
+    }
+    return result;
+  }
+
+  private async observeOnce(
     sat: string,
     options: AssetResolutionOptions = {},
   ): Promise<{ snapshot?: SatSnapshot; resolution: SatResolution }> {
@@ -102,10 +110,10 @@ export class AssetResolver {
           ) as SatResolution,
         };
       return { snapshot, resolution: resolveSat(snapshot, options) };
-    } catch {
+    } catch (error) {
       return {
         resolution: failure(
-          "incomplete",
+          error !== null && typeof error === "object" && "code" in error && error.code === "SAT_SNAPSHOT_CHAIN_CHANGED" ? "chain-changed" : "incomplete",
           "The provider could not obtain a complete sat snapshot",
         ) as SatResolution,
       };

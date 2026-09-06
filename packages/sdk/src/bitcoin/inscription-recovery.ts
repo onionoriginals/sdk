@@ -102,6 +102,11 @@ async function persist(store: InscriptionRecoveryStore | undefined, record: Insc
   }
 }
 
+async function isCurrentlyConfirmed(provider: OrdinalsProvider, txid: string): Promise<boolean> {
+  try { return (await provider.getTransactionStatus(txid)).confirmed === true; }
+  catch { return false; }
+}
+
 /** Submit only these exact bytes. Direct broadcasting requires a durable store, never an implicit memory fallback. */
 export async function submitPreparedInscriptionOnSat(params: {
   prepared: PreparedInscriptionOnSat;
@@ -126,7 +131,21 @@ export async function submitPreparedInscriptionOnSat(params: {
     }
     record = structuredClone(saved);
   }
-  if (record.broadcast === 'reveal_broadcast') return result(record);
+  if (saved && record.broadcast !== 'prepared') {
+    // A persisted acknowledgement describes an earlier submission, not present
+    // chain state. Eviction/reorg can remove either transaction. Only a fresh
+    // confirmed reveal lets us skip submitting the pair on this invocation.
+    if (await isCurrentlyConfirmed(provider, prepared.revealTxId)) {
+      record.broadcast = 'reveal_broadcast';
+      try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
+      return result(record);
+    }
+    // Unconfirmed status conflates absent and mempool; transport errors provide
+    // no presence evidence either. Replaying the identical signed commit is
+    // safe in both cases and does not create a new commitment or funding spend.
+    record.broadcast = await isCurrentlyConfirmed(provider, prepared.commitTxId)
+      ? 'commit_broadcast' : 'commit_broadcast_unknown';
+  }
   // This write is the gate before ANY submission, including retries.
   await persist(recoveryStore, record);
 
@@ -159,9 +178,7 @@ export async function submitPreparedInscriptionOnSat(params: {
     } catch (error) {
       // Unknown/not-confirmed conflates absent and mempool in this provider API.
       // Only actual confirmation can independently resolve a lost acknowledgement.
-      let confirmed = false;
-      try { confirmed = (await provider.getTransactionStatus(prepared.commitTxId)).confirmed === true; } catch { /* retain ambiguity */ }
-      if (!confirmed) return result(record, error);
+      if (!await isCurrentlyConfirmed(provider, prepared.commitTxId)) return result(record, error);
     }
     record.broadcast = 'commit_broadcast';
   }
@@ -172,9 +189,7 @@ export async function submitPreparedInscriptionOnSat(params: {
     const txid = await provider.broadcastTransaction(prepared.revealTxHex);
     if (txid !== prepared.revealTxId) throw new Error('Provider reveal id does not match the signed transaction.');
   } catch (error) {
-    let confirmed = false;
-    try { confirmed = (await provider.getTransactionStatus(prepared.revealTxId)).confirmed === true; } catch { /* retain ambiguity */ }
-    if (!confirmed) return result(record, error);
+    if (!await isCurrentlyConfirmed(provider, prepared.revealTxId)) return result(record, error);
   }
   record.broadcast = 'reveal_broadcast';
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }

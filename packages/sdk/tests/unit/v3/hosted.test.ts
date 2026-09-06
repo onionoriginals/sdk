@@ -133,3 +133,25 @@ test("publication refuses an omitted domain before invoking custody or storage",
       .verified,
   ).toBe(true);
 });
+
+test('equal resource bytes with different signed media types round-trip without colliding transport metadata', async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'text', mediaType: 'text/plain', content: 'hello' },
+    { id: 'bytes', mediaType: 'application/octet-stream', content: 'hello' },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.asset.resources.map(r => r.mediaType)).toEqual(['text/plain', 'application/octet-stream']);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test('a terminal hosted history can be published and remains deactivated for fresh consumers', async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const initial = await sdk.lifecycle.publishToWeb(await sdk.lifecycle.createAsset([]), { domain: 'example.com' });
+  await initial.asset.deactivate('retired');
+  await sdk.lifecycle.publishToWeb(initial.asset, { domain: 'example.com' });
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(initial.did);
+  expect(loaded.asset.state.active).toBe(false);
+  expect(loaded.verification.verified).toBe(true);
+});

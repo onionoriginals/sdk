@@ -241,3 +241,27 @@ test("rotation and updates in one later publication retire the prior key indepen
     ).rejects.toThrow("current controller");
   }
 });
+
+test('resolution retries a changing snapshot and bounds failures if the chain cannot stabilize', async () => {
+  const { snapshot } = await boundary(); let calls = 0;
+  const changing = structuredClone(snapshot); changing.tipAfter.hash = 'e'.repeat(64);
+  const sdk = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => ++calls === 1 ? changing : snapshot } });
+  expect((await sdk.lifecycle.resolveAssetFromSat('123')).status).toBe('accepted');
+  expect(calls).toBe(2);
+  calls = 0;
+  const unstable = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => { calls++; return changing; } } });
+  expect((await unstable.lifecycle.resolveAssetFromSat('123')).status).toBe('chain-changed');
+  expect(calls).toBe(3);
+});
+
+
+test("resolution retries provider-detected chain movement without accepting partial evidence", async () => {
+  const { snapshot } = await boundary();
+  let reads = 0;
+  const sdk = OriginalsSDK.create({ network: "regtest", satProvider: { async getSatSnapshot() {
+    if (++reads === 1) throw Object.assign(new Error("index moved"), { code: "SAT_SNAPSHOT_CHAIN_CHANGED" });
+    return snapshot;
+  } } });
+  expect((await sdk.lifecycle.resolveAssetFromSat("123")).status).toBe("accepted");
+  expect(reads).toBe(2);
+});

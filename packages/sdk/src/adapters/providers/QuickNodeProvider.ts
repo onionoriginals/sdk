@@ -1,3 +1,5 @@
+import type { SatSnapshot } from '@originals/cel/v3';
+import { readSatSnapshot } from './sat-snapshot.js';
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
 import { StructuredError } from '@originals/cel';
@@ -286,7 +288,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (this.contentEncoding === 'base64') {
       // Explicit encoding: no guessing. Content that is not valid base64 is a
       // server contract violation, not literal text (issue #350).
-      if (!isBase64Shaped) {
+      if (compact !== '' && (!isBase64Shaped || Buffer.from(compact, 'base64').toString('base64') !== compact)) {
         throw new StructuredError(
           'QUICKNODE_CONTENT_UNEXPECTED_SHAPE',
           "QuickNodeProvider: ord_getContent result is not base64 (provider configured with contentEncoding: 'base64')"
@@ -522,6 +524,39 @@ export class QuickNodeProvider implements OrdinalsProvider {
         { inscriptionId: id }
       );
     }
+  }
+
+  /**
+   * Complete CEL 3 evidence from the Ordinals & Runes add-on and active Core blocks.
+   * Pin contentEncoding to the endpoint's wire contract: 'utf8' for the
+   * documented literal text result, 'base64' only for gateways configured to
+   * encode binary content that way. Auto mode
+   * cannot attest exact bytes. ord_getMetadata must return its documented raw
+   * hex string or explicit null; decoded objects and unavailable methods fail.
+   * https://www.quicknode.com/docs/bitcoin/ord_getMetadata
+   * https://www.quicknode.com/docs/bitcoin/ord_getContent
+   */
+  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+    if (this.contentEncoding === 'auto') throw new StructuredError(
+      'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'CEL 3 snapshots require an explicit contentEncoding wire contract',
+    );
+    return readSatSnapshot({
+      rpc: (method, params) => this.rpcCall(method, params),
+      status: () => this.rpcCall('ord_getStatus', []),
+      indexHash: height => this.rpcCall('ord_getBlockHash', [height]),
+      sat: sat => this.rpcCall('ord_getSat', [Number(sat)]),
+      inscription: id => this.rpcCall('ord_getInscription', [id]),
+      content: async id => {
+        let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024);
+        // The documented wrapper carries literal content; never re-serialize
+        // decoded objects or guess whether an alphanumeric string is base64.
+        if (result === null) return null;
+        if (typeof result === 'object' && !Array.isArray(result)) result = (result as { content?: unknown }).content;
+        if (typeof result !== 'string') throw new StructuredError('QUICKNODE_CONTENT_UNEXPECTED_SHAPE', 'Snapshot content must use the configured string encoding');
+        return this.decodeContent(result);
+      },
+      metadata: id => this.rpcCall('ord_getMetadata', [id]),
+    }, satoshi, this.expectedNetwork);
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

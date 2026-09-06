@@ -69,7 +69,7 @@ test('CEL 3 snapshots retain raw metadata and derive reveal order from active Co
       return Response.json({ result });
     }
     const path = new URL(req.url).pathname;
-    if (path === '/status') return Response.json({ chain: 'regtest', sat_index: true, address_index: true, height: 100 });
+    if (path === '/status') return Response.json({ chain: 'regtest', sat_index: true, address_index: true, inscription_index: true, unrecoverably_reorged: false, height: 100 });
     if (path === '/blockhash/100') return new Response(hash);
     if (path === '/sat/123') return Response.json({ number: 123, inscriptions: [id], address: 'holder', satpoint: txid + ':0:0' });
     if (path === '/inscription/' + id) return Response.json({ id, sat: 123, height: 100, content_type: 'image/png', content_length: 3 });

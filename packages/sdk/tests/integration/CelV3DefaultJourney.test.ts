@@ -61,7 +61,7 @@ test("unavailable asset resolution cannot return an older cached DID document", 
     "@context": ["https://www.w3.org/ns/did/v1"],
   });
   await expect(sdk.did.resolveDID(did)).rejects.toMatchObject({
-    code: "ASSET_RESOLUTION_UNAVAILABLE",
+    code: "ASSET_RESOLUTION_INCOMPLETE",
   });
 });
 

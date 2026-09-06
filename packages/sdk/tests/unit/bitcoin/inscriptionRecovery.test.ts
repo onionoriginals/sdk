@@ -72,12 +72,13 @@ describe('signed inscription recovery', () => {
     expect(params.satSigner.signAndFinalizeCommitPsbt).toHaveBeenCalledTimes(1);
     expect(params.buildContent).toHaveBeenCalledTimes(1);
     expect(params.provider.getFirstSatOfOutput).toHaveBeenCalledTimes(1);
-    // A completed retry reads the durable acknowledgement and submits nothing.
+    // Only a fresh observed confirmation makes this retry terminal.
+    retryProvider.getTransactionStatus = async () => ({ confirmed: true });
     await resumeInscriptionOnSat({ recoveryId: first.recoveryId, provider: retryProvider, recoveryStore: diskStore(directory) });
     expect(accepted).toHaveLength(3);
   }));
 
-  it('retries only the same reveal after second-broadcast response loss', async () => withStore(async (directory) => {
+  it('retries only the same reveal when its commit is currently confirmed', async () => withStore(async (directory) => {
     const params = parameters();
     const attempts: string[] = [];
     params.provider.broadcastTransaction = async (hex: string) => {
@@ -87,6 +88,7 @@ describe('signed inscription recovery', () => {
     };
     const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
     expect(first.broadcast).toBe('reveal_broadcast_unknown');
+    params.provider.getTransactionStatus = async (txid: string) => ({ confirmed: txid === first.commitTxId });
     const resumed = await resumeInscriptionOnSat({ recoveryId: first.recoveryId, provider: params.provider, recoveryStore: diskStore(directory) });
     expect(resumed.broadcast).toBe('reveal_broadcast');
     expect(attempts).toEqual([first.prepared.signedCommitHex, first.prepared.revealTxHex, first.prepared.revealTxHex]);
@@ -149,5 +151,51 @@ describe('signed inscription recovery', () => {
     const result = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
     expect(result.broadcast).toBe('reveal_broadcast');
     expect(calls).toBe(2);
+  }));
+});
+
+
+describe('recovery after eviction or reorganization', () => {
+  it.each(['reveal_broadcast', 'reveal_broadcast_unknown', 'commit_broadcast'] as const)(
+    'rebroadcasts the exact pair when transactions previously recorded as %s are absent', async (previousStatus) => withStore(async (directory) => {
+      const params = parameters();
+      const mempool = new Set<string>();
+      const attempts: string[] = [];
+      let rejectReveal = previousStatus !== 'reveal_broadcast';
+      params.provider.broadcastTransaction = async (hex: string) => {
+        attempts.push(hex);
+        const tx = parse(hex);
+        if (tx.getInput(0).txid && Buffer.from(tx.getInput(0).txid!).toString('hex') !== params.fundingUtxos[0].txid) {
+          if (rejectReveal || !mempool.has(Buffer.from(tx.getInput(0).txid!).toString('hex'))) throw new Error('missing inputs or response lost');
+        }
+        mempool.add(tx.id);
+        return tx.id;
+      };
+      const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+      if (previousStatus === 'commit_broadcast') {
+        const record = (await diskStore(directory).load(first.recoveryId))!;
+        record.broadcast = 'commit_broadcast';
+        await diskStore(directory).save(record);
+      } else expect(first.broadcast).toBe(previousStatus);
+      mempool.clear(); // Both the commit and reveal can leave the node after acknowledgement.
+      attempts.length = 0;
+      rejectReveal = false;
+      const resumed = await resumeInscriptionOnSat({ recoveryId: first.recoveryId, provider: params.provider, recoveryStore: diskStore(directory) });
+      expect(resumed.broadcast).toBe('reveal_broadcast');
+      expect(attempts).toEqual([first.prepared.signedCommitHex, first.prepared.revealTxHex]);
+      expect(params.satSigner.signAndFinalizeCommitPsbt).toHaveBeenCalledTimes(1);
+      expect(params.buildContent).toHaveBeenCalledTimes(1);
+    })
+  );
+
+  it('does not equate a failed status read with a previous acknowledgement remaining valid', async () => withStore(async (directory) => {
+    const params = parameters();
+    const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    const attempts: string[] = [];
+    params.provider.getTransactionStatus = async () => { throw new Error('status transport unavailable'); };
+    params.provider.broadcastTransaction = async (hex: string) => { attempts.push(hex); return parse(hex).id; };
+    const resumed = await resumeInscriptionOnSat({ recoveryId: first.recoveryId, provider: params.provider, recoveryStore: diskStore(directory) });
+    expect(resumed.broadcast).toBe('reveal_broadcast');
+    expect(attempts).toEqual([first.prepared.signedCommitHex, first.prepared.revealTxHex]);
   }));
 });
