@@ -1,0 +1,54 @@
+{
+  "baseCommit": "b24f100f9791c252dcf2e0e5fc1b301ed138882f",
+  "productionFailureAt": "2026-09-06T22:00:54.806Z",
+  "rootCause": "The browser buffer package rejects plain Uint8Array arguments to Buffer.equals; Node accepts them. Recovery validation compared scure byte arrays through that Node-specific behavior before provider submission.",
+  "fix": "Use noble equalBytes for the commit-output and Taproot-control comparisons; preserve every identity, signature and commitment validation.",
+  "regression": {
+    "red": {
+      "passed": 6,
+      "failed": 1,
+      "error": "Cannot parse recovery transactions: Argument must be a Buffer"
+    },
+    "green": {
+      "passed": 7,
+      "failed": 0
+    },
+    "browserBufferFixture": {
+      "passed": true,
+      "validPairAccepted": true,
+      "rejected": [
+        "signature",
+        "control-parity"
+      ],
+      "fixtureSubmissions": 1,
+      "realBroadcasts": 0
+    }
+  },
+  "checks": {
+    "packages": {
+      "pass": 4651,
+      "skip": 248,
+      "fail": 0
+    },
+    "landing": {
+      "pass": 1024,
+      "skip": 0,
+      "fail": 0
+    },
+    "lint": "pass with existing warnings",
+    "packageBuild": true,
+    "esm": true,
+    "browserStaticGuard": true,
+    "realCoreOrdRegtest": true
+  },
+  "limitations": [
+    "Fixture browser validation uses synthetic regtest funding and no live submission.",
+    "Owner signed mainnet pair remains retained; retry on fixed deployment and confirmation proof are pending."
+  ],
+  "testedCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b",
+  "review": {
+    "status": "complete",
+    "runId": "20260906-150519-d47e3024",
+    "actionableFindings": 0
+  }
+}

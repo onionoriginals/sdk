@@ -1,0 +1,53 @@
+{
+  "runtimeCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b",
+  "deploymentId": "d3b2b97c-5305-47d7-a3df-5c7279b501b2",
+  "passed": true,
+  "checks": [
+    {
+      "path": "/",
+      "status": 200,
+      "passed": true,
+      "asset": "/assets/index-BW0PaWiK.js",
+      "sha256": "6ed199f7c959f408d8ee62f2c3b90bfc302b7ae5e81c76b010d0d766e929f03e",
+      "canonicalHostPresent": true
+    },
+    {
+      "path": "/api/health",
+      "status": 200,
+      "passed": true,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "path": "/api/btc/network",
+      "status": 200,
+      "passed": true,
+      "body": {
+        "network": "mainnet",
+        "faucet": false
+      }
+    },
+    {
+      "path": "/api/me",
+      "status": 401,
+      "passed": true,
+      "body": {
+        "message": "Not authenticated"
+      }
+    }
+  ],
+  "observedAt": "2026-09-06T22:24:15.625119+00:00",
+  "deploymentStatus": "SUCCESS",
+  "originalDataVolumePreserved": true,
+  "browserLoadedAsset": "/assets/index-BW0PaWiK.js",
+  "retainedRetryVisible": true,
+  "hostedVerification": {
+    "verified": true,
+    "resourceBytes": 3857,
+    "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33",
+    "head": "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
+    "stableSdk": "3.0.0",
+    "freshConsumer": true
+  }
+}

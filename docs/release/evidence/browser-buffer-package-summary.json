@@ -1,0 +1,58 @@
+{
+  "testedSource": {
+    "base": "b24f100f9791c252dcf2e0e5fc1b301ed138882f",
+    "fixFile": "packages/sdk/src/bitcoin/inscription-recovery.ts",
+    "fixSourceSha256": "50f1aa867fc79218c5a2f8b0db395044a2e4ea09a327dba67f4e85cc16e73343"
+  },
+  "checks": {
+    "freshFrozenInstall": true,
+    "stableChangesetVersion": true,
+    "freshBuild": true,
+    "freshTarballConsumerInstall": true,
+    "node": "v20.10.0",
+    "packedEntryPoints": 29,
+    "localBinaryJourney": true,
+    "concurrentEvents": 3,
+    "coldLoadVerification": true,
+    "privatePathsDenied": true,
+    "strictPublicTypes": true,
+    "cliVersion": "3.0.0",
+    "browserBufferExactPairSubmissionFixture": true,
+    "publication": false
+  },
+  "packages": [
+    {
+      "name": "@originals/cel",
+      "version": "1.0.0",
+      "filename": "originals-cel-1.0.0.tgz",
+      "integrity": "sha512-jvVs2nAB221wiOvqXbIUwDEpt6Ljs+5mzRZ4onCo5+twfpaiMJ7bNUFGWwXtbjZVAyzI2Gu43l6ACN/Xiujc2g==",
+      "size": 137634,
+      "entryCount": 116,
+      "sha256": "0c9e019b2b7ea5dc114688b0ad8de87c0261c512e92cf64215032916d795f27f"
+    },
+    {
+      "name": "@originals/sdk",
+      "version": "3.0.0",
+      "filename": "originals-sdk-3.0.0.tgz",
+      "integrity": "sha512-2xebLlh+rV2pm4cC/EfyIr9wm0rLAwm23T5QeWKJ5g2fcBfvXJXfIxki8WXxF7pJkLneMq+guQQrWUdqtaVO/Q==",
+      "size": 496910,
+      "entryCount": 327,
+      "sha256": "97f03f89e3a859185ad1ee112bd95631b8ed12bf59b45fbf34a4fba7e312f208"
+    },
+    {
+      "name": "@originals/auth",
+      "version": "3.0.0",
+      "filename": "originals-auth-3.0.0.tgz",
+      "integrity": "sha512-H24Sp5CV0JvKIMXXnkaf7BEyZDtyi+smmbl8LjHYrsmpZeiP4j50sJX530JGnjuBD2Zqf+Kf0TKKL16W/6pjTw==",
+      "size": 40302,
+      "entryCount": 59,
+      "sha256": "05ed82b4ec3e9b0831df6631319feedd427de63aa01b3c42bec43913a0a69af3"
+    }
+  ],
+  "artifacts": {
+    "preview": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-buffer-preview-g0ntdmq9",
+    "artifacts": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-buffer-artifacts-2wvhrhy7",
+    "consumer": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-buffer-consumer-656fipvp"
+  },
+  "testedCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b"
+}

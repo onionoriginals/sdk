@@ -1,0 +1,83 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "scope": {
+    "base": "b24f100f9791c252dcf2e0e5fc1b301ed138882f",
+    "branch": "codex/release-3.0.0",
+    "head_sha": "b24f100f9791c252dcf2e0e5fc1b301ed138882f",
+    "pr_url": null,
+    "files_changed": 2
+  },
+  "intent": "Repair browser recovery validation that rejects Uint8Array operands under the buffer/ polyfill. Preserve exact Taproot output, control block and signature validation and prove valid cold retry with native/browser Buffer.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "project-standards",
+    "adversarial-claude"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The committed regression intentionally exercises recovery with the raw browser Buffer polyfill; it does not constitute a complete production-shim or browser transaction-preparation test. Existing Node negative security coverage plus the browser positive regression satisfy this scoped comparison replacement."
+  ],
+  "coverage": {
+    "scope_mode": "local-aligned",
+    "files": [
+      "packages/sdk/src/bitcoin/inscription-recovery.ts",
+      "apps/landing/src/sdk/local-publication-recovery.test.ts"
+    ],
+    "exec_lines": 38,
+    "roster": "full; cryptographic comparison and changed test surface disqualify lite",
+    "standards": "CLAUDE.md fallback governs both files; no applicable CODING_STANDARDS.md",
+    "conditional_reasons": {
+      "security": "Validation of persisted signed transaction witness and committed Taproot output.",
+      "testing": "Native/browser Buffer cold recovery regression.",
+      "adversarial-claude": "Bitcoin spending and recovery boundary."
+    },
+    "local_reviewers": "All four completed; host accepted one concurrent leaf, so queued reviewers ran serially without lost coverage.",
+    "excluded": "Untracked owner-mainnet-proof.json, patch changeset, temporary probes, and later release documentation/evidence edits; code/test files remained frozen.",
+    "cross_model": {
+      "cross_model_route": "claude",
+      "model_requested": "claude-opus-5",
+      "effort_requested": "high",
+      "receipt_supported": true,
+      "model_actual": "claude-opus-5",
+      "effort_actual": "unverified",
+      "independence_verified": true
+    },
+    "cross_model_outcome": "Completed; no confirmed runtime defect. Three anchor-50 test advisories were suppressed.",
+    "peer_lifecycle": "Terminal result collected via verified runner read; consumed job directory deleted.",
+    "suppressed_by_confidence": {
+      "50": 3
+    },
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "mode_aware_demotions": 3,
+    "validator_shortcut_count": 0,
+    "validator_batch": {
+      "verdicts": [
+        {
+          "#": 1,
+          "validated": false,
+          "reason": "Existing passing security cases independently reject control-key and control-parity tampering through the two replaced comparisons, while the new landing test exercises equalBytes with the browser Buffer polyfill, so duplicating those negative witnesses in the browser suite is not a material gap introduced by this change."
+        }
+      ]
+    },
+    "validator_drop_count": 1,
+    "failed_reviewers": [],
+    "fast_pass": "No urgent findings.",
+    "settlement_suppression": "Not evaluated; no scoped plan discovered.",
+    "verification": "Review is static and includes independent validation of the existing negative security tests. Parent separately reports full package/landing/regtest and actual Vite browser fixture validation; this receipt does not certify a live mainnet broadcast."
+  },
+  "artifact_path": "/tmp/compound-engineering-501/ce-code-review/20260906-150519-d47e3024",
+  "run_id": "20260906-150519-d47e3024"
+}
