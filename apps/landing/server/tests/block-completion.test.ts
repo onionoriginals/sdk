@@ -75,6 +75,35 @@ test('reconnects after close and heartbeat timeout and catches up on reconnect',
   h.sockets[2].block('c'.repeat(64)); await flush(); expect(calls).toBe(2);
 });
 
+test.each([true, 'true'])('pong %j keeps a healthy connection alive without extra sweeps', async pong => {
+  let calls = 0;
+  const h = harness(async () => { calls++; });
+  const socket = h.sockets[0];
+  socket.onopen!(); await flush();
+  for (let i = 0; i < 3; i++) {
+    h.tick();
+    expect(JSON.parse(socket.sent.at(-1)!)).toEqual({ action: 'ping' });
+    socket.onmessage!({ data: JSON.stringify({ pong }) });
+    expect([...h.timers.values()].map(timer => timer.delay)).toEqual([30_000]);
+  }
+  await flush();
+  expect(socket.closed).toBe(false);
+  expect(h.sockets.length).toBe(1);
+  expect(calls).toBe(1);
+  expect(h.errors).toEqual([]);
+  h.listener.stop();
+});
+
+test.each([false, 'false', 1, null])('invalid pong %j does not cancel the heartbeat timeout', pong => {
+  const h = harness();
+  const socket = h.sockets[0];
+  socket.onopen!(); h.tick();
+  socket.onmessage!({ data: JSON.stringify({ pong }) });
+  h.tick();
+  expect(socket.closed).toBe(true);
+  h.listener.stop();
+});
+
 test('pong keeps the connection alive; failures are handled without exposing URL credentials', async () => {
   const h = harness(async () => { throw new Error('wss://secret@example.test/ws'); });
   h.sockets[0].onopen!(); await flush();

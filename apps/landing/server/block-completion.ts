@@ -98,7 +98,7 @@ export function startBlockCompletion(options: BlockCompletionOptions) {
       let message;
       try { message = JSON.parse(event.data); } catch { return; }
       if (!message || typeof message !== 'object') return;
-      if (message.pong === true) { retryMs = 1000; heartbeat(current); }
+      if (message.pong === true || message.pong === 'true') { retryMs = 1000; heartbeat(current); }
       const id = message.block?.id;
       if (typeof id !== 'string' || !/^[a-f0-9]{64}$/i.test(id)) return;
       retryMs = 1000;
