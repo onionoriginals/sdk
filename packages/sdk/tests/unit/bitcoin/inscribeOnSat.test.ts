@@ -1,6 +1,6 @@
 import { describe, it, expect, mock } from 'bun:test';
 import * as btc from '@scure/btc-signer';
-import { inscribeOnSat } from '../../../src/bitcoin/inscribe-on-sat';
+import { inscribeOnSat, prepareInscriptionOnSat, submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat';
 import { getScureNetwork } from '../../../src/bitcoin/transactions/commit';
 import { sampleUtxo, sampleChangeAddress } from '../../fixtures/bitcoin';
 
@@ -22,14 +22,23 @@ function parse(hex: string) {
 function providerDouble(overrides: any = {}) {
   return {
     getFirstSatOfOutput: async () => '1250000000',
-    broadcastTransaction: async () => 'cc'.repeat(32),
+    broadcastTransaction: async (hex: string) => parse(hex).id,
     ...overrides
   } as any;
 }
 
 const buildContent = async (sat: string) => ({ content: Buffer.from(`doc for ${sat}`), contentType: 'application/did+json' });
 
+const recoveryStore = () => {
+  const records = new Map<string, any>();
+  return {
+    save: async (record: any) => { records.set(record.recoveryId, JSON.parse(JSON.stringify(record))); },
+    load: async (id: string) => records.get(id)
+  };
+};
+
 const baseParams = () => ({
+  recoveryStore: recoveryStore(),
   buildContent, fundingUtxos: [sampleUtxo], satSigner: signer,
   changeAddress: sampleChangeAddress, feeRate: 2, network: 'regtest' as const
 });
@@ -53,18 +62,17 @@ describe('inscribeOnSat', () => {
     expect(signAndFinalizeCommitPsbt).toHaveBeenCalledTimes(1);
   });
 
-  it('broadcasts the reveal AFTER the commit, built from the LOCAL commit txid (not a provider-returned one)', async () => {
+  it('broadcasts the reveal AFTER the commit, built from the LOCAL commit txid', async () => {
     const broadcasts: string[] = [];
-    // broadcastTransaction returns a BOGUS txid — it must not influence the reveal prevout.
     const provider = providerDouble({
-      broadcastTransaction: async (hex: string) => { broadcasts.push(hex); return 'ff'.repeat(32); }
+      broadcastTransaction: async (hex: string) => { broadcasts.push(hex); return parse(hex).id; }
     });
     const res = await inscribeOnSat({ ...baseParams(), provider });
 
     // Two broadcasts, commit first then reveal.
     expect(broadcasts.length).toBe(2);
 
-    // commitTxId is computed locally from the signed commit, NOT the bogus broadcast return.
+    // commitTxId is independently computed locally from the exact signed commit.
     const localCommitTxId = parse(broadcasts[0]).id;
     expect(res.commitTxId).toBe(localCommitTxId);
     expect(res.commitTxId).not.toBe('ff'.repeat(32));
@@ -197,40 +205,24 @@ describe('inscribeOnSat', () => {
     expect(submitted.changeAddress).toBe(sampleChangeAddress);
   });
 
-  it('throws INSCRIPTION_SUBMIT_FAILED with full recovery data when submitInscription fails', async () => {
-    const provider = providerDouble({
-      submitInscription: async () => { throw new Error('network died mid-POST'); }
-    });
-    try {
-      await inscribeOnSat({ ...baseParams(), provider });
-      throw new Error('expected INSCRIPTION_SUBMIT_FAILED');
-    } catch (e: any) {
-      expect(e.code).toBe('INSCRIPTION_SUBMIT_FAILED');
-      // Recovery must not depend on this process's memory: both signed txs ride
-      // in the error details.
-      expect(typeof e.details?.signedCommitHex).toBe('string');
-      expect(typeof e.details?.revealTxHex).toBe('string');
-      expect(typeof e.details?.commitTxId).toBe('string');
-      expect(e.details?.satoshi).toBe('1250000000');
-    }
+  it('returns submission ambiguity with full exact recovery bytes when submitInscription fails', async () => {
+    const provider = providerDouble({ submitInscription: async () => { throw new Error('network died mid-POST'); } });
+    const res = await inscribeOnSat({ ...baseParams(), provider });
+    expect(res.broadcast).toBe('commit_broadcast_unknown');
+    expect(parse(res.prepared.signedCommitHex).id).toBe(res.commitTxId);
+    expect(parse(res.prepared.revealTxHex).id).toBe(res.revealTxId);
+    expect(res.error).toBe('network died mid-POST');
   });
 
-  it('attaches recovery data (revealTxHex + commitTxId) when the reveal broadcast fails', async () => {
+  it('returns reveal ambiguity and exact pair when the second broadcast fails', async () => {
     let n = 0;
-    const provider = providerDouble({
-      broadcastTransaction: async () => { n++; if (n === 2) throw new Error('mempool rejected reveal'); return 'ab'.repeat(32); }
-    });
-    try {
-      await inscribeOnSat({ ...baseParams(), provider });
-      throw new Error('expected REVEAL_BROADCAST_FAILED');
-    } catch (e: any) {
-      expect(e.code).toBe('REVEAL_BROADCAST_FAILED');
-      expect(typeof e.details?.revealTxHex).toBe('string');
-      expect(e.details.revealTxHex.length).toBeGreaterThan(0);
-      expect(typeof e.details?.commitTxId).toBe('string');
-      expect(e.details?.revealTxId).toBeDefined();
-      expect(e.details?.satoshi).toBe('1250000000');
-    }
+    const provider = providerDouble({ broadcastTransaction: async (hex: string) => {
+      if (++n === 2) throw new Error('response lost');
+      return parse(hex).id;
+    } });
+    const res = await inscribeOnSat({ ...baseParams(), provider });
+    expect(res.broadcast).toBe('reveal_broadcast_unknown');
+    expect(parse(res.prepared.revealTxHex).id).toBe(res.revealTxId);
   });
 });
 
@@ -251,7 +243,7 @@ describe('inscribeOnSat — multi-input funding', () => {
   it('accepts a two-input commit and spends the declared set in the declared order', async () => {
     const broadcasts: string[] = [];
     const provider = providerDouble({
-      broadcastTransaction: async (hex: string) => { broadcasts.push(hex); return 'cc'.repeat(32); }
+      broadcastTransaction: async (hex: string) => { broadcasts.push(hex); return parse(hex).id; }
     });
     const res = await inscribeOnSat({ ...twoInputParams(), provider });
     expect(res.satoshi).toBe('1250000000');
@@ -348,7 +340,7 @@ describe('inscribeOnSat — multi-input funding', () => {
 describe('inscribeOnSat reports how far broadcasting got', () => {
   it('reports reveal_broadcast when both transactions reached the network', async () => {
     const provider = providerDouble({
-      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b', status: 'reveal_broadcast' })
+      submitInscription: async (p: any) => ({ commitTxId: parse(p.signedCommitHex).id, revealTxId: parse(p.revealTxHex).id, status: 'reveal_broadcast' })
     });
     const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
     expect(res.broadcast).toBe('reveal_broadcast');
@@ -356,7 +348,7 @@ describe('inscribeOnSat reports how far broadcasting got', () => {
 
   it('reports commit_broadcast when only the commit did — the case that used to be invisible', async () => {
     const provider = providerDouble({
-      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b', status: 'commit_broadcast' })
+      submitInscription: async (p: any) => ({ commitTxId: parse(p.signedCommitHex).id, revealTxId: parse(p.revealTxHex).id, status: 'commit_broadcast' })
     });
     const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
     expect(res.broadcast).toBe('commit_broadcast');
@@ -365,22 +357,74 @@ describe('inscribeOnSat reports how far broadcasting got', () => {
     expect(res.inscriptionId).toBeTruthy();
   });
 
-  it('treats a provider that reports no status as complete, not as doubt', async () => {
-    // Pre-dates the field. It has always meant "both broadcast", so inventing
-    // uncertainty here would regress every existing implementation.
+  it.each([undefined, null, 'garbage'])('keeps missing or invalid provider status %s unknown', async (status) => {
     const provider = providerDouble({
-      submitInscription: async () => ({ commitTxId: 'a', revealTxId: 'b' })
+      submitInscription: async (p: any) => ({ commitTxId: parse(p.signedCommitHex).id, revealTxId: parse(p.revealTxHex).id, status })
     });
-    const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
-    expect(res.broadcast).toBe('reveal_broadcast');
+    const res = await inscribeOnSat({ ...baseParams(), provider });
+    expect(res.broadcast).toBe('commit_broadcast_unknown');
+    expect(res.error).toContain('status');
   });
 
   it('reports reveal_broadcast on the two-broadcast fallback path', async () => {
     // No submitInscription seam: both broadcasts must have succeeded to get
-    // here at all, since a failed reveal throws REVEAL_BROADCAST_FAILED.
+    // a failed reveal now returns an explicit unknown state.
     const provider = providerDouble();
     delete (provider as any).submitInscription;
     const res = await inscribeOnSat({ ...baseParams(), satSigner: signer, provider });
     expect(res.broadcast).toBe('reveal_broadcast');
+  });
+});
+
+
+describe('durable signed-pair recovery (#566)', () => {
+  it('returns unknown commit state with the exact durable pair after accepted commit loses its response', async () => {
+    let persisted: any;
+    const broadcasts: string[] = [];
+    const recoveryStore = {
+      save: async (record: any) => { persisted = JSON.parse(JSON.stringify(record)); },
+      load: async () => persisted
+    };
+    const result = await inscribeOnSat({
+      ...baseParams(), recoveryStore,
+      provider: providerDouble({ broadcastTransaction: async (hex: string) => {
+        broadcasts.push(hex);
+        throw new Error('accepted, then response lost');
+      } })
+    } as any);
+    expect(result.broadcast).toBe('commit_broadcast_unknown');
+    expect(persisted.prepared.signedCommitHex).toBe(broadcasts[0]);
+    expect(Buffer.from(parse(persisted.prepared.revealTxHex).getInput(0).txid!).toString('hex')).toBe(parse(broadcasts[0]).id);
+  });
+});
+
+
+describe('signed commit template integrity', () => {
+  it.each(['script', 'amount', 'missing', 'sequence', 'lockTime', 'version'])('rejects signer changes to %s before broadcast', async (change) => {
+    const provider = providerDouble({ broadcastTransaction: mock(async (hex: string) => parse(hex).id) });
+    const satSigner = { signAndFinalizeCommitPsbt: async (psbt: string) => {
+      const original = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), { allowUnknownOutputs: true });
+      expect(original.outputsLength).toBe(2);
+      const rebuilt = new btc.Transaction({
+        allowUnknownOutputs: true, allowUnknownInputs: true,
+        version: change === 'version' ? original.version + 1 : original.version,
+        lockTime: change === 'lockTime' ? original.lockTime + 1 : original.lockTime
+      });
+      for (let i = 0; i < original.inputsLength; i++) {
+        const input = original.getInput(i);
+        rebuilt.addInput(change === 'sequence' ? { ...input, sequence: 0xfffffffe } : input);
+      }
+      rebuilt.addOutput(original.getOutput(0));
+      if (change !== 'missing') {
+        const output = original.getOutput(1);
+        rebuilt.addOutput({ ...output,
+          ...(change === 'script' ? { script: new Uint8Array([0, 20, ...new Uint8Array(20).fill(7)]) } : {}),
+          ...(change === 'amount' ? { amount: output.amount! - 1n } : {})
+        });
+      }
+      return Buffer.from(rebuilt.toBytes(true, false)).toString('hex');
+    } };
+    await expect(inscribeOnSat({ ...baseParams(), provider, satSigner })).rejects.toMatchObject({ code: 'COMMIT_TX_MISMATCH' });
+    expect(provider.broadcastTransaction).not.toHaveBeenCalled();
   });
 });
