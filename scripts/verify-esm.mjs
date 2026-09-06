@@ -25,7 +25,7 @@
  *
  * Run AFTER `bun run build`. Exits non-zero on the first failure.
  */
-import { existsSync, mkdirSync, unlinkSync, symlinkSync, rmSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, symlinkSync, rmSync, readdirSync, statSync, readFileSync, mkdtempSync, renameSync } from 'node:fs';
 import { resolve, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -86,17 +86,24 @@ function specifiersFromExports(pkg) {
 }
 
 const createdLinks = [];
-// Point node_modules/<name> at the freshly built workspace package. Never trust a
-// pre-existing link/dir — a stale one would silently validate the wrong code — so
-// we always remove and recreate, then clean up afterwards.
+// Preserve installed packages (including dangling workspace links) while checking
+// the local build. Later CI gates must see exactly the dependencies we found.
 function linkPackage(name, dir) {
   const target = resolve(repoRoot, dir);
-  const linkPath = join(nodeModules, ...name.split('/')); // node_modules/@originals/sdk
+  const linkPath = join(nodeModules, ...name.split('/'));
   mkdirSync(dirname(linkPath), { recursive: true });
-  try { unlinkSync(linkPath); } catch { /* not a symlink/file */ }
-  try { rmSync(linkPath, { recursive: true, force: true }); } catch { /* not a dir */ }
+  const backupDir = mkdtempSync(join(nodeModules, '.verify-esm-'));
+  const backupPath = join(backupDir, 'original');
+  const entry = { linkPath, backupDir, backupPath, backedUp: false, linked: false };
+  createdLinks.push(entry);
+  try {
+    renameSync(linkPath, backupPath);
+    entry.backedUp = true;
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
   symlinkSync(target, linkPath, 'dir');
-  createdLinks.push(linkPath);
+  entry.linked = true;
 }
 
 let failures = 0;
@@ -123,9 +130,10 @@ try {
   }
   if (failures === 0) console.log(`✓ ${checked} exported entry point(s) import cleanly under Node`);
 } finally {
-  for (const link of createdLinks) {
-    // unlinkSync removes the symlink itself (never its target).
-    try { unlinkSync(link); } catch { /* best-effort cleanup */ }
+  for (const entry of createdLinks.reverse()) {
+    if (entry.linked) unlinkSync(entry.linkPath);
+    if (entry.backedUp) renameSync(entry.backupPath, entry.linkPath);
+    rmSync(entry.backupDir, { recursive: true });
   }
 }
 

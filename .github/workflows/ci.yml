@@ -106,6 +106,9 @@ jobs:
         with:
           node-version: "20.10.0"
 
+      - name: Test ESM verification preserves installed dependencies
+        run: node --test scripts/tests/verify-esm.test.mjs
+
       - name: Verify built packages import under Node ESM
         run: node scripts/verify-esm.mjs
 
