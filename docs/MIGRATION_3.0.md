@@ -1,172 +1,119 @@
 # Upgrading to `@originals/sdk` 3.0
 
-3.0 exists because of one report: the SDK's recommended path could not be used by any custody that never exports a private key — Turnkey, KMS, HSMs, passkeys — and several code paths produced signed artifacts that the SDK's own verifier then rejected, with no error at the point of signing.
+SDK 3.0 uses CEL 3 for asset creation, mutation, publication and recovery.
+This changes the asset format and custody contract. The [released API guide](../packages/sdk/V3.md)
+is the complete reference; the earlier asset APIs are not a compatibility path.
 
-Fixing that meant making things fail loudly that previously failed silently. **Most of the breaking changes below will surface as code that used to "work" now throwing.** In every case, that code was producing something broken; the throw is telling you where.
+## 1. Existing asset histories are not automatically migrated
 
-Work through the sections that apply. Each one states what breaks, what to do, and why.
+Neither the default SDK nor `@originals/sdk/v3` accepts or translates earlier
+asset logs or envelopes. Preserve old histories and their matching verifier
+when maintaining historical records. Changing a proof label cannot convert a
+signed history to CEL 3. Creating an asset anew produces a new identity; it does
+not preserve the old asset's authenticated lineage.
 
----
+CEL 3 envelopes have `format: 'originals/asset'`, `version: 3`, an `eventLog`
+containing `{ log: [...] }`, and explicit base64 resource attachments. Loading
+checks the history and the actual bytes of every supplied resource version.
+`allowPartial: true` can retain incomplete evidence, but never bypasses signature
+or supplied-byte verification.
 
-## 1. `createAsset` now requires custody
+## 2. Asset custody uses `CelSigner`
 
-**Breaks:** `createAsset` / `createDraft` throw `NO_CUSTODY`.
-
-Previously, with no `keyStore` and no signer, the SDK generated the asset's controller key and immediately discarded it. The asset minted fine and could never author another event — `publishToWeb` and `inscribeOnBitcoin` would still report success while silently omitting their provenance events. That was the default, and the shape of the documented quickstart.
-
-```ts
-// before — worked, produced an asset that could never be published
-const sdk = OriginalsSDK.create({ network: 'mainnet' });
-const asset = await sdk.lifecycle.createAsset(resources);
-
-// after — pick one
-const sdk = OriginalsSDK.create({ network: 'mainnet', keyStore });        // local keys
-const sdk = OriginalsSDK.create({ network: 'mainnet', signer });          // remote custody
-const asset = await sdk.lifecycle.createAsset(resources, { signer });     // or per call
-```
-
-If you genuinely want a throwaway asset that can never author again, say so:
+A CEL 3 signer declares `algorithm`, a canonical `did:key` `controller`, and
+`sign(message): Promise<Uint8Array>`. Supported algorithms are Ed25519, P-256
+and P-384. Configure a signer or pass one per operation; creation without one
+throws `NO_CUSTODY`.
 
 ```ts
-await sdk.lifecycle.createAsset(resources, { controller: 'ephemeral' });
+import { OriginalsSDK, createLocalSigner } from '@originals/sdk';
+
+// Obtain secretKeyBytes from your own custody.
+const signer = createLocalSigner('Ed25519', secretKeyBytes);
+const sdk = OriginalsSDK.create({ signer });
+const asset = await sdk.lifecycle.createAsset([
+  { id: 'art', mediaType: 'image/png', content: pngBytes },
+], { name: 'First edition' });
+await asset.addResourceVersion('art', revisedPngBytes, 'image/png');
+const { asset: restored, verification } =
+  await OriginalsSDK.create().lifecycle.loadAsset(JSON.stringify(asset.serialize()));
 ```
 
-`'ephemeral'` is honoured even when a keyStore is configured — the key is not persisted. Passing both `options.signer` and `controller: 'ephemeral'` throws `CONTRADICTORY_CUSTODY`, because those are opposite instructions and guessing between them is what 3.0 removes.
+The retained `OriginalsSigner`/`ExternalSigner` utilities use different interfaces;
+they cannot be passed straight into this lifecycle. Implement the `CelSigner`
+contract for remote custody, including its algorithm-specific hashing and
+fixed-width signature requirements; see [the signing contract](../packages/cel/V3.md#offline-creation-and-continuation).
+Every returned signature is checked. A `keyStore` alone configures independent
+identity/credential utilities; it does not select an asset controller. The old
+`controller: 'ephemeral'` creation option is not supported.
 
-## 2. Lifecycle operations throw when they cannot sign their provenance event
+## 3. Mutations and publication return explicit results
 
-**Breaks:** `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys` — and the asset-level `update` appends — throw `CEL_APPEND_FAILED`.
+Use `asset.update`, `asset.addResourceVersion`, `asset.rotateKey` and
+`asset.deactivate`. The outgoing controller authorizes rotation; later edits
+require the new controller. Holder possession does not grant controller authority.
 
-An operation has not succeeded if the log is missing the migration it just performed. Previously these emitted `cel:append-skipped` and continued, so you could hold a published asset whose provenance log had a hole in it.
+Mutations serialize per asset instance. A failed signature preserves the previous
+committed state. Explicit `onAppendFailure: 'skip'` permits missing-custody skips,
+not invalid signatures or unauthorized signers. Skipped resource edits remain
+unsigned local drafts and make full verification false until signed or discarded.
 
-```ts
-// restore the old behaviour explicitly, per call or globally
-await sdk.lifecycle.publishToWeb(asset, 'example.com', { onAppendFailure: 'skip' });
-OriginalsSDK.create({ ..., onAppendFailure: 'skip' });
-```
+Hosted publication takes `publishToWeb(asset, { domain })` and returns a new
+published asset. Bitcoin publication uses preparation, durable submission and
+fresh sat resolution. A signed proposal or broadcast acknowledgement does not
+establish acceptance. See [publication and recovery](../packages/sdk/V3.md#hosted-publication)
+for configuration, return states and retry requirements.
 
-One exception is unchanged: a legacy asset with no CEL log still degrades rather than throwing, because no configuration could give it one.
+## 4. Imports select the CEL 3 implementation explicitly
 
-## 3. Remote custody: use `OriginalsSigner`
+- `@originals/sdk`: default CEL 3 SDK and independent utilities.
+- `@originals/sdk/v3`: smaller local-only SDK.
+- `@originals/sdk/cel`: CEL 3 core, equivalent to `@originals/cel/v3`.
+- `@originals/sdk/types`: current public asset types.
+- `@originals/sdk/testing`: provider test doubles.
 
-**New, and the reason for the release.** One interface, three members:
+The standalone `@originals/cel` root still exposes retained previous-format APIs
+and a `celV3` namespace. Its root is **not interchangeable** with `@originals/sdk/cel`.
+Use `@originals/cel/v3` for new standalone histories.
 
-```ts
-interface OriginalsSigner {
-  readonly verificationMethodId: string;   // "did:key:z6Mk…#z6Mk…"
-  readonly publicKeyMultibase: string;
-  signBytes(bytes: Uint8Array): Promise<Uint8Array>;
-}
-```
+Previous asset exports such as `OriginalsCel`, `createEventLog`, `verifyEventLog`,
+`toCelSigner`, witness factories and old batch/lifecycle APIs are removed from
+the SDK root. See the [removed surfaces](../packages/sdk/V3.md#public-entry-points-and-removed-surfaces).
+There is no `@originals/sdk/legacy` fallback.
 
-The SDK canonicalizes and hashes; your signer only ever signs opaque bytes. Accept it on the config or per call. Adapters convert in both directions — `signerFromKeyPair`, `signerFromKeyStore`, `signerFromExternalSigner`, `toCelSigner`, `toExternalSigner`.
+## 5. CEL 3 uses standard JCS cryptosuite identifiers
 
-Before shipping an implementation, run the conformance harness:
+CEL 3 emits `DataIntegrityProof` with `eddsa-jcs-2022` for Ed25519, or
+`ecdsa-jcs-2019` for P-256/P-384. These suites are defined in the W3C
+[EdDSA](https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/) and
+[ECDSA](https://www.w3.org/TR/2025/REC-vc-di-ecdsa-20250515/) Recommendations.
+The signing message binds both the canonicalized proof configuration and event
+through their hashes. See [the implementation](../packages/cel/src/v3/proofs.ts).
 
-```ts
-import { assertSignerConformance } from '@originals/sdk';
-await assertSignerConformance(mySigner);
-```
+`originals-cel-ed25519-jcs-v1` belongs to the retained previous-format code.
+It honestly labels a custom construction; it is neither emitted nor accepted by
+the CEL 3 implementation. Some even older proofs used the standard-looking
+`eddsa-jcs-2022` label with a different signing construction. Their label does
+not make those histories CEL 3, and relabelling does not migrate them.
 
-`KeyStore` is now key **persistence**, not a signing authority. It still works for local-key flows.
+`originals/cel/3` identifies the Originals **application profile**: asset operations,
+controller authorization and supported CEL features. It is not a cryptosuite.
+The [selected profile](../specs/originals-cel-v3-profile.md) is based on the CCG
+community draft; this is not certification of every CCG feature or generic
+processor interoperability.
 
-**Turnkey users:** `@originals/auth`'s signers already sign bytes — they are `ExternalSigner`-shaped (`signBytes` resolves `{ signature }`), so wrap once and pass the result anywhere:
+## 6. Independent auth and byte utilities
 
-```ts
-import { signerFromExternalSigner } from '@originals/sdk';
-const signer = signerFromExternalSigner(turnkeySigner);
-```
+Import auth server utilities from `@originals/auth/server` and client utilities
+from `@originals/auth/client`. The auth root carries types and the isomorphic
+`turnkeySignBytes` helper, rather than re-exporting server code.
 
-If the signer's verification method is not a `did:key`, pass `{ publicKeyMultibase }` — otherwise it throws `SIGNER_PUBLIC_KEY_REQUIRED`. Turnkey's Ed25519 accounts use `ADDRESS_FORMAT_SOLANA`, whose address is base58 of the raw key with **no multicodec header** — so `did:key:${account.address}` is not a valid did:key. Convert it:
+Public byte APIs use `Uint8Array`. On Node, convert with
+`Buffer.from(bytes).toString('hex')` when a Buffer encoding method is needed;
+`Uint8Array.toString()` does not produce hex. Browser integrations should use
+portable byte encoders.
 
-```ts
-import { base58AddressToEd25519Multikey } from '@originals/sdk';
-const publicKeyMultibase = base58AddressToEd25519Multikey(account.address);
-```
-
-## 4. `ExternalSigner` must implement `signBytes`
-
-**Breaks:** `signCredentialWithExternalSigner` throws `EXTERNAL_SIGNER_SIGNBYTES_REQUIRED` for a `sign()`-only signer.
-
-The old path hardcoded `cryptosuite: 'eddsa-rdfc-2022'` and then let the signer choose its own canonicalization. Every didwebvh-shaped signer chooses JCS, so the proof was labelled RDFC and signed over JCS bytes: **no credential signed that way ever verified.** Nothing depended on this working, because it didn't.
-
-It also now throws `ISSUER_BINDING_MISMATCH` if the credential's `issuer` is not controlled by the signing key — matching the local-key path, and matching what the verifier checks.
-
-## 5. The CEL cryptosuite is renamed, and the proof configuration is signed
-
-**Breaks:** anything matching the literal `'eddsa-jcs-2022'`.
-
-New proofs carry `originals-cel-ed25519-jcs-v1`. The old label was never that suite — there was no hashing step and the proof configuration was excluded from the signature, so `created`, `verificationMethod` and `proofPurpose` were editable after signing.
-
-**Logs sealed before 3.0 keep verifying.** `eddsa-jcs-2022` is accepted on read, permanently, and never written again. Use the exported constants rather than string literals:
-
-```ts
-import { CEL_CRYPTOSUITE, CEL_CRYPTOSUITE_LEGACY } from '@originals/sdk';
-```
-
-If you sign CEL events yourself, the preimage changed — `signingInput.celEvent(entry, proofConfig)` now takes the proof configuration as a second argument. A signer that ignores it fails at seal time rather than silently later.
-
-## 6. Imports: curated subpaths, and test doubles moved
-
-**Breaks:** deep subpath imports.
-
-The `exports` map wildcarded eleven internal directories, making every internal file a permanent API commitment. Supported entry points are now `.`, `./cel`, `./testing`, `./types`.
-
-```ts
-// before
-import { OrdMockProvider } from '@originals/sdk';
-import { multikey } from '@originals/sdk/crypto/Multikey';
-
-// after
-import { OrdMockProvider } from '@originals/sdk/testing';
-import { multikey } from '@originals/sdk';
-```
-
-`retry` and `circuit-breaker` are no longer root exports. If you need something that moved, it is almost certainly on the root — open an issue if not.
-
-## 7. `Buffer` → `Uint8Array`
-
-**Breaks:** anything passing or expecting `Buffer` across the public API — `Signer` and its subclasses, `OrdinalsProvider`, `StorageAdapter`, `OrdinalsInscription.content`, `ResourceManager`, `KeyManager`.
-
-`Buffer` is a Node global; a browser consumer without a shim gets a `ReferenceError`. `Buffer` *is* a `Uint8Array`, so passing one still works — it is reading the return values that changes:
-
-```ts
-// before
-const hex = sig.toString('hex');
-
-// after, on Node — Buffer still exists, it just isn't handed to you
-const hex = Buffer.from(sig).toString('hex');
-
-// after, portable — no dependency, works in a browser
-const hex = [...sig].map((b) => b.toString(16).padStart(2, '0')).join('');
-```
-
-Going the other way, the SDK exports `encoding.hexToBytes`.
-
-## 8. `@originals/auth`: the root no longer re-exports server code
-
-**Breaks:** importing server utilities from the package root. The root now carries types plus the isomorphic `turnkeySignBytes`; everything else moved behind `./server` and `./client`.
-
-```ts
-// before — pulled jsonwebtoken, @turnkey/sdk-server and Express into browser bundles
-import { createAuthMiddleware } from '@originals/auth';
-
-// after
-import { createAuthMiddleware } from '@originals/auth/server';
-import { initOtp } from '@originals/auth/client';
-```
-
-If you were reaching into `@originals/auth` for Turnkey key encoding, see §3 — `base58AddressToEd25519Multikey` lives on `@originals/sdk`.
-
-## 9. New package: `@originals/cel`
-
-The CEL core — create, append, verify event logs — is now its own package with no Bitcoin stack, no `jsonld`, and no Node builtins. If you only create and verify logs, depend on it directly and skip the rest.
-
-**No existing import breaks.** `@originals/sdk/cel` re-exports the *entire* `@originals/cel` surface — that subpath and the standalone package are now interchangeable. The `@originals/sdk` root carries most of it but not all: eleven symbols (`appendEvent`, `committedFields`, `canonicalizeEntryForChain`, `cbor`, `btcoDidFromSatoshi`, …) live only on `./cel`. If a CEL import fails from the root, take it from `@originals/sdk/cel`.
-
----
-
-## 10. Retained `/vc` utilities use current RDFC-1.0 canonicalization
+## 7. Retained credential utilities use current RDFC-1.0 canonicalization
 
 **Breaks:** some credentials signed with earlier JSON-LD canonicalization can fail verification through credential utilities exported from `@originals/sdk` after upgrading.
 
@@ -180,9 +127,8 @@ The canonicalizer also enforces complexity limits for graphs with certain blank-
 
 ## Recommended upgrade order
 
-1. Configure custody (§1) — everything else depends on it.
-2. Run your test suite and fix the throws. Each one marks a place that was previously failing silently.
-3. Fix imports (§6, §8) — the compiler finds these for you.
-4. Only then look at `Buffer` (§7); most call sites need no change.
-
-If something that used to work now throws and the message doesn't make the fix obvious, that's a bug in the message — please open an issue with it.
+1. Inventory previous-format histories and keep their verification path separate.
+2. Implement CEL 3 custody and update resource inputs and imports.
+3. Exercise creation, mutation, serialization and fresh recovery with real resource bytes.
+4. Update hosted/Bitcoin publication and durable retry integrations using the API guide.
+5. Check representative retained credentials for the canonicalization changes above.
