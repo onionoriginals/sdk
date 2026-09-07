@@ -124,3 +124,5 @@ These results close the implementation gaps requested in #583, #570 and #572.
 They do not establish live Turnkey service behavior, a new production deployment,
 new npm publication, or a new public-chain transcript. The existing release map's
 separate API/spec, clean-browser mainnet and release sign-off gates remain distinct.
+
+Supplemental shutdown-probe review: [pinned receipt](evidence/identity-regtest-completion/supplemental-review.json), no remaining findings at commit `1eab0c1f`.

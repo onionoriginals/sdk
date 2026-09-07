@@ -1,0 +1,40 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "review_kind": "supplemental read-only review",
+  "parent_run_id": "20260907-003521-535836cb",
+  "base": "8351976159866c8770dcdcb93a9c4ba2678e43e5",
+  "head_sha": "1eab0c1f4a104bbd9d22d40c4183e189ff0826c2",
+  "files_reviewed": [
+    "scripts/regtest/assert-stopped.ts",
+    "scripts/regtest/assert-stopped.test.ts",
+    "scripts/regtest/restart-check.ts",
+    ".github/workflows/regtest.yml"
+  ],
+  "diff_sha256": "60f2e493d46f3f8ac130774e458f0fb134bd8155ec97649fd98cf2daf3fd0b1f",
+  "findings": [],
+  "actionable_findings": [],
+  "resolved_during_review": [
+    {
+      "file": "scripts/regtest/assert-stopped.ts",
+      "issue": "Default fetch redirects could turn a live endpoint redirecting to a closed port into an accepted connection-refusal result.",
+      "resolution": "Fetch uses redirect: manual; regression proves a redirect response from a live original endpoint fails the stopped check."
+    }
+  ],
+  "coverage": [
+    "Inspected refusal-only matching for Bun direct ConnectionRefused/ECONNREFUSED and Node cause.ECONNREFUSED.",
+    "Inspected timeout/hung-listener, live HTTP response, closed endpoint and redirect-to-closed-port regressions.",
+    "Verified restart-check uses the helper and CI executes download, environment and stopped-endpoint unit files.",
+    "Read the fresh real Core31.1/ord0.29 restart receipt: result pass, independent and combined restarts, queued restart handling, failed-restart cleanup and preserved inscription bytes.",
+    "No production changes; broader original review receipt remains unchanged."
+  ],
+  "verification": {
+    "reviewer_execution": "No tests or builds run by this reviewer.",
+    "parent_reported": "8 harness unit tests /16 assertions pass;3 guard tests /4 assertions pass; regtest typecheck passes.",
+    "observed_receipt": "/tmp/originals-completion-restart-final.json",
+    "retained_receipt": "docs/release/evidence/identity-regtest-completion/regtest-restart.json",
+    "receipt_result": "pass"
+  },
+  "completed_at": "2026-09-07T08:01:10.882355+00:00",
+  "artifact_path": "/tmp/compound-engineering-501/ce-code-review/20260907-003521-535836cb/supplemental-review.json"
+}
