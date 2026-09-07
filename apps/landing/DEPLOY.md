@@ -340,3 +340,14 @@ lives in the Railway dashboard.
 | --- | --- | --- |
 | 2026-09-06 read-only API check | No schedules and no backup snapshots on the production builder volume. Enable and verify before release. | Not enabled |
 | 2026-09-06 authorized preflight | Daily, six-day retention; manual pre-release backup and isolated native restore verified (361 files, 50 valid JSON files). Temporary restore resources removed; original production volume retained. See `docs/release/evidence/production-backup-restore.json`. | Codex, with owner authorization |
+
+## Storage and single-writer release guards
+
+A deployed authenticated server refuses startup if `ORIGINALS_DATA_DIR` is
+missing, unwritable, or outside a mounted volume, even when `CONFIG_STRICT` is
+off. This protects the retained signed transaction pairs used for recovery.
+
+Run one replica. The server claims `.instance.lock` in the data directory before
+opening either durable store. A second writer refuses startup. After an unclean
+exit, allow 60 seconds for stale-lock recovery; a process that loses ownership
+terminates. During deployment, stop the old writer before starting the new one.
