@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, spyOn } from 'bun:test';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 import { ResourceVersionManager } from '../../../src/lifecycle/ResourceVersioning';
-import { AssetResource, DIDDocument, VerifiableCredential, OriginalsConfig } from '../../../src/types';
+import { AssetResourceInput, DIDDocument, VerifiableCredential, OriginalsConfig } from '../../../src/types';
 import { hashResource } from '../../../src/utils/validation';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
@@ -135,7 +135,7 @@ describe('ResourceVersionManager', () => {
 
 describe('OriginalsAsset - Resource Versioning', () => {
   test('creates asset with initial resource version 1', () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -155,7 +155,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('addResourceVersion creates new version and preserves old', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -176,11 +176,11 @@ describe('OriginalsAsset - Resource Versioning', () => {
     // Old version should still be accessible
     const v1 = asset.getResourceVersion('res1', 1);
     expect(v1).not.toBeNull();
-    expect(v1!.content).toBe('hello');
+    expect(v1!.content).toEqual(new TextEncoder().encode('hello'));
   });
 
   test('addResourceVersion throws error if content unchanged', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -196,7 +196,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('addResourceVersion throws error if resource not found', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -212,7 +212,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('getAllVersions returns all versions sorted', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -234,7 +234,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('getResourceHistory returns complete history', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -255,7 +255,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('version chain integrity is verifiable', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -281,7 +281,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('emits resource:version:created event', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -316,7 +316,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('directly-constructed asset degrades: no appender ⇒ no provenance, emits cel:append-skipped', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -348,7 +348,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
     
     expect(hash1).not.toBe(hash2);
     
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -365,9 +365,9 @@ describe('OriginalsAsset - Resource Versioning', () => {
     expect(newResource.hash).not.toBe(hash1);
   });
 
-  test('addResourceVersion rejects Buffer content instead of silently dropping it (issue #276)', async () => {
+  test('addResourceVersion preserves Buffer content without retaining its backing memory', async () => {
     const buffer1 = Buffer.from('binary content 1', 'utf-8');
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'data',
@@ -378,16 +378,15 @@ describe('OriginalsAsset - Resource Versioning', () => {
 
     const asset = new OriginalsAsset(resources, buildDid('did:cel:xyz'), emptyCreds);
     const buffer2 = Buffer.from('binary content 2', 'utf-8');
-    // Buffer content used to be accepted but only its hash was stored — the
-    // bytes were unrecoverably lost. It now throws so the loss is impossible.
-    // The parameter is declared `string` since issue #311, so JS callers
-    // (modelled with the cast) still hit the runtime guard.
-    await expect(asset.addResourceVersion('res1', buffer2 as unknown as string, 'application/octet-stream'))
-      .rejects.toThrow(/binary \(Buffer\) content/);
+    const version = await asset.addResourceVersion('res1', buffer2, 'application/octet-stream');
+    expect(version.content).toEqual(new Uint8Array(buffer2));
+    expect(version.hash).toBe(hashResource(buffer2));
+    buffer2.fill(0);
+    expect(hashResource(version.content!)).toBe(version.hash);
   });
 
   test('versioning works across all layers (did:cel)', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -405,7 +404,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('versioning works across all layers (did:webvh)', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -423,7 +422,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('versioning works across all layers (did:btco)', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -441,7 +440,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('multiple resources can be versioned independently', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -472,7 +471,7 @@ describe('OriginalsAsset - Resource Versioning', () => {
   });
 
   test('timestamp is recorded for each version', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -501,7 +500,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
     const hash3 = hashResource(Buffer.from('v3', 'utf-8'));
     
     // Simulate persisted resources loaded in wrong order [v3, v1, v2]
-    const unsortedResources: AssetResource[] = [
+    const unsortedResources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',
@@ -565,7 +564,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
     const res2_v2_hash = hashResource(Buffer.from('res2-v2', 'utf-8'));
     
     // Multiple resources, each with unsorted versions
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       // res2 v2 (out of order)
       {
         id: 'res2',
@@ -623,7 +622,7 @@ describe('OriginalsAsset - Unsorted Resource Loading', () => {
 
 describe('OriginalsAsset - Credential Integration', () => {
   test('credential can be issued for version creation (integration check)', async () => {
-    const resources: AssetResource[] = [
+    const resources: AssetResourceInput[] = [
       {
         id: 'res1',
         type: 'text',

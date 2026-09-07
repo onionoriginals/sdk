@@ -13,7 +13,8 @@
  * setting QUICKNODE_ENDPOINT + BTC_FAUCET_WALLET_ID + BTC_FAUCET_ADDRESS.
  */
 import { createInMemorySessionStorage } from '@originals/auth/server';
-import { QuickNodeProvider } from '@originals/sdk';
+import { QuickNodeProvider, RegtestProvider } from '@originals/sdk';
+import { regtestOrdinalLookup } from './server/regtest';
 import { buildFetch } from './server/app';
 import { createWebvhHostStore } from './server/webvh-host';
 import { buildRoutes } from './server/index';
@@ -34,12 +35,17 @@ import {
   type FaucetTxSigner,
   type OrdinalLookup,
 } from './server/bitcoin';
+import { startBlockCompletion } from './server/block-completion';
 import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { checkConfig, isStrictConfig, resolveDataDir } from './server/config';
+import {
+  createInscriptionCompletionSweep,
+  type SweepProvider,
+} from './server/inscription-completion-sweep';
+import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
@@ -67,7 +73,10 @@ const inscriptionsStore = createInscriptionsStore({ dataDir: originalsDataDir })
 // this on first RPC (the CHAIN_TO_NETWORK guard from issue #350) and fails
 // loudly on a mismatch — the seatbelt against a wrong-network endpoint.
 const btcNet = serverBtcNetwork();
-const providerNetwork = btcNet === 'mainnet' ? 'mainnet' : 'testnet';
+const providerNetwork = btcNet === 'testnet4' ? 'testnet' : btcNet;
+const regtestProvider = btcNet === 'regtest' ? new RegtestProvider({
+  rpcUrl: process.env.REGTEST_RPC_URL!, ordUrl: process.env.REGTEST_ORD_URL!, rpcAuth: process.env.REGTEST_RPC_AUTH!,
+}) : undefined;
 // The deposit indexer seam (KTD4): ONE configurable, optionally authenticated
 // Esplora-shaped base URL behind every address->UTXO read in this process —
 // the creator-pays deposit route AND the testnet4 faucet alike. Defaults to
@@ -83,7 +92,7 @@ const money = createMoneyLogger();
 // pay a call per UTXO per tick. ABSENT without a QuickNode endpoint, which
 // makes the deposit route offer NOTHING as spendable — fail closed, because a
 // 546-sat ordinal pulled in as a top-up is an inscription burned as fees.
-const ordinals: OrdinalLookup | undefined = process.env.QUICKNODE_ENDPOINT
+const ordinals: OrdinalLookup | undefined = regtestProvider ? regtestOrdinalLookup(regtestProvider) : process.env.QUICKNODE_ENDPOINT
   ? cachedOrdinalLookup(quickNodeOrdinalLookup({ endpoint: process.env.QUICKNODE_ENDPOINT }))
   : undefined;
 
@@ -91,10 +100,10 @@ const ordinals: OrdinalLookup | undefined = process.env.QUICKNODE_ENDPOINT
 // reads are NOT QuickNode: its Ordinals add-on has no address surface and Core
 // there has no address index — see resolveIndexer in server/bitcoin.ts.
 function createFaucetProviderFromEnv(): FaucetProvider {
-  const provider = new QuickNodeProvider({
+  const provider = (regtestProvider ?? new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: providerNetwork,
-  }) as unknown as FaucetProvider;
+  })) as unknown as FaucetProvider;
   // Network threaded through so the P2WPKH script derivation matches the
   // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
   // calls this today, but a mainnet caller must not hit the tb1q-only path.
@@ -114,21 +123,21 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   const turnkey = getTurnkey();
   let bitcoin;
   if (isBitcoinConfigured()) {
-    if (btcNet === 'mainnet') {
+    if (btcNet === 'mainnet' || btcNet === 'regtest') {
       // Creator-pays mainnet: NO faucet — the creator deposits to their own
       // Turnkey-derived bc1q address and the inscription spends their UTXO.
       // The funding route is stripped entirely (not merely disabled).
       const routes = createBitcoinRoutes({
         jwtSecret,
         provider: createFaucetProviderFromEnv(),
-        network: 'mainnet',
+        network: providerNetwork,
         indexer,
         ordinals,
         moneyLog: money,
         inscriptions: inscriptionsStore,
       });
       bitcoin = { ...routes, funding: undefined };
-      console.log('[landing] MAINNET inscription configured — /api/btc/* live (creator-pays, no faucet)');
+      console.log(`[landing] ${btcNet} inscription configured — /api/btc/* live (creator-pays, no faucet)`);
       // Which index a stranger's deposit is actually read from, on one line.
       console.log(
         `[landing] deposit indexer: ${indexer.api}${indexer.authToken ? ' (authenticated)' : ' (no token — free public tier)'}`
@@ -175,6 +184,16 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   };
 }
 
+/**
+ * The canonical host for did:webvh (#529). Bare hostname only — the DID embeds
+ * it verbatim, so a scheme or path here would mint identifiers that cannot
+ * resolve. Unset (dev, tests) means no redirect and no pinning.
+ */
+function canonicalWebvhHost(): string | undefined {
+  const v = process.env.VITE_WEBVH_HOST?.trim();
+  return v && isBareHost(v) ? v : undefined;
+}
+
 const api = buildApiRoutes();
 
 const server = Bun.serve({
@@ -185,6 +204,10 @@ const server = Bun.serve({
     hostStore,
     distDir: DIST,
     originals: api?.originals ?? null,
+    // The one host did:webvh identifiers may name (#529). Same value the SPA
+    // bakes in, read at runtime here so the redirect and the DID agree; a bad
+    // value is already a named violation in the boot config report.
+    canonicalHost: canonicalWebvhHost(),
   }),
   // Last line of defence (R3): a handler that throws must not reach a client
   // as an untyped 500 with nothing in the log. One named JSON body, one
@@ -225,7 +248,34 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
+  // Finish what can be finished (#545), BEFORE reporting what is stuck: a
+  // record this pass completes should not also be warned about as stranded.
+  // Its own provider instance: the routes build theirs inside buildApiRoutes
+  // and never expose it, and a sweep that only reads status and broadcasts
+  // needs nothing the routes' instance holds. Same endpoint, same network.
+  const completionSweep = createInscriptionCompletionSweep({
+    store: inscriptionsStore,
+    provider: createFaucetProviderFromEnv() as unknown as SweepProvider,
+    moneyLog: money,
+    maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
+  });
+  const complete = async () => {
+    const r = await completionSweep();
+    if (r.completed > 0 || r.failed > 0) {
+      console.warn(
+        `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
+          `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
+      );
+    }
+  };
+  const blockCompletion = startBlockCompletion({
+    url: resolveBlockEventsUrl(process.env),
+    complete,
+    onError: (error) => console.warn(`[landing] ${error.message}`),
+  });
+  process.once('exit', () => blockCompletion.stop());
   const sweep = () => {
+    void blockCompletion.request();
     try {
       const { stale, unreadable } = inscriptionsStore.sweepStale(24 * 60 * 60_000);
       if (stale.length > 0) {

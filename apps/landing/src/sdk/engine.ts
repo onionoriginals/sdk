@@ -1,3 +1,5 @@
+import { fundingSignerAddress } from '../auth/turnkey-session';
+import { contentBytes, contentText, resourceView, type ResourceContent } from './resource-view';
 /**
  * The live engine behind the landing-page demo.
  *
@@ -102,7 +104,7 @@ export interface DemoAssetState {
     id: string;
     hash: string;
     contentType: string;
-    content: string;
+    content: ResourceContent;
     /** 1 at genesis; bumped by each signed `update` event. */
     version: number;
   };
@@ -178,7 +180,7 @@ export class DemoEngine {
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     const keys = this.keys;
     // Real signing over the /api/btc/* QuickNode proxies needs BOTH: a deploy
-    // that enables it (VITE_BTC_NETWORK=testnet4|mainnet) AND a signed-in
+    // that enables it (VITE_BTC_NETWORK=testnet4|mainnet|regtest) AND a signed-in
     // visitor with a key to sign with. Anonymous visitors keep the
     // self-contained OrdMockProvider on every network — the flag alone used to
     // hand them an enabled money button that errored (R5/KTD2). The flag is
@@ -328,18 +330,20 @@ export class DemoEngine {
 
   /**
    * Step 1 — create a did:cel asset. The primary resource is the artwork
-   * itself: a real SVG file whose exact bytes are hashed and carried through
+   * itself: a file whose exact bytes are hashed and carried through
    * the whole lifecycle. A small JSON metadata resource rides along.
    */
-  async create(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
-    const svgBytes = new TextEncoder().encode(artworkSvg);
+  async create(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
+    const src = asSource(source);
+    const svgBytes = contentBytes(src.content);
     const svgHash = toHex(sha256(svgBytes));
 
     const metadata = buildMetadata({
       title,
-      medium,
+      style,
       created: new Date().toISOString(),
-      artworkHash: svgHash
+      artworkHash: svgHash,
+      artworkFile: src.filename
     });
     const metaBytes = new TextEncoder().encode(metadata);
 
@@ -350,10 +354,10 @@ export class DemoEngine {
     const authorship = await this.resolveAuthorshipSigner();
     const asset = await this.sdk.lifecycle.createAsset([
       {
-        id: 'artwork.svg',
-        type: 'image',
-        content: artworkSvg,
-        contentType: 'image/svg+xml',
+        id: src.filename,
+        type: resourceKind(src.contentType),
+        content: src.content,
+        contentType: src.contentType,
         hash: svgHash,
         size: svgBytes.length
       },
@@ -401,7 +405,7 @@ export class DemoEngine {
    * never names a resource URL that 404s. did:btco is refused here because an
    * update there is a PAID on-chain append — real sats, not a demo click.
    */
-  async update(title: string, medium: string, artworkSvg: string): Promise<DemoAssetState> {
+  async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     const asset = this.asset;
     if (!asset) throw new Error('Create an asset first');
     if (asset.currentLayer === 'did:btco') {
@@ -411,7 +415,8 @@ export class DemoEngine {
     }
 
     const current = this.snapshot();
-    const svgHash = toHex(sha256(new TextEncoder().encode(artworkSvg)));
+    const src = asSource(source);
+    const svgHash = toHex(sha256(contentBytes(src.content)));
 
     // The SAME controller that signed genesis. An `update` is a signed CEL
     // append like any other, and supplying a signer to `createAsset` means the
@@ -425,27 +430,28 @@ export class DemoEngine {
     // The artwork is generated FROM the title, so a text edit changes these
     // bytes — that is the edit. Skip when identical: addResourceVersion refuses
     // a no-op version rather than logging one.
-    if (artworkSvg !== current.resource.content) {
+    if (svgHash !== current.resource.hash || src.contentType !== current.resource.contentType) {
       await asset.addResourceVersion(
         current.resource.id,
-        artworkSvg,
-        'image/svg+xml',
+        src.content,
+        src.contentType,
         `Artwork regenerated for "${title}"`,
         signed
       );
       this.assetResourceHash = svgHash; // the /me summary posts this on publish
     }
 
-    // metadata.json embeds the title, the medium AND the artwork's sha-256, so
+    // metadata.json embeds the title, the style AND the artwork's sha-256, so
     // leaving it at v1 would have the asset's own metadata describe bytes it no
     // longer carries. Genesis `created` is preserved — it is when the asset was
     // made, not when it was last edited.
     if (current.metadata) {
       const next = buildMetadata({
         title,
-        medium,
+        style,
         created: createdAtOf(current.metadata.content),
-        artworkHash: svgHash
+        artworkHash: svgHash,
+        artworkFile: current.resource.id
       });
       if (next !== current.metadata.content) {
         await asset.addResourceVersion(
@@ -588,6 +594,8 @@ export class DemoEngine {
       fundingUtxo?: { txid: string; vout: number; value: number; scriptPubKey?: string; address?: string };
       changeAddress: string;
       signingClient: TurnkeyBitcoinClient;
+      /** Optional signer account identifier when it differs from the output address. */
+      signWith?: string;
     };
   }): Promise<DemoAssetState> {
     if (!this.asset) throw new Error('Create an asset first');
@@ -596,7 +604,7 @@ export class DemoEngine {
       // Real sat-selected path: the user's Turnkey key signs the commit.
       const satSigner = new TurnkeySatSigner({
         client: opts.funding.signingClient,
-        signWith: opts.funding.changeAddress, // the user's funding address IS signWith
+        signWith: opts.funding.signWith ?? fundingSignerAddress(opts.funding.changeAddress),
       });
       const fundingUtxos =
         opts.funding.fundingUtxos ?? (opts.funding.fundingUtxo ? [opts.funding.fundingUtxo] : []);
@@ -690,11 +698,11 @@ export class DemoEngine {
         id: res.id,
         hash: res.hash,
         contentType: res.contentType,
-        content: res.content ?? '',
+        content: resourceView(res.content, res.contentType),
         version: res.version ?? 1
       },
       metadata: meta
-        ? { id: meta.id, hash: meta.hash, content: meta.content ?? '' }
+        ? { id: meta.id, hash: meta.hash, content: contentText(meta.content ?? new Uint8Array()) }
         : undefined,
       credentials: asset.credentials.length,
       celLog: celEntries(asset),
@@ -718,22 +726,51 @@ export class DemoEngine {
 
 
 /**
+ * What the asset is made of: the primary resource's bytes and how to publish
+ * them. Generated artwork is the default, but a visitor can now bring their own
+ * PNG, SVG or text file, and those travel the same lifecycle byte-for-byte.
+ */
+export interface AssetSource {
+  /** Exact content. Strings are UTF-8 convenience input; files use Uint8Array. */
+  content: ResourceContent;
+  contentType: string;
+  /** The resource id — also the filename it is published under. */
+  filename: string;
+}
+
+/** A bare string is legacy shorthand for generated SVG artwork. */
+function asSource(source: string | AssetSource): AssetSource {
+  return typeof source === 'string'
+    ? { content: source, contentType: 'image/svg+xml', filename: 'artwork.svg' }
+    : source;
+}
+
+/** The SDK's coarse resource `type`, from the media type it carries. */
+function resourceKind(contentType: string): string {
+  return contentType.startsWith('image/') ? 'image' : 'text';
+}
+
+/**
  * The asset's metadata resource. One builder for genesis and every revision —
  * two shapes here would let an edit silently change a field it never meant to.
  */
 function buildMetadata(input: {
   title: string;
-  medium: string;
+  style: string;
   created: string;
   artworkHash: string;
+  artworkFile: string;
 }): string {
   return JSON.stringify(
     {
       title: input.title,
-      medium: input.medium,
+      // Renamed from `medium`: the value names the generative style, which is
+      // what it always actually described. Readers fall back to `medium` so
+      // assets published before the rename still show their label.
+      style: input.style,
       creator: 'you',
       created: input.created,
-      artwork: { file: 'artwork.svg', sha256: input.artworkHash }
+      artwork: { file: input.artworkFile, sha256: input.artworkHash }
     },
     null,
     2
@@ -755,7 +792,7 @@ interface VersionedResource {
   id: string;
   hash: string;
   contentType: string;
-  content?: string;
+  content?: Uint8Array;
   version?: number;
 }
 

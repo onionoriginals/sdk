@@ -11,7 +11,7 @@ export function Hero() {
   // fresh per visit, live-updated as the visitor edits it in the demo.
   const seed = useSyncExternalStore(subscribeArtSeed, getArtSeed);
   const art = useMemo(
-    () => generateArtwork(seed.title, seed.medium, seed.nonce, { transparent: true }),
+    () => generateArtwork(seed.title, seed.style, seed.nonce, { transparent: true }),
     [seed]
   );
 

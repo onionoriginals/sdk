@@ -307,6 +307,8 @@ Content-Type: application/json
 
 ### 4.5 Bitcoin Witness (btco Layer)
 
+> **Superseded on-chain shape.** The on-chain shape described in this section 4.5 (and the `{ didDocument, celLog }` inscription metadata) is superseded by the decision record at [specs/btco-inscription-shape.md](../specs/btco-inscription-shape.md) and will change in a future major release. The text below is retained for reference until that change lands.
+
 #### 4.5.1 BitcoinWitnessProof Structure
 
 ```json

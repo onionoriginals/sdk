@@ -10,11 +10,13 @@
  * advisory-only, never trusted at load/verify time. Post-genesis resource
  * updates are signed `update` log events (#Phase 4) — folded from the log, not advisory.
  */
-import type { AssetResource, DIDDocument, VerifiableCredential } from '../types/index.js';
+import type { DIDDocument, VerifiableCredential } from '../types/index.js';
+import type { SerializedAssetResource } from '../utils/resource-content.js';
+export type { EncodedResourceContent, SerializedAssetResource } from '../utils/resource-content.js';
 import type { EventLog } from '@originals/cel';
 
 export const ASSET_ENVELOPE_FORMAT = 'originals/asset' as const;
-export const ASSET_ENVELOPE_VERSION = 1;
+export const ASSET_ENVELOPE_VERSION = 2;
 
 export interface AssetEnvelope {
   format: typeof ASSET_ENVELOPE_FORMAT;
@@ -29,8 +31,8 @@ export interface AssetEnvelope {
     'did:webvh'?: DIDDocument;
     'did:btco'?: DIDDocument;
   };
-  /** Full resource shape, inline content included. */
-  resources: AssetResource[];
+  /** JSON-safe resources. v2 emits tagged base64; v1 UTF-8 strings remain readable. */
+  resources: SerializedAssetResource[];
   credentials?: VerifiableCredential[];
   /** HONESTY SECTION — advisory only, never verified/trusted. */
   unverified?: {

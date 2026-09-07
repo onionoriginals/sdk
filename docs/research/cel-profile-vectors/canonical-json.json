@@ -1,0 +1,92 @@
+{
+  "status": "Canonicalization evidence only. Not an accepted Originals profile or a production verifier.",
+  "source": "https://www.rfc-editor.org/rfc/rfc8785.html",
+  "method": "Literal canonical strings; UTF-8 bytes hashed independently using Python hashlib and OpenSSL CLI. No Originals SDK implementation is imported. Expected did:cel/proof vectors await the wire/profile decision.",
+  "acceptedCanonicalization": [
+    {
+      "name": "rfc8785-number-format",
+      "inputJson": "[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001]",
+      "expectedCanonical": "[333333333.3333333,1e+30,4.5,0.002,1e-27]",
+      "expectedUtf8Hex": "5b3333333333333333332e333333333333332c31652b33302c342e352c302e3030322c31652d32375d",
+      "expectedSha256Hex": "7c6bc86d861387d823ae596b79ca0b26567dddc22a77acb1f4e06d441f555adf",
+      "expectedDigestMultibase": "uEiB8a8hthhOH2COuWWt5ygsmVn3dwip3rLH04G1EH1Va3w",
+      "basis": "RFC 8785 section 3.2.2; array extracted from its published example"
+    },
+    {
+      "name": "numeric-and-json-property-names",
+      "inputJson": "{\"name\":\"é\",\"2\":\"two\",\"constructor\":\"literal\",\"__proto__\":{\"kept\":true},\"10\":\"ten\"}",
+      "expectedCanonical": "{\"10\":\"ten\",\"2\":\"two\",\"__proto__\":{\"kept\":true},\"constructor\":\"literal\",\"name\":\"é\"}",
+      "expectedUtf8Hex": "7b223130223a2274656e222c2232223a2274776f222c225f5f70726f746f5f5f223a7b226b657074223a747275657d2c22636f6e7374727563746f72223a226c69746572616c222c226e616d65223a22c3a9227d",
+      "expectedSha256Hex": "c0c34f80b58a867b98bf9355216520a22c8944a019c0d2ceb19cc1535cf1b785",
+      "expectedDigestMultibase": "uEiDAw0-AtYqGe5i_k1UhZSCiLIlEoBnA0s6xnMFTXPG3hQ",
+      "basis": "Locally authored literal using RFC 8785 recursive UTF-16 property ordering; every own JSON field is retained"
+    },
+    {
+      "name": "nested-objects-and-array-order",
+      "inputJson": "{\"z\":[{\"b\":2,\"a\":1},3,2,1],\"a\":{\"y\":true,\"x\":null}}",
+      "expectedCanonical": "{\"a\":{\"x\":null,\"y\":true},\"z\":[{\"a\":1,\"b\":2},3,2,1]}",
+      "expectedUtf8Hex": "7b2261223a7b2278223a6e756c6c2c2279223a747275657d2c227a223a5b7b2261223a312c2262223a327d2c332c322c315d7d",
+      "expectedSha256Hex": "036cb070cedf6a8702bd2bbca14bc542a9187b16247479274932d5e8022af0f1",
+      "expectedDigestMultibase": "uEiADbLBwzt9qhwK9K7yhS8VCqRh7FiR0eSdJMtXoAirw8Q",
+      "basis": "Locally authored literal using RFC 8785 section 3.2.3"
+    },
+    {
+      "name": "unicode-utf16-key-order",
+      "inputJson": "{\"\\ufb33\":7,\"😀\":6,\"€\":5,\"ö\":4,\"\\u0080\":3,\"1\":2,\"\\r\":1}",
+      "expectedCanonical": "{\"\\r\":1,\"1\":2,\"\":3,\"ö\":4,\"€\":5,\"😀\":6,\"דּ\":7}",
+      "expectedUtf8Hex": "7b225c72223a312c2231223a322c22c280223a332c22c3b6223a342c22e282ac223a352c22f09f9880223a362c22efacb3223a377d",
+      "expectedSha256Hex": "4bd52d82f332c2e5c7206abd57c74b45dd4f0fef63ab7af87b8bde4481e450e7",
+      "expectedDigestMultibase": "uEiBL1S2C8zLC5ccgar1Xx0tF3U8P72Orevh7i95EgeRQ5w",
+      "basis": "RFC 8785 section 3.2.3 published key-order example, with locally substituted numeric values"
+    },
+    {
+      "name": "unicode-not-normalized-composed",
+      "inputJson": "{\"name\":\"é\"}",
+      "expectedCanonical": "{\"name\":\"é\"}",
+      "expectedUtf8Hex": "7b226e616d65223a22c3a9227d",
+      "expectedSha256Hex": "2f16b8477146a1b2ba7d6bb7cf7c9979c191cc2838a107dbf5f0d920b4cb3ba1",
+      "expectedDigestMultibase": "uEiAvFrhHcUahsrp9a7fPfJl5wZHMKDihB9v18NkgtMs7oQ",
+      "basis": "RFC 8785 section 3.1 forbids Unicode normalization"
+    },
+    {
+      "name": "unicode-not-normalized-decomposed",
+      "inputJson": "{\"name\":\"é\"}",
+      "expectedCanonical": "{\"name\":\"é\"}",
+      "expectedUtf8Hex": "7b226e616d65223a2265cc81227d",
+      "expectedSha256Hex": "6a547588c4055916e090ed61467326046dd52810679d03bfb84d862a7123522e",
+      "expectedDigestMultibase": "uEiBqVHWIxAVZFuCQ7WFGcyYEbdUoEGedA7-4TYYqcSNSLg",
+      "basis": "RFC 8785 section 3.1 forbids Unicode normalization"
+    },
+    {
+      "name": "negative-zero",
+      "inputJson": "[-0,0]",
+      "expectedCanonical": "[0,0]",
+      "expectedUtf8Hex": "5b302c305d",
+      "expectedSha256Hex": "3d5812abc84c11768aa73a732c85d75dbed439188f5bb3239e9b762ea31d9862",
+      "expectedDigestMultibase": "uEiA9WBKryEwRdoqnOnMshdddvtQ5GI9bsyOem3Yuox2YYg",
+      "basis": "RFC 8785 Appendix B negative-zero serialization"
+    }
+  ],
+  "rejectedCanonicalization": [
+    {
+      "name": "duplicate-object-members",
+      "inputJson": "{\"name\":\"first\",\"name\":\"second\"}",
+      "expected": "reject before ordinary JSON parsing discards the duplicate"
+    },
+    {
+      "name": "lone-surrogate-value",
+      "inputJson": "{\"name\":\"\\ud800\"}",
+      "expected": "reject invalid Unicode scalar sequence"
+    },
+    {
+      "name": "lone-surrogate-key",
+      "inputJson": "{\"\\udfff\":1}",
+      "expected": "reject invalid Unicode scalar sequence"
+    },
+    {
+      "name": "nonfinite-number",
+      "inputJson": "{\"amount\":1e999}",
+      "expected": "reject IEEE 754 infinity rather than serialize null"
+    }
+  ]
+}

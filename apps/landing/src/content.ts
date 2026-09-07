@@ -198,10 +198,21 @@ export const demo = {
     titleLabel: 'Asset title',
     titlePlaceholder: 'e.g. Genesis Artwork #001',
     defaultTitle: 'Genesis Artwork #001',
-    mediumLabel: 'Medium',
-    mediums: ['Artwork', 'Music', 'Writing', 'Photograph', 'Dataset'],
+    sourceLabel: 'Source',
+    sourceGenerate: 'Generate',
+    sourceUpload: 'Upload',
+    sourceWrite: 'Write',
+    uploadCta: 'Choose a file',
+    uploadHint: 'A PNG, SVG or plain text file, up to 32 KB.',
+    uploadTooBig: 'That file is larger than 32 KB. Inscribing pays by the byte, so the demo keeps uploads small enough to actually reach Bitcoin.',
+    uploadWrongType: 'Choose a PNG, SVG or plain text file.',
+    uploadEmpty: 'That file is empty, so there would be nothing to hash.',
+    writePlaceholder: 'Type or paste anything. These exact characters get hashed, signed and published.',
+    writeEmpty: 'Write something first — an empty asset has nothing to prove.',
+    writeHint: 'These exact characters are what get hashed, signed and published.',
+    styleLabel: 'Style',
     regenerate: 'Regenerate',
-    artHint: 'Generated in your browser from the title — its exact bytes are what get hashed, signed and published.'
+    artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
   },
   steps: [
     {
@@ -348,12 +359,14 @@ export const demo = {
     linkLabel: 'Open the signed DID log',
     note: 'The SDK’s real resolver fetched this back over HTTP(S). Open it: it’s the signed version history.'
   },
-  /**
-   * Reachable ONLY on a `VITE_BTC_NETWORK=testnet4` build (`real && network
-   * !== 'mainnet'`): faucet-funded, worthless tBTC. Named for the network so
-   * no mainnet surface can borrow a string from here by accident — the mainnet
-   * copy lives in `steps[2]` and `deposit`.
-   */
+  /** Explicit local chain, separately labelled from the public networks. */
+  regtest: {
+    subhead: 'The final step inscribes on local Bitcoin regtest using test coins.',
+    done: 'Anchored on local Bitcoin regtest.',
+    notice: 'Local regtest · test coins only. This run uses your local Bitcoin Core and ord services.',
+    signInPrompt: 'Sign in to inscribe on your local Bitcoin regtest network.',
+    stepDescription: 'Inscribes the published Original onto a satoshi on local Bitcoin regtest. Fund the displayed bcrt address with local test coins.',
+  },
   testnet4: {
     signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
     stepDescription:
@@ -426,6 +439,14 @@ export const demo = {
     // The sat is decided by the commit's first input, so it IS known already;
     // the inscription that will ride on it is not on chain yet.
     commitOnlySatPrefix: 'It will land on satoshi',
+    // The commit txid is the ONE thing that lets someone watch their own money
+    // land. Withholding it while telling them to wait is what made this step
+    // feel like nothing happened.
+    commitOnlyTxLabel: 'Funding transaction:',
+    commitOnlyFeeLabel: 'paid at',
+    commitOnlyTrackLink: 'Track it on Your Originals',
+    commitOnlyRevealPending:
+      'The inscription transaction is signed and saved; it broadcasts as soon as the one above confirms.',
     commitOnlyBody:
       'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
     balanceReuse:
@@ -503,6 +524,11 @@ export const demo = {
     ordinalCheckUnavailable:
       'We can’t currently check whether the coins at your deposit address carry an inscription of their own, and we won’t spend a coin we can’t check — an inscribed sat spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
     ordinalCheckBadge: 'Can’t check your coins for inscriptions.',
+    // The check ran, but the address holds more outputs than one poll can
+    // classify. The unchecked ones are simply not counted — a block explorer
+    // will show more than the amount above, and this says why.
+    ordinalCheckPartial: (unchecked: number) =>
+      `${unchecked} smaller ${unchecked === 1 ? 'output' : 'outputs'} at your deposit address ${unchecked === 1 ? 'hasn’t' : 'haven’t'} been checked for inscriptions yet, so ${unchecked === 1 ? 'it isn’t' : 'they aren’t'} counted above. Your balance in a block explorer will read higher than the amount we can spend.`,
     // The bindings file — the whole of "this address belongs to this account".
     bindingUnreadable:
       'We can’t confirm which deposit address belongs to your account right now, so we’re not showing one: a wrong address here means BTC sent somewhere this site can never spend from. Anything you’ve already sent is untouched. Try again in a few minutes.',
@@ -542,7 +568,7 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path and are hosted for keeps, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -692,7 +718,7 @@ export const originalDetail = {
       inscribe: {
         title: 'Inscribed',
         blurb:
-          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free.'
+          'The next step in the lifecycle: inscribing on a satoshi makes ownership transferable on Bitcoin — permanent, final, and platform-free. The reveal inscription carries the whole signed log in its own metadata, so from here the Original’s provenance survives even this service; a log that stops at did:webvh lasts only as long as this service hosts it.'
       }
     },
     upcomingLabel: 'Up next',
@@ -733,9 +759,14 @@ export const originalDetail = {
     inscriptionLabel: 'Inscription',
     satoshiLabel: 'Satoshi',
     txLabel: 'Reveal transaction',
+    // The reveal is signed and saved before it is broadcast, so its id exists
+    // while the transaction does not. Say so rather than linking a 404.
+    txNotBroadcastNote: 'Signed and saved, not yet broadcast — it goes out once the funding transaction confirms.',
+    commitTxLabel: 'Funding transaction',
     pendingBadge: 'awaiting confirmation',
     confirmedBadge: 'confirmed on-chain',
-    explorerLabel: 'View on mempool.space'
+    explorerLabel: 'View on mempool.space',
+    commitExplorerLabel: 'View the funding transaction on mempool.space'
   }
 };
 
@@ -964,11 +995,17 @@ export const legal = {
           'deposit_shortfall — the balance changed and still does not cover the quote',
           'deposit_read_failed — an address read, or the address binding, could not be trusted',
           'deposit_ordinal_check_unavailable — coins could not be checked for inscriptions, so none were offered as spendable',
+          'deposit_ordinal_check_partial — the address held more outputs than one check covers; the unchecked ones were not offered as spendable',
           'inscribe_attempted — a signed pair passed validation and is about to broadcast',
           'inscribe_failed — a pair was refused or failed to broadcast',
           'inscribe_broadcast — a pair reached the network',
           'deposit_balance_held — the hourly sweep found a bound address still holding confirmed sats',
-          'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance'
+          'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance',
+          'inscription_sweep_completed — we finished your inscription for you: your commit had confirmed, so we broadcast the reveal we already held, with nobody watching',
+          'inscription_sweep_push_failed — that broadcast was refused by the network, and your inscription is still unfinished',
+          'inscription_sweep_waiting — your commit had not confirmed yet, so we held the reveal and pushed nothing this hour',
+          'inscription_sweep_lookup_failed — we could not read whether your commit had confirmed, so we pushed nothing',
+          'inscription_sweep_unreadable — an account\u2019s inscription file could not be read, which is where a signed reveal lives'
         ],
         footer: [
           'You are identified by your Turnkey sub-organization id, never by your email address. The formatter enforces that rather than trusting the code calling it: a field named like an email, or any value shaped like an email address, is replaced with [redacted] before the line is written.',

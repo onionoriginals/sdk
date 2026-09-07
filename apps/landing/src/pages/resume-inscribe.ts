@@ -38,9 +38,9 @@ export async function fetchHostedResources(
   did: string,
   cel: CelLog | null,
   host?: string
-): Promise<Record<string, string>> {
+): Promise<Record<string, Uint8Array>> {
   const artifacts = webvhArtifacts(did, host);
-  const contents: Record<string, string> = {};
+  const contents: Record<string, Uint8Array> = {};
   if (!artifacts) return contents;
   await Promise.all(
     hostedResourceRefs(cel).map(async (ref) => {
@@ -49,7 +49,7 @@ export async function fetchHostedResources(
         const res = await fetch(sameOriginUrl(artifacts.resourceUrl(ref.segment), host), {
           credentials: 'same-origin',
         });
-        if (res.ok) contents[ref.segment] = await res.text();
+        if (res.ok) contents[ref.segment] = new Uint8Array(await res.arrayBuffer());
       } catch {
         /* absent → MISSING_CONTENT, reported by the envelope builder */
       }

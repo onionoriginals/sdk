@@ -74,14 +74,17 @@ export interface ResourceValidationResult {
  */
 export interface Resource extends AssetResource {
   /** The actual content (for in-memory resources) */
-  content?: string;
+  content?: Uint8Array;
   
-  /** Binary content as base64-encoded string */
+  /** Legacy import-only binary representation. New runtime resources use content bytes. */
   contentBase64?: string;
   
   /** Description of the resource */
   description?: string;
 }
+
+/** JSON-safe standalone ResourceManager export; legacy text imports are also accepted. */
+export type ResourceSnapshot = Omit<Resource, 'content'> & { content?: string };
 
 // Re-export canonical ResourceVersionHistory and ResourceVersion from shared types
 export type { ResourceVersionHistory, ResourceVersion } from '../types/resource-version.js';

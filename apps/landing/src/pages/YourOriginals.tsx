@@ -26,6 +26,8 @@ export interface OriginalRow {
   resourceHash: string;
   createdAt: string;
   resourceUrl?: string;
+  /** The resource's media type — only an image may be used as the cover. */
+  resourceContentType?: string;
   /** Present once the Original migrated to did:btco (real inscription). */
   btcoDid?: string;
   inscriptionId?: string;
@@ -33,6 +35,16 @@ export interface OriginalRow {
   revealTxId?: string;
   satoshi?: string;
   inscriptionStatus?: 'pending' | 'confirmed';
+  /**
+   * Whether the REVEAL transaction is actually on the network.
+   *
+   * The commit and reveal are both signed and persisted before either is
+   * broadcast, so `revealTxId` exists long before the transaction does — and
+   * linking it to an explorer while it is still unbroadcast is a 404 handed to
+   * someone who just spent money. `inscriptionStatus` cannot answer this: it is
+   * written 'pending' at inscribe time whichever of the two went out.
+   */
+  revealBroadcast?: boolean;
 }
 
 /**
@@ -126,9 +138,21 @@ export function withLiveInscriptionStatus(
   records: PendingInscription[]
 ): OriginalRow[] {
   return rows.map((r) => {
-    if (!r.commitTxId || r.inscriptionStatus === 'confirmed') return r;
+    // A confirmed Original's record is retired, so there may be nothing to join
+    // against — but a confirmed reveal is certainly on the network.
+    if (r.inscriptionStatus === 'confirmed') return { ...r, revealBroadcast: true };
+    if (!r.commitTxId) return r;
     const rec = records.find((x) => x.commitTxId === r.commitTxId);
-    return rec?.status === 'confirmed' ? { ...r, inscriptionStatus: 'confirmed' as const } : r;
+    if (!rec) return r;
+    // Carry the broadcast state through, not just confirmation: the detail page
+    // needs to know which of the two transactions actually exists before it
+    // offers an explorer link to either.
+    const revealBroadcast = rec.status === 'reveal_broadcast' || rec.status === 'confirmed';
+    return {
+      ...r,
+      revealBroadcast,
+      ...(rec.status === 'confirmed' ? { inscriptionStatus: 'confirmed' as const } : {})
+    };
   });
 }
 
@@ -209,6 +233,15 @@ async function resolveLive(did: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Whether a stored resource may be used as a cover image.
+ *
+ * The store derives `resourceUrl` for ANY primary resource, text included, so
+ * presence of a URL is not evidence there is a picture behind it. Unknown types
+ * fall back to the empty cover: a plain tile beats a broken image icon.
+ */
+const isImageType = (contentType: string | undefined) => !!contentType?.startsWith('image/');
 
 export function YourOriginals() {
   const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
@@ -414,7 +447,7 @@ export function YourOriginals() {
                     aria-label={`“${row.title}” — ${yourOriginals.viewLabel}`}
                   >
                     <span className="your-original-cover">
-                      {row.resourceUrl ? (
+                      {row.resourceUrl && isImageType(row.resourceContentType) ? (
                         <img src={sameOriginUrl(row.resourceUrl, window.location.host)} alt="" />
                       ) : (
                         <span className="your-original-cover-empty" aria-hidden="true" />

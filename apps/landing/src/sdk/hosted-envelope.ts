@@ -1,3 +1,5 @@
+import { base64 } from '@scure/base';
+import { contentBytes, type ResourceContent } from './resource-view';
 /**
  * Rebuild an Original from what it hosts.
  *
@@ -139,7 +141,7 @@ export function hostedResourceRefs(cel: CelLog | null): HostedResourceRef[] {
  */
 export function hostedAssetEnvelope(
   cel: CelLog | null,
-  contents: Record<string, string>
+  contents: Record<string, ResourceContent>
 ): { envelope: AssetEnvelope } | { problem: HydrationProblem } {
   if (!cel || !Array.isArray(cel.events) || cel.events.length === 0) {
     return { problem: { code: 'NO_CEL', message: 'This Original hosts no event log.' } };
@@ -183,7 +185,7 @@ export function hostedAssetEnvelope(
       hash: ref.hash,
       version: ref.version,
       ...(ref.previousVersionHash ? { previousVersionHash: ref.previousVersionHash } : {}),
-      content,
+      content: { encoding: 'base64' as const, data: base64.encode(contentBytes(content)) },
     });
   }
 

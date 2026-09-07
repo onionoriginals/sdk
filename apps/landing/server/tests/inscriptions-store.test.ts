@@ -64,6 +64,7 @@ describe('inscriptions-store', () => {
     expect(keys).toEqual(['sub-1:1', 'sub-1:2', 'sub-2:3']);
     // …but not the fresh one, and not anything already retired.
     store.setStatus('sub-1', '2'.repeat(64), 'confirmed');
+    store.retire('sub-1', '2'.repeat(64));
     expect(store.sweepStale(24 * 60 * 60_000).stale.map((s) => s.commitTxId[0]).sort()).toEqual(['1', '3']);
   });
 
@@ -104,10 +105,12 @@ describe('inscriptions-store', () => {
     expect(store.list('sub-9')).toEqual([]);
   });
 
-  test('a confirmed record is retired: hex dropped, row kept as a join key', () => {
+  test('confirmation retains bytes until the reconciler explicitly retires the record', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
+    expect(store.get('sub-1', 'c'.repeat(64))!.revealTxHex).toBe('02bb');
+    store.retire('sub-1', 'c'.repeat(64));
     const r = store.get('sub-1', 'c'.repeat(64))!;
     expect(r.status).toBe('confirmed');
     expect(r.retired).toBe(true);
@@ -127,6 +130,7 @@ describe('inscriptions-store', () => {
       .toThrow('STORE_FULL');
     // Terminal records must never lock a creator out of inscribing again.
     store.setStatus('sub-1', '1'.repeat(64), 'confirmed');
+    store.retire('sub-1', '1'.repeat(64));
     store.create('sub-1', rec({ commitTxId: '3'.repeat(64), fundingOutpoints: ['a:3'] }));
     expect(store.list('sub-1')).toHaveLength(3);
   });
@@ -209,7 +213,7 @@ describe('inscriptions-store', () => {
     // …and it can still be driven to completion.
     store.setStatus('sub-1', 'c'.repeat(64), 'confirmed');
     expect(store.get('sub-1', 'c'.repeat(64))!.status).toBe('confirmed');
-    expect(store.sweepStale(0).stale).toEqual([]); // retired on confirm, as for a new-shape record
+    expect(store.sweepStale(0).stale).toHaveLength(1); // legacy pairs retain recovery bytes too
   });
 });
 
@@ -293,5 +297,56 @@ describe('deposit bindings and the cross-user reader', () => {
     // that would ever see their funds. Skipping is right; skipping SILENTLY
     // is not: the caller gets who was lost so it can say so out loud.
     expect(out.unreadable).toEqual(['sub-1']);
+  });
+});
+
+/**
+ * The cross-user walk behind the completion sweep (#545). It returns the reveal
+ * HEX, not a pointer — the caller broadcasts it — so what it includes and what
+ * it withholds is a money decision, not a convenience.
+ */
+describe('pendingRevealBroadcasts', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'is-pending-'));
+
+  test('returns a commit_broadcast record that still holds its reveal', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+
+    const { pending, unreadable } = store.pendingRevealBroadcasts();
+    expect(unreadable).toEqual([]);
+    expect(pending.length).toBe(1);
+    expect(pending[0].subOrgId).toBe('sub-1');
+    expect(pending[0].record.revealTxHex).toBe('02bb');
+  });
+
+  test('skips a SUPERSEDED record: a live rebuilt pair owns its outpoint', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+    store.supersede('sub-1', 'c'.repeat(64));
+    // Pushing a superseded pair's reveal would race the pair that replaced it.
+    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+  });
+
+  test('skips every status but commit_broadcast', () => {
+    for (const status of ['signed', 'reveal_broadcast', 'confirmed']) {
+      const store = createInscriptionsStore({ dataDir: dir() });
+      store.create('sub-1', rec({ status: status as never }));
+      expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+    }
+  });
+
+  test('skips a record with no reveal artifact — there is nothing to push', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast', revealTxHex: undefined }));
+    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
+  });
+
+  test('walks every user, not just one', () => {
+    const store = createInscriptionsStore({ dataDir: dir() });
+    store.create('sub-1', rec({ status: 'commit_broadcast' }));
+    store.create('sub-2', rec({ status: 'commit_broadcast', commitTxId: 'd'.repeat(64) }));
+
+    const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
+    expect(subs).toEqual(['sub-1', 'sub-2']);
   });
 });

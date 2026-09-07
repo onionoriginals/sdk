@@ -222,6 +222,22 @@ describe('a commit-only broadcast is not an inscription', () => {
     // And it must not imply the creator owes another action.
     expect(demo.deposit.commitOnlyBody).toMatch(/automatically/i);
   });
+
+  /**
+   * The commit-only view told a creator to wait and gave them nothing to watch,
+   * at the moment real money had just moved. The funding txid is the one thing
+   * that makes the wait legible, so the copy that carries it is asserted here.
+   */
+  test('the commit-only copy offers the funding transaction and somewhere to track it', () => {
+    expect(demo.deposit.commitOnlyTxLabel).toMatch(/transaction/i);
+    expect(demo.deposit.commitOnlyTrackLink).toMatch(/track/i);
+    // The reveal line must say it is already signed and needs nothing from the
+    // creator — the same promise commitOnlyBody makes, at the point of waiting.
+    expect(demo.deposit.commitOnlyRevealPending).toMatch(/signed/i);
+    expect(demo.deposit.commitOnlyRevealPending).toMatch(/broadcasts|automatically/i);
+    // And still never claims the inscription exists yet.
+    expect(demo.deposit.commitOnlyRevealPending).not.toMatch(/inscribed\b/i);
+  });
 });
 
 describe('the completion panel shows nothing it cannot back up', () => {

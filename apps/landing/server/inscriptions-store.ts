@@ -65,10 +65,10 @@ export interface InscriptionRecord {
    */
   superseded?: boolean;
   /**
-   * The recovery artifacts have been dropped because the record is TERMINAL:
-   * either its own reveal confirmed, or it is a superseded pair whose funding
-   * outpoint was won by a record that confirmed (its commit double-spends a
-   * confirmed tx and can never land). The row itself is kept forever — /me
+   * Recovery artifacts were explicitly dropped by the reconciler after its
+   * confirmation horizon, or when a competing pair won the funding outpoint.
+   * This is a retention policy, not a guarantee against deeper reorganizations.
+   * The row is retained subject to the store's capacity limit — /me
    * joins on it to show a confirmed inscription — but it no longer carries
    * broadcastable hex, so it stops counting against the pending cap and stops
    * costing disk. Retiring is the ONLY way hex ever leaves this store.
@@ -118,7 +118,8 @@ export interface InscriptionsStore {
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
   /**
-   * Stamp a re-push of an already-broadcast reveal. Touches ONLY
+   * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
+   * Touches ONLY
    * `rebroadcastAt` — the status did not change, and `updatedAt` is what the
    * UI's staleness clock reads.
    */
@@ -138,6 +139,23 @@ export interface InscriptionsStore {
    * silently accumulate. Read-only; acting on them stays with the per-user
    * rebroadcast route.
    */
+  /**
+   * Every record across ALL users that is waiting on a reveal broadcast:
+   * status `commit_broadcast`, a persisted reveal, not superseded.
+   *
+   * Exists so the server can finish an inscription without a browser tab
+   * (#545). The per-user list poll already does this, but it only runs when a
+   * creator is looking — so a confirmed commit whose creator closed the tab is
+   * spent money and no inscription until they happen to return.
+   *
+   * Returns the reveal hex: the caller broadcasts it, so it needs the artifact,
+   * not just a pointer to it. Unreadable files are reported, never swallowed —
+   * that file holds the only copy of a signed reveal.
+   */
+  pendingRevealBroadcasts(): {
+    pending: Array<{ subOrgId: string; record: InscriptionRecord }>;
+    unreadable: string[];
+  };
   sweepStale(olderThanMs: number): {
     stale: Array<{
       subOrgId: string;
@@ -263,7 +281,7 @@ function subFile(dataDir: string, dir: string, subOrgId: string): string {
   return join(dataDir, dir, `${subOrgId}.json`);
 }
 
-/** A record still carries a broadcastable pair (i.e. it is not terminal). */
+/** A record still carries a broadcastable pair. Confirmation alone does not retire it. */
 function isPending(r: InscriptionRecord): boolean {
   return !r.retired && !!r.revealTxHex;
 }
@@ -475,8 +493,8 @@ export function createInscriptionsStore(opts: {
       if (!rec) throw new Error('NOT_FOUND');
       rec.status = status;
       rec.updatedAt = new Date(now()).toISOString();
-      // Confirmed is terminal: the pair landed, so the hex is dead weight.
-      if (status === 'confirmed') retireInPlace(rec);
+      // Confirmation is reversible. The reconciler explicitly retires the
+      // pair only after its configured recovery horizon has elapsed.
       writeAll(subOrgId, recs);
     },
     markRebroadcast(subOrgId, commitTxId) {
@@ -495,6 +513,35 @@ export function createInscriptionsStore(opts: {
     findByOutpoints(subOrgId, outpoints) {
       const wanted = new Set(outpoints);
       return readAll(subOrgId).filter((r) => !r.superseded && outpointsOf(r).some((o) => wanted.has(o)));
+    },
+    pendingRevealBroadcasts() {
+      const dir = join(opts.dataDir, 'inscriptions');
+      const unreadable: string[] = [];
+      const pending: Array<{ subOrgId: string; record: InscriptionRecord }> = [];
+      if (!existsSync(dir)) return { pending, unreadable };
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.json')) continue;
+        const subOrgId = file.slice(0, -'.json'.length);
+        let recs: InscriptionRecord[];
+        try {
+          const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as unknown;
+          if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
+          recs = parsed as InscriptionRecord[];
+        } catch {
+          unreadable.push(subOrgId);
+          continue;
+        }
+        for (const r of recs) {
+          // Superseded pairs are excluded: a live rebuilt pair owns their
+          // funding outpoint, and pushing theirs would race it. The list poll
+          // reinstates those on evidence; this sweep does not adjudicate.
+          if (r.superseded) continue;
+          if (r.status !== 'commit_broadcast') continue;
+          if (!r.revealTxHex) continue;
+          pending.push({ subOrgId, record: r });
+        }
+      }
+      return { pending, unreadable };
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');

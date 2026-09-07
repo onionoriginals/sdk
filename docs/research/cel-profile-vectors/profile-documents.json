@@ -1,0 +1,2895 @@
+{
+  "provenance": "Public RFC8032/W3C keys; json-canonicalize 2.0.0, Node SHA-2, Noble2.2.0 signing, cborg5.1.7 encoding. No Originals production code. Expected acceptance/rejection is declared from the written profile, not obtained from the reference checker. Node/OpenSSL independently checks signatures.",
+  "coverage": "Representation, schema, selected semantic checks, signatures, event digests, internal previousEvent links and genesis DID binding. No full fold/controller succession, WebVH identity, Bitcoin/provider behavior, runtime-object validation or resource retrieval.",
+  "accepted": [
+    {
+      "id": "ed25519-create",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "p256-create",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "ecdsa-jcs-2019",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z23E72hX5rvLE8qLP7h8SLSCHzvBKnrXCK94PtJbrraqGFivBLBj3LaRGDgqQHEKChy6McxKJn9wVMwx4okBevvCB"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiCqbgYYVY4glheeeXk8X2mYbvFePbmo6pIKrswMdLDw6w",
+        "head": "uEiCqbgYYVY4glheeeXk8X2mYbvFePbmo6pIKrswMdLDw6w",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b5650222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiCqbgYYVY4glheeeXk8X2mYbvFePbmo6pIKrswMdLDw6w",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"ecdsa-jcs-2019\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP\"}",
+              "proofHashHex": "7858a86a90c940f8fef78bdb07bdd1127572e8517f09f034deadf5a7bf6d9a6d",
+              "documentHashHex": "aa6e0618558e2096179e79793c5f69986ef15e3db9a8ea920aaecc0c74b0f0eb",
+              "signingMessageHex": "7858a86a90c940f8fef78bdb07bdd1127572e8517f09f034deadf5a7bf6d9a6daa6e0618558e2096179e79793c5f69986ef15e3db9a8ea920aaecc0c74b0f0eb",
+              "signatureHex": "33efc2244ab6a8ceea25929c1bada0b307dbc9eedd60d8ff2fd9fb3fb423e98847f5a0e335dc9c5d1a02b705f663fc3322a11a347f17fd4892c55874811b8194"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278396469643a6b65793a7a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b56506474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a323345373268583572764c4538714c50376838534c5343487a76424b6e7258434b393450744a627272617147466976424c426a334c6152474467715148454b436879364d63784b4a6e3977564d7778346f6b4265767643426b63727970746f73756974656e65636473612d6a63732d323031396c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f64786b6469643a6b65793a7a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b5650237a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b5650"
+    },
+    {
+      "id": "p384-create",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "ecdsa-jcs-2019",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ#z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zvvYZ7gfFpyFjsQrtwZ7M1vaWQ8qLirHbTvRusLKSEqzd7VMNG6wsYFmTkY3R2rpwnhJyy8b6ufNEGP6tZW9aZBXZ8bndLDwZ4gKE5PwU77kL39XK1y5UM3qJ1ZvVT812pGm"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiB3kTAc3azw0LOZcYmckYPfOaK66vbkrDgYhq_xjeinDg",
+        "head": "uEiB3kTAc3azw0LOZcYmckYPfOaK66vbkrDgYhq_xjeinDg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a38324c6b7542696579475368564268767445327a6f6944364b6d6134744a4746746b416878523570666b7035515077344c75746f5957687651436e476a64566e31346b756a51222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiB3kTAc3azw0LOZcYmckYPfOaK66vbkrDgYhq_xjeinDg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"ecdsa-jcs-2019\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ#z82LkuBieyGShVBhvtE2zoiD6Kma4tJGFtkAhxR5pfkp5QPw4LutoYWhvQCnGjdVn14kujQ\"}",
+              "proofHashHex": "82ac2cfc9c968aaf15ea92151505ce6f27874adc9402dad03e2efb75ffebedb677e984b3372cbaaadbb61e7e38dbd127",
+              "documentHashHex": "641aa7f0fdfce73af4d980a39dc859cd1d1e60ef9ac022e63d78d44f8e438b8146bb56e68871ce29a6085f44214245ee",
+              "signingMessageHex": "82ac2cfc9c968aaf15ea92151505ce6f27874adc9402dad03e2efb75ffebedb677e984b3372cbaaadbb61e7e38dbd127641aa7f0fdfce73af4d980a39dc859cd1d1e60ef9ac022e63d78d44f8e438b8146bb56e68871ce29a6085f44214245ee",
+              "signatureHex": "9c898de0fce0788c23e9d1076dbfdd44e2dc0c43906a5a06d6362fe8477fbac16eb235219ba75482b0dc3376edd77391fee6fcded93ecaac227ffc2dbfaadad97ce00c2a85bb27e220f8f182f4b741aed4e1d8e8736e869edb76cb1dd3496436"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c6572784f6469643a6b65793a7a38324c6b7542696579475368564268767445327a6f6944364b6d6134744a4746746b416878523570666b7035515077344c75746f5957687651436e476a64566e31346b756a516474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578847a7676595a376766467079466a73517274775a374d317661575138714c6972486254765275734c4b5345717a6437564d4e4736777359466d546b593352327270776e684a797938623675664e45475036745a5739615a42585a38626e644c44775a34674b453550775537376b4c3339584b317935554d33714a315a76565438313270476d6b63727970746f73756974656e65636473612d6a63732d323031396c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478976469643a6b65793a7a38324c6b7542696579475368564268767445327a6f6944364b6d6134744a4746746b416878523570666b7035515077344c75746f5957687651436e476a64566e31346b756a51237a38324c6b7542696579475368564268767445327a6f6944364b6d6134744a4746746b416878523570666b7035515077344c75746f5957687651436e476a64566e31346b756a51"
+    },
+    {
+      "id": "metadata-key-and-unicode-preservation",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ],
+                  "metadata": {
+                    "2": "two",
+                    "10": "ten",
+                    "__proto__": {
+                      "signed": "retained"
+                    },
+                    "constructor": "constructor value",
+                    "prototype": "prototype value",
+                    "nested": [
+                      {
+                        "2": 2,
+                        "10": 10
+                      }
+                    ],
+                    "é": "composed",
+                    "é": "decomposed",
+                    "😀": "non-BMP",
+                    "דּ": "BMP",
+                    "number": 1e+30
+                  }
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z3BGfY9PPVuYfQg1aXwutupFUqAdp6MtkS2aAHAv1PVGd3LyoUUdYuanRT8qhqQhUzDunnqKwXnc3iy5pbpD2LXoR"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiABFMWYir3iNj2w-L2g2kza47FYg_SpKP5Vl-jIxT5mWA",
+        "head": "uEiABFMWYir3iNj2w-L2g2kza47FYg_SpKP5Vl-jIxT5mWA",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"metadata\":{\"10\":\"ten\",\"2\":\"two\",\"__proto__\":{\"signed\":\"retained\"},\"constructor\":\"constructor value\",\"é\":\"decomposed\",\"nested\":[{\"10\":10,\"2\":2}],\"number\":1e+30,\"prototype\":\"prototype value\",\"é\":\"composed\",\"😀\":\"non-BMP\",\"דּ\":\"BMP\"},\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226d65746164617461223a7b223130223a2274656e222c2232223a2274776f222c225f5f70726f746f5f5f223a7b227369676e6564223a2272657461696e6564227d2c22636f6e7374727563746f72223a22636f6e7374727563746f722076616c7565222c2265cc81223a226465636f6d706f736564222c226e6573746564223a5b7b223130223a31302c2232223a327d5d2c226e756d626572223a31652b33302c2270726f746f74797065223a2270726f746f747970652076616c7565222c22c3a9223a22636f6d706f736564222c22f09f9880223a226e6f6e2d424d50222c22efacb3223a22424d50227d2c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiABFMWYir3iNj2w-L2g2kza47FYg_SpKP5Vl-jIxT5mWA",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "0114c5988abde2363db0f8bda0da4cdae3b15883f4a928fe5597e8c8c53e6658",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a60114c5988abde2363db0f8bda0da4cdae3b15883f4a928fe5597e8c8c53e6658",
+              "signatureHex": "6ce3f92be6c8203a2bd3e27da4e0bfc2bc7a411f61b280b0d129510f9869f430f397001c11feec729aa04cc12c8d86d238d7e27b0670e4bbe9238080645d0004"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a7646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33686d65746164617461ab61326374776f6231306374656e62c3a968636f6d706f7365646365cc816a6465636f6d706f73656463efacb363424d5064f09f9880676e6f6e2d424d50666e657374656481a26132026231300a666e756d626572fb46293e5939a08cea695f5f70726f746f5f5fa1667369676e65646872657461696e65646970726f746f747970656f70726f746f747970652076616c75656b636f6e7374727563746f7271636f6e7374727563746f722076616c7565696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a33424766593950505675596651673161587775747570465571416470364d746b533261414841763150564764334c796f5555645975616e5254387168715168557a44756e6e714b77586e633369793570627044324c586f526b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "single-proof-object",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "created": "2026-09-05T00:00:00.000Z",
+              "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+              "proofPurpose": "assertionMethod",
+              "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f66a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "proof-created-omitted",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4RS9rbfSsY6uDPQtLJ4tCroupoKhbrYCsmaG25vGsSkvhWap6y5maJYCmekG5fGBxGAC95iB1ZLbwd7WATwRjXm6"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "ab1f253c73da41e509bdf75c08b57cecf972394441dac714de6ba01af296cdadba253fb836a4c2483cb3e16e4ecfc04a2958082dd596dd4cb6f6e00c9a79a205"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a564747970657244617461496e7465677269747950726f6f666a70726f6f6656616c756578597a345253397262665373593675445051744c4a347443726f75706f4b6862725943736d61473235764773536b76685761703679356d614a59436d656b47356647427847414339356942315a4c6277643757415477526a586d366b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "multiple-controller-proofs",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4RS9rbfSsY6uDPQtLJ4tCroupoKhbrYCsmaG25vGsSkvhWap6y5maJYCmekG5fGBxGAC95iB1ZLbwd7WATwRjXm6"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            },
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "ab1f253c73da41e509bdf75c08b57cecf972394441dac714de6ba01af296cdadba253fb836a4c2483cb3e16e4ecfc04a2958082dd596dd4cb6f6e00c9a79a205"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6682a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a564747970657244617461496e7465677269747950726f6f666a70726f6f6656616c756578597a345253397262665373593675445051744c4a347443726f75706f4b6862725943736d61473235764773536b76685761703679356d614a59436d656b47356647427847414339356942315a4c6277643757415477526a586d366b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "proof-order-does-not-change-identity",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4RS9rbfSsY6uDPQtLJ4tCroupoKhbrYCsmaG25vGsSkvhWap6y5maJYCmekG5fGBxGAC95iB1ZLbwd7WATwRjXm6"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "03d9c50a20857dfc9ed6396b0396d192d764d84b4fb393624a8be46b54205a28d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "ab1f253c73da41e509bdf75c08b57cecf972394441dac714de6ba01af296cdadba253fb836a4c2483cb3e16e4ecfc04a2958082dd596dd4cb6f6e00c9a79a205"
+            },
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6781a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6682a564747970657244617461496e7465677269747950726f6f666a70726f6f6656616c756578597a345253397262665373593675445051744c4a347443726f75706f4b6862725943736d61473235764773536b76685761703679356d614a59436d656b47356647427847414339356942315a4c6277643757415477526a586d366b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "create-and-two-updates",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "name": "A second title"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4XcWhRjp8HHPo2wPY5TLSnMYciGaSVDwmHCuVd5zwggs63dXqAC1g92dShtzh1BV58K6FvYisHgywLE7Zbhp7BQB"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA",
+                      "previousDigestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z5YCbBn2KZmEcrmkxVZU3VPCp1PUcKK66jNqtb9vL4RGEWa3za589965nqU9MXMrqTgkb1YU7pmJo5FyiPm625JbT"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"name\":\"A second title\",\"profile\":\"originals/cel/3\"},\"type\":\"update\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b226e616d65223a2241207365636f6e64207469746c65222c2270726f66696c65223a226f726967696e616c732f63656c2f33227d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signatureHex": "b0732a0825db9ac099f63d1f7b920bd08642ff14ac6d1b919495adbd69ab6b2b8da9d12bbab31a6ea5f1d139206d127cc74aec59463df419522698aea2b16508"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA\",\"id\":\"art.png\",\"mediaType\":\"image/png\",\"previousDigestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\"}]},\"type\":\"update\"},\"previousEvent\":\"uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a2275456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e41222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67222c2270726576696f75734469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651227d5d7d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a22754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f5167346377227d",
+              "eventDigest": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "75dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a675dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signatureHex": "e2f93960b8fdd7d4c85f6553cc533143b1c124071c4afa9a0f1527b3b0bee81a79c500393634cc83eb4c47008ee559057eea908498249cd61022000a9c05d402"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6783a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a2646e616d656e41207365636f6e64207469746c656770726f66696c656f6f726967696e616c732f63656c2f336474797065667570646174656d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a3458635768526a70384848506f3277505935544c536e4d5963694761535644776d4843755664357a776767733633645871414331673932645368747a6831425635384b364676596973486779774c45375a626870374251426b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a26770726f66696c656f6f726967696e616c732f63656c2f33697265736f757263657381a4626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f75456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e417770726576696f75734469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516474797065667570646174656d70726576696f75734576656e74782f754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f51673463776570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a35594362426e324b5a6d4563726d6b78565a553356504370315055634b4b36366a4e71746239764c345247455761337a613538393936356e7155394d584d727154676b6231595537706d4a6f35467969506d3632354a62546b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "delta-needs-history",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "name": "A second title"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4XcWhRjp8HHPo2wPY5TLSnMYciGaSVDwmHCuVd5zwggs63dXqAC1g92dShtzh1BV58K6FvYisHgywLE7Zbhp7BQB"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA",
+                      "previousDigestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z5YCbBn2KZmEcrmkxVZU3VPCp1PUcKK66jNqtb9vL4RGEWa3za589965nqU9MXMrqTgkb1YU7pmJo5FyiPm625JbT"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "history-required",
+        "head": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"name\":\"A second title\",\"profile\":\"originals/cel/3\"},\"type\":\"update\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b226e616d65223a2241207365636f6e64207469746c65222c2270726f66696c65223a226f726967696e616c732f63656c2f33227d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signatureHex": "b0732a0825db9ac099f63d1f7b920bd08642ff14ac6d1b919495adbd69ab6b2b8da9d12bbab31a6ea5f1d139206d127cc74aec59463df419522698aea2b16508"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA\",\"id\":\"art.png\",\"mediaType\":\"image/png\",\"previousDigestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\"}]},\"type\":\"update\"},\"previousEvent\":\"uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a2275456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e41222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67222c2270726576696f75734469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651227d5d7d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a22754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f5167346377227d",
+              "eventDigest": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "75dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a675dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signatureHex": "e2f93960b8fdd7d4c85f6553cc533143b1c124071c4afa9a0f1527b3b0bee81a79c500393634cc83eb4c47008ee559057eea908498249cd61022000a9c05d402"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6782a2656576656e74a2696f7065726174696f6ea26464617461a2646e616d656e41207365636f6e64207469746c656770726f66696c656f6f726967696e616c732f63656c2f336474797065667570646174656d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a3458635768526a70384848506f3277505935544c536e4d5963694761535644776d4843755664357a776767733633645871414331673932645368747a6831425635384b364676596973486779774c45375a626870374251426b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a26770726f66696c656f6f726967696e616c732f63656c2f33697265736f757263657381a4626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f75456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e417770726576696f75734469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516474797065667570646174656d70726576696f75734576656e74782f754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f51673463776570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a35594362426e324b5a6d4563726d6b78565a553356504370315055634b4b36366a4e71746239764c345247455761337a613538393936356e7155394d584d727154676b6231595537706d4a6f35467969506d3632354a62546b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377",
+      "status": "history-required"
+    },
+    {
+      "id": "delta-with-prior-head",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "name": "A second title"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4XcWhRjp8HHPo2wPY5TLSnMYciGaSVDwmHCuVd5zwggs63dXqAC1g92dShtzh1BV58K6FvYisHgywLE7Zbhp7BQB"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA",
+                      "previousDigestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z5YCbBn2KZmEcrmkxVZU3VPCp1PUcKK66jNqtb9vL4RGEWa3za589965nqU9MXMrqTgkb1YU7pmJo5FyiPm625JbT"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "head": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"name\":\"A second title\",\"profile\":\"originals/cel/3\"},\"type\":\"update\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b226e616d65223a2241207365636f6e64207469746c65222c2270726f66696c65223a226f726967696e616c732f63656c2f33227d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6ff0985a89b8100720a46b6d5db0eda01f53ca8e23e8679dd6c64ad4239083873",
+              "signatureHex": "b0732a0825db9ac099f63d1f7b920bd08642ff14ac6d1b919495adbd69ab6b2b8da9d12bbab31a6ea5f1d139206d127cc74aec59463df419522698aea2b16508"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiC6j3zd6cwpM2eHhl3baSqxaKdGrP7xYJ-nnguo3RF9NA\",\"id\":\"art.png\",\"mediaType\":\"image/png\",\"previousDigestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\"}]},\"type\":\"update\"},\"previousEvent\":\"uEiD_CYWom4EAcgpGttXbDtoB9Tyo4j6Ged1sZK1COQg4cw\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a2275456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e41222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67222c2270726576696f75734469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651227d5d7d2c2274797065223a22757064617465227d2c2270726576696f75734576656e74223a22754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f5167346377227d",
+              "eventDigest": "uEiB12rIHVacI_TGlsOVjZ9TupXBxhsDnjbqywwlIgEj6CA",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "75dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a675dab20755a708fd31a5b0e56367d4eea5707186c0e78dbab2c309488048fa08",
+              "signatureHex": "e2f93960b8fdd7d4c85f6553cc533143b1c124071c4afa9a0f1527b3b0bee81a79c500393634cc83eb4c47008ee559057eea908498249cd61022000a9c05d402"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6782a2656576656e74a2696f7065726174696f6ea26464617461a2646e616d656e41207365636f6e64207469746c656770726f66696c656f6f726967696e616c732f63656c2f336474797065667570646174656d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a3458635768526a70384848506f3277505935544c536e4d5963694761535644776d4843755664357a776767733633645871414331673932645368747a6831425635384b364676596973486779774c45375a626870374251426b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a26770726f66696c656f6f726967696e616c732f63656c2f33697265736f757263657381a4626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f75456943366a337a64366377704d326548686c336261537178614b644772503778594a2d6e6e67756f335246394e417770726576696f75734469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516474797065667570646174656d70726576696f75734576656e74782f754569445f4359576f6d344541636770477474586244746f423954796f346a3647656431735a4b31434f51673463776570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a35594362426e324b5a6d4563726d6b78565a553356504370315055634b4b36366a4e71746239764c345247455761337a613538393936356e7155394d584d727154676b6231595537706d4a6f35467969506d3632354a62546b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377",
+      "priorDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg"
+    },
+    {
+      "id": "rotation-wire",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "rotateKey",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "newController": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+                  "rotatedAt": "2026-09-05T00:00:00.000Z"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z5CbffsgP6sctQYYXtyixzDsz5dteMDGBNn5ZWUhC1uE8ZxskYfejyMEktX4t6JTkgdW2r8hnnSRTiPef1uQu5QGg"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiBSBs8oYEhiQLZ7_vp4vWYQLHaFZhfC0Y3u5UClzyQIpA",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"newController\":\"did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP\",\"profile\":\"originals/cel/3\",\"rotatedAt\":\"2026-09-05T00:00:00.000Z\"},\"type\":\"rotateKey\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b226e6577436f6e74726f6c6c6572223a226469643a6b65793a7a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b5650222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c22726f74617465644174223a22323032362d30392d30355430303a30303a30302e3030305a227d2c2274797065223a22726f746174654b6579227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiBSBs8oYEhiQLZ7_vp4vWYQLHaFZhfC0Y3u5UClzyQIpA",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "5206cf2860486240b67bfefa78bd66102c76856617c2d18deee540a5cf2408a4",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a65206cf2860486240b67bfefa78bd66102c76856617c2d18deee540a5cf2408a4",
+              "signatureHex": "d211c4f6d6d014d5e1ccdf9ee98ec2aa76584cdf6c08ec335e8e3b21063167eac825f313f63c019872c451d302401d746cda3b3a398045a099aa7440d9094009"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6782a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a36770726f66696c656f6f726967696e616c732f63656c2f3369726f746174656441747818323032362d30392d30355430303a30303a30302e3030305a6d6e6577436f6e74726f6c6c657278396469643a6b65793a7a446e6165704275767351386370735772564b773866627047707650654e536a565054576f713663527161597a424b5650647479706569726f746174654b65796d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a35436266667367503673637451595958747969787a44737a356474654d4447424e6e355a57556843317545385a78736b5966656a794d456b74583474364a546b676457327238686e6e5352546950656631755175355147676b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "deactivation-wire",
+      "scope": "Representation, proof construction and internal hash links only; no complete Originals authorization/fold or Bitcoin claim.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "deactivate",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "deactivatedAt": "2026-09-05T00:00:00.000Z",
+                  "reason": "Fixture retirement"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z2oDpTvBsfq4u5rjb3NYF6iXxZPx8aWWx8V1Pk6qvy6gvJ9GqosYn3Gt2h4hnWBFyHZky2v496ow7zJ1ziTGiyTax"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDkjDvejohUSwCGAMih1BfdshR0Kc2YlfhDS0nzBrGeLw",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"deactivatedAt\":\"2026-09-05T00:00:00.000Z\",\"profile\":\"originals/cel/3\",\"reason\":\"Fixture retirement\"},\"type\":\"deactivate\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2264656163746976617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c22726561736f6e223a2246697874757265207265746972656d656e74227d2c2274797065223a2264656163746976617465227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiDkjDvejohUSwCGAMih1BfdshR0Kc2YlfhDS0nzBrGeLw",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "e48c3bde8e88544b008600c8a1d417ddb2147429cd9895f8434b49f306b19e2f",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6e48c3bde8e88544b008600c8a1d417ddb2147429cd9895f8434b49f306b19e2f",
+              "signatureHex": "59e0513a42a72313896a8a56b53d2e3baa6f2eac7e9a33b612a33bf2546b69a8839a856f70c9a93f08248dd186ac227a58b65a198f1ce17ec97025cbb106e809"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6782a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a366726561736f6e7246697874757265207265746972656d656e746770726f66696c656f6f726967696e616c732f63656c2f336d646561637469766174656441747818323032362d30392d30355430303a30303a30302e3030305a64747970656a646561637469766174656d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a326f4470547642736671347535726a62334e5946366958785a50783861575778385631506b367176793667764a3947716f73596e334774326834686e57424679485a6b7932763439366f77377a4a317a69544769795461786b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    },
+    {
+      "id": "migration-wire",
+      "scope": "Wire/proof only. The WebVH alias is a syntax illustration, not a resolvable DID or verified WebVH identity; no Bitcoin publication exists.",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "operation": {
+                "type": "migrate",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "from": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+                  "to": "did:webvh:fixture:example.com:art",
+                  "layer": "webvh",
+                  "migratedAt": "2026-09-05T00:00:00.000Z"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z35zH5n9cCgRFgWNUuHUH44RgEQAMNW7SV1YSvNZYHry1MQBsaasjn2TKKRTxdgfaafhz9C4Nk8o5LSShAzvZJraa"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiCfDpUvxK1oDtmmIIkq1rnwrSXf3u5VbaeQ2EHVffcGlQ",
+              "operation": {
+                "type": "migrate",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "from": "did:webvh:fixture:example.com:art",
+                  "to": "did:btco:reg:5000000000",
+                  "layer": "btco",
+                  "migratedAt": "2026-09-05T00:00:00.000Z"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4Go3ow1vQMZgjq6Jj7VMzLXpRUpTfRGPUQmWqMKsc548nD1Qp37nFFVkxsfx9H9ecp5CuAJHXogVSbLJcBGaPADo"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "wire-proof-chain-valid",
+        "didCel": "did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+        "head": "uEiDAsV2WRr18lEF2pf1XQgOxNRxVeTDjAR3UMEc3aDNQ9A",
+        "entries": [
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"controller\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\",\"createdAt\":\"2026-09-05T00:00:00.000Z\",\"name\":\"art.png\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"originals/cel/3\",\"resources\":[{\"digestMultibase\":\"uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ\",\"id\":\"art.png\",\"mediaType\":\"image/png\"}]},\"type\":\"create\"}}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b22636f6e74726f6c6c6572223a226469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377222c22637265617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c226e616d65223a226172742e706e67222c226e6f6e6365223a2241414141414141414141414141414141414141414141222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c227265736f7572636573223a5b7b226469676573744d756c746962617365223a22754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f384651222c226964223a226172742e706e67222c226d6564696154797065223a22696d6167652f706e67227d5d7d2c2274797065223a22637265617465227d7d",
+              "eventDigest": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6d4ea4f0d95f7aa1d80262edfc9bb1ed31aa9e00504c5d5648db5766134acbd66",
+              "signatureHex": "27f5353aa6de3868c11e0b5a1eb03f54e2136b3b5c7334468fc7ef5348d6518b374e33322b731522391c13e78e560f3ab3809df45a4e93c6e2ce84092f38ad06"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"from\":\"did:cel:uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\",\"layer\":\"webvh\",\"migratedAt\":\"2026-09-05T00:00:00.000Z\",\"profile\":\"originals/cel/3\",\"to\":\"did:webvh:fixture:example.com:art\"},\"type\":\"migrate\"},\"previousEvent\":\"uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2266726f6d223a226469643a63656c3a7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67222c226c61796572223a227765627668222c226d696772617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c22746f223a226469643a77656276683a666978747572653a6578616d706c652e636f6d3a617274227d2c2274797065223a226d696772617465227d2c2270726576696f75734576656e74223a227545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67227d",
+              "eventDigest": "uEiCfDpUvxK1oDtmmIIkq1rnwrSXf3u5VbaeQ2EHVffcGlQ",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "9f0e952fc4ad680ed9a620892ad6b9f0ad25dfdeee556da790d841d57df70695",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a69f0e952fc4ad680ed9a620892ad6b9f0ad25dfdeee556da790d841d57df70695",
+              "signatureHex": "6855c69539592442685b488e047cfd5cd20d2cfc9cbd116b70bb3f8b653aba56b9e2574a5e1a64c23d8469b4641d63bc182224fe7109413dc93a7f8cb26eb507"
+            }
+          ],
+          [
+            {
+              "canonicalEvent": "{\"operation\":{\"data\":{\"from\":\"did:webvh:fixture:example.com:art\",\"layer\":\"btco\",\"migratedAt\":\"2026-09-05T00:00:00.000Z\",\"profile\":\"originals/cel/3\",\"to\":\"did:btco:reg:5000000000\"},\"type\":\"migrate\"},\"previousEvent\":\"uEiCfDpUvxK1oDtmmIIkq1rnwrSXf3u5VbaeQ2EHVffcGlQ\"}",
+              "eventUtf8Hex": "7b226f7065726174696f6e223a7b2264617461223a7b2266726f6d223a226469643a77656276683a666978747572653a6578616d706c652e636f6d3a617274222c226c61796572223a226274636f222c226d696772617465644174223a22323032362d30392d30355430303a30303a30302e3030305a222c2270726f66696c65223a226f726967696e616c732f63656c2f33222c22746f223a226469643a6274636f3a7265673a35303030303030303030227d2c2274797065223a226d696772617465227d2c2270726576696f75734576656e74223a22754569436644705576784b316f44746d6d49496b7131726e7772535866337535566261655132454856666663476c51227d",
+              "eventDigest": "uEiDAsV2WRr18lEF2pf1XQgOxNRxVeTDjAR3UMEc3aDNQ9A",
+              "canonicalProofConfiguration": "{\"created\":\"2026-09-05T00:00:00.000Z\",\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw\"}",
+              "proofHashHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6",
+              "documentHashHex": "c0b15d9646bd7c944176a5fd574203b1351c557930e3011dd4304737683350f4",
+              "signingMessageHex": "8ab88888e2d0fb4b6163c1b067716403cfcdc897aa34a0fd85274d68db7e68a6c0b15d9646bd7c944176a5fd574203b1351c557930e3011dd4304737683350f4",
+              "signatureHex": "a3abcc6fc476c90707300a1fdd7b7eb60db8cfd3bac1d76acf68794726a5c1f04bbc0c0f93375d0c461367c871374bd0d2de3229e17fb601f6edf8bad46b490a"
+            }
+          ]
+        ]
+      },
+      "cborHex": "a1636c6f6783a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65676172742e706e67656e6f6e636576414141414141414141414141414141414141414141416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d30392d30355430303a30303a30302e3030305a697265736f757263657381a3626964676172742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d73776474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578587a6f4c543731564e52315475346536353131666a327462576535467231754273737153575368796570414c536b5a536e72786b7a33546e53374b37666a6133704a425275626b6339593551345747736f4d4e4c47525a70486b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a562746f78216469643a77656276683a666978747572653a6578616d706c652e636f6d3a6172746466726f6d78376469643a63656c3a7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a67656c617965726577656276686770726f66696c656f6f726967696e616c732f63656c2f336a6d6967726174656441747818323032362d30392d30355430303a30303a30302e3030305a6474797065676d6967726174656d70726576696f75734576656e74782f7545694455366b384e6c6665714859416d4c745f4a7578375447716e67425154463157534e74585a684e4b79395a676570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a33357a48356e39634367524667574e5575485548343452674551414d4e57375356315953764e5a59487279314d5142736161736a6e32544b4b525478646766616166687a3943344e6b386f354c535368417a765a4a7261616b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377a2656576656e74a2696f7065726174696f6ea26464617461a562746f776469643a6274636f3a7265673a353030303030303030306466726f6d78216469643a77656276683a666978747572653a6578616d706c652e636f6d3a617274656c61796572646274636f6770726f66696c656f6f726967696e616c732f63656c2f336a6d6967726174656441747818323032362d30392d30355430303a30303a30302e3030305a6474797065676d6967726174656d70726576696f75734576656e74782f754569436644705576784b316f44746d6d49496b7131726e7772535866337535566261655132454856666663476c516570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d30392d30355430303a30303a30302e3030305a6a70726f6f6656616c756578597a34476f336f773176514d5a676a71364a6a37564d7a4c5870525570546652475055516d57714d4b73633534386e4431517033376e4646566b78736678394839656370354375414a48586f675653624c4a634247615041446f6b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377237a364d6b74777570646d4c58565671547a43773469343672347547796f734758526e5233586a4e345a71376f4d4d7377"
+    }
+  ],
+  "rejected": [
+    {
+      "id": "old-events-wrapper",
+      "stage": "structure",
+      "document": {
+        "events": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "old-did-document-wrapper",
+      "stage": "structure",
+      "document": {
+        "didDocument": {
+          "id": "did:btco:reg:1"
+        },
+        "celLog": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "entry-type-data-in-old-position",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "type": "create",
+            "data": {
+              "profile": "originals/cel/3",
+              "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+              "createdAt": "2026-09-05T00:00:00.000Z",
+              "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+              "name": "art.png",
+              "resources": [
+                {
+                  "id": "art.png",
+                  "mediaType": "image/png",
+                  "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                }
+              ]
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "missing-profile",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "unknown-profile",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/99",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "data-did-cannot-select-identity",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ],
+                  "did": "did:cel:claimed"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "data-and-dataReference",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                },
+                "dataReference": {
+                  "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "dataReference-array-is-not-CCG",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "dataReference": [
+                  {
+                    "id": "art.png",
+                    "mediaType": "image/png",
+                    "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                  }
+                ]
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "empty-log",
+      "stage": "structure",
+      "document": {
+        "log": []
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "empty-proof-array",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": []
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "too-many-proofs",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "genesis-previous-null",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              },
+              "previousEvent": null
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "genesis-previous-digest",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              },
+              "previousEvent": "uEiDU6k8NlfeqHYAmLt_Jux7TGqngBQTF1WSNtXZhNKy9Zg"
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "unknown-operation",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "transfer",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "holder-author",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ],
+                  "author": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "custom-proof-label",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "OriginalsCelProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "custom-suite-label",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "originals-cel-ed25519-jcs-v1",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "wrong-purpose",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "authentication",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "proof-chain-unsupported",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH",
+                "previousProof": "urn:proof:1"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "cached-bitcoin-proof-fields",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH",
+                "blockHeight": 101
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "leap-second-proof-time",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2016-12-31T23:59:60Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "invalid-calendar-date",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-02-30T00:00:00Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "lowercase-time",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05t00:00:00z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "empty-resource-urls",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ",
+                      "url": []
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "relative-resource-url",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ",
+                      "url": [
+                        "art.png"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "malformed-percent-url",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ",
+                      "url": [
+                        "https://example.com/%xx"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "media-type-parameter-outside-profile",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png; charset=utf-8",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "duplicate-resource-id",
+      "stage": "semantic",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    },
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "noncanonical-nonce",
+      "stage": "semantic",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAB",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "padded-resource-digest",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ="
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "name-changed-after-signing",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "Changed",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "own-prototype-value-changed",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ],
+                  "metadata": {
+                    "2": "two",
+                    "10": "ten",
+                    "__proto__": {
+                      "signed": "changed"
+                    },
+                    "constructor": "constructor value",
+                    "prototype": "prototype value",
+                    "nested": [
+                      {
+                        "2": 2,
+                        "10": 10
+                      }
+                    ],
+                    "é": "composed",
+                    "é": "decomposed",
+                    "😀": "non-BMP",
+                    "דּ": "BMP",
+                    "number": 1e+30
+                  }
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z3BGfY9PPVuYfQg1aXwutupFUqAdp6MtkS2aAHAv1PVGd3LyoUUdYuanRT8qhqQhUzDunnqKwXnc3iy5pbpD2LXoR"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "numeric-looking-key-value-changed",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ],
+                  "metadata": {
+                    "2": "changed",
+                    "10": "ten",
+                    "__proto__": {
+                      "signed": "retained"
+                    },
+                    "constructor": "constructor value",
+                    "prototype": "prototype value",
+                    "nested": [
+                      {
+                        "2": 2,
+                        "10": 10
+                      }
+                    ],
+                    "é": "composed",
+                    "é": "decomposed",
+                    "😀": "non-BMP",
+                    "דּ": "BMP",
+                    "number": 1e+30
+                  }
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z3BGfY9PPVuYfQg1aXwutupFUqAdp6MtkS2aAHAv1PVGd3LyoUUdYuanRT8qhqQhUzDunnqKwXnc3iy5pbpD2LXoR"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "verification-method-fragment-mismatch",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "suite-key-mismatch",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "ecdsa-jcs-2019",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "one-valid-one-invalid-proof",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              },
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z1111111111111111111111111111111111111111111111111111111111111111"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "missing-previous-event",
+      "stage": "structure",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "name": "A second title"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z4XcWhRjp8HHPo2wPY5TLSnMYciGaSVDwmHCuVd5zwggs63dXqAC1g92dShtzh1BV58K6FvYisHgywLE7Zbhp7BQB"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "valid-signature-wrong-chain-link",
+      "stage": "chain",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          },
+          {
+            "event": {
+              "previousEvent": "uEiCqbgYYVY4glheeeXk8X2mYbvFePbmo6pIKrswMdLDw6w",
+              "operation": {
+                "type": "update",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "name": "Wrong predecessor"
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z3AsAHLcSeHoYE7aSiBwcxq4YtwxeZSj34zYGkP5eMxjqkDyYKW3wkgbf4XxxZH1yyFNnv2WZnkZxH1JhFF8nbQu3"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    },
+    {
+      "id": "valid-log-wrong-requested-DID",
+      "stage": "identity",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+              }
+            ]
+          }
+        ]
+      },
+      "expectedDid": "did:cel:uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ",
+      "expected": "rejected"
+    },
+    {
+      "id": "signature-over-wrong-wrapper",
+      "stage": "proof",
+      "document": {
+        "log": [
+          {
+            "event": {
+              "operation": {
+                "type": "create",
+                "data": {
+                  "profile": "originals/cel/3",
+                  "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                  "createdAt": "2026-09-05T00:00:00.000Z",
+                  "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+                  "name": "art.png",
+                  "resources": [
+                    {
+                      "id": "art.png",
+                      "mediaType": "image/png",
+                      "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+                    }
+                  ]
+                }
+              }
+            },
+            "proof": [
+              {
+                "type": "DataIntegrityProof",
+                "cryptosuite": "eddsa-jcs-2022",
+                "created": "2026-09-05T00:00:00.000Z",
+                "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+                "proofPurpose": "assertionMethod",
+                "proofValue": "z5Kv25fiNAcopDiyXw9hGvS8qpRpvYLqeJk3yedd5pKvwyECCP2xDRcKZ7YfzUJV5QP47DiVWTZknopNUHc2gMsEX"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "rejected"
+    }
+  ]
+}

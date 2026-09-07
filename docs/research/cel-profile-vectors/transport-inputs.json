@@ -1,0 +1,131 @@
+{
+  "json": [
+    {
+      "id": "numeric-and-prototype-member-names",
+      "source": "{\"10\":10,\"2\":2,\"__proto__\":{\"x\":1}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "composed-and-decomposed-unicode",
+      "source": "{\"é\":1,\"é\":2}",
+      "expected": "accepted"
+    },
+    {
+      "id": "duplicate-decoded-key",
+      "source": "{\"name\":1,\"name\":2}",
+      "expected": "rejected"
+    },
+    {
+      "id": "escaped-duplicate-key",
+      "source": "{\"name\":1,\"\\u006eame\":2}",
+      "expected": "rejected"
+    },
+    {
+      "id": "lone-surrogate-value",
+      "source": "{\"x\":\"\\ud800\"}",
+      "expected": "rejected"
+    },
+    {
+      "id": "lone-surrogate-key",
+      "source": "{\"\\udfff\":1}",
+      "expected": "rejected"
+    },
+    {
+      "id": "nonfinite-number",
+      "source": "{\"x\":1e999}",
+      "expected": "rejected"
+    },
+    {
+      "id": "multiple-json-documents",
+      "source": "{}{}",
+      "expected": "rejected"
+    },
+    {
+      "id": "json-bom",
+      "source": "﻿{}",
+      "expected": "rejected"
+    }
+  ],
+  "cbor": [
+    {
+      "id": "integer-one",
+      "hex": "a1616101",
+      "expected": "accepted"
+    },
+    {
+      "id": "float-one-same-value",
+      "hex": "a16161f93c00",
+      "expected": "accepted"
+    },
+    {
+      "id": "alternate-integer-width",
+      "hex": "a161611801",
+      "expected": "accepted"
+    },
+    {
+      "id": "negative-zero",
+      "hex": "a16161f98000",
+      "expected": "accepted"
+    },
+    {
+      "id": "exact-large-integer",
+      "hex": "a161611b2000000000000000",
+      "expected": "accepted"
+    },
+    {
+      "id": "duplicate-map-key",
+      "hex": "a2616101616102",
+      "expected": "rejected"
+    },
+    {
+      "id": "non-text-map-key",
+      "hex": "a10101",
+      "expected": "rejected"
+    },
+    {
+      "id": "byte-string",
+      "hex": "a161614101",
+      "expected": "rejected"
+    },
+    {
+      "id": "tag",
+      "hex": "a16161c000",
+      "expected": "rejected"
+    },
+    {
+      "id": "undefined",
+      "hex": "a16161f7",
+      "expected": "rejected"
+    },
+    {
+      "id": "infinity",
+      "hex": "a16161f97c00",
+      "expected": "rejected"
+    },
+    {
+      "id": "nan",
+      "hex": "a16161f97e00",
+      "expected": "rejected"
+    },
+    {
+      "id": "invalid-utf8",
+      "hex": "a1616161ff",
+      "expected": "rejected"
+    },
+    {
+      "id": "indefinite-map",
+      "hex": "bf616101ff",
+      "expected": "rejected"
+    },
+    {
+      "id": "trailing-item",
+      "hex": "a000",
+      "expected": "rejected"
+    },
+    {
+      "id": "inexact-large-integer",
+      "hex": "a161611b2000000000000001",
+      "expected": "rejected"
+    }
+  ]
+}

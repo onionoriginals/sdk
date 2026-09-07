@@ -24,18 +24,21 @@ import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store'
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 
 /**
- * The server-side network flag: BTC_NETWORK=mainnet|testnet4 (default testnet4).
+ * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
  * Env is a parameter so the boot-time config contract can judge a snapshot.
  */
 export function serverBtcNetwork(
   env: Record<string, string | undefined> = process.env
-): 'mainnet' | 'testnet4' {
-  return env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
+): 'mainnet' | 'testnet4' | 'regtest' {
+  return env.BTC_NETWORK === 'regtest' ? 'regtest' : env.BTC_NETWORK === 'mainnet' ? 'mainnet' : 'testnet4';
 }
 
 export function isBitcoinConfigured(
   env: Record<string, string | undefined> = process.env
 ): boolean {
+  if (serverBtcNetwork(env) === 'regtest') {
+    return !!env.REGTEST_RPC_URL && !!env.REGTEST_ORD_URL && !!env.REGTEST_RPC_AUTH && !!env.BTC_INDEXER_API;
+  }
   if (!env.QUICKNODE_ENDPOINT) return false;
   // Mainnet is creator-pays: no faucet env needed (and none is mounted).
   if (serverBtcNetwork(env) === 'mainnet') return true;
@@ -54,13 +57,25 @@ export interface FaucetProvider extends OrdinalsProvider {
   >;
 }
 
-export type BtcNet = 'mainnet' | 'testnet';
+export type BtcNet = 'mainnet' | 'testnet' | 'regtest';
+
+export function bitcoinSigningNetwork(network: BtcNet) {
+  return network === 'regtest' ? { ...btc.TEST_NETWORK, bech32: 'bcrt' } : network === 'mainnet' ? btc.NETWORK : btc.TEST_NETWORK;
+}
+
+/** Local regtest services must never silently read a public chain. */
+export function isLoopbackServiceUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.username && !url.password;
+  } catch { return false; }
+}
 
 /** The scriptPubKey (hex) for a bech32 P2WPKH address (`tb1q…` or `bc1q…`). */
 export function p2wpkhScriptHex(address: string, network: BtcNet = 'testnet'): string {
-  const decoded = btc.Address(network === 'mainnet' ? btc.NETWORK : btc.TEST_NETWORK).decode(address);
+  const decoded = btc.Address(bitcoinSigningNetwork(network)).decode(address);
   if (!decoded || decoded.type !== 'wpkh') {
-    throw new Error(`Address must be P2WPKH (${network === 'mainnet' ? 'bc1q' : 'tb1q'}…): ${address}`);
+    throw new Error(`Address must be P2WPKH (${network === 'regtest' ? 'bcrt1q' : network === 'mainnet' ? 'bc1q' : 'tb1q'}…): ${address}`);
   }
   // Cast: the narrowed wpkh shape is a valid OutScript input; the union type on
   // encode() otherwise widens to include undefined and fails to match.
@@ -105,8 +120,13 @@ const stripTrailingSlash = (u: string) => u.replace(/\/+$/, '');
  */
 export function resolveIndexer(
   env: Record<string, string | undefined> = process.env,
-  network: BtcNet = serverBtcNetwork(env) === 'mainnet' ? 'mainnet' : 'testnet'
+  network: BtcNet = serverBtcNetwork(env) === 'testnet4' ? 'testnet' : serverBtcNetwork(env) as BtcNet
 ): IndexerConfig {
+  if (network === 'regtest') {
+    if (!env.BTC_INDEXER_API) throw new Error('regtest requires an explicit BTC_INDEXER_API');
+    if (!isLoopbackServiceUrl(env.BTC_INDEXER_API)) throw new Error('regtest BTC_INDEXER_API must use a loopback service');
+    return { api: stripTrailingSlash(env.BTC_INDEXER_API), ...(env.BTC_INDEXER_TOKEN ? { authToken: env.BTC_INDEXER_TOKEN } : {}), ...(env.BTC_INDEXER_AUTH_HEADER ? { authHeader: env.BTC_INDEXER_AUTH_HEADER } : {}) };
+  }
   const legacy = network === 'mainnet' ? env.MEMPOOL_API : env.MEMPOOL_TESTNET4_API ?? env.MEMPOOL_API;
   const api = stripTrailingSlash(env.BTC_INDEXER_API || legacy || DEFAULT_INDEXER_API[network]);
   const cfg: IndexerConfig = { api };
@@ -447,10 +467,10 @@ export async function classifySpendableUtxos<T extends { txid: string; vout: num
   utxos: T[],
   lookup: OrdinalLookup | undefined,
   maxLookups = 25
-): Promise<{ ok: boolean; spendable: T[]; ordinalBearing: number; reason?: string }> {
-  if (utxos.length === 0) return { ok: true, spendable: [], ordinalBearing: 0 };
+): Promise<{ ok: boolean; spendable: T[]; ordinalBearing: number; unchecked: number; reason?: string }> {
+  if (utxos.length === 0) return { ok: true, spendable: [], ordinalBearing: 0, unchecked: 0 };
   if (!lookup) {
-    return { ok: false, spendable: [], ordinalBearing: 0, reason: 'no ordinal lookup configured' };
+    return { ok: false, spendable: [], ordinalBearing: 0, unchecked: utxos.length, reason: 'no ordinal lookup configured' };
   }
   // Largest first: the same order selection walks, so the bounded budget is
   // spent on the outputs a commit would actually reach for.
@@ -465,12 +485,13 @@ export async function classifySpendableUtxos<T extends { txid: string; vout: num
       // One unanswerable candidate poisons the whole selection: a partial
       // classification is exactly the state where a top-up silently burns an
       // inscribed sat.
-      return { ok: false, spendable: [], ordinalBearing: 0, reason: (e as Error).message };
+      return { ok: false, spendable: [], ordinalBearing: 0, unchecked: utxos.length, reason: (e as Error).message };
     }
     if (inscriptions.length > 0) ordinalBearing++;
     else spendable.push(u);
   }
-  return { ok: true, spendable, ordinalBearing };
+  // Past the budget is unclassified, not clean; the caller must be able to say so (#493).
+  return { ok: true, spendable, ordinalBearing, unchecked: Math.max(0, utxos.length - maxLookups) };
 }
 
 /**
@@ -679,6 +700,9 @@ export function createBitcoinRoutes(deps: {
   // on every poll; short enough that an evicted one is back in the mempool
   // within the hour.
   const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
+  // Application recovery horizon, not a Bitcoin finality guarantee. Retain
+  // both signed transactions and recheck the chain until six confirmations.
+  const RECOVERY_CONFIRMATIONS = 6;
 
   // ONE fee source for the money path (R3/KTD3). The deposit quote, the
   // /api/btc/fee estimate the browser builds the inscription against, and the
@@ -744,11 +768,6 @@ export function createBitcoinRoutes(deps: {
       reconcileCursors.set(sub, c);
     }
     return c;
-  }
-  function rotate<T>(arr: T[], cursor: number): T[] {
-    if (arr.length === 0) return arr;
-    const start = cursor % arr.length;
-    return [...arr.slice(start), ...arr.slice(0, start)];
   }
 
   /** 429 when the per-user QuickNode-quota cap is hit, else null. */
@@ -1080,6 +1099,14 @@ export function createBitcoinRoutes(deps: {
         candidates: utxos.confirmed.length,
         reason: classified.reason,
       });
+    } else if (classified.unchecked > 0) {
+      money('deposit_ordinal_check_partial', {
+        sub,
+        network,
+        address,
+        candidates: utxos.confirmed.length,
+        unchecked: classified.unchecked,
+      });
     }
     const confirmedUtxos = classified.spendable;
     // The commit's outputs are priced INDIVIDUALLY (R25): this deploy builds
@@ -1191,7 +1218,13 @@ export function createBitcoinRoutes(deps: {
        * only the spend is withheld (R25 keeps the shape open: the quote does
        * not assume a single spend output).
        */
-      ordinalCheck: classified.ok ? ('ok' as const) : ('unavailable' as const),
+      ordinalCheck: !classified.ok
+        ? ('unavailable' as const)
+        : classified.unchecked > 0
+          ? ('partial' as const)
+          : ('ok' as const),
+      /** Confirmed outputs past the lookup budget: unclassified, so not offered. Present only when 'partial'. */
+      ...(classified.ok && classified.unchecked > 0 ? { uncheckedOutputs: classified.unchecked } : {}),
       unconfirmedSats: utxos.unconfirmedSats,
       estimatedCostSats,
       /**
@@ -1454,6 +1487,61 @@ export function createBitcoinRoutes(deps: {
     }
     const revealTxId = reveal.id;
 
+    // Where the money goes (#493): step 5b never looked at output 1, so a signer that
+    // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
+    const network = deps.network ?? 'testnet';
+    if (!isValidBitcoinAddress(changeAddress, network)) {
+      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
+    }
+    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
+    let bound: string | null;
+    try {
+      bound = store.depositBinding(sub, network);
+    } catch {
+      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
+    }
+    // Fail CLOSED on an unbound account. `bound && …` skipped the check
+    // entirely when nothing was bound, and nothing forces the deposit route
+    // (the only thing that binds, `bindDepositAddress` above) to run first — so
+    // a caller could go straight to this route, never bind, and name any
+    // change address it liked. That is precisely the browser-shaped adversary
+    // this route exists to stop, so an absent binding is a refusal, not a pass.
+    if (bound !== changeAddress) {
+      return refuse(
+        'change_address_not_bound',
+        {
+          error: 'address_not_bound',
+          message: bound
+            ? 'changeAddress is not the deposit address bound to this account.'
+            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
+        },
+        403
+      );
+    }
+    let changeScript: string;
+    try {
+      changeScript = p2wpkhScriptHex(changeAddress, network);
+    } catch (e) {
+      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
+    }
+    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
+    }
+    if (reveal.outputsLength < 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal output must pay changeAddress.' }, 400);
+    }
+
+    // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
+    // client can declare any outpoint, and an inscribed one becomes the new DID sat or burns as fee.
+    const declaredUtxos = declared.map((u) => ({ txid: u.txid!, vout: u.vout!, value: typeof u.value === 'number' ? u.value : 0 }));
+    const ordinalCheck = await classifySpendableUtxos(declaredUtxos, deps.ordinals, declaredUtxos.length);
+    if (!ordinalCheck.ok) {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the funding outputs carry no inscription.' }, 503);
+    }
+    if (ordinalCheck.ordinalBearing > 0) {
+      return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'A declared funding output carries an inscription and must not be spent.' }, 400);
+    }
+
     // Consume a per-user slot only now that the request has proven valid —
     // malformed submissions must not burn the hourly cap for free (mirrors
     // the funding route's validate-before-consuming rule).
@@ -1607,10 +1695,10 @@ export function createBitcoinRoutes(deps: {
    * 2. LIVE pairs stuck at commit_broadcast (reveal broadcast failed at some
    *    point) get their reveal completed from the persisted copy once their
    *    commit confirms.
-   * 3. Broadcast-but-unconfirmed reveals get a confirmation check; a
-   *    confirmed reveal is persisted as 'confirmed' (sticky, and its recovery
-   *    artifacts are dropped), so each record costs at most a handful of
-   *    provider lookups over its lifetime. One that is STILL unconfirmed
+   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS. An earlier confirmation
+   *    remains reversible: retain both transactions, demote after a reorg, and
+   *    rebroadcast. Retire the artifacts only at the retention horizon.
+   *    One that is STILL unconfirmed
    *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
    *    copy — a reveal evicted from the mempool has no other way back.
    */
@@ -1647,7 +1735,7 @@ export function createBitcoinRoutes(deps: {
     // land — so it is excluded from reconciliation instead of costing a
     // pointless provider lookup on every poll for the rest of time.
     const confirmedOutpoints = new Set(
-      newestFirst.filter((r) => r.status === 'confirmed').flatMap(outpointsOf)
+      newestFirst.filter((r) => r.status === 'confirmed' && r.retired).flatMap(outpointsOf)
     );
     // Any single spent input is enough to kill a rival commit for good.
     const isDead = (r: InscriptionRecord) => outpointsOf(r).some((o) => confirmedOutpoints.has(o));
@@ -1681,7 +1769,7 @@ export function createBitcoinRoutes(deps: {
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
-      newestFirst.filter((r) => !r.superseded && r.status === 'reveal_broadcast'),
+      newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),
       cursors.confirm
     );
     let lookups = 0;
@@ -1731,8 +1819,16 @@ export function createBitcoinRoutes(deps: {
       try {
         const st = await provider.getTransactionStatus(r.revealTxId);
         if (st?.confirmed) {
-          store.setStatus(sub, r.commitTxId, 'confirmed');
+          if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
+          if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
+          continue;
+        }
+        if (r.status === 'confirmed') {
+          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
           changed = true;
+          if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
+          if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
+          store.markRebroadcast(sub, r.commitTxId);
           continue;
         }
         // Not confirmed, and nothing else in the system ever re-pushes a
@@ -1812,7 +1908,7 @@ export function createBitcoinRoutes(deps: {
       throw e;
     }
     if (!rec) return json({ error: 'not_found' }, 404);
-    if (rec.status === 'confirmed') {
+    if (rec.status === 'confirmed' && rec.retired) {
       return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
@@ -1841,13 +1937,14 @@ export function createBitcoinRoutes(deps: {
       if (st?.confirmed) {
         reclaimIfSuperseded();
         store.setStatus(sub, commitTxId, 'confirmed');
+        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
         return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
       }
     } catch {
       // No lookup support / transport failure — fall through to rebroadcast.
     }
 
-    if (rec.status === 'signed' && rec.signedCommitHex) {
+    if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
       reclaimIfSuperseded();
@@ -1889,6 +1986,18 @@ export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;
 export function positiveInt(value: unknown, fallback: number): number {
   const n = typeof value === 'string' ? Number(value) : (value as number);
   return Number.isInteger(n) && (n as number) > 0 ? (n as number) : fallback;
+}
+
+/**
+ * Start a stably ordered worklist at `cursor % length`. Advancing the cursor by
+ * however many items a pass consumed is what lets a bounded pass cover a
+ * backlog larger than itself over successive passes (both hourly sweeps and
+ * the list poll's reconciliation use this; one idiom, not three).
+ */
+export function rotate<T>(arr: T[], cursor: number): T[] {
+  if (arr.length === 0) return arr;
+  const start = cursor % arr.length;
+  return [...arr.slice(start), ...arr.slice(0, start)];
 }
 
 /**
@@ -1965,8 +2074,7 @@ export function createDepositBalanceSweep(deps: {
     });
     // Stable order + rotating cursor: every candidate gets its turn.
     candidates.sort((a, b) => (a.subOrgId + a.address).localeCompare(b.subOrgId + b.address));
-    const start = candidates.length > 0 ? cursor % candidates.length : 0;
-    const pass = [...candidates.slice(start), ...candidates.slice(0, start)].slice(0, maxPerPass);
+    const pass = rotate(candidates, cursor).slice(0, maxPerPass);
     cursor += pass.length;
 
     let withBalance = 0;

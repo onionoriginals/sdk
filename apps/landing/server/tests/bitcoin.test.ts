@@ -6,6 +6,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import {
+  classifySpendableUtxos,
   createBitcoinRoutes,
   rawKeyFaucetSigner,
   fetchFaucetUtxos,
@@ -386,7 +387,7 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
       body: (await res.json()) as {
         confirmedUtxos: Array<{ txid: string; value: number }>;
         confirmedSats: number;
-        ordinalCheck: 'ok' | 'unavailable';
+        ordinalCheck: 'ok' | 'unavailable' | 'partial';
         network: string;
       },
     };
@@ -535,6 +536,64 @@ describe('GET /api/btc/deposit — ownership binding and ordinal safety', () => 
  * must not foreclose one. The quote is derived from a LIST of commit outputs,
  * so a platform fee output is an added entry, not a re-derived constant.
  */
+/**
+ * #493 item 4 — the lookup budget used to truncate silently: outputs past the
+ * 25 largest were dropped from the spendable set while the response still
+ * said `ordinalCheck: 'ok'`, so a creator whose balance sits in many small
+ * outputs saw a shortfall they could not reconcile with a block explorer.
+ */
+describe('classifySpendableUtxos reports what it did not check', () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ txid: i.toString(16).padStart(64, '0'), vout: 0, value: 1_000 + i }));
+
+  test('counts the candidates past the lookup budget instead of dropping them silently', async () => {
+    const r = await classifySpendableUtxos(many(30), ordinalsSaying(), 25);
+    expect(r.ok).toBe(true);
+    expect(r.spendable).toHaveLength(25);
+    expect(r.unchecked).toBe(5);
+  });
+
+  test('reports zero unchecked when everything fit the budget', async () => {
+    const r = await classifySpendableUtxos(many(3), ordinalsSaying(), 25);
+    expect(r.unchecked).toBe(0);
+  });
+});
+
+describe('GET /api/btc/deposit — a truncated ordinal check is disclosed (#493)', () => {
+  const MAINNET_ADDRESS = btc.p2wpkh(FAUCET_PUB, btc.NETWORK).address!;
+  function req(address: string) {
+    const token = signToken('sub-1', 'a@b.com', undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    return new Request(`http://host/api/btc/deposit?address=${encodeURIComponent(address)}`, { headers: { cookie } });
+  }
+
+  test("says 'partial' when more outputs sat at the address than the lookup budget covers", async () => {
+    const utxos = Array.from({ length: 30 }, (_, i) => ({
+      txid: i.toString(16).padStart(64, '0'),
+      vout: 0,
+      value: 1_000 + i,
+      status: { confirmed: true },
+    }));
+    const fetchImpl = (async () => new Response(JSON.stringify(utxos), { status: 200 })) as unknown as typeof fetch;
+    const routes = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet',
+      depositApi: 'https://mempool.example/api',
+      fetchImpl,
+      ordinals: ordinalsSaying(),
+      inscriptions: createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'dep-')) }),
+    });
+    const r = req(MAINNET_ADDRESS);
+    const res = await routes.deposit(r, new URL(r.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ordinalCheck: string; confirmedUtxos: unknown[]; uncheckedOutputs?: number };
+    expect(body.ordinalCheck).toBe('partial');
+    expect(body.confirmedUtxos).toHaveLength(25);
+    expect(body.uncheckedOutputs).toBe(5);
+  });
+});
+
 describe('the cost estimate does not assume a single spend output (R25)', () => {
   const base = { feeRate: 3, inputs: 1, contentBytes: 8_000 };
 

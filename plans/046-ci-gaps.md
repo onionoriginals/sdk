@@ -16,11 +16,11 @@
 
 ## Why this matters
 
-Four gaps, each of which let something real through during run 3. None are
+Five gaps, each of which let something real through during run 3. None are
 hypothetical: for each, the bug shipped to a PR and was caught by a human or a
 review bot rather than by CI.
 
-### 1. `turbo run lint` does not depend on `^build`
+### 1. `turbo run lint` does not depend on `^build` — FIXED
 
 `packages/auth` imports types from `@originals/sdk`, which resolve through
 `packages/sdk/dist`. The lint task has no `dependsOn: ["^build"]`, so during lint
@@ -161,7 +161,7 @@ while a GC sawtooth yields −67% and passes.
 2. The browser-safety gate covers `@originals/auth`'s browser-facing entries and
    fails on a `Buffer` reference in a guarded graph. Verify by temporarily
    reintroducing `Buffer.from` into `turnkeySignBytes` and confirming CI fails.
-3. `bun run lint` in both packages lints the entire `src` tree, and passes.
+3. `bun run lint` in every package lints the entire `src` tree, and passes.
 4. CI typechecks, tests and builds `apps/landing` on every PR, and is green on
    `main`. Verify by reintroducing the `OrdMockProvider` root import or the
    `updateResource` key and confirming the job fails.

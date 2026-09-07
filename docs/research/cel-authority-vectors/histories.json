@@ -1,0 +1,3329 @@
+{
+  "scope": "Hand-worked decision histories with real signatures from public test keys. Positions, completeness, ownership and tips are DECLARED SCENARIOS, not Bitcoin observations. WebVH method binding is symbolic and not verified. This is not production or regtest evidence.",
+  "actors": {
+    "A": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+    "B": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+    "H": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z"
+  },
+  "entries": {
+    "G": {
+      "event": {
+        "operation": {
+          "type": "create",
+          "data": {
+            "profile": "originals/cel/3",
+            "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "createdAt": "2026-09-05T00:00:00.000Z",
+            "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+            "name": "Original",
+            "resources": [
+              {
+                "id": "art.png",
+                "mediaType": "image/png",
+                "digestMultibase": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA"
+              }
+            ],
+            "metadata": {
+              "phase": "creation"
+            }
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5ooukiB7VvvtrHmCZRzpxdEZe8E1TENbp4F1Kvv7GQsmEf1yvziYcsBgcmsXmFADRJaYSY1BNtxgNUaVbyjASu5X"
+        }
+      ]
+    },
+    "W": {
+      "event": {
+        "previousEvent": "uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+            "to": "did:webvh:fixture:example.com:art",
+            "layer": "webvh",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z2SxBVYs9VVyLJZFWjxDTGd8omnVF2xt2vp8jKPSoLGWGYRESHAhTjgoioYzenTfR4fBDNEzpMBfwAU5JCWvF4m8J"
+        }
+      ]
+    },
+    "T": {
+      "event": {
+        "previousEvent": "uEiA2d2ZLmnWrZTS2taCI-kDeO3gFBMT9XtF9DaDDru9NNQ",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:webvh:fixture:example.com:art",
+            "to": "did:btco:reg:5000000000",
+            "layer": "btco",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z4qnY6VMmrmyygyiC7o83PLuz68P5VfAgXNjEYEAB26absshy5xoQZk1Vewbk66iZofzWX78vVYEV1vXozicb8jFb"
+        }
+      ]
+    },
+    "R": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "rotateKey",
+          "data": {
+            "profile": "originals/cel/3",
+            "newController": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+            "rotatedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "ztEVmNXPzWnvDUENwbmxjFnfHPaok62mxT7KTcbfRUgrCbYg1JqzVFyZhk6rnBBezuG7RRHt8gy9GGpXFpuKznnv"
+        }
+      ]
+    },
+    "Rwrong": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "rotateKey",
+          "data": {
+            "profile": "originals/cel/3",
+            "newController": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+            "rotatedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z2sGCvv2UE7N6cQySmaBec9DG2JCKyqD7XcmETX3b4n1R8HL8NmLkSBc9Z1u7wAYf4mSiY92fNDxWDsc4KgMFoJCs"
+        }
+      ]
+    },
+    "Aretired": {
+      "event": {
+        "previousEvent": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Rejected old key"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5g3h1NNBRDSvpB473tZTq5wb5YxypaYEMBMqfkdtEM2huZv2Fd5tUbK62E8qTcDDpp1VobPvoEReu5wUn2jojiHw"
+        }
+      ]
+    },
+    "Bupdate": {
+      "event": {
+        "previousEvent": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Current key update"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zRtcghAmCxZvkuYJVXGhosMvzZxGq8Yu6BaX8UUc7xn2sbvURihshCsgucbZxdHcPmuyqgFVUg7q39QcNAQxQ4Wx"
+        }
+      ]
+    },
+    "Hupdate": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Holder-authored update"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zruWRhpfXGe85ifwU35bhP79E1h3U7jUdhncZ5uTvaAmNHHJXWKDP7MfrzPga8H3EhAvi6zRCmdzvfbxGqpR3FV2"
+        }
+      ]
+    },
+    "U": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "First branch"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zsDAg88JACr2usy2UJZKVeKHDG6iKisp5W2B8gH2YdcgNtEkYEN9m7QpBjABJLnEeRJQqrdp6Xm5jczS9skLPntm"
+        }
+      ]
+    },
+    "V": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Second branch"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z3GeqRMDNsex3TVMNRDFLHp7xKX5TVKhpoS65Fuhq713JEPQfwEe1YU3LSxQavAFL2TsBqEvqTFo5PYe6ST4DhGqe"
+        }
+      ]
+    },
+    "U2": {
+      "event": {
+        "previousEvent": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "metadata": {
+              "phase": "second update"
+            }
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5AdRnf5a8g62TNyBVtRkfbBxwRxFPANLUBHH3j6U9iCE33xSQPt6dA9W9PJkCgwUnFQn3adoDHF2tosccwFx2VHc"
+        }
+      ]
+    },
+    "D": {
+      "event": {
+        "previousEvent": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "operation": {
+          "type": "deactivate",
+          "data": {
+            "profile": "originals/cel/3",
+            "deactivatedAt": "2026-09-05T00:00:00.000Z",
+            "reason": "Done"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z3wJeWL6tWgbKnj3g6g2s8ErFBaiWLytX57ANf41erQ4yhKi8H6LPZEKqQeV6aZbQDJ1LXMkfALapUxgbuHTdoQ8u"
+        }
+      ]
+    },
+    "Dupdate": {
+      "event": {
+        "previousEvent": "uEiBlSfzpAy8l2-uwacxOAA6ssSbqaJd3yh57ipkPRCd6Ww",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Rejected after deactivation"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5YfMhvk8uZBx4wtoc43q5LiQB5EhRYUM7GKqdnTayYAkf4v73WyhSeoENoQcn6e4z1jpNiPzw8HyNu4SUdkR4Ey3"
+        }
+      ]
+    },
+    "ReturnA": {
+      "event": {
+        "previousEvent": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "operation": {
+          "type": "rotateKey",
+          "data": {
+            "profile": "originals/cel/3",
+            "newController": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "rotatedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zVLswCdtKMnXbDtt9KCz7d33rRbiSKVgcioJZXJhFdBqeTjogjZGQhCjy7bwZoqeidwi7SzQXEGircoychGcPryJ"
+        }
+      ]
+    },
+    "Aauthorized": {
+      "event": {
+        "previousEvent": "uEiDTOK6KqMebHhvwHU5hNRwr8UMjH1aOgmYdCEII2n-T-w",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "name": "Explicitly reauthorized"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5F71ufSyrdwv4UUjqN4YswFRi22F4bjsX345mCSkNKE5p65UFwqBpNJmzFfA9U35MU2KG8ktVqj35eF499ZHRXzi"
+        }
+      ]
+    },
+    "NoOpRotation": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "rotateKey",
+          "data": {
+            "profile": "originals/cel/3",
+            "newController": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "rotatedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z34NM4scZmrxoPd9LmLVHuvsN21m2WzeRYLqcqSY92WiyDDch7VhYKwrvcKt4M9gEqAQKTvBhBPT9n9PmFNzrL81h"
+        }
+      ]
+    },
+    "Resource": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "resources": [
+              {
+                "id": "art.png",
+                "mediaType": "image/png",
+                "digestMultibase": "uEiB_zP3uiZdSFt2cHp96Ji2TR1WEJCfpdTufQQohY6jvTg",
+                "previousDigestMultibase": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA"
+              }
+            ]
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z3RjpqpSPRhVW2pHaJ2mptak4rQXjFCwenkbFgUnQvVd4p55f6aCNcFy6nRjk9A3g49A6rZGYH5Pamd7rtcF23nL2"
+        }
+      ]
+    },
+    "BadResource": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "update",
+          "data": {
+            "profile": "originals/cel/3",
+            "resources": [
+              {
+                "id": "art.png",
+                "mediaType": "image/png",
+                "digestMultibase": "uEiB_zP3uiZdSFt2cHp96Ji2TR1WEJCfpdTufQQohY6jvTg",
+                "previousDigestMultibase": "uEiDe5rk7sNUFFqfNfkKTX788msy-ND5cww6DQmM1GgHOKg"
+              }
+            ]
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z4vhRtcuv2xyNZSWotiiBif9BuyRvCb9SpQqCKxFJcLU136e1qTLZPc9TPQoWRAb5dajdJnMQ4abvhDCifBHCnGMp"
+        }
+      ]
+    },
+    "WrongFrom": {
+      "event": {
+        "previousEvent": "uEiA2d2ZLmnWrZTS2taCI-kDeO3gFBMT9XtF9DaDDru9NNQ",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+            "to": "did:btco:reg:5000000000",
+            "layer": "btco",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z4bqcwGw3CQyzduknXKwgdQVvX1njUXRaUc4fWBd7ujNtFLQuM7zm3S6EjoXnMaYkmckSHJ1HZuYwJh8SREnyQiN3"
+        }
+      ]
+    },
+    "WrongSatClaim": {
+      "event": {
+        "previousEvent": "uEiA2d2ZLmnWrZTS2taCI-kDeO3gFBMT9XtF9DaDDru9NNQ",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:webvh:fixture:example.com:art",
+            "to": "did:btco:reg:5000000001",
+            "layer": "btco",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z4Ypi3pdr9PeYP4PsBZqKzHdiw4aVmpdSFJ24Bc7oSiA8mq87iZA8v8LUEaP3CaJGnVwn4mkaN8s5CTZEUeWe7uCL"
+        }
+      ]
+    },
+    "LateMigration": {
+      "event": {
+        "previousEvent": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:webvh:fixture:example.com:art",
+            "to": "did:btco:reg:5000000000",
+            "layer": "btco",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5Qtf7TLSZEAr33HDJktVJFBkDMuZXguYT5dDY7sYXjpc6o9U3yYH5ZW1DdezjktT3dz5N3ZQgV3tE4L67reKTern"
+        }
+      ]
+    },
+    "G2": {
+      "event": {
+        "operation": {
+          "type": "create",
+          "data": {
+            "profile": "originals/cel/3",
+            "controller": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+            "createdAt": "2026-09-05T00:00:00.000Z",
+            "nonce": "AgICAgICAgICAgICAgICAg",
+            "name": "Another Original",
+            "resources": [
+              {
+                "id": "art.png",
+                "mediaType": "image/png",
+                "digestMultibase": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA"
+              }
+            ],
+            "metadata": {
+              "phase": "creation"
+            }
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z3NnaPhQS4b9iJrv8shdjCtUEDfAS8UA7fjNCbd6Fum37SK2BZEwzsNVSbj1bXRcx6ck5KA9PH7jTDMJc4yjkUpMd"
+        }
+      ]
+    },
+    "W2": {
+      "event": {
+        "previousEvent": "uEiDBqSLhybPB0gCQyMDPvMDmI1aJBqvcT4AHxnbiojd8qw",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:cel:uEiDBqSLhybPB0gCQyMDPvMDmI1aJBqvcT4AHxnbiojd8qw",
+            "to": "did:webvh:fixture2:example.com:other",
+            "layer": "webvh",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z5nKNT7RkFb9MjDGsNhWJsBktddpdRyaY3UCxiPdPp2imEg17LvqA4SivfHmNNoiBtebWgeizxQ6MDF5KLoixbf85"
+        }
+      ]
+    },
+    "T2": {
+      "event": {
+        "previousEvent": "uEiDQnChJPeVPvEdi0I75NAj9a1DzC7p9GKkYMRLJcb26hw",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:webvh:fixture2:example.com:other",
+            "to": "did:btco:reg:5000000000",
+            "layer": "btco",
+            "migratedAt": "2026-09-05T00:00:00.000Z"
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "ecdsa-jcs-2019",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP#zDnaepBuvsQ8cpsWrVKw8fbpGpvPeNSjVPTWoq6cRqaYzBKVP",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "z2tT9iAQTE8CEDBTN4cFYxmfKWrjH9nzNxiebu4VNY4dFsEtYRuxXwDWdaeDwsUAECLv11ntbxk4ffBJTtvHM9MAj"
+        }
+      ]
+    }
+  },
+  "entryDigests": {
+    "G": "uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+    "W": "uEiA2d2ZLmnWrZTS2taCI-kDeO3gFBMT9XtF9DaDDru9NNQ",
+    "T": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+    "R": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+    "Rwrong": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+    "Aretired": "uEiBKdFD1kQEIO5uwbYg45sXpAICzSwbXR4SD4puACuy4uw",
+    "Bupdate": "uEiCU9cPwbYXUCxLVH3tpbDau5efjitakwPwBHO9OdNyDIg",
+    "Hupdate": "uEiBrK9GSQvdc9NQlo94jEi4iVVaOLrJGvZKUi_xW6NCgSA",
+    "U": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+    "V": "uEiCXAfaIQ2R17Ht6uU6Sq7X_2IuqGrUBrLBOeFAW2XADcg",
+    "U2": "uEiBXUhA7Q_uuVPoh1OjMnPV7eNBFQbSPpud_Y8DbGSqQ7A",
+    "D": "uEiBlSfzpAy8l2-uwacxOAA6ssSbqaJd3yh57ipkPRCd6Ww",
+    "Dupdate": "uEiAuVKcRTZ25qVoFr_xzaBI8bZizCx6vcqGux_EQgxAlEA",
+    "ReturnA": "uEiDTOK6KqMebHhvwHU5hNRwr8UMjH1aOgmYdCEII2n-T-w",
+    "Aauthorized": "uEiDqRWLFvGogj4eIZSA8pvfNUFnsV0-ADj-0fG3AB7TpMg",
+    "NoOpRotation": "uEiApAiQHjFcXzFQxBR8LTMbuGzmVM-xJxQ6tgCFn6vITVw",
+    "Resource": "uEiDbS0a3gxzZJYQ_XFZmljqh13W00QQsGo96pnzbXkmH6g",
+    "BadResource": "uEiAwMmXJEw0250O9dEHeliwAzelS9cvM3OO94OoFCprmEw",
+    "WrongFrom": "uEiCdBluSap5M_oGSraamX-k7oMgtMDS5-XepzQ5a7r0Q_Q",
+    "WrongSatClaim": "uEiC4NEbsWU71iJO6pEl69UcA20eUvNuSYi46CXNyuxu-mg",
+    "LateMigration": "uEiCmX9BDuhxbc3tUOGoTxfl9fSyDrRNHgaSw-bNZwf63mA",
+    "G2": "uEiDBqSLhybPB0gCQyMDPvMDmI1aJBqvcT4AHxnbiojd8qw",
+    "W2": "uEiDQnChJPeVPvEdi0I75NAj9a1DzC7p9GKkYMRLJcb26hw",
+    "T2": "uEiDW8OhAyunFOdVztW-jkrqBrgscguxZsQ7lvhr8mkmt9Q"
+  },
+  "cases": [
+    {
+      "id": "boundary-establishes-current-controller",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "sale-changes-possession-only",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "H"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "H"
+      }
+    },
+    {
+      "id": "holder-cannot-author",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "H"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "holder",
+          "entries": [
+            "Hupdate"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "H"
+      }
+    },
+    {
+      "id": "holder-can-publish-controller-authorized-bytes",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "H"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "authorized",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U",
+        "headDigest": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "H"
+      }
+    },
+    {
+      "id": "rotation-retires-A",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "R",
+        "headDigest": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "new-key-cannot-authorize-its-own-rotation",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "wrong-rotation",
+          "entries": [
+            "Rwrong"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "retired-A-cannot-append-after-reacquisition",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "old-key",
+          "entries": [
+            "Aretired"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "R",
+        "headDigest": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "current-B-can-append",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "B"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "new-key",
+          "entries": [
+            "Bupdate"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "Bupdate",
+        "headDigest": "uEiCU9cPwbYXUCxLVH3tpbDau5efjitakwPwBHO9OdNyDIg",
+        "controller": "B",
+        "name": "Current key update",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "B"
+      }
+    },
+    {
+      "id": "rotation-and-B-update-in-one-publication",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "batch",
+          "entries": [
+            "R",
+            "Bupdate"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "Bupdate",
+        "headDigest": "uEiCU9cPwbYXUCxLVH3tpbDau5efjitakwPwBHO9OdNyDIg",
+        "controller": "B",
+        "name": "Current key update",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "bad-second-entry-rolls-back-entire-publication",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "bad-batch",
+          "entries": [
+            "R",
+            "Aretired"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "same-block-separate-extension-is-too-early",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "first",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "second",
+          "entries": [
+            "U2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            2,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U",
+        "headDigest": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "same-block-internal-batch-is-valid",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "batch",
+          "entries": [
+            "U",
+            "U2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U2",
+        "headDigest": "uEiBXUhA7Q_uuVPoh1OjMnPV7eNBFQbSPpud_Y8DbGSqQ7A",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "second update"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "later-block-extension-is-valid",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "first",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "second",
+          "entries": [
+            "U2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U2",
+        "headDigest": "uEiBXUhA7Q_uuVPoh1OjMnPV7eNBFQbSPpud_Y8DbGSqQ7A",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "second update"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "same-block-fork-uses-numeric-transaction-position",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "tx-ten",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            10,
+            0
+          ],
+          "complete": true,
+          "confirmed": true,
+          "inscriptionNumber": -100
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "tx-two",
+          "entries": [
+            "V"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            2,
+            0
+          ],
+          "complete": true,
+          "confirmed": true,
+          "inscriptionNumber": 100
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "V",
+        "headDigest": "uEiCXAfaIQ2R17Ht6uU6Sq7X_2IuqGrUBrLBOeFAW2XADcg",
+        "controller": "A",
+        "name": "Second branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "same-transaction-fork-uses-numeric-envelope-index",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "index-ten",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            10
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "index-two",
+          "entries": [
+            "V"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            2
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "V",
+        "headDigest": "uEiCXAfaIQ2R17Ht6uU6Sq7X_2IuqGrUBrLBOeFAW2XADcg",
+        "controller": "A",
+        "name": "Second branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "invalid-earlier-candidate-does-not-win",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "bad",
+          "entries": [
+            "Rwrong"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "good",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            2,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "R",
+        "headDigest": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "inspected-unrelated-bytes-do-not-poison",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "unrelated",
+          "entries": [],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true,
+          "unrelated": true
+        },
+        {
+          "id": "good",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U",
+        "headDigest": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "non-extending-branch-does-not-replace-head",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "first",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "other",
+          "entries": [
+            "V"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "U",
+        "headDigest": "uEiDRVnOczz07cy35YymRPx4neBjHw5hb2kL9Hyk0EwoBRQ",
+        "controller": "A",
+        "name": "First branch",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "resource-update-is-bound-to-its-prior-digest",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "resource",
+          "entries": [
+            "Resource"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "Resource",
+        "headDigest": "uEiDbS0a3gxzZJYQ_XFZmljqh13W00QQsGo96pnzbXkmH6g",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiB_zP3uiZdSFt2cHp96Ji2TR1WEJCfpdTufQQohY6jvTg",
+        "resourceVersion": 2,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "wrong-prior-resource-digest-is-ignored",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "bad-resource",
+          "entries": [
+            "BadResource"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "deactivation-is-terminal-for-authorship",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "H"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "deactivate",
+          "entries": [
+            "D"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "after",
+          "entries": [
+            "Dupdate"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            104,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "D",
+        "headDigest": "uEiBlSfzpAy8l2-uwacxOAA6ssSbqaJd3yh57ipkPRCd6Ww",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": false,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "H"
+      }
+    },
+    {
+      "id": "explicit-current-key-rotation-can-reauthorize-A",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "return",
+          "entries": [
+            "ReturnA"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "update",
+          "entries": [
+            "Aauthorized"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            104,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "Aauthorized",
+        "headDigest": "uEiDqRWLFvGogj4eIZSA8pvfNUFnsV0-ADj-0fG3AB7TpMg",
+        "controller": "A",
+        "name": "Explicitly reauthorized",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "no-op-rotation-is-invalid",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "no-op",
+          "entries": [
+            "NoOpRotation"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "migration-from-must-match-current-alias",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "invalid-boundary",
+          "entries": [
+            "G",
+            "W",
+            "WrongFrom"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "not-found",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "btco-is-terminal-for-migration",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "late-migration",
+          "entries": [
+            "LateMigration"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "orphan-delta-does-not-create-an-asset",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "orphan",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "not-found",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "unconfirmed-candidate-is-pending",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "pending",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": false
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "provider-sat-association-mismatch-is-inconsistent",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "wrong-sat",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000001",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "inconsistent-evidence",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "provider-network-mismatch-is-inconsistent",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "wrong-network",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "mainnet",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "inconsistent-evidence",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "signed-wrong-sat-claim-is-an-invalid-candidate",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "wrong-claim",
+          "entries": [
+            "G",
+            "W",
+            "WrongSatClaim"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            100,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "incomplete-enumeration-cannot-claim-latest",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": false,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "incomplete",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "unavailable-bytes-cannot-be-called-junk",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "unavailable",
+          "entries": [],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": false,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "incomplete",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "missing-creation-position-cannot-be-guessed",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "unknown-order",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": null,
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "incomplete",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "tip-change-invalidates-combined-result",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "different-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "chain-changed",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "reorg-without-rotation-restores-previous-authority",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "replacement-tip-110",
+        "tipAfter": "replacement-tip-110",
+        "enumerationComplete": true,
+        "owner": "A",
+        "cachedHead": "R",
+        "cachedController": "B"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "reorg-without-deactivation-restores-active-history",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "replacement-tip-110",
+        "tipAfter": "replacement-tip-110",
+        "enumerationComplete": true,
+        "owner": "A",
+        "cachedHead": "D",
+        "cachedActive": false
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "R",
+        "headDigest": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "duplicate-identical-observation-is-idempotent",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "R",
+        "headDigest": "uEiBG4K4xq0HPABzWdg9KD2ezWe5YD7qtLNpMrOaKQn3vrg",
+        "controller": "B",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "conflicting-observation-for-one-id-is-not-a-fork",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "U"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "inconsistent-evidence",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "earliest-boundary-fixes-the-sat-identity",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "another-boundary",
+          "entries": [
+            "G2",
+            "W2",
+            "T2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "requested-later-identity-cannot-filter-away-earlier-boundary",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A",
+        "expectedDid": "did:cel:uEiDBqSLhybPB0gCQyMDPvMDmI1aJBqvcT4AHxnbiojd8qw"
+      },
+      "publications": [
+        {
+          "id": "another-boundary",
+          "entries": [
+            "G2",
+            "W2",
+            "T2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "identity-mismatch",
+        "head": null,
+        "controller": null
+      }
+    },
+    {
+      "id": "requested-earliest-identity-agrees",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A",
+        "expectedDid": "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ"
+      },
+      "publications": [
+        {
+          "id": "another-boundary",
+          "entries": [
+            "G2",
+            "W2",
+            "T2"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        }
+      ],
+      "expected": {
+        "status": "accepted-at-declared-snapshot",
+        "head": "T",
+        "headDigest": "uEiA0JuttPqE1URB_h9Ytw7-ikGWjYQaYCgXRVmQs-kxypQ",
+        "controller": "A",
+        "name": "Original",
+        "metadata": {
+          "phase": "creation"
+        },
+        "active": true,
+        "resourceDigest": "uEiCQ_CMWlYsrwrqvQ9bLSxWEJA7Beh_w7CbVMS9V-Q5egA",
+        "resourceVersion": 1,
+        "aliases": [
+          "did:cel:uEiD6e35TLv4htFZ2w0the3KeMKPnBSNFsZbOzpdyybrwmQ",
+          "did:webvh:fixture:example.com:art",
+          "did:btco:reg:5000000000"
+        ],
+        "owner": "A"
+      }
+    },
+    {
+      "id": "required-verification-capability-unavailable",
+      "snapshot": {
+        "network": "regtest",
+        "sat": "5000000000",
+        "tipBefore": "declared-tip-110",
+        "tipAfter": "declared-tip-110",
+        "enumerationComplete": true,
+        "owner": "A"
+      },
+      "publications": [
+        {
+          "id": "boundary",
+          "entries": [
+            "G",
+            "W",
+            "T"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            101,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "rotation",
+          "entries": [
+            "R"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            102,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true
+        },
+        {
+          "id": "uncheckable",
+          "entries": [
+            "Bupdate"
+          ],
+          "sat": "5000000000",
+          "network": "regtest",
+          "position": [
+            103,
+            1,
+            0
+          ],
+          "complete": true,
+          "confirmed": true,
+          "capabilityUnavailable": true
+        }
+      ],
+      "expected": {
+        "status": "unsupported-capability",
+        "head": null,
+        "controller": null
+      }
+    }
+  ]
+}

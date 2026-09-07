@@ -1,0 +1,167 @@
+{
+  "checkedAt": "2026-09-06T03:24:04.205794+00:00",
+  "baseRevision": "071b898420dd1052f4e4d34a27e59bea167784d0",
+  "branch": "codex/regtest-flow",
+  "implementation": "Local uncommitted CEL 3 core; no SDK consumer migration, publication, deployment or new-format regtest run in this stage",
+  "coreDiffSha256": "14c1a10ee4f60436e783ff2216c40cba80f5397104574d3333145ee274c4556d",
+  "coreDiffCommand": [
+    "git",
+    "diff",
+    "--binary",
+    "HEAD",
+    "--",
+    "packages/cel",
+    "bun.lock"
+  ],
+  "preservedBytesRegtestDiffSha256": "a78b7d8f5fa017432560fe4af4be7ef13f76c7ac0dda5864f4c3f256a50789ab",
+  "preservedDiffCommand": [
+    "git",
+    "diff",
+    "--binary",
+    "HEAD",
+    "--",
+    ".",
+    ":!docs/regtest/**",
+    ":!specs/btco-inscription-shape.md",
+    ":!packages/cel/**",
+    ":!bun.lock",
+    ":!docs/research/**"
+  ],
+  "runtimes": {
+    "bun": "1.3.5",
+    "node": "25.2.1",
+    "python": "3.14.6"
+  },
+  "checks": {
+    "focusedCel3": {
+      "passed": 161,
+      "failed": 0,
+      "files": 8,
+      "output": "/tmp/originals-cel-v3-final-focused.log"
+    },
+    "allCel": {
+      "passed": 1075,
+      "failed": 0,
+      "files": 53,
+      "output": "/tmp/originals-cel-v3-final-all-cel.log"
+    },
+    "sdk": {
+      "passed": 3163,
+      "skipped": 245,
+      "failed": 0,
+      "files": 236,
+      "output": "/tmp/originals-cel-v3-final-sdk.log"
+    },
+    "typecheck": {
+      "result": "passed",
+      "output": "/tmp/originals-cel-v3-typecheck.log"
+    },
+    "newCoreLint": {
+      "errors": 0,
+      "warnings": 0,
+      "output": "/tmp/originals-cel-v3-lint.log"
+    },
+    "packageBuild": {
+      "result": "passed",
+      "packages": [
+        "cel",
+        "sdk",
+        "auth"
+      ],
+      "output": "/tmp/originals-cel-v3-final-build.log"
+    },
+    "esmExports": {
+      "passed": 23,
+      "output": "/tmp/originals-cel-v3-final-esm.log"
+    },
+    "browserSafety": {
+      "result": "passed",
+      "output": "/tmp/originals-cel-v3-final-browser.log"
+    },
+    "browserTargetBundle": {
+      "result": "passed",
+      "modules": 50,
+      "output": "/tmp/originals-cel-v3-browser.mjs"
+    },
+    "runtimeSmoke": {
+      "result": "passed",
+      "scope": "Browser-target bundle in Node without Buffer/process globals; not real-browser E2E",
+      "output": "/tmp/originals-cel-v3-runtime-smoke.log"
+    },
+    "frozenReferenceHashes": {
+      "passed": 29
+    },
+    "referenceRepresentation": {
+      "accepted": 14,
+      "rejected": 40,
+      "cborInputs": 16,
+      "preferredCborEncodings": 5,
+      "result": "passed"
+    },
+    "referenceAuthorityCompanion": {
+      "signedEntries": 24,
+      "histories": 42,
+      "reversedOrderCases": 42,
+      "result": "passed"
+    },
+    "referenceOutput": "/tmp/originals-cel-v3-reference-check.log",
+    "gitDiffCheck": "passed",
+    "localDocumentLinks": "passed"
+  },
+  "review": {
+    "standards": {
+      "findings": 2,
+      "resolved": 2,
+      "recheckTestsPassed": 56
+    },
+    "spec": {
+      "findings": 2,
+      "resolved": 2,
+      "recheckTestsPassed": 103
+    },
+    "remainingScopedFindings": 0,
+    "optionalFreezeDuplication": "consolidated"
+  },
+  "notVerified": [
+    "New-format real Bitcoin/regtest publications, transfers, reorgs or recovery",
+    "Actual provider snapshot completeness/active-chain assertions",
+    "WebVH DID-method/SCID binding, DNS/TLS",
+    "IDNA2008 domain support (explicit unsupported capability)",
+    "Real browser/HSM/Turnkey journey",
+    "Cross-sat canonicality, global uniqueness or finality",
+    "All remote resource retrieval/bytes",
+    "Every numeric/size boundary or maximum-valid-log CPU budget",
+    "New-format SDK API migration, old API removal, release/CI/mainnet readiness"
+  ],
+  "sha256": {
+    "bun.lock": "45aff41ef64c782e5b006a8ef2b83e418ef35fbe6b44de1b7cbe8062dd220451",
+    "docs/research/cel-core-vectors/README.md": "2c870dfa6cad9387f5b620be8f347764b4e3b30a30f33a9d8ba8911d1e75f283",
+    "docs/research/cel-core-vectors/check-histories.mjs": "5974c4937f3a6f073bed598457eb3344fafce02ba3ca9abfe26fb9ae4351be40",
+    "docs/research/cel-core-vectors/generate-histories.mjs": "716b2eb156a85d4d9b2974d62bd109cdd783fcf711b41073e895640850a0c3e1",
+    "docs/research/cel-core-vectors/histories.json": "99e92b9b62247b142ae0180d3d93d6750a55db9e1486b169622fc173fce489be",
+    "docs/research/cel-core-vectors/implementation-review.md": "e246f90811a417f54250a41e517a2345c92dea19fe6c4e9a8426a57490fb6c1a",
+    "packages/cel/V3.md": "08a10d67683f7383983cea55507e02462365e03f5bc2ab047b5e1e533ffc2bb6",
+    "packages/cel/package.json": "5fb1b876fdebb3c52efecd65644b048ff655a0edae2327e70d84035255fbde15",
+    "packages/cel/src/index.ts": "b2e2082c5891fe78fe600acff603f3f54c3524075f136aefa4e82ad239c4fb40",
+    "packages/cel/src/v3/cbor.ts": "b007d9fc79ac33f51ccf00d6e8f0da66400c14069880012edd4b7fe770a245a8",
+    "packages/cel/src/v3/dids.ts": "a66e799e14bb56f0128a11ee92f72e49158c7669eca3e2d9a939a89a54e2f41e",
+    "packages/cel/src/v3/errors.ts": "10de030c789dfdf07208c1368c62f17fb73827dc1d32d9db39beeaad8242f7f2",
+    "packages/cel/src/v3/history.ts": "b3d7f38857c920b7e5f031d0d4ba1723f4ae5bd1072fbacff0329c89b8d1057b",
+    "packages/cel/src/v3/immutable.ts": "b7e4bbc5a3859f6fd151be9af90c0732459ee577add7dc0f5f850bc10b09d337",
+    "packages/cel/src/v3/index.ts": "6f2c7ea28b4c43d23116438d895337d0532c638d8056bb9a065812c7e00752cf",
+    "packages/cel/src/v3/primitives.ts": "3f6997445d20384b29832d46e80ce5a89ae0bcc629c9b722c0b11366a90a04ce",
+    "packages/cel/src/v3/profile.ts": "aadb1086288bdd39862458673a988cda11bf53b5bff35f79f91ca6c3d553a27d",
+    "packages/cel/src/v3/proofs.ts": "e89e1676463b0893edab3c42619023837b47d89bc6dd4da0fdea4d1f9440f24d",
+    "packages/cel/src/v3/publications.ts": "3155f54baa30d032ac9ede07fb75f3aea62fa0c481d5907e829e928bb17d69a5",
+    "packages/cel/src/v3/types.ts": "0c93298e417d0429e20e7166e30602c054fc13044bafbe696b1ce6d971f5843c",
+    "packages/cel/src/v3/values.ts": "54b21fd7e680423a9d211a486f8b8a2046ffa2d478bb5b0fa32e0771057023ed",
+    "packages/cel/tests/v3/dids.test.ts": "30f94ab0fa7b3f4edc642c9e14d49cf2ef0c190c6d9fd47258808291b68c509a",
+    "packages/cel/tests/v3/history.test.ts": "098510da1ba612aa0b8eabee7b085ac2801f47e6df98c908d66817a0b90fe318",
+    "packages/cel/tests/v3/known-answers.test.ts": "7d200e03b87962ca03c1daa09439681deb5197b75b9791ff8d50ed59c9d5838c",
+    "packages/cel/tests/v3/limits.test.ts": "3b879d6dd4b4b4bea5664bd7ab0367e30f700615205b64ae56731c14898de4c4",
+    "packages/cel/tests/v3/profile.test.ts": "5cb76d04f27481d1a7c9ed2bed969ac29d7f620c4d48ca1c2cb3383b2339d0b7",
+    "packages/cel/tests/v3/publications.test.ts": "2b762b0bc694083a915440b1730287ef1f81760041e81a9b196351b4182fa693",
+    "packages/cel/tests/v3/signing.test.ts": "6d164fab8841a88de5ee27956fc8d8afed129a719750050b88c9372382c0a6dd",
+    "packages/cel/tests/v3/values.test.ts": "1ae093a91042fb7952a8defc68a8324aab9d5c973eed7fd42d3edbdbe89d89b7"
+  }
+}

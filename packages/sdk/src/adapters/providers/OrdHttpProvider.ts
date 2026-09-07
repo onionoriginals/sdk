@@ -319,8 +319,18 @@ export class OrdHttpProvider implements OrdinalsProvider {
 export async function createOrdinalsProviderFromEnv(
   options?: { network?: 'mainnet' | 'testnet' | 'signet' | 'regtest' }
 ): Promise<OrdinalsProvider> {
-  // A configured QuickNode endpoint takes precedence: it is the only
-  // env-selectable provider with real broadcast/status/fee support.
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
+  if (env.BTC_NETWORK === 'regtest' || env.REGTEST_RPC_URL || env.REGTEST_ORD_URL || env.REGTEST_RPC_AUTH) {
+    if (options?.network && options.network !== 'regtest') {
+      throw new StructuredError('BTCO_NETWORK_MISMATCH', 'The explicit local regtest profile cannot serve another network.');
+    }
+    if (!env.REGTEST_RPC_URL || !env.REGTEST_ORD_URL || !env.REGTEST_RPC_AUTH) {
+      throw new StructuredError('REGTEST_CONFIG_REQUIRED', 'Regtest requires REGTEST_RPC_URL, REGTEST_ORD_URL and REGTEST_RPC_AUTH.');
+    }
+    const { RegtestProvider } = await import('./RegtestProvider.js');
+    return new RegtestProvider({ rpcUrl: env.REGTEST_RPC_URL, ordUrl: env.REGTEST_ORD_URL, rpcAuth: env.REGTEST_RPC_AUTH });
+  }
+  // Outside the explicit local profile, prefer a configured QuickNode endpoint.
   const quickNodeEndpoint = ((globalThis as any).process?.env?.QUICKNODE_ENDPOINT) || '';
   if (quickNodeEndpoint) {
     const mod = await import('./QuickNodeProvider.js');
@@ -356,4 +366,3 @@ export async function createOrdinalsProviderFromEnv(
   const mod = await import('./OrdMockProvider.js');
   return new mod.OrdMockProvider();
 }
-

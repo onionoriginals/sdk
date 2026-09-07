@@ -15,8 +15,9 @@
  *
  * Byte-level signing is NOT reimplemented here: `turnkeySignBytes` from
  * `@originals/auth` is the one place Turnkey actually signs (hex payload,
- * HASH_FUNCTION_NO_OP, r‖s concatenation, 64-byte guard), and it is already
- * documented as the capability that lets a Turnkey key author CEL events.
+ * HASH_FUNCTION_NOT_APPLICABLE, r‖s concatenation, 64-byte guard), and it is
+ * already documented as the capability that lets a Turnkey key author CEL
+ * events.
  *
  * NAME COLLISION: `auth/authorship-key.ts` is a DIFFERENT key. That one signs
  * the user's own did:webvh identity document and lives only in this browser's

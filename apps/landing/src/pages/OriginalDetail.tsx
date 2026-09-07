@@ -364,9 +364,19 @@ function Hero(props: {
   const { did, data, checks, allOk, anyFail, copied, onCopy } = props;
   const row = data.row!;
   const artResource = data.resources.find(isImage);
-  const artUrl =
-    (artResource && data.resourceUrls[artResource.id]) ??
-    (row.resourceUrl ? sameOriginUrl(row.resourceUrl, window.location.host) : undefined);
+  // An asset whose primary resource is TEXT has no image to show. Rendering its
+  // bytes through <img> would draw a broken icon over a perfectly valid asset,
+  // so text leads with its own content — already fetched into resourceTexts.
+  const textResource = artResource ? null : data.resources.find(isText);
+  const textBody = textResource ? data.resourceTexts[textResource.id] : undefined;
+  // The row fallback is only an IMAGE fallback. `row.resourceUrl` is derived by
+  // the originals store for any primary resource, text included, so taking it
+  // unconditionally put a .txt back into <img> and bypassed the branch above.
+  const rowArtUrl =
+    !textResource && row.resourceUrl
+      ? sameOriginUrl(row.resourceUrl, window.location.host)
+      : undefined;
+  const artUrl = (artResource && data.resourceUrls[artResource.id]) ?? rowArtUrl;
   const medium = mediumFromMetadata(data);
 
   return (
@@ -374,6 +384,8 @@ function Hero(props: {
       <div className="od-art">
         {artUrl ? (
           <img src={artUrl} alt={`Artwork for “${row.title}”`} />
+        ) : textBody !== undefined ? (
+          <pre className="od-art-text">{textBody}</pre>
         ) : (
           <div className="od-art-placeholder" aria-hidden="true" />
         )}
@@ -462,7 +474,10 @@ function mediumFromMetadata(data: DetailData): string | null {
   const text = meta ? data.resourceTexts[meta.id] : undefined;
   if (!text) return null;
   try {
-    const parsed = JSON.parse(text) as { medium?: unknown };
+    // `style` since the rename; `medium` for assets published before it —
+    // including the first real mainnet Original, which must keep rendering.
+    const parsed = JSON.parse(text) as { style?: unknown; medium?: unknown };
+    if (typeof parsed.style === 'string') return parsed.style;
     return typeof parsed.medium === 'string' ? parsed.medium : null;
   } catch {
     return null;
@@ -661,7 +676,15 @@ function Identity({ summary }: { summary: DidLogSummary }) {
 
 function Bitcoin({ row }: { row: OriginalRow }) {
   const b = originalDetail.bitcoin;
-  const explorerUrl = row.revealTxId ? btcoExplorerUrl(row.revealTxId) : undefined;
+  // Link ONLY transactions that are actually on the network. The reveal is
+  // signed and persisted before it is broadcast, so `revealTxId` exists while
+  // the transaction does not — linking it unconditionally handed a 404 to
+  // someone who had just paid. While the reveal is still pending, the funding
+  // transaction IS live, and is what a creator can usefully watch.
+  const revealLive = row.revealBroadcast === true;
+  const explorerUrl = revealLive && row.revealTxId ? btcoExplorerUrl(row.revealTxId) : undefined;
+  const commitExplorerUrl =
+    !revealLive && row.commitTxId ? btcoExplorerUrl(row.commitTxId) : undefined;
   return (
     <section className="od-section">
       <div className="section-head">
@@ -697,16 +720,31 @@ function Bitcoin({ row }: { row: OriginalRow }) {
               <dd><code>{row.satoshi}</code></dd>
             </div>
           )}
+          {!revealLive && row.commitTxId && (
+            <div>
+              <dt>{b.commitTxLabel}</dt>
+              <dd><code title={row.commitTxId}>{short(row.commitTxId, 24, 8)}</code></dd>
+            </div>
+          )}
           {row.revealTxId && (
             <div>
               <dt>{b.txLabel}</dt>
-              <dd><code title={row.revealTxId}>{short(row.revealTxId, 24, 8)}</code></dd>
+              <dd>
+                <code title={row.revealTxId}>{short(row.revealTxId, 24, 8)}</code>
+                {!revealLive && <span className="od-tx-note">{b.txNotBroadcastNote}</span>}
+              </dd>
             </div>
           )}
         </dl>
         {explorerUrl && (
           <a className="od-raw-link" href={explorerUrl} target="_blank" rel="noreferrer">
             {b.explorerLabel}
+            <ExternalIcon />
+          </a>
+        )}
+        {commitExplorerUrl && (
+          <a className="od-raw-link" href={commitExplorerUrl} target="_blank" rel="noreferrer">
+            {b.commitExplorerLabel}
             <ExternalIcon />
           </a>
         )}

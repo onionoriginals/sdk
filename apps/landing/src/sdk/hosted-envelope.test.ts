@@ -188,12 +188,12 @@ describe('hydrate then inscribe', () => {
     // What the origin would serve back: the CEL, and the sealed bytes keyed by
     // the digest segment they are hosted under.
     const cel = JSON.parse(JSON.stringify({ events: asset.celLog.events })) as CelLog;
-    const contents: Record<string, string> = {};
+    const contents: Record<string, Uint8Array> = {};
     for (const ref of hostedResourceRefs(cel)) {
       const live = asset.resources.find(
         (r) => r.id === ref.id && (r.version ?? 1) === ref.version
       );
-      contents[ref.segment] = String(live?.content ?? '');
+      contents[ref.segment] = live?.content ?? new Uint8Array();
     }
 
     const { envelope } = ok(hostedAssetEnvelope(cel, contents));
@@ -280,7 +280,7 @@ describe('a revised Original', () => {
     // The revised bytes are what a later inscription must anchor.
     const versions = revived.resources.filter((r) => r.id === 'artwork.svg');
     expect(versions.map((r) => r.version ?? 1).sort()).toEqual([1, 2]);
-    expect(versions.find((r) => (r.version ?? 1) === 2)?.content).toBe(v2);
+    expect(versions.find((r) => (r.version ?? 1) === 2)?.content).toEqual(new TextEncoder().encode(v2));
   }, 30_000);
 
   test('reports a version whose bytes will not load, rather than dropping it', () => {

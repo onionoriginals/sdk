@@ -54,7 +54,7 @@ describe('ResourceManager', () => {
       expect(resource.version).toBe(1);
       expect(resource.previousVersionHash).toBeUndefined();
       expect(resource.createdAt).toBeDefined();
-      expect(resource.content).toBe(content);
+      expect(resource.content).toEqual(new TextEncoder().encode(content));
     });
 
     it('should create a binary resource from Buffer', () => {
@@ -68,8 +68,8 @@ describe('ResourceManager', () => {
       expect(resource.type).toBe('image');
       expect(resource.contentType).toBe('image/png');
       expect(resource.size).toBe(4);
-      expect(resource.contentBase64).toBe(content.toString('base64'));
-      expect(resource.content).toBeUndefined();
+      expect(resource.content).toEqual(new Uint8Array(content));
+      expect(resource.contentBase64).toBeUndefined();
     });
 
     it('should use provided resource ID if given', () => {
@@ -444,7 +444,7 @@ describe('ResourceManager', () => {
         type: 'text',
         contentType: 'text/plain',
       });
-      resource.content = 'different content';
+      resource.content = new TextEncoder().encode('different content');
 
       const result = manager.validateResource(resource);
 
@@ -623,7 +623,7 @@ describe('ResourceManager', () => {
         hash: manager.hashContent('test content'),
         size: 12,
         version: 1,
-        content: 'test content',
+        content: new TextEncoder().encode('test content'),
         createdAt: new Date().toISOString(),
       };
 

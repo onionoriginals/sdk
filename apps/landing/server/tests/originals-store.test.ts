@@ -64,6 +64,35 @@ describe('originals-store', () => {
     expect(list[0].title).toBe('Piece');
     expect(list[0].resourceHash).toBe('deadbeef');
     expect(list[0].resourceUrl).toBe('https://demo.example.com/studio/you/abc/resources/zR1');
+    expect(list[0].resourceContentType).toBe('image/svg+xml');
+  });
+
+  /**
+   * The URL is derived for ANY primary resource, so its presence is not
+   * evidence there is a picture behind it. A text Original gets a perfectly
+   * good resourceUrl, and a caller that assumed image drew a broken icon over
+   * a valid asset — on the detail hero and the /me cover both.
+   */
+  test('a text Original reports its real media type, not an assumed image', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const did = 'did:webvh:SCID:demo.example.com:studio:you:txt';
+    store.saveBytes('sub-1', 'demo.example.com/studio/you/txt/did.jsonl', enc('{}'), 'application/jsonl');
+    store.saveBytes('sub-1', 'demo.example.com/studio/you/txt/resources/zT1', enc('just words'), 'text/plain');
+    store.recordOriginal('sub-1', { did, title: 'Notes', resourceHash: 'cafe', createdAt: '2026-07-21T00:00:00.000Z' });
+
+    const [row] = store.list('sub-1');
+    expect(row.resourceUrl).toBe('https://demo.example.com/studio/you/txt/resources/zT1');
+    expect(row.resourceContentType).toBe('text/plain');
+  });
+
+  test('a missing content-type sidecar leaves the type unknown rather than guessing', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    const did = 'did:webvh:SCID:demo.example.com:studio:you:none';
+    store.recordOriginal('sub-1', { did, title: 'Bare', resourceHash: 'f00d', createdAt: '2026-07-21T00:00:00.000Z' });
+
+    const [row] = store.list('sub-1');
+    expect(row.resourceUrl).toBeUndefined();
+    expect(row.resourceContentType).toBeUndefined();
   });
 
   test('durability across a re-open on the same dir', () => {

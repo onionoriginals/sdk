@@ -209,7 +209,13 @@ export class OriginalsSDK {
     emitTelemetry(config.telemetry, { name: 'sdk.init', attributes: { network: config.network } });
     
     // Initialize managers
-    this.did = new DIDManager(config, this.metrics);
+    this.did = new DIDManager(config, this.metrics, async (did, resolveKey) => {
+      const sat = did.match(/^did:btco:(?:(?:reg|sig|test):)?(\d+)$/)?.[1];
+      if (!sat) return null;
+      const { asset } = await this.lifecycle.resolveAssetFromSat(sat, { resolveKey });
+      const document = asset.serialize().didDocuments['did:btco'];
+      return document?.id === did ? document : null;
+    });
     this.credentials = new CredentialManager(config, this.did, this.metrics);
     // Honor config.keyStore when no dedicated keyStore parameter is passed —
     // OriginalsConfig declares it, so silently dropping it would type-check
@@ -540,5 +546,3 @@ export class OriginalsSDK {
     };
   }
 }
-
-

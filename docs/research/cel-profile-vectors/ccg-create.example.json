@@ -1,0 +1,35 @@
+{
+  "log": [
+    {
+      "event": {
+        "operation": {
+          "type": "create",
+          "data": {
+            "profile": "originals/cel/3",
+            "controller": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "createdAt": "2026-09-05T00:00:00.000Z",
+            "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+            "name": "art.png",
+            "resources": [
+              {
+                "id": "art.png",
+                "mediaType": "image/png",
+                "digestMultibase": "uEiBePTgttN2D1ZqldCeTrWt5A0CehlyDvLxUg1BJ8EO8FQ"
+              }
+            ]
+          }
+        }
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "created": "2026-09-05T00:00:00.000Z",
+          "verificationMethod": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zoLT71VNR1Tu4e6511fj2tbWe5Fr1uBssqSWShyepALSkZSnrxkz3TnS7K7fja3pJBRubkc9Y5Q4WGsoMNLGRZpH"
+        }
+      ]
+    }
+  ]
+}

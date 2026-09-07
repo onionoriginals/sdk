@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:originals:cel:3:schema",
+  "title": "Originals CEL 3 representation",
+  "description": "Structural schema only. Strict parsing, canonical encodings, key/proof verification, chain/state/Bitcoin validation and byte/depth/value limits also apply. See originals-cel-v3-profile.md.",
+  "type": "object",
+  "properties": {
+    "log": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "minItems": 1,
+      "maxItems": 10000
+    }
+  },
+  "required": [
+    "log"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^uEi[A-Za-z0-9_-]{44}$",
+      "minLength": 47,
+      "maxLength": 47
+    },
+    "resource": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 262144,
+          "minLength": 1
+        },
+        "mediaType": {
+          "type": "string",
+          "format": "media-type",
+          "maxLength": 255
+        },
+        "digestMultibase": {
+          "$ref": "#/$defs/digest"
+        },
+        "url": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "absolute-url",
+            "maxLength": 8192
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "digestMultibase"
+      ],
+      "additionalProperties": false
+    },
+    "resourceUpdate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 262144,
+          "minLength": 1
+        },
+        "mediaType": {
+          "type": "string",
+          "format": "media-type",
+          "maxLength": 255
+        },
+        "digestMultibase": {
+          "$ref": "#/$defs/digest"
+        },
+        "url": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "absolute-url",
+            "maxLength": 8192
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "previousDigestMultibase": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "id",
+        "mediaType",
+        "digestMultibase",
+        "previousDigestMultibase"
+      ],
+      "additionalProperties": false
+    },
+    "create": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "const": "originals/cel/3"
+        },
+        "controller": {
+          "type": "string",
+          "pattern": "^did:key:z[1-9A-HJ-NP-Za-km-z]+$",
+          "maxLength": 256
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "originals-time",
+          "maxLength": 64
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resource"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 262144
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "profile",
+        "controller",
+        "createdAt",
+        "nonce",
+        "resources"
+      ],
+      "additionalProperties": false
+    },
+    "update": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "const": "originals/cel/3"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 262144
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resourceUpdate"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "metadata"
+          ]
+        },
+        {
+          "required": [
+            "resources"
+          ]
+        }
+      ]
+    },
+    "rotation": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "const": "originals/cel/3"
+        },
+        "newController": {
+          "type": "string",
+          "pattern": "^did:key:z[1-9A-HJ-NP-Za-km-z]+$",
+          "maxLength": 256
+        },
+        "rotatedAt": {
+          "type": "string",
+          "format": "originals-time",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "profile",
+        "newController",
+        "rotatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "deactivate": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "const": "originals/cel/3"
+        },
+        "deactivatedAt": {
+          "type": "string",
+          "format": "originals-time",
+          "maxLength": 64
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 262144
+        }
+      },
+      "required": [
+        "profile",
+        "deactivatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "migrate": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "const": "originals/cel/3"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^did:(cel|webvh):[^\\s]+$",
+          "maxLength": 8192
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^did:(webvh|btco):[^\\s]+$",
+          "maxLength": 8192
+        },
+        "layer": {
+          "enum": [
+            "webvh",
+            "btco"
+          ]
+        },
+        "migratedAt": {
+          "type": "string",
+          "format": "originals-time",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "profile",
+        "from",
+        "to",
+        "layer",
+        "migratedAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "layer": {
+                "const": "webvh"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "to": {
+                "pattern": "^did:webvh:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "layer": {
+                "const": "btco"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "to": {
+                "pattern": "^did:btco:"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "proof": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "DataIntegrityProof"
+        },
+        "cryptosuite": {
+          "enum": [
+            "ecdsa-jcs-2019",
+            "eddsa-jcs-2022"
+          ]
+        },
+        "verificationMethod": {
+          "type": "string",
+          "pattern": "^did:key:z[1-9A-HJ-NP-Za-km-z]+#z[1-9A-HJ-NP-Za-km-z]+$",
+          "maxLength": 512
+        },
+        "proofPurpose": {
+          "const": "assertionMethod"
+        },
+        "proofValue": {
+          "type": "string",
+          "pattern": "^z[1-9A-HJ-NP-Za-km-z]+$",
+          "minLength": 2,
+          "maxLength": 133
+        },
+        "created": {
+          "type": "string",
+          "format": "originals-time",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "type",
+        "cryptosuite",
+        "verificationMethod",
+        "proofPurpose",
+        "proofValue"
+      ],
+      "additionalProperties": false
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create"
+            },
+            "data": {
+              "$ref": "#/$defs/create"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "update"
+            },
+            "data": {
+              "$ref": "#/$defs/update"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "rotateKey"
+            },
+            "data": {
+              "$ref": "#/$defs/rotation"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "deactivate"
+            },
+            "data": {
+              "$ref": "#/$defs/deactivate"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "migrate"
+            },
+            "data": {
+              "$ref": "#/$defs/migrate"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/operation"
+        },
+        "previousEvent": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "properties": {
+                  "type": {
+                    "const": "create"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "previousEvent"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "previousEvent"
+            ]
+          }
+        }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/event"
+        },
+        "proof": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/proof"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/proof"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            }
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "proof"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
