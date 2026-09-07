@@ -45,7 +45,7 @@ export function Hero() {
           </a>
         </div>
         <figure className="hero-visual card">
-          <Pipeline autoplay />
+          <Pipeline autoplay showNames={false} />
           <figcaption>{hero.pipelineCaption}</figcaption>
         </figure>
       </div>

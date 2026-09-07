@@ -117,4 +117,8 @@
   .pipeline-role {
     display: none;
   }
+  /* With the did:* names off (the hero), the role is the only label — keep it. */
+  .pipeline[data-names-hidden] .pipeline-role {
+    display: block;
+  }
 }
