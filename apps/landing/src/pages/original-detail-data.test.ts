@@ -62,6 +62,13 @@ describe('celTimeline', () => {
     expect(steps[2].state).toBe('upcoming');
     expect(steps[2].at).toBeUndefined();
   });
+  test('does not suggest inscription as a next step when a Bitcoin publication is already recorded', () => {
+    const steps = celTimeline(cel, { inscriptionId: 'ab'.repeat(32) + 'i0' });
+    expect(steps.map((step) => step.id)).toEqual(['create', 'publish']);
+    expect(steps.every((step) => step.state === 'done')).toBe(true);
+    // The stored publication is status evidence, not another signed event.
+    expect(cel.log).toHaveLength(2);
+  });
   test('every step upcoming when there is no log', () => {
     const steps = celTimeline(null);
     expect(steps.every((s) => s.state === 'upcoming')).toBe(true);

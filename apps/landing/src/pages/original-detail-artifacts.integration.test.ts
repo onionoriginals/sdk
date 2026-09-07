@@ -6,6 +6,7 @@
  * artifacts fold into the timeline/summary/digests the page renders.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { withLiveInscriptionStatus, type OriginalRow } from './YourOriginals';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { installCel3Host, engineWithSigner } from '../sdk/cel3-test-helpers';
 import {
@@ -56,6 +57,26 @@ describe('detail page artifacts after a real durable publish', () => {
     expect(steps[1].facts.find((f) => f.label === 'Published as')?.value).toBe(did);
     expect(steps[2].state).toBe('upcoming'); // inscribe (did:btco)
     expect(steps[0].proof?.proofValue).toBeDefined();
+
+    // The hosted log remains at WebVH after a Bitcoin submission. The same
+    // recorded row and live-status join used by the page must stop advertising
+    // inscription as a future action, both before and after confirmation.
+    const commitTxId = 'ab'.repeat(32);
+    const revealTxId = 'cd'.repeat(32);
+    const row: OriginalRow = {
+      did, title: 'Detail Piece', resourceHash: '', createdAt: new Date().toISOString(),
+      commitTxId, revealTxId, inscriptionId: revealTxId + 'i0', inscriptionStatus: 'pending',
+    };
+    for (const status of ['commit_broadcast', 'reveal_broadcast', 'confirmed'] as const) {
+      const [current] = withLiveInscriptionStatus([row], [{
+        commitTxId, revealTxId, inscriptionId: row.inscriptionId!,
+        fundingOutpoint: 'ef'.repeat(32) + ':0', status,
+        createdAt: row.createdAt, updatedAt: row.createdAt,
+      }]);
+      const timeline = celTimeline(cel, current);
+      expect(timeline.map((step) => step.id)).toEqual(['create', 'publish']);
+      expect(current.inscriptionStatus).toBe(status === 'confirmed' ? 'confirmed' : 'pending');
+    }
 
     // Every sealed resource serves at its derived URL (declared multihash
     // digest → hosted raw-hash multibase, the exact key publishResources
