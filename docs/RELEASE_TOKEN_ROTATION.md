@@ -20,6 +20,11 @@ All three packages already exist in the registry: `@originals/sdk`,
 its first package publication are obsolete. Grant access to the `@originals`
 scope or explicitly include all three packages.
 
+The subsequent read-only runner check confirmed the stored token expires at
+**2026-10-25T06:53:28.982Z**, has package-write permission for `@originals`, and
+has 2FA bypass enabled. `NPM_TOKEN_EXPIRES_AT` is now set to `2026-10-25`.
+See [the sanitized receipt](release/evidence/final-npm-credential.json).
+
 ## Read-only checks
 
 `.github/workflows/npm-release-check.yml` runs on pushes to the trusted release
