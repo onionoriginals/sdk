@@ -1,5 +1,10 @@
 # Originals CEL Application Specification
 
+> **Previous-format reference.** This document describes retained older CEL APIs
+> and proofs, including `originals-cel-ed25519-jcs-v1`. For released SDK 3.0 use
+> the [CEL 3 API guide](../packages/sdk/V3.md) and
+> [migration guide](MIGRATION_3.0.md). The CEL 3 verifier does not accept these old histories.
+
 **Version:** 1.2.0  
 **Status:** Draft  
 **Date:** 2026-07-11
