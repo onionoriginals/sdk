@@ -445,8 +445,8 @@ export class CredentialManager {
     const signature = this.decodeMultibase(proofValue);
     if (!signature) return false;
 
-    const digest = await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>);
     try {
+      const digest = await computeCredentialDigest(credential as unknown as Record<string, unknown>, proof as unknown as Record<string, unknown>);
       const resolvedKey = await this.resolveVerificationMethodMultibase(
         verificationMethod,
         credential.issuer

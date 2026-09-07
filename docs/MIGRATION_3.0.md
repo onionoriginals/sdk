@@ -168,7 +168,7 @@ The CEL core — create, append, verify event logs — is now its own package wi
 
 ## 10. Retained `/vc` utilities use current RDFC-1.0 canonicalization
 
-**Breaks:** some credentials signed with earlier JSON-LD canonicalization can fail verification through `@originals/sdk/vc` after upgrading.
+**Breaks:** some credentials signed with earlier JSON-LD canonicalization can fail verification through credential utilities exported from `@originals/sdk` after upgrading.
 
 The retained credential utilities now use `jsonld` 9 and `rdf-canonize` 5. This also moves the JSON-LD HTTP client onto the maintained Undici 6 dependency line. The canonicalizer implements RDFC-1.0, matching the utilities' `eddsa-rdfc-2022` proof contract; its accepted `URDNA2015` algorithm name is an alias for that implementation.
 

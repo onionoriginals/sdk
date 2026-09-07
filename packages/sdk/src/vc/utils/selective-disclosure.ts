@@ -127,10 +127,11 @@ export const labelReplacementCanonicalizeNQuads = async (
     const canonicalizedDataset = await jsonld.canonize(deskolemizedNQuads.join('\n'), {
       documentLoader: options?.documentLoader,
       inputFormat: 'application/n-quads',
-      algorithm: 'URDNA2015',
       format: 'application/n-quads',
       safe: true,
-      canonicalIdMap
+      // JSON-LD 9 forwards RDF canonicalizer options only through this object.
+      // The populated map binds selected statements to the full signed dataset.
+      canonizeOptions: { algorithm: 'RDFC-1.0', canonicalIdMap }
     } as any);
 
     const canonicalIdMapStripped = stripBlankNodePrefixes(canonicalIdMap);
