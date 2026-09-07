@@ -11,7 +11,7 @@ reproduced checks, and combined release validation.
 | #579 | Artifact action upgrade matches hosted-runner use; CI/regtest pass. Merged. |
 | #576 | Release integration carries the fixes below and exits prerelease mode. |
 | #554 | Public identity domain guards were integrated; carried its final explicit-domain playground fix and tests. Superseded by #576. |
-| #551 | Browser-key binding refusal, user notice and tests are integrated in #576. Superseded. |
+| #551 | Merged independently while release checks ran; reconciled its additional UI regression with the existing CEL 3 integration. |
 | #547 | Hero role labels preserve demo labels and mobile visibility. Merged. |
 | #533 | Reconciled current Turnkey types, refreshed lockfile, and separated private-app/public-package changesets for CLI 3. Auth/landing tests and CI pass. Merged. |
 | #528 | One timing outlier is tolerated without changing its threshold. Merged. |

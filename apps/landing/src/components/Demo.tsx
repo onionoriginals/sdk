@@ -962,6 +962,7 @@ export function Demo() {
                       <div className="demo-deposit-head">
                         <strong>{demo.session.unavailableHeading}</strong>
                       </div>
+                      {/* A refusal made on the user's behalf (#494) says so; anything else is on us. */}
                       <p className="demo-error" role="alert">{signingNotice ?? signingGateMessage(gate, network, signing)}</p>
                       <p className="demo-inscribe-note">{demo.session.preserved}</p>
                     </div>
