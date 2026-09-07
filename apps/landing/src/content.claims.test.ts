@@ -72,12 +72,11 @@ describe('the page states the indexer trust assumption', () => {
   });
 });
 
-describe('the page does not imply did:cel is a standard', () => {
-  test('the protocol section says which methods are registered and which is ours', () => {
-    // "Built on W3C DIDs" covers did:webvh and did:btco. did:cel is
-    // unregistered, has no Universal Resolver driver, and its verification
-    // algorithm is ours — the first thing a W3C reader checks.
-    expect(protocol.standardsNote).toMatch(/did:cel/);
-    expect(protocol.standardsNote).toMatch(/not registered|unregistered/i);
+describe('the page distinguishes CEL provenance from DID-method compatibility', () => {
+  test('the protocol section acknowledges the existing method and the format mismatch', () => {
+    expect(protocol.standardsNote).toMatch(/file and document provenance/i);
+    expect(protocol.standardsNote).toMatch(/existing W3C CCG did:cel draft method/);
+    expect(protocol.standardsNote).toMatch(/different format/);
+    expect(protocol.standardsNote).not.toMatch(/did:cel is ours|not registered|unregistered/i);
   });
 });
