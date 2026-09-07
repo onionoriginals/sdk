@@ -1,28 +1,21 @@
 /**
  * Single-instance enforcement for the data directory.
  *
- * Everything on the money path assumes one process. The double-spend guard is
- * an in-process promise chain, the rate limiters are in-memory Maps, and the
- * file stores serialize through the event loop. Two replicas sharing a volume
- * could therefore spend the same funding outpoint and strand a creator's BTC.
- *
- * The lock implementation deliberately lives in a maintained lock library.
- * Its acquisition uses atomic mkdir, and stale recovery atomically renames the
- * stale directory to a unique claim before removing it. Keeping that protocol
- * in one tested primitive avoids check-then-write and check-then-unlink races
- * between a displaced holder and its successor.
+ * The spend guards and file stores coordinate inside one process. Hold a
+ * SQLite exclusive transaction for that process's entire lifetime so another
+ * writer cannot enter, even if the holder is paused. The operating system
+ * releases the lock when a process dies; elapsed time never transfers ownership.
+ * The database path must remain in place, including between acquisitions.
  */
-import lockfile from '@bybrave/proper-lockfile2';
+import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const LOCK_FILENAME = '.instance.lock';
-export const HEARTBEAT_MS = 10_000;
-export const STALE_AFTER_MS = 60_000;
+export const LOCK_FILENAME = '.instance.lock.sqlite';
 
 export interface InstanceLock {
   path: string;
-  /** Stop heartbeating and release the lock. Idempotent. */
+  /** Release the exclusive transaction and close its connection. Idempotent. */
   release(): Promise<void>;
 }
 
@@ -36,71 +29,53 @@ export class MultipleInstanceError extends Error {
 function refusalMessage(dataDir: string, path: string): string {
   return (
     `[landing] Refusing to start: another process is already writing to ${dataDir}.\n` +
-    `  This service is single-instance by construction. The double-spend guard, every rate limiter and both\n` +
-    `  file stores coordinate through in-process state, so a second writer can build a second commit against\n` +
-    `  a funding outpoint the first already spent — stranding a creator's committed BTC on a reveal that can\n` +
-    `  never land.\n` +
-    `  If you scaled this service up, scale it back to ONE replica.\n` +
-    `  A crashed holder is reclaimed ${STALE_AFTER_MS / 1000}s after its last heartbeat. Once you are certain\n` +
-    `  no writer is running, you can also remove ${path} before restarting.`
+    `  Run ONE replica and stop the current writer before starting its replacement.\n` +
+    `  A paused process retains ownership; a terminated process releases it automatically.\n` +
+    `  Never delete ${path}: replacing a live lock file would allow a second writer.`
   );
 }
 
 /** Claim the data directory or fail closed when another writer holds it. */
 export async function acquireInstanceLock(
-  dataDir: string,
-  opts: {
-    log?: (message: string) => void;
-    /** Fatal handler for a process whose lock can no longer be guaranteed. */
-    onOwnershipLost?: (message: string) => void;
-  } = {}
+  dataDir: string
 ): Promise<InstanceLock> {
-  const log = opts.log ?? ((message: string) => console.warn(message));
   const path = join(dataDir, LOCK_FILENAME);
   mkdirSync(dataDir, { recursive: true });
-
-  let reclaimed = false;
-  let releaseLock: () => Promise<void>;
+  let database: Database | undefined;
   try {
-    releaseLock = await lockfile.lock(dataDir, {
-      lockfilePath: path,
-      realpath: false,
-      stale: STALE_AFTER_MS,
-      update: HEARTBEAT_MS,
-      retries: 0,
-      onReclaimed: () => {
-        reclaimed = true;
-      },
-      onCompromised: (error) => {
-        const message = `[landing] instance-lock ownership lost at ${path}; refusing to continue as a second writer: ${error.message}`;
-        if (opts.onOwnershipLost) opts.onOwnershipLost(message);
-        else {
-          console.error(message);
-          process.exit(1);
-        }
-      },
-    });
+    database = new Database(path, { create: true });
+    database.exec('PRAGMA busy_timeout = 0');
+    // WAL allows readers alongside its writer and is unsuitable for this lock.
+    database.exec('PRAGMA journal_mode = DELETE');
+    database.exec('BEGIN EXCLUSIVE');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'ELOCKED') {
+    database?.close();
+    const code = (error as { code?: string })?.code;
+    if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') {
       throw new MultipleInstanceError(refusalMessage(dataDir, path));
     }
     throw error;
   }
 
-  if (reclaimed) log(`[landing] reclaimed an abandoned instance lock at ${path}.`);
-
+  // Keep the connection strongly reachable until release. There is deliberately
+  // no timeout, heartbeat, stale-file cleanup or unlink on this ownership path.
+  const connection = database;
   let released = false;
   return {
     path,
     async release() {
       if (released) return;
       released = true;
-      await releaseLock();
+      try {
+        connection.exec('ROLLBACK');
+      } finally {
+        connection.close();
+      }
     },
   };
 }
 
-/** Release cleanly on termination signals; the lock library also covers exit. */
+/** Release on graceful termination; OS file locks also cover SIGKILL/crashes. */
 export function releaseOnExit(lock: InstanceLock): void {
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.once(signal, () => {

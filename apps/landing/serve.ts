@@ -63,7 +63,7 @@ const hostStore = createWebvhHostStore();
 // users' Originals (checkConfig() above reports exactly that, by name).
 const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolveDataDir(process.env);
 // Serialize all writers before opening the durable stores.
-const instanceLock = await acquireInstanceLock(originalsDataDir, { log: (m) => console.warn(m) });
+const instanceLock = await acquireInstanceLock(originalsDataDir);
 releaseOnExit(instanceLock);
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,

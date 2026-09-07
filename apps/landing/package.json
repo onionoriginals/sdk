@@ -36,8 +36,7 @@
     "didwebvh-ts": "^2.8.0",
     "qrcode-generator": "2.0.4",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "@bybrave/proper-lockfile2": "5.0.0"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@turnkey/sdk-types": "1.6.0",

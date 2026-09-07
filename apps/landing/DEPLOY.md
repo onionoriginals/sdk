@@ -347,7 +347,11 @@ A deployed authenticated server refuses startup if `ORIGINALS_DATA_DIR` is
 missing, unwritable, or outside a mounted volume, even when `CONFIG_STRICT` is
 off. This protects the retained signed transaction pairs used for recovery.
 
-Run one replica. The server claims `.instance.lock` in the data directory before
-opening either durable store. A second writer refuses startup. After an unclean
-exit, allow 60 seconds for stale-lock recovery; a process that loses ownership
-terminates. During deployment, stop the old writer before starting the new one.
+Run one replica. Before opening either durable store, the server holds an exclusive
+SQLite transaction in `.instance.lock.sqlite` inside the data directory. A second
+writer refuses startup. Pausing a process or aging the file never transfers
+ownership; the operating system releases the lock when the process terminates,
+including after a crash. During deployment, stop the old writer before starting
+the new one. Never delete, replace or restore over the lock database while a
+writer is running. Keep the database in place between restarts; there is no stale
+lock cleanup or recovery wait.

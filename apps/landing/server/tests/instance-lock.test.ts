@@ -1,98 +1,92 @@
-/** Integration coverage for the single-writer filesystem lock. */
+/** Integration coverage for the process-owned single-writer lock. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  acquireInstanceLock,
-  LOCK_FILENAME,
-  MultipleInstanceError,
-  STALE_AFTER_MS,
-} from '../instance-lock';
+import { acquireInstanceLock, LOCK_FILENAME, MultipleInstanceError } from '../instance-lock';
 
 let dir: string;
+const children: ReturnType<typeof Bun.spawn>[] = [];
+const modulePath = new URL('../instance-lock.ts', import.meta.url).pathname;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'instance-lock-'));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  for (const child of children.splice(0)) {
+    child.kill('SIGKILL');
+    await child.exited;
+  }
   rmSync(dir, { recursive: true, force: true });
 });
 
-const lockPath = () => join(dir, LOCK_FILENAME);
+async function startHolder() {
+  const child = Bun.spawn([process.execPath, '-e', `
+    import { acquireInstanceLock, releaseOnExit } from ${JSON.stringify(modulePath)};
+    const lock = await acquireInstanceLock(${JSON.stringify(dir)});
+    releaseOnExit(lock);
+    console.log('LOCKED');
+    process.stdin.resume();
+  `], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  children.push(child);
+  const reader = child.stdout.getReader();
+  const first = await reader.read();
+  reader.releaseLock();
+  expect(new TextDecoder().decode(first.value)).toContain('LOCKED');
+  return child;
+}
 
 describe('instance lock', () => {
-  test('acquires exclusively and releases idempotently', async () => {
+  test('acquires exclusively and releases idempotently without deleting the database', async () => {
     const first = await acquireInstanceLock(dir);
-    expect(existsSync(lockPath())).toBe(true);
-
+    expect(first.path).toBe(join(dir, LOCK_FILENAME));
     await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
-    expect(existsSync(lockPath())).toBe(true);
-
     await first.release();
     await expect(first.release()).resolves.toBeUndefined();
-    expect(existsSync(lockPath())).toBe(false);
-
+    expect(existsSync(first.path)).toBe(true);
     const next = await acquireInstanceLock(dir);
+    // Releasing a former owner must never disturb its successor.
+    await first.release();
+    await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
     await next.release();
   });
 
-  test('refusal explains the operational fix', async () => {
-    const first = await acquireInstanceLock(dir);
+  test('a separate live process prevents acquisition and gives an operational refusal', async () => {
+    await startHolder();
+    await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
+    await expect(acquireInstanceLock(dir)).rejects.toThrow('ONE replica');
+    await expect(acquireInstanceLock(dir)).rejects.toThrow('Never delete');
+  });
 
+  test('a killed process releases ownership immediately without stale-file removal', async () => {
+    const child = await startHolder();
+    child.kill('SIGKILL');
+    await child.exited;
+    expect(existsSync(join(dir, LOCK_FILENAME))).toBe(true);
+    const successor = await acquireInstanceLock(dir);
+    await successor.release();
+  });
+
+  test('graceful shutdown releases ownership without deleting the database', async () => {
+    const child = await startHolder();
+    child.kill('SIGTERM');
+    expect(await child.exited).toBe(0);
+    expect(existsSync(join(dir, LOCK_FILENAME))).toBe(true);
+    const successor = await acquireInstanceLock(dir);
+    await successor.release();
+  });
+
+  test.skipIf(process.platform === 'win32')('a paused holder cannot be displaced by an aged lock file', async () => {
+    const child = await startHolder();
+    child.kill('SIGSTOP');
     try {
-      await acquireInstanceLock(dir);
-      throw new Error('second acquisition unexpectedly succeeded');
-    } catch (error) {
-      expect(error).toBeInstanceOf(MultipleInstanceError);
-      expect((error as Error).message).toContain('ONE replica');
-      expect((error as Error).message).toContain('60s');
+      const old = new Date(0);
+      utimesSync(join(dir, LOCK_FILENAME), old, old);
+      await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
     } finally {
-      await first.release();
+      child.kill('SIGCONT');
     }
-  });
-
-  test('reclaims a stale lock and reports recovery', async () => {
-    mkdirSync(lockPath());
-    const stale = new Date(Date.now() - STALE_AFTER_MS - 1_000);
-    utimesSync(lockPath(), stale, stale);
-    const lines: string[] = [];
-
-    const lock = await acquireInstanceLock(dir, { log: (message) => lines.push(message) });
-
-    expect(lines.join('\n')).toContain('reclaimed an abandoned instance lock');
-    await lock.release();
-  });
-
-  test('only one concurrent contender can reclaim the same stale lock', async () => {
-    mkdirSync(lockPath());
-    const stale = new Date(Date.now() - STALE_AFTER_MS - 1_000);
-    utimesSync(lockPath(), stale, stale);
-
-    const attempts = await Promise.allSettled([
-      acquireInstanceLock(dir),
-      acquireInstanceLock(dir),
-      acquireInstanceLock(dir),
-    ]);
-    const winners = attempts.filter(
-      (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof acquireInstanceLock>>> =>
-        attempt.status === 'fulfilled'
-    );
-    const losers = attempts.filter((attempt) => attempt.status === 'rejected');
-
-    expect(winners).toHaveLength(1);
-    expect(losers).toHaveLength(2);
-    expect(losers.every((attempt) => attempt.reason instanceof MultipleInstanceError)).toBe(true);
-    await winners[0]!.value.release();
-  });
-
-  test('an orphaned unique reclaim path never blocks acquisition', async () => {
-    mkdirSync(`${lockPath()}.reclaim-dead-process`);
-
-    const lock = await acquireInstanceLock(dir);
-
-    expect(existsSync(lockPath())).toBe(true);
-    await lock.release();
+    await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
   });
 });
