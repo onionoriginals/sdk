@@ -145,4 +145,15 @@ describe('signingGate: a failed bootstrap is its own state', () => {
   test('an anonymous visitor is still asked to sign in, whatever the status', () => {
     expect(signingGate({ ...base, authenticated: false, status: 'unavailable' })).toBe('sign-in');
   });
+
+  // #494: when the bootstrap was refused because the token named a key this
+  // browser does not hold, the unavailable panel shows THAT reason in place of
+  // the generic body. Same source-level pin as the Nav button above.
+  test('the unavailable panel prefers the specific signing notice over the generic body', async () => {
+    const source = await Bun.file(new URL('./Demo.tsx', import.meta.url)).text();
+    const start = source.indexOf("gate === 'unavailable' ? (");
+    expect(start).toBeGreaterThan(0);
+    const panel = source.slice(start, source.indexOf("gate === 'reauth' ? (", start));
+    expect(panel).toContain('signingNotice ?? signingGateMessage(gate, network, signing)');
+  });
 });
