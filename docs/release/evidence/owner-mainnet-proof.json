@@ -1,7 +1,7 @@
 {
   "observedAt": "2026-09-06T21:58:56.324097+00:00",
   "runtimeCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b",
-  "phase": "broadcast-awaiting-confirmations",
+  "phase": "confirmed-verified-awaiting-six-confirmation-retirement",
   "assetDid": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
   "webvhDid": "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
   "title": "Originals 3.0.0 Release Proof",
@@ -17,7 +17,14 @@
     "liveCreationAndPublication": true,
     "freshStableTarballConsumer": true,
     "hostedSdkVerification": true,
-    "allHostedResourcesVerified": true
+    "allHostedResourcesVerified": true,
+    "onSatPngDigestVerified": true,
+    "acceptedControllerHistoryVerified": true,
+    "derivedDidControllerVerified": true,
+    "separatePossessionObserved": true,
+    "fullAssetWithHostedMetadataVerified": true,
+    "reopenedBrowserHostedChecks": true,
+    "reopenedBrowserConfirmedBadge": true
   },
   "funding": {
     "observedBalanceSats": 17434,
@@ -39,13 +46,16 @@
     "inscriptionId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9i0",
     "sat": "321959825743820",
     "didBtco": "did:btco:321959825743820",
-    "confirmations": 0,
+    "confirmations": 4,
     "broadcastObservedAt": "2026-09-07T00:32:33.723527+00:00",
     "retainedPairObservationScope": "Observed before owner retry; server recovery must remain available until six confirmations",
     "initialRetryProviderError": "bad-txns-inputs-missingorspent",
     "initialRetryServerStatus": "commit_broadcast",
     "exactRevealIndependentlyObservedInMempool": true,
-    "serverReconciliationVerified": false
+    "serverReconciliationVerified": true,
+    "confirmedBlockHeight": 965854,
+    "acceptedHead": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+    "recoveryPairRetainedBeforeHorizon": true
   },
   "releaseReady": false,
   "initialRuntimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
@@ -57,5 +67,9 @@
     "head": "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
     "stableSdk": "3.0.0",
     "freshConsumer": true
-  }
+  },
+  "browserLimitations": [
+    "Reopened page independently verifies hosted artifacts and overlays confirmed server status; fresh stable SDK separately verifies the three-event accepted Bitcoin history.",
+    "Hosted provenance timeline still shows the Bitcoin migration as Up next even though the On Bitcoin section correctly reports confirmed; record this display inconsistency for follow-up."
+  ]
 }
