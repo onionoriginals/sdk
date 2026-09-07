@@ -83,7 +83,7 @@ the real regtest browser command supplies the publication/Bitcoin evidence.
 | Node ESM exported entries | 25 imported successfully |
 | Browser import safety, including offline envelope entry | Passed; offline envelope requires no Node builtins or Buffer global |
 | Root lint | Passed, zero errors; 489 existing warnings |
-| Regtest installer/lifecycle unit checks | 5 passed, 12 assertions |
+| Regtest installer/lifecycle unit checks | 8 passed, 16 assertions |
 | Integrated real Core 31.1 / ord 0.29.0 | All three lifecycle/fault/reorg scenarios, no-address-index capability, and restart proof passed |
 | Actual Chromium 152 creator recovery | Both fault scenarios passed; all processes closed |
 | Local browser smoke and narrow viewport checks | Passed |
@@ -96,9 +96,11 @@ cookies, JWT secrets or browser profiles. Historical `/tmp` paths in receipts
 identify their original runs and are not portable commands.
 
 The runtime/test/CI diff SHA-256 was
-`e10652b23c586374ca9ad26df34a2d003c47a85d47816977d037ff2ae8573275`,
-computed with `git diff --binary HEAD -- packages apps scripts .github package.json .changeset`
-against the base above, including staged new files. Release/spec prose and
+`cf139f5a8f0c8a2999761ad9fb0409766f474719566312f16f3d682e2a139473`,
+computed with `git diff --binary 34921926 -- packages apps scripts .github package.json .changeset`
+against the base above. Main’s subsequent standards-copy fix was integrated at
+`8351976159866c8770dcdcb93a9c4ba2678e43e5`; the tested runtime and test files
+remained identical. Post-merge frontend types and nine copy/summary checks passed. Release/spec prose and
 retained evidence are excluded from that digest.
 
 ## Review and release boundaries
@@ -106,8 +108,17 @@ retained evidence are excluded from that digest.
 The simplification pass applied one redundant document-validation cleanup and
 made the harness's one-shot fault marker atomic. It retained explicit trust
 checks and deferred a broader verification-token refactor; that refactor is not
-needed for correctness or acceptance. Independent code review is recorded in
-the completion PR before publishing the branch.
+needed for correctness or acceptance. [Independent code review](evidence/identity-regtest-completion/review.json)
+completed with eight local lenses and a separate Claude Opus 5 adversarial
+review, with no actionable findings. Advisory limits are repeated authenticated
+history checks and absence of a combined account-switch/old-key Chromium case;
+the corresponding account/legacy-key unit checks pass.
+
+A supplemental review strengthened the stopped-endpoint probe: timeouts, live
+HTTP responses and redirects cannot count as stopped. Three regressions pass,
+and the real restart proof passed again. The existing process-exit checks already
+await child termination; this improves the verification assertion rather than
+changing daemon lifecycle behavior.
 
 These results close the implementation gaps requested in #583, #570 and #572.
 They do not establish live Turnkey service behavior, a new production deployment,

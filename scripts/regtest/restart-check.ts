@@ -1,3 +1,4 @@
+import { assertEndpointStopped } from './assert-stopped';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -48,7 +49,7 @@ const ordWallet = async <T>(...args: string[]): Promise<T> => {
 };
 const endpointsStopped = async () => {
   for (const endpoint of [env.rpcUrl, env.ordUrl]) {
-    await assert.rejects(fetch(endpoint, { signal: AbortSignal.timeout(2_000) }), `${endpoint} stopped accepting connections`);
+    await assertEndpointStopped(endpoint);
   }
 };
 try {
