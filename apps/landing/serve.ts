@@ -1,3 +1,4 @@
+import { createExploreRoutes } from './server/explore';
 /**
  * Production server for the landing app (Railway) — single service.
  *
@@ -200,6 +201,8 @@ const server = Bun.serve({
   hostname: '0.0.0.0',
   fetch: buildFetch({
     apiRoutes: api?.routes ?? null,
+    explore: createExploreRoutes({ store: originalsStore, dataDir: originalsDataDir }),
+    publications: originalsStore,
     hostStore,
     distDir: DIST,
     originals: api?.originals ?? null,

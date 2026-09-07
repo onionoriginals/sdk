@@ -1,3 +1,5 @@
+import type { createExploreRoutes } from './explore';
+import type { OriginalsStore } from './originals-store';
 import { file } from 'bun';
 import { normalize } from 'node:path';
 import { route, json, type Handler } from './router';
@@ -40,7 +42,8 @@ const DOCUMENT_CSP = [
   "style-src 'self'",
   // data: for the two things the bundle genuinely inlines — the runtime-
   // generated artwork <img> and vite's inlined woff faces. Never for script.
-  "img-src 'self' data:",
+  // blob: is image-only, for previews of hash-checked hosted resource bytes.
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
   // Turnkey's API is the ONLY cross-origin destination: the browser SDK signs
   // against it directly. did:webvh resolution is same-origin (the log lives on
@@ -106,6 +109,9 @@ export function buildFetch(deps: {
   distDir: string;
   // Durable per-user Originals (auth-gated). Present only when auth is configured.
   originals?: OriginalsRoutes | null;
+  // Already-published bytes remain readable even when sign-in is unavailable.
+  publications?: Pick<OriginalsStore, 'serve'>;
+  explore?: ReturnType<typeof createExploreRoutes>;
   // How many proxies sit in front of this process. Snapshotted at construction
   // from TRUSTED_PROXY_HOPS; tests pass it explicitly.
   trustedProxyHops?: number;
@@ -189,6 +195,10 @@ export function buildFetch(deps: {
       if (handler) return handler(req, url, clientIp);
     }
 
+    if (deps.explore && (path === '/api/explore' || path === '/api/explore/original')) {
+      return deps.explore.handle(req, url, clientIp);
+    }
+
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
     // (matches main's behavior; never SPA-fallback /api/* to index.html).
     if (path === '/api' || path.startsWith('/api/')) {
@@ -223,7 +233,7 @@ export function buildFetch(deps: {
       // may only answer in their publication namespace, after these routes.
       const staticFile = await serveStatic(url, distDir, false);
       if (staticFile) return staticFile;
-      const durable = originals?.serve(url);
+      const durable = (deps.publications ?? originals)?.serve(url);
       if (durable) return durable;
       // A missing durable object must never fall through to anonymous content
       // or the SPA; its URL remains reserved before its first publication.

@@ -1,0 +1,11 @@
+{
+  "observedAt": "2026-09-07T00:50:31.185Z",
+  "commitTxId": "60ecfcae52ba594f5bda2d2657bf965df4df419bc87681aee2f40cf4d57755fa",
+  "revealTxId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9",
+  "status": "confirmed",
+  "retired": false,
+  "superseded": false,
+  "signedCommitRetained": true,
+  "signedRevealRetained": true,
+  "updatedAt": "2026-09-07T00:35:45.351Z"
+}

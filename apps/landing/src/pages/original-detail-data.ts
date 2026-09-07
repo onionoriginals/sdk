@@ -123,9 +123,10 @@ export interface TimelineStep {
 /**
  * Fold the CEL event log into the three-layer lifecycle. Every completed step
  * carries the signed proof of the event that performed it; steps the asset
- * hasn't reached yet render as 'upcoming'.
+ * hasn't reached yet render as 'upcoming'. A recorded Bitcoin publication has
+ * its own status panel; omit its placeholder without inventing a hosted event.
  */
-export function celTimeline(cel: CelLog | null): TimelineStep[] {
+export function celTimeline(cel: CelLog | null, publication?: Pick<OriginalRow, 'inscriptionId'> | null): TimelineStep[] {
   const events = celEvents(cel);
   const create = events.find((e) => e.type === 'create');
   const publish = events.find((e) => e.type === 'migrate' && e.data?.layer === 'webvh');
@@ -159,7 +160,7 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
     inscribeFacts.push({ label: 'Inscribed as', value: inscribe.data.targetDid, mono: true });
   }
 
-  return [
+  const steps: TimelineStep[] = [
     {
       id: 'create',
       layer: 'did:cel',
@@ -185,6 +186,9 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
       proof: inscribe?.proof?.[0]
     }
   ];
+  return steps.filter((step) =>
+    step.id !== 'inscribe' || step.state !== 'upcoming' || !publication?.inscriptionId
+  );
 }
 
 /* ——— Custody chain (holder entries), item 5 ——— */

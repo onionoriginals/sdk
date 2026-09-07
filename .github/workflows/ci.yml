@@ -65,6 +65,9 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Release workflow contract
+        run: node --test scripts/release-workflow.test.mjs
+
   coverage:
     name: Coverage meets thresholds
     runs-on: ubuntu-latest

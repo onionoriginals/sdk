@@ -1,7 +1,6 @@
 /**
- * Minimal client-side routing — no react-router. Five views: the landing page
- * ('/'), Your Originals ('/me'), a single Original's detail page
- * ('/me/<encoded did>'), and the two legal pages ('/privacy', '/terms').
+ * Minimal client-side routing for the landing, public Explore gallery/detail,
+ * account gallery/detail, and legal pages.
  * navigate() pushes history and notifies subscribers; useLocationPath()
  * re-renders on navigate + browser back/forward.
  *
@@ -10,9 +9,11 @@
  */
 import { useEffect, useState } from 'react';
 
-export type RouteName = 'landing' | 'your-originals' | 'original-detail' | 'privacy' | 'terms';
+export type RouteName = 'landing' | 'explore' | 'explore-original' | 'your-originals' | 'original-detail' | 'privacy' | 'terms';
 
 export function routeForPath(pathname: string): RouteName {
+  if (pathname === '/explore') return 'explore';
+  if (pathname.startsWith('/explore/') && exploreDidFromPath(pathname)) return 'explore-original';
   if (pathname === '/me') return 'your-originals';
   if (pathname.startsWith('/me/') && didFromPath(pathname)) return 'original-detail';
   if (pathname === '/privacy') return 'privacy';
@@ -89,4 +90,9 @@ export function useLocationPath(): string {
     };
   }, []);
   return path;
+}
+
+export function exploreOriginalPath(did: string): string { return `/explore/${encodeURIComponent(did)}`; }
+export function exploreDidFromPath(pathname: string): string | null {
+  return pathname.startsWith('/explore/') ? didFromPath('/me/' + pathname.slice('/explore/'.length)) : null;
 }
