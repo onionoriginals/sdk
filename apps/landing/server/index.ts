@@ -1,3 +1,4 @@
+import { createExploreRoutes } from './explore';
 import { createInMemorySessionStorage, type SessionStorage } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { json, type Handler } from './router';
@@ -59,9 +60,8 @@ export function buildRoutes(deps: {
 if (import.meta.main) {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
-  const originalsStore = createOriginalsStore({
-    dataDir: process.env.ORIGINALS_DATA_DIR ?? './.originals-data',
-  });
+  const dataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
+  const originalsStore = createOriginalsStore({ dataDir });
   const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
   const apiRoutes = buildRoutes({
     turnkey: getTurnkey(),
@@ -73,7 +73,7 @@ if (import.meta.main) {
   const distDir = new URL('../dist/', import.meta.url).pathname;
   const server = Bun.serve({
     port: Number(process.env.PORT ?? 8787),
-    fetch: buildFetch({ apiRoutes, hostStore, distDir, originals }),
+    fetch: buildFetch({ apiRoutes, hostStore, distDir, originals, explore: createExploreRoutes({ store: originalsStore, dataDir }) }),
   });
   console.log(`[auth-server] listening on http://localhost:${server.port}`);
 }

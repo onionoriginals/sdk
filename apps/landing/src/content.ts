@@ -40,6 +40,7 @@ export const site = {
 
 export const nav = {
   links: [
+    { label: 'Explore', href: '/explore' },
     { label: 'Why Originals', href: '#why' },
     { label: 'Try it', href: '#demo' },
     { label: 'Protocol', href: '#protocol' },
@@ -874,6 +875,7 @@ export const footer = {
     {
       title: 'Project',
       links: [
+        { label: 'Explore Originals', href: '/explore' },
         { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' },
         { label: 'npm — @originals/sdk', href: 'https://www.npmjs.com/package/@originals/sdk' },
         { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/ORIGINALS_PROTOCOL_SPECIFICATION.md' }
@@ -888,7 +890,7 @@ export const footer = {
       ]
     },
     /**
-     * R19. These two are the only in-app footer links — root-relative hrefs the
+     * R19. Legal links use root-relative hrefs the
      * Footer routes through navigate() instead of opening in a new tab. See
      * `legal` below for the copy they lead to.
      */
@@ -1065,4 +1067,42 @@ export const legal = {
       }
     ]
   }
+};
+
+export const explore = {
+  eyebrow: 'The public collection',
+  title: 'Every Original has a story.',
+  intro: 'Discover work published with Originals. Open a piece to explore its signed history and the files it preserves.',
+  searchLabel: 'Search published Originals',
+  searchPlaceholder: 'A title, an Original, a controller key…',
+  searchButton: 'Search',
+  newest: 'Newest first',
+  loading: 'Opening the collection…',
+  loadingMore: 'Loading more Originals…',
+  loadMore: 'Load more Originals',
+  unavailable: 'The collection could not be loaded. Please try again.',
+  retry: 'Try again',
+  emptyTitle: 'The collection starts with an Original.',
+  emptyBody: 'Published work will appear here. Create an Original to add your first piece.',
+  noResults: 'No Originals match your search.',
+  clear: 'Clear search',
+  create: 'Create an Original',
+  open: 'Explore Original',
+  created: 'Created',
+  file: 'File',
+  files: 'files',
+  back: 'All Originals',
+  missing: 'This Original is not available in the public collection.',
+  resources: 'Open the original file',
+  history: 'Signed history',
+  controller: 'Controller key',
+  identity: 'Original identity',
+  hostedIdentity: 'Published identity',
+  log: 'WebVH version history',
+  cel: 'Cryptographic event log',
+  checking: 'Checking the signatures and file…',
+  checked: 'Hosted history and primary file verified',
+  incomplete: 'Verification incomplete',
+  checkNote: 'These checks verify the hosted signatures and primary file in your browser. Bitcoin confirmation and possession are separate checks.',
+  openHistory: 'Inspect the signed artifacts',
 };

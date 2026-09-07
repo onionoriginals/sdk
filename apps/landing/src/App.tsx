@@ -1,3 +1,6 @@
+import { Explore } from './pages/Explore';
+import { ExploreOriginal } from './pages/ExploreOriginal';
+import { exploreDidFromPath } from './router';
 import { useEffect, useState } from 'react';
 import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
@@ -27,7 +30,7 @@ function RoutedApp() {
   return (
     <>
       <Nav />
-      {legalDoc ? (
+      {route === 'explore' ? <Explore /> : route === 'explore-original' ? <ExploreOriginal did={exploreDidFromPath(path)!} /> : legalDoc ? (
         <LegalPage doc={legalDoc} />
       ) : route === 'original-detail' ? (
         <OriginalDetail did={didFromPath(path)!} />

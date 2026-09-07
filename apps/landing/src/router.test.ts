@@ -1,9 +1,18 @@
 import { describe, test, expect } from 'bun:test';
-import { routeForPath, originalPath, didFromPath } from './router';
+import { routeForPath, originalPath, didFromPath, exploreOriginalPath, exploreDidFromPath } from './router';
 
 const DID = 'did:webvh:QmScid123:demo.example.com:user-abc:asset-1';
 
 describe('routeForPath', () => {
+  test('public Explore routes round-trip a DID and reject malformed paths', () => {
+    expect(routeForPath('/explore')).toBe('explore');
+    expect(routeForPath(exploreOriginalPath(DID))).toBe('explore-original');
+    expect(exploreDidFromPath(exploreOriginalPath(DID))).toBe(DID);
+    for (const path of ['/explore/', '/explore/%GG', '/explore/a/b', '/explore/not-a-did']) {
+      expect(exploreDidFromPath(path)).toBeNull();
+      expect(routeForPath(path)).toBe('landing');
+    }
+  });
   test('/ → landing', () => {
     expect(routeForPath('/')).toBe('landing');
   });
