@@ -1,3 +1,4 @@
+import { assetIdFromDigest, normalizeAssetId } from "./identity.js";
 import { CelError, requireThat } from "./errors.js";
 import {
   copyValue,
@@ -237,7 +238,8 @@ function eventShape(value: JsonValue): void {
         string(data.to, 8192);
         time(data.migratedAt);
         requireThat(
-          /^did:(cel|webvh):[^\s]+$/.test(data.from) &&
+          (/^did:(cel|webvh):[^\s]+$/.test(data.from) ||
+            (data.from.startsWith("ni:///sha-256;") && normalizeAssetId(data.from) === data.from)) &&
             (data.layer === "webvh" || data.layer === "btco") &&
             data.to.startsWith("did:" + data.layer + ":"),
           "CEL_MIGRATION",
@@ -403,7 +405,7 @@ export function encodeDocument(
 export function eventDigest(input: unknown): string {
   return hashJson(validateEvent(input));
 }
-/** Derive genesis identity, never reading an unsigned or legacy declared DID. */
+/** @deprecated Originals 3.0 compatibility alias, not the CCG did:cel method. Use deriveAssetId. */
 export function deriveDid(input: unknown): string {
   const event = validateEvent(input);
   requireThat(
@@ -412,4 +414,11 @@ export function deriveDid(input: unknown): string {
     "Genesis must be create",
   );
   return "did:cel:" + hashJson(event);
+}
+
+/** Derive the RFC 6920 identity of a validated genesis event. */
+export function deriveAssetId(input: unknown): string {
+  const event = validateEvent(input);
+  requireThat(event.operation.type === "create", "CEL_GENESIS", "Genesis must be create");
+  return assetIdFromDigest(hashJson(event));
 }

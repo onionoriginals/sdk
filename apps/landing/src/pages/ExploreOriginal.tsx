@@ -149,7 +149,7 @@ export function ExploreOriginal({ did }: { did: string }) {
               </div>
               <div>
                 <dt>{copy.identity}</dt>
-                <dd>{original.assetDid}</dd>
+                <dd>{original.assetId}</dd>
               </div>
               <div>
                 <dt>{copy.hostedIdentity}</dt>

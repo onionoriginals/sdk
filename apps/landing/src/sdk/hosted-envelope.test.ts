@@ -13,7 +13,7 @@ describe('CEL 3 hosted envelope', () => {
     const content = Object.fromEntries(asset.resources.map((r) => [r.digestMultibase, r.content!]));
     const rebuilt = hostedAssetEnvelope(asset.celLog, content);
     if ('problem' in rebuilt) throw new Error(rebuilt.problem.message);
-    expect(rebuilt.envelope.version).toBe(3);
+    expect(rebuilt.envelope.version).toBe(4);
     const cold = await OriginalsSDK.create().lifecycle.loadAsset(JSON.parse(JSON.stringify(rebuilt.envelope)));
     expect(cold.verification.verified).toBe(true);
     expect(cold.asset.resources.map((r) => r.content)).toEqual(asset.resources.map((r) => r.content));

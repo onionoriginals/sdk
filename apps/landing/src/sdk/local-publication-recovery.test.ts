@@ -191,3 +191,19 @@ test.each(["native", "browser"] as const)("a cold retry with %s Buffer reuses bo
     globalThis.Buffer = nativeBuffer;
   }
 });
+
+test('saved SDK 3 publication keys remain visible only for the owning account and verified genesis', async () => {
+  host = installCel3Host('sub-1');
+  const { default: prepared } = await import('../../../../packages/sdk/tests/fixtures/identity/sdk3-web-publication.json');
+  const key = `originals:web-publication:sub-1:${prepared.asset.assetDid}`;
+  const saved = JSON.stringify(prepared);
+  localStorage.setItem(key, saved);
+  const recoveries = localPublicationRecoveries('sub-1');
+  expect(recoveries).toHaveLength(1);
+  expect(recoveries[0].key).toBe(key);
+  expect(recoveries[0].assetId).toStartWith('ni:///sha-256;');
+  expect(localPublicationRecoveries('other-account')).toEqual([]);
+  localStorage.removeItem(key);
+  localStorage.setItem(key + 'unrelated', saved);
+  expect(localPublicationRecoveries('sub-1')).toEqual([]);
+});

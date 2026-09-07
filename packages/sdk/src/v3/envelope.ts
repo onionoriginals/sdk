@@ -5,6 +5,8 @@ import {
   copyValue,
   validateDigest,
   validateDocument,
+  normalizeAssetId,
+  verifyHistory,
 } from "@originals/cel/v3";
 import type {
   AssetEnvelope,
@@ -13,7 +15,7 @@ import type {
 } from "./types.js";
 
 export const ASSET_ENVELOPE_FORMAT = 'originals/asset' as const;
-export const ASSET_ENVELOPE_VERSION = 3 as const;
+export const ASSET_ENVELOPE_VERSION = 4 as const;
 
 /** SDK interchange budgets, separate from the smaller limits on signed CEL metadata. */
 export const ASSET_LIMITS = Object.freeze({
@@ -336,28 +338,30 @@ export function readEnvelope(input: unknown): AssetEnvelope {
     }
   }
   const value = record(raw);
-  if (value.format !== "originals/asset" || value.version !== 3)
+  if (value.format !== "originals/asset" || ![3, 4].includes(value.version as number))
     throw new CelError(
       "unsupported",
       "ASSET_ENVELOPE_VERSION",
-      "Expected an originals/asset version-3 envelope; earlier formats are not translated",
+      "Expected an originals/asset version-3 or version-4 envelope with CEL 3 history",
     );
   fields(
     value,
-    ["format", "version", "assetDid", "eventLog", "resources"],
+    ["format", "version", value.version === 3 ? "assetDid" : "assetId", "eventLog", "resources"],
     ["unverified"],
   );
-  requireAsset(
-    typeof value.assetDid === "string",
-    "ASSET_ENVELOPE",
-    "Envelope needs a genesis assetDid",
-  );
+  const identity = value.version === 3 ? value.assetDid : value.assetId;
+  requireAsset(typeof identity === "string" &&
+    identity.startsWith(value.version === 3 ? "did:cel:" : "ni:///sha-256;"),
+    "ASSET_ENVELOPE", "Envelope identity must match its declared version");
+  const assetId = normalizeAssetId(identity);
   const budget = new AttachmentBudget();
+  const eventLog = validateDocument(value.eventLog);
+  verifyHistory(eventLog, { expectedAssetId: assetId });
   const envelope: AssetEnvelope = {
     format: "originals/asset",
-    version: 3,
-    assetDid: value.assetDid,
-    eventLog: validateDocument(value.eventLog),
+    version: 4,
+    assetId,
+    eventLog,
     resources: copyAttachments(value.resources, budget),
   };
   if (Object.prototype.hasOwnProperty.call(value, "unverified")) {

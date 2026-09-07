@@ -1,3 +1,4 @@
+import { normalizeAssetId } from "./identity.js";
 import { freeze } from "./immutable.js";
 import { CelError } from "./errors.js";
 import { parseAssetDid, type BitcoinNetwork } from "./dids.js";
@@ -110,7 +111,7 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedDid?: string } = {},
+  options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -125,13 +126,21 @@ export function resolveSat(
   if (prefix === undefined || typeof snapshot.sat !== "string")
     return failure("invalid", "Invalid query network or sat");
   const queriedDid = "did:btco:" + prefix + snapshot.sat;
+  let expectedAssetId: string | undefined;
   try {
+    for (const expected of [options.expectedAssetId, options.expectedDid]) {
+      if (expected === undefined) continue;
+      const normalized = normalizeAssetId(expected);
+      if (expectedAssetId !== undefined && expectedAssetId !== normalized)
+        return failure("invalid", "Conflicting requested asset identities");
+      expectedAssetId = normalized;
+    }
     parseAssetDid(queriedDid);
     if (
       options.expectedDid !== undefined &&
       parseAssetDid(options.expectedDid).method !== "cel"
     )
-      return failure("invalid", "Expected a did:cel identity");
+      return failure("invalid", "Expected a genesis asset identity");
   } catch (error) {
     if (!(error instanceof CelError)) throw error;
     return failure("invalid", error.code);
@@ -392,8 +401,8 @@ export function resolveSat(
       // Choose the first valid boundary independent of a requested genesis filter.
       if (
         !history &&
-        options.expectedDid !== undefined &&
-        next.state.didCel !== options.expectedDid
+        expectedAssetId !== undefined &&
+        next.state.assetId !== expectedAssetId
       )
         return failure(
           "identity-mismatch",

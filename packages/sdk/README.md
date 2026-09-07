@@ -1,13 +1,15 @@
 # @originals/sdk
 
-Create and recover Originals from authenticated CEL 3 history and exact resource
-bytes. An Original's controller authorizes its history; Bitcoin sat possession is
+An Original records signed claims about files and their versions. Create and
+recover it from authenticated CEL 3 history and exact resource bytes. An Original's controller authorizes its history; Bitcoin sat possession is
 a separate concept, established by on-chain observations rather than a signature
 alone.
 
-SDK 3.0.0 uses CEL 3 throughout local mutation, WebVH publication and cold
-recovery, Bitcoin publication, and fresh asset/DID resolution. Earlier asset
-formats are not accepted. Publishing returns explicit prepared/submitted states;
+This checkout prepares SDK 4 / CEL 2: canonical asset identity is the RFC 6920
+`ni:///sha-256;…` URI of the genesis event. SDK 3.0.0 is already published. Its
+CEL 3 histories remain readable through a strict version-3 envelope path;
+pre-CEL-3 asset formats are unsupported. The signed CEL representation, controller
+proofs, WebVH publication, Bitcoin publication and fresh resolution are retained. Publishing returns explicit prepared/submitted states;
 only fresh provider evidence establishes an accepted Bitcoin head.
 
 ## Create, edit, recover
@@ -81,12 +83,18 @@ originals-cel create --file art.png --media-type image/png --algorithm Ed25519 -
 originals-cel verify --asset asset.json
 ```
 
-The key file holds raw private-key bytes. Outputs are complete version-3 asset
+The key file holds raw private-key bytes. Outputs are complete version-4 asset
 envelopes; existing files are not overwritten. `verify --log` instead checks
 controller history only and reports that narrower scope. No command broadcasts
 transactions. See `originals-cel --help` and [the API guide](V3.md).
 
 ## Documentation
+
+[Upgrading to SDK 4](../../docs/MIGRATION_4.0.md) covers the public identifier and
+envelope-field changes. [Asset identity](../../specs/originals-asset-identity.md)
+separates the genesis commitment from publication aliases and historical
+Originals 3 `did:cel` strings. Originals uses generic CCG CEL; it does not
+implement the CCG `did:cel` DID method.
 
 [The CEL 3 API guide](V3.md) describes types, options, limits, recovery, removed
 previous-format exports, and publication/recovery requirements. Protocol rules are in

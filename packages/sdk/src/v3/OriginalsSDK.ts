@@ -189,7 +189,7 @@ export class LifecycleManager {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       envelope.unverified?.localResources,
       this.resolver,
     );

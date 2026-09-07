@@ -1,5 +1,5 @@
-// Browser smoke test: loads the page with ?smoke=1 which runs the full
-// real-SDK lifecycle (create → publish → inscribe) in Chromium.
+// Browser smoke test: loads the page with ?smoke=1 which creates and reloads
+// a real signed local asset in Chromium. Publication is tested by regtest-browser.
 import { chromium } from 'playwright-core';
 import { chromiumExecutablePath } from './browser.mjs';
 
@@ -29,3 +29,5 @@ console.log('--- console errors ---');
 console.log(consoleErrors.length ? consoleErrors.join('\n') : '(none)');
 await browser.close();
 if (text.includes('ERROR') || consoleErrors.length) process.exit(1);
+const result = JSON.parse(text);
+if (result.verified !== true || !result.assetId?.startsWith('ni:///sha-256;')) process.exit(1);

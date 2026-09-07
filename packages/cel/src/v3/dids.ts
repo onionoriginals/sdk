@@ -1,3 +1,4 @@
+import { normalizeAssetId } from "./identity.js";
 import { base58 } from "@scure/base";
 import { CelError, requireThat } from "./errors.js";
 import { validateDigest } from "./primitives.js";
@@ -21,6 +22,10 @@ export function parseAssetDid(did: unknown): AssetDid {
     "CEL_DID",
     "Expected a bare asset DID",
   );
+  if (did.startsWith("ni:")) {
+    return { method: "cel", did: normalizeAssetId(did) };
+  }
+  // Retained parser compatibility: this is an Originals 3.0 alias, not DID-method resolution.
   if (did.startsWith("did:cel:")) {
     validateDigest(did.slice(8));
     return { method: "cel", did };

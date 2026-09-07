@@ -9,7 +9,8 @@ bun run regtest
 
 The command downloads and verifies pinned Bitcoin Core 31.1 and ord 0.29.0
 release archives on Apple Silicon macOS or x86-64 Linux, builds the packages,
-typechecks the harness, and runs three isolated journeys. Each creates a temporary chain and wallet,
+typechecks the harness, and runs three isolated journeys, the no-address-index
+capability check, and the Core/ord restart proof. Each creates a temporary chain and wallet,
 mines its own coins, and uses loopback RPC, ord, indexer, and HTTPS services.
 No public Bitcoin network or paid faucet is used. The script stops its nodes on normal
 completion or a caught failure; temporary data and logs remain for diagnosis.
@@ -24,7 +25,8 @@ bun run regtest
 ```
 
 Receipts are written as `receipt-none.json`, `receipt-reveal-rejected.json`, and
-`receipt-commit-response-lost.json`. Each includes actual binary versions,
+`receipt-commit-response-lost.json`, plus `receipt-no-address-index.json` and
+`receipt-restart.json`. Each journey includes actual binary versions,
 transaction and inscription IDs, the orphaned block and active tip, the content
 hash, and the temporary data directory. The runner accepts PNGs up to the local
 hosting service's 256 KiB object limit. The interactive landing file picker has
@@ -53,7 +55,7 @@ flowchart LR
   R --> B[Bitcoin Core regtest]
   B --> O[ord index]
   O --> V[Fresh verified sat and DID resolution]
-  V --> J[Version 2 JSON export and reload]
+  V --> J[Version 4 JSON export and reload]
 ```
 
 All three runs check exact PNG bytes and hashes, the selected sat's identity,
@@ -73,15 +75,16 @@ Fresh SDK instances then verify and recover the asset from the sat alone.
 
 Runtime resource content is `Uint8Array`. Strings are accepted at creation
 boundaries and encoded as UTF-8. Hashes, byte counts, hosted bodies, and ordinal
-content use the original bytes. AssetEnvelope v2 uses tagged canonical base64
-for JSON; v1 text envelopes remain readable. See
-[the resource contract](../../packages/sdk/docs/resource-bytes.md).
+content use the original bytes. New SDK envelopes use version 4 and canonical
+`ni` asset identity; strict version-3 Originals envelopes remain readable.
+The signed event format is unchanged CEL 3. See
+[the current identity contract](../../specs/originals-asset-identity.md) and
+[SDK 4 migration](../MIGRATION_4.0.md).
 
-This proves the currently implemented media-content inscription plus
-`{ didDocument, celLog }` ordinal metadata. It does **not** implement or validate
-the new `application/cel` shape in
-[the inscription decision record](../../specs/btco-inscription-shape.md).
-Rerun the same journey when that representation lands.
+The journey verifies raw media with CEL CBOR metadata at the Bitcoin boundary,
+then exact delta publications (including log-only `application/cel` bodies),
+controller rotation, sale/reacquisition, reorgs and deactivation. No DID document
+is inscribed. It enforces the [inscription decision](../../specs/btco-inscription-shape.md).
 
 ## SDK and landing configuration
 
@@ -114,22 +117,27 @@ The regular server still needs its normal auth/hosting configuration. A regtest
 funding address uses `bcrt1`; the Turnkey account identifier uses the corresponding
 `tb1` encoding of the same witness program. Testnet4 is not part of this profile.
 
-## Boundaries and remaining gates
+## Browser, restart and release boundaries
 
-- The run uses a disposable local key through the existing `TurnkeySatSigner`
-  adapter and an authenticated local fixture session. It does not call the
-  Turnkey service or automate an interactive browser login. Actual hosted signer
-  support and browser operation remain separate validation gates.
+- `bun run regtest:browser` additionally drives the actual creator UI in Chromium,
+  persists the signed pair, restarts the browser, server, Core and ord, and
+  finishes that exact inscription without another signature. See
+  [browser verification](browser-verification.md) for fixture boundaries and
+  [restart verification](restart-verification.md) for Core-only, ord-only and
+  combined restart assertions.
+- These runs use disposable local keys through the existing signer adapters and
+  an authenticated local fixture session. Actual hosted Turnkey issuance and
+  remote custody remain separate production validation gates.
 - Recovery artifacts are retained through early confirmation and retired at six
   confirmations. Six is a storage/recovery horizon, **not Bitcoin finality**.
-  Reorganizations after retirement, and previously retired records without hex,
-  cannot be recovered automatically by this store.
-- This covers creation, publication, inscription, and fresh recovery. Transfers,
-  holder appends/reinscriptions, fee replacement, many-input funding, deep reorgs,
-  concurrent server processes, and service-loss recovery need separate rehearsals.
-- The new workflow runs the three scenarios on pull requests affecting the flow.
-  Local Apple Silicon validation is recorded here; hosted Linux CI has not yet run.
-- The SDK resource type change is intended for the 3.0 prerelease. Consumers must
-  rebuild and migrate text display code before release. No release was published.
+  Deep reorgs after retirement, fee replacement, power loss and concurrent
+  production writers need separate rehearsals.
+- The workflow requires HTTP journeys, node restarts and both browser fault
+  scenarios, and uploads failure artifacts. Earlier hosted Linux results are
+  recorded in the release evidence; each new change still requires its own CI run.
+- SDK 3.0.0 was published. The identity correction records an SDK 4 / CEL 2 major
+  changeset; local regtest does not publish packages or establish a public-host
+  or mainnet acceptance gate.
 
-See [the validation record](validation.md) for exact scope and results.
+The [September 5 validation record](validation.md) is historical. Current
+completion evidence is linked from the browser/restart documents and release record.

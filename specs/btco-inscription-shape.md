@@ -5,12 +5,26 @@
 `OriginalsCelAnchor` service, the `WitnessAttestation` content shape, holder appends,
 `data.author`, and the post-anchor `rotateKey`/`deactivate` freeze.
 
+> **Identity supersession, 2026-09-07:** the original dated decision above is
+> retained. SDK 3.0.0 is now published. For SDK 4 / CEL 2,
+> [Originals asset identity](originals-asset-identity.md) replaces the historical
+> `did:cel` asset spelling with canonical `ni`. Existing CEL 3 histories,
+> signatures, hosted bindings and inscriptions remain readable and unchanged;
+> no reinscription is needed. The original clean cut applied to pre-CEL-3 data,
+> not this identity correction. Controller authority and inscription shape are
+> unchanged. This record does not itself attest a later release's verification.
+
 ## Wire shape
 
 - The log is the CCG Cryptographic Event Log data model, media type `application/cel`:
   `{ log: [{ event: { previousEvent, operation: { type, data } }, proof }] }`.
-- `did:cel` = multihash of the canonicalized genesis `event` object. Every existing
-  did:cel changes. Clean cut, no migration: the one mainnet Original (did:btco:321959825736830, 2026-08-21) already fails to verify under current code, so nothing that works today breaks.
+- Canonical `assetId` = RFC 6920 `ni:///sha-256;` plus the unpadded base64url
+  SHA-256 of the JCS genesis `event`. The historical Originals 3 spelling was
+  `did:cel:` plus its event multihash; compatibility compares the same complete
+  digest without rewriting signed history. The original September 4 clean-cut
+  rationale concerned the pre-CEL-3 mainnet Original
+  (`did:btco:321959825736830`, 2026-08-21), not SDK 3 records or this major-version
+  identity update.
 - **CCG conformance clarification, 2026-09-05 (owner selected):** the Original
   description, including controller information and its `resources` array, lives
   under `operation.data`. Do not combine it with `operation.dataReference`; that
@@ -58,7 +72,10 @@
   Earliest valid whole publication wins on a fork, ordered by creation block,
   transaction position, then numeric inscription index.
 - The DID document is emitted from the fold: id, verificationMethod = fold controller,
-  alsoKnownAs = did:cel + did:webvh, live sat ownership in didDocumentMetadata.
+  alsoKnownAs = canonical `ni` plus authenticated publication aliases (including
+  an Originals 3 alias when retained in signed history), live sat ownership in
+  didDocumentMetadata. This derived Bitcoin controller document is not a CCG
+  `did:cel` method document.
 - Entries may be read from provider metadata (they are signed and chained), so the
   resolver's "DID doc only from content" rule is dropped.
 

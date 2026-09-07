@@ -68,7 +68,7 @@ test('hosted PNG bytes become a tagged base64 envelope that verifies in a fresh 
   const ref = hostedResourceRefs(cel)[0];
   const built = hostedAssetEnvelope(cel, { [ref.segment]: png });
   if ('problem' in built) throw new Error(built.problem.message);
-  expect(built.envelope.version).toBe(3);
+  expect(built.envelope.version).toBe(4);
   expect(built.envelope.resources[0].content).toEqual({ encoding: 'base64', data: btoa(String.fromCharCode(...png)) });
   const engine = new DemoEngine();
   const revived = await engine.hydrate(JSON.parse(JSON.stringify(built.envelope)));

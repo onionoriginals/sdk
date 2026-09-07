@@ -1,23 +1,24 @@
+import { parseAssetEnvelope } from "@originals/sdk/asset-envelope";
 import type {
   PreparedBitcoinPublication,
   PreparedWebPublication,
 } from "@originals/sdk";
-import { verifyHistory, validateDocument } from "@originals/sdk/cel";
+import { verifyHistory } from "@originals/sdk/cel";
 import { digestMultibaseSha256Hex } from "../pages/original-detail-data";
 
 export interface LocalPublicationRecovery {
   key: string;
   kind: "web" | "bitcoin";
   title: string;
-  assetDid: string;
+  assetId: string;
   commitTxId?: string;
 }
 export function recoveryStorageKey(
   kind: "web" | "bitcoin",
   account: string,
-  assetDid: string,
+  assetId: string,
 ): string {
-  return `originals:${kind}-publication:${account}:${assetDid}`;
+  return `originals:${kind}-publication:${account}:${assetId}`;
 }
 /** Only this signed-in account's authenticated, signed proposals are offered. */
 export function localPublicationRecoveries(
@@ -28,9 +29,9 @@ export function localPublicationRecoveries(
   for (let index = 0; index < storage.length; index++) {
     const key = storage.key(index);
     if (!key) continue;
-    const kind = key.startsWith(recoveryStorageKey("web", account, "did:cel:"))
+    const kind = key.startsWith(recoveryStorageKey("web", account, ""))
       ? "web"
-      : key.startsWith(recoveryStorageKey("bitcoin", account, "did:cel:"))
+      : key.startsWith(recoveryStorageKey("bitcoin", account, ""))
         ? "bitcoin"
         : null;
     if (!kind) continue;
@@ -42,15 +43,17 @@ export function localPublicationRecoveries(
         prepared.format !== `originals/${kind}-publication`
       )
         continue;
-      const state = verifyHistory(validateDocument(prepared.asset.eventLog), {
-        expectedDid: prepared.asset.assetDid,
+      const envelope = parseAssetEnvelope(prepared.asset);
+      const state = verifyHistory(envelope.eventLog, {
+        expectedAssetId: envelope.assetId,
       }).state;
-      if (key !== recoveryStorageKey(kind, account, state.didCel)) continue;
+      // Match only this account and the exact verified genesis, including old saved keys.
+      if (![state.assetId, state.didCel].some((id) => key === recoveryStorageKey(kind, account, id))) continue;
       results.push({
         key,
         kind,
         title: state.name ?? "Original",
-        assetDid: state.didCel,
+        assetId: state.assetId,
         ...(prepared.format === "originals/bitcoin-publication"
           ? { commitTxId: prepared.transactions.commitTxId }
           : {}),

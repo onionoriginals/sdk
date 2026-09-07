@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner } from "@originals/cel/v3";
+import { createLocalSigner, assetDigest } from "@originals/cel/v3";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
@@ -107,7 +107,7 @@ test("a failed upload retries the identical prepared publication and substituted
   await inner.putObject(
     "example.com",
     "published/anonymous/" +
-      asset.id.slice(8) +
+      assetDigest(asset.id) +
       "/resources/" +
       resource.digestMultibase,
     new Uint8Array([0]),

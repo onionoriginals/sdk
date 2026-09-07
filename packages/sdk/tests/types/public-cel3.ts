@@ -98,3 +98,23 @@ import type { AssetTransferredEvent } from '@originals/sdk';
 import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
 // @ts-expect-error The types subpath must not revive the removed confirmation contract.
 import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
+
+// SDK 4 identity change: stable offline subpath plus explicit SDK 3 read aliases.
+import { parseAssetEnvelope } from '@originals/sdk/asset-envelope';
+import { deriveAssetId, deriveDid, normalizeAssetId, assetDigest } from '@originals/sdk/cel';
+const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
+const currentVersion: 4 = currentEnvelope.version;
+const canonicalAssetId: string = state.assetId;
+const legacyAlias: string = state.didCel;
+const legacyEnvelope = {
+  format: 'originals/asset', version: 3, assetDid: legacyAlias,
+  eventLog: loaded.celLog, resources: currentEnvelope.resources,
+};
+await SDK.create().lifecycle.loadAsset(legacyEnvelope);
+verifyHistory(loaded.celLog, {expectedDid: legacyAlias, expectedAssetId: canonicalAssetId});
+const canonicalFromEvent: string = deriveAssetId(loaded.celLog.log[0].event);
+const legacyFromEvent: string = deriveDid(loaded.celLog.log[0].event);
+const digest: string = assetDigest(normalizeAssetId(legacyFromEvent));
+// @ts-expect-error New envelopes do not expose the removed unsigned field.
+currentEnvelope.assetDid;
+void currentVersion; void canonicalFromEvent; void digest;

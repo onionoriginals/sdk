@@ -7,10 +7,18 @@ together with the precise consequences below. The [wire/proof contract](original
 defines the signed values and proof algorithms. This document defines when those
 values change the accepted asset state.
 
+> **Identity supersession, 2026-09-07:** the dated authority decision above is
+> retained. SDK 3.0.0 is now published; SDK 4 / CEL 2 use canonical `ni` identity
+> under [Originals asset identity](originals-asset-identity.md). The historical
+> Originals 3 `did:cel` spelling remains read compatibility only. Current
+> identity wording below supersedes that spelling, with no change to controller
+> authority, signed events, Bitcoin ordering or the pre-CEL-3 format boundary.
+
 The earlier inscription record's term "creator-lineage key" means the **current
 controller established by the accepted lineage**, not every key ever in it.
-The no-holder-writes, raw-byte content, derived Bitcoin evidence, clean cut and
-delta-publication decisions remain in force.
+The no-holder-writes, raw-byte content, derived Bitcoin evidence and
+delta-publication decisions remain in force. The earlier clean cut concerned
+pre-CEL-3 histories; it does not prohibit authenticated SDK 3 envelope reads.
 
 ## Authority is evaluated at each entry
 
@@ -36,7 +44,8 @@ Bitcoin nor CEL can prove that the same person controls two unrelated keys.
 The fold consumes validated entries in accepted order and has no network I/O.
 It derives:
 
-- genesis `did:cel`, current asset alias/layer, and the ordered migration aliases;
+- canonical genesis `assetId` (`ni`), current asset alias/layer, and the ordered
+  migration aliases;
 - current controller and historical controller intervals (history is not authority);
 - name, metadata, creation time, ordered resource ids with their current
   descriptors and accepted version counts;
@@ -53,13 +62,15 @@ controller and previousEvent checks pass:
 
 | Operation | State checks and effect |
 | --- | --- |
-| create | First entry only. Derive did:cel, initialize the controller, descriptors, version 1 for each resource, and active state. Never trust a declared asset DID. |
+| create | First entry only. Derive canonical `ni` assetId, initialize the controller, descriptors, version 1 for each resource, and active state. Never trust a declared asset identity. |
 | update | Asset must be active. Replace supplied name/metadata in full. For every resource update, its id must already exist and previousDigestMultibase must equal that id's current digest. Replace that descriptor, retaining its original position, and increment its accepted version count. Reject the whole operation if any member fails. |
 | rotateKey | Asset must be active. Current controller signs a different valid newController. Change the current controller after this entry; retain historical intervals for verification only. |
 | deactivate | Asset must be active. Mark it deactivated. No later authorship operation is accepted, including reactivation, rotation or migration. Bitcoin possession and historical evidence remain meaningful; this does not burn the sat, delete bytes or prevent a sat transfer. |
-| migrate | Asset must be active. `from` must equal the current alias. Permit cel → webvh, then webvh → btco, exactly once each. `layer` and the canonical destination DID must agree. Retain the prior aliases. Btco is terminal for migration. |
+| migrate | Asset must be active. `from` must equal the current alias, or at the local CEL layer be a strict historical Originals 3 alias of the same genesis. Preserve that signed value. Permit cel → webvh, then webvh → btco, exactly once each. `layer` and the canonical destination DID must agree. Retain the prior aliases. Btco is terminal for migration. |
 
-Use shared canonical DID parsing rather than a prefix check. A signed WebVH
+Use shared canonical asset identity and publication-alias parsing rather than a
+prefix check. Historical identity equivalence compares the complete genesis
+commitment and never rewrites signed migrations. A signed WebVH
 alias is a locator/creator claim, not by itself proof that an HTTPS host serves
 it or that its WebVH identifier is valid. SDK publication/resolution must check
 that separate method binding. The deterministic fold must not resolve an alias
@@ -138,8 +149,9 @@ on that sat: a complete authorized history from create through webvh migration,
 ending exactly with its btco migration to this sat/network. Boundary content and
 metadata follow the inscription decision. A bare create, an orphan delta or an
 initial snapshot ending with unwitnessed post-anchor entries is not a boundary.
-Select this boundary independently of any requested did:cel filter. After
-selection, a requested did:cel identity must match its derived genesis or the
+Select this boundary independently of any requested asset-identity filter. After
+selection, a requested `ni` or historical Originals 3 identity must match its
+derived genesis or the
 resolution fails with an identity mismatch. A later boundary matching the
 request must not cause the same sat to resolve to a different Original. If no
 boundary exists, the result is not-found; if an earlier candidate cannot be
@@ -237,5 +249,7 @@ controller signatures for the event cases.
 Production acceptance requires the new core to reproduce these outcomes through
 its public verifier/fold and the SDK/DID consumers to share that result. Provider
 evidence collection, real regtest publications/transfers/reorganizations and the
-new-format end-to-end journey remain implementation work. Resolving this decision
-does not establish those operational results or authorize public-chain activity.
+end-to-end journey require separate operational evidence. These were implementation
+gates when the decision was written; current run reports establish their own
+scope and results. Resolving this decision alone does not establish those results
+or authorize public-chain activity.

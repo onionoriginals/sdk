@@ -21,6 +21,15 @@ const check = Bun.spawn([process.execPath, 'run', 'typecheck:regtest'], {
 });
 if (await check.exited) throw new Error('Regtest harness typecheck failed');
 
+if (process.argv.includes('--browser')) {
+  const browser = Bun.spawn([process.execPath, 'apps/landing/scripts/regtest-browser.ts'], {
+    cwd: root,
+    env: { ...process.env, ...binaries },
+    stdout: 'inherit', stderr: 'inherit',
+  });
+  process.exit(await browser.exited);
+}
+
 const scenarios = process.env.REGTEST_FAULT
   ? [process.env.REGTEST_FAULT]
   : ['none', 'reveal-rejected', 'commit-response-lost'];
@@ -49,3 +58,15 @@ const capability = Bun.spawn([process.execPath, 'apps/landing/scripts/sat-snapsh
   stdout: 'inherit', stderr: 'inherit',
 });
 if (await capability.exited) process.exit(capability.exitCode ?? 1);
+
+const restartReceipt = process.env.REGTEST_RECEIPT?.replace(/\.json$/, '');
+const restart = Bun.spawn([process.execPath, 'scripts/regtest/restart-check.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(restartReceipt ? { REGTEST_RECEIPT: `${restartReceipt}-restart.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { REGTEST_LOGS_DIR: `${process.env.REGTEST_LOGS_DIR}/restart` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await restart.exited) process.exit(restart.exitCode ?? 1);

@@ -96,6 +96,17 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{
+            name: 'buffer-polyfill',
+            // Keep this initialization independent of SDK chunks that read Buffer eagerly.
+            test: /(?:node_modules\/(?:buffer|base64-js|ieee754)\/|src\/shims\/buffer-global\.ts$)/
+          }]
+        }
+      }
+    },
     chunkSizeWarningLimit: 1600
   }
 });

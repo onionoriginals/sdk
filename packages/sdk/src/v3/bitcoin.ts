@@ -134,7 +134,7 @@ export class BitcoinPublications {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       envelope.unverified?.localResources,
       this.resolver,
     );
@@ -181,7 +181,7 @@ export class BitcoinPublications {
         "Only the current controller can sign the boundary migration",
       );
     if (state.layer === "webvh") {
-      const hosted = await this.resolver.checkWeb(state.alias, state.didCel);
+      const hosted = await this.resolver.checkWeb(state.alias, state.assetId);
       if (hosted.status !== "verified" || hosted.head !== state.head)
         invalid(
           "ASSET_WEBVH_BINDING",
@@ -267,7 +267,7 @@ export class BitcoinPublications {
             );
           accepted = resolution.state;
           if (
-            accepted.didCel !== state.didCel ||
+            accepted.assetId !== state.assetId ||
             full.log.length <= accepted.entryCount ||
             eventDigest(full.log[accepted.entryCount - 1].event) !==
               accepted.head
@@ -378,7 +378,7 @@ export class BitcoinPublications {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       [],
       this.resolver,
     );

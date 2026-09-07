@@ -8,7 +8,7 @@ permissions:
 jobs:
   regtest:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -22,6 +22,10 @@ jobs:
         env:
           REGTEST_RECEIPT: regtest-receipt.json
           REGTEST_LOGS_DIR: regtest-logs
+      - run: bun apps/landing/node_modules/playwright-core/cli.js install --with-deps chromium
+      - run: bun run regtest:browser
+        env:
+          REGTEST_BROWSER_ARTIFACTS_DIR: regtest-browser-artifacts
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -29,3 +33,4 @@ jobs:
           path: |
             regtest-receipt-*.json
             regtest-logs/**
+            regtest-browser-artifacts/**

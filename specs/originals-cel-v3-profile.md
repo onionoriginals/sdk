@@ -1,16 +1,18 @@
 # Originals CEL 3 wire and proof profile
 
-Status: implementation contract, selected direction approved by the owner on
-2026-09-05. **Not an implemented or certified processor.** This completes the
-representation portion of [Pin the application/cel wire and proof profile for
-Originals 3.0.0](https://github.com/onionoriginals/sdk/issues/559).
+Status: current wire/proof contract for the `originals/cel/3` representation,
+selected on 2026-09-05 for SDK 3.0.0 and retained by SDK 4 / CEL 2. Identity
+naming is superseded by [Originals asset identity](originals-asset-identity.md).
+This is an application profile of a CCG community draft, not certification of
+a generic CEL processor or a DID-method implementation.
 
 This document and its [JSON Schema](originals-cel-v3.schema.json) specify the
 representation. The [inscription decision](btco-inscription-shape.md) specifies
-the asset's Bitcoin shape. [Controller authority and inscription ordering](https://github.com/onionoriginals/sdk/issues/560)
-still owns the authorization and on-chain fold; wire/proof acceptance alone is
-not asset verification. Repository code at
-`071b898420dd1052f4e4d34a27e59bea167784d0` still implements the old CEL shape.
+the Bitcoin shape, and [controller authority and inscription ordering](originals-cel-v3-authority.md)
+specifies the fold. Wire/proof acceptance alone is not asset verification.
+The design-time [reference corpus](../docs/research/cel-profile-vectors/README.md)
+retains its original expected values; current compatibility rules preserve their
+signed events while deriving the canonical `ni` asset identity.
 
 ## References and conformance
 
@@ -95,7 +97,8 @@ Creation `nonce` is unpadded base64url of exactly 16 bytes, with no multibase
 prefix. Writers use fresh cryptographically random bytes for each intended new
 asset; fixed values are for fixtures only. This distinguishes otherwise
 identical creations. Readers check encoding, not unverifiable randomness.
-Creation does not contain a declared asset DID: `did:cel` is always derived.
+Creation does not contain a declared asset identity: the canonical `ni` asset
+identifier is always derived from genesis.
 
 `name` and `reason` are strings. `metadata` is a JSON object. In an update,
 supplied `name`/`metadata` replace the respective value in full; omitted fields
@@ -139,12 +142,14 @@ match is insufficient. Secp256k1 Bitcoin keys do not select this ECDSA suite.
 
 Migration `from`/`to` are the current and destination asset aliases; `layer` is
 `webvh` or `btco` and must agree with `to`. Exact identifier syntax and matching
-against verified aliases belong to the shared DID/fold validation, never a
+against verified aliases belong to shared identity/alias and fold validation, never a
 string-prefix-only trust check. `did:btco` contains the network and decimal sat
 number; no numeric satoshi value or separate contradictory network is signed.
 The boundary entry signs the selected sat before transaction construction;
 transaction id, inscription id, height and block hash are derived afterwards.
-The permitted journey remains `did:cel → did:webvh → did:btco`.
+The permitted journey remains local CEL → WebVH → Bitcoin. New local aliases
+use `ni`; historical Originals 3 `did:cel` migration sources remain readable
+when their complete genesis commitment matches. Signed values are never rewritten.
 
 ## Canonical values and identity
 
@@ -168,7 +173,7 @@ For a validated event E:
 ```text
 B(E) = UTF8(JCS(E))
 D(E) = "u" + base64url_unpadded(0x12 || 0x20 || SHA256(B(E)))
-did:cel = "did:cel:" + D(genesis.event)
+assetId = "ni:///sha-256;" + base64url_unpadded(SHA256(B(genesis.event)))
 next.event.previousEvent = D(previous.event)
 ```
 
@@ -177,8 +182,11 @@ round-trip to the same string; padding, alternate bases, alternate algorithms
 and noncanonical trailing bits are rejected. Resource digests use the same
 expression with raw file bytes in place of B(E). Proofs, JSON whitespace,
 CBOR encodings and transport wrappers do not affect event identity. All validated
-event members do. A requested `did:cel` must match the derived genesis identifier;
-no `data.did` or other legacy discriminator bypasses that comparison.
+event members do. A requested asset identity must match the derived genesis
+identifier; no `data.did` or other legacy discriminator bypasses that comparison.
+The `ni` suffix uses only the 32 raw hash bytes, without multibase/multihash
+headers. Its strict syntax, compatibility aliases and envelope-version rules
+are normative in [Originals asset identity](originals-asset-identity.md).
 
 ## Controller proofs
 
@@ -297,7 +305,7 @@ These are behavioral boundaries, not frozen export names:
 3. **History verification/fold:** complete log or verified-prefix plus delta →
    chain and authorized asset state, or missing/invalid history. The current
    `verifyEventLog` and asset `verify`/`loadAsset` must converge on this boundary.
-4. **Resolution:** requested DID plus provider observations → the same verified
+4. **Resolution:** requested asset identity or publication alias plus provider observations → the same verified
    state, separately qualified Bitcoin evidence and live ownership. Resource
    bytes must match the accepted descriptor before being reported verified.
 5. **Write:** `createAsset`/append/publish/inscribe validate, sign, and verify the
@@ -317,17 +325,16 @@ Legacy `{events:...}`, `{celLog:...}`, `{didDocument,celLog}`, entry-level
 `author`, `witnessedAt` and stored Bitcoin proof fields do not verify under this
 profile. This is the previously selected clean cut, not an automatic migration.
 
-## Evidence and remaining implementation work
+## Evidence and verification scope
 
 The [reference corpus](../docs/research/cel-profile-vectors/README.md) supplies
 complete signed creation/continuation documents, canonical bytes, event/resource
-digests, did:cel values, JSON/CBOR equivalence, negative documents and published
+digests, historical Originals 3 did:cel aliases, JSON/CBOR equivalence, negative documents and published
 W3C cryptographic known answers. Expected values come from literal published
 vectors and independent reference tools; no Originals production code generates
 the expectations. Corpus success is not new-SDK or regtest success.
 
-The implementation gate must run the corpus through the public boundaries above,
-then run the actual creator/recovery journey with the new representation.
-Authority, publication ordering, reorganization and completeness examples still
-need the separate fold decision. This wire contract does not close those tickets,
-deploy anything, or authorize public-chain transactions.
+Verification must run the corpus through the public boundaries above and exercise
+the actual creator/recovery journey. Authority, publication ordering, reorganization
+and completeness follow the separate authority contract. Reference-vector success
+alone does not establish browser, regtest or public-chain evidence.

@@ -131,7 +131,7 @@ for (const scenario of fixtures.cases)
         expect(result.state.name).toBe(scenario.expected.name);
         expect(result.state.metadata).toEqual(scenario.expected.metadata);
         expect(result.state.active).toBe(scenario.expected.active);
-        expect(result.state.aliases).toEqual(scenario.expected.aliases);
+        expect(result.state.aliases).toEqual([result.state.assetId, ...scenario.expected.aliases]);
         expect(result.state.resources[0].digestMultibase).toBe(
           scenario.expected.resourceDigest,
         );
