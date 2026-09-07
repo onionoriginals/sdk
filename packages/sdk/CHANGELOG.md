@@ -1,5 +1,339 @@
 # @originals/sdk
 
+## 3.0.0
+
+### Major Changes
+
+- d7da21e: Resolve CEL 3 asset bytes and Bitcoin DID authority from the same fresh complete
+  sat snapshot. Expose provider-qualified chain, deactivation and ownership results;
+  fail closed on unavailable or inconsistent evidence and recheck network recovery.
+- a8fe507: **CEL proofs no longer claim to be W3C Data Integrity.**
+
+  Every CEL proof carried `type: "DataIntegrityProof"`, asserting that a conforming Data Integrity implementation could verify it. None can. The cryptosuite is ours and unregistered, so a conforming verifier reads past the type, fails to recognise the suite, and rejects — naming the envelope after the spec only moved that discovery one field later. Plan 042 already fixed this for the `cryptosuite` field; this does the same for `type`, which is the field a reader looks at first.
+
+  ```
+  CEL_PROOF_TYPE        = 'OriginalsCelProof'   — written from now on
+  CEL_PROOF_TYPE_LEGACY = 'DataIntegrityProof'  — accepted on READ, permanently
+  ```
+
+  Carried by every proof in a CEL log: the controller's event signatures and the `bitcoin-ordinals-2024` witness attestations alike. Both are Originals constructions; neither is Data Integrity. Genuine W3C credential proofs (`eddsa-rdfc-2022`, `bbs-2023`) are untouched and keep the W3C type — those really are conformant.
+
+  This renames a claim. It does not change which bytes are signed, and no cryptography moves.
+
+  **Logs sealed before this change keep verifying.** They cannot be re-signed, so `DataIntegrityProof` remains accepted on read, forever. External artifacts written by other implementations — a competing anchoring's did:btco document — may carry it too.
+
+  **Accepting both labels opens no door.** The type is not a dispatch key: the cryptosuite selects the preimage, and since 042 the proof configuration — `type` included — is inside the signature. So relabelling a current-suite proof to the legacy type breaks it, and relabelling a legacy proof to the new one breaks it as well. Both directions fail closed, which is what made this shippable rather than a downgrade vector.
+
+  `CEL_PROOF_TYPE`, `CEL_PROOF_TYPE_LEGACY`, `CEL_PROOF_TYPES` and `isCelProofType` are root exports of both packages, alongside the existing suite constants.
+
+  **Breaking:**
+
+  - New CEL proofs carry `type: 'OriginalsCelProof'`. Anything matching on the literal `'DataIntegrityProof'` must accept both — use `isCelProofType`.
+  - This applies to witness proofs as well as event proofs.
+
+  Reading is strictly widened, so nothing already minted breaks.
+
+- d7da21e: Make CEL 3 the default asset lifecycle. Publish verified resource bytes with a separate WebVH method log, resolve Bitcoin identities from complete fresh sat evidence, and construct full boundary or accepted-head delta inscriptions. Persist exact signed commit/reveal pairs before broadcast and resume ambiguous submissions without creating a new identity or transaction pair. The landing creator uses the same public APIs and retains prepared publications across reloads.
+
+  Breaking: require an explicit hosted domain and an application-controlled signer; remove previous asset/manifest and holder-authorized mutation semantics. Controller rotation, possession and observed chain state are separate. See packages/sdk/V3.md and the CEL 3 profile specifications for migration and provider requirements.
+
+- d7da21e: Make CEL 3 the default SDK asset API, with serialized mutations, byte-bound resource
+  versions, explicit draft recovery, matching public types, and a local-only CLI.
+  Remove previous asset writers/verifiers from the SDK entry points and preserve
+  standalone identity utilities. The landing creator uses the same CEL 3 public
+  asset and publication contracts.
+- 6e6bc3d: **BREAKING: did:peer support is removed entirely.** No creation, no resolution, and — unlike earlier releases — no verifier read path. `@aviarytech/did-peer` is no longer a dependency of either package.
+
+  - **Verifier (`@originals/cel`)**: a did:peer DID is refused wherever a self-certifying DID is checked — genesis controllers, legacy `data.did` bindings, rotateKey targets, and committed `data.author` values all fail closed (empty key set, never a resolver fallback). Pre-existing logs whose genesis or rotation chain names a did:peer DID **no longer verify**. `validateDID` no longer accepts `did:peer:…` — and now accepts `did:key:…`, the protocol's only self-certifying method.
+  - **SDK (`@originals/sdk`)**: `DIDManager.resolveDID` returns null for did:peer (unsupported method, no fabricated stub); the credential documentLoader no longer treats did:peer as self-certifying, so legacy did:peer credentials no longer verify (registry fallback is did:key-only); `loadAsset` / `resolveAssetFromSat` refuse any log whose current controller is not a did:key with a clear error, and a post-anchor append under a non-did:key signing VM throws `CEL_APPEND_FAILED` before anything is appended or inscribed.
+
+- 6e6bc3d: **BREAKING: the non-cooperative rotation path (#366) is removed.** Holding the anchoring sat grants no control of an asset's key set: a `rotateKey` whose controller proof is not authorized by the current key lineage now always fails verification, even when it carries a fully verified reinscription witness on the anchored sat. The sat proves ownership and gates the right to append (see the sat-gated-appends entry in this same release) — it never buys the identity slot.
+
+  Removed APIs:
+
+  - `sdk.lifecycle.authorizeSigner(...)` (`@originals/sdk`) — the write side of the deleted path (a self-signed rotation plus reinscription witness). There is no replacement call: the cooperative `rotateBtcoKeys` (signed by the outgoing controller) is the only rotation. The capability the removal takes away — a buyer establishing their own authoring key without the seller's signature — ships in this same release as sat-gated appends (`asset.appendStatement`): a sat holder appends with their own key directly, with no rotation and no key-set change.
+  - `EventVerification.nonCooperativeRotation` (`@originals/cel`) — rotations are only ever cooperative now, so the field is meaningless.
+
+  Documented consequence: **the controller key lineage is frozen once an asset is inscribed.** A creator who loses the post-migrate controller key can no longer rotate it away; pre-anchor rotation is unaffected.
+
+- e718ad4: Preserve resource bytes throughout the SDK and add the CEL 3 core and a real local regtest journey.
+
+  **SDK migration:** runtime resource content is now `Uint8Array`; creation inputs still accept text and encode it once as UTF-8. Decode returned text explicitly with `TextDecoder`, and call `asset.serialize()` before JSON serialization. AssetEnvelope version 2 encodes inline content as canonical base64; the loader still reads version-1 UTF-8 envelopes and emits version 2 on serialization. Hashes, sizes, publication and inscription use the original bytes. The SDK also exports an explicit loopback-only `RegtestProvider` and resolves btco asset and DID reads through the verified asset path.
+
+  **CEL core:** add `@originals/cel/v3` and the root `celV3` namespace for the selected CCG application profile, with strict JSON/CBOR encoding, Data Integrity signatures, one controller-history verifier and an on-sat snapshot fold. Existing package-root APIs remain available. The SDK mutation APIs, WebVH publisher, Bitcoin writer and live regtest journey still use the preceding CEL representation; migrating those callers is separate work.
+
+  **Landing:** preserve uploaded bytes through hosting and inscription, and persist signed commit/reveal pairs before broadcast so retries can recover from rejected reveals, lost commit responses and early reorganizations. Retire recovery records after six confirmations; this is an operational retention policy, not a finality guarantee. Add a disposable local regtest journey covering those recovery paths.
+
+- d7da21e: Upgrade JSON-LD processing to version 9 so published SDK installations use the
+  maintained Undici 6 HTTP client. Retained VC utilities use corrected RDFC-1.0
+  control-character escaping and complexity limits; affected older credentials may
+  need reissuing. CEL 3 event histories use independent canonicalization.
+- 6e6bc3d: **BREAKING: sat-gated appends and the creator-vs-holder entry split.** Authority over a CEL splits at the btco anchor: before the migrate, the key decides (unchanged); after the migrate, the sat decides. A post-anchor event is authorized iff it commits its author's key in `data.author` (inside the chain digest), its single controller proof is that author's key, and it carries a fully verified `bitcoin-ordinals-2024` witness proof on the anchoring sat whose inscription strictly postdates the current anchor. The signer does NOT have to be in the authorized key set, and appending never modifies it.
+
+  Verifier (`@originals/cel`):
+
+  - Post-anchor `rotateKey`, `deactivate`, and `migrate` are rejected outright, and `transfer` events are rejected ANYWHERE, in any shape — there is no transfer event in the model (ownership is the sat, moved by a Bitcoin transaction) and no legacy transfer-bearing log to read. Off-chain post-anchor appends — including the witness-acknowledgment updates earlier SDK versions wrote — no longer verify.
+  - Entries are classified: creator entries (signed by the genesis controller or a pre-anchor rotation — the authenticity claim) vs holder entries (post-anchor writes by the sat holder — chain of custody). Holder entries carry an ALLOWLISTED data shape (`author`/`statement`/`occurredAt`/`links`/`ext`); anything else fails the log. New public surface: `EventVerification.authorKey`/`authorClass`, `VerificationResult.creatorKeys`/`holders`, `AssetState.custody`/`holders`, and the pure display fold `classifyLogEntries`.
+  - `options.verifier` is documented as UNSAFE for btco logs: none of the on-chain authority machinery runs on that path.
+  - **Fail-closed on a bad holder entry is deliberate**: a post-anchor holder append that breaks the data allowlist or fails the sat gate fails the WHOLE log, permanently — not just that entry. The sat holder owns the sat, so inscribing junk destroys their own asset's provenance; the genesis authenticity claim remains readable in the on-chain prefix before the junk entry. There is no partial-verification mode.
+
+  SDK (`@originals/sdk`):
+
+  - `rotateBtcoKeys` always throws `KEY_ROTATION_NOT_PERMITTED`: a did:btco asset is definitionally past the anchor, so its output could never verify again. The controller key lineage is frozen at inscription time.
+  - Post-inscription witness-acknowledgment appends are no longer written (they would invalidate every new log). Serialized envelopes or hosted logs from earlier versions that carry a post-migrate acknowledgment update no longer verify — re-serialize from the chain (`resolveAssetFromSat`) to obtain the clean on-chain log.
+  - New `asset.appendStatement({ statement?, occurredAt?, links?, ext? }, { signer? })`: the sat holder's write. The append path signs with the caller's configured signer even when its key is not in the log, commits `data.author`, and refuses holder authenticity claims locally (`CEL_HOLDER_FIELD_NOT_PERMITTED`) before anything is inscribed or paid.
+  - `resolveAssetFromSat` now also returns `owner` — the sat's current holder, read live from the provider's owner index at call time, never cached; unset when no owner index exists.
+  - `ProvenanceChain.custody` + `ProvenanceQuery.custody()` expose the holder chain; `replayProvenance` folds holder entries into `custody`, never into `resourceUpdates`.
+
+- 6e6bc3d: **BREAKING: legacy compatibility paths are removed — the protocol starts fresh.** There is no legacy data to support, so the transitional read/write paths are gone rather than maintained:
+
+  - **`transfer` events are rejected anywhere, in any shape** (`@originals/cel`). The v0/v1 distinction and the pre-anchor v0 read path are deleted: ownership is the sat, moved by a Bitcoin transaction, never a log event, and no v0 log exists to read. Any log carrying a `transfer` entry fails verification.
+  - **Genesis lineage is `data.controller` only.** The classification and custody folds (`classifyLogEntries`, `beginCustodyFold`, the landing's custody view) no longer fall back to legacy `data.creator`/`data.did` or the create proof's VM; a genesis without `controller` has no lineage, so nothing can make a post-anchor authenticity claim on such a log. The `genesisLineageDids` helper (added in this same release cycle) is removed.
+  - **Resource URLs are multibase-multihash only** (`@originals/sdk`). The raw-sha256 legacy segment ("ud…") is never written: the dual-write and the `legacyResourceUrlCompat` config flag are removed, publish/update write exactly one key per resource version, and `parseResourcePathSegment` is deleted (nothing reads segments back — the canonical segment IS the key). The landing host serves exact keys with no alternate-form fallback.
+  - **`classifyLogEntries` agrees with the verifier on rejected entries**: a post-anchor non-`update` entry is classed `unattributed` regardless of lineage — the display fold never labels an entry "creator" that the verifier rejects.
+
+- **Security:** BBS+ selective disclosure now fails closed. Both no-key paths threw away the caller's privacy intent while reporting success.
+
+  `deriveSelectiveProof` fell back, for any credential without a `bbs-2023` proof, to returning the credential **unchanged** while listing the undisclosed paths in `hiddenFields`. A caller who trusted that report and forwarded `result.credential` published every field it claimed to withhold. It now throws `BBS_BASE_PROOF_REQUIRED`.
+
+  `prepareSelectiveDisclosure` had the matching hole: given no key pair it returned a "metadata-only" result — the credential untouched, pointer arrays attached — which read as success but created no proof, so nothing could ever be derived from it. It now throws `BBS_KEY_REQUIRED`.
+
+  These combined into one trap: the example in `docs/LLM_AGENT_GUIDE.md` passed no key, so it demonstrated the metadata-only path, and a reader following it got a credential with no proof and then a "derived" result that redacted nothing. The example is corrected to show the real flow.
+
+  **Breaking:** calls that previously resolved now throw. Any code relying on either fallback was not performing selective disclosure — it was either producing an unusable credential or leaking. Pass a BBS+ key pair to `prepareSelectiveDisclosure` and derive from its output.
+
+  Note the SDK still cannot generate BLS12-381 keys (`KeyManager` covers ES256K / Ed25519 / ES256), so issuers must bring their own via `@digitalbazaar/bbs-signatures`; `multikey.encodePublicKey(publicKey, 'Bls12381G2')` encodes it for the DID document. The documented example shows this.
+
+- **`Buffer` is purged from every public signature — the API speaks `Uint8Array`** (plan 044).
+
+  `Buffer` is a Node global; any browser consumer without a bundler shim got `ReferenceError` the moment a Buffer-typed path executed. Public signatures now use `Uint8Array` throughout, and the browser-reachable entry points (`index`, `LifecycleManager`, `OriginalsAsset`, `cel`) no longer construct Buffers at runtime.
+
+  **Signature changes** (callers passing `Buffer` still compile — `Buffer` extends `Uint8Array`; code that called Buffer methods on _returned_ values must convert):
+
+  - `Signer` and all four implementations (`ES256KSigner`, `Ed25519Signer`, `ES256Signer`, `Bls12381G2Signer`): `sign`/`verify` take and return `Uint8Array`. The returned signature is no longer a `Buffer` instance — use `Buffer.from(sig)` in Node if you need one.
+  - `OrdinalsProvider` (and every shipped provider): `createInscription({ data })`, `InscriptionParts`, and returned/`getInscriptionById` `content` are `Uint8Array`. Decode text content with `new TextDecoder().decode(content)`, not `content.toString('utf8')`.
+  - `StorageAdapter.put(data: Uint8Array | string)` and `StorageGetResult.content: Uint8Array`.
+  - `OrdinalsInscription.content?: Uint8Array` (`types/bitcoin`).
+  - `ResourceManager.createResource` / `updateResource` / `hashContent` accept `Uint8Array | string`.
+  - `KeyManager.encodePublicKeyMultibase(publicKey: Uint8Array, …)` / `decodePublicKeyMultibase` returns `{ key: Uint8Array, … }`.
+  - `LifecycleManager.estimateAppendCost` `content` option: `string | Uint8Array`.
+
+  Internal Node-only paths (transaction building, CLI, server providers) still use `Buffer` where appropriate — the guarantee is about the public surface and the browser-reachable graph.
+
+- **The CEL cryptosuite is renamed, and the proof configuration is now signed** (plan 042).
+
+  CEL proofs were labelled `eddsa-jcs-2022`, but the construction was not that suite. There was no hashing step, and the proof configuration was deliberately excluded from the signature. Two consequences, both now fixed:
+
+  **The name promised interop it could not deliver.** A conforming Data Integrity implementation could never verify an Originals CEL proof, nor could we verify theirs, while the label said otherwise. New proofs carry `originals-cel-ed25519-jcs-v1` — a bespoke name that claims exactly what it does.
+
+  **The proof configuration was unattested.** Because the signature covered only the event, `created`, `verificationMethod`, `proofPurpose` and even `cryptosuite` were editable after the fact without invalidating anything — a freely forgeable timestamp inside a structure whose entire purpose is tamper-evidence. The signing input is now `sha256(JCS(proofConfig)) || sha256(JCS(event))`, mirroring the Data Integrity hashing step.
+
+  Binding the configuration is also what makes the migration safe. The verifier dispatches on the suite label, and the two constructions cannot be swapped: relabelling a pre-042 proof to the new suite fails (its signature never covered the configuration), and downgrading a new proof to the old label fails too (the old preimage is not what was signed). Both directions fail closed, so an attacker cannot pick whichever ruleset suits them.
+
+  **Logs sealed before this change keep verifying.** They cannot be re-signed, so `eddsa-jcs-2022` remains accepted on READ — permanently, and never written again. Such logs necessarily keep their original weakness: editing `created` on a pre-042 proof is still undetectable, which is precisely why the construction changed. Externally produced artifacts (a competing anchoring's did:btco document, written by another implementation) may also still carry the old label.
+
+  `celProofSigningInput`, `canonicalizeEvent`, `CEL_CRYPTOSUITE`, `CEL_CRYPTOSUITE_LEGACY`, `verifyDidKeyProof` and `structuralCheckReason` are now root exports, so an external signer or verifier can produce and check the exact bytes without reverse-engineering them.
+
+  **Breaking:**
+
+  - New CEL proofs carry `cryptosuite: 'originals-cel-ed25519-jcs-v1'`. Anything matching on the literal `'eddsa-jcs-2022'` must accept both.
+  - `signingInput.celEvent(entry)` now takes the proof configuration as a second argument: `signingInput.celEvent(entry, proofConfig)`. A signer that ignores it produces a proof that fails at seal time rather than silently later.
+  - Third-party CEL signers must build the proof configuration first and sign over it. Seal-time self-verification (plan 034) catches implementations that have not migrated, at the call site.
+
+- **Custody is required, and a provenance append that cannot be signed now fails loudly** (plan 041).
+
+  Two defaults are inverted. Both used to produce assets that looked fine and were quietly broken.
+
+  **`createAsset` requires somewhere to keep the controller key.** Without a signer or a keyStore the freshly generated key was discarded at mint, so the asset could never author another event — `publishToWeb` and `inscribeOnBitcoin` would still "succeed" while omitting their provenance events. That was the default, and the shape of the documented quickstart. It now throws `NO_CUSTODY` naming every way to supply custody. `{ controller: 'ephemeral' }` is the explicit opt-in for a genuinely write-once asset; it still verifies, it simply can never gain another event. It is honoured even when a keyStore is configured — the generated key is not persisted, and no `key:unpersisted` event fires, because that event signals custody lost by accident and this was requested.
+
+  **A lifecycle operation that cannot sign its own event throws `CEL_APPEND_FAILED`** instead of emitting `cel:append-skipped` and carrying on. An operation has not succeeded if the log is missing the migration it just performed. The old behavior is available per call (`{ onAppendFailure: 'skip' }` on `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `addResourceVersion`) or globally (`config.onAppendFailure`), and still emits `cel:append-skipped`.
+
+  One exception, deliberately: `NO_CEL_LOG` — a legacy pre-CEL asset with no chain to append to — always degrades. No configuration could give such an asset a log, so gating on it would refuse to operate on them at all, which is a different and much harsher policy than "you have a log but cannot sign it".
+
+  **`rotateBtcoKeys` accepts `incomingSigner`.** The post-rotation witness acknowledgment folds to the NEW controller, so the outgoing signer cannot sign it. Without this a remote-custody rotation completed but dropped its acknowledgment — the last silently-dropped event in the lifecycle. The acknowledgment remains non-gating.
+
+  **`config.keyStore` is honoured however the manager is constructed.** `OriginalsSDK.create` destructured `keyStore` out of the config it passed downstream, so anything reading custody from the config — including a `LifecycleManager` built directly from it — saw none. `KeyStore` is also now documented as key _persistence_ rather than a signing authority; prefer `signer` for authorship.
+
+  **Breaking:**
+
+  - `createAsset` / `createDraft` throw `NO_CUSTODY` unless a signer, a keyStore, or `{ controller: 'ephemeral' }` is supplied.
+  - `createAsset` throws `CONTRADICTORY_CUSTODY` when given both `options.signer` and `{ controller: 'ephemeral' }` — a signer makes the asset authorable by that key, which is the opposite of write-once, and silently honouring either instruction would be a guess. An _ambient_ `config.signer` is different: a per-call ephemeral controller simply overrides it.
+  - `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys` and `addResourceVersion` throw `CEL_APPEND_FAILED` where they previously degraded. Pass `onAppendFailure: 'skip'` for the old behavior.
+
+  Callers relying on the old defaults were, in every case, producing assets whose provenance logs were missing events they believed had been recorded.
+
+- **Four silent signing failures are now loud.** Each one produced a plausible signed artifact that the SDK's own verifier rejected, with no error at sign time — so the failure surfaced arbitrarily far from its cause, often after an asset was already inscribed.
+
+  **CEL proofs are verified before they are sealed.** `createEventLog` / `appendEvent` checked only that the signer returned something proof-shaped. A signer using the wrong preimage sealed a genesis whose `did:cel` derived fine, whose log looked well-formed, and which could never verify. Both now verify the proof against its own `did:key` verification method before sealing it — offline, one Ed25519 verify per append. Set `{ verifyOnSign: false }` only to deliberately construct an invalid log, e.g. a tamper-detection fixture.
+
+  **The CEL cryptosuite whitelist matches what the verifier can check.** The structural validator admitted `eddsa-rdfc-2022` while the dispatcher failed it closed — a suite the validator accepted but that could never verify. Verification failures now also carry a reason (`unsupported cryptosuite`, `signature mismatch`, `no resolver for <vm>`) instead of a bare "Verification failed".
+
+  **`signCredentialWithExternalSigner` signs the bytes the SDK computed.** It hardcoded `cryptosuite: 'eddsa-rdfc-2022'` and then called `signer.sign({document, proof})`, letting the signer choose its own canonicalization. Every didwebvh-shaped signer chooses JCS, so the proof was labelled RDFC and signed over JCS bytes: **no credential signed this way could ever verify.** The SDK now canonicalizes and hashes (RDFC-2022) and the signer signs exactly those bytes via `ExternalSigner.signBytes`. It also binds the signing key to the credential's stated issuer, matching the local-key path.
+
+  **`CredentialManager` requires a `DIDManager`.** Without one, Data Integrity proofs fell through to a legacy digest path that no DI proof can satisfy, so `verifyCredential` returned a `false` indistinguishable from a bad signature.
+
+  **Breaking:**
+
+  - `ExternalSigner` implementations used with `signCredentialWithExternalSigner` must implement `signBytes(data)`. A `sign()`-only signer now throws `EXTERNAL_SIGNER_SIGNBYTES_REQUIRED` rather than emitting an unverifiable credential — such credentials never verified, so no working code depended on this.
+  - `new CredentialManager(config)` now throws `DID_MANAGER_REQUIRED`; pass a `DIDManager`, or use `sdk.credentials`.
+  - Signers producing proofs over the wrong preimage now throw at append time instead of writing an unverifiable event.
+  - Credentials whose `issuer` is not controlled by the signing key now throw `ISSUER_BINDING_MISMATCH` at sign time.
+
+  The published `packages/sdk/README.md` also documented `did:peer` as the creation layer (it is `did:cel`) and advertised Turnkey/KMS/HSM support the authorship path does not have. It now carries a **Custody** section making `keyStore` step zero and naming both degrade signals, `key:unpersisted` and `cel:append-skipped`.
+
+- **Packaging: tree-shakeable entry, curated `exports`, test doubles moved to `/testing`** (plan 043).
+
+  The package is no longer hostile to bundlers, and the export surface now matches what a remote-custody integrator needs instead of what the repo happened to contain.
+
+  - **`"sideEffects": false`.** The root entry's side-effect-only `import './crypto/noble-init.js'` is gone; the noble sync-hash configuration now happens explicitly (an idempotent `initNobleCrypto()` call) inside the modules that use sync noble APIs (`crypto/Signer.ts`, `did/KeyManager.ts`). A bundler can now drop the ~150-module graph (jsonld included) when you only import types. If you imported the SDK purely for its import-time noble setup, call the exported `initNobleCrypto` — but no SDK path requires you to.
+  - **Curated `exports` map.** The 11 internal `./dir/*` wildcards are gone; every internal file is no longer a semver commitment. The supported entry points are now exactly: `.` (root), `./cel` (browser-safe genesis entry), `./testing` (test doubles), `./types`, and `./package.json`. Deep imports like `@originals/sdk/crypto/Multikey` no longer resolve — everything public is exported from the root (e.g. `multikey`).
+  - **Test doubles off the root.** `OrdMockProvider` and `FeeOracleMock` moved from the root entry to `@originals/sdk/testing`. Update imports: `import { OrdMockProvider, FeeOracleMock } from '@originals/sdk/testing'`. Production bundles no longer carry mock providers.
+  - **Remote-signer toolkit added to the root:** `Verifier` (issuer-bound credential verification), `EdDSACryptosuiteManager` (shared signing-input construction), `createDocumentLoader` (JSON-LD loader bound to a `DIDManager`), and `currentControllerVm` (fold a CEL log to the current controller's verification method; also exported from `./cel`).
+  - **Dropped from the root:** `withRetry`/`RetryOptions` (`utils/retry`) and `CircuitBreaker`/`withCircuitBreaker` (`utils/circuit-breaker`). These are internal infrastructure, not Originals API; vendor your own if you depended on them.
+
+- **Remote custody can author assets.** Turnkey, KMS, HSM, MPC and passkey backends never export a private key, and the SDK's authorship path required one — `KeyStore.getPrivateKey(vmId)`. Any such backend was locked out of the recommended tier entirely.
+
+  **One signer interface.** `OriginalsSigner` is three members — `verificationMethodId`, `publicKeyMultibase`, and `signBytes(bytes)` — the smallest capability a custody backend can offer. The SDK canonicalizes and hashes; the signer only ever signs opaque bytes. It is accepted on `OriginalsConfig` and per call on `createAsset`, `publishToWeb`, `inscribeOnBitcoin`, `rotateBtcoKeys`, `authorizeSigner` and `addResourceVersion`. Adapters convert in both directions: `signerFromKeyPair`, `signerFromKeyStore`, `signerFromExternalSigner`, `toCelSigner`, `toExternalSigner`.
+
+  **The provenance leak this closes:** `publishToWeb` accepted an `ExternalSigner`, but that signer only authorized the did:webvh log. The asset's own CEL `migrate` event was appended by a keyStore-only path, so a remote-custody caller doing everything right got a published asset whose provenance log was **missing its migration event** — reported as success. Every authorship append now accepts the configured or per-call signer.
+
+  **One signing-input namespace.** `signingInput` exposes the four (and only four) preimages this SDK signs: `celEvent`, `witness`, `didWebvh`, `credential`. Every internal signing path routes through it, so "which bytes do I sign?" has one answer and the four cannot drift apart. Note `didWebvh` delegates to didwebvh-ts's own `prepareDataForSigning` — it is `sha256(JCS(proof)) || sha256(JCS(document))`, not JCS over the pair, and reimplementing it by hand produces proofs that never verify.
+
+  **A conformance harness.** `assertSignerConformance(signer)` lets any custody backend prove its implementation before shipping, and `MockRemoteSigner` (signBytes-only, no key export) exercises the full create → publish → inscribe → rotate flow in the SDK's own tests. No test previously exercised a non-exporting backend, which is why this went unnoticed.
+
+  **`@originals/auth`:** both Turnkey signers now implement `signBytes` via a single shared `turnkeySignBytes` primitive, so a Turnkey key satisfies `OriginalsSigner` and can author CEL events and sign credentials — not only did:webvh logs. The byte-level code already existed, duplicated across the two signers and kept in sync by comment.
+
+  Custody is explicit at every append: a signer passed to `createAsset` is **not** retained on the asset. An asset holding a signer handed to it once is hidden state that outlives the call — a session-backed signer (a Turnkey browser session) goes stale inside it, and a serialized/reloaded asset has no binding at all. Later appends take a signer per call, or fall back to `config.signer`.
+
+  **Breaking:**
+
+  - `@originals/auth`'s root entry no longer re-exports `./server`. Importing so much as a type from `@originals/auth` pulled `jsonwebtoken`, `@turnkey/sdk-server` and Express into browser bundles. Import server utilities from `@originals/auth/server` and client utilities from `@originals/auth/client`; the root now exports types plus `turnkeySignBytes`, which is browser-safe (hex via @noble/hashes, no `Buffer`).
+  - `ExternalSigner`, `CelSigner`, and using a `KeyStore` as a signing authority are deprecated in favour of `OriginalsSigner`. They still work; removal is a later release. `KeyStore` remains supported for key _persistence_.
+  - The Turnkey signers' "no signature returned" error message is now one shared string naming the expected `activity.result.signRawPayloadResult.{r,s}` shape.
+
+  Also adds `base58AddressToEd25519Multikey`: custody backends hand back an address, not a Multikey, and Turnkey's Ed25519 accounts use `ADDRESS_FORMAT_SOLANA` — base58 of the raw key, with no multicodec header. Building `did:key:${address}` from it yields something that is not a valid did:key, a mistake consumers kept re-deriving.
+
+### Minor Changes
+
+- 09ce651: Support multi-input funding for inscriptions, and stop the commit builder from silently dropping a caller's UTXO.
+
+  `inscribeOnBitcoin` now accepts `fundingUtxos: Utxo[]` (the singular `fundingUtxo` stays as a one-element shorthand). The identity satoshi is pinned to the first funding UTXO and re-asserted against the built and signed transaction, rather than being implied by there being exactly one input.
+
+  This closes a latent funds-safety bug: `createCommitTransaction` selects value-descending and stops once the target is covered, so passing a caller-ordered set could drop the identity UTXO entirely and inscribe on the wrong satoshi. The new `exactUtxos` mode spends the caller's exact set in the caller's exact order and fails closed rather than narrowing.
+
+  `OrdinalsProvider.submitInscription` gains a `fundingUtxos` array carrying every funding input in order, so an implementation persisting for recovery can claim all of them. The change is additive: the singular `fundingUtxo` stays required and keeps mirroring the identity input, so existing implementations continue to compile.
+
+  Also fixes a commit-builder dead end that a fundable set could hit. The final fee was priced against an output count re-derived from the estimated fee rather than the count the funding check was made against; above roughly 17.6 sat/vB (P2WPKH change) a surplus that clears dust flipped the transaction back to two outputs and threw `Outputs exceed inputs`. The builder now reuses the planned output count, absorbing a surplus too small to make a viable change output into the fee.
+
+- 71c81f3: Real-BTC hardening for the sat-selected inscribe path.
+
+  - **BIP-125 RBF on every built input**: the commit and reveal builders (and
+    the landing faucet's funding tx) now set sequence `0xfffffffd` instead of
+    @scure/btc-signer's final-sequence default, so a fee-spiked commit is
+    replaceable rather than parked. `RBF_SEQUENCE` is exported from the commit
+    builder. Note the reveal signals RBF but is **not** replaceable in practice:
+    its signing key is ephemeral and never persisted, so a wedged reveal is
+    recovered by rebroadcast (automatic — see the landing app's list poll) or
+    bumped by CPFP on its postage output, never by replacement.
+  - **Atomic `submitInscription` seam on `OrdinalsProvider`** (optional): when a
+    provider implements it, `inscribeOnSat` submits the signed commit+reveal
+    pair in ONE call instead of two sequential `broadcastTransaction` calls,
+    letting the implementation persist both transactions durably BEFORE
+    anything is broadcast — the stranded-funds fix: a caller that dies between
+    commit and reveal can no longer orphan the committed funds. A failed submit
+    throws `INSCRIPTION_SUBMIT_FAILED` carrying full recovery data (both signed
+    tx hexes, txids, sat, inscription id). Providers without the seam keep the
+    existing two-broadcast behavior and `REVEAL_BROADCAST_FAILED` semantics.
+
+- 08b9f17: **Two signer-facing improvements, both from the first real mainnet inscription.**
+
+  **`Utxo.prevTxHex` (optional).** BIP-143 computes a SegWit v0 sighash from
+  `witnessUtxo` alone, so the commit builder never attached the previous
+  transaction. Some signers require it regardless — Turnkey answers
+  `code 3: input N is missing non_witness_utxo for SegWit v0 input`, and hardware
+  wallets have long demanded it as their only defence against being lied to about
+  an input's value. Supply `prevTxHex` on a funding UTXO and the commit builder
+  attaches `nonWitnessUtxo`; omit it and nothing changes.
+
+  It is verified, not trusted: the bytes must hash to the UTXO's `txid`, and the
+  output at `vout` must match its value and `scriptPubKey`. An unchecked
+  `nonWitnessUtxo` is exactly what the fee-inflation attack substitutes, so a
+  mismatch throws rather than being signed.
+
+  **`InscribeOnSatResult.broadcast`.** `submitInscription` already returned
+  `'commit_broadcast' | 'reveal_broadcast'`, and `inscribeOnSat` discarded it —
+  so callers could not tell a completed pair from a commit-only broadcast where
+  the reveal is persisted for rebroadcast. Both are successes, but only one means
+  the inscription exists; a UI built on the missing distinction announced an
+  inscription and linked to a reveal txid that returned 404.
+
+  A provider that reports no status is treated as complete, which is what it has
+  always meant, so existing implementations are unaffected.
+
+- Production providers can now verify btco-anchored did:cel assets end to end (#473).
+
+  `getAnchoringsForDidCel` — the capability `verifyEventLog` requires for #402 first-anchor-wins uniqueness — was implemented only by the `OrdMockProvider` test double, so every btco-anchored asset failed verification (`UNIQUENESS_UNVERIFIABLE`) against `QuickNodeProvider` or `OrdHttpProvider`.
+
+  The contract now has two documented conformance tiers, and the verifier passes the log's own anchored sat as a scope hint (`getAnchoringsForDidCel(didCel, { satoshi })`):
+
+  - **FULL** (a global back-link index, e.g. `OrdMockProvider`): enumerates anchorings on any sat; cross-sat legitimate-duplicate detection via authenticated competitors (#402) works.
+  - **SAT-SCOPED** (now implemented by `QuickNodeProvider` and `OrdHttpProvider` via a shared helper): enumerates only the log's own anchored sat, since ord exposes no did:cel back-link index. This proves the claimed anchoring EXISTS on-chain, back-linked and height-confirmed; it does NOT check cross-sat canonicality — behaviourally identical to the already-accepted `didDocument`-omitting degraded mode, so no #402 security property is weakened: uniqueness stays fail-closed and non-opt-in, and sat-scoped providers throw (`ANCHORING_ENUMERATION_UNSCOPED`) rather than fabricate an empty enumeration when called without a scope.
+
+  Backward compatible: existing single-argument implementations of the optional method remain valid.
+
+- Extract the CEL core into `@originals/cel` (plan 044, item 6).
+
+  `@originals/cel` is the browser-safe half of the protocol: create, append, and
+  verify Cryptographic Event Logs offline. It carries only `@noble/*`,
+  `@scure/base`, `cborg`, and a lazily-loaded `@aviarytech/did-peer` (legacy
+  did:peer:4 read path) — no Bitcoin stack, no `jsonld`, no `didwebvh-ts`, no
+  Node builtins. Subpath exports: `.` (CEL core + shared primitives: `multikey`,
+  `StructuredError`, satoshi validation, DID/proof types), `./encoding`,
+  `./cbor`, and `./testing` (`OrdMockProvider`).
+
+  `@originals/sdk` now depends on `@originals/cel` and re-exports everything it
+  exported before — the root entry, `@originals/sdk/cel`, and
+  `@originals/sdk/testing` surfaces are unchanged, so no consumer imports break.
+  The `originals-cel` CLI still ships from the SDK (it drives the full
+  OriginalsSDK lifecycle and needs `fs`/`path`). Type-only couplings were cut
+  structurally: `BtcoCelManager`/`BitcoinWitness`/`OriginalsCel` now accept a
+  `CelBitcoinManager` structural slice (satisfied by `BitcoinManager` as-is) and
+  `createDidManagerKeyResolver` a `CelDidResolver` (satisfied by `DIDManager`).
+
+- `addResourceVersion` now hosts the new version's bytes when the asset is published, so a `did:webvh` asset can be updated without its log out-running what the origin serves.
+
+  Recording a new resource version appends a signed `update` event carrying the new `toHash`. For an asset bound to a `did:webvh` that hash implies a resource URL — but nothing ever wrote the bytes there: `publishResources` runs only inside `publishToWeb`. Updating a published asset therefore produced a signed, verifying log that named a file the origin answered with 404. In practice that made post-publish updates unusable, which is why callers were left doing revisions only at `did:cel`.
+
+  The update path now writes the new bytes to exactly the key `publishToWeb` would have used — `{domain}/{userPath}/resources/{multibase(hash)}`. The derivation is shared with `publishResources` rather than duplicated, so the two cannot drift. Earlier versions stay hosted at their own content-addressed keys, so old URLs keep resolving.
+
+  Hosting runs **before** the append, mirroring the `inscribeConfirm` gate's abort-before-mutate rule: if the bytes cannot be hosted, `addResourceVersion` throws `STORAGE_REQUIRED` with the log untouched and no version pushed in memory. The reverse ordering has no clean recovery — the event would already be signed into the chain — whereas the only cost of a later append failure is one unreferenced object at a content-addressed key.
+
+  Unpublished (`did:cel`) assets are unaffected: there is nothing hosted, so nothing to write.
+
+  No new event is emitted: `resource:published` cannot be announced correctly from the update path (it would run inside the append, before the version reaches `asset.resources`), and `resource:version:created` already announces a new version after the push, carrying `toHash`.
+
+### Patch Changes
+
+- d7da21e: Validate inscription reveal bytes consistently in browsers and Node so a valid retained transaction pair can reach submission and recovery without a Buffer type error.
+- d7da21e: Read complete sat ownership without requiring the unrelated address-to-outputs index. When an ord-compatible content base URL is configured, preserve raw metadata bytes through its metadata route and distinguish explicit absence from unavailable provider responses.
+- d7da21e: Carry forward release-review safeguards: require durable deployed storage and one
+  writer per data directory, require explicit playground publication domains, and
+  audit the dependency tree in CI.
+- **`originals-cel inspect` no longer prints `[object Object]`.** CEL event data is arbitrary JSON written by whoever produced the log, so a field the CLI renders as a string — an asset `name`, a `layer`, a deactivation `reason` — can legitimately be an object. `String(value)` turned those into `[object Object]`, hiding the content at exactly the moment someone is inspecting a log to understand it. Non-primitives are now JSON-rendered. The `Unsupported proof type` error from the Data Integrity proof path had the same flaw and is fixed the same way.
+
+  Found by quoting the `lint` script's glob: it was unquoted, so the shell expanded it to one directory level and `cel/cli`, `bitcoin/transactions`, `migration/*` and several other directories had never been linted at all.
+
+- Updated dependencies [a8fe507]
+- Updated dependencies [4cfbd39]
+- Updated dependencies [6e6bc3d]
+- Updated dependencies [6e6bc3d]
+- Updated dependencies [e718ad4]
+- Updated dependencies [6e6bc3d]
+- Updated dependencies [6e6bc3d]
+- Updated dependencies
+- Updated dependencies
+  - @originals/cel@1.0.0
+
 ## 3.0.0-next.1
 
 ### Minor Changes
