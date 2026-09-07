@@ -1,0 +1,27 @@
+name: npm release credential observations
+
+# Trusted release branches only: never hand publishing credentials to a PR job.
+# All registry requests are GETs; this workflow cannot publish or rotate tokens.
+on:
+  push:
+    branches: [codex/release-final-check, codex/release-3.0.0]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Observe stored npm credential without publishing
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/npm-release-check.mjs

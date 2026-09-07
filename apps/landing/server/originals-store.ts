@@ -179,9 +179,14 @@ export function createOriginalsStore(opts: {
   function resourcePrefix(did: string): string | null {
     const parts = did.split(':');
     if (parts.length < 4 || parts[0] !== 'did' || parts[1] !== 'webvh') return null;
-    const host = decodeURIComponent(parts[3] ?? '');
-    const segs = parts.slice(4).map((s) => decodeURIComponent(s));
-    return segs.length ? `${host}/${segs.join('/')}/resources/` : `${host}/resources/`;
+    try {
+      const host = decodeURIComponent(parts[3] ?? '');
+      const segs = parts.slice(4).map((s) => decodeURIComponent(s));
+      return segs.length ? `${host}/${segs.join('/')}/resources/` : `${host}/resources/`;
+    } catch {
+      // A malformed recorded DID has no cover; other account rows still load.
+      return null;
+    }
   }
 
   function list(subOrgId: string): OriginalSummary[] {

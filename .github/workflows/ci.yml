@@ -66,7 +66,7 @@ jobs:
         run: bun run test
 
       - name: Release workflow contract
-        run: node --test scripts/release-workflow.test.mjs
+        run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs
 
   coverage:
     name: Coverage meets thresholds

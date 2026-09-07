@@ -193,6 +193,20 @@ describe('public Explore discovery', () => {
     expect(body.total).toBe(1);
     expect(body.originals[0].title).toBe('Real');
   });
+  test('a malformed candidate DID does not hide valid publications from the same account', async () => {
+    const t = await setup();
+    const did = await t.publish('alice', 'Still discoverable');
+    t.store.recordOriginal('alice', {
+      did: 'did:webvh:bad:gallery.test:%',
+      title: 'Malformed candidate',
+      resourceHash: 'x',
+      createdAt: '2099',
+    });
+    const body = await (await t.request('/api/explore')).json();
+    expect(body.total).toBe(1);
+    expect(body.originals[0].did).toBe(did);
+    expect(body.originals[0].title).toBe('Still discoverable');
+  });
   test('search, bounded pagination, public detail and missing detail work without a session', async () => {
     const t = await setup();
     const a = await t.publish('alice', 'North');
