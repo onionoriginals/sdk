@@ -1,0 +1,22 @@
+[
+  {
+    "event": "inscribe_attempted",
+    "at": "2026-09-07T00:28:57.335Z",
+    "commitTxId": "60ecfcae52ba594f5bda2d2657bf965df4df419bc87681aee2f40cf4d57755fa",
+    "revealTxId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9"
+  },
+  {
+    "event": "inscribe_failed",
+    "at": "2026-09-07T00:28:57.625Z",
+    "commitTxId": "60ecfcae52ba594f5bda2d2657bf965df4df419bc87681aee2f40cf4d57755fa",
+    "revealTxId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9",
+    "reason": "reveal_broadcast_failed"
+  },
+  {
+    "event": "inscribe_broadcast",
+    "at": "2026-09-07T00:28:57.625Z",
+    "commitTxId": "60ecfcae52ba594f5bda2d2657bf965df4df419bc87681aee2f40cf4d57755fa",
+    "revealTxId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9",
+    "status": "commit_broadcast"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "observedAt": "2026-09-07T00:32:16.171Z",
+  "runtimeCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b",
+  "stableSdk": "3.0.0",
+  "freshConsumer": true,
+  "readOnly": true,
+  "status": "not-found",
+  "reason": "No valid boundary in the complete sat observations"
+}
