@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Integration tests for peer → webvh migration
@@ -5,7 +6,7 @@
 
 import { describe, test, expect, beforeEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import { AuditLogger, AuditSignerConfig } from '../../../src/migration/audit/AuditLogger';
 import { MigrationStateEnum } from '../../../src/migration/types';

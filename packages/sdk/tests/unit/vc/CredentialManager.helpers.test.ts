@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect } from 'bun:test';
 import { 
   CredentialManager,
@@ -6,7 +7,7 @@ import {
   type OwnershipSubject,
   type AssetResource,
   type VerifiableCredential
-} from '../../../src';
+} from '../../previous-sdk';
 import { DIDManager } from '../../../src/did/DIDManager';
 
 const config: any = { 

@@ -6,7 +6,7 @@
  * and a summary of the signed did:webvh version-history log.
  */
 import type { OriginalRow } from './YourOriginals';
-import { claimedSignerDid } from '@originals/sdk/cel';
+import { validateDocument, type CelDocument } from '@originals/sdk/cel';
 
 /* ——— CEL log shapes (what LifecycleManager publishes as cel.json) ——— */
 
@@ -42,8 +42,19 @@ export interface CelEvent {
   previousEvent?: string;
 }
 
-export interface CelLog {
-  events: CelEvent[];
+export type CelLog = CelDocument;
+
+/** Display projection only. Verification always consumes the original document. */
+export function celEvents(cel: CelLog | null): CelEvent[] {
+  if (!cel) return [];
+  try {
+    return validateDocument(cel).log.map(({ event, proof }) => ({
+      type: event.operation.type,
+      data: { ...event.operation.data, ...('from' in event.operation.data ? { sourceDid: event.operation.data.from, targetDid: event.operation.data.to } : {}) },
+      previousEvent: event.previousEvent,
+      proof: Array.isArray(proof) ? proof : [proof],
+    }));
+  } catch { return []; }
 }
 
 /* ——— Artifact locations ——— */
@@ -112,10 +123,11 @@ export interface TimelineStep {
 /**
  * Fold the CEL event log into the three-layer lifecycle. Every completed step
  * carries the signed proof of the event that performed it; steps the asset
- * hasn't reached yet render as 'upcoming'.
+ * hasn't reached yet render as 'upcoming'. A recorded Bitcoin publication has
+ * its own status panel; omit its placeholder without inventing a hosted event.
  */
-export function celTimeline(cel: CelLog | null): TimelineStep[] {
-  const events = cel?.events ?? [];
+export function celTimeline(cel: CelLog | null, publication?: Pick<OriginalRow, 'inscriptionId'> | null): TimelineStep[] {
+  const events = celEvents(cel);
   const create = events.find((e) => e.type === 'create');
   const publish = events.find((e) => e.type === 'migrate' && e.data?.layer === 'webvh');
   const inscribe = events.find((e) => e.type === 'migrate' && e.data?.layer === 'btco');
@@ -148,7 +160,7 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
     inscribeFacts.push({ label: 'Inscribed as', value: inscribe.data.targetDid, mono: true });
   }
 
-  return [
+  const steps: TimelineStep[] = [
     {
       id: 'create',
       layer: 'did:cel',
@@ -174,6 +186,9 @@ export function celTimeline(cel: CelLog | null): TimelineStep[] {
       proof: inscribe?.proof?.[0]
     }
   ];
+  return steps.filter((step) =>
+    step.id !== 'inscribe' || step.state !== 'upcoming' || !publication?.inscriptionId
+  );
 }
 
 /* ——— Custody chain (holder entries), item 5 ——— */
@@ -194,48 +209,16 @@ export interface CustodyRow {
  * verified, so the page labels these as the holders' claims.
  */
 export function celCustody(cel: CelLog | null): CustodyRow[] {
-  const events = cel?.events ?? [];
-  // Lineage is genesis `data.controller` only (the model's sole genesis
-  // identity; there is no legacy shape to read) plus pre-anchor rotations.
-  // The signer is read via the SDK's shared `claimedSignerDid` (author, else
-  // the first NON-WITNESS proof's VM DID) — a hand-rolled proof[0] read here
-  // previously mislabeled a witness-first proof array's `did:btco:witness` as
-  // the author.
-  const lineage = new Set<string>();
-  const genesisController = events[0]?.data?.controller;
-  if (typeof genesisController === 'string') lineage.add(genesisController);
-  let anchored = false;
-  const rows: CustodyRow[] = [];
-  for (let i = 1; i < events.length; i++) {
-    const e = events[i];
-    const data = e.data ?? {};
-    if (e.type === 'migrate' && data.layer === 'btco') {
-      anchored = true;
-      continue;
-    }
-    if (!anchored && e.type === 'rotateKey' && typeof data.newController === 'string') {
-      lineage.add(data.newController);
-      continue;
-    }
-    if (anchored && e.type === 'update') {
-      const author = claimedSignerDid(e as { data?: unknown; proof?: unknown });
-      if (author === undefined || !lineage.has(author)) {
-        rows.push({
-          author: author ?? '(unverified author)',
-          ...(typeof data.statement === 'string' ? { statement: data.statement } : {}),
-          ...(typeof data.occurredAt === 'string' ? { occurredAt: data.occurredAt } : {}),
-          eventIndex: i,
-        });
-      }
-    }
-  }
-  return rows;
+  // CEL 3 has controller-authorized events only. Sat ownership is a live
+  // Bitcoin fact, never a holder-authored event or a display-fold inference.
+  return [];
 }
 
 /** The resources sealed at genesis (id + media type + content digest). */
 export function celResources(cel: CelLog | null): CelResourceRef[] {
-  const create = cel?.events?.find((e) => e.type === 'create');
-  return create?.data?.resources ?? [];
+  const resources = new Map<string, CelResourceRef>();
+  for (const event of celEvents(cel)) for (const resource of event.data?.resources ?? []) resources.set(resource.id, resource);
+  return [...resources.values()];
 }
 
 /* ——— did:webvh log summary ——— */

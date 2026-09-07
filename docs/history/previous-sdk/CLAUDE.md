@@ -1,0 +1,438 @@
+> Historical pre-3.0 SDK reference. This describes retained previous-format code and is not the public 3.0 contract. Use [the CEL 3 API guide](../../../packages/sdk/V3.md) for current code. Relative links below retain their original locations.
+
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## CEL 3 routing during the implementation transition
+
+For asset API work, read [packages/sdk/V3.md](packages/sdk/V3.md): the default
+SDK is now `src/core/OriginalsSDK3.ts`, composed around `src/v3/OriginalsSDK.ts`
+and its shared CEL 3 state. The public `/cel`, `/types`, and CLI entries follow
+that representation. Static identity helpers live in `src/did/identity-operations.ts`.
+
+The lifecycle descriptions below refer to the preceding implementation retained
+for baseline regression tests and the landing's private `previous-sdk` adapter.
+Treat that adapter as pending release integration (#563–565, #570), not a public
+SDK compatibility path or new-format evidence. The selected profile and authority
+contracts govern CEL 3. Record previous-format and new-format test evidence
+separately; complete the new regtest journey before claiming release readiness.
+
+## LLM Agent Documentation
+
+For comprehensive API reference optimized for code generation, see:
+- **[docs/LLM_AGENT_GUIDE.md](docs/LLM_AGENT_GUIDE.md)** - Full API reference with signatures, types, and examples
+- **[docs/LLM_QUICK_REFERENCE.md](docs/LLM_QUICK_REFERENCE.md)** - Compact quick-reference card
+
+## Project Overview
+
+This is a TypeScript SDK for the Originals Protocol - enabling creation, discovery, and transfer of digital assets with cryptographically verifiable provenance. The protocol organizes digital asset lifecycles into three layers:
+
+- **`did:cel`** - Private creation genesis (offline, free); an asset IS a Cryptographic Event Log
+- **`did:webvh`** - Public discovery via HTTPS hosting
+- **`did:btco`** - Transferable ownership on Bitcoin (ownership IS live sat control)
+
+Assets migrate unidirectionally through these layers: did:cel → did:webvh → did:btco. (`did:peer` support is REMOVED entirely — no creation, no resolution, no verifier read path; pre-existing `did:peer` logs and credentials no longer verify.)
+
+## Build and Test Commands
+
+### Build
+```bash
+bun run build
+```
+This compiles TypeScript from `packages/sdk/src/` to `packages/sdk/dist/`.
+
+### Testing
+```bash
+# Run all tests (integration, unit, security, stress)
+bun test
+
+# Run from root (runs SDK tests)
+bun run test
+
+# Run with coverage
+bun run test:coverage
+
+# Run specific test suites
+cd packages/sdk && bun test tests/integration
+cd packages/sdk && bun test tests/unit
+cd packages/sdk && bun test tests/security
+cd packages/sdk && bun test tests/stress
+
+# Run a single test file
+bun test packages/sdk/tests/unit/crypto/Multikey.test.ts
+```
+
+### Linting
+```bash
+bun run lint
+```
+
+### Development Notes
+- The project uses Bun as the runtime and package manager
+- Test setup is in `packages/sdk/tests/setup.bun.ts` (preloaded via bunfig.toml)
+- Console output is suppressed during tests to reduce noise
+
+## Architecture
+
+### Core System Design
+
+The SDK is built around a layered architecture with clear separation of concerns:
+
+**OriginalsSDK (src/core/OriginalsSDK.ts)** - Main entry point that orchestrates all managers:
+- `did: DIDManager` - DID document creation and resolution
+- `credentials: CredentialManager` - Verifiable credential handling
+- `lifecycle: LifecycleManager` - Asset migration between layers
+- `bitcoin: BitcoinManager` - Bitcoin/Ordinals integration
+
+### DID Layer Architecture (src/did/)
+
+The DID system supports three DID methods with unified interfaces:
+
+**DIDManager (DIDManager.ts)** - Central orchestrator for all DID operations
+- `createDIDWebVH()` - Create a did:webvh identifier for public hosting
+- `migrateToDIDWebVH()` - Upgrade a genesis (did:cel) asset to did:webvh for public hosting
+- `migrateToDIDBTCO()` - Inscribe DID on Bitcoin for transferable ownership (sat = identity)
+- `resolveDID()` - Universal resolver for all supported DID methods (did:peer is not one — it resolves to null)
+
+> Genesis is minted via `sdk.lifecycle.createAsset()` (a `did:cel` `create` event) — there is no `createDIDPeer()`.
+
+**WebVHManager (WebVHManager.ts)** - did:webvh-specific operations
+- Integrates with didwebvh-ts library for version history DIDs
+- Supports external signers (Turnkey, AWS KMS, HSMs) via ExternalSigner interface
+- Creates/updates DID logs as JSONL files for .well-known hosting
+- Key methods: `createDIDWebVH()`, `updateDIDWebVH()`, `loadDIDLog()`
+
+**BtcoDidResolver (BtcoDidResolver.ts)** - did:btco resolution
+- Resolves DIDs inscribed on Bitcoin Ordinals
+- Uses OrdinalsProvider interface for blockchain queries
+- Validates satoshi numbers and inscription integrity
+
+**KeyManager (KeyManager.ts)** - Cryptographic key generation
+- Supports ES256K (secp256k1), Ed25519, and ES256 (secp256r1)
+- Generates Multikey-formatted keys (multibase encoding)
+- Used by all DID methods for key creation
+
+### External Signer Pattern
+
+The SDK supports external key management for production deployments:
+
+```typescript
+interface ExternalSigner {
+  sign(input: { document: Record<string, unknown>; proof: Record<string, unknown> }): Promise<{ proofValue: string }>;
+  getVerificationMethodId(): string;
+}
+```
+
+This enables integration with:
+- Turnkey for user key management
+- AWS KMS for enterprise key custody
+- Hardware Security Modules (HSMs)
+- Other secure key management systems
+
+Key files: `src/types/common.ts`, `src/did/WebVHManager.ts`
+
+### Bitcoin Integration Architecture (src/bitcoin/)
+
+**BitcoinManager (BitcoinManager.ts)** - High-level Bitcoin operations
+- `inscribeData()` - Inscribe arbitrary data as Ordinals
+- `transferInscription()` - Move an inscription-bearing sat to a new address (pure sat move)
+- `validateBTCODID()` - Validate a did:btco identifier against on-chain state
+
+> Ownership transfer is a pure Bitcoin **sat move** (`sdk.lifecycle.transferOwnership()` → `transferInscription()`); it edits NO DID document and writes NOTHING to the CEL. did:btco genesis is inscribed via `sdk.lifecycle.inscribeOnBitcoin()`.
+
+**Commit-Reveal Pattern (bitcoin/transactions/commit.ts)**
+- Commit transaction: uses a random reveal keypair, so the reveal address can't be precomputed/front-run from the mempool
+- Reveal transaction: Inscribes actual data on that satoshi
+- UTXO selection (utxo-selection.ts) ensures ordinal-awareness
+- Protocol-level uniqueness (did:cel sat) is NOT a commit-pointer mechanism — it's first-anchor-wins, verified fail-closed at resolution in `verifyEventLog` via the provider's `getAnchoringsForDidCel`
+
+**OrdinalsProvider Interface (adapters/types.ts)**
+- Abstract interface for Bitcoin operations
+- OrdMockProvider: Testing/development implementation
+- OrdinalsClient: Production Bitcoin integration
+- Allows pluggable backends (local ord daemon, API services, etc.)
+
+**Fee Management**
+- Optional FeeOracleAdapter for dynamic fee estimation
+- Falls back to OrdinalsProvider fee estimation
+- Configurable fee rates per operation
+
+### Lifecycle Management (src/lifecycle/)
+
+An Original asset **IS a CEL** (Cryptographic Event Log — `@originals/cel`, packages/cel/): every *authorship* lifecycle operation appends a signed event to `asset.celLog`, and the log — not the in-memory caches — is the source of provenance truth. Ownership is the exception: it IS Bitcoin sat control, read live (`getCurrentOwner()`), and a transfer writes nothing to the CEL.
+
+**LifecycleManager (LifecycleManager.ts)** - Orchestrates asset migration; each authorship op appends a signed CEL event (transfers are the exception — pure sat moves)
+- `createAsset()` - Mints a `did:cel` genesis (`create` event); `asset.id` is the derived did:cel and `currentLayer` is `'did:cel'`
+- `publishToWeb()` - Migrates to did:webvh (`migrate` event)
+- `inscribeOnBitcoin()` - Migrates to did:btco (`migrate` event); the on-chain DID doc carries an `OriginalsCelAnchor` (`#cel` service) committing to the log head at inscription time, and IS the witness artifact for the event's bitcoin proof. This on-chain shape (the `OriginalsCelAnchor` and the `{ didDocument, celLog }` inscription metadata) is superseded by the decision record at [specs/btco-inscription-shape.md](specs/btco-inscription-shape.md) and will change in a future major release.
+- `transferOwnership()` - A pure Bitcoin **sat move** — writes NOTHING to the CEL (ownership IS sat control; the sat move hands over the RIGHT TO APPEND). Ownership is read live via `getCurrentOwner()`, never from a log event. The `transfer` CEL event type is rejected anywhere, in any shape — there is no transfer event in the model and no legacy log to read.
+- **Sat-gated appends**: after the btco anchor, authority is sat control — a post-anchor event must commit its signer in `data.author` and carry a verified reinscription witness on the anchoring sat that strictly postdates the current anchor. The sat holder appends with their OWN key (`asset.appendStatement()`); holder entries carry an allowlisted shape (`statement`/`occurredAt`/`links`/`ext`) and can never make authenticity claims (`name`/`resources`… are creator-lineage only, `CEL_HOLDER_FIELD_NOT_PERMITTED` locally). `rotateKey`/`deactivate`/`migrate` are REJECTED post-anchor: `rotateBtcoKeys()` now always throws `KEY_ROTATION_NOT_PERMITTED` (the controller key lineage is frozen at inscription time), and no witness-acknowledgment events are appended. The verifier reports `authorClass` per entry plus `creatorKeys`/`holders`; `classifyLogEntries` is the pure display fold.
+- The non-cooperative rotation path (#366, `authorizeSigner`, formerly `claimOwnership`) is REMOVED: holding the sat grants no control of the key set, so a rotateKey not signed by the current controller never verifies. `rotateBtcoKeys` (cooperative, signed by the outgoing controller) is the only rotation. The creator's key lineage is frozen once the asset is inscribed — a lost post-migrate controller key cannot be rotated away.
+- `asset.serialize()` / `lifecycle.loadAsset()` - The interchange format (#377): `serialize()` emits a self-describing `AssetEnvelope` (the CEL log + captured DID docs + resources + an `unverified` honesty section); `loadAsset()` is the inverse and VERIFIES BY DEFAULT — same `verifyEventLog` gate plus resource↔genesis binding and DID-doc↔fold cross-checks, all fail-closed. With an ordinalsProvider it sets `checkHeadFreshness`, rejecting a truncated pre-rotation hand-off as `STALE_LOG` (#366).
+- Event-driven architecture via EventEmitter; when no keyStore/signing key is available, appends degrade with a `cel:append-skipped` event (verification is public-key-only and needs no keys; only WRITING needs the controller key)
+- Batch operations support for multiple assets
+
+**OriginalsAsset (OriginalsAsset.ts)** - Asset representation, backed by its CEL log
+- Encapsulates resources, credentials, and provenance
+- Tracks migration state across layers; `replayProvenance` folds the log to reconstruct it
+- `verify()` delegates to `verifyEventLog` — gating on the whole signed chain (btco anchoring needs an `ordinalsProvider` to check the witness proof)
+- Version management for resource updates
+
+**BatchOperations (BatchOperations.ts)**
+- Execute multiple operations atomically
+- Validation pipeline ensures consistency
+- Rollback support on partial failures
+
+### Verifiable Credentials (src/vc/)
+
+**CredentialManager (CredentialManager.ts)** - W3C Verifiable Credential handling
+- JSON-LD credential signing (not JWT)
+- Data Integrity proofs using EdDSA and BBS+ cryptosuites
+- Integration with DIDManager for issuer/subject resolution
+
+**Cryptosuites (vc/cryptosuites/)**
+- `eddsa.ts` - EdDSA signatures (Ed25519)
+- `bbs.ts` - BBS+ signatures for selective disclosure
+- No JSON Web Keys - uses multibase Multikey encoding
+
+### Storage Abstraction (src/storage/)
+
+Pluggable storage via StorageAdapter interface:
+- `MemoryStorageAdapter` - In-memory (testing)
+- `LocalStorageAdapter` - Browser localStorage
+- Custom adapters can be implemented for databases, IPFS, etc.
+
+### Migration System (src/migration/) — EXPERIMENTAL, not the production path
+
+> **Note:** This subsystem is **experimental and unused in production.** `OriginalsSDK`/`LifecycleManager` run their own migrate/publish/inscribe flow with independent validation and never instantiate `MigrationManager`, so the checkpoint/rollback/audit/state-machine machinery below protects no production code path (issue #279). `MigrationManager` is intentionally **not** exported from the package entry point. Do not treat it as the supported migration API; use `LifecycleManager` (`sdk.lifecycle`) for real migrations.
+
+State machine-driven asset migration with validation:
+- **StateMachine (migration/state/StateMachine.ts)** - Enforces lifecycle rules
+- **ValidationPipeline (migration/validation/)** - Pre-flight checks
+  - DIDCompatibilityValidator: Ensures DID method compatibility
+  - CredentialValidator: Validates credential integrity
+  - StorageValidator: Checks storage requirements
+  - LifecycleValidator: Enforces layer progression rules
+- **CheckpointManager** - Creates recovery points
+- **RollbackManager** - Reverts failed migrations
+
+### Key Type System (src/types/)
+
+**Multikey Encoding**
+- All keys use multibase+multicodec encoding (not JWK)
+- Supported types: ES256K (Bitcoin), Ed25519 (VC signing), ES256
+- See src/crypto/Multikey.ts for encoding/decoding
+
+**Bitcoin Types (bitcoin.ts)**
+- UTXO, Transaction, Inscription interfaces
+- Ordinals-specific types (satoshi ranges, inscription content)
+
+**DID Types (did.ts)**
+- W3C DID Document interfaces
+- Verification methods, service endpoints
+- ExternalSigner/ExternalVerifier interfaces
+
+### Event System (src/events/)
+
+**EventEmitter (EventEmitter.ts)** - Type-safe event dispatching
+- Lifecycle events: asset:created, asset:migrated, resource:published
+- Subscribe via `lifecycle.on(eventType, handler)`
+- Event types defined in events/types.ts
+
+## Important Implementation Patterns
+
+### Error Handling
+Use `StructuredError` from `src/utils/telemetry.ts` for consistent error reporting:
+```typescript
+throw new StructuredError('ERROR_CODE', 'User-friendly message');
+```
+
+### Validation
+- Bitcoin addresses: Use `validateBitcoinAddress()` from utils/bitcoin-address.ts
+- Satoshi numbers: Use `validateSatoshiNumber()` from utils/satoshi-validation.ts
+- Never skip input validation - throw clear errors early
+
+### Logging
+- Logger instances available via config: `new Logger('ComponentName', config)`
+- Supports multiple outputs and structured logging
+- Sensitive data is sanitized when sanitizeLogs: true
+
+### Testing Requirements
+- All new features require unit tests in `tests/unit/`
+- Bitcoin operations require integration tests with OrdMockProvider
+- Complex flows need end-to-end tests in `tests/integration/`
+- Security-sensitive code requires tests in `tests/security/`
+
+## WebVH Network Deployments
+
+The SDK supports three WebVH network deployments with different stability levels:
+
+### Network Tiers
+
+Each WebVH network maps to a corresponding Bitcoin network for consistent environment configuration across the entire stack:
+
+- **`pichu.originals.build`** (Production)
+  - **Stability**: Major releases only (X.0.0)
+  - **Bitcoin Network**: `mainnet`
+  - **Use case**: Production applications requiring maximum stability
+  - **Default**: This is the default network
+
+- **`cleffa.originals.build`** (Staging)
+  - **Stability**: Minor releases (X.Y.0)
+  - **Bitcoin Network**: `signet`
+  - **Use case**: Pre-production testing and staging environments
+
+- **`magby.originals.build`** (Development)
+  - **Stability**: All patch versions (X.Y.Z)
+  - **Bitcoin Network**: `regtest`
+  - **Use case**: Development and experimentation with latest features
+
+### Version Validation
+
+Each network enforces semantic versioning constraints:
+- **pichu**: Only accepts major releases (e.g., 1.0.0, 2.0.0)
+- **cleffa**: Accepts major and minor releases (e.g., 1.1.0, 2.5.0)
+- **magby**: Accepts all versions including patches (e.g., 1.2.3)
+
+### Network Selection
+
+You can select a network when configuring the SDK:
+
+```typescript
+// Use production network (default)
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'pichu', // or omit for default
+});
+
+// Use staging network
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'cleffa',
+});
+
+// Use development network
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'magby',
+});
+```
+
+When creating or migrating to did:webvh, the SDK will automatically use the configured network's domain. You can also explicitly provide a domain to override:
+
+```typescript
+// Uses configured network domain (e.g., pichu.originals.build)
+await sdk.did.createDIDWebVH({ paths: ['user', 'alice'] });
+
+// Explicitly override domain
+await sdk.did.createDIDWebVH({
+  domain: 'custom.example.com',
+  paths: ['user', 'alice']
+});
+```
+
+### Context URLs
+
+Each network has its own context URL:
+- `https://pichu.originals.build/context`
+- `https://cleffa.originals.build/context`
+- `https://magby.originals.build/context`
+
+All three networks use the same context document content, but are served from their respective domains.
+
+### Bitcoin Network Mapping
+
+When migrating assets from `did:webvh` to `did:btco`, the SDK automatically uses the Bitcoin network that corresponds to your configured WebVH network:
+
+```typescript
+const sdk = OriginalsSDK.create({
+  webvhNetwork: 'magby', // Development network
+});
+
+// When migrating to did:btco, automatically uses Bitcoin regtest
+await sdk.did.migrateToDIDBTCO(didDoc, satoshi);
+// Creates: did:btco:reg:123 (regtest network)
+```
+
+The mapping ensures consistent environments:
+- **magby** (dev) → **regtest** (Bitcoin dev network)
+- **cleffa** (staging) → **signet** (Bitcoin test network)
+- **pichu** (production) → **mainnet** (Bitcoin production)
+
+This eliminates configuration errors and ensures that your development environment uses regtest, staging uses signet, and production uses mainnet automatically.
+
+## Configuration
+
+The SDK is configured via `OriginalsConfig`:
+
+```typescript
+const sdk = OriginalsSDK.create({
+  network: 'mainnet' | 'regtest' | 'signet', // Bitcoin network
+  webvhNetwork: 'pichu' | 'cleffa' | 'magby', // WebVH network (default: 'pichu')
+  defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256',
+  ordinalsProvider: new OrdMockProvider(), // Required for Bitcoin ops
+  feeOracle?: customFeeOracle, // Optional dynamic fees
+  storageAdapter?: customStorage, // Optional custom storage
+  enableLogging: true,
+  logging?: { level, outputs, sanitizeLogs },
+  telemetry?: customHooks
+});
+```
+
+**Critical**: Bitcoin operations (inscribe, transfer) require `ordinalsProvider` to be configured. Use `OrdMockProvider` for testing, `QuickNodeProvider` for production reads/broadcast/status/fees (QuickNode Bitcoin endpoint with the Ordinals & Runes add-on; `createOrdinalsProviderFromEnv()` selects it when `QUICKNODE_ENDPOINT` is set). Inscription construction/signing stays local — QuickNodeProvider's `createInscription`/`transferInscription` fail loudly by design; build the transaction locally and submit via `broadcastTransaction`.
+
+## Development Workflow
+
+### When Adding New Features
+
+1. **Create tests first** - Start with test cases in appropriate directory
+2. **Implement incrementally** - Build in small, testable units
+3. **Run tests continuously** - `bun test` should always pass
+4. **Update types** - Keep interfaces in src/types/ current
+5. **Document public APIs** - Add JSDoc comments for exported functions
+
+### When Fixing Bugs
+
+1. **Reproduce in test** - Create failing test case
+2. **Identify root cause** - Use logging and debugging
+3. **Fix with minimal changes** - Preserve existing behavior
+4. **Verify fix** - Ensure test passes and no regressions
+5. **Update related tests** - Adjust tests if behavior intentionally changed
+
+### When Refactoring
+
+1. **Ensure 100% test coverage** - All tests passing before refactor
+2. **Refactor incrementally** - Small, atomic changes
+3. **Run tests after each change** - Catch regressions immediately
+4. **Preserve public APIs** - Don't break external consumers
+5. **Update internal docs** - Keep CLAUDE.md current if architecture changes
+
+## Cursor Rules Reference
+
+This project uses Cursor AI rules in `.cursor/rules/` for development workflows:
+
+- **@questions** - Enforce clarifying questions before code changes
+- **@tasks** - Task list management for tracking PRD implementation
+- **@continue** - Onboard fresh AI agents to projects in progress
+- **@create-prd** - Guide creation of Product Requirements Documents
+
+These rules ensure consistent collaboration patterns and prevent miscommunication during implementation.
+
+## Common Gotchas
+
+1. **Path imports**: Always use absolute imports from src/ root, not relative paths
+2. **Noble crypto imports**: Use `@noble/hashes/sha2.js` not `@noble/hashes/sha256`
+3. **Multikey encoding**: Never use JWK format - always multibase Multikey
+4. **DID resolution**: Use DIDManager.resolveDID() not direct resolver calls
+5. **Bitcoin operations**: Always validate satoshi numbers and addresses before operations
+6. **Test setup**: Don't import setup.bun.ts manually - it's preloaded via bunfig.toml
+7. **ExternalSigner**: For did:webvh operations, provide either keyPair OR externalSigner, not both
+
+## Monorepo Structure
+
+This is a monorepo with:
+- `packages/cel/` - `@originals/cel`: the browser-safe CEL core (create/append/verify event logs, multikey, shared primitives). No Bitcoin stack, no jsonld, no Node builtins.
+- `packages/sdk/` - The main SDK (where most development happens); depends on `@originals/cel` and re-exports its surface (incl. the `@originals/sdk/cel` subpath)
+- `packages/auth/` - Turnkey-based authentication
+- `apps/` - Example applications
+- Root scripts in `scripts/` - CI/CD, coverage, and browser-safety/ESM gates
+
+Work primarily in `packages/sdk/` directory. Root-level commands delegate to the packages. CEL core changes belong in `packages/cel/src/` (its tests in `packages/cel/tests/`); the CEL CLI stays in `packages/sdk/src/cel/cli/`.

@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for the multi-issue review sweep. Per CLAUDE.md,
  * security-sensitive code requires coverage under tests/security/ — these
@@ -198,7 +199,7 @@ describe('Satoshi upper bound excludes non-existent ordinals (issue #292)', () =
 
 describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => {
   test('a did:webvh whose path segments contain ".." is rejected', async () => {
-    const { OriginalsSDK } = await import('../../src');
+    const { OriginalsSDK } = await import('../previous-sdk');
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([
@@ -211,7 +212,7 @@ describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => 
   });
 
   test('a domain that percent-decodes to a traversal path is rejected', async () => {
-    const { OriginalsSDK } = await import('../../src');
+    const { OriginalsSDK } = await import('../previous-sdk');
     const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
     const asset = await sdk.lifecycle.createAsset([

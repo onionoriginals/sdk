@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Bitcoin coverage gap tests
  *
@@ -8,7 +9,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder';
 import { createCommitTransaction } from '../../../src/bitcoin/transactions/commit';

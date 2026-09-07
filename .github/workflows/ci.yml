@@ -65,6 +65,9 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Release workflow contract
+        run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs
+
   coverage:
     name: Coverage meets thresholds
     runs-on: ubuntu-latest
@@ -110,7 +113,13 @@ jobs:
           node-version: "20.10.0"
 
       - name: Verify built packages import under Node ESM
-        run: node scripts/verify-esm.mjs
+        run: |
+          node --test scripts/verify-esm.test.mjs
+          node scripts/verify-esm.mjs
+
+      - name: Verify SDK public types match the default CEL 3 API
+        working-directory: packages/sdk
+        run: bun run typecheck:public
 
       # Node-only features must load their modules lazily so browser/edge
       # consumers can still import the package. One static `import 'node:fs'`
@@ -138,6 +147,20 @@ jobs:
       # Not landing:ci — that page-drive needs an API server + TURNKEY_* secrets.
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+      - run: bun install --frozen-lockfile
+      - name: Audit production dependencies
+        run: bun audit --prod
+      - name: Audit all dependencies
+        run: bun audit
 
   changeset:
     name: Changeset present

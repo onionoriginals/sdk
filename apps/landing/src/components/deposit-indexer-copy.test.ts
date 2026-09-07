@@ -8,7 +8,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { demo, yourOriginals } from '../content';
-import { depositErrorMessage, depositErrorBadge } from './Demo';
+import { depositErrorMessage, depositErrorBadge } from './demo-logic';
 import { depositAlertMessage } from '../pages/YourOriginals';
 
 describe('indexer-unavailable copy (R28)', () => {

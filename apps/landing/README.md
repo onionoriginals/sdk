@@ -92,3 +92,37 @@ Confirmed commits should advance to `reveal_broadcast` without a browser tab.
 If the feed repeatedly fails, set `BTC_BLOCKS_WS_URL=off` while diagnosing it;
 the hourly recovery path stays active. Public feed availability and QuickNode's
 view of confirmation determine how quickly a received block can lead to completion.
+
+### Public Explore collection
+
+`/explore` lists active CEL 3 publications recorded by accounts on this host.
+It spans accounts and needs no session. It is a catalogue of this app's durable
+publications, not a network-wide Bitcoin index. `/explore/<encoded-did>` opens
+a public detail page with the controller identity, hosted logs and primary file.
+
+`GET /api/explore` accepts `q` (title or identity, up to 150 characters), `limit`
+(1–48, default 24), and `offset` (default 0). Results sort by signed creation time,
+newest first, then DID; the response contains `originals`, `total`, and
+`nextOffset`. `GET /api/explore/original?did=…` returns a single entry or 404.
+The catalogue caches for 15 seconds and each client IP gets 60 requests/minute.
+New publications can therefore take up to 15 seconds to appear.
+
+Account indexes supply candidate DIDs only. Discovery checks account ownership
+of the hosted artifacts, the signed CEL history and both directions of the
+WebVH identity binding. Account metadata and claimed Bitcoin status are omitted.
+The existing public artifact URLs remain public; account listing and writes stay
+authenticated. Discovery does not assert Bitcoin confirmation or sat possession.
+Browser previews hash the resource bytes before rendering an image-only blob;
+public detail independently verifies the hosted histories and primary file.
+
+To exercise the collection without production credentials or Bitcoin funds:
+
+```sh
+bun run landing:check
+bun apps/landing/scripts/explore-smoke.ts
+```
+
+The browser smoke creates 26 real signed publications in a temporary store,
+serves the built app, checks search/pagination, image and text previews,
+verification/tampering, retry and mobile layouts, then removes its data.
+Set `EXPLORE_SCREENSHOTS` to a directory to save visual evidence.

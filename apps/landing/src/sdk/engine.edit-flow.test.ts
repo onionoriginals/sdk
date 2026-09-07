@@ -16,6 +16,7 @@ function installHostFetch(host: string) {
     const url = new URL(typeof input === 'string' ? input : input.toString(), `http://${host}`);
     const method = (init?.method ?? 'GET').toUpperCase();
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       return store.handlePut(
         new Request(url, { method, headers: init?.headers as HeadersInit, body: init?.body as BodyInit }),
         url
@@ -57,8 +58,9 @@ describe('editing an Original by its title', () => {
     expect(third.resource.version).toBe(3);
     expect(JSON.parse(third.metadata!.content).title).toBe('Moonrise');
 
-    // Genesis plus two edits, each edit touching artwork + metadata.
-    expect(third.celLog.filter((e) => e.type === 'update')).toHaveLength(4);
+    // Genesis plus two edits, each signing artwork, metadata and the asset name.
+    expect(third.celLog.filter((e) => e.type === 'update')).toHaveLength(6);
+    expect(third.provenance.name).toBe('Moonrise');
     expect(await engine.asset!.verify()).toBe(true);
   });
 

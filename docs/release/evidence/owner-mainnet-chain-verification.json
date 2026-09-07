@@ -1,0 +1,250 @@
+{
+  "observedAt": "2026-09-07T00:48:44.266Z",
+  "runtimeCommit": "e9c518706486df7aee41f90345c9a1007f6b8c0b",
+  "stableSdk": "3.0.0",
+  "freshConsumer": true,
+  "readOnly": true,
+  "status": "accepted",
+  "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+  "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+  "ownership": {
+    "owner": "bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl",
+    "satpoint": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9:0:0"
+  },
+  "tip": {
+    "height": 965857,
+    "hash": "00000000000000000000510f02fc7897cd4210ee461b3dcf98a87849ba3efd07"
+  },
+  "publications": [
+    {
+      "inscriptionId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9i0",
+      "position": {
+        "height": 965854,
+        "blockHash": "000000000000000000004093dbe74190a09158efed283039a3758651c2677f4b",
+        "transactionIndex": 626,
+        "inscriptionIndex": 0
+      },
+      "eventDigests": [
+        "uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+        "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
+        "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw"
+      ],
+      "inlineResourceIds": [
+        "tla-logo.png"
+      ],
+      "inlineContentStatus": "matched"
+    }
+  ],
+  "verification": {
+    "verified": false,
+    "history": {
+      "status": "authenticated",
+      "scope": "controller-history",
+      "bitcoinAcceptance": "unverified",
+      "webvhBinding": "unverified",
+      "state": {
+        "didCel": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+        "alias": "did:btco:321959825743820",
+        "aliases": [
+          "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "did:btco:321959825743820"
+        ],
+        "layer": "btco",
+        "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+        "controllers": [
+          {
+            "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+            "fromEntry": 0
+          }
+        ],
+        "createdAt": "2026-09-06T21:56:26.241Z",
+        "name": "Originals 3.0.0 Release Proof",
+        "metadata": {},
+        "resources": [
+          {
+            "digestMultibase": "uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+            "id": "tla-logo.png",
+            "mediaType": "image/png",
+            "version": 1
+          },
+          {
+            "digestMultibase": "uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "version": 1
+          }
+        ],
+        "active": true,
+        "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+        "entryCount": 3
+      }
+    },
+    "resources": "incomplete",
+    "missingResources": [
+      {
+        "id": "metadata.json",
+        "version": 1
+      }
+    ],
+    "unverifiedLocalResources": 0,
+    "publication": {
+      "status": "accepted",
+      "scope": "sat",
+      "crossSatCanonicality": "unknown",
+      "tip": {
+        "height": 965857,
+        "hash": "00000000000000000000510f02fc7897cd4210ee461b3dcf98a87849ba3efd07"
+      },
+      "state": {
+        "didCel": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+        "alias": "did:btco:321959825743820",
+        "aliases": [
+          "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "did:btco:321959825743820"
+        ],
+        "layer": "btco",
+        "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+        "controllers": [
+          {
+            "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+            "fromEntry": 0
+          }
+        ],
+        "createdAt": "2026-09-06T21:56:26.241Z",
+        "name": "Originals 3.0.0 Release Proof",
+        "metadata": {},
+        "resources": [
+          {
+            "digestMultibase": "uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+            "id": "tla-logo.png",
+            "mediaType": "image/png",
+            "version": 1
+          },
+          {
+            "digestMultibase": "uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "version": 1
+          }
+        ],
+        "active": true,
+        "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+        "entryCount": 3
+      },
+      "history": {
+        "status": "authenticated",
+        "scope": "controller-history",
+        "bitcoinAcceptance": "unverified",
+        "webvhBinding": "unverified",
+        "state": {
+          "didCel": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "alias": "did:btco:321959825743820",
+          "aliases": [
+            "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+            "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+            "did:btco:321959825743820"
+          ],
+          "layer": "btco",
+          "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+          "controllers": [
+            {
+              "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+              "fromEntry": 0
+            }
+          ],
+          "createdAt": "2026-09-06T21:56:26.241Z",
+          "name": "Originals 3.0.0 Release Proof",
+          "metadata": {},
+          "resources": [
+            {
+              "digestMultibase": "uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+              "id": "tla-logo.png",
+              "mediaType": "image/png",
+              "version": 1
+            },
+            {
+              "digestMultibase": "uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "version": 1
+            }
+          ],
+          "active": true,
+          "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+          "entryCount": 3
+        }
+      },
+      "ownership": {
+        "owner": "bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl",
+        "satpoint": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9:0:0"
+      },
+      "publications": [
+        {
+          "inscriptionId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9i0",
+          "position": {
+            "height": 965854,
+            "blockHash": "000000000000000000004093dbe74190a09158efed283039a3758651c2677f4b",
+            "transactionIndex": 626,
+            "inscriptionIndex": 0
+          },
+          "eventDigests": [
+            "uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+            "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
+            "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw"
+          ],
+          "inlineResourceIds": [
+            "tla-logo.png"
+          ],
+          "inlineContentStatus": "matched"
+        }
+      ],
+      "pending": [],
+      "diagnostics": [],
+      "webvhBinding": "unverified"
+    }
+  },
+  "didDocument": {
+    "@context": [
+      "https://www.w3.org/ns/did/v1",
+      "https://w3id.org/security/multikey/v1"
+    ],
+    "id": "did:btco:321959825743820",
+    "controller": [
+      "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui"
+    ],
+    "alsoKnownAs": [
+      "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+      "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    ],
+    "verificationMethod": [
+      {
+        "id": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui#z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+        "type": "Multikey",
+        "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+        "publicKeyMultibase": "z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui"
+      }
+    ],
+    "authentication": [
+      "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui#z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui"
+    ],
+    "assertionMethod": [
+      "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui#z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui"
+    ]
+  },
+  "png": {
+    "byteLength": 3857,
+    "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33"
+  },
+  "withHostedResources": {
+    "verified": true,
+    "hostedVerified": true,
+    "resourceIds": [
+      "tla-logo.png",
+      "metadata.json"
+    ],
+    "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+    "hostedHead": "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg"
+  }
+}

@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * LIFECYCLE coverage gap tests
  *
@@ -8,7 +9,7 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { OriginalsSDK, OriginalsAsset } from '../../../src';
+import { OriginalsSDK, OriginalsAsset } from '../../previous-sdk';
 import { LifecycleManager } from '../../../src/lifecycle/LifecycleManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';

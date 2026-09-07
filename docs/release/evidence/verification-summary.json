@@ -1,0 +1,87 @@
+{
+  "runtimeCommit": "b82aae0ebd357cd5b11d685abed0a3e460e6f39d",
+  "recordedAt": "2026-09-06T16:50:30.221235+00:00",
+  "releaseReady": false,
+  "sourceTrees": {
+    "packages/sdk": "096289ef7395186596ca1b860032fc0b5aecfae1",
+    "packages/cel": "43d074a0b2e4adfae787965578f18fcb9e491c7f",
+    "packages/auth": "e11909a5eff82d26450430dddc9e20a1df4b4c2a",
+    "apps/landing": "94694a1af8e22f5a1e851802ae19f6174968af2d"
+  },
+  "checks": {
+    "packages": {
+      "passed": 4632,
+      "skipped": 248,
+      "failed": 0,
+      "log": "/tmp/originals-review-final-packages.log"
+    },
+    "landing": {
+      "passed": 1021,
+      "failed": 0,
+      "log": "/tmp/originals-ready-landing-check.log"
+    },
+    "coverage": {
+      "functions": 88.84,
+      "lines": 88.44,
+      "threshold": 80,
+      "log": "/tmp/originals-review-final-coverage.log"
+    },
+    "types": "package source, built public exports, Railway and packed consumer passed",
+    "lint": "passed; pre-existing warnings retained",
+    "regtest": "all three real Core/ord scenarios passed",
+    "browser": "desktop and mobile real HTTPS PNG create/publish/reload/cold resolution passed",
+    "stableArtifacts": "fresh tarball installation, Node20.10, exports, public types, binary/concurrent/cold-load journey and CLI passed",
+    "productionBuild": "mainnet and originals.build flags; built locally, not deployed"
+  },
+  "reviewRun": "20260906-090911-cc7e0c5f",
+  "closedReviewFindings": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    10
+  ],
+  "remaining": [
+    "live Turnkey OTP and owner-bound browser session",
+    "owner mainnet/public-host proof within US$20 total cap, including six confirmations"
+  ],
+  "operatorPreflightUpdate": {
+    "recordedAt": "2026-09-06T17:38:01.052342+00:00",
+    "productionPreflightAndDeploymentAuthorized": true,
+    "contentTransport": "verified against transaction witness and configured",
+    "backupRestore": "daily backups, native snapshot, isolated restore and cleanup verified",
+    "productionCandidateDeployed": true,
+    "details": "../3.0.0-operator-preflight.md",
+    "deploymentId": "12730c33-396a-4ba4-8db3-622da700e392",
+    "deployedRuntimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+    "remoteChecks": "health, mainnet/no-faucet, auth rejection, canonical redirect and startup passed",
+    "browserBlocker": "Mac locked; owner away"
+  },
+  "providerFixUpdate": {
+    "runtimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+    "recordedAt": "2026-09-06T17:57:59.848348+00:00",
+    "adapterTests": {
+      "passed": 170,
+      "failed": 0
+    },
+    "regtest": "all three creator scenarios plus ownership transfer without address indexing passed",
+    "productionProvider": "complete known-PNG snapshot and exact digest passed",
+    "metadata": "418 raw CBOR bytes match original witness; exact inscription-specific 404 required for absence",
+    "review": "bounded review completed; HTTP200 null rejection added",
+    "stableArtifacts": "fresh stable tarballs, Node20.10 all29 exports, public types, binary/concurrent/cold-load and CLI passed",
+    "ci": "all required checks passed on 71e57306; CodeRabbit review disabled and Macroscope skipped on draft",
+    "ciCounts": {
+      "packagePassed": 4651,
+      "packageSkipped": 210,
+      "packageFailed": 0,
+      "landingPassed": 1023,
+      "landingFailed": 0,
+      "sdkCoverageFunctions": 88.84,
+      "sdkCoverageLines": 88.44
+    }
+  }
+}

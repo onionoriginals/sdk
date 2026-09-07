@@ -1,5 +1,6 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, afterEach } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { OrdinalsClientProviderAdapter } from '../../src/did/providers/OrdinalsClientProviderAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';

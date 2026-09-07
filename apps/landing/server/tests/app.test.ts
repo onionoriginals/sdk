@@ -169,6 +169,9 @@ describe('SPA document security headers', () => {
       if (directive.includes('data:')) {
         expect(['img-src', 'font-src']).toContain(directive.split(/\s+/)[0]);
       }
+      if (directive.includes('blob:')) {
+        expect(directive.split(/\s+/)[0]).toBe('img-src');
+      }
     }
   });
 

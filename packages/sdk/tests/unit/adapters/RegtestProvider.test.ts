@@ -58,3 +58,30 @@ test('an empty address index cannot hide an unindexed Core tip', async () => {
   const provider = new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' });
   await expect(provider.getAddressUtxos('bcrt1qqqq')).rejects.toThrow('current Bitcoin Core tip');
 });
+
+test('CEL 3 snapshots retain raw metadata and derive reveal order from active Core blocks', async () => {
+  const txid = 'a'.repeat(64), hash = 'b'.repeat(64), id = txid + 'i0';
+  server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
+    if (req.method === 'POST') {
+      const { method } = await req.json() as { method: string };
+      const result = method === 'getblockchaininfo' ? { chain: 'regtest', blocks: 100, bestblockhash: hash }
+        : method === 'getblockhash' ? hash : method === 'getblock' ? { hash, height: 100, confirmations: 1, tx: [txid] } : null;
+      return Response.json({ result });
+    }
+    const path = new URL(req.url).pathname;
+    if (path === '/status') return Response.json({ chain: 'regtest', sat_index: true, address_index: true, inscription_index: true, unrecoverably_reorged: false, height: 100 });
+    if (path === '/blockhash/100') return new Response(hash);
+    if (path === '/sat/123') return Response.json({ number: 123, inscriptions: [id], address: 'holder', satpoint: txid + ':0:0' });
+    if (path === '/inscription/' + id) return Response.json({ id, sat: 123, height: 100, content_type: 'image/png', content_length: 3 });
+    if (path === '/content/' + id) return new Response(new Uint8Array([0, 255, 1]));
+    if (path === '/r/metadata/' + id) return Response.json('a1636c6f6780');
+    return new Response('Not found', { status: 404 });
+  } });
+  const provider = new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' });
+  const snapshot = await provider.getSatSnapshot('123');
+  expect(snapshot.enumerationComplete).toBe(true);
+  expect(snapshot.blocks).toEqual([{ height: 100, hash, txids: [txid] }]);
+  expect(snapshot.publications[0].creation?.transactionIndex).toBe(0);
+  expect(snapshot.publications[0].body).toEqual({ status: 'complete', mediaType: 'image/png', bytes: new Uint8Array([0, 255, 1]), metadata: new Uint8Array([161, 99, 108, 111, 103, 128]) });
+  expect(snapshot.ownership).toEqual({ owner: 'holder', satpoint: txid + ':0:0' });
+});

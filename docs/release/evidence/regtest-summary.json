@@ -1,0 +1,32 @@
+{
+  "testedCommit": "b82aae0ebd357cd5b11d685abed0a3e460e6f39d",
+  "recordedAt": "2026-09-06T16:46:50.370201+00:00",
+  "sourceFiles": {
+    "apps/landing/scripts/regtest-journey.ts": "39c084ecd031143bd803c0b8bc378f7cbf653a2054f13ff5ada02cce6461622f",
+    "apps/landing/server/bitcoin.ts": "0c73f1d4b4ebce9e554fa2596b71eef77dfa5ceee8769595290af32da83ba747",
+    "apps/landing/server/reinscription.ts": "60bd19965a3c3041bbf89b52adbeb1f07c440fca264010f12ac9e41c55a23454",
+    "packages/sdk/src/v3/bitcoin.ts": "87fe0dd096abee753765d28018e4c109d88bf28c166d28799788668122a8aab7",
+    "packages/sdk/src/v3/resolution.ts": "9d0acd888c3d7d1a771f4ec6921bfc7dba805ef67229500b262f439e7f08addb",
+    "packages/sdk/src/v3/hosted.ts": "feae1fa43f952b45af9d9bb35bb3a9847b64791d5c16d944d26e036344eb7104",
+    "packages/sdk/src/bitcoin/inscription-recovery.ts": "04997d3acdadb94568ef01e95b82e394b9ba8a2bb9ac70ed11d9d39c384c1dda",
+    "packages/sdk/src/adapters/providers/sat-snapshot.ts": "5cfe3bd8c1de58062d6145f1e4b55f7f8c450cbb71abfabb5c41504acacfada0"
+  },
+  "result": "pass",
+  "scenarios": [
+    {
+      "fault": "none",
+      "receipt": "regtest-none.json"
+    },
+    {
+      "fault": "reveal-rejected",
+      "receipt": "regtest-reveal-rejected.json"
+    },
+    {
+      "fault": "commit-response-lost",
+      "receipt": "regtest-commit-response-lost.json"
+    }
+  ],
+  "command": "BITCOIND_BIN=<pinned31.1binary> ORD_BIN=<pinned0.29.0binary> bun run regtest",
+  "signing": "disposable local keys through TurnkeySatSigner; no live Turnkey request",
+  "scope": "local Core/ord plus actual HTTPS routes; no public network or mainnet proof"
+}

@@ -327,11 +327,11 @@ export class BBSCryptosuiteManager {
     const canonicalIdMap = new Map<string, string>();
     await jsonld.canonize(groups.get('combined')!.deskolemizedNQuads.join(''), {
       documentLoader: options.documentLoader,
-      algorithm: 'URDNA2015',
       inputFormat: 'application/n-quads',
       format: 'application/n-quads',
       safe: true,
-      canonicalIdMap
+      // JSON-LD 9 requires nested options to populate the verifier's label map.
+      canonizeOptions: { algorithm: 'RDFC-1.0', canonicalIdMap }
     } as any);
     const strippedIdMap = stripBlankNodePrefixes(canonicalIdMap);
 

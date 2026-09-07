@@ -17,7 +17,7 @@ import {
   depositShortfallMessage,
   depositErrorMessage,
   depositErrorBadge,
-} from './Demo';
+} from './demo-logic';
 
 const utxo = (value: number) => ({ txid: 'a'.repeat(64), vout: 0, value, scriptPubKey: '0014' + '11'.repeat(20) });
 

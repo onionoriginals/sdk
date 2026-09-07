@@ -21,6 +21,7 @@
  * as `txid:vout`. On mainnet with neither, the Ordinals check is skipped and
  * the script exits non-zero — a check that cannot check is not a pass.
  */
+import { createHash } from 'node:crypto';
 import { QuickNodeProvider } from '@originals/sdk';
 import { fetchFaucetUtxos, resolveIndexer, serverBtcNetwork, IndexerError } from '../server/bitcoin';
 
@@ -46,7 +47,7 @@ if (chain === 'mainnet' && !process.env.BTC_INDEXER_API) {
   );
 }
 
-const provider = new QuickNodeProvider({ endpoint, expectedNetwork: network });
+const provider = new QuickNodeProvider({ endpoint, expectedNetwork: network, contentBaseUrl: process.env.QUICKNODE_CONTENT_BASE_URL, contentEncoding: process.env.QUICKNODE_CONTENT_ENCODING === 'base64' ? 'base64' : process.env.QUICKNODE_CONTENT_ENCODING === 'utf8' ? 'utf8' : 'auto' });
 
 /** The outpoint to ask the Ordinals add-on about. */
 let probe: { txid: string; vout: number };
@@ -90,7 +91,17 @@ try {
   const sat = await provider.getFirstSatOfOutput!(probe);
   console.log(`✅ Ordinals & Runes add-on works on ${chain}.`);
   console.log(`   first sat of ${probe.txid}:${probe.vout} = ${sat}`);
-  console.log(`   → real ${chain} inscription is viable on this endpoint.`);
+  const snapshot = await provider.getSatSnapshot(sat);
+  console.log(`   complete CEL 3 snapshot at height ${snapshot.tipAfter.height}: ${snapshot.publications.length} publication(s)`);
+  if (!process.env.BTC_CHECK_PNG_SAT || !process.env.BTC_CHECK_PNG_SHA256) {
+    throw new Error('Set BTC_CHECK_PNG_SAT and BTC_CHECK_PNG_SHA256 to verify known binary inscription bytes; an empty sat is not a PNG transport check.');
+  }
+  const pngSnapshot = await provider.getSatSnapshot(process.env.BTC_CHECK_PNG_SAT);
+  const expectedHash = process.env.BTC_CHECK_PNG_SHA256;
+  const found = pngSnapshot.publications.some((publication) => publication.body.status === 'complete' &&
+    publication.body.mediaType === 'image/png' && createHash('sha256').update(publication.body.bytes).digest('hex') === expectedHash);
+  if (!found) throw new Error('Known PNG bytes did not match the expected SHA-256 digest.');
+  console.log('✅ Known PNG raw bytes match the supplied digest in a complete snapshot. This is provider-read evidence only.');
 } catch (e) {
   const msg = (e as Error).message;
   if (/serves chain|configured for/.test(msg)) {

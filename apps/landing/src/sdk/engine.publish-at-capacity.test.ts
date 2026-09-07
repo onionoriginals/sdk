@@ -14,6 +14,7 @@ function installHostFetch(store: ReturnType<typeof createWebvhHostStore>, client
     const method = (init?.method ?? 'GET').toUpperCase();
     const url = new URL(raw, `http://${host}`);
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       if (method === 'GET' || method === 'HEAD') return store.read(url);
       const req = new Request(url, {
         method,
@@ -42,19 +43,20 @@ describe('a full anonymous demo run against a store at capacity', () => {
     store = createWebvhHostStore({ maxEntries: 12, maxEntriesPerClient: 6, maxClients: 4 });
     const fill = installHostFetch(store, 'filler');
     for (let i = 0; i < 40; i++) {
-      const key = `other.test/spike${i}/did.jsonl`;
-      await store.handlePut(
+      const key = `other.test/published/anonymous/spike${i}/did.jsonl`;
+      const put = await store.handlePut(
         new Request(`http://host/api/host/${encodeURIComponent(key)}`, {
           method: 'PUT',
           headers: { 'content-type': 'application/jsonl' },
           body: 'filler',
         }),
         new URL(`http://host/api/host/${encodeURIComponent(key)}`),
-        `10.0.0.${i % 8}`
+        `10.0.0.${i % 4}`
       );
+      expect(put.status).toBe(200);
     }
     fill();
-    expect(store.stats().entries).toBeLessThanOrEqual(12);
+    expect(store.stats().entries).toBe(12);
     restore = installHostFetch(store, 'new-visitor');
   });
   afterEach(() => restore());

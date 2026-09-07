@@ -1,0 +1,74 @@
+{
+  "recordedAt": "2026-09-06T16:04:29.277638+00:00",
+  "readOnly": true,
+  "network": "production configured endpoint",
+  "results": [
+    {
+      "method": "getblockchaininfo",
+      "success": true,
+      "errorCode": null,
+      "resultType": "dict",
+      "fields": [
+        "bestblockhash",
+        "bits",
+        "blocks",
+        "chain",
+        "chainwork",
+        "difficulty",
+        "headers",
+        "initialblockdownload",
+        "mediantime",
+        "pruned",
+        "size_on_disk",
+        "target",
+        "time",
+        "verificationprogress",
+        "warnings"
+      ],
+      "observed": {
+        "chain": "main",
+        "blocks": 965799
+      }
+    },
+    {
+      "method": "ord_getStatus",
+      "success": true,
+      "errorCode": null,
+      "resultType": "dict",
+      "fields": [
+        "address_index",
+        "blessed_inscriptions",
+        "chain",
+        "cursed_inscriptions",
+        "height",
+        "initial_sync_time",
+        "inscription_index",
+        "inscriptions",
+        "json_api",
+        "lost_sats",
+        "minimum_rune_for_next_block",
+        "rune_index",
+        "runes",
+        "sat_index",
+        "started",
+        "transaction_index",
+        "unrecoverably_reorged",
+        "uptime"
+      ],
+      "observed": {
+        "chain": "mainnet",
+        "height": 965799,
+        "sat_index": true,
+        "address_index": false,
+        "inscription_index": true,
+        "unrecoverably_reorged": false
+      }
+    },
+    {
+      "method": "ord_getBlockHash",
+      "success": true,
+      "errorCode": null,
+      "resultType": "str"
+    }
+  ]
+}

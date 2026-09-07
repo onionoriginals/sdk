@@ -16,7 +16,7 @@ import {
   inscribeStepView,
   publishDurabilityNote,
   resolvedCopy,
-} from './Demo';
+} from './demo-logic';
 import { demoTier } from '../sdk/network-flag';
 import { demo } from '../content';
 
@@ -95,10 +95,10 @@ describe('step 3 states its own tier', () => {
     expect(view.description).toMatch(/your own|your key|your browser/i);
   });
 
-  test('the anonymous step names itself a simulation', () => {
+  test('the anonymous step names the account and funding requirements', () => {
     const view = inscribeStepView(demoTier('mainnet', false).real, 'mainnet');
     expect(view.simulated).toBe(true);
-    expect(view.description).toMatch(/simulat|mock/i);
+    expect(view.description).toMatch(/requires|funded|deployment/i);
     expect(view.label).toBe(demo.simulated.action);
   });
 
@@ -116,9 +116,9 @@ describe('the section subhead', () => {
     expect(demoSubhead(true)).toMatch(/bitcoin/i);
   });
 
-  test('the anonymous tier’s subhead says the last step is simulated', () => {
-    expect(demoSubhead(false, 'mainnet')).toMatch(/simulat|mock/i);
-    expect(demoSubhead(false, 'off')).toMatch(/simulat|mock/i);
+  test('the anonymous tier’s subhead names the Bitcoin deployment requirement', () => {
+    expect(demoSubhead(false, 'mainnet')).toMatch(/requires|funded|deployment/i);
+    expect(demoSubhead(false, 'off')).toMatch(/requires|funded|deployment/i);
   });
 
   test('only a build with a real path invites the visitor to sign in for one', () => {

@@ -1,9 +1,13 @@
+import type { SatSnapshot } from "@originals/cel/v3";
+import { readSatSnapshot, type SatSnapshotBudget } from "./sat-snapshot.js";
 import type { OrdinalsProvider } from '../types.js';
 import { enumerateAnchoringsOnSat } from '../anchoring-enumeration.js';
 import { decode as decodeCbor } from '@originals/cel/cbor';
 import { hexToBytes } from '@originals/cel/encoding';
 
 export interface RegtestProviderOptions {
+  /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
+  snapshotBudget?: SatSnapshotBudget;
   ordUrl: string;
   rpcUrl: string;
   /** Bitcoin Core cookie contents (user:password), supplied by the local host. */
@@ -34,6 +38,7 @@ export class RegtestProvider implements OrdinalsProvider {
   private readonly rpcUrl: string;
   private readonly rpcAuth: string;
   private readonly feeRate: number;
+  private readonly snapshotBudget: SatSnapshotBudget;
 
   constructor(options: RegtestProviderOptions) {
     const local = (value: string) => {
@@ -43,6 +48,7 @@ export class RegtestProvider implements OrdinalsProvider {
       }
       return url.href.replace(/\/+$/, '');
     };
+    this.snapshotBudget = { ...options.snapshotBudget };
     this.ordUrl = local(options.ordUrl);
     this.rpcUrl = local(options.rpcUrl);
     this.rpcAuth = options.rpcAuth;
@@ -51,7 +57,7 @@ export class RegtestProvider implements OrdinalsProvider {
   }
 
   private async bytes(url: string, init?: RequestInit): Promise<Uint8Array | null> {
-    const response = await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(url, { ...init, redirect: 'error', signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`Regtest HTTP ${response.status}`);
     const reader = response.body?.getReader();
@@ -71,14 +77,14 @@ export class RegtestProvider implements OrdinalsProvider {
     return bytes;
   }
 
-  private async ord<T>(path: string): Promise<T | null> {
-    const bytes = await this.bytes(this.ordUrl + path, { headers: { accept: 'application/json' } });
+  private async ord<T>(path: string, signal?: AbortSignal): Promise<T | null> {
+    const bytes = await this.bytes(this.ordUrl + path, { headers: { accept: 'application/json' }, signal });
     return bytes === null ? null : JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
 
-  private async rpc<T>(method: string, params: unknown[] = []): Promise<T> {
+  private async rpc<T>(method: string, params: unknown[] = [], signal?: AbortSignal): Promise<T> {
     const bytes = await this.bytes(this.rpcUrl, {
-      method: 'POST', headers: { authorization: `Basic ${btoa(this.rpcAuth)}`, 'content-type': 'application/json' },
+      signal, method: 'POST', headers: { authorization: `Basic ${btoa(this.rpcAuth)}`, 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'originals', method, params }),
     });
     if (!bytes) throw new Error(`Regtest RPC endpoint missing: ${method}`);
@@ -149,6 +155,24 @@ export class RegtestProvider implements OrdinalsProvider {
     const sat = result.sat_ranges?.[0]?.[0];
     if (result.spent || !Number.isSafeInteger(sat) || sat! < 0) throw new Error('Unspent output sat ranges unavailable');
     return String(sat);
+  }
+
+  /** Complete, stable CEL 3 observation using ord 0.29's sat enumeration and raw CBOR endpoint.
+   * Block creation order comes from Core's active blocks, never inscription numbers or current location.
+   */
+  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+    return readSatSnapshot({
+      rpc: (method, params, signal) => this.rpc(method, params, signal),
+      status: signal => this.ord('/status', signal),
+      indexHash: async (height, signal) => {
+        const bytes = await this.bytes(`${this.ordUrl}/blockhash/${height}`, { signal });
+        return bytes === null ? null : new TextDecoder().decode(bytes).trim();
+      },
+      sat: (sat, signal) => this.ord(`/sat/${sat}`, signal),
+      inscription: (id, signal) => this.ord(`/inscription/${id}`, signal),
+      content: (id, signal) => this.bytes(`${this.ordUrl}/content/${id}`, { signal }),
+      metadata: (id, signal) => this.ord(`/r/metadata/${id}`, signal),
+    }, satoshi, 'regtest', this.snapshotBudget);
   }
 
   async getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>> {

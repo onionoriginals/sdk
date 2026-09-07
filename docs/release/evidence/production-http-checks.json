@@ -1,0 +1,77 @@
+{
+  "recordedAt": "2026-09-06T18:03:06.449839+00:00",
+  "deploymentId": "12730c33-396a-4ba4-8db3-622da700e392",
+  "runtimeCommit": "71e57306ed08aa50ab1954c459a0fa9b8631471d",
+  "checks": [
+    {
+      "asset": "/assets/index-BiLilOBP.js",
+      "status": 200,
+      "bytes": 369613,
+      "sha256": "f814f1c7759dd132ca30ea9bf31f8db6be88784b0f4f682ed569e091d3df5530",
+      "canonicalHostPresent": true,
+      "passed": true
+    },
+    {
+      "url": "https://originals.build/",
+      "status": 200,
+      "expectedStatus": 200,
+      "passed": true,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "38bf85181a12946508119cc8631d90c7b72a66124ef981b80a5012d66970aa68",
+      "bytes": 4737
+    },
+    {
+      "url": "https://originals.build/api/health",
+      "status": 200,
+      "expectedStatus": 200,
+      "passed": true,
+      "contentType": "application/json",
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "url": "https://originals.build/api/btc/network",
+      "status": 200,
+      "expectedStatus": 200,
+      "passed": true,
+      "contentType": "application/json",
+      "body": {
+        "network": "mainnet",
+        "faucet": false
+      }
+    },
+    {
+      "url": "https://originals.build/api/me",
+      "status": 401,
+      "expectedStatus": 401,
+      "passed": true,
+      "contentType": "application/json",
+      "body": {
+        "message": "Not authenticated"
+      }
+    },
+    {
+      "url": "https://originals.build/api/btc/sat-snapshot/1252201400444387",
+      "status": 401,
+      "expectedStatus": 401,
+      "passed": true,
+      "contentType": "application/json",
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    {
+      "url": "https://builder-production-2757.up.railway.app/",
+      "status": 301,
+      "expectedStatus": 301,
+      "passed": true,
+      "contentType": null,
+      "location": "https://originals.build/"
+    }
+  ],
+  "passed": true,
+  "browserVerified": false,
+  "browserBlocker": "Owner Mac locked; live Turnkey OTP and owner journey pending",
+  "bitcoinTransactionsSubmitted": 0
+}

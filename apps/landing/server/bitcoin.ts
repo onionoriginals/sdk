@@ -15,8 +15,9 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
-import { isValidBitcoinAddress } from '@originals/sdk';
+import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal } from '@originals/sdk';
 import { json, type Handler } from './router';
+import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
@@ -656,6 +657,7 @@ export function createBitcoinRoutes(deps: {
 }): {
   funding: Handler;
   sat: Handler;
+  satSnapshot: Handler;
   fee: Handler;
   broadcast: Handler;
   deposit: Handler;
@@ -664,6 +666,7 @@ export function createBitcoinRoutes(deps: {
   inscribe: Handler;
   inscribeList: Handler;
   inscribeRebroadcast: Handler;
+  sweepInscriptions: () => Promise<{ processed: number; unreadable: string[] }>;
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
   const now = deps.now ?? (() => Date.now());
@@ -829,6 +832,29 @@ export function createBitcoinRoutes(deps: {
       return json({ satoshi });
     } catch (e) {
       return json({ error: 'sat_lookup_failed', message: (e as Error).message }, 502);
+    }
+  };
+
+  const satSnapshot: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const satoshi = url.pathname.slice('/api/btc/sat-snapshot/'.length);
+    if (!/^(0|[1-9]\d*)$/.test(satoshi) || !validateSatoshiNumber(satoshi).valid) return json({ error: 'bad_request' }, 400);
+    if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
+    try {
+      const snapshot = await provider.getSatSnapshot(satoshi);
+      return json({ ...snapshot, publications: snapshot.publications.map((publication) => ({
+        ...publication,
+        body: publication.body.status === 'complete' ? {
+          ...publication.body,
+          bytes: Array.from(publication.body.bytes),
+          metadata: publication.body.metadata === null ? null : Array.from(publication.body.metadata),
+        } : publication.body,
+      })) });
+    } catch {
+      return json({ error: 'sat_snapshot_unavailable' }, 502);
     }
   };
 
@@ -1399,7 +1425,7 @@ export function createBitcoinRoutes(deps: {
   const inscribe: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    const limited = rateLimited(clientIp);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
@@ -1531,6 +1557,25 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal output must pay changeAddress.' }, 400);
     }
 
+    // Transaction ids exclude witness bytes. Validate the committed script and
+    // reveal signature before persisting or exposing the parent to the network.
+    try {
+      validateInscriptionReveal(commit, reveal);
+    } catch {
+      return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
+    }
+
+    // Cheap syntax, transaction shape and bound-address checks precede this
+    // slot. Every provider-backed attempt consumes it, including refused
+    // continuations, so invalid controller proofs cannot trigger unlimited
+    // full sat scans.
+    const perUser = inscribeUserLimiter.check(sub);
+    if (!perUser.allowed) {
+      return json({ error: 'inscribe_user_cap' }, 429, {
+        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+      });
+    }
+
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
     // client can declare any outpoint, and an inscribed one becomes the new DID sat or burns as fee.
     const declaredUtxos = declared.map((u) => ({ txid: u.txid!, vout: u.vout!, value: typeof u.value === 'number' ? u.value : 0 }));
@@ -1539,17 +1584,15 @@ export function createBitcoinRoutes(deps: {
       return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the funding outputs carry no inscription.' }, 503);
     }
     if (ordinalCheck.ordinalBearing > 0) {
-      return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'A declared funding output carries an inscription and must not be spent.' }, 400);
-    }
-
-    // Consume a per-user slot only now that the request has proven valid —
-    // malformed submissions must not burn the hourly cap for free (mirrors
-    // the funding route's validate-before-consuming rule).
-    const perUser = inscribeUserLimiter.check(sub);
-    if (!perUser.allowed) {
-      return json({ error: 'inscribe_user_cap' }, 429, {
-        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+      // Only a verified continuation may deliberately spend an inscribed input.
+      // Fee inputs remain strictly ordinal-free; no client-provided flag can
+      // bypass the fresh controller, sat alignment and exact delta checks.
+      const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);
+      const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({
+        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,
+        inscriptionIds: () => deps.ordinals!.outpointInscriptions(declaredUtxos[0]),
       });
+      if (!authorized) return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'An inscribed input requires an authorized CEL continuation on the identity sat; fee inputs must carry no inscriptions.' }, 400);
     }
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry
@@ -1683,7 +1726,7 @@ export function createBitcoinRoutes(deps: {
 
   /**
    * GET /api/btc/inscribe — the user's inscription records (no tx hex; ids +
-   * status only). Three best-effort reconciliation passes ride on this poll,
+   * status only). Three bounded reconciliation passes ride on this poll,
    * in priority order under one shared lookup budget, so EVERY stranded state
    * converges automatically — the manual Finish button is a shortcut, never
    * the only path:
@@ -1700,13 +1743,31 @@ export function createBitcoinRoutes(deps: {
    *    rebroadcast. Retire the artifacts only at the retention horizon.
    *    One that is STILL unconfirmed
    *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
-   *    copy — a reveal evicted from the mempool has no other way back.
+   *    pair, commit first — either or both may have left the mempool.
    */
   const inscribeList: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
+    return reconcileUser(sub);
+  };
+
+  async function reconcileUser(sub: string): Promise<Response> {
+    try {
+      return await reconcileRecords(sub);
+    } catch (error) {
+      const unreadable = unreadableRecords(sub, error);
+      if (unreadable) return unreadable;
+      // Provider status failures are handled separately below. A persistence
+      // failure must reach both the caller and the background sweep; it must
+      // never become a successful response containing stale record state.
+      money('inscribe_failed', { sub, reason: 'reconciliation_store_failed' });
+      return json({ error: 'inscription_reconciliation_failed', message: 'Recovery records could not be reconciled durably. Retry when storage is available.' }, 503);
+    }
+  }
+
+  async function reconcileRecords(sub: string): Promise<Response> {
     if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.inscriptions;
     // A torn file must not surface as a bare, unnamed 500: this route IS the
@@ -1722,9 +1783,9 @@ export function createBitcoinRoutes(deps: {
     }
     // Bound the per-request provider fan-out on top of the per-user quota cap
     // above. The worklist is PRIORITIZED: superseded reconciliation goes
-    // first — those pairs carry committed funds and have NO manual recovery
-    // surface (the UI hides them by design), so ordinary confirmation polling
-    // for newer records must never starve them. Within each pass a ROTATING
+    // first, while reserving reads for later nonempty categories. Contested
+    // pairs, stranded live commits and confirmations must all make progress.
+    // Within each pass a ROTATING
     // cursor picks where the scan starts, so even a backlog larger than the
     // whole budget is fully covered across successive polls — no record can
     // sit permanently behind the budget.
@@ -1753,7 +1814,6 @@ export function createBitcoinRoutes(deps: {
       newestFirst.filter(
         (r) =>
           r.superseded &&
-          r.status !== 'confirmed' &&
           !r.retired &&
           !!r.revealTxHex &&
           !isDead(r)
@@ -1765,91 +1825,94 @@ export function createBitcoinRoutes(deps: {
     // once THEIR commit confirms, the persisted reveal is completed here
     // automatically, so no state depends on the manual Finish button.
     const liveStuck = rotate(
-      newestFirst.filter((r) => !r.superseded && r.status === 'commit_broadcast' && !!r.revealTxHex),
+      newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'signed' || r.status === 'commit_broadcast') && !!r.revealTxHex),
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
       newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),
       cursors.confirm
     );
+    // Reserve one read for each later nonempty category. Priority and each
+    // category's rotating cursor remain, but an unresolved contested backlog
+    // can no longer consume all five reads forever.
+    const supersededLimit = 5 - Number(liveStuck.length > 0) - Number(liveUnconfirmed.length > 0);
+    const stuckLimit = 5 - Number(liveUnconfirmed.length > 0);
+    const readStatus = async (txid: string) => {
+      try { return await provider.getTransactionStatus(txid); }
+      catch { return null; } // A provider outage preserves the last observed state.
+    };
     let lookups = 0;
     for (const r of supersededPending) {
-      if (lookups >= 5) break;
+      if (lookups >= supersededLimit) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || !current.superseded || current.retired) continue;
       lookups++;
       cursors.superseded++;
-      try {
-        // ONE question decides a contested outpoint, whatever the pair's
-        // stored status: did THIS pair's commit confirm? (A reveal can only
-        // ever confirm on top of its own commit, so the commit check covers
-        // every superseded state — including reveal_broadcast pairs whose
-        // reveal never actually landed.) If yes: retire the rival (its commit
-        // conflicts with a confirmed tx), reinstate this pair, and complete
-        // it by (re)broadcasting the persisted reveal idempotently; the next
-        // poll's confirmation pass then walks it to 'confirmed'.
-        const st = await provider.getTransactionStatus(r.commitTxId);
-        if (!st?.confirmed) continue;
-        reclaimOutpoint(store, sub, r);
-        const revealErr = await broadcastIdempotent(r.revealTxHex);
-        store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
-        changed = true;
-      } catch {
-        // Lookup unsupported/down — leave the record as stored.
-      }
+      const st = await readStatus(r.commitTxId);
+      if (!st?.confirmed) continue;
+      // Reclaim and journal the attempt durably before sending the exact
+      // stored reveal. A failed write stops this pass before another side effect.
+      reclaimOutpoint(store, sub, r);
+      store.markRebroadcast(sub, r.commitTxId);
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
+      changed = true;
     }
     for (const r of liveStuck) {
-      if (lookups >= 5) break;
+      if (lookups >= stuckLimit) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.stuck++;
-      try {
-        const st = await provider.getTransactionStatus(r.commitTxId);
-        if (!st?.confirmed) continue;
-        const revealErr = await broadcastIdempotent(r.revealTxHex);
-        if (!revealErr) {
-          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-          changed = true;
-        }
-      } catch {
-        // Lookup unsupported/down — the manual Finish button still covers it.
+      const st = await readStatus(r.commitTxId);
+      if (!st) continue;
+      if (!st.confirmed) {
+        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+        if (!r.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
+      }
+      store.markRebroadcast(sub, r.commitTxId);
+      if (!st.confirmed) {
+        if (await broadcastIdempotent(r.signedCommitHex!)) continue;
+        store.setStatus(sub, r.commitTxId, 'commit_broadcast');
+        changed = true;
+      }
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      if (!revealErr) {
+        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+        changed = true;
       }
     }
     for (const r of liveUnconfirmed) {
       if (lookups >= 5) break;
+      const current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.confirm++;
-      try {
-        const st = await provider.getTransactionStatus(r.revealTxId);
-        if (st?.confirmed) {
-          if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
-          if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
-          continue;
-        }
-        if (r.status === 'confirmed') {
-          store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-          changed = true;
-          if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
-          if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
-          store.markRebroadcast(sub, r.commitTxId);
-          continue;
-        }
-        // Not confirmed, and nothing else in the system ever re-pushes a
-        // reveal once it is marked broadcast. A reveal built at a rate that a
-        // fee spike leaves behind gets EVICTED from the mempool and would
-        // then never land — the commit's funds sit in a P2TR output nobody
-        // can reach (the reveal key is ephemeral, so it can never be replaced
-        // either). Re-push the persisted copy periodically: idempotent, free,
-        // and a no-op for a reveal that is simply waiting for a block.
-        // Throttle on rebroadcastAt, NOT updatedAt: updatedAt is how long the
-        // record has been stuck at this status, which is what the UI reads to
-        // decide whether to offer a manual retry. Refreshing it here would
-        // reset that clock every 30 minutes and the manual path would never
-        // surface. The status has not changed, so neither should updatedAt.
-        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
-        if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
-          await broadcastIdempotent(r.revealTxHex);
-          store.markRebroadcast(sub, r.commitTxId);
-        }
-      } catch {
-        // Lookup unsupported/down — report the stored status.
+      const st = await readStatus(r.revealTxId);
+      if (!st) continue;
+      if (st.confirmed) {
+        if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
+        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
+        continue;
+      }
+      if (r.status === 'confirmed') {
+        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
+        changed = true;
+        store.markRebroadcast(sub, r.commitTxId);
+        if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
+        if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
+        continue;
+      }
+      // Keep the manual-retry status clock unchanged; the independent durable
+      // attempt timestamp throttles resubmission even after ambiguous delivery.
+      const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
+      if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
+        store.markRebroadcast(sub, r.commitTxId);
+        // Both transactions can disappear from the mempool. Replaying the
+        // exact retained parent first also works when it is already known;
+        // an ambiguous parent failure retains the pair for the next attempt.
+        if (r.signedCommitHex && await broadcastIdempotent(r.signedCommitHex)) continue;
+        await broadcastIdempotent(r.revealTxHex);
       }
     }
     if (changed) {
@@ -1882,7 +1945,27 @@ export function createBitcoinRoutes(deps: {
     // rather than only in a 15s poll on a tab that is long closed.
     const depositAlert = store.getDepositAlert(sub);
     return json({ inscriptions, ...(depositAlert ? { depositAlert } : {}) });
-  };
+  }
+
+  let sweepRunning = false;
+  let sweepCursor = 0;
+  // Uses the same bounded reconciliation as an authenticated poll. No HTTP
+  // token is synthesized and no signed pair is rebuilt by this background job.
+  async function sweepInscriptions(): Promise<{ processed: number; unreadable: string[] }> {
+    if (!deps.inscriptions || sweepRunning) return { processed: 0, unreadable: [] };
+    sweepRunning = true;
+    try {
+      const { stale, unreadable } = deps.inscriptions.sweepStale(0);
+      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, 10);
+      const failures = [...unreadable];
+      for (const sub of subs) {
+        try { if (!(await reconcileUser(sub)).ok) failures.push(sub); }
+        catch { failures.push(sub); }
+      }
+      sweepCursor += subs.length;
+      return { processed: subs.length, unreadable: [...new Set(failures)] };
+    } finally { sweepRunning = false; }
+  }
 
   /**
    * POST /api/btc/inscribe/rebroadcast { commitTxId } — finish a stranded
@@ -1932,16 +2015,29 @@ export function createBitcoinRoutes(deps: {
     // unknown or merely-unconfirmed reveal falls through to the (idempotent)
     // rebroadcast below — QuickNode reports both as { confirmed: false }, so
     // presence alone cannot distinguish "in mempool" from "never broadcast".
+    let revealStatus: Awaited<ReturnType<typeof provider.getTransactionStatus>> | undefined;
     try {
-      const st = await provider.getTransactionStatus(rec.revealTxId);
-      if (st?.confirmed) {
-        reclaimIfSuperseded();
-        store.setStatus(sub, commitTxId, 'confirmed');
-        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
-        return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
-      }
+      revealStatus = await provider.getTransactionStatus(rec.revealTxId);
     } catch {
       // No lookup support / transport failure — fall through to rebroadcast.
+    }
+    if (revealStatus?.confirmed) {
+      reclaimIfSuperseded();
+      store.setStatus(sub, commitTxId, 'confirmed');
+      if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
+      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+    }
+    try {
+      if (revealStatus && rec.status === 'confirmed') {
+        // Persist the lost confirmation before attempting recovery. A conflict
+        // or an unavailable broadcaster must not leave a stale confirmed row.
+        // Keep rec's prior status below so the exact commit is retried first.
+        store.setStatus(sub, commitTxId, 'reveal_broadcast');
+      }
+      store.markRebroadcast(sub, commitTxId);
+    } catch {
+      money('inscribe_failed', { sub, commitTxId, reason: 'reconciliation_store_failed' });
+      return json({ error: 'inscription_reconciliation_failed', message: 'Recovery attempt could not be recorded durably. Retry when storage is available.' }, 503);
     }
 
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
@@ -1956,10 +2052,11 @@ export function createBitcoinRoutes(deps: {
     // there is no CPFP to pull it back: it never confirms, so the list poll's
     // confirmed-commit gate never fires, and the reveal is rejected for
     // missing inputs forever while the creator's rebuild 409s on a live
-    // record. Re-push the persisted commit, then retry. Re-pushing a commit
+    // record. Both transactions can also be evicted after a successful reveal
+    // broadcast. Re-push the persisted commit, then retry. Re-pushing a commit
     // that is still in the mempool is a harmless no-op — which is why this is
     // the safe direction.
-    if (revealErr && rec.status === 'commit_broadcast' && rec.signedCommitHex && isMissingInputsError(revealErr)) {
+    if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (!commitErr) revealErr = await broadcastIdempotent(rec.revealTxHex);
@@ -1972,7 +2069,7 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
   };
 
-  return { funding, sat, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast };
+  return { funding, sat, satSnapshot, fee, broadcast, deposit, prevTx, networkInfo, inscribe, inscribeList, inscribeRebroadcast, sweepInscriptions };
 }
 
 export type BitcoinRoutes = ReturnType<typeof createBitcoinRoutes>;

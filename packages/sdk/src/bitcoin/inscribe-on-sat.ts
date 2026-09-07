@@ -6,6 +6,10 @@ import { StructuredError } from '@originals/cel';
 import { validateSatoshiNumber } from '@originals/cel';
 import { createCommitTransaction, createRevealTransaction } from './transactions/commit.js';
 import { scriptPubKeyForAddress } from './transfer.js';
+import { submitPreparedInscriptionOnSat } from './inscription-recovery.js';
+import type { PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionBroadcastState } from './inscription-recovery.js';
+export { submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from './inscription-recovery.js';
+export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRecoveryStore, InscriptionBroadcastState } from './inscription-recovery.js';
 
 export interface InscribeOnSatParams {
   buildContent: (satoshi: string) => Promise<{ content: Uint8Array; contentType: string; metadata?: Record<string, unknown> }>;
@@ -21,6 +25,8 @@ export interface InscribeOnSatParams {
   feeRate: number;
   network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
   provider: OrdinalsProvider;
+  /** Required for direct broadcast providers. save() must complete durable storage before resolving. */
+  recoveryStore?: InscriptionRecoveryStore;
 }
 
 export interface InscribeOnSatResult {
@@ -28,42 +34,22 @@ export interface InscribeOnSatResult {
   inscriptionId: string;
   commitTxId: string;
   revealTxId: string;
-  /**
-   * How far broadcasting actually got.
-   *
-   * `'reveal_broadcast'` — both transactions reached the network; the
-   * inscription exists.
-   * `'commit_broadcast'` — the commit is on the network and the reveal is
-   * persisted by the provider for rebroadcast. STILL A SUCCESS: it completes
-   * without the caller re-signing anything, usually once the commit confirms.
-   * But the inscription does NOT exist yet, so a caller must not announce one
-   * or link to `revealTxId` — that transaction is not findable.
-   *
-   * This used to be dropped: `submitInscription` returns it, the value was not
-   * captured, and callers had no way to tell the two apart. A UI built on that
-   * told a creator their inscription was done and linked to a reveal txid that
-   * 404'd.
-   */
-  broadcast: 'commit_broadcast' | 'reveal_broadcast';
+  /** A broadcast acknowledgement is not chain confirmation; unknown states require same-pair recovery. */
+  broadcast: InscriptionBroadcastState;
+  recoveryId: string;
+  /** Exact recovery bytes, also persisted before direct broadcasting. */
+  prepared: PreparedInscriptionOnSat;
+  error?: string;
 }
 
-/**
- * Orchestrates a genesis did:btco inscription targeted at a caller-selected
- * funding output's sat. FIRE-AND-FORGET: correctness rests on the provider's
- * honest sat index + deterministic tx construction, both verified at DERIVE
- * time — the DID sat is derived from the provider before anything is spent, and
- * the inscription is deterministically constructed to land on it. There is NO
- * post-broadcast re-check: on a real ord-indexed provider the inscription isn't
- * queryable until confirmed (minutes-hours), so a post-broadcast sat lookup
- * would spuriously fail after real BTC was spent. The caller owns confirmation
- * monitoring. Both txs are built (and the commit txid computed locally) BEFORE
- * broadcasting, and a post-commit reveal failure returns recovery data so the
- * committed funds are never stranded. The signer's returned commit is checked
- * (every input == the declared funding set in order, output[0]==the built
- * commit output) before that broadcast, so a buggy/malicious signer can't
- * silently redirect the DID sat.
- */
+/** Prepare and durably submit a sat-selected pair. Retry using resumeInscriptionOnSat, never by re-signing. */
 export async function inscribeOnSat(params: InscribeOnSatParams): Promise<InscribeOnSatResult> {
+  const prepared = await prepareInscriptionOnSat(params);
+  return submitPreparedInscriptionOnSat({ prepared, provider: params.provider, recoveryStore: params.recoveryStore });
+}
+
+/** Build both transactions and compute their identities without broadcasting or requiring a recovery store. */
+export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Promise<PreparedInscriptionOnSat> {
   const { buildContent, fundingUtxos, satSigner, changeAddress, feeRate, network, provider } = params;
 
   // 0) The funding set must be a real, non-degenerate list before anything —
@@ -107,6 +93,10 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
       { declared: outpoints, selected });
   }
 
+  const template = btc.Transaction.fromPSBT(Buffer.from(commit.commitPsbtBase64, 'base64'), {
+    allowUnknownOutputs: true
+  });
+
   // 4) Caller signs the commit; the return MUST be broadcast-ready tx hex.
   const signedCommit = await satSigner.signAndFinalizeCommitPsbt(commit.commitPsbtBase64);
 
@@ -130,15 +120,12 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   // funding UTXO, not merely something parseable. A buggy/malicious signer could
   // return a different, validly-formed tx (wrong input, wrong output) which would
   // silently land the DID on the wrong sat. Check the inputs against the
-  // declared funding set (in order) and output[0]==the commit output
-  // (amount + scriptPubKey) BEFORE broadcasting.
-  // Also BOUND the shape: exactly the declared inputs in the declared order
-  // (an extra/missing/reordered input either spends an unrelated UTXO or moves
-  // the identity sat) and at most two outputs (the commit output at vout 0 plus
-  // an optional change output — a third output could redirect funds to an
-  // attacker). Both fail closed before any broadcast.
+  // declared funding set (in order), every output amount/script, sequence,
+  // version and locktime against the original PSBT BEFORE broadcasting.
+  // This also protects the change output from redirection, omission or fee inflation.
   const mismatchDetails = { fundingUtxos: outpoints, commitAmount: commit.commitAmount, commitAddress: commit.commitAddress };
-  if (parsed.inputsLength !== fundingUtxos.length || parsed.outputsLength < 1 || parsed.outputsLength > 2) {
+  if (parsed.inputsLength !== fundingUtxos.length || parsed.outputsLength !== template.outputsLength ||
+      parsed.version !== template.version || parsed.lockTime !== template.lockTime) {
     throw new StructuredError('COMMIT_TX_MISMATCH',
       'The signed commit does not match the commit built for this funding set; refusing to broadcast (the DID sat would be wrong).',
       mismatchDetails);
@@ -150,12 +137,17 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
   const inputMatches = outpoints.every((expected, i) => {
     const input = parsed.getInput(i);
     const txidHex = Buffer.from(input.txid ?? new Uint8Array()).toString('hex').toLowerCase();
-    return `${txidHex}:${input.index}` === expected;
+    return `${txidHex}:${input.index}` === expected && input.sequence === template.getInput(i).sequence;
   });
   const expectedCommitScriptHex = scriptPubKeyForAddress(commit.commitAddress, network);
   const output0ScriptHex = Buffer.from(output0.script ?? new Uint8Array()).toString('hex');
   const outputMatches = output0.amount === BigInt(commit.commitAmount) && output0ScriptHex === expectedCommitScriptHex;
-  if (!inputMatches || !outputMatches) {
+  const allOutputsMatch = Array.from({ length: template.outputsLength }, (_, index) => {
+    const actual = parsed.getOutput(index);
+    const expected = template.getOutput(index);
+    return actual.amount === expected.amount && Buffer.from(actual.script ?? []).equals(Buffer.from(expected.script ?? []));
+  }).every(Boolean);
+  if (!inputMatches || !outputMatches || !allOutputsMatch) {
     throw new StructuredError('COMMIT_TX_MISMATCH',
       'The signed commit does not match the commit built for this funding set; refusing to broadcast (the DID sat would be wrong).',
       mismatchDetails);
@@ -170,55 +162,10 @@ export async function inscribeOnSat(params: InscribeOnSatParams): Promise<Inscri
     destinationAddress: changeAddress, feeRate, network
   });
 
-  // 7+8) Broadcast commit then reveal. When the provider offers the atomic
-  // submitInscription seam, use it: the implementation persists BOTH signed
-  // txs durably before broadcasting anything, so a caller that dies between
-  // commit and reveal can never strand the committed funds (the reveal is
-  // rebroadcast from the persisted copy). Otherwise fall back to the two
-  // sequential broadcasts with in-memory recovery data.
-  let broadcast: InscribeOnSatResult['broadcast'] = 'reveal_broadcast';
-  if (typeof provider.submitInscription === 'function') {
-    try {
-      const submitted = await provider.submitInscription({
-        signedCommitHex: signedCommit,
-        revealTxHex: reveal.revealTxHex,
-        fundingUtxos,
-        // Legacy singular mirror: an implementation predating multi-input
-        // reads the IDENTITY input here, never a random one.
-        fundingUtxo: identityUtxo,
-        changeAddress
-      });
-      // An implementation predating this field reports nothing; treat that as
-      // the complete case it has always meant, rather than inventing doubt.
-      if (submitted?.status === 'commit_broadcast') broadcast = 'commit_broadcast';
-    } catch (e) {
-      // Ambiguous by construction: the submit may have failed before anything
-      // was persisted/broadcast (nothing spent) or after (server-side recovery
-      // owns it). Attach the full recovery data either way so no funds path
-      // depends on this process's memory surviving.
-      throw new StructuredError('INSCRIPTION_SUBMIT_FAILED',
-        `Submitting the signed commit+reveal pair failed: ${e instanceof Error ? e.message : String(e)}. ` +
-        'If the submission reached the server it will complete the inscription from its persisted copy; ' +
-        'otherwise nothing was broadcast and the funding UTXO is unspent.',
-        {
-          commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex,
-          signedCommitHex: signedCommit, satoshi, inscriptionId: reveal.inscriptionId
-        });
-    }
-  } else {
-    // Broadcast the commit.
-    await provider.broadcastTransaction(signedCommit);
-
-    // Broadcast the reveal; on failure the commit is already on-chain, so
-    // attach recovery data (rebroadcast revealTxHex to complete the inscription).
-    try {
-      await provider.broadcastTransaction(reveal.revealTxHex);
-    } catch {
-      throw new StructuredError('REVEAL_BROADCAST_FAILED',
-        `Commit ${commitTxId} broadcast but the reveal failed; rebroadcast revealTxHex to recover the committed funds and complete the inscription.`,
-        { commitTxId, revealTxId: reveal.revealTxId, revealTxHex: reveal.revealTxHex, satoshi, inscriptionId: reveal.inscriptionId });
-    }
-  }
-
-  return { satoshi, inscriptionId: reveal.inscriptionId, commitTxId, revealTxId: reveal.revealTxId, broadcast };
+  return {
+    version: 1, network, satoshi, inscriptionId: reveal.inscriptionId,
+    commitTxId, revealTxId: reveal.revealTxId,
+    signedCommitHex: signedCommit, revealTxHex: reveal.revealTxHex,
+    fundingUtxos: fundingUtxos.map((utxo) => ({ ...utxo })), changeAddress
+  };
 }

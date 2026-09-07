@@ -37,3 +37,15 @@ for (const fault of scenarios) {
   });
   if (await journey.exited) process.exit(journey.exitCode ?? 1);
 }
+
+const capabilityReceipt = process.env.REGTEST_RECEIPT?.replace(/\.json$/, '');
+const capability = Bun.spawn([process.execPath, 'apps/landing/scripts/sat-snapshot-no-address.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(capabilityReceipt ? { REGTEST_RECEIPT: `${capabilityReceipt}-no-address-index.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { REGTEST_LOGS_DIR: `${process.env.REGTEST_LOGS_DIR}/no-address-index` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await capability.exited) process.exit(capability.exitCode ?? 1);

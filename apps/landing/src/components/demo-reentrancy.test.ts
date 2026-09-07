@@ -13,7 +13,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositBadgeLabel, runExclusive, stepButtonDisabled } from './Demo';
+import { depositBadgeLabel, runExclusive, stepButtonDisabled } from './demo-logic';
 
 describe('runExclusive — one run at a time, whichever surface asks', () => {
   const deferred = () => {

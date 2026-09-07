@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Plan 039/040 headline: the full documented flow under a NON-EXPORTING
  * custody backend (MockRemoteSigner — signBytes only, no key export, no
@@ -10,7 +11,7 @@
  * whole chain verifies.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockRemoteSigner } from '../../src/crypto/MockRemoteSigner';

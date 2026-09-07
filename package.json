@@ -17,7 +17,7 @@
     "verify:browser": "node scripts/check-browser-safety.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",
-    "typecheck:railway": "tsc -p .railway/tsconfig.json",
+    "typecheck:railway": "bun run --cwd packages/sdk tsc -p ../../.railway/tsconfig.json",
     "test:coverage": "turbo run test:coverage --filter='./packages/*'",
     "test:ci": "turbo run test:ci --filter='./packages/*'",
     "test:security": "turbo run test:security --filter='./packages/*'",
@@ -46,7 +46,12 @@
     "turbo": "^2.3.3"
   },
   "overrides": {
-    "human-id": "4.1.1"
+    "human-id": "4.1.1",
+    "brace-expansion": "^5.0.8",
+    "nanoid": "^3.3.16",
+    "postcss": "^8.5.23",
+    "js-yaml": "^4.3.1",
+    "fast-uri": "^3.1.6"
   },
   "engines": {
     "node": ">=20.10.0"

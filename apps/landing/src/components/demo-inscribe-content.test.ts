@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { demo } from '../content';
-import { depositErrorMessage } from './Demo';
+import { depositErrorMessage } from './demo-logic';
 
 /**
  * U5 — the old `inscribeGate` block mixed testnet4 copy with strings the

@@ -9,7 +9,7 @@
  */
 import { webvhArtifacts, sameOriginUrl, type CelLog } from './original-detail-data';
 import { hostedAssetEnvelope, hostedResourceRefs } from '../sdk/hosted-envelope';
-import { selectFundingUtxos, inscribeIsComplete, type DepositInfo } from '../components/Demo';
+import { selectFundingUtxos, inscribeIsComplete, type DepositInfo } from '../components/demo-logic';
 import { ensureAuthorshipAccount, type TurnkeyBitcoinClient } from '../auth/turnkey-session';
 import { authorshipPublicKeyMultibase, canAuthor } from '../sdk/turnkey-cel-signer';
 
@@ -115,10 +115,9 @@ export async function resumeInscribe(opts: {
   const { did, host, subOrgId, fundingAddress, signingClient, onProgress } = opts;
   try {
     onProgress?.('hydrating');
-    const cel = opts.cel ?? (await fetchHostedCel(did, host));
-    const contents = await fetchHostedResources(did, cel, host);
-    const built = hostedAssetEnvelope(cel, contents);
-    if ('problem' in built) return { ok: false, message: built.problem.message };
+    const { DemoEngine } = await import('../sdk/engine');
+    const engine = new DemoEngine({ authed: true, subOrgId });
+    await engine.hydrateFromWeb(did);
 
     const loadDeposit =
       opts.loadDeposit ??
@@ -143,9 +142,6 @@ export async function resumeInscribe(opts: {
       };
     }
 
-    const { DemoEngine } = await import('../sdk/engine');
-    const engine = new DemoEngine({ authed: true, subOrgId });
-    await engine.hydrate(built.envelope);
 
     onProgress?.('inscribing');
     // The existing path, unchanged.
@@ -158,11 +154,11 @@ export async function resumeInscribe(opts: {
     // return, so the browser reads it back off the provider — the same seam
     // the demo's completion panel reads. A status we cannot read means the
     // reveal is NOT known to have landed, so nothing is claimed.
-    const submitted = (engine.ordinalsProvider as { lastSubmit?: { status?: string } }).lastSubmit;
+    const submitted = engine.lastSubmission;
     return {
       ok: true,
       inscription: state.inscription,
-      complete: inscribeIsComplete(submitted?.status),
+      complete: inscribeIsComplete(submitted?.broadcast),
     };
   } catch (err) {
     return { ok: false, message: (err as Error)?.message ?? 'Could not inscribe this Original.' };

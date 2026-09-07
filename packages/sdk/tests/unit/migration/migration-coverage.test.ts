@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Core/Migration/Events coverage gaps
@@ -15,7 +16,7 @@ import { describe, it, test, expect, beforeEach, afterEach, beforeAll } from 'bu
 import { createHash } from 'crypto';
 import * as ed25519 from '@noble/ed25519';
 
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import { MigrationStateEnum } from '../../../src/migration/types';
 import type { MigrationAuditRecord } from '../../../src/migration/types';

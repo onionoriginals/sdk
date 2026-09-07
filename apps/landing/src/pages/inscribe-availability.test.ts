@@ -3,6 +3,7 @@
  * an inscribable row, a Finish row, and a row with no usable key — plus the
  * rule that Finish and Inscribe never appear together.
  */
+import { OriginalsSDK, createLocalSigner } from '@originals/sdk';
 import { describe, test, expect } from 'bun:test';
 import {
   inscribeAvailability,
@@ -10,18 +11,19 @@ import {
   rowAfterInscribe,
   unclaimedInscriptions,
 } from './inscribe-availability';
-import { inscribeIsComplete } from '../components/Demo';
+import { inscribeIsComplete } from '../components/demo-logic';
 import { yourOriginals } from '../content';
 import type { DisabledReason } from './inscribe-availability';
 import type { OriginalRow, PendingInscription } from './YourOriginals';
 import type { CelLog } from './original-detail-data';
 
-const MINE = 'did:key:z6Mkj2fLd1Cft3Y1d4keoArcN9fxSUKUXo49sdyPDHA796qk';
-const THEIRS = 'did:key:z6MkvvR62AzMMmNR4NS9wB5ksUCLNfgDGTbG6uEKM3MU6NWz';
-
-const celFor = (controller: string): CelLog => ({
-  events: [{ type: 'create', data: { controller, resources: [] } }],
-});
+const mine = createLocalSigner('Ed25519', new Uint8Array(32).fill(1));
+const theirs = createLocalSigner('Ed25519', new Uint8Array(32).fill(2));
+const MINE = mine.controller;
+const THEIRS = theirs.controller;
+const mineAsset = await OriginalsSDK.create({ signer: mine }).lifecycle.createAsset([]);
+const theirAsset = await OriginalsSDK.create({ signer: theirs }).lifecycle.createAsset([]);
+const celFor = (controller: string): CelLog => controller === MINE ? mineAsset.celLog : theirAsset.celLog;
 
 const row = (over: Partial<OriginalRow> = {}): OriginalRow => ({
   did: 'did:webvh:scid:example.test:abc',

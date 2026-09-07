@@ -5,6 +5,7 @@
  * completes from server state via rebroadcast.
  */
 import { describe, test, expect } from 'bun:test';
+import { inscriptionFixture } from './inscription-pair-fixture';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,12 +24,12 @@ const USER_PUB = secp256k1.getPublicKey(USER_PRIV, true);
 const USER_P2WPKH = btc.p2wpkh(USER_PUB, btc.TEST_NETWORK);
 const USER_ADDRESS = USER_P2WPKH.address!;
 const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
+const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
 /**
  * A structurally-valid signed commit (1 input spending the funding UTXO, 2
- * outputs) + reveal (1 input spending commit:0, 1 output). Signature validity
- * is not what the route checks — the invariants are structural — but signing
- * for real keeps the txs parseable as broadcast-ready raw hex.
+ * outputs) + reveal (1 input spending commit:0, 1 output). The reveal carries a genuine Taproot inscription witness so the route
+ * verifies both transaction invariants and the committed script/signature.
  */
 function buildPair(
   fundingTxid = 'a'.repeat(64),
@@ -42,7 +43,7 @@ function buildPair(
     sequence: 0xfffffffd,
     witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n },
   });
-  commit.addOutputAddress(USER_ADDRESS, 20_000n, btc.TEST_NETWORK); // commit output
+  commit.addOutputAddress(INSCRIPTION.address, 20_000n, btc.TEST_NETWORK); // commit output
   commit.addOutputAddress(opts.changeTo ?? USER_ADDRESS, 29_000n, btc.TEST_NETWORK); // change
   commit.sign(USER_PRIV);
   commit.finalize();
@@ -54,11 +55,10 @@ function buildPair(
     txid: commitTxId,
     index: 0,
     sequence: 0xfffffffd,
-    witnessUtxo: { script: USER_P2WPKH.script, amount: 20_000n },
+    witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
   });
   reveal.addOutputAddress(opts.revealTo ?? USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
-  reveal.sign(USER_PRIV);
-  reveal.finalize();
+  INSCRIPTION.finalize(reveal, commit);
   const revealTxHex = hex.encode(reveal.extract());
 
   return {
@@ -90,7 +90,7 @@ function buildMultiPair(
     });
   }
   const total = utxos.reduce((n, u) => n + u.value, 0);
-  commit.addOutputAddress(USER_ADDRESS, BigInt(commitValue), btc.TEST_NETWORK);
+  commit.addOutputAddress(INSCRIPTION.address, BigInt(commitValue), btc.TEST_NETWORK);
   commit.addOutputAddress(USER_ADDRESS, BigInt(total - commitValue - 1_000), btc.TEST_NETWORK);
   commit.sign(USER_PRIV);
   commit.finalize();
@@ -100,11 +100,10 @@ function buildMultiPair(
     txid: commit.id,
     index: 0,
     sequence: 0xfffffffd,
-    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(commitValue) },
+    witnessUtxo: { script: INSCRIPTION.script, amount: BigInt(commitValue) },
   });
   reveal.addOutputAddress(USER_ADDRESS, BigInt(commitValue - 1_000), btc.TEST_NETWORK);
-  reveal.sign(USER_PRIV);
-  reveal.finalize();
+  INSCRIPTION.finalize(reveal, commit);
 
   return {
     signedCommitHex: hex.encode(commit.extract()),
@@ -130,6 +129,7 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
 
 function harness(opts?: {
+  dataDir?: string;
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
@@ -160,7 +160,7 @@ function harness(opts?: {
     },
     async estimateFee() { return 3; },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-  const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
+  const dataDir = opts?.dataDir ?? mkdtempSync(join(tmpdir(), 'insc-'));
   const store = createInscriptionsStore({ dataDir });
   // Bind the deposit address up front, as the real flow does when a creator
   // reads it before funding. Without this the route refuses (#493): an unbound
@@ -276,14 +276,13 @@ describe('POST /api/btc/inscribe', () => {
     const rival = (() => {
       const commit = new btc.Transaction();
       commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(USER_ADDRESS, 25_000n, btc.TEST_NETWORK);
+      commit.addOutputAddress(INSCRIPTION.address, 25_000n, btc.TEST_NETWORK);
       commit.sign(USER_PRIV);
       commit.finalize();
       const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 25_000n } });
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 25_000n } });
       reveal.addOutputAddress(USER_ADDRESS, 24_000n, btc.TEST_NETWORK);
-      reveal.sign(USER_PRIV);
-      reveal.finalize();
+      INSCRIPTION.finalize(reveal, commit);
       return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
     })();
     const res = await post(routes, rival);
@@ -309,14 +308,13 @@ describe('POST /api/btc/inscribe', () => {
     const rebuilt = (() => {
       const commit = new btc.Transaction();
       commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
       commit.sign(USER_PRIV);
       commit.finalize();
       const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
       reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      reveal.sign(USER_PRIV);
-      reveal.finalize();
+      INSCRIPTION.finalize(reveal, commit);
       return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
     })();
     const res = await post(routes, rebuilt);
@@ -348,14 +346,13 @@ describe('POST /api/btc/inscribe', () => {
     const rebuilt = (() => {
       const commit = new btc.Transaction();
       commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
       commit.sign(USER_PRIV);
       commit.finalize();
       const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
       reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      reveal.sign(USER_PRIV);
-      reveal.finalize();
+      INSCRIPTION.finalize(reveal, commit);
       return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
     })();
     const res = await post(routes, rebuilt);
@@ -494,14 +491,13 @@ describe('GET /api/btc/inscribe', () => {
     const pairB = (() => {
       const commit = new btc.Transaction();
       commit.addInput({ txid: pairA.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
       commit.sign(USER_PRIV);
       commit.finalize();
       const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
       reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      reveal.sign(USER_PRIV);
-      reveal.finalize();
+      INSCRIPTION.finalize(reveal, commit);
       return { ...pairA, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
     })();
     expect((await post(h.routes, pairB)).status).toBe(200);
@@ -594,14 +590,13 @@ describe('GET /api/btc/inscribe', () => {
     const pairB = (() => {
       const commit = new btc.Transaction();
       commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(USER_ADDRESS, 30_000n, btc.TEST_NETWORK);
+      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
       commit.sign(USER_PRIV);
       commit.finalize();
       const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 30_000n } });
+      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
       reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      reveal.sign(USER_PRIV);
-      reveal.finalize();
+      INSCRIPTION.finalize(reveal, commit);
       return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
     })();
     expect((await post(routes, pairB)).status).toBe(200);
@@ -895,6 +890,58 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
   });
 
+  test('manual retry restores both evicted transactions from a previously broadcast pair after restart', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    expect((await post(initial.routes, pair)).status).toBe(200);
+    expect(initial.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+    let commitPresent = false;
+    const attempts: string[] = [];
+    const restarted = harness({ dataDir: initial.dataDir, broadcast: async raw => {
+      attempts.push(raw);
+      if (raw === pair.signedCommitHex) commitPresent = true;
+      else if (!commitPresent) throw new Error('bad-txns-inputs-missingorspent');
+      return raw === pair.signedCommitHex ? pair.commitTxId : pair.revealTxId;
+    } });
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const response = await restarted.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(response.status).toBe(200);
+    expect((await response.json()).status).toBe('reveal_broadcast');
+    expect(attempts).toEqual([pair.revealTxHex, pair.signedCommitHex, pair.revealTxHex]);
+    expect(restarted.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(restarted.store.get('sub-1', pair.commitTxId)?.rebroadcastAt).toBeDefined();
+  });
+
+  test('manual retry journals the attempt before exposing either retained transaction', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    await post(initial.routes, pair);
+    const restarted = harness({ dataDir: initial.dataDir, broadcast: async raw => {
+      expect(restarted.store.get('sub-1', pair.commitTxId)?.rebroadcastAt).toBeDefined();
+      return raw === pair.signedCommitHex ? pair.commitTxId : pair.revealTxId;
+    } });
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    expect((await restarted.routes.inscribeRebroadcast(req, new URL(req.url))).status).toBe(200);
+    expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
+  });
+
+  test('manual retry stops before broadcast when the durable attempt journal fails', async () => {
+    const pair = buildPair();
+    const initial = harness();
+    await post(initial.routes, pair);
+    const restarted = harness({ dataDir: initial.dataDir });
+    restarted.store.markRebroadcast = () => { throw new Error('disk unavailable'); };
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const response = await restarted.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe('inscription_reconciliation_failed');
+    expect(restarted.broadcasts).toEqual([]);
+    const retained = restarted.store.get('sub-1', pair.commitTxId)!;
+    expect(retained.signedCommitHex).toBe(pair.signedCommitHex);
+    expect(retained.revealTxHex).toBe(pair.revealTxHex);
+    expect(retained.rebroadcastAt).toBeUndefined();
+  });
+
   test('a reveal rejected for an unrelated reason does NOT re-push the commit', async () => {
     const pair = buildPair();
     let failReveal = true;
@@ -1041,10 +1088,62 @@ describe('evicted-reveal recovery', () => {
     const h = harness();
     parked(h.store, 45 * 60_000);
     await poll(h);
-    expect(h.broadcasts).toEqual(['02bb']);
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
     // rebroadcastAt is the throttle: an immediate second poll must not re-push.
     await poll(h);
-    expect(h.broadcasts).toEqual(['02bb']);
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
+  });
+
+  test('background recovery restores an evicted commit and reveal from the exact durable pair', async () => {
+    const pair = buildPair();
+    let commitPresent = false;
+    const attempts: string[] = [];
+    const h = harness();
+    parked(h.store, 45 * 60_000, { ...pair, inscriptionId: `${pair.revealTxId}i0` });
+    const restarted = harness({ dataDir: h.dataDir, broadcast: async raw => {
+      expect(h.store.get('sub-1', pair.commitTxId)?.rebroadcastAt).toBeDefined();
+      attempts.push(raw);
+      if (raw === pair.signedCommitHex) commitPresent = true;
+      else if (!commitPresent) throw new Error('bad-txns-inputs-missingorspent');
+      return raw === pair.signedCommitHex ? pair.commitTxId : pair.revealTxId;
+    } });
+    await restarted.routes.sweepInscriptions();
+    expect(attempts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(restarted.broadcasts).toEqual(attempts);
+    await restarted.routes.sweepInscriptions();
+    expect(attempts).toHaveLength(2);
+  });
+
+  test('an ambiguous parent retry stops child submission and retains the throttled pair', async () => {
+    const attempts: string[] = [];
+    const h = harness({ broadcast: async raw => {
+      attempts.push(raw);
+      throw new Error('connection reset after submission');
+    } });
+    const before = parked(h.store, 45 * 60_000);
+    expect((await poll(h)).status).toBe(200);
+    expect(attempts).toEqual(['02aa']);
+    const after = h.store.get('sub-1', before.commitTxId)!;
+    expect(after.status).toBe('reveal_broadcast');
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.signedCommitHex).toBe(before.signedCommitHex);
+    expect(after.revealTxHex).toBe(before.revealTxHex);
+    expect(after.rebroadcastAt).toBeDefined();
+    await h.routes.sweepInscriptions();
+    expect(attempts).toEqual(['02aa']);
+  });
+
+  test('a stale pair is never replayed when its durable retry journal cannot be written', async () => {
+    const h = harness();
+    const before = parked(h.store, 45 * 60_000);
+    h.store.markRebroadcast = () => { throw new Error('disk unavailable'); };
+    const response = await poll(h);
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe('inscription_reconciliation_failed');
+    expect(h.broadcasts).toEqual([]);
+    expect(h.store.get('sub-1', before.commitTxId)?.rebroadcastAt).toBeUndefined();
+    expect((await h.routes.sweepInscriptions()).unreadable).toEqual(['sub-1']);
+    expect(h.broadcasts).toEqual([]);
   });
 
   test('a re-push does NOT reset the status clock the manual retry reads', async () => {
@@ -1056,7 +1155,7 @@ describe('evicted-reveal recovery', () => {
     const h = harness();
     const before = parked(h.store, 8 * 60 * 60_000);
     await poll(h);
-    expect(h.broadcasts).toEqual(['02bb']); // it did re-push…
+    expect(h.broadcasts).toEqual(['02aa', '02bb']); // it did re-push…
     const rec = h.store.get('sub-1', 'c'.repeat(64))!;
     expect(rec.updatedAt).toBe(before.updatedAt); // …without touching the status clock
     expect(rec.status).toBe('reveal_broadcast');
@@ -1080,6 +1179,26 @@ describe('evicted-reveal recovery', () => {
     expect(rec.status).toBe('confirmed');
     expect(rec.retired).toBe(true);
     expect(rec.revealTxHex).toBeUndefined(); // artifacts dropped once terminal
+  });
+
+  test('background sweep recovers without an authenticated browser poll and retains reorg bytes', async () => {
+    const h = harness();
+    parked(h.store, 45 * 60_000, { status: 'confirmed' });
+    const first = await h.routes.sweepInscriptions();
+    expect(first.processed).toBe(1);
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.revealTxHex).toBe('02bb');
+    await h.routes.sweepInscriptions();
+    expect(h.broadcasts).toHaveLength(2);
+  });
+
+  test('background sweep replays a stranded signed pair after a lost commit acknowledgement', async () => {
+    const h = harness();
+    parked(h.store, 45 * 60_000, { status: 'signed' });
+    await h.routes.sweepInscriptions();
+    expect(h.broadcasts).toEqual(['02aa', '02bb']);
+    expect(h.store.get('sub-1', 'c'.repeat(64))!.status).toBe('reveal_broadcast');
   });
 
   test('a stale reveal is surfaced to the monitoring sweep', () => {
@@ -1509,35 +1628,39 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
 
 test('one confirmation survives a restart, demotes on reorg, and retires only at six', async () => {
   let confirmations = 1;
-  const h = harness({ txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
+  let h = harness({ txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
   const pair = buildPair();
   await post(h.routes, pair);
   const poll = async () => {
     const req = authedReq('/api/btc/inscribe', undefined, 'GET');
-    return h.routes.inscribeList(req, new URL(req.url));
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { inscriptions: Array<{ status: string }> }).inscriptions[0].status;
   };
-  await poll();
-  const reloaded = createInscriptionsStore({ dataDir: h.dataDir });
+  expect(await poll()).toBe('confirmed');
+  h = harness({ dataDir: h.dataDir, txStatus: () => ({ confirmed: confirmations > 0, confirmations }) });
+  const reloaded = h.store;
   expect(reloaded.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   confirmations = 0;
-  await poll();
+  expect(await poll()).toBe('reveal_broadcast');
   expect(reloaded.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
   expect(h.broadcasts.slice(-2)).toEqual([pair.signedCommitHex, pair.revealTxHex]);
   confirmations = 5;
-  await poll();
+  expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   confirmations = 6;
-  await poll();
+  expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
 });
 
-test('failed reorg rebroadcasts keep the pair recoverable for a later manual retry', async () => {
+test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(
+  'failed reorg rebroadcasts retain the exact pair for manual retry: %s', async (rejection) => {
   let confirmations = 1;
   let unavailable = false;
   const h = harness({
     txStatus: () => ({ confirmed: confirmations > 0, confirmations }),
     broadcast: async () => {
-      if (unavailable) throw new Error('local node temporarily unavailable');
+      if (unavailable) throw new Error(rejection);
       return 'f'.repeat(64);
     },
   });
@@ -1568,4 +1691,132 @@ test('failed reorg rebroadcasts keep the pair recoverable for a later manual ret
   await poll();
   expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
   expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+});
+
+
+test('manual recovery demotes a prior confirmation even when the original commit now conflicts', async () => {
+  let confirmed = true;
+  let conflict = false;
+  const attempts: string[] = [];
+  const h = harness({
+    txStatus: () => ({ confirmed, confirmations: confirmed ? 1 : 0 }),
+    broadcast: async (txHex) => {
+      attempts.push(txHex);
+      if (conflict) throw new Error('txn-mempool-conflict');
+      return 'f'.repeat(64);
+    },
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const listReq = authedReq('/api/btc/inscribe', undefined, 'GET');
+  await h.routes.inscribeList(listReq, new URL(listReq.url));
+  expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
+  confirmed = false;
+  conflict = true;
+  attempts.length = 0;
+  const retry = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+  const response = await h.routes.inscribeRebroadcast(retry, new URL(retry.url));
+  expect(response.status).toBe(502);
+  const reloaded = createInscriptionsStore({ dataDir: h.dataDir });
+  const pending = reloaded.get('sub-1', pair.commitTxId)!;
+  expect(pending.status).toBe('reveal_broadcast');
+  expect(pending.signedCommitHex).toBe(pair.signedCommitHex);
+  expect(pending.revealTxHex).toBe(pair.revealTxHex);
+  expect(pending.retired).not.toBe(true);
+  expect(attempts).toEqual([pair.signedCommitHex]);
+});
+
+test('a superseded prior confirmation is still reconciled when its commit wins after a reorg', async () => {
+  const pair = buildPair();
+  const rival = buildMultiPair([{ txid: pair.fundingUtxo.txid, vout: 0, value: 50_000 }], 25_000);
+  const h = harness({ txStatus: (txid) => ({ confirmed: txid === pair.commitTxId || txid === pair.revealTxId, confirmations: 1 }) });
+  const at = new Date().toISOString();
+  const record = (p: typeof pair | typeof rival, extra: Partial<InscriptionRecord>): InscriptionRecord => ({
+    commitTxId: p.commitTxId, revealTxId: p.revealTxId, inscriptionId: `${p.revealTxId}i0`,
+    signedCommitHex: p.signedCommitHex, revealTxHex: p.revealTxHex,
+    fundingOutpoints: [`${pair.fundingUtxo.txid}:0`], changeAddress: USER_ADDRESS,
+    status: 'reveal_broadcast', createdAt: at, updatedAt: at, ...extra,
+  });
+  h.store.create('sub-1', record(pair, { status: 'confirmed', superseded: true }));
+  h.store.create('sub-1', record(rival, {}));
+  const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+  const response = await h.routes.inscribeList(req, new URL(req.url));
+  expect(response.status).toBe(200);
+  expect(h.store.get('sub-1', pair.commitTxId)?.superseded).not.toBe(true);
+  expect(h.store.get('sub-1', rival.commitTxId)?.superseded).toBe(true);
+  expect(h.broadcasts).toEqual([pair.revealTxHex]);
+  expect(h.store.get('sub-1', rival.commitTxId)?.revealTxHex).toBe(rival.revealTxHex);
+});
+
+describe('bounded durable reconciliation across recovery categories (#496)', () => {
+  function seed(h: ReturnType<typeof harness>, index: number, status: InscriptionRecord['status'], superseded = false) {
+    const pair = buildPair(index.toString(16).padStart(64, '0'));
+    const at = new Date(Date.now() - 45 * 60_000).toISOString();
+    h.store.create('sub-1', { ...pair, inscriptionId: pair.revealTxId + 'i0', fundingOutpoints: [pair.fundingUtxo.txid + ':0'], status, createdAt: at, updatedAt: at, ...(superseded ? { superseded: true } : {}) });
+    return pair;
+  }
+  async function poll(h: ReturnType<typeof harness>) {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    return h.routes.inscribeList(req, new URL(req.url));
+  }
+
+  test('a permanent superseded backlog cannot starve stuck commits or retained confirmations under five reads', async () => {
+    const committed = new Set<string>(), confirmed = new Set<string>();
+    let reads = 0;
+    const h = harness({ txStatus: txid => { reads++; return { confirmed: committed.has(txid) || confirmed.has(txid), confirmations: confirmed.has(txid) ? 6 : 1 }; } });
+    for (let i = 1; i <= 6; i++) seed(h, i, 'signed', true);
+    const stuck = Array.from({ length: 6 }, (_, i) => seed(h, i + 20, 'commit_broadcast'));
+    const reveals = Array.from({ length: 6 }, (_, i) => seed(h, i + 40, 'reveal_broadcast'));
+    stuck.forEach(pair => committed.add(pair.commitTxId));
+    reveals.forEach(pair => confirmed.add(pair.revealTxId));
+    // Allow two rotations while completed commits enter the confirmation list.
+    for (let pass = 0; pass < 24; pass++) {
+      reads = 0;
+      expect((await poll(h)).status).toBe(200);
+      expect(reads).toBeLessThanOrEqual(5);
+    }
+    expect(stuck.every(pair => h.store.get('sub-1', pair.commitTxId)?.status === 'reveal_broadcast')).toBe(true);
+    expect(reveals.every(pair => h.store.get('sub-1', pair.commitTxId)?.retired)).toBe(true);
+  });
+
+  test('reorg demotion and rebroadcast-journal write failures surface as 503 before any broadcast', async () => {
+    for (const operation of ['setStatus', 'markRebroadcast', 'retire', 'reinstate'] as const) {
+      const h = harness({ txStatus: { confirmed: operation === 'retire' || operation === 'reinstate', confirmations: 6 } });
+      const pair = seed(h, 80, operation === 'setStatus' || operation === 'retire' ? 'confirmed' : 'reveal_broadcast', operation === 'reinstate');
+      h.store[operation] = () => { throw new Error('simulated disk full'); };
+      const response = await poll(h);
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toBe('inscription_reconciliation_failed');
+      expect(h.broadcasts).toEqual([]);
+      expect(createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+      expect((await h.routes.sweepInscriptions()).unreadable).toEqual(['sub-1']);
+    }
+  });
+
+  test('provider status outages preserve observations without being reported as store failures', async () => {
+    const h = harness({ txStatus: () => { throw new Error('provider unavailable'); } });
+    const pair = seed(h, 85, 'confirmed');
+    expect((await poll(h)).status).toBe(200);
+    expect((await h.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(h.broadcasts).toEqual([]);
+    expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
+    expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
+  });
+
+  test('a failed status write after delivery remains an explicit failure and restart retries the durable pair', async () => {
+    const h = harness({ txStatus: { confirmed: true, confirmations: 1 } });
+    const pair = seed(h, 90, 'commit_broadcast');
+    h.store.setStatus = () => { throw new Error('simulated disk full after delivery'); };
+    const response = await poll(h);
+    expect(response.status).toBe(503);
+    expect(h.broadcasts).toEqual([pair.revealTxHex]);
+    const saved = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
+    expect(saved.status).toBe('commit_broadcast');
+    expect(saved.rebroadcastAt).toBeDefined();
+    expect(saved.revealTxHex).toBe(pair.revealTxHex);
+    const restarted = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
+    expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
+    expect(restarted.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+  });
 });

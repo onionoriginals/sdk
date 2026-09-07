@@ -6,7 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "V3.md",
+    "LICENSE"
   ],
   "sideEffects": false,
   "exports": {

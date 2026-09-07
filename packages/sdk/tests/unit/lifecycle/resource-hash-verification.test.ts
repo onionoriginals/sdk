@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for issue #347: resource content must be verified against
  * its declared hash at create/publish/inscribe time — a signed ResourceMigrated
@@ -6,7 +7,7 @@
  */
 import { describe, test, expect } from 'bun:test';
 import { createHash } from 'crypto';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

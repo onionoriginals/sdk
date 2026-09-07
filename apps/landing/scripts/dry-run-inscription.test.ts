@@ -4,7 +4,7 @@
  * mechanically, and fail LOUDLY if a broadcast ever gets through.
  */
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as btc from '@scure/btc-signer';
@@ -13,17 +13,18 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { generateArtwork } from '../src/sdk/artwork';
-import { cbor } from '@originals/sdk/cel';
+import { parseDocument, encodeDocument } from '@originals/sdk';
 import {
   BROADCAST_REFUSED_SENTINEL,
   DryRunBroadcastRefused,
   decodeEnvelope,
-  didDocumentIdOf,
+  boundaryDidOf,
   mockFixture,
   neverBroadcast,
   p2wpkhAddressOf,
   privateKeyFromWif,
   renderReport,
+  resolvePayload,
   runDryRun,
   summarizeTx,
   verifyCommitSignatures,
@@ -31,7 +32,7 @@ import {
   type DryRunReport,
 } from './dry-run-inscription';
 
-const payload = { content: generateArtwork('Dry run test', 'Artwork', 1).svg, contentType: 'image/svg+xml', filename: 'artwork.svg' };
+const payload = { content: new TextEncoder().encode(generateArtwork('Dry run test', 'Artwork', 1).svg), contentType: 'image/svg+xml', filename: 'artwork.svg' };
 const dataDir = () => mkdtempSync(join(tmpdir(), 'dry-run-test-'));
 
 const failed = (r: DryRunReport) => r.checks.filter((c) => c.result === 'fail').map((c) => `${c.id}: ${c.detail}`);
@@ -92,11 +93,11 @@ describe('runDryRun against the mock provider', () => {
     expect(report.reveal!.feeRateSatVb!).toBeGreaterThanOrEqual(report.fee.routeRateSatVb!);
     expect(report.fee.rederivedQuoteSats).toBe(report.fee.quotedCostSats);
 
-    // The envelope carries the payload and its DID document is keyed by the identity sat.
+    // The envelope carries the payload and its verified CEL boundary alias is keyed by the identity sat.
     expect(report.envelope?.bodySha256).toBe(report.payload.sha256);
     expect(report.envelope?.contentType).toBe('image/svg+xml');
     expect(report.expectedDid).toBe(`did:btco:${report.satoshi}`);
-    expect(report.envelope?.metadataDidDocumentId).toBe(report.expectedDid);
+    expect(report.envelope?.metadataBoundaryDid).toBe(report.expectedDid);
     expect(report.envelope?.signature.ok).toBe(true);
     expect(byId(report, 'commit.signed').detail).toContain('#1 ECDSA valid');
     expect(report.inscriptionId).toBe(`${report.reveal!.txid}i0`);
@@ -106,7 +107,7 @@ describe('runDryRun against the mock provider', () => {
     expect(report.server.inscribeBody?.error).toBe('commit_broadcast_failed');
     expect(String(report.server.inscribeBody?.message)).toContain(BROADCAST_REFUSED_SENTINEL);
     expect(report.server.recordStatus).toBe('signed');
-    expect(report.server.broadcastAttempts).toEqual(['broadcastTransaction', 'broadcastTransaction']);
+    expect(report.server.broadcastAttempts).toEqual(['broadcastTransaction']);
     expect(report.server.broadcastRouteCalls).toBe(0);
     expect(report.freshness.firstInternalKey).not.toBe(report.freshness.secondInternalKey);
 
@@ -124,7 +125,7 @@ describe('runDryRun against the mock provider', () => {
       mode: 'mock',
       payload,
       world: (contentBytes) => mockFixture({ network: 'testnet', contentBytes }),
-      webvhDomain: 'localhost',
+      webvhDomain: 'dry-run.localhost',
       dataDir: dataDir(),
     });
     expect(failed(report)).toEqual([]);
@@ -170,6 +171,20 @@ describe('runDryRun against the mock provider', () => {
     expect(report.commit).toBeNull();
     expect(report.server.broadcastAttempts).toEqual([]);
   }, 30_000);
+
+  test('incomplete sat evidence blocks preparation before any submission', async () => {
+    const report = await runDryRun({ network: 'mainnet', mode: 'mock', payload,
+      world: bytes => {
+        const fixture = mockFixture({ network: 'mainnet', contentBytes: bytes });
+        const snapshot = fixture.readProvider.getSatSnapshot!.bind(fixture.readProvider);
+        fixture.readProvider.getSatSnapshot = async sat => ({ ...await snapshot(sat), indexHealthy: false });
+        return fixture;
+      }, webvhDomain: 'originals.build', dataDir: dataDir() });
+    expect(report.verdict).toBe('fail');
+    expect(report.server.broadcastAttempts).toEqual([]);
+    expect(report.server.inscribeStatus).toBeNull();
+    expect(report.server.buildError).toContain('complete fresh accepted sat observation');
+  });
 
   /**
    * The property the harness exists for. If the guard is bypassed and the
@@ -243,15 +258,31 @@ describe('signature verification', () => {
 });
 
 describe('helpers', () => {
-  test('didDocumentIdOf reads the DID document id structurally, not by substring', () => {
-    const did = 'did:btco:123';
-    const right = cbor.encode({ didDocument: { id: did, alsoKnownAs: ['did:cel:x'] }, celLog: { events: [] } });
-    expect(didDocumentIdOf(right)).toBe(did);
-    // The expected DID appears in the bytes, but not as the document id.
-    const elsewhere = cbor.encode({ didDocument: { id: 'did:btco:999', alsoKnownAs: [did] } });
-    expect(didDocumentIdOf(elsewhere)).toBe('did:btco:999');
-    expect(didDocumentIdOf(new Uint8Array([0xff, 0x00]))).toBeNull();
-    expect(didDocumentIdOf(cbor.encode({ celLog: {} }))).toBeNull();
+  test('boundaryDidOf verifies the full signed CEL boundary and rejects truncated or malformed history', async () => {
+    const report = await runDryRun({ network: 'mainnet', mode: 'mock', payload,
+      world: bytes => mockFixture({ network: 'mainnet', contentBytes: bytes }), webvhDomain: 'originals.build', dataDir: dataDir() });
+    expect(failed(report)).toEqual([]);
+    const leaf = btc.Transaction.fromRaw(hex.decode(report.reveal!.hex)).getInput(0).finalScriptWitness![1];
+    const metadata = decodeEnvelope(leaf).metadata;
+    expect(boundaryDidOf(metadata)).toBe(report.expectedDid);
+    const document = parseDocument(metadata, 'cbor');
+    expect(boundaryDidOf(encodeDocument({ log: document.log.slice(0, -1) }, 'cbor'))).toBeNull();
+    expect(boundaryDidOf(encodeDocument({ log: document.log.slice(-1) }, 'cbor'))).toBeNull();
+    expect(boundaryDidOf(new Uint8Array([0xff, 0x00]))).toBeNull();
+  });
+
+  test('binary PNG file is preserved byte for byte through mainnet-format construction', async () => {
+    const png = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64'));
+    const path = join(dataDir(), 'art.png'); writeFileSync(path, png);
+    const binary = resolvePayload({ DRY_RUN_PAYLOAD: path });
+    expect(binary.content).toEqual(png);
+    expect(binary.contentType).toBe('image/png');
+    const report = await runDryRun({ network: 'mainnet', mode: 'mock', payload: binary,
+      world: bytes => mockFixture({ network: 'mainnet', contentBytes: bytes }), webvhDomain: 'originals.build', dataDir: dataDir() });
+    expect(failed(report)).toEqual([]);
+    expect(report.envelope?.bodyBytes).toBe(png.length);
+    expect(report.envelope?.bodySha256).toBe(hex.encode(sha256(png)));
+    expect(report.envelope?.metadataBoundaryDid).toBe(report.expectedDid);
   });
 
   test('decodeEnvelope reads content type, body and metadata back out of an ord leaf script', () => {

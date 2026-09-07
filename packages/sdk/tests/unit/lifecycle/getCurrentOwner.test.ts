@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Phase-4 Task 4: LifecycleManager.getCurrentOwner(asset).
  *
@@ -6,7 +7,7 @@
  * authorship only; #366 ownership-is-sat).
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, OriginalsAsset } from '../../../src';
+import { OriginalsSDK, OriginalsAsset } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

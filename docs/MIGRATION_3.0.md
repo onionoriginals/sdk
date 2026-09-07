@@ -166,6 +166,18 @@ The CEL core — create, append, verify event logs — is now its own package wi
 
 ---
 
+## 10. Retained `/vc` utilities use current RDFC-1.0 canonicalization
+
+**Breaks:** some credentials signed with earlier JSON-LD canonicalization can fail verification through credential utilities exported from `@originals/sdk` after upgrading.
+
+The retained credential utilities now use `jsonld` 9 and `rdf-canonize` 5. This also moves the JSON-LD HTTP client onto the maintained Undici 6 dependency line. The canonicalizer implements RDFC-1.0, matching the utilities' `eddsa-rdfc-2022` proof contract; its accepted `URDNA2015` algorithm name is an alias for that implementation.
+
+Canonical N-Quads now escape tabs and other control characters instead of leaving them as raw characters. For example, a literal tab becomes the two characters `\t`, and U+0001 becomes `\u0001`. Those changed bytes change a credential's signature input. An existing signature made over the older bytes cannot be carried over by relabelling the proof: the issuer must reissue affected credentials using the current canonicalization.
+
+The canonicalizer also enforces complexity limits for graphs with certain blank-node structures. Previously accepted graphs may now be rejected during signing or verification. Check representative existing credentials before upgrading; affected graphs may need to be simplified and their credentials reissued. See the [upstream canonicalization changes](https://github.com/digitalbazaar/rdf-canonize/blob/main/CHANGELOG.md) for the escaping and complexity-control details.
+
+**The CEL 3 event format is unaffected.** CEL 3 event signing and verification use their own deterministic JSON/CBOR encoding, independently of these retained JSON-LD credential utilities.
+
 ## Recommended upgrade order
 
 1. Configure custody (§1) — everything else depends on it.

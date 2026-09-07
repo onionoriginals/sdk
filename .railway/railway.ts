@@ -32,7 +32,7 @@ export default defineRailway(() => {
     // Omitting the source makes the plan detach the GitHub repo from the service.
     source: github("onionoriginals/sdk", { branch: "main" }),
     build: {
-      builder: "NIXPACKS",
+      builder: "RAILPACK",
       buildCommand:
         "bun install && bun run build && cd apps/landing && bun run build",
     },
@@ -71,6 +71,13 @@ export default defineRailway(() => {
       TURNKEY_API_PRIVATE_KEY: preserve(),
       TURNKEY_ORGANIZATION_ID: preserve(),
       QUICKNODE_ENDPOINT: preserve(),
+      // Byte-exact CEL 3 reads require one verified content transport. Keep
+      // its operator-selected gateway configuration across authoritative apply.
+      QUICKNODE_CONTENT_BASE_URL: preserve(),
+      QUICKNODE_CONTENT_ENCODING: preserve(),
+      // Historical dashboard value; unused by this SDK, retained so this
+      // release's infrastructure plan does not delete operator state.
+      WEBVH_DOMAIN: preserve(),
       BTC_INDEXER_TOKEN: preserve(),
       // Set on the live service but read by nothing in this repo; preserved so
       // apply does not delete it. Decide its fate on the dashboard, not here.

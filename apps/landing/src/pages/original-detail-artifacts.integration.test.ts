@@ -6,16 +6,9 @@
  * artifacts fold into the timeline/summary/digests the page renders.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { withLiveInscriptionStatus, type OriginalRow } from './YourOriginals';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { DemoEngine } from '../sdk/engine';
-import { createOriginalsStore } from '../../server/originals-store';
-import { createOriginalsRoutes } from '../../server/originals-routes';
-import { createWebvhHostStore } from '../../server/webvh-host';
-import { buildFetch } from '../../server/app';
+import { installCel3Host, engineWithSigner } from '../sdk/cel3-test-helpers';
 import {
   webvhArtifacts,
   celTimeline,
@@ -27,49 +20,17 @@ import {
   type CelLog
 } from './original-detail-data';
 
-const JWT = 'test-secret-at-least-32-chars-long!!';
-const HOST = 'demo.test';
-
-const toHex = (bytes: Uint8Array) =>
-  Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-
-// Route the browser's durable PUTs, the summary POST, AND the resolver's https
-// GETs through one in-process server (buildFetch) with a real durable store.
-function installServerFetch(store: ReturnType<typeof createOriginalsStore>) {
-  const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
-  const apiRoutes = { 'POST /api/originals': originals.record, 'GET /api/originals': originals.list } as Record<
-    string,
-    (req: Request, url: URL) => Response | Promise<Response>
-  >;
-  const fetchFn = buildFetch({ apiRoutes, hostStore: createWebvhHostStore(), distDir: '/nonexistent/', originals });
-  const cookie = getAuthCookieConfig(signToken('sub-1', 's@b.com', undefined, { secret: JWT }));
-  const cookieHeader = `${cookie.name}=${cookie.value}`;
-  const real = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === 'string' ? input : input.toString();
-    const url = new URL(raw, `http://${HOST}`);
-    const headers = new Headers(init?.headers as HeadersInit);
-    headers.set('cookie', cookieHeader); // the browser would attach the auth cookie
-    return fetchFn(new Request(url, { ...init, headers }));
-  }) as unknown as typeof fetch;
-  return () => { globalThis.fetch = real; };
-}
+const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
 describe('detail page artifacts after a real durable publish', () => {
-  let restore: () => void;
-  let store: ReturnType<typeof createOriginalsStore>;
-
-  beforeEach(() => {
-    (import.meta as unknown as { env: Record<string, string> }).env ??= {};
-    (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = HOST;
-    store = createOriginalsStore({ dataDir: mkdtempSync(join(tmpdir(), 'od-artifacts-')) });
-    restore = installServerFetch(store);
-  });
-  afterEach(() => restore());
+  let host: ReturnType<typeof installCel3Host>;
+  beforeEach(() => { host = installCel3Host('sub-1'); });
+  afterEach(() => host.restore());
 
   test('every derived artifact URL serves, and the artifacts fold into the page models', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>';
-    const engine = new DemoEngine({ authed: true, subOrgId: 'sub-1' });
+    const { engine } = engineWithSigner('sub-1');
+    const store = host.store;
     await engine.create('Detail Piece', 'Artwork', svg);
     const state = await engine.publish();
     const did = state.webvhDid!;
@@ -96,6 +57,26 @@ describe('detail page artifacts after a real durable publish', () => {
     expect(steps[1].facts.find((f) => f.label === 'Published as')?.value).toBe(did);
     expect(steps[2].state).toBe('upcoming'); // inscribe (did:btco)
     expect(steps[0].proof?.proofValue).toBeDefined();
+
+    // The hosted log remains at WebVH after a Bitcoin submission. The same
+    // recorded row and live-status join used by the page must stop advertising
+    // inscription as a future action, both before and after confirmation.
+    const commitTxId = 'ab'.repeat(32);
+    const revealTxId = 'cd'.repeat(32);
+    const row: OriginalRow = {
+      did, title: 'Detail Piece', resourceHash: '', createdAt: new Date().toISOString(),
+      commitTxId, revealTxId, inscriptionId: revealTxId + 'i0', inscriptionStatus: 'pending',
+    };
+    for (const status of ['commit_broadcast', 'reveal_broadcast', 'confirmed'] as const) {
+      const [current] = withLiveInscriptionStatus([row], [{
+        commitTxId, revealTxId, inscriptionId: row.inscriptionId!,
+        fundingOutpoint: 'ef'.repeat(32) + ':0', status,
+        createdAt: row.createdAt, updatedAt: row.createdAt,
+      }]);
+      const timeline = celTimeline(cel, current);
+      expect(timeline.map((step) => step.id)).toEqual(['create', 'publish']);
+      expect(current.inscriptionStatus).toBe(status === 'confirmed' ? 'confirmed' : 'pending');
+    }
 
     // Every sealed resource serves at its derived URL (declared multihash
     // digest → hosted raw-hash multibase, the exact key publishResources

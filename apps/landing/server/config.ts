@@ -14,6 +14,10 @@
  * CONFIG_STRICT=1. Rollback is unsetting that one variable — no redeploy of
  * code.
  *
+ * Durable-data failures are the exception to that ladder. A deployed instance
+ * without a real writable volume would accept BTC while persisting the only
+ * reveal-recovery copy to ephemeral storage, so those issues are always fatal.
+ *
  * Every rule is a pure function over an env snapshot plus a data-dir probe, so
  * "writable but not a mounted volume" is testable without a container.
  */
@@ -39,7 +43,7 @@ export function resolveBlockEventsUrl(env: Record<string, string | undefined>): 
     : 'wss://mempool.space/testnet4/api/v1/ws';
 }
 
-export type ConfigSeverity = 'error' | 'warn';
+export type ConfigSeverity = 'error' | 'warn' | 'fatal';
 
 export interface ConfigIssue {
   /** The env var at fault. Always named — a report you cannot act on is noise. */
@@ -226,6 +230,21 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     report('BTC_BLOCKS_WS_URL', 'BTC_BLOCKS_WS_URL must be a wss:// URL or "off"; in non-strict mode block notifications are disabled and hourly completion remains active.');
   }
 
+  if (env.QUICKNODE_ENDPOINT) {
+    if (!env.QUICKNODE_CONTENT_BASE_URL && env.QUICKNODE_CONTENT_ENCODING !== 'base64') {
+      report('QUICKNODE_CONTENT_BASE_URL', 'CEL 3 PNG reads require an HTTPS raw-content base URL, or QUICKNODE_CONTENT_ENCODING=base64 for a gateway verified to encode binary content. Text/auto encoding cannot establish byte-safe PNG retrieval.');
+    }
+    if (env.QUICKNODE_CONTENT_BASE_URL) {
+      try {
+        const url = new URL(env.QUICKNODE_CONTENT_BASE_URL);
+        if (url.protocol !== 'https:' || url.search || url.hash || url.username || url.password) throw new Error();
+      } catch { report('QUICKNODE_CONTENT_BASE_URL', 'QUICKNODE_CONTENT_BASE_URL must be an HTTPS base URL without query, fragment or userinfo.'); }
+    }
+    if (env.QUICKNODE_CONTENT_ENCODING && !['base64', 'utf8'].includes(env.QUICKNODE_CONTENT_ENCODING)) {
+      report('QUICKNODE_CONTENT_ENCODING', 'QUICKNODE_CONTENT_ENCODING must be base64 or utf8 and must match the verified gateway contract.');
+    }
+  }
+
   // The deposit indexer seam (R4/KTD4). Every address→UTXO read a creator's
   // money depends on goes through one base URL; this makes WHICH one, and
   // whether it is authenticated, legible at boot.
@@ -320,23 +339,36 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     }
   }
 
-  // Durable data. Only signed-in users have any, so this follows the auth surface.
+  // Durable data. Only signed-in users have any, so this follows the auth
+  // surface. On a deployed instance these failures are fatal regardless of
+  // CONFIG_STRICT: this directory carries the only recovery copy of a signed
+  // reveal transaction after its commit has spent real BTC.
   if (authIntended(env)) {
+    const dataDirSeverity: ConfigSeverity = deployed ? 'fatal' : 'warn';
+    const reportDataDir = (message: string) =>
+      issues.push({ key: 'ORIGINALS_DATA_DIR', severity: dataDirSeverity, message });
+    const recoveryStakes =
+      'This path holds the only copies of signed reveal transactions — the one thing standing between a ' +
+      "dead browser tab and a creator's permanently committed BTC.";
     const { explicit } = resolveDataDir(env);
     if (!explicit) {
-      report(
-        'ORIGINALS_DATA_DIR',
-        `ORIGINALS_DATA_DIR is not set — durable Originals fall back to ${DEFAULT_DATA_DIR}, which a redeploy wipes.`
+      reportDataDir(
+        `ORIGINALS_DATA_DIR is not set — durable Originals fall back to ${DEFAULT_DATA_DIR}, which is inside ` +
+          `the container and which every redeploy wipes. ${recoveryStakes} Attach a persistent volume and set ` +
+          `ORIGINALS_DATA_DIR to its mount path.`
       );
     }
     const probe = input.dataDir;
     if (probe) {
       if (!probe.writable) {
-        report('ORIGINALS_DATA_DIR', `ORIGINALS_DATA_DIR (${probe.path}) is not writable.`);
+        reportDataDir(
+          `ORIGINALS_DATA_DIR (${probe.path}) is not writable — nothing can be persisted at all. ${recoveryStakes}`
+        );
       } else if (deployed && explicit && !isMountedVolume(probe.path, probe.mountPoints)) {
-        report(
-          'ORIGINALS_DATA_DIR',
-          `ORIGINALS_DATA_DIR (${probe.path}) is writable but is not a mounted volume — attach a persistent volume and point it at the mount path. Writability alone survives nothing: a redeploy deletes this path, and it holds the only copies of signed reveal transactions.`
+        reportDataDir(
+          `ORIGINALS_DATA_DIR (${probe.path}) is writable but is not a mounted volume — attach a persistent ` +
+            `volume and point it at the mount path. Writability alone survives nothing: a redeploy deletes this ` +
+            `path. ${recoveryStakes}`
         );
       }
     }
@@ -412,9 +444,9 @@ export function isStrictConfig(env: Record<string, string | undefined> = process
   return v === '1' || v === 'true';
 }
 
-export function formatConfigReport(issues: ConfigIssue[], strict: boolean): string {
+export function formatConfigReport(issues: ConfigIssue[], refusing: boolean): string {
   const errors = issues.filter((i) => i.severity === 'error');
-  const head = strict
+  const head = refusing
     ? 'Refusing to start — the configuration contract is not met:'
     : errors.length > 0
       ? 'Configuration contract NOT met (warn-only: set CONFIG_STRICT=1 to make this fatal):'
@@ -424,8 +456,8 @@ export function formatConfigReport(issues: ConfigIssue[], strict: boolean): stri
 }
 
 /**
- * Report the issues, and in strict mode throw on the first deployed-environment
- * error. Pure over its `log` sink so a test never writes to the console.
+ * Report issues, refusing for every fatal issue and for ordinary deployed
+ * errors only when strict mode is enabled.
  */
 export function enforceConfig(
   issues: ConfigIssue[],
@@ -434,9 +466,11 @@ export function enforceConfig(
   if (issues.length === 0) return;
   const strict = opts.strict ?? isStrictConfig();
   const log = opts.log ?? ((m: string) => console.warn(m));
+  const fatal = issues.filter((i) => i.severity === 'fatal');
   const errors = issues.filter((i) => i.severity === 'error');
-  const message = formatConfigReport(issues, strict && errors.length > 0);
-  if (strict && errors.length > 0) throw new Error(message);
+  const refusing = fatal.length > 0 || (strict && errors.length > 0);
+  const message = formatConfigReport(issues, refusing);
+  if (refusing) throw new Error(message);
   log(message);
 }
 

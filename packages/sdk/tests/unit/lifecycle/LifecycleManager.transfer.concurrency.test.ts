@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Item 3: transferOwnership concurrency guard + batch transfer duplicate
  * detection.
@@ -10,7 +11,7 @@
  * listed twice in a batch would be transferred twice.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, OriginalsAsset } from '../../../src';
+import { OriginalsSDK, OriginalsAsset } from '../../previous-sdk';
 import { BatchValidator } from '../../../src/lifecycle/BatchOperations';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

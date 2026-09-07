@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { verifyHistory } from '@originals/sdk/cel';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
 
@@ -13,12 +14,13 @@ function installHostFetch(host: string) {
     const method = (init?.method ?? 'GET').toUpperCase();
     const url = new URL(raw, `http://${host}`);
     if (url.pathname.startsWith('/api/host/')) {
+      if (method === 'GET') return store.read(url);
       const req = new Request(url, {
         method,
         headers: init?.headers as HeadersInit,
         body: init?.body as BodyInit,
       });
-      return store.handlePut(req, url);
+      return method === 'GET' ? store.read(url) : store.handlePut(req, url);
     }
     // Resolver GET https://<host>/<path>/did.jsonl → serve from the store.
     const served = store.serve(new Request(url), url);
@@ -58,8 +60,12 @@ describe('publish → resolve roundtrip', () => {
     const parts = state.webvhDid!.split(':'); // did:webvh:<SCID>:<host>:<slug>
     const expectedUrl = `https://${host}/${parts.slice(4).join('/')}/did.jsonl`;
 
+    expect(engine.asset!.celLog.log[0].event.operation.type).toBe('create');
+    expect(verifyHistory(engine.asset!.celLog).state.layer).toBe('webvh');
+    expect(state.webvhDid).toContain(':published:anonymous:');
     expect(state.layer).toBe('did:webvh');
     expect(state.webvhDid).toContain(`:${host}:`);
+    expect(state.btcoDid).toBeUndefined();
     expect(state.webvhLogUrl).toBe(expectedUrl);
     expect(state.webvhResolved).toBe(true);
 
@@ -67,4 +73,30 @@ describe('publish → resolve roundtrip', () => {
     expect(resolvedEvents[0].logUrl).toBe(expectedUrl);
     expect(resolvedEvents[0].resolved).toBe(true);
   });
+  test('a cold engine restores exact PNG bytes and all revised versions', async () => {
+    const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255]);
+    const engine = new DemoEngine();
+    await engine.create('My PNG', 'Upload', { filename: 'mine.png', content: png, contentType: 'image/png' });
+    const published = await engine.publish();
+    const next = Uint8Array.from([...png, 1]);
+    await engine.update('New PNG', 'Upload', { filename: 'mine.png', content: next, contentType: 'image/png' });
+    const cold = new DemoEngine();
+    const state = await cold.hydrateFromWeb(published.webvhDid!);
+    expect(state.did).toBe(published.did);
+    expect(state.webvhDid).toBe(published.webvhDid);
+    expect(state.resource.version).toBe(2);
+    expect(state.resource.content).toEqual(next);
+    expect(state.provenance.name).toBe('New PNG');
+    expect(cold.asset!.state.name).toBe('New PNG');
+    expect(cold.asset!.resources.filter((r) => r.id === 'mine.png').map((r) => r.content)).toEqual([png, next]);
+    expect(state.webvhResolved).toBe(true);
+  });
+
+  test('a local genesis has no hosted or Bitcoin binding', async () => {
+    const state = await new DemoEngine().create('Local', 'Artwork', '<svg/>');
+    expect(state.did).toStartWith('did:cel:');
+    expect(state.webvhDid).toBeUndefined();
+    expect(state.btcoDid).toBeUndefined();
+  });
+
 });

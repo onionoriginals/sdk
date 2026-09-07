@@ -1,3 +1,4 @@
+import { localPublicationRecoveries, recoverLocalPublication, type LocalPublicationRecovery } from '../sdk/local-publication-recovery';
 /**
  * The /me "Your Originals" page. Auth-gated: signed-out users get a prompt;
  * signed-in users see their durable did:webvh Originals as a gallery of cards
@@ -6,7 +7,7 @@
  * provenance — CEL timeline, signed DID log, sealed resources — is laid out
  * and re-verified in the browser. Empty state links back to the demo.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, originalPath } from '../router';
@@ -218,17 +219,9 @@ export async function fetchOriginals(): Promise<OriginalRow[]> {
 async function resolveLive(did: string): Promise<boolean> {
   try {
     const { OriginalsSDK } = await import('@originals/sdk');
-    const { OrdMockProvider } = await import('@originals/sdk/testing');
-    const { HttpHostingStorageAdapter } = await import('../sdk/http-hosting-adapter');
-    const sdk = OriginalsSDK.create({
-      network: 'regtest',
-      webvhNetwork: 'magby',
-      defaultKeyType: 'Ed25519',
-      ordinalsProvider: new OrdMockProvider(),
-      storageAdapter: new HttpHostingStorageAdapter(),
-      enableLogging: false,
-    } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
-    return !!(await sdk.did.resolveDID(did, { skipCache: true } as never));
+    const { DurableHostingStorageAdapter } = await import('../sdk/durable-hosting-adapter');
+    const sdk = OriginalsSDK.create({ storageAdapter: new DurableHostingStorageAdapter() });
+    return (await sdk.lifecycle.resolveAssetFromWeb(did)).verification.verified;
   } catch {
     return false;
   }
@@ -244,8 +237,22 @@ async function resolveLive(did: string): Promise<boolean> {
 const isImageType = (contentType: string | undefined) => !!contentType?.startsWith('image/');
 
 export function YourOriginals() {
+  const { isAuthenticated, user } = useAuth();
+  // Account changes discard the old account's rows, notices and pending actions.
+  return <AccountOriginals key={isAuthenticated ? user?.subOrgId : 'signed-out'} />;
+}
+
+function AccountOriginals() {
   const { isAuthenticated, isLoading: authLoading, bitcoin, user } = useAuth();
+  const recoveryGeneration = useRef(0);
+  useLayoutEffect(() => {
+    recoveryGeneration.current++;
+    return () => { recoveryGeneration.current++; };
+  }, [isAuthenticated, user?.subOrgId]);
   const [originals, setOriginals] = useState<OriginalRow[]>([]);
+  const [localRecovery, setLocalRecovery] = useState<LocalPublicationRecovery[]>([]);
+  const [recoveringLocal, setRecoveringLocal] = useState<string | null>(null);
+  const [localRecoveryNote, setLocalRecoveryNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
   const [unfinished, setUnfinished] = useState<PendingInscription[]>([]);
@@ -276,6 +283,10 @@ export function YourOriginals() {
     Promise.all([fetchOriginals(), fetchInscriptions()]).then(([rows, inscriptions]) => {
       if (!live) return;
       const recs = inscriptions.records;
+      if (user?.subOrgId) {
+        const known = new Set(recs.map((record) => record.commitTxId));
+        setLocalRecovery(localPublicationRecoveries(user.subOrgId).filter((record) => !record.commitTxId || !known.has(record.commitTxId)));
+      }
       const merged = withLiveInscriptionStatus(rows, recs);
       setOriginals(merged);
       setUnfinished(unfinishedInscriptions(recs));
@@ -294,7 +305,7 @@ export function YourOriginals() {
       // rather than stranding the page on the loading state forever.
       .finally(() => { if (live) setLoaded(true); });
     return () => { live = false; };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.subOrgId]);
 
   useEffect(() => {
     let live = true;
@@ -360,6 +371,27 @@ export function YourOriginals() {
     }
   };
 
+  const recoverLocal = async (item: LocalPublicationRecovery) => {
+    if (!isAuthenticated || !user?.subOrgId || recoveringLocal) return;
+    const account = user.subOrgId;
+    const generation = recoveryGeneration.current;
+    const isCurrentAccount = () => generation === recoveryGeneration.current;
+    setRecoveringLocal(item.key);
+    setLocalRecoveryNote(null);
+    try {
+      const note = await recoverLocalPublication(account, item.key, localStorage, isCurrentAccount);
+      if (!isCurrentAccount()) return;
+      setLocalRecoveryNote(note);
+      const [rows, records] = await Promise.all([fetchOriginals(), fetchInscriptions()]);
+      if (!isCurrentAccount()) return;
+      setOriginals(withLiveInscriptionStatus(rows, records.records));
+      setUnfinished(unfinishedInscriptions(records.records));
+      const known = new Set(records.records.map((record) => record.commitTxId));
+      setLocalRecovery(localPublicationRecoveries(account).filter((record) => !record.commitTxId || !known.has(record.commitTxId)));
+    } catch (error) { if (isCurrentAccount()) setLocalRecoveryNote((error as Error).message); }
+    finally { if (isCurrentAccount()) setRecoveringLocal(null); }
+  };
+
   const view = originalsView({ authLoading, authenticated: isAuthenticated, loaded, originals });
 
   return (
@@ -385,6 +417,21 @@ export function YourOriginals() {
             <p>{depositAlertMessage(depositAlert)}</p>
           </div>
         )}
+
+        {isAuthenticated && localRecovery.length > 0 && (
+          <div className="card your-originals-finish" role="alert">
+            <p className="your-originals-finish-title">Finish a retained publication</p>
+            <p>This browser saved the signed publication before sending it. Retry the same history and transactions; no new signature or funding is needed.</p>
+            <ul>{localRecovery.map((item) => (
+              <li key={item.key}><span>{item.title}</span>
+                <button type="button" className="btn btn-primary" disabled={recoveringLocal !== null} onClick={() => void recoverLocal(item)}>
+                  {recoveringLocal === item.key ? 'Retrying…' : item.kind === 'web' ? 'Finish publishing' : 'Retry signed transactions'}
+                </button>
+              </li>
+            ))}</ul>
+          </div>
+        )}
+        {localRecoveryNote && <p className="your-originals-note" role="status">{localRecoveryNote}</p>}
 
         {isAuthenticated && unfinished.length > 0 && (
           <div className="card your-originals-finish" role="alert">

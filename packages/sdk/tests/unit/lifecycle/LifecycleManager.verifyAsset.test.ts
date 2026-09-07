@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Phase-3 Task 4 carry-forward: LifecycleManager.verifyAsset(asset, overrides?).
  *
@@ -10,7 +11,7 @@
  * `(sdk as any).config?.ordinalsProvider` to asset.verify() directly).
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

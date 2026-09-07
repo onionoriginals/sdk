@@ -1,7 +1,8 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /* istanbul ignore file */
 import { describe, test, expect } from 'bun:test';
 import * as btc from '@scure/btc-signer';
-import { OriginalsSDK, OriginalsAsset } from '../../../src';
+import { OriginalsSDK, OriginalsAsset } from '../../previous-sdk';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { sampleUtxo, sampleChangeAddress } from '../../fixtures/bitcoin';
@@ -50,25 +51,21 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     []
   );
 
-  test('inscribes the genesis did:btco onto the caller-derived sat', async () => {
-    const sdk = createSDK();
+  test('the private preceding writer cannot broadcast without durable recovery', async () => {
+    const provider = new SatSelectProvider();
+    let broadcasts = 0;
+    provider.broadcastTransaction = async () => { broadcasts++; return 'bb'.repeat(32); };
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest', ordinalsProvider: provider } as any);
     const asset = createAsset();
-    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, {
-      fundingUtxo: sampleUtxo,
-      satSigner,
-      changeAddress: sampleChangeAddress,
-      feeRate: 2
-    });
-
-    expect(result.currentLayer).toBe('did:btco');
-    expect(asset.bindings!['did:btco']).toBe('did:btco:reg:1777');
-
-    const prov = asset.getProvenance();
-    const migration = prov.migrations[prov.migrations.length - 1];
-    expect(migration.satoshi).toBe('1777');
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, {
+      fundingUtxo: sampleUtxo, satSigner, changeAddress: sampleChangeAddress, feeRate: 2,
+    })).rejects.toMatchObject({ code: 'INSCRIPTION_RECOVERY_REQUIRED' });
+    expect(broadcasts).toBe(0);
+    expect(asset.currentLayer).toBe('did:webvh');
+    expect(asset.bindings?.['did:btco']).toBeUndefined();
   });
 
-  test('accepts a MULTI-UTXO funding set and pins the identity to the first (R26)', async () => {
+  test('keeps first-input identity when preparing multiple inputs, then refuses an undurable submission', async () => {
     const provider = new SatSelectProvider();
     const queried: Array<{ txid: string; vout: number }> = [];
     provider.getFirstSatOfOutput = async (o: { txid: string; vout: number }) => { queried.push(o); return '1777'; };
@@ -82,16 +79,17 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     const identity = { ...sampleUtxo, txid: `${'1'.repeat(62)}00`, vout: 0, value: 3_000 };
     const topUp = { ...sampleUtxo, txid: `${'2'.repeat(62)}01`, vout: 1, value: 90_000 };
 
-    const result = await sdk.lifecycle.inscribeOnBitcoin(asset, {
+    let preparedPsbt = '';
+    await expect(sdk.lifecycle.inscribeOnBitcoin(asset, {
       fundingUtxos: [identity, topUp],
-      satSigner,
+      satSigner: { signAndFinalizeCommitPsbt: async (psbt: string) => { preparedPsbt = psbt; return satSigner.signAndFinalizeCommitPsbt(psbt); } },
       changeAddress: sampleChangeAddress,
       feeRate: 2
-    });
+    })).rejects.toMatchObject({ code: 'INSCRIPTION_RECOVERY_REQUIRED' });
 
-    expect(result.currentLayer).toBe('did:btco');
+    expect(broadcasts).toEqual([]);
     expect(queried).toEqual([{ txid: identity.txid, vout: 0 }]);
-    const commit = btc.Transaction.fromRaw(Buffer.from(broadcasts[0], 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    const commit = btc.Transaction.fromPSBT(Buffer.from(preparedPsbt, 'base64'), { allowUnknownInputs: true, allowUnknownOutputs: true });
     expect(commit.inputsLength).toBe(2);
     expect(Buffer.from(commit.getInput(0)!.txid!).toString('hex')).toBe(identity.txid);
   });
@@ -126,12 +124,7 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
     ).rejects.toMatchObject({ code: 'FEE_RATE_REQUIRED' });
   });
 
-  test('preserves the migrate CEL event (no rollback) and reaches a coherent btco state when the reveal broadcast fails', async () => {
-    // The reveal broadcast (2nd broadcastTransaction call) fails, but the commit
-    // is already on-chain and the reveal is recoverable via revealTxHex. The
-    // migrate event MUST NOT be rolled back — doing so would desync the log from
-    // an inscription that can still land. A keyStore is required so the CEL
-    // migrate event actually appends (otherwise it degrades to append-skipped).
+  test('refusal before broadcast rolls back the private preceding migration proposal', async () => {
     let n = 0;
     class FailRevealProvider extends SatSelectProvider {
       async broadcastTransaction(_tx: unknown): Promise<string> {
@@ -159,22 +152,12 @@ describe('inscribeOnBitcoin (sat-selected)', () => {
         changeAddress: sampleChangeAddress,
         feeRate: 2
       })
-    ).rejects.toMatchObject({ code: 'REVEAL_BROADCAST_FAILED' });
+    ).rejects.toMatchObject({ code: 'INSCRIPTION_RECOVERY_REQUIRED' });
 
-    // The migrate event survived the failure (NOT rolled back).
-    const migrate = asset.celLog!.events.find(e => e.type === 'migrate');
-    expect(migrate).toBeDefined();
-    expect(asset.celLog!.events.length).toBeGreaterThan(eventsBefore);
-
-    // Coherent "migrated, inscription pending" state: layer advanced + binding set,
-    // matching a successful-but-unconfirmed inscription.
-    expect(asset.currentLayer).toBe('did:btco');
-    expect(asset.bindings!['did:btco']).toBe('did:btco:reg:1777');
-
-    // verify / replay fold from the log without blowing up (return, not throw).
-    const ok = await asset.verify({ ordinalsProvider: provider as any });
-    expect(typeof ok).toBe('boolean');
-    expect(() => asset.getProvenance()).not.toThrow();
+    expect(n).toBe(0);
+    expect(asset.celLog!.events.length).toBe(eventsBefore);
+    expect(asset.currentLayer).toBe('did:cel');
+    expect(asset.bindings?.['did:btco']).toBeUndefined();
   });
 
   test('legacy inscribeOnBitcoin(asset) still works with OrdMock (provider picks the sat)', async () => {

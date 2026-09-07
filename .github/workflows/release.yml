@@ -21,7 +21,7 @@ jobs:
     name: Version (open release PR)
     runs-on: ubuntu-latest
     outputs:
-      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      hasChangesets: ${{ steps.changesets.outputs['has-changesets'] }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,6 +33,11 @@ jobs:
           # CI. Falls back to GITHUB_TOKEN if CHANGESETS_TOKEN isn't configured
           # (PR still opens; it just won't run ci.yml until the secret is added).
           token: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup release tooling Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -46,18 +51,17 @@ jobs:
         id: changesets
         uses: changesets/action@v2
         with:
-          version: bun run version
+          github-token: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
+          version-script: bun run version
           # No publish here — the publish job below runs once this PR merges.
-          publish: ""
-        env:
-          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
+          publish-script: ""
 
       # Merging the Version PR IS the release approval, so the PR must state what
       # merging does. changesets' own body lists changelogs but never the target
       # versions' dist-tags — and the surprising one (a brand-new package skipping
       # `next` for `latest`) is invisible without this.
       - name: Comment the publish plan on the Version PR
-        if: steps.changesets.outputs.hasChangesets == 'true'
+        if: steps.changesets.outputs['has-changesets'] == 'true'
         env:
           GH_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -176,6 +180,14 @@ jobs:
       - name: Verify browser-facing entry points have no eager Node builtins
         run: node scripts/check-browser-safety.mjs
 
+      # Keep the Node 20 consumer gates above, then use the runtime required by
+      # Changesets CLI v3. setup-node also configures NODE_AUTH_TOKEN for npm.
+      - name: Setup release tooling Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
       # Preflight the npm token BEFORE anything irreversible. An expired or
       # invalid NPM_TOKEN does not fail cleanly at publish: npm returns a
       # misleading `E404 Not Found - PUT https://registry.npmjs.org/@originals%2fsdk`
@@ -217,10 +229,9 @@ jobs:
       - name: Publish to npm, push tags, and create GitHub releases
         uses: changesets/action@v2
         with:
-          publish: bun run release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: bun run release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # `--provenance` is not a valid `changeset publish` flag; npm provenance
           # is enabled via this env var instead (id-token: write is already set).

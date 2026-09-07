@@ -1,56 +1,65 @@
 {
-  "events": [
+  "log": [
     {
-      "type": "create",
-      "data": {
-        "controller": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD",
-        "createdAt": "2026-08-16T05:28:08.247Z",
-        "name": "artwork.svg",
-        "nonce": "uMKUVYScE-LOi6Il-WzYGUg",
-        "resources": [
-          {
-            "digestMultibase": "uEiDq42LG0UdTeZMLYrsckqR3sn7DCIZuAV6nnKrn11NgWg",
-            "id": "artwork.svg",
-            "mediaType": "image/svg+xml"
-          },
-          {
-            "digestMultibase": "uEiAYsepzbRrYtqCvKqdKJEiWxs-pTxfzzV9ApQkcvPuI5A",
-            "id": "metadata.json",
-            "mediaType": "application/json"
+      "event": {
+        "operation": {
+          "type": "create",
+          "data": {
+            "profile": "originals/cel/3",
+            "controller": "did:key:z6Mkg31KSoXBogCfhP31WqPJdCtMs5iA6Pkn7SBhSujkaBxY",
+            "createdAt": "2026-09-06T15:34:21.525Z",
+            "nonce": "dIgcdUzqqgWlIMw7spy8sA",
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "digestMultibase": "uEiAh82KxqR0xuOeHd-k9PlE3eOAjplZqFAN47GvsVWZNrA"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "digestMultibase": "uEiD-EYVLZWeHsY5TwbU-9N98jajweP90VH8rTr8ikMTU8Q"
+              }
+            ],
+            "name": "First Light"
           }
-        ]
+        }
       },
       "proof": [
         {
-          "created": "2026-08-16T05:28:08.247Z",
-          "cryptosuite": "originals-cel-ed25519-jcs-v1",
-          "proofPurpose": "assertionMethod",
-          "proofValue": "z5Bcr9Z54HZcm7S6rPF1zT9mzu7M3bRMebvZVHxDDLR5vN32bjwVqfvAqPpcFF2TAQvfyiogXykDzLGw2ixJA62at",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
+          "cryptosuite": "eddsa-jcs-2022",
+          "verificationMethod": "did:key:z6Mkg31KSoXBogCfhP31WqPJdCtMs5iA6Pkn7SBhSujkaBxY#z6Mkg31KSoXBogCfhP31WqPJdCtMs5iA6Pkn7SBhSujkaBxY",
+          "proofPurpose": "assertionMethod",
+          "created": "2026-09-06T15:34:21.528Z",
+          "proofValue": "z4Ui32gRBzAKbSBf3asuMzD4HXmgqk3hgDoCoiS1khuaNvYNjZLEUFMb5Wu2fnLJL489CuvpBW9CgXXy66hxRnvmx"
         }
       ]
     },
     {
-      "type": "migrate",
-      "data": {
-        "domain": "magby.originals.build",
-        "layer": "webvh",
-        "migratedAt": "2026-08-16T05:28:08.289Z",
-        "sourceDid": "did:cel:uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g",
-        "targetDid": "did:webvh:QmTmT6hf5tLcf5kjrBUFn5tYc6KcUQcRwvvWGFdtGZ7Lac:magby.originals.build:ueibapl3jud_-pk44pwonlavj-5znsd97opbjyybfpvxe0g"
+      "event": {
+        "previousEvent": "uEiAn7aEMJmHddUREi3phU1plTZA_uJvHKPCpXKhC-LjqAg",
+        "operation": {
+          "type": "migrate",
+          "data": {
+            "profile": "originals/cel/3",
+            "from": "did:cel:uEiAn7aEMJmHddUREi3phU1plTZA_uJvHKPCpXKhC-LjqAg",
+            "to": "did:webvh:QmT4gv3FUVitVLeF4exikRXZk6HohqfS8MuwPfkPQqsDCR:magby.originals.build:example:cel3",
+            "layer": "webvh",
+            "migratedAt": "2026-09-06T15:34:21.624Z"
+          }
+        }
       },
       "proof": [
         {
-          "created": "2026-08-16T05:28:08.289Z",
-          "cryptosuite": "originals-cel-ed25519-jcs-v1",
-          "proofPurpose": "assertionMethod",
-          "proofValue": "z4QH1iA1JAqTcnifEXHyW5Lby2wwabEFQJaXWKkUPa6GKnRHqmznaAXb9W3zx4p6AwXSjFVobiqv7x6tULy9FSiqQ",
           "type": "DataIntegrityProof",
-          "verificationMethod": "did:key:z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD#z6Mkjgexntoj2HgZe44eVBg9otJVg2u9Mw77PWLc3X8wzgzD"
+          "cryptosuite": "eddsa-jcs-2022",
+          "verificationMethod": "did:key:z6Mkg31KSoXBogCfhP31WqPJdCtMs5iA6Pkn7SBhSujkaBxY#z6Mkg31KSoXBogCfhP31WqPJdCtMs5iA6Pkn7SBhSujkaBxY",
+          "proofPurpose": "assertionMethod",
+          "created": "2026-09-06T15:34:21.626Z",
+          "proofValue": "z4rrz1WR1dxtSR6SwibL1rYmzMw7rSXxgXYbMGFDStAUYsT5CuYSKq1yDHaKBr82xaB321SS1YYnbde6obRDD9yH1"
         }
-      ],
-      "previousEvent": "uEiBApL3JUD_-pK44pwONLAvJ-5Znsd97OPbjYYbFpvXE0g"
+      ]
     }
   ]
 }

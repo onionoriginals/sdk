@@ -1,3 +1,5 @@
+import type { SatSnapshot } from '@originals/cel/v3';
+import { readSatSnapshot, type SatSnapshotBudget } from './sat-snapshot.js';
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
 import { StructuredError } from '@originals/cel';
@@ -6,6 +8,8 @@ import { decode as decodeCbor } from '@originals/cel/cbor';
 import { hexToBytes } from '@originals/cel/encoding';
 
 export interface QuickNodeProviderOptions {
+  /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
+  snapshotBudget?: SatSnapshotBudget;
   /**
    * Full QuickNode endpoint URL including the token path, e.g.
    * `https://your-endpoint-name.btc.quiknode.pro/<token>/`.
@@ -31,7 +35,7 @@ export interface QuickNodeProviderOptions {
   expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
   /**
    * How `ord_getContent` results are encoded (issue #350):
-   * - 'base64' (recommended): always base64-decode; malformed base64 fails loudly.
+   * - 'base64': only for a gateway explicitly configured to base64-encode; malformed base64 fails loudly.
    * - 'utf8': treat the result as literal UTF-8 text.
    * - 'auto' (default, for backwards compatibility): heuristic — base64-shaped
    *   content is decoded, anything else is treated as literal UTF-8. Ambiguous
@@ -39,6 +43,8 @@ export interface QuickNodeProviderOptions {
    *   deployments where content hashes matter.
    */
   contentEncoding?: 'base64' | 'utf8' | 'auto';
+  /** Explicit ord-compatible base URL serving raw /content/:id and /r/metadata/:id. Used for CEL 3 snapshots instead of their JSON-RPC wrappers. */
+  contentBaseUrl?: string;
 }
 
 /** getblockchaininfo.chain values mapped to SDK network names. */
@@ -109,7 +115,10 @@ export class QuickNodeProvider implements OrdinalsProvider {
   private readonly maxContentBytes: number;
   private readonly expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
   private readonly contentEncoding: 'base64' | 'utf8' | 'auto';
+  private readonly contentBaseUrl?: string;
   private networkCheck: Promise<void> | null = null;
+
+  private readonly snapshotBudget: SatSnapshotBudget;
 
   constructor(options: QuickNodeProviderOptions) {
     if (!options?.endpoint) {
@@ -127,12 +136,20 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       throw new StructuredError('QUICKNODE_ENDPOINT_INVALID', `QuickNodeProvider endpoint must be http(s), got ${parsed.protocol}`);
     }
+    this.snapshotBudget = { ...options.snapshotBudget };
     this.endpoint = options.endpoint;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
     this.maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
     this.expectedNetwork = options.expectedNetwork;
     this.contentEncoding = options.contentEncoding ?? 'auto';
+    if (options.contentBaseUrl !== undefined) {
+      try {
+        const content = new URL(options.contentBaseUrl);
+        if (!['http:', 'https:'].includes(content.protocol) || content.search || content.hash || content.username || content.password) throw new Error();
+        this.contentBaseUrl = content.href.replace(/\/$/, '');
+      } catch { throw new StructuredError('QUICKNODE_CONTENT_ENDPOINT_INVALID', 'contentBaseUrl must be an HTTP(S) base URL without query, fragment or userinfo'); }
+    }
   }
 
   /**
@@ -176,14 +193,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * status but still send a JSON body; parse the body when possible so the
    * RPC error surfaces instead of an opaque HTTP failure.
    */
-  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number): Promise<T> {
+  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number, signal?: AbortSignal): Promise<T> {
     const cap = maxBytes ?? this.maxJsonBytes;
     const res = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       redirect: 'error',
-      signal: AbortSignal.timeout(this.timeout),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
     });
     const lenHeader = res.headers?.get?.('content-length');
     if (lenHeader && Number(lenHeader) > cap) {
@@ -286,7 +303,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (this.contentEncoding === 'base64') {
       // Explicit encoding: no guessing. Content that is not valid base64 is a
       // server contract violation, not literal text (issue #350).
-      if (!isBase64Shaped) {
+      if (compact !== '' && (!isBase64Shaped || Buffer.from(compact, 'base64').toString('base64') !== compact)) {
         throw new StructuredError(
           'QUICKNODE_CONTENT_UNEXPECTED_SHAPE',
           "QuickNodeProvider: ord_getContent result is not base64 (provider configured with contentEncoding: 'base64')"
@@ -522,6 +539,68 @@ export class QuickNodeProvider implements OrdinalsProvider {
         { inscriptionId: id }
       );
     }
+  }
+
+  /**
+   * Complete CEL 3 evidence from the Ordinals & Runes add-on and active Core blocks.
+   * Pin contentEncoding to the endpoint's wire contract: 'utf8' for the
+   * documented literal text result, 'base64' only for gateways configured to
+   * encode binary content that way. Auto mode
+   * cannot attest exact bytes. With contentBaseUrl, use ord's raw content and
+   * metadata routes, including its explicit inscription-specific absence marker.
+   * Otherwise ord_getMetadata must return raw hex or explicit null. Decoded
+   * objects, unavailable routes and ambiguous RPC errors fail.
+   * https://www.quicknode.com/docs/bitcoin/ord_getMetadata
+   * https://www.quicknode.com/docs/bitcoin/ord_getContent
+   */
+  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+    if (!this.contentBaseUrl && this.contentEncoding === 'auto') throw new StructuredError(
+      'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'CEL 3 snapshots require an explicit contentEncoding wire contract',
+    );
+    return readSatSnapshot({
+      rpc: (method, params, signal) => this.rpcCall(method, params, undefined, signal),
+      status: signal => this.rpcCall('ord_getStatus', [], undefined, signal),
+      indexHash: (height, signal) => this.rpcCall('ord_getBlockHash', [height], undefined, signal),
+      sat: (sat, signal) => this.rpcCall('ord_getSat', [Number(sat)], undefined, signal),
+      inscription: (id, signal) => this.rpcCall('ord_getInscription', [id], undefined, signal),
+      content: async (id, signal) => {
+        if (this.contentBaseUrl) {
+          const response = await fetch(this.contentBaseUrl + '/content/' + id, {
+            headers: { Accept: 'application/octet-stream' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
+          });
+          if (response.status === 404) return null;
+          if (!response.ok) throw new StructuredError('QUICKNODE_CONTENT_UNAVAILABLE', 'Raw inscription content request failed');
+          if (Number(response.headers.get('content-length')) > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
+          return bytes;
+        }
+        let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024, signal);
+        // The documented wrapper carries literal content; never re-serialize
+        // decoded objects or guess whether an alphanumeric string is base64.
+        if (result === null) return null;
+        if (typeof result === 'object' && !Array.isArray(result)) result = (result as { content?: unknown }).content;
+        if (typeof result !== 'string') throw new StructuredError('QUICKNODE_CONTENT_UNEXPECTED_SHAPE', 'Snapshot content must use the configured string encoding');
+        return this.decodeContent(result);
+      },
+      metadata: async (id, signal) => {
+        if (!this.contentBaseUrl) return this.rpcCall('ord_getMetadata', [id], undefined, signal);
+        const response = await fetch(this.contentBaseUrl + '/r/metadata/' + id, {
+          headers: { Accept: 'application/json' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
+        });
+        if (Number(response.headers.get('content-length')) > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+        const text = new TextDecoder().decode(bytes);
+        // A generic gateway 404 can mean the route is unavailable. Only ord's
+        // matching inscription-specific marker attests absent metadata.
+        if (response.status === 404 && text.trim() === `inscription ${id} metadata not found`) return null;
+        if (!response.ok) throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata request failed');
+        const metadata: unknown = JSON.parse(text);
+        if (typeof metadata !== 'string') throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata must be a hex string');
+        return metadata;
+      },
+    }, satoshi, this.expectedNetwork, this.snapshotBudget);
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

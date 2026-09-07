@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Issue #303 — ONE shared keyed inscription lock across managers.
  *
@@ -21,7 +22,7 @@
  * manager instance is rejected before it can double-pay.
  */
 import { describe, it, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
+import { OriginalsSDK } from '../previous-sdk';
 import { OperationLock } from '../../src/utils/OperationLock';
 import { BitcoinManager } from '../../src/bitcoin/BitcoinManager';
 import { MockOrdinalsProvider } from '../mocks/adapters';

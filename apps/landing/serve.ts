@@ -1,3 +1,4 @@
+import { createExploreRoutes } from './server/explore';
 /**
  * Production server for the landing app (Railway) — single service.
  *
@@ -41,15 +42,13 @@ import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import {
-  createInscriptionCompletionSweep,
-  type SweepProvider,
-} from './server/inscription-completion-sweep';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
+import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
-// served. Warn-only until CONFIG_STRICT=1 — see server/config.ts for why.
+// served. Durable-storage failures always refuse a deployed boot; other errors
+// are warn-only until CONFIG_STRICT=1 — see server/config.ts.
 const configIssues = checkConfig();
 
 const DIST = new URL('./dist/', import.meta.url).pathname;
@@ -63,6 +62,9 @@ const hostStore = createWebvhHostStore();
 // deploy that dir is ephemeral and every redeploy silently wipes signed-in
 // users' Originals (checkConfig() above reports exactly that, by name).
 const { path: originalsDataDir, explicit: originalsDataDirIsExplicit } = resolveDataDir(process.env);
+// Serialize all writers before opening the durable stores.
+const instanceLock = await acquireInstanceLock(originalsDataDir);
+releaseOnExit(instanceLock);
 const originalsStore = createOriginalsStore({ dataDir: originalsDataDir });
 // In-flight commit+reveal pairs persist next to the Originals (same data dir,
 // same JWT-sub namespacing) so a dead tab can never strand committed funds.
@@ -103,6 +105,8 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   const provider = (regtestProvider ?? new QuickNodeProvider({
     endpoint: process.env.QUICKNODE_ENDPOINT!,
     expectedNetwork: providerNetwork,
+    contentBaseUrl: process.env.QUICKNODE_CONTENT_BASE_URL,
+    contentEncoding: process.env.QUICKNODE_CONTENT_ENCODING === 'base64' ? 'base64' : process.env.QUICKNODE_CONTENT_ENCODING === 'utf8' ? 'utf8' : 'auto',
   })) as unknown as FaucetProvider;
   // Network threaded through so the P2WPKH script derivation matches the
   // address prefix (bc1q on mainnet, tb1q on testnet4) — only the faucet
@@ -112,7 +116,7 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   return provider;
 }
 
-function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes } | null {
+function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes; sweepInscriptions?: () => Promise<{ processed: number; unreadable: string[] }> } | null {
   const jwtSecret = process.env.JWT_SECRET;
   const configured =
     jwtSecret &&
@@ -181,6 +185,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
+    sweepInscriptions: bitcoin?.sweepInscriptions,
   };
 }
 
@@ -201,6 +206,8 @@ const server = Bun.serve({
   hostname: '0.0.0.0',
   fetch: buildFetch({
     apiRoutes: api?.routes ?? null,
+    explore: createExploreRoutes({ store: originalsStore, dataDir: originalsDataDir }),
+    publications: originalsStore,
     hostStore,
     distDir: DIST,
     originals: api?.originals ?? null,
@@ -248,24 +255,12 @@ if (api) {
     moneyLog: money,
     maxPerPass: positiveInt(process.env.DEPOSIT_SWEEP_MAX_PER_PASS, 50),
   });
-  // Finish what can be finished (#545), BEFORE reporting what is stuck: a
-  // record this pass completes should not also be warned about as stranded.
-  // Its own provider instance: the routes build theirs inside buildApiRoutes
-  // and never expose it, and a sweep that only reads status and broadcasts
-  // needs nothing the routes' instance holds. Same endpoint, same network.
-  const completionSweep = createInscriptionCompletionSweep({
-    store: inscriptionsStore,
-    provider: createFaucetProviderFromEnv() as unknown as SweepProvider,
-    moneyLog: money,
-    maxPerPass: positiveInt(process.env.INSCRIBE_SWEEP_MAX_PER_PASS, 25),
-  });
+  // Block notifications and the hourly fallback share the route reconciler's
+  // durable writes, bounded rotating budget and reorg recovery policy.
   const complete = async () => {
-    const r = await completionSweep();
-    if (r.completed > 0 || r.failed > 0) {
-      console.warn(
-        `[landing] inscription completion sweep: ${r.completed} reveal(s) broadcast, ` +
-          `${r.failed} failed, ${r.waiting} awaiting commit confirmation`
-      );
+    const result = await api.sweepInscriptions?.();
+    if (result?.unreadable.length) {
+      console.warn(`[landing] inscription recovery sweep could not reconcile ${result.unreadable.length} account(s)`);
     }
   };
   const blockCompletion = startBlockCompletion({

@@ -9,7 +9,7 @@
  * these tests pin the direction, not a precise byte count.
  */
 import { describe, test, expect } from 'bun:test';
-import { inscriptionContentBytes } from './Demo';
+import { inscriptionContentBytes } from './demo-logic';
 import type { DemoAssetState } from '../sdk/engine';
 
 const entry = (i: number): DemoAssetState['celLog'][number] => ({

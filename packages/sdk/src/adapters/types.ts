@@ -27,6 +27,8 @@ export interface FeeOracleAdapter {
 }
 
 export interface OrdinalsProvider {
+  /** Complete CEL 3 observation; omission explicitly means the provider cannot resolve new-format assets. */
+  getSatSnapshot?(satoshi: string): Promise<import("@originals/cel/v3").SatSnapshot>;
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
     // Optional: deferred-content providers may not echo built content back.

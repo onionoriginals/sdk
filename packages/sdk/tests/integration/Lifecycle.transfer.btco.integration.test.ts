@@ -1,6 +1,7 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /* istanbul ignore file */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK, OriginalsAsset } from '../../src';
+import { OriginalsSDK, OriginalsAsset } from '../previous-sdk';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';

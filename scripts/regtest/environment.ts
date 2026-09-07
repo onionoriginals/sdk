@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import type { Subprocess } from 'bun';
 
 /** Disposable real nodes, with no public peers, public RPC or production wallet. */
-export async function startRegtest() {
+export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
+  const indexAddresses = options.indexAddresses ?? true;
   const dataDir = await mkdtemp(join(tmpdir(), 'originals-regtest-'));
   const coreDir = join(dataDir, 'core');
   await mkdir(coreDir);
@@ -71,14 +72,14 @@ export async function startRegtest() {
     const miningAddress = await rpc<string>('getnewaddress', ['', 'bech32'], 'originals-regtest');
     await rpc('generatetoaddress', [101, miningAddress]);
     spawn([ord, '--regtest', '--bitcoin-rpc-url', rpcUrl, '--cookie-file', join(coreDir, 'regtest', '.cookie'),
-      '--data-dir', join(dataDir, 'ord'), '--index-sats', '--index-addresses', '--index-transactions',
+      '--data-dir', join(dataDir, 'ord'), '--index-sats', ...(indexAddresses ? ['--index-addresses'] : []), '--index-transactions',
       '--index-cache-size', '33554432', '--commit-interval', '1', '--savepoint-interval', '1', '--max-savepoints', '20',
       'server', '--address', '127.0.0.1', '--http-port', new URL(ordUrl).port, '--polling-interval', '100ms'], 'ord');
     async function sync() {
       const tip = await rpc<{ blocks: number; bestblockhash: string }>('getblockchaininfo');
       await until('ord indexed tip', async () => {
         const status = await (await fetch(`${ordUrl}/status`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(2_000) })).json() as { chain: string; height: number; sat_index: boolean; address_index: boolean; unrecoverably_reorged: boolean };
-        if (status.chain !== 'regtest' || !status.sat_index || !status.address_index || status.unrecoverably_reorged) throw new Error('ord does not have the required regtest indexes');
+        if (status.chain !== 'regtest' || !status.sat_index || status.address_index !== indexAddresses || status.unrecoverably_reorged) throw new Error('ord does not have the required regtest indexes');
         if (status.height !== tip.blocks) return false;
         const indexedHash = await (await fetch(`${ordUrl}/blockhash/${tip.blocks}`, { signal: AbortSignal.timeout(2_000) })).text();
         return indexedHash.replaceAll('"', '').trim() === tip.bestblockhash;

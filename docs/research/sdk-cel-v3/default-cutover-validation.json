@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-06T08:32:17.586699+00:00",
+  "worktree": "/Users/brian/Projects/onionoriginals/sdk/.worktrees/codex/sdk-cel-v3",
+  "branch": "codex/sdk-cel-v3",
+  "baseCommit": "08a9981e22fbcb16e31495bd35344cd0016a11d7",
+  "reviewedSnapshot": "Uncommitted default SDK cutover. Not included in PR #574.",
+  "implementationDiffSha256": "5ba330e94774645e7c03c9943c6d32f7cdcf99ddb92f89ef103c32d0ed60ee84",
+  "implementationDiffCommand": [
+    "git",
+    "diff",
+    "--binary",
+    "08a9981e22fbcb16e31495bd35344cd0016a11d7",
+    "--",
+    ".github/workflows/ci.yml",
+    ".changeset/quiet-oranges-fold.md",
+    "CLAUDE.md",
+    "packages/sdk",
+    "apps/landing"
+  ],
+  "files": {
+    ".changeset/quiet-oranges-fold.md": "f094b41db1da66ee1907498cd76b24d323bcdbaafe8bb2ef82f1f28fc409db91",
+    ".github/workflows/ci.yml": "2f3cd30e7fae24e7c316530b3466216d43ae6adc45fa83de6456fc59d2ba094e",
+    "CLAUDE.md": "c28f93d0f55001c0dd2d74385975da4412250f4643fa19962bd3c8de0f4d54f6",
+    "apps/landing/scripts/dry-run-inscription.test.ts": "786381c612e933cba54f02818a301dc3325edc1519d120a148076ec907580ebd",
+    "apps/landing/scripts/dry-run-inscription.ts": "b25c56336c9f88a9fd17a18a54f8299b33749b3fc1fd424b4293f3b0eac80f9f",
+    "apps/landing/scripts/make-example.ts": "9c6490c518fe90b624c3ba39b08bc267c24e27651674ecea20f569fcbdba1d76",
+    "apps/landing/scripts/regtest-journey.ts": "2c770326f7ece89dd93bf953d46929185aa728525e8367304d21fc40d3ff73c7",
+    "apps/landing/src/pages/original-detail-data.ts": "05a05b08da15bccaab3bf3746512885f184c86d22d75a58ffa57629c10fdadab",
+    "apps/landing/src/sdk/engine.ts": "bd7eccb3ef18cd7c178d16ac308dbcd27f030802b47594f8f51b64f60fbc8e07",
+    "apps/landing/src/sdk/hosted-envelope.test.ts": "e392399f699cc85d71195a8e8bc4cc8e18810140218da6bbea35e4d914136d5d",
+    "apps/landing/src/sdk/hosted-envelope.ts": "74a02a677e33bb6043fb8d008a4e5421e0e3c8cf7b01a660c96bb4284cd191f4",
+    "apps/landing/src/sdk/previous-sdk.ts": "c3fb0c3adc1134ecbe0a4809eea4eb1d22690641243c977434fc5e283ed59877",
+    "apps/landing/src/sdk/resource-bytes.test.ts": "ff53b0c8a9a5a86d0af16e7c1ba98427cc843513b9c23fa616afb03bdaec242b",
+    "apps/landing/src/sdk/verify-example.ts": "a30d50d075c7c2b88b9602b467a4bcfc712777029a8ee70698d1638680f632c6",
+    "apps/landing/src/sdk/verify-original.ts": "f8cd1f5fbc1d2d28bb46104061520a217af177372d078a4cb4637c70b2c49d0b",
+    "packages/sdk/README.md": "aae97d5668faa28e7ce85aedf1ba2e25f4fba8add52db92bb8887d63963b88a8",
+    "packages/sdk/V3.md": "e5a19c959dac2aefd44c9e644532378dba62eaa36eb5b970c22eefb804581b1a",
+    "packages/sdk/package.json": "441361456558807a374565aabb3ee75d781606adfa8668a5db687940338181af",
+    "packages/sdk/src/cel/index.ts": "977f10fae7b2873350e23fa29090cf10f8ae626a7368403d51e9ca9216d28eaf",
+    "packages/sdk/src/core/OriginalsSDK.ts": "44a37d96849d9b93b63ca136d78ba7b94179237ce72f865013dd0e6279cc5a87",
+    "packages/sdk/src/core/OriginalsSDK3.ts": "ecb1263c23f55a54a29e48b4708f3408b990376effc0f548e053808f884d63e5",
+    "packages/sdk/src/did/DIDManager.ts": "d423dadfcfd2fa2e64c9209f38c0e2b26746a22654e783423685d0fdb43a165b",
+    "packages/sdk/src/did/identity-operations.ts": "885977a8e749b7eed09a07d9d535ae79ec20ac1ae8a9780df52efa5f1c13ac3b",
+    "packages/sdk/src/index.ts": "98e9ffb78490abe875074e85c11a118f2daef5825bffd04346074f0f53a02331",
+    "packages/sdk/src/types/public.ts": "1781955d7d453316ebe7047f55c28829628bc4ada953157d296f88f7fbbbe12f",
+    "packages/sdk/src/v3/OriginalsAsset.ts": "4b6c39a318c3eb2f9768773fea32d3b4dbdbd851f2bd51b315f02be0a5ba2555",
+    "packages/sdk/src/v3/OriginalsSDK.ts": "19a86b5069fe413deede29f421418e25342ca83c6136a140a34f905a80e88eba",
+    "packages/sdk/src/v3/cli.ts": "299c2f76d1b4b82b4a16a613499971e24212e23463699763bb3439cb8cfc7a2c",
+    "packages/sdk/src/v3/envelope.ts": "58b33e6f0640d040ea667234ce48dfdf90f8470674713bea0419ba13a5f619aa",
+    "packages/sdk/src/v3/index.ts": "01db5508e48fb3d97cf0ecd0e9795a47a08b3d93b43757c6c3d375721a32b9df",
+    "packages/sdk/src/v3/options.ts": "1d253acc225b5dc60e4e278aefa41d94d852f9f81c0eaad2c1ee6265b049e479",
+    "packages/sdk/src/v3/resources.ts": "c81975fb06687bd60b2996c5edae083ba5d6c7fea69f50a55be20a8a927c6b1e",
+    "packages/sdk/src/v3/types.ts": "2c9f8b2f7337e859dc9311c2d1e9d92006b308127f2da62de5ac65d3eb00a683",
+    "packages/sdk/tests/integration/BtcoBytesResolution.test.ts": "35eb37425ac35f156d3471019af171482137df4980e28549f1799e9942c3ba4a",
+    "packages/sdk/tests/integration/BtcoRoundTrip.test.ts": "1d8e57ae34cd7fcf0b85de92e4e2ac653556c1ad05273d682c0926ae748e1a88",
+    "packages/sdk/tests/integration/CelConvergence.e2e.test.ts": "39ebf079af2ce0f69e9dddca4ba537ba0d3cd7a2964ae219a079b1e8527dd651",
+    "packages/sdk/tests/integration/CelV3Cli.test.ts": "6c7f1aade1a518429cdd61c50595a3d2487cfa82db80de43e58da8f3024bbd73",
+    "packages/sdk/tests/integration/CelV3DefaultJourney.test.ts": "a6e227128478b53d971c6fa5f8eb7eb4e3a80e510cf11863184d3569693801d7",
+    "packages/sdk/tests/integration/CelV3LocalJourney.test.ts": "7c9521883b29e28dadccae4282a38a551fcd243a9436ea477b02638dae830b6f",
+    "packages/sdk/tests/integration/CreatorBuyerHandoff.e2e.test.ts": "12c92130a2b15ec5f66a141cfc2408d288230600ed836bf82023dd05241ccba4",
+    "packages/sdk/tests/integration/CredentialManager.test.ts": "51046594ab78024a98b3c371056f660ed2e70ecfc36038ad9f3d0927a1b2d931",
+    "packages/sdk/tests/integration/DIDManager.test.ts": "33205b48a14ef485a53476cec1321c9c0f926fb43329a1e3fc650a7797aeec91",
+    "packages/sdk/tests/integration/DidPeerToWebVhFlow.test.ts": "1e2cc83503b4ad6f4620d3e1cc681716fb719c6d6fb37c5c129ad717adc2703b",
+    "packages/sdk/tests/integration/FeePreviewConfirm.e2e.test.ts": "46a3496a0a8d1dcd82c703dbc6c2b3e72a8351c20c25d670c6b1d9cd657fe184",
+    "packages/sdk/tests/integration/Lifecycle.transfer.btco.integration.test.ts": "42638fbf7023a0b4e8b94db2ba40bbe3c5fae0d11c5859343685c73063f57389",
+    "packages/sdk/tests/integration/LifecycleManager.test.ts": "1a7d6b6191280ca9277fd922a7dafb4e51c539cfdbb31aa95ee888c40b6ba89c",
+    "packages/sdk/tests/integration/PerEventRealtime.e2e.test.ts": "3771a295fe38dedc725bf54f872bbbf53a0670ef11ccc392984e4e78c17dde6b",
+    "packages/sdk/tests/integration/RemoteSignerLifecycle.e2e.test.ts": "5b51a25e06258ce6ced7f5bda63bef558ccd5be974acbdd3edeb229f6e33c0f0",
+    "packages/sdk/tests/integration/ResolveFromSat.e2e.test.ts": "2603178b2d05697a55146c5fd71d92e751c49e10540f1659c6a2dfca19bde866",
+    "packages/sdk/tests/integration/ResourceUpdateHandoff.e2e.test.ts": "e16af18562a6feb2df9752d0b15777887bb7d2a73778bbe1be9a3615fd9497c6",
+    "packages/sdk/tests/integration/SharedInscriptionLock.test.ts": "55a88e6c108a018b583f7e87cd0b8d2eaed4114540cffeb663145d6543189a2b",
+    "packages/sdk/tests/integration/WebVhPublish.test.ts": "fbc75f604eeaab4c9b6ff8a59001f09715afaa6b84e841021d5aeedd383b807f",
+    "packages/sdk/tests/integration/cel-lifecycle.test.ts": "e221b34e5ffbcd525c12b50a97888cd5f09cacfdb9d07c4cd4b14a81e2b0890d",
+    "packages/sdk/tests/integration/head-freshness-attack.e2e.test.ts": "37cd7043b36846e0bc2f786aa6d8fd33bd39cac45b576025ade6e45f3acabb2f",
+    "packages/sdk/tests/integration/migration/MigrationLifecycle.test.ts": "f6dbbaa169d90ea14041db76cc931b6ed1c92449a46b434f2270fdb470498b40",
+    "packages/sdk/tests/integration/migration/peer-to-webvh.test.ts": "3279eab2bf16825375cfdc7865a6d0afe81f5818d7827a538b70f7a28be62e7e",
+    "packages/sdk/tests/previous-sdk.ts": "2fc0481fb09e54f0ec73d6c8bf8d31cff353c124946c30047ca3a1f78a0e13a7",
+    "packages/sdk/tests/security/btco-resolver-ssrf.test.ts": "5f978ee1e4f3b20a6387a391b74f38b2ca22d935cb4a1f8830c2c00a1392c94f",
+    "packages/sdk/tests/security/issue-batch-340-345-309-312-regressions.test.ts": "e2abaf7f0ca4ca4f55744ed5033746661a0211d8a4562e62666b2e9af0390400",
+    "packages/sdk/tests/security/multi-issue-review-regressions.test.ts": "c06cfff7a72066328e90b2df9bbd81edd367e2d9a2446ae5a3b900d0e3d786fd",
+    "packages/sdk/tests/types/public-cel3.ts": "df97f574a92a3ba23e85a50ff766bdbdac3895fa8fbce10134f48a54ca045df1",
+    "packages/sdk/tests/unit/bitcoin/BitcoinManager.test.ts": "1179e27054fae1a7dc7e410dc3fad4440bee66fdf4b6264253839f58dfcc8acf",
+    "packages/sdk/tests/unit/bitcoin/bitcoin-coverage.test.ts": "6d6f9f396cc8209a721f59153685c88455ee5874c27b690323a013613de1e2b6",
+    "packages/sdk/tests/unit/bitcoin/transfer-inscription-scriptpubkey.test.ts": "92aa1bfe7d4b55439012f2a8560f743c595009693e56defbdd24ff0b1d71d6e1",
+    "packages/sdk/tests/unit/core/OriginalsSDK.test.ts": "ef8e1163e18135b3d3c9fcb9addc0c2f4a50f30a4d3c9d2765ead3bdad54094a",
+    "packages/sdk/tests/unit/did/BtcoDidResolver.ownership.test.ts": "52c6cc476cbaac16be319f794bd3a10502807421e7cad435646cd29c1c6df17e",
+    "packages/sdk/tests/unit/did/DIDManager.celResolution.test.ts": "a21b60275470ff488510433ed2734883f41a0403c7932ef6dfa5f6f3c37b1f33",
+    "packages/sdk/tests/unit/did/DIDManager.migration-slug.test.ts": "0d3232619e015cf986178763d8658454231b003c685114f15549610bbcf9259b",
+    "packages/sdk/tests/unit/did/DIDManager.test.ts": "6f09faeb5404ef8702c54d097f01b82ed79742d72d2c6c15503d08c4ee477fbc",
+    "packages/sdk/tests/unit/did/WebVHManager.signer-exclusivity.test.ts": "f6c746cee1c0cd6a37ca6f5ab1c9ab80706aa057ab5862fa68994babd74701cb",
+    "packages/sdk/tests/unit/did/webvh-write-paths.test.ts": "3972d19f1b9b8acf79d63292fb642933ab62e7b4b61e70ce4270b356aadbf7f2",
+    "packages/sdk/tests/unit/events/ManagerEventMirroring.test.ts": "4057ec05fdf4bacfb290de8085c0cc3a6cd4557cb1881b6524e4bf44a875e0af",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.appendRace.test.ts": "0164ff855fc1208f995d64e4436dd60b4aefe794d46adc25cfd1ada0140ff61f",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.atomicRollback.test.ts": "a1e7a9704738f844a34abaeab5d35aafe22bf4319bd1f3586b96f7148a0b33ea",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.celPersistence.test.ts": "0418fa4b37523d63377df8fed6f29ef78192a6d5570be8df1837625c2016126e",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.cleanapi.test.ts": "893a0bff363cbad575e308b77aed3122b604b0caa3aa3aa01ae0d92701bddf9b",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.empty-resources.test.ts": "e0d2338abb29efb478d714865a1b601d29b6afe21b105d5a753fe159d3134a8a",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.inscribe.test.ts": "5e1e363047ce3669a2ad1c98f9530df7e11f5a7f98063801e47a2337796858f2",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.migrationcredential.test.ts": "aa2999b23e33a88cb362a07939d1eda152ff3abbe3efbf802805092a6995d3c2",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.mintwebvh.test.ts": "a8dd4c5b67172cf2c51852455702f45da166ce12e30ce2970b9eed8e130c8f82",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.noSigningKeyDegrade.test.ts": "18497fdd9a37883822d22343e19504a0241545b9b8079bb04d6af66ec8911351",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.prov.test.ts": "339d40d1dc1c2cfdc30508077b64ffa09d1e8d1c89e347e60ff1b71649d8e14d",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.rotateBtcoKeys.test.ts": "587dc989335981817a2509b969afbbeeb69b2ca2ebf0f9e9673851ca3df60e69",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.test.ts": "13d769e4c9f0ab528b5e08ec482134cf7ea788bce8bc1cd845acf12a15e04cb7",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.transfer.comprehensive.test.ts": "c0c626161c54f99956ef4afee5b792e80e733f519b446b268e6a32a444f2b9be",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.transfer.concurrency.test.ts": "bd4ae372d712f59e49092d605994069f089219ba08e18d460002f85d4791535d",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.transfer.unit.test.ts": "494657d4d450851b27f440264060740a7eac77908a91c4bc963d86add8fae258",
+    "packages/sdk/tests/unit/lifecycle/LifecycleManager.verifyAsset.test.ts": "ff084e2ada4dcfbe8d7da43ae1233128b6ee1cf060ee2f837e7fd282b161d425",
+    "packages/sdk/tests/unit/lifecycle/addResourceVersion.webvhHosting.test.ts": "b2698129ffd2532eb1f125eb7e1b835a249fc8d793604c907fe530127d761a31",
+    "packages/sdk/tests/unit/lifecycle/assetEnvelope.test.ts": "f83fe35ad524cb52a3c0b9288394db826952b42b522548025a8012bfec0cce4d",
+    "packages/sdk/tests/unit/lifecycle/authorCommitted.test.ts": "d3318c0e16683b82df07eee85fb950b53bc051549e3bc24fb393fc50b9348c16",
+    "packages/sdk/tests/unit/lifecycle/custody-required.test.ts": "1a7d23c12ee6d4dba656a812a3dfd1e88586d20e4147252e87044730119ebcce",
+    "packages/sdk/tests/unit/lifecycle/didKeyOnlyControllers.test.ts": "44b52a2d5835d8ba62a98bbfdb57271420e34b3c648b9c3de4245063270270c5",
+    "packages/sdk/tests/unit/lifecycle/getCurrentOwner.test.ts": "2e2d21e1df159071f1577f16435104109871d2f20367a6e80ad50e1ec9f33d13",
+    "packages/sdk/tests/unit/lifecycle/inscribe-alsoKnownAs-didcel.test.ts": "dfb32f7acdb2feddfe61fc2a661ba277b7c0f32e19df7cbb30161a8c07d6fa51",
+    "packages/sdk/tests/unit/lifecycle/inscribeOnBitcoin.satSelect.test.ts": "61a21663782e5b32ad3c446f860fb6315aef324783cb978b0d7d422fc8584a29",
+    "packages/sdk/tests/unit/lifecycle/lifecycle-coverage.test.ts": "027d473e8d7afdac4332f8a00f17083921fea1142804c0f147a627edd58f41ec",
+    "packages/sdk/tests/unit/lifecycle/loadAsset.test.ts": "e2188fc7b1c633c539c21a90ef76a62166983beb5efb0ba11aca8ee054e3cc3f",
+    "packages/sdk/tests/unit/lifecycle/publish-domain-validation.test.ts": "d5c68af55c382040c99aa7f1b1962fd1f58445c8e9a5e1fab8e88e37c5811cf1",
+    "packages/sdk/tests/unit/lifecycle/resource-hash-verification.test.ts": "5b2f670adc9700d02973bbb806650687afef92bee9ae50def8d1e9a51f393396",
+    "packages/sdk/tests/unit/lifecycle/resourceBytes.test.ts": "0888af80ad1a40cc7c13cf5acd5031df50062140ffbcf5cf782a51af3555f7ac",
+    "packages/sdk/tests/unit/lifecycle/satGatedAppends.sdk.test.ts": "582799c9aad4169e92ef15e07e35990895f45ae5b8514bb650c9b49006df83cb",
+    "packages/sdk/tests/unit/migration/CheckpointManager.test.ts": "64979aaca71447224119cc6fe34c28ccbf618c796b069e15f45ce92bd6cb0176",
+    "packages/sdk/tests/unit/migration/MigrationManager.batch.test.ts": "c2a5026ff7b532a8354bfc40b1e471128d65d90f62251b95395efc9e6e7e98a9",
+    "packages/sdk/tests/unit/migration/RollbackManager.test.ts": "2cb756c300f8c7aed38fee7034864caacc80d369944400ec9e9ddc650fcf8aa5",
+    "packages/sdk/tests/unit/migration/StateTracker.cleanup.test.ts": "a8a6799f2d4437b765853714e534f772b1af48055aa75cbadd21fa2096f8e390",
+    "packages/sdk/tests/unit/migration/checkpoint-cleanup-selfheal.test.ts": "8524075c6b38b876dbd80bbed4e236995f884e65f02b89efe92ff0f55b764274",
+    "packages/sdk/tests/unit/migration/checkpoint-startup-reclaim.test.ts": "600be53a20e5ab984fa2d09bbcc0e414dfbae581688543d0e515d37607de4527",
+    "packages/sdk/tests/unit/migration/checkpoint-storage-truth-sweep.test.ts": "aa6b3fc6030e44026d4053c1f622be45be6f3f198eef21858ddaafd62cc3b2c3",
+    "packages/sdk/tests/unit/migration/migration-coverage.test.ts": "8628303f300233b0a657fa7699f9c8661243debcd495d7043bad1f5fe85ae376",
+    "packages/sdk/tests/unit/migration/migration-scenarios.test.ts": "0b0909459b58c9e839655d8b06e481f51b68fba98cd4e712572bdc1b12f3ce25",
+    "packages/sdk/tests/unit/v3/asset.test.ts": "7014acc90ee817cc1e345236d9c556d10ff6baf8a8b9578d27ef6c41e112a47a",
+    "packages/sdk/tests/unit/v3/recovery-limits.test.ts": "235f5be108fb65eb3225ece42eb1c78cb772aea58c5c8998814975836dc6a3bc",
+    "packages/sdk/tests/unit/v3/validation.test.ts": "4544b2100275b65526895d0b4ba670a139d70538c10c0142c643dada2a024e2b",
+    "packages/sdk/tests/unit/vc/CredentialManager.helpers.test.ts": "2ec1d80bfff4259aa9d2ba38b47e5ad3fa53c1e522c0a92402e60a0c00f15414",
+    "packages/sdk/tests/unit/vc/CredentialManager.test.ts": "4f2424abdbe0f9fc71ab4fa166a14cc70c8ff812c3587f180f792dfde0a8ca5d",
+    "packages/sdk/tests/unit/vc/MultiSigManager.test.ts": "ee728ab1ebfbb94eb5703afafa752f90791023e554c4326ec0c0295653f90765"
+  },
+  "runtime": {
+    "bun": "1.3.5",
+    "node": "v25.2.1",
+    "python": "3.14.6",
+    "platform": "macOS-15.3.1-arm64-arm-64bit-Mach-O"
+  },
+  "results": {
+    "allSdk": {
+      "command": "cd packages/sdk && bun test tests/",
+      "exitCode": 0,
+      "passed": 3205,
+      "skipped": 245,
+      "failed": 0,
+      "files": 242,
+      "expectCalls": 51234,
+      "elapsedSeconds": 74.26,
+      "includesNewTests": 42,
+      "timing": "Before final unsupported-identity error formatting cleanup; focused SDK and auth rechecks below ran after that cleanup."
+    },
+    "focusedSdk": {
+      "command": "cd packages/sdk && bun test tests/unit/core/OriginalsSDK.test.ts tests/unit/v3 tests/integration/CelV3LocalJourney.test.ts tests/integration/CelV3DefaultJourney.test.ts tests/integration/CelV3Cli.test.ts",
+      "exitCode": 0,
+      "passed": 69,
+      "failed": 0,
+      "files": 7,
+      "expectCalls": 209
+    },
+    "auth": {
+      "command": "cd packages/auth && bun test",
+      "exitCode": 0,
+      "passed": 249,
+      "skipped": 3,
+      "failed": 0,
+      "files": 13
+    },
+    "landing": {
+      "command": "bun run landing:check",
+      "exitCode": 0,
+      "passed": 986,
+      "failed": 0,
+      "includes": [
+        "typecheck",
+        "tests",
+        "production build"
+      ],
+      "warnings": "Crypto-shim import and ineffective-dynamic-import warnings remain."
+    },
+    "build": {
+      "command": "bun run build",
+      "exitCode": 0,
+      "successfulTasks": 3,
+      "cachedTasks": 1
+    },
+    "publicTypes": {
+      "command": "cd packages/sdk && bun run typecheck:public",
+      "exitCode": 0,
+      "ciStepAdded": true
+    },
+    "lint": {
+      "command": "cd packages/sdk && bunx eslint src/v3 src/core/OriginalsSDK3.ts src/did/identity-operations.ts src/types/public.ts src/index.ts src/cel/index.ts",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 8,
+      "warningScope": "Unresolved didwebvh createDID dependency types in extracted identity helper."
+    },
+    "esm": {
+      "command": "bun run verify:esm",
+      "exitCode": 0,
+      "entryPoints": 24
+    },
+    "browserGuard": {
+      "command": "bun run verify:browser",
+      "exitCode": 0,
+      "warnings": "Existing Buffer-global advisories in prior Bitcoin modules. Not actual browser E2E."
+    },
+    "pack": {
+      "command": "cd packages/sdk && npm pack --dry-run --json --ignore-scripts",
+      "exitCode": 0,
+      "files": 313,
+      "verifiedFiles": [
+        "V3.md",
+        "dist/core/OriginalsSDK3.js",
+        "dist/core/OriginalsSDK3.d.ts",
+        "dist/types/public.d.ts",
+        "dist/v3/cli.js",
+        "dist/did/identity-operations.js"
+      ],
+      "testsPacked": false,
+      "published": false
+    },
+    "regtest": {
+      "command": "BITCOIND_BIN=/tmp/originals-regtest-tools/bitcoin-31.1/bin/bitcoind ORD_BIN=/tmp/originals-regtest-tools/ord-0.29.0/ord REGTEST_RECEIPT=/tmp/originals-sdk-v3-default-baseline.json REGTEST_LOGS_DIR=/tmp/originals-sdk-v3-default-regtest-logs bun run regtest",
+      "exitCode": 0,
+      "passed": 3,
+      "failed": 0,
+      "core": "31.1.0",
+      "ord": "0.29.0",
+      "representation": "Preceding-format private landing adapter, not CEL 3 inscription evidence",
+      "receipts": [
+        {
+          "path": "docs/research/sdk-cel-v3/baseline-regtest/none.json",
+          "sha256": "136fd03b7e41d611db0c0e2feecdcfc945be597a7b5debe63396b2f0f992c6cf",
+          "result": "pass",
+          "representation": "preceding format; AssetEnvelope v2",
+          "fault": "none"
+        },
+        {
+          "path": "docs/research/sdk-cel-v3/baseline-regtest/reveal-rejected.json",
+          "sha256": "66e28847c71f4322ba62c1b7caa2e3131b7f41ea310c0e25a06b038cbb754955",
+          "result": "pass",
+          "representation": "preceding format; AssetEnvelope v2",
+          "fault": "reveal-rejected"
+        },
+        {
+          "path": "docs/research/sdk-cel-v3/baseline-regtest/commit-response-lost.json",
+          "sha256": "ca3063bcfeb248b33245cfa2ea433bfa33668efd59ecbbe124a36d4594bac1e7",
+          "result": "pass",
+          "representation": "preceding format; AssetEnvelope v2",
+          "fault": "commit-response-lost"
+        }
+      ],
+      "initialAttempt": "Default tool download stalled at downloader issue already fixed on PR #574; stopped, then rerun with existing pinned binaries."
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  },
+  "localLogs": {
+    "allSdk": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-sdk.log",
+      "sha256": "9996012dd58bb1e7ec466f89bd8ad675ed3218dea82cca40d5c212e73c98c3ba",
+      "note": "Local temporary log, not committed"
+    },
+    "focusedSdk": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-focused.log",
+      "sha256": "78297b038086d908640ad428dfe2301f0444c3650123258105932c356164ba47",
+      "note": "Local temporary log, not committed"
+    },
+    "auth": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-auth.log",
+      "sha256": "d37129adece3807766ce4b3547adf5881b3f124d3bc54b84cc5472f794a8776e",
+      "note": "Local temporary log, not committed"
+    },
+    "landing": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-landing.log",
+      "sha256": "aebe42f4a25dec8d1e627446822109db415af0bc8fbd2ce64db804f47a8b554e",
+      "note": "Local temporary log, not committed"
+    },
+    "build": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-rebuild.log",
+      "sha256": "33e3a9d85f57f48c5d10b2c26775bddae47d5ffe845b184d73c127aeb88e92d8",
+      "note": "Local temporary log, not committed"
+    },
+    "publicTypes": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-public-types.log",
+      "sha256": "e9545129eacc4e3e719906cfd8796f68fe04b1aa8aecc6f807a2667c5e3c11d5",
+      "note": "Local temporary log, not committed"
+    },
+    "lint": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-lint.log",
+      "sha256": "40ca2377b64989f962ac4d353c005ccf9017439f108ce124ae2dd7b62377b72b",
+      "note": "Local temporary log, not committed"
+    },
+    "esm": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-esm.log",
+      "sha256": "699c159f2721a920e58fac36a4c03aeeb7568d35532cc2fbe2209219d688294c",
+      "note": "Local temporary log, not committed"
+    },
+    "browserGuard": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-browser.log",
+      "sha256": "68a09ca001652b6d5b1eeeb64ff5f0284c35d68d20f9a112333b54298b28ede1",
+      "note": "Local temporary log, not committed"
+    },
+    "pack": {
+      "path": "/tmp/originals-sdk-v3-cutover-final-pack.json",
+      "sha256": "aee19fbacc806271b952b2042ee070eb05f95435efd17458b6d9f89279f697b3",
+      "note": "Local temporary log, not committed"
+    },
+    "regtest": {
+      "path": "/tmp/originals-sdk-v3-cutover-regtest.log",
+      "sha256": "351a33870e27d3929da59b40e4441cf8efc9598b26ca757440f7a76c78d1732f",
+      "note": "Local temporary log, not committed"
+    }
+  },
+  "reviews": {
+    "standards": "No remaining actionable finding within local cutover scope. Final 6 root/CLI tests pass.",
+    "specification": "Default routing now satisfies #562 local criterion. 42 new runtime/CLI tests pass. Public type fixture finding fixed and independently rechecked."
+  },
+  "scopeLimits": [
+    "No new-format WebVH publication, on-sat resolution, Bitcoin writer or real regtest issuance evidence.",
+    "No browser E2E, remote custody provider validation, Linux CI or public-chain activity for this snapshot.",
+    "Per-instance queues do not coordinate separate loaded instances or publication retries.",
+    "Preceding SDK/network implementation remains behind an explicit private landing adapter and test-only regression barrel.",
+    "No package publication, deployment or merge. This branch predates later PR #574 downloader/CI fixes."
+  ],
+  "closureScope": "Implementation of #562 local default SDK routing complete; delivery/release status separate."
+}

@@ -139,6 +139,19 @@ export function createOriginalsRoutes(deps: {
     if (nsSeg && nsSeg.startsWith('user-') && nsSeg !== userSlug(sub)) {
       return json({ error: 'forbidden_namespace' }, 403);
     }
+    const segments = key.split('/');
+    if (nsSeg === 'published') {
+      if (segments[2] !== 'accounts' || segments[3] !== sub || !segments[4] ||
+          !/^u[A-Za-z0-9_-]+$/.test(segments[4]) ||
+          !((segments.length === 6 && ['did.jsonl', 'cel.json'].includes(segments[5])) ||
+            (segments.length === 7 && segments[5] === 'resources' && DIGEST_MULTIBASE.test(segments[6])))) {
+        return json({ error: 'forbidden_namespace' }, 403);
+      }
+    } else if (nsSeg !== userSlug(sub) &&
+               !(nsSeg && /^u[A-Za-z0-9_-]+$/.test(nsSeg)) &&
+               !(segments.length === 2 && segments[0] === 'cel')) {
+      return json({ error: 'forbidden_namespace' }, 403);
+    }
     // Cap the upload before buffering the whole body into memory (the rate
     // limiter bounds request COUNT, not per-request size).
     const declared = Number(req.headers.get('content-length'));

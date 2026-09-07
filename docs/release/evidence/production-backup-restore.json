@@ -1,0 +1,54 @@
+{
+  "recordedAt": "2026-09-06T17:34:32.589262+00:00",
+  "backup": {
+    "volumeInstanceBackupList": [
+      {
+        "createdAt": "2026-09-06T17:22:23.434Z",
+        "expiresAt": null,
+        "id": "7415d64f-1abf-4c92-bb9a-8dc43d649d91",
+        "name": "Pre-release 3.0.0 - 2026-09-06",
+        "referencedMB": 800,
+        "usedMB": null
+      }
+    ],
+    "volumeInstanceBackupScheduleList": [
+      {
+        "id": "7da1d4e5-9e96-4c03-925b-8eff68c8f40b",
+        "kind": "DAILY",
+        "retentionSeconds": 518400
+      }
+    ]
+  },
+  "restore": {
+    "backupId": "7415d64f-1abf-4c92-bb9a-8dc43d649d91",
+    "restoredVolumeId": "16460ffa-f096-419e-b916-664b3ae79931",
+    "verificationServiceId": "b5d587b7-9163-44ef-a94c-b8d270101c32",
+    "verificationDeploymentId": "1c80af32-74fe-4d3d-a8e5-20adb990806e",
+    "publicDomains": [],
+    "applicationCredentialsPresent": false,
+    "productionDeploymentUnchanged": true,
+    "productionVolumeUnchanged": true,
+    "proof": {
+      "jsonFiles": 50,
+      "invalidJson": 0,
+      "manifestSha256": "ca3e924d666b21411ec85d25ca15f5c228db3c6f9822f6b94c9a5940316d00a1",
+      "message": "",
+      "symlinks": 0,
+      "level": "info",
+      "timestamp": "2026-09-06T17:33:33.888578712Z",
+      "readOnly": true,
+      "bytes": 291643,
+      "files": 361,
+      "kind": "release-300-restored-volume-verification"
+    }
+  },
+  "cleanup": {
+    "verifiedAt": "2026-09-06T17:36:17.605040+00:00",
+    "temporaryServiceDeleted": true,
+    "restoredCopyDeleted": true,
+    "productionDeploymentUnchanged": true,
+    "originalBackupRetained": true,
+    "dailyScheduleRetained": true,
+    "stagedChangesEmpty": true
+  }
+}

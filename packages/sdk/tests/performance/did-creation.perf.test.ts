@@ -136,7 +136,7 @@ describe('DID Creation Performance', () => {
       const durations: number[] = [];
       for (const sourceDoc of sourceDocs) {
         const start = performance.now();
-        const webvhDoc = await sdk.did.migrateToDIDWebVH(sourceDoc);
+        const webvhDoc = await sdk.did.migrateToDIDWebVH(sourceDoc, 'example.com');
         durations.push(performance.now() - start);
 
         expect(webvhDoc.didDocument.id).toContain('did:webvh');

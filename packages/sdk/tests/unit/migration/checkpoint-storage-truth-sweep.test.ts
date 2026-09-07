@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 // SKIPPED (#279 + did:peer purge Phase 4·5/5): MigrationManager is experimental/unexported; its did:peer-based setup is parked pending #279.
 /**
  * Storage-truth cleanup sweep: the durable checkpoint object itself is the
@@ -32,7 +33,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { CheckpointManager } from '../../../src/migration/checkpoint/CheckpointManager';
 import { CheckpointStorage } from '../../../src/migration/checkpoint/CheckpointStorage';
 import { MIGRATION_STORAGE_DOMAIN } from '../../../src/migration/storage/MigrationStorage';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MigrationManager } from '../../../src/migration';
 import type { LogEntry } from '../../../src/utils/Logger';
 import { MockKeyStore } from '../../mocks/MockKeyStore';

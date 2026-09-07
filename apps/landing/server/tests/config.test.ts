@@ -25,6 +25,7 @@ const GOOD = {
   TURNKEY_API_PRIVATE_KEY: 'priv',
   TURNKEY_ORGANIZATION_ID: 'org',
   BTC_NETWORK: 'testnet4',
+  QUICKNODE_CONTENT_BASE_URL: 'https://ord.example.com/',
   ORIGINALS_DATA_DIR: '/data',
   TRUSTED_PROXY_HOPS: '1',
   RAILWAY_VOLUME_MOUNT_PATH: '/data',
@@ -32,6 +33,12 @@ const GOOD = {
 const mounted: DataDirProbe = { path: '/data', writable: true, mountPoints: ['/data'] };
 
 const errors = (issues: ConfigIssue[]) => issues.filter((i) => i.severity === 'error');
+/**
+ * Data-dir issues are `fatal` on a deployed instance, not `error`: they refuse
+ * the boot regardless of CONFIG_STRICT, because booting past a missing volume
+ * destroys the only copy of signed reveal hex. See config.ts's header.
+ */
+const fatals = (issues: ConfigIssue[]) => issues.filter((i) => i.severity === 'fatal');
 const keys = (issues: ConfigIssue[]) => issues.map((i) => i.key);
 const without = (env: Record<string, string | undefined>, key: string) => {
   const next = { ...env };
@@ -115,23 +122,23 @@ describe('validateConfig — deployed environment', () => {
     expect(keys(issues)).toContain('QUICKNODE_ENDPOINT');
   });
 
-  test('a missing ORIGINALS_DATA_DIR is reported', () => {
-    const issues = errors(
+  test('a missing ORIGINALS_DATA_DIR is FATAL', () => {
+    const issues = fatals(
       validateConfig({ env: without(GOOD, 'ORIGINALS_DATA_DIR'), dataDir: null })
     );
     expect(keys(issues)).toContain('ORIGINALS_DATA_DIR');
   });
 
-  test('an unwritable data directory is reported', () => {
-    const issues = errors(
+  test('an unwritable data directory is FATAL', () => {
+    const issues = fatals(
       validateConfig({ env: GOOD, dataDir: { ...mounted, writable: false } })
     );
     expect(keys(issues)).toEqual(['ORIGINALS_DATA_DIR']);
     expect(issues[0].message).toMatch(/writ/i);
   });
 
-  test('a path that is writable but not a mounted volume fails', () => {
-    const issues = errors(
+  test('a path that is writable but not a mounted volume is FATAL', () => {
+    const issues = fatals(
       validateConfig({
         env: { ...GOOD, ORIGINALS_DATA_DIR: '/app/.originals-data', RAILWAY_VOLUME_MOUNT_PATH: '/data' },
         dataDir: { path: '/app/.originals-data', writable: true, mountPoints: ['/data'] },
@@ -139,6 +146,16 @@ describe('validateConfig — deployed environment', () => {
     );
     expect(keys(issues)).toEqual(['ORIGINALS_DATA_DIR']);
     expect(issues[0].message).toMatch(/volume|mount/i);
+  });
+
+  test('every data-dir message names what is actually at stake', () => {
+    for (const input of [
+      { env: without(GOOD, 'ORIGINALS_DATA_DIR'), dataDir: null },
+      { env: GOOD, dataDir: { ...mounted, writable: false } },
+    ]) {
+      const [issue] = fatals(validateConfig(input));
+      expect(issue.message).toMatch(/signed reveal/i);
+    }
   });
 
   test('an absent trusted-proxy hop count is reported naming it', () => {
@@ -198,7 +215,7 @@ describe('validateConfig — local environment', () => {
     expect(validateConfig({ env: { NODE_ENV: 'development' }, dataDir: null })).toEqual([]);
   });
 
-  test('locally a missing ORIGINALS_DATA_DIR warns rather than erroring', () => {
+  test('locally a missing ORIGINALS_DATA_DIR warns rather than erroring or being fatal', () => {
     const env = {
       JWT_SECRET: 'x'.repeat(32),
       TURNKEY_API_PUBLIC_KEY: 'pub',
@@ -207,6 +224,7 @@ describe('validateConfig — local environment', () => {
     };
     const issues = validateConfig({ env, dataDir: null });
     expect(errors(issues)).toEqual([]);
+    expect(fatals(issues)).toEqual([]);
     expect(keys(issues)).toContain('ORIGINALS_DATA_DIR');
   });
 
@@ -335,6 +353,36 @@ describe('strict mode', () => {
     expect(() => enforceConfig(issues, { strict: true, log: () => {} })).toThrow(/TRUSTED_PROXY_HOPS/);
   });
 
+  test('a FATAL issue refuses the boot even with CONFIG_STRICT off', () => {
+    // The whole point of the severity: an operator who has not opted into
+    // strict mode must not thereby boot past a missing data volume.
+    const fatal: ConfigIssue[] = [
+      { key: 'ORIGINALS_DATA_DIR', severity: 'fatal', message: 'not a mounted volume' },
+    ];
+    expect(() => enforceConfig(fatal, { strict: false, log: () => {} })).toThrow(/ORIGINALS_DATA_DIR/);
+    expect(() => enforceConfig(fatal, { strict: true, log: () => {} })).toThrow(/ORIGINALS_DATA_DIR/);
+  });
+
+  test('a deployed instance with no volume refuses to boot with CONFIG_STRICT unset', () => {
+    // End to end through validateConfig, which is how serve.ts reaches it.
+    const issues = validateConfig({
+      env: { ...GOOD, ORIGINALS_DATA_DIR: '/app/.originals-data' },
+      dataDir: { path: '/app/.originals-data', writable: true, mountPoints: ['/data'] },
+    });
+    expect(() => enforceConfig(issues, { strict: false, log: () => {} })).toThrow(/ORIGINALS_DATA_DIR/);
+  });
+
+  test('CONFIG_STRICT keeps its exact meaning for everything that is not fatal', () => {
+    // No fatal issue present: warn-only still boots, strict still refuses.
+    // Introducing `fatal` changed nothing about this ladder.
+    const nonFatal: ConfigIssue[] = [
+      { key: 'JWT_SECRET', severity: 'error', message: 'too short' },
+      { key: 'BTC_INDEXER_API', severity: 'warn', message: 'public tier' },
+    ];
+    expect(() => enforceConfig(nonFatal, { strict: false, log: () => {} })).not.toThrow();
+    expect(() => enforceConfig(nonFatal, { strict: true, log: () => {} })).toThrow(/JWT_SECRET/);
+  });
+
   test('warn-only mode reports the same violations without throwing', () => {
     const lines: string[] = [];
     const issues = validateConfig({ env: without(GOOD, 'JWT_SECRET'), dataDir: mounted });
@@ -460,4 +508,12 @@ describe('block completion feed configuration', () => {
       expect(issue!.message).not.toContain(url);
     }
   });
+});
+
+test('CEL 3 QuickNode deployment names missing or invalid byte transport configuration', () => {
+  const env = { ...without(GOOD, 'QUICKNODE_CONTENT_BASE_URL'), QUICKNODE_ENDPOINT: 'https://example.com/token/' };
+  expect(keys(validateConfig({ env, dataDir: mounted }))).toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_BASE_URL: 'https://ord.example.com/' }, dataDir: mounted }))).not.toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_ENCODING: 'base64' }, dataDir: mounted }))).not.toContain('QUICKNODE_CONTENT_BASE_URL');
+  expect(keys(validateConfig({ env: { ...env, QUICKNODE_CONTENT_BASE_URL: 'http://ord.example.com/' }, dataDir: mounted }))).toContain('QUICKNODE_CONTENT_BASE_URL');
 });

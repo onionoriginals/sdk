@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { DemoCopyError, demoFailureMessage } from './Demo';
+import { DemoCopyError, demoFailureMessage } from './demo-logic';
 import { demo } from '../content';
 
 // R15: a store or transport failure must never reach a visitor as a raw

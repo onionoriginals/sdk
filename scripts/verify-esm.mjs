@@ -25,7 +25,7 @@
  *
  * Run AFTER `bun run build`. Exits non-zero on the first failure.
  */
-import { existsSync, mkdirSync, unlinkSync, symlinkSync, rmSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, unlinkSync, symlinkSync, rmdirSync, readdirSync, statSync, lstatSync, realpathSync, renameSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -87,16 +87,26 @@ function specifiersFromExports(pkg) {
 
 const createdLinks = [];
 // Point node_modules/<name> at the freshly built workspace package. Never trust a
-// pre-existing link/dir — a stale one would silently validate the wrong code — so
-// we always remove and recreate, then clean up afterwards.
+// pre-existing link/dir unless it resolves to this workspace. Preserve the
+// installation: hoisted Bun layouts need these links after this check finishes.
 function linkPackage(name, dir) {
   const target = resolve(repoRoot, dir);
   const linkPath = join(nodeModules, ...name.split('/')); // node_modules/@originals/sdk
   mkdirSync(dirname(linkPath), { recursive: true });
-  try { unlinkSync(linkPath); } catch { /* not a symlink/file */ }
-  try { rmSync(linkPath, { recursive: true, force: true }); } catch { /* not a dir */ }
+  try { if (realpathSync(linkPath) === realpathSync(target)) return; } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  let backup;
+  try {
+    lstatSync(linkPath); // Also preserve a dangling symlink.
+    const directory = mkdtempSync(join(dirname(linkPath), '.verify-esm-'));
+    backup = join(directory, 'original');
+    renameSync(linkPath, backup);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  createdLinks.push({ linkPath, backup });
   symlinkSync(target, linkPath, 'dir');
-  createdLinks.push(linkPath);
 }
 
 let failures = 0;
@@ -123,9 +133,13 @@ try {
   }
   if (failures === 0) console.log(`✓ ${checked} exported entry point(s) import cleanly under Node`);
 } finally {
-  for (const link of createdLinks) {
+  for (const { linkPath, backup } of createdLinks.reverse()) {
     // unlinkSync removes the symlink itself (never its target).
-    try { unlinkSync(link); } catch { /* best-effort cleanup */ }
+    try { unlinkSync(linkPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (backup) {
+      renameSync(backup, linkPath);
+      rmdirSync(dirname(backup));
+    }
   }
 }
 

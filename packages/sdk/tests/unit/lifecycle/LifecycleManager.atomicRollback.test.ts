@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Item 5: the documented atomicRollback option (LifecycleOperationOptions,
  * "default: true") was never read by any code. publishToWeb left
@@ -7,7 +8,7 @@
  * deleted when the adapter supports deletion.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import type { AssetResource } from '../../../src/types';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 

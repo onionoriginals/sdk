@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect } from 'bun:test';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -16,7 +17,7 @@ describe('sat ownership (#366)', () => {
   });
 
   test('resolution carries ownership metadata after inscription', async () => {
-    const { OriginalsSDK } = await import('../../../src');
+    const { OriginalsSDK } = await import('../../previous-sdk');
     const { OrdinalsProviderResolverAdapter } = await import('../../../src/did/providers/OrdinalsProviderResolverAdapter');
     const provider = new OrdMockProvider();
     const sdk = OriginalsSDK.create({ onAppendFailure: 'skip', network: 'regtest', defaultKeyType: 'ES256K', ordinalsProvider: provider });

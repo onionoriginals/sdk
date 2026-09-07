@@ -311,7 +311,7 @@ export function OriginalDetail({ did }: { did: string }) {
           <>
             <Hero did={did} data={data} checks={checks} allOk={allOk} anyFail={anyFail} copied={copied} onCopy={copyDid} />
             {data.cel ? (
-              <Timeline steps={celTimeline(data.cel)} />
+              <Timeline steps={celTimeline(data.cel, data.row)} />
             ) : (
               <p className="od-note">{originalDetail.artifactsMissing}</p>
             )}

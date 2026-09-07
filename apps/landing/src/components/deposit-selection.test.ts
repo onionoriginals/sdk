@@ -10,7 +10,7 @@
  * guard that summing makes load-bearing.
  */
 import { describe, test, expect } from 'bun:test';
-import { selectFundingUtxos, type FundingUtxo } from './Demo';
+import { selectFundingUtxos, type FundingUtxo } from './demo-logic';
 
 const SCRIPT = '0014' + '11'.repeat(20);
 const utxo = (n: number, value: number): FundingUtxo => ({

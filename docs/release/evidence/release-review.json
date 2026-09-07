@@ -1,0 +1,793 @@
+{
+  "status": "complete",
+  "verdict": "Not ready",
+  "scope": {
+    "base": "9116ce2c364872f7993336050786e722da86c2e2",
+    "branch": "codex/release-3.0.0",
+    "head_sha": "1c55b4d9873a3381fdd30f6e0ca5c4c98216b255",
+    "pr_url": null,
+    "files_changed": 254,
+    "supplemental_review": {
+      "commit": "eee2b5ba",
+      "path": ".changeset/config.json",
+      "result": "No contract issue found in explicit private-package versioning configuration."
+    }
+  },
+  "intent": "Release the default Originals SDK 3.0.0 with CEL 3 controller-authorized assets, explicit hosted publication and cold recovery, fresh complete Bitcoin asset/DID resolution, and boundary/delta writing with durable exact signed-pair recovery. The landing creator and recovery journey must use that public SDK, preserve raw media bytes, separate sat ownership from controller authority, and never present submission or partial evidence as chain acceptance.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "reliability",
+    "api-contract",
+    "testing",
+    "project-standards",
+    "julik-frontend-races",
+    "performance",
+    "maintainability",
+    "agent-native",
+    "adversarial-claude"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/server/bitcoin.ts",
+      "first_evidence": "apps/landing/server/bitcoin.ts:1902 --         await broadcastIdempotent(r.revealTxHex);",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 1902,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P1",
+      "suggested_fix": "In the throttled liveUnconfirmed replay branch, journal the attempt first and replay the retained signedCommitHex before revealTxHex, or detect missing-input rejection and resend commit then reveal. Preserve the original pair and durable status on failure. Apply the same missing-parent fallback to manual recovery of reveal_broadcast records.",
+      "title": "Replay evicted commits before retrying unconfirmed reveals",
+      "why_it_matters": "A pair acknowledged as reveal_broadcast can lose both unconfirmed transactions from the mempool. Every background pass then resends only the reveal, which is rejected for missing inputs, while the record remains reveal_broadcast forever; the new closed-browser recovery loop never restores its parent. The retained signed commit already supplies the exact safe recovery bytes, as the adjacent signed/commit_broadcast and reorg branches demonstrate.",
+      "evidence": [
+        "apps/landing/server/bitcoin.ts:1902 --         await broadcastIdempotent(r.revealTxHex);",
+        "apps/landing/server/bitcoin.ts:1823 --       newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),",
+        "Read-only in-memory invocation of createBitcoinRoutes(...).sweepInscriptions() three times, one hour apart, with a reveal_broadcast record and absent parent returned {\"calls\":[\"reveal\",\"reveal\",\"reveal\"],\"status\":\"reveal_broadcast\",\"parentPresent\":false}. The mock broadcaster rejected reveal with bad-txns-inputs-missingorspent and would accept the retained commit.",
+        "provenance: 72a4cba9 Brian Richter 2026-09-06 - fix(landing): prevent recovery starvation and surface storage failures. This diff rewrites the branch and adds the closed-browser sweep caller; the missing-parent path is directly relevant to that new recovery promise."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "apps/landing/server/bitcoin.ts",
+      "first_evidence": "apps/landing/server/bitcoin.ts:1571-1576 \u2014 `const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);` / `const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({` / `        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,`",
+      "independent_reviewers": [
+        "adversarial-claude"
+      ],
+      "line": 1572,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial-claude"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move the `inscribeUserLimiter.check(sub)` block (bitcoin.ts:1582-1587) \u2014 and add a `quotaCapped(sub)` check \u2014 to before the ordinal-classification/reinscription block at line 1563, so a refused request still burns a slot. If keeping cheap-refusal-is-free is important, gate only the expensive `isAuthorizedReinscription` branch behind its own small per-user counter (e.g. 3/hour), since reaching it already requires a declared inscribed outpoint.",
+      "title": "Unmetered sat-snapshot amplification on POST /api/btc/inscribe",
+      "why_it_matters": "A signed-in caller can force a complete fresh ord/Core sat enumeration per request, on an attacker-chosen sat, before any per-user quota slot is consumed. Each such request can fan out to thousands of upstream QuickNode calls and tens of MiB of downloads. Exhausting that quota kills `currentFeeRate`, and both the deposit route and the fee route fail closed on it \u2014 so the amplification takes down the money path for every creator on the deploy, not just the caller.",
+      "evidence": [
+        "apps/landing/server/bitcoin.ts:1571-1576 \u2014 `const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);` / `const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({` / `        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,`",
+        "apps/landing/server/bitcoin.ts:1582 \u2014 `const perUser = inscribeUserLimiter.check(sub);` sits AFTER the block above, with the comment 'Consume a per-user slot only now that the request has proven valid'. A `refuse('funding_outpoint_inscribed', ...)` at line 1576 therefore returns without consuming any per-user slot.",
+        "apps/landing/server/bitcoin.ts:1428 \u2014 `const limited = rateLimited(clientIp);` is the ONLY limiter on this handler; unlike `sat`/`fee`/`broadcast`/`inscribeList`, `inscribe` never calls `quotaCapped(sub)`. ipLimiter is 120/60_000 (line 680).",
+        "Trigger path: the caller controls `fundingUtxos` entirely (bitcoin.ts:1454-1464) and no signature is ever verified, so a structurally valid commit/reveal pair naming any publicly known inscribed mainnet outpoint as input 0 passes every check at lines 1485-1558 (changeAddress must equal the caller's own bound deposit address, which they hold). `classifySpendableUtxos` then reports `ordinalBearing > 0` and execution reaches `isAuthorizedReinscription`.",
+        "Cost per request: apps/landing/server/reinscription.ts:52 `const accepted = await sdk.lifecycle.resolveAssetFromSat(sat);` \u2192 packages/sdk/src/v3/resolution.ts:88-98 retries `observeOnce` up to 3 times on chain-changed/inconsistent-evidence \u2192 packages/sdk/src/adapters/providers/sat-snapshot.ts:46 accepts `sat.inscriptions.length > 10000` as the only bound, and lines 58/77/81 issue an `/inscription`, a `/content` and an `/r/metadata` read per listed inscription (plus `getblockhash`/`getblock` per distinct height), with the byte ceiling at line 86 set to 32 MiB.",
+        "Not cached: packages/sdk/src/v3/resolution.ts:68 \u2014 `/** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */` \u2014 so repeated requests naming the same sat repeat the full enumeration."
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "packages/sdk/src/adapters/providers/sat-snapshot.ts",
+      "first_evidence": "packages/sdk/src/adapters/providers/sat-snapshot.ts:53 --   for (const id of sat.inscriptions) {",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 53,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Add a configurable total deadline/call budget to readSatSnapshot (checked before each per-inscription dependency call and reported as an incomplete observation on expiry), then pass the same bounded budget from the landing sat-snapshot route/provider. Keep serial completeness semantics; fail closed rather than returning a partial snapshot. Add a regression test with a reader exposing many inscriptions and delayed calls to prove the request stops before issuing all reads.",
+      "title": "Bound sat-snapshot request work",
+      "why_it_matters": "An authenticated request for a sat with many inscriptions holds the landing server open while it serially performs up to 10,000 inscription, content, and metadata reads. Each QuickNode read can take the configured 10 seconds, so a slow or degraded provider turns one request into hours of retained work and an enormous upstream call fan-out; the route has neither a total deadline nor an in-flight bulkhead. Repeated requests can therefore exhaust server connections and QuickNode capacity, causing a cascading failure for ordinary inscription and fee routes. A total snapshot deadline that fails closed preserves the required complete-evidence guarantee without allowing an unbounded dependency call chain.",
+      "evidence": [
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:53 --   for (const id of sat.inscriptions) {",
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:46-47 -- sat.inscriptions.length > 10000 is the only enumeration limit.",
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:58,77,81 -- each iteration awaits reader.inscription(id), reader.content(id), and reader.metadata(id) serially.",
+        "apps/landing/server/bitcoin.ts:847 -- const snapshot = await provider.getSatSnapshot(satoshi);"
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "packages/sdk/src/bitcoin/inscription-recovery.ts",
+      "first_evidence": "packages/sdk/src/bitcoin/inscription-recovery.ts:64 -- if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 64,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Add a shared prepared-pair verifier before any save or broadcast: verify the supported reveal script-path witness, its Taproot control block commitment to commit output zero, and its Schnorr signature over the actual commit output script and amount. Reject invalid witnesses with INVALID_INSCRIPTION_RECOVERY. Reuse that guard in the landing submit route for its direct HTTP callers. The existing dry-run verifyRevealSignature helper supplies the signature-verification pattern, but also validate the control-block/output commitment. Add a regression that flips one reveal-signature byte while preserving both txids and asserts zero provider submissions.",
+      "title": "CWE-354: Verify reveal witnesses before spending the commit",
+      "why_it_matters": "A restored or transferred prepared publication with a damaged reveal signature passes the new recovery validator, spends the valid commit, and retains only a reveal that Bitcoin will always reject. SegWit transaction IDs do not cover witness bytes: changing one Schnorr-signature byte preserves every identity and destination check here, and the higher-level publication validator only parses the inscription. Verifying the reveal against commit output zero before persistence or submission prevents an invalid recovery artifact from turning into stranded funds.",
+      "evidence": [
+        "packages/sdk/src/bitcoin/inscription-recovery.ts:64 -- if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {",
+        "packages/sdk/src/bitcoin/inscription-recovery.ts:77-78 -- if (reveal.outputsLength !== 1 || Buffer.from(reveal.getOutput(0).script!).toString('hex') !== scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.'); This is the last transaction check before validate returns.",
+        "packages/sdk/src/v3/bitcoin.ts:477-483 -- publish clones and validates the wrapper, then forwards prepared.transactions to submitPreparedInscriptionOnSat; its preceding validation parses inscription contents but never verifies the Bitcoin signature.",
+        "Read-only in-memory reproduction against reviewed checkout using prepareInscriptionOnSat with a real secp256k1 signer, a synthetic unspent funding input, and a recording mock broadcaster. Extract finalScriptWitness[0] from the prepared reveal, locate that signature in the raw reveal bytes, XOR its first byte with 1, then pass the altered prepared record to submitPreparedInscriptionOnSat with a capturing recoveryStore. Independently verify original and modified signatures with schnorr.verify and tx.preimageWitnessV1 against commit output zero. Observed: {\"originalSignatureValid\":true,\"changedSignatureValid\":false,\"sameTxid\":true,\"calls\":2,\"firstWasOriginalCommit\":true,\"status\":\"reveal_broadcast_unknown\",\"error\":\"mandatory-script-verify-flag-failed: Invalid Schnorr signature\",\"persistedOriginalReveal\":false}. The broadcaster simulated the rejection; signature invalidity and the SDK's two submissions were measured directly. No network transactions were sent.",
+        "apps/landing/scripts/dry-run-inscription.ts:391-416 -- verifyRevealSignature already verifies the Schnorr signature using the commit script, amount, leaf script and leaf version; the production recovery path does not call it."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/src/sdk/engine.ts",
+      "first_evidence": "apps/landing/src/sdk/engine.ts:373 --     this.assetTitle = title;",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 373,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "When title differs from asset.state.name, append asset.update({ name: title }, signed) before publishing the revised asset. Retain the metadata.json update, and extend title-edit/cold-recovery tests to assert the CEL name and recovered account title.",
+      "title": "Persist revised titles in the CEL asset name",
+      "why_it_matters": "Retitling an Original changes its metadata resource and current account row, but its authenticated CEL name remains the genesis title. A cold hydration or retained-publication recovery uses asset.state.name and restores the old title into the account record. The native CEL 3 cutover added that authoritative name at creation without updating it during the existing title-edit flow.",
+      "evidence": [
+        "apps/landing/src/sdk/engine.ts:373 --     this.assetTitle = title;",
+        "apps/landing/src/sdk/engine.ts:304 --       { signer: authorship, name: title },",
+        "apps/landing/src/sdk/engine.ts:273 --       this.asset.state.name ?? this.asset.resources[0]?.id ?? \"\";",
+        "apps/landing/src/sdk/local-publication-recovery.ts:108 --       title: asset.state.name ?? item.title,",
+        "Read-only bun invocation created title Before, called engine.update with title After and unchanged SVG, then printed {\"name\":\"Before\",\"metadata\":\"After\"}. Existing title-edit tests assert metadata.title but not state.name."
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/src/sdk/engine.ts",
+      "first_evidence": "apps/landing/src/sdk/engine.ts:566 --         alias.startsWith(\"did:webvh:\") ? \"did:webvh\" : \"did:btco\",",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 566,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Build bindings only for aliases explicitly starting with did:webvh: or did:btco:, or independently find each method's alias. Leave btcoDid undefined until an actual did:btco alias exists.",
+      "title": "Exclude genesis aliases from Bitcoin DID bindings",
+      "why_it_matters": "Every new local Original is displayed with a did:btco row containing its did:cel identifier, even though it has never been published to Bitcoin. CEL state.aliases includes the genesis did:cel, and the two-way mapping classifies every non-WebVH alias as Bitcoin. DidList renders any truthy btcoDid without checking the layer, so the false chain identity is visible during normal creation and hosted publication.",
+      "evidence": [
+        "apps/landing/src/sdk/engine.ts:566 --         alias.startsWith(\"did:webvh:\") ? \"did:webvh\" : \"did:btco\",",
+        "apps/landing/src/components/Demo.tsx:1819 --   if (asset.btcoDid) entries.push(['did:btco', asset.btcoDid]);",
+        "Read-only bun invocation of engine.create showed aliases containing only did:cel:uEi... while snapshot.btcoDid was that same did:cel:uEi... string."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "packages/sdk/src/types/public.ts",
+      "first_evidence": "packages/sdk/src/types/public.ts:12 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset } from '../v3/hosted.js';",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 12,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add `HostedEvidence` to the hosted type re-export in `packages/sdk/src/types/public.ts`, then extend `tests/types/public-cel3.ts` with an `@originals/sdk/types` import and assignment for `AssetVerification['hosted']`.",
+      "title": "Types subpath omits HostedEvidence",
+      "why_it_matters": "A TypeScript consumer that consistently imports SDK declarations from `@originals/sdk/types` cannot name the hosted verification result returned through `AssetVerification.hosted`, even though the root and `/v3` public entries export `HostedEvidence`. This makes a normal typed hosted-publication/verification integration fail to compile or require an unsupported deep import. Re-exporting the type from the documented types entry restores the advertised CEL 3 type surface.",
+      "evidence": [
+        "packages/sdk/src/types/public.ts:12 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset } from '../v3/hosted.js';",
+        "packages/sdk/src/index.ts:221 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from \"./v3/hosted.js\";",
+        "packages/sdk/src/v3/index.ts:10 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from \"./hosted.js\";",
+        "packages/sdk/src/v3/types.ts:106 -- hosted?: import(\"./hosted.js\").HostedEvidence;"
+      ]
+    },
+    {
+      "#": 8,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "packages/sdk/src/v3/bitcoin.ts",
+      "first_evidence": "packages/sdk/src/v3/bitcoin.ts:328 --               : candidates.find((resource) => resource.id === inlineResourceId);",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 328,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Keep candidates[0] for the default selection, but resolve an explicit inlineResourceId against proposedState.resources. Continue selecting the matching current version's authenticated attachment and rejecting missing bytes.",
+      "title": "Honor explicit inline selection for unchanged resources",
+      "why_it_matters": "A caller who selects an existing unchanged resource on a metadata-only or key-rotation delta receives a log-only inscription instead of the requested media. This also prevents intentionally adding bytes for a resource that was only referenced by an earlier publication. The explicit resource passes the authenticated-current-resource guard but is subsequently searched only in the changed-resource candidates.",
+      "evidence": [
+        "packages/sdk/src/v3/bitcoin.ts:328 --               : candidates.find((resource) => resource.id === inlineResourceId);",
+        "packages/sdk/src/v3/bitcoin.ts:301 --         const candidates = proposedState.resources.filter((resource) => {",
+        "packages/sdk/src/v3/bitcoin.ts:329 --         if (!selected)",
+        "packages/sdk/V3.md:253 -- first changed current resource. `inlineResourceId` selects another current",
+        "packages/sdk/V3.md:254 -- resource; `null` makes a log-only `application/cel` JSON inscription."
+      ]
+    },
+    {
+      "#": 10,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "apps/landing/src/pages/YourOriginals.tsx",
+      "first_evidence": "apps/landing/src/pages/YourOriginals.tsx:368 -- setLocalRecoveryNote(await recoverLocalPublication(user.subOrgId, item.key));",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 368,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add an account/generation ref that is advanced on auth identity change; capture its value before recoverLocalPublication, and before every post-await setState (including the follow-up fetch) return unless it still matches the current signed-in sub-org. Cover sign-out then sign-in while recovery is pending.",
+      "title": "Ignore recovery completion after account changes",
+      "why_it_matters": "A retained-publication retry that finishes after the user signs out or switches accounts still refreshes and commits state through the old closure. The next account can therefore briefly receive the prior account's retained-publication titles and recovery controls, and a late completion can overwrite the newer account's list until its own fetch wins. Bind the operation to the initiating sub-org and discard its completion when that identity is no longer current.",
+      "evidence": [
+        "apps/landing/src/pages/YourOriginals.tsx:368 -- setLocalRecoveryNote(await recoverLocalPublication(user.subOrgId, item.key));",
+        "apps/landing/src/pages/YourOriginals.tsx:369 -- const [rows, records] = await Promise.all([fetchOriginals(), fetchInscriptions()]);",
+        "apps/landing/src/pages/YourOriginals.tsx:374 -- } catch (error) { setLocalRecoveryNote((error as Error).message); }"
+      ]
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/server/bitcoin.ts",
+      "first_evidence": "apps/landing/server/bitcoin.ts:1902 --         await broadcastIdempotent(r.revealTxHex);",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 1902,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P1",
+      "suggested_fix": "In the throttled liveUnconfirmed replay branch, journal the attempt first and replay the retained signedCommitHex before revealTxHex, or detect missing-input rejection and resend commit then reveal. Preserve the original pair and durable status on failure. Apply the same missing-parent fallback to manual recovery of reveal_broadcast records.",
+      "title": "Replay evicted commits before retrying unconfirmed reveals",
+      "why_it_matters": "A pair acknowledged as reveal_broadcast can lose both unconfirmed transactions from the mempool. Every background pass then resends only the reveal, which is rejected for missing inputs, while the record remains reveal_broadcast forever; the new closed-browser recovery loop never restores its parent. The retained signed commit already supplies the exact safe recovery bytes, as the adjacent signed/commit_broadcast and reorg branches demonstrate.",
+      "evidence": [
+        "apps/landing/server/bitcoin.ts:1902 --         await broadcastIdempotent(r.revealTxHex);",
+        "apps/landing/server/bitcoin.ts:1823 --       newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'reveal_broadcast' || r.status === 'confirmed')),",
+        "Read-only in-memory invocation of createBitcoinRoutes(...).sweepInscriptions() three times, one hour apart, with a reveal_broadcast record and absent parent returned {\"calls\":[\"reveal\",\"reveal\",\"reveal\"],\"status\":\"reveal_broadcast\",\"parentPresent\":false}. The mock broadcaster rejected reveal with bad-txns-inputs-missingorspent and would accept the retained commit.",
+        "provenance: 72a4cba9 Brian Richter 2026-09-06 - fix(landing): prevent recovery starvation and surface storage failures. This diff rewrites the branch and adds the closed-browser sweep caller; the missing-parent path is directly relevant to that new recovery promise."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "apps/landing/server/bitcoin.ts",
+      "first_evidence": "apps/landing/server/bitcoin.ts:1571-1576 \u2014 `const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);` / `const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({` / `        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,`",
+      "independent_reviewers": [
+        "adversarial-claude"
+      ],
+      "line": 1572,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial-claude"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move the `inscribeUserLimiter.check(sub)` block (bitcoin.ts:1582-1587) \u2014 and add a `quotaCapped(sub)` check \u2014 to before the ordinal-classification/reinscription block at line 1563, so a refused request still burns a slot. If keeping cheap-refusal-is-free is important, gate only the expensive `isAuthorizedReinscription` branch behind its own small per-user counter (e.g. 3/hour), since reaching it already requires a declared inscribed outpoint.",
+      "title": "Unmetered sat-snapshot amplification on POST /api/btc/inscribe",
+      "why_it_matters": "A signed-in caller can force a complete fresh ord/Core sat enumeration per request, on an attacker-chosen sat, before any per-user quota slot is consumed. Each such request can fan out to thousands of upstream QuickNode calls and tens of MiB of downloads. Exhausting that quota kills `currentFeeRate`, and both the deposit route and the fee route fail closed on it \u2014 so the amplification takes down the money path for every creator on the deploy, not just the caller.",
+      "evidence": [
+        "apps/landing/server/bitcoin.ts:1571-1576 \u2014 `const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);` / `const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({` / `        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,`",
+        "apps/landing/server/bitcoin.ts:1582 \u2014 `const perUser = inscribeUserLimiter.check(sub);` sits AFTER the block above, with the comment 'Consume a per-user slot only now that the request has proven valid'. A `refuse('funding_outpoint_inscribed', ...)` at line 1576 therefore returns without consuming any per-user slot.",
+        "apps/landing/server/bitcoin.ts:1428 \u2014 `const limited = rateLimited(clientIp);` is the ONLY limiter on this handler; unlike `sat`/`fee`/`broadcast`/`inscribeList`, `inscribe` never calls `quotaCapped(sub)`. ipLimiter is 120/60_000 (line 680).",
+        "Trigger path: the caller controls `fundingUtxos` entirely (bitcoin.ts:1454-1464) and no signature is ever verified, so a structurally valid commit/reveal pair naming any publicly known inscribed mainnet outpoint as input 0 passes every check at lines 1485-1558 (changeAddress must equal the caller's own bound deposit address, which they hold). `classifySpendableUtxos` then reports `ordinalBearing > 0` and execution reaches `isAuthorizedReinscription`.",
+        "Cost per request: apps/landing/server/reinscription.ts:52 `const accepted = await sdk.lifecycle.resolveAssetFromSat(sat);` \u2192 packages/sdk/src/v3/resolution.ts:88-98 retries `observeOnce` up to 3 times on chain-changed/inconsistent-evidence \u2192 packages/sdk/src/adapters/providers/sat-snapshot.ts:46 accepts `sat.inscriptions.length > 10000` as the only bound, and lines 58/77/81 issue an `/inscription`, a `/content` and an `/r/metadata` read per listed inscription (plus `getblockhash`/`getblock` per distinct height), with the byte ceiling at line 86 set to 32 MiB.",
+        "Not cached: packages/sdk/src/v3/resolution.ts:68 \u2014 `/** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */` \u2014 so repeated requests naming the same sat repeat the full enumeration."
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "packages/sdk/src/adapters/providers/sat-snapshot.ts",
+      "first_evidence": "packages/sdk/src/adapters/providers/sat-snapshot.ts:53 --   for (const id of sat.inscriptions) {",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 53,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Add a configurable total deadline/call budget to readSatSnapshot (checked before each per-inscription dependency call and reported as an incomplete observation on expiry), then pass the same bounded budget from the landing sat-snapshot route/provider. Keep serial completeness semantics; fail closed rather than returning a partial snapshot. Add a regression test with a reader exposing many inscriptions and delayed calls to prove the request stops before issuing all reads.",
+      "title": "Bound sat-snapshot request work",
+      "why_it_matters": "An authenticated request for a sat with many inscriptions holds the landing server open while it serially performs up to 10,000 inscription, content, and metadata reads. Each QuickNode read can take the configured 10 seconds, so a slow or degraded provider turns one request into hours of retained work and an enormous upstream call fan-out; the route has neither a total deadline nor an in-flight bulkhead. Repeated requests can therefore exhaust server connections and QuickNode capacity, causing a cascading failure for ordinary inscription and fee routes. A total snapshot deadline that fails closed preserves the required complete-evidence guarantee without allowing an unbounded dependency call chain.",
+      "evidence": [
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:53 --   for (const id of sat.inscriptions) {",
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:46-47 -- sat.inscriptions.length > 10000 is the only enumeration limit.",
+        "packages/sdk/src/adapters/providers/sat-snapshot.ts:58,77,81 -- each iteration awaits reader.inscription(id), reader.content(id), and reader.metadata(id) serially.",
+        "apps/landing/server/bitcoin.ts:847 -- const snapshot = await provider.getSatSnapshot(satoshi);"
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "packages/sdk/src/bitcoin/inscription-recovery.ts",
+      "first_evidence": "packages/sdk/src/bitcoin/inscription-recovery.ts:64 -- if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 64,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Add a shared prepared-pair verifier before any save or broadcast: verify the supported reveal script-path witness, its Taproot control block commitment to commit output zero, and its Schnorr signature over the actual commit output script and amount. Reject invalid witnesses with INVALID_INSCRIPTION_RECOVERY. Reuse that guard in the landing submit route for its direct HTTP callers. The existing dry-run verifyRevealSignature helper supplies the signature-verification pattern, but also validate the control-block/output commitment. Add a regression that flips one reveal-signature byte while preserving both txids and asserts zero provider submissions.",
+      "title": "CWE-354: Verify reveal witnesses before spending the commit",
+      "why_it_matters": "A restored or transferred prepared publication with a damaged reveal signature passes the new recovery validator, spends the valid commit, and retains only a reveal that Bitcoin will always reject. SegWit transaction IDs do not cover witness bytes: changing one Schnorr-signature byte preserves every identity and destination check here, and the higher-level publication validator only parses the inscription. Verifying the reveal against commit output zero before persistence or submission prevents an invalid recovery artifact from turning into stranded funds.",
+      "evidence": [
+        "packages/sdk/src/bitcoin/inscription-recovery.ts:64 -- if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {",
+        "packages/sdk/src/bitcoin/inscription-recovery.ts:77-78 -- if (reveal.outputsLength !== 1 || Buffer.from(reveal.getOutput(0).script!).toString('hex') !== scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.'); This is the last transaction check before validate returns.",
+        "packages/sdk/src/v3/bitcoin.ts:477-483 -- publish clones and validates the wrapper, then forwards prepared.transactions to submitPreparedInscriptionOnSat; its preceding validation parses inscription contents but never verifies the Bitcoin signature.",
+        "Read-only in-memory reproduction against reviewed checkout using prepareInscriptionOnSat with a real secp256k1 signer, a synthetic unspent funding input, and a recording mock broadcaster. Extract finalScriptWitness[0] from the prepared reveal, locate that signature in the raw reveal bytes, XOR its first byte with 1, then pass the altered prepared record to submitPreparedInscriptionOnSat with a capturing recoveryStore. Independently verify original and modified signatures with schnorr.verify and tx.preimageWitnessV1 against commit output zero. Observed: {\"originalSignatureValid\":true,\"changedSignatureValid\":false,\"sameTxid\":true,\"calls\":2,\"firstWasOriginalCommit\":true,\"status\":\"reveal_broadcast_unknown\",\"error\":\"mandatory-script-verify-flag-failed: Invalid Schnorr signature\",\"persistedOriginalReveal\":false}. The broadcaster simulated the rejection; signature invalidity and the SDK's two submissions were measured directly. No network transactions were sent.",
+        "apps/landing/scripts/dry-run-inscription.ts:391-416 -- verifyRevealSignature already verifies the Schnorr signature using the commit script, amount, leaf script and leaf version; the production recovery path does not call it."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/src/sdk/engine.ts",
+      "first_evidence": "apps/landing/src/sdk/engine.ts:373 --     this.assetTitle = title;",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 373,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "When title differs from asset.state.name, append asset.update({ name: title }, signed) before publishing the revised asset. Retain the metadata.json update, and extend title-edit/cold-recovery tests to assert the CEL name and recovered account title.",
+      "title": "Persist revised titles in the CEL asset name",
+      "why_it_matters": "Retitling an Original changes its metadata resource and current account row, but its authenticated CEL name remains the genesis title. A cold hydration or retained-publication recovery uses asset.state.name and restores the old title into the account record. The native CEL 3 cutover added that authoritative name at creation without updating it during the existing title-edit flow.",
+      "evidence": [
+        "apps/landing/src/sdk/engine.ts:373 --     this.assetTitle = title;",
+        "apps/landing/src/sdk/engine.ts:304 --       { signer: authorship, name: title },",
+        "apps/landing/src/sdk/engine.ts:273 --       this.asset.state.name ?? this.asset.resources[0]?.id ?? \"\";",
+        "apps/landing/src/sdk/local-publication-recovery.ts:108 --       title: asset.state.name ?? item.title,",
+        "Read-only bun invocation created title Before, called engine.update with title After and unchanged SVG, then printed {\"name\":\"Before\",\"metadata\":\"After\"}. Existing title-edit tests assert metadata.title but not state.name."
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "apps/landing/src/sdk/engine.ts",
+      "first_evidence": "apps/landing/src/sdk/engine.ts:566 --         alias.startsWith(\"did:webvh:\") ? \"did:webvh\" : \"did:btco\",",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 566,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Build bindings only for aliases explicitly starting with did:webvh: or did:btco:, or independently find each method's alias. Leave btcoDid undefined until an actual did:btco alias exists.",
+      "title": "Exclude genesis aliases from Bitcoin DID bindings",
+      "why_it_matters": "Every new local Original is displayed with a did:btco row containing its did:cel identifier, even though it has never been published to Bitcoin. CEL state.aliases includes the genesis did:cel, and the two-way mapping classifies every non-WebVH alias as Bitcoin. DidList renders any truthy btcoDid without checking the layer, so the false chain identity is visible during normal creation and hosted publication.",
+      "evidence": [
+        "apps/landing/src/sdk/engine.ts:566 --         alias.startsWith(\"did:webvh:\") ? \"did:webvh\" : \"did:btco\",",
+        "apps/landing/src/components/Demo.tsx:1819 --   if (asset.btcoDid) entries.push(['did:btco', asset.btcoDid]);",
+        "Read-only bun invocation of engine.create showed aliases containing only did:cel:uEi... while snapshot.btcoDid was that same did:cel:uEi... string."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "packages/sdk/src/types/public.ts",
+      "first_evidence": "packages/sdk/src/types/public.ts:12 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset } from '../v3/hosted.js';",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 12,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add `HostedEvidence` to the hosted type re-export in `packages/sdk/src/types/public.ts`, then extend `tests/types/public-cel3.ts` with an `@originals/sdk/types` import and assignment for `AssetVerification['hosted']`.",
+      "title": "Types subpath omits HostedEvidence",
+      "why_it_matters": "A TypeScript consumer that consistently imports SDK declarations from `@originals/sdk/types` cannot name the hosted verification result returned through `AssetVerification.hosted`, even though the root and `/v3` public entries export `HostedEvidence`. This makes a normal typed hosted-publication/verification integration fail to compile or require an unsupported deep import. Re-exporting the type from the documented types entry restores the advertised CEL 3 type surface.",
+      "evidence": [
+        "packages/sdk/src/types/public.ts:12 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset } from '../v3/hosted.js';",
+        "packages/sdk/src/index.ts:221 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from \"./v3/hosted.js\";",
+        "packages/sdk/src/v3/index.ts:10 -- export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from \"./hosted.js\";",
+        "packages/sdk/src/v3/types.ts:106 -- hosted?: import(\"./hosted.js\").HostedEvidence;"
+      ]
+    },
+    {
+      "#": 8,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "packages/sdk/src/v3/bitcoin.ts",
+      "first_evidence": "packages/sdk/src/v3/bitcoin.ts:328 --               : candidates.find((resource) => resource.id === inlineResourceId);",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 328,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Keep candidates[0] for the default selection, but resolve an explicit inlineResourceId against proposedState.resources. Continue selecting the matching current version's authenticated attachment and rejecting missing bytes.",
+      "title": "Honor explicit inline selection for unchanged resources",
+      "why_it_matters": "A caller who selects an existing unchanged resource on a metadata-only or key-rotation delta receives a log-only inscription instead of the requested media. This also prevents intentionally adding bytes for a resource that was only referenced by an earlier publication. The explicit resource passes the authenticated-current-resource guard but is subsequently searched only in the changed-resource candidates.",
+      "evidence": [
+        "packages/sdk/src/v3/bitcoin.ts:328 --               : candidates.find((resource) => resource.id === inlineResourceId);",
+        "packages/sdk/src/v3/bitcoin.ts:301 --         const candidates = proposedState.resources.filter((resource) => {",
+        "packages/sdk/src/v3/bitcoin.ts:329 --         if (!selected)",
+        "packages/sdk/V3.md:253 -- first changed current resource. `inlineResourceId` selects another current",
+        "packages/sdk/V3.md:254 -- resource; `null` makes a log-only `application/cel` JSON inscription."
+      ]
+    },
+    {
+      "#": 10,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "apps/landing/src/pages/YourOriginals.tsx",
+      "first_evidence": "apps/landing/src/pages/YourOriginals.tsx:368 -- setLocalRecoveryNote(await recoverLocalPublication(user.subOrgId, item.key));",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 368,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add an account/generation ref that is advanced on auth identity change; capture its value before recoverLocalPublication, and before every post-await setState (including the follow-up fetch) return unless it still matches the current signed-in sub-org. Cover sign-out then sign-in while recovery is pending.",
+      "title": "Ignore recovery completion after account changes",
+      "why_it_matters": "A retained-publication retry that finishes after the user signs out or switches accounts still refreshes and commits state through the old closure. The next account can therefore briefly receive the prior account's retained-publication titles and recovery controls, and a late completion can overwrite the newer account's list until its own fetch wins. Bind the operation to the initiating sub-org and discard its completion when that identity is no longer current.",
+      "evidence": [
+        "apps/landing/src/pages/YourOriginals.tsx:368 -- setLocalRecoveryNote(await recoverLocalPublication(user.subOrgId, item.key));",
+        "apps/landing/src/pages/YourOriginals.tsx:369 -- const [rows, records] = await Promise.all([fetchOriginals(), fetchInscriptions()]);",
+        "apps/landing/src/pages/YourOriginals.tsx:374 -- } catch (error) { setLocalRecoveryNote((error as Error).message); }"
+      ]
+    }
+  ],
+  "triage_groups": [
+    {
+      "title": "Safe transaction recovery",
+      "findings": [
+        1,
+        4
+      ],
+      "context": "Stored signed bytes must be executable and replay the complete retained pair.",
+      "preferred_resolution": "Verify witness commitments and signatures before submission, then replay missing parents before reveals.",
+      "why": "Prevents stranded commit funds and restores exact-pair recovery after eviction."
+    },
+    {
+      "title": "Bound expensive sat observations",
+      "findings": [
+        2,
+        3
+      ],
+      "context": "Full fresh observations can amplify individual requests into many provider calls.",
+      "preferred_resolution": "Charge the route quota before full resolution and impose an operation-wide read deadline/call budget.",
+      "why": "Per-call timeouts and byte limits do not bound aggregate request work."
+    },
+    {
+      "title": "Accurate landing state across recovery",
+      "findings": [
+        5,
+        6,
+        10
+      ],
+      "context": "Published names, DID bindings and async recovery results must belong to the current asset/account.",
+      "preferred_resolution": "Persist CEL names, filter method-specific aliases and guard recovery completions with account generations.",
+      "why": "Keeps cold recovery and rendered state aligned with authenticated history and the active account."
+    }
+  ],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan": "docs/release/3.0.0-readiness.md",
+    "plan_source": "explicit",
+    "readiness": "legacy",
+    "requirements": [
+      {
+        "requirement": "Fresh complete Bitcoin asset/DID resolution",
+        "status": "partially addressed",
+        "evidence": [
+          "packages/sdk/src/v3/resolution.ts",
+          "packages/sdk/src/adapters/providers/sat-snapshot.ts"
+        ],
+        "remaining_findings": [
+          2,
+          3
+        ]
+      },
+      {
+        "requirement": "Hosted publication and cold recovery with explicit domain",
+        "status": "met",
+        "evidence": [
+          "packages/sdk/src/v3/hosted.ts",
+          "docs/release/evidence/landing-cel3-browser/receipt.json"
+        ]
+      },
+      {
+        "requirement": "Boundary and accepted-head delta Bitcoin writing",
+        "status": "partially addressed",
+        "evidence": [
+          "packages/sdk/src/v3/bitcoin.ts"
+        ],
+        "remaining_findings": [
+          8
+        ]
+      },
+      {
+        "requirement": "Durable exact signed-pair recovery",
+        "status": "partially addressed",
+        "evidence": [
+          "packages/sdk/src/bitcoin/inscription-recovery.ts",
+          "apps/landing/server/bitcoin.ts"
+        ],
+        "remaining_findings": [
+          1,
+          4
+        ]
+      },
+      {
+        "requirement": "Confirmation and reorg reconciliation",
+        "status": "met",
+        "evidence": [
+          "docs/release/evidence/regtest-summary.json",
+          "apps/landing/server/tests/inscribe-routes.test.ts"
+        ]
+      },
+      {
+        "requirement": "Disjoint anonymous and trusted namespaces",
+        "status": "met",
+        "evidence": [
+          "apps/landing/server/webvh-host.ts",
+          "apps/landing/server/tests/upload-isolation.test.ts"
+        ]
+      },
+      {
+        "requirement": "Landing CEL3 creator journey",
+        "status": "partially addressed",
+        "evidence": [
+          "apps/landing/src/sdk/engine.ts",
+          "apps/landing/src/pages/YourOriginals.tsx"
+        ],
+        "remaining_findings": [
+          5,
+          6,
+          10
+        ]
+      },
+      {
+        "requirement": "Real Core/ord journeys and recovery scenarios",
+        "status": "met",
+        "evidence": [
+          "scripts/regtest/README.md",
+          "docs/release/evidence/regtest-summary.json"
+        ]
+      },
+      {
+        "requirement": "Zero-broadcast mainnet-format dry run",
+        "status": "met",
+        "evidence": [
+          "docs/release/evidence/mainnet-format-png-dryrun.json"
+        ],
+        "qualification": "Fixture format/signing proof; not live mainnet acceptance."
+      },
+      {
+        "requirement": "Public API freeze and normative release documentation",
+        "status": "partially addressed",
+        "evidence": [
+          "packages/sdk/V3.md",
+          "docs/release/3.0.0-public-api.md"
+        ],
+        "remaining_findings": [
+          7
+        ]
+      },
+      {
+        "requirement": "Regression review and required release checks",
+        "status": "partially addressed",
+        "evidence": [
+          "docs/release/evidence/api-freeze-audit.json"
+        ],
+        "qualification": "Fixes from this review require targeted renewed verification."
+      },
+      {
+        "requirement": "Record production prerequisites and final verdict",
+        "status": "met",
+        "evidence": [
+          "docs/release/3.0.0-operator-preflight.md"
+        ],
+        "qualification": "Provider indexes, byte-exact content transport, backups, live OTP and owner mainnet proof remain release prerequisites."
+      }
+    ]
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Production provider index completeness, exact binary transport, backup/restore evidence, live OTP and funded owner mainnet proof remain explicit release prerequisites.",
+    "Cross-model review raised an unconfirmed interleave between signed-pair background replay and concurrent superseding submission; no independent proof was established, so it remains a residual risk.",
+    "Exact retained-pair replay is required; UI funding/fee copy should remain clear that recovery reuses prior signed transactions. A replacement transaction must remain a deliberate separately authorized proposal.",
+    "The unchanged clean-ordinal cache could interact with provider index lag; the peer could not establish that the configured provider returns a false empty inscription set.",
+    "Static code review does not establish production chain/provider honesty or deployed custody behavior."
+  ],
+  "testing_gaps": [
+    "Add a background recovery case where both previously acknowledged unconfirmed transactions disappear, then require exact commit-before-reveal recovery across repeated sweeps.",
+    "Add explicit inlineResourceId coverage on a delta whose selected resource descriptor is unchanged.",
+    "Assert state.name and the cold recovered account title after a title-only edit.",
+    "Assert that local and hosted-only snapshots omit btcoDid and their DID lists omit the Bitcoin row.",
+    "Recovery tests cover mismatched txids, malformed hex and reordered funding inputs, but do not exercise witness-only signature or control-block corruption that leaves txids unchanged.",
+    "The public export-map type test imports hosted preparation types from `@originals/sdk/types` but does not import `HostedEvidence` or type-check `AssetVerification.hosted`, so this omission is not caught.",
+    "No component test exercises a retained-publication retry completing after sign-out or a different account signs in; assert stale completion cannot update rows, recovery controls, or status copy.",
+    "No test exercises /api/btc/inscribe reaching `isAuthorizedReinscription` with a bogus declared inscribed outpoint and asserting that the request consumed a per-user quota slot (or was refused before the sat-snapshot read). apps/landing/server/tests/bitcoin-reinscription.test.ts:34 stubs `outpointInscriptions` and a small provider, so the amplification cost of the real snapshot path is never measured.",
+    "No concurrency test interleaves `reconcileRecords`'s liveStuck commit re-push with a POST /api/btc/inscribe that supersedes the same 'signed' record. The existing double-spend-guard coverage exercises two concurrent inscribe submissions (which the `withSubLock` mutex covers) but not inscribe-versus-reconcile, which the mutex does not cover.",
+    "apps/landing/src/sdk/local-publication-recovery.test.ts:126-147 asserts the bitcoin key survives a repeated recovery, but no test covers `engine.inscribe` being called with a materially DIFFERENT funding selection or fee rate while a retained pair exists, i.e. the case where the retained pair silently overrides the freshly gated inputs.",
+    "No test drives `resumeInscribe` end-to-end against a retained pair, so the contradiction between its 'your deposit does not cover this yet' gate and the pair actually resubmitted is not asserted anywhere.",
+    "`cachedOrdinalLookup` has no test for the ord-index-lag scenario (a freshly confirmed reveal output classified as clean and that answer being served for the process lifetime); the cache is only exercised for hit/miss counting.",
+    "A persistent post-build create/mutate/fresh-load public package integration test would complement source tests and the existing ESM/type gates; parent reports a successful isolated tarball consumer check outside this frozen review."
+  ],
+  "coverage": {
+    "mode": "agent report-only",
+    "scope_mode": "local-aligned",
+    "exec_lines": 13525,
+    "uncounted_files": 59,
+    "lite_eligible": false,
+    "standards": "CLAUDE.md fallback for changed files; docs/history/previous-sdk/CLAUDE.md additionally governs archived historical documents. No CODING_STANDARDS.md applies.",
+    "conditional_reasons": {
+      "security": "Public upload/submission routes, controller custody and bound browser sessions.",
+      "reliability": "Exact recovery, partial failure, provider deadlines and background work.",
+      "api-contract": "Default major SDK exports, types subpath, CLI and HTTP consumers.",
+      "testing": "New public-seam suites, fixtures and regtest/dryrun verification mechanisms.",
+      "maintainability": "Large structural SDK cutover and shared recovery changes.",
+      "performance": "Complete snapshot enumeration and resource-byte transforms.",
+      "julik-frontend-races": "Async session and publication recovery state.",
+      "agent-native": "Rewritten SDK agent guides, CLI and public capability discoverability."
+    },
+    "skipped_reviewers": {
+      "learnings": "No docs/solutions corpus.",
+      "data-migration": "Changed migration-named files are retained regression tests, not schema/backfill artifacts.",
+      "deployment-verification": "No risky migration artifacts.",
+      "swift-ios": "No relevant Swift runtime changes.",
+      "previous-comments": "Explicit base review, no PR-comment scope."
+    },
+    "failed_reviewers": [],
+    "all_launched_reviewers_collected": true,
+    "cross_model": {
+      "cross_model_route": "claude",
+      "model_requested": "claude-opus-5",
+      "effort_requested": "high",
+      "receipt_supported": true,
+      "model_actual": "claude-opus-5",
+      "effort_actual": "unverified",
+      "independence_verified": true
+    },
+    "peer_cleanup": "Terminal result consumed through verified runner read; job directory deleted.",
+    "validator": {
+      "batches": 1,
+      "selected": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        10
+      ],
+      "validated": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        10
+      ],
+      "dropped": [],
+      "cross_model_shortcuts": 0,
+      "degraded": [],
+      "reason_for_nine_item_batch": "One batch retained every actionable finding rather than omit the ninth at the normal eight-item cap."
+    },
+    "raw_findings": 13,
+    "suppressed_by_confidence": {
+      "50": 2
+    },
+    "preference_suppressed": [
+      {
+        "original_number": 9,
+        "reason": "Oversized-module extraction has no cited project limit or proved observable defect; shared false-positive rule suppresses generic structure preferences."
+      }
+    ],
+    "mode_aware_demotions": 1,
+    "demoted_testing_candidate": 11,
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "artifact_repairs": "Testing and performance artifacts had a single extraneous leading plus; detail loading removed that prefix while retaining the original files and their valid compact returns.",
+    "fast_pass": "No urgent candidate.",
+    "settlement_conflicts": 0,
+    "source_integrity": "Runtime sources stayed at frozen reviewed HEAD; later changes were explicit packaging configuration and evidence refreshes, not included as silently reviewed runtime edits."
+  },
+  "artifact_path": "/tmp/compound-engineering-501/ce-code-review/20260906-090911-cc7e0c5f",
+  "run_id": "20260906-090911-cc7e0c5f"
+}

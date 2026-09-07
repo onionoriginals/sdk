@@ -1,8 +1,9 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { DIDManager } from '../../../src/did/DIDManager';
 import type {
   VerifiableCredential,

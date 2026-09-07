@@ -1,0 +1,14 @@
+{
+  "observedAt": "2026-09-07T00:47:45.803415+00:00",
+  "txid": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9",
+  "status": {
+    "confirmed": true,
+    "block_height": 965854,
+    "block_hash": "000000000000000000004093dbe74190a09158efed283039a3758651c2677f4b",
+    "block_time": 1788741316
+  },
+  "tipHeight": 965856,
+  "confirmations": 3,
+  "providerObservedTipHeight": 965857,
+  "providerObservedConfirmations": 4
+}

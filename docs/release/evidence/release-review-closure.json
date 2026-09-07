@@ -1,0 +1,123 @@
+{
+  "status": "complete",
+  "review_type": "bounded finding-closure follow-up",
+  "prior_review": "/tmp/compound-engineering-501/ce-code-review/20260906-090911-cc7e0c5f/review.json",
+  "scope": {
+    "worktree": "/Users/brian/Projects/onionoriginals/sdk/.worktrees/codex/release-3.0.0-review-fixes",
+    "base": "eee2b5ba",
+    "head_sha": "eb02040f6fae67225270615e62fd7efe4b153740",
+    "includes_uncommitted_changes": true,
+    "diff_sha256": "e9149a30243591f62bc069b2214a7e1eaba6c270fdcf730bcc05b382d836a52a",
+    "file_sha256": {
+      "apps/landing/server/bitcoin.ts": "0c73f1d4b4ebce9e554fa2596b71eef77dfa5ceee8769595290af32da83ba747",
+      "apps/landing/server/tests/bitcoin-reinscription.test.ts": "e3e18b4e1deb388b14322958328b864f2d80a9c24cefc8c2b9b9d1ddbe6d7a4f",
+      "apps/landing/server/tests/inscribe-routes.test.ts": "0c840ddcfe5a5f24129d406e636eefb8143c50d1ca7d7030338eff1420c6438e",
+      "apps/landing/server/tests/inscription-pair-fixture.ts": "5cdf82a668365af3fcbfcaad3048c9255dd0d3ef12d3146b160f1e460bf0fbb1",
+      "apps/landing/server/tests/money-log.test.ts": "8db8a9db285313586d548bb2e18c9eccff051074df61e5988fe25b6253aa8af6",
+      "apps/landing/src/pages/YourOriginals.tsx": "24da89363bc640a1ae1b1fcd5c8098a196aac52bbbf5bfefdb0e9b7652f2646f",
+      "apps/landing/src/pages/your-originals-recovery.browser.test.ts": "a4c2de83e42c35fcb4d16ba3dc5633a18611cf33883875459b5959279ed62a15",
+      "apps/landing/src/sdk/engine.edit-flow.test.ts": "1c9b4fb6dc29272a1844817282d89376b6fe054b7d9fa11caf213c789ce108ba",
+      "apps/landing/src/sdk/engine.publish-resolve.test.ts": "0859bd6c491cd3b32aacc00058d769fd4b60b510e494ac81d41a887352def305",
+      "apps/landing/src/sdk/engine.revise-authorship.test.ts": "35d8fd56111d07cd45b2f9902d8f85c9d638f82952f031a08da68659dfa56fc5",
+      "apps/landing/src/sdk/engine.ts": "f9f0aa246a79b2c35fc8c1d233c995bec88ed8a3fee5c614c135218cbfded4a4",
+      "apps/landing/src/sdk/engine.update.test.ts": "4a0be06788919ed5e3f98cd102ca83b827fec565dbcc0fe2c1a6ad81b424a1ec",
+      "apps/landing/src/sdk/local-publication-recovery.test.ts": "f5af2dd6d38026717de5c13b32de2ee28e27bf30629f4a002af820b193b018ff",
+      "apps/landing/src/sdk/local-publication-recovery.ts": "36ed1bd244a5027cf6c72295089fc555109c5195ce31ab6a94e38576a04845e1",
+      "docs/release/3.0.0-inscription-recovery-policy.md": "e91ffc33a3f7615012d684c6afd9dbc91dad2984b5d84e47f39e006b85a93fa3",
+      "docs/release/3.0.0-public-api.md": "83df7f0c3ee95943facf284f5131a2f177798bd0589d4522a0fc1824a300fea8",
+      "packages/sdk/V3.md": "cfcac37f74410039f73fc753a2b00a4ed1c9f98469d75e5d1a3e675c7490250e",
+      "packages/sdk/src/adapters/providers/QuickNodeProvider.ts": "dbd5a04031bc6813da6405049a92bbe290142b48d6cebea3f371396d667a20fe",
+      "packages/sdk/src/adapters/providers/RegtestProvider.ts": "a955daf0e5f002a495a1de7fe4aef42b09d715bfd4b6672e19257a071657f87a",
+      "packages/sdk/src/adapters/providers/sat-snapshot.ts": "5cfe3bd8c1de58062d6145f1e4b55f7f8c450cbb71abfabb5c41504acacfada0",
+      "packages/sdk/src/bitcoin/inscription-recovery.ts": "04997d3acdadb94568ef01e95b82e394b9ba8a2bb9ac70ed11d9d39c384c1dda",
+      "packages/sdk/src/index.ts": "8f75148751cf70e7c5161f40c7711f42893ffe0b029ac828ca9518207167316f",
+      "packages/sdk/src/types/public.ts": "7e2ea4b813ca325acc2a00093c3ad74a0b30bccc2d7e521458657654a43a1c70",
+      "packages/sdk/src/v3/bitcoin.ts": "87fe0dd096abee753765d28018e4c109d88bf28c166d28799788668122a8aab7",
+      "packages/sdk/tests/security/cel3-inscription-custody.test.ts": "39bcd21964f304b382130996ff746ab55942c53110113711e3512935c00d9a3d",
+      "packages/sdk/tests/types/public-cel3.ts": "54ecf404f3c519fb622c5c31be5cf84431ac77368df07c45af4e27852d7fa2f9",
+      "packages/sdk/tests/unit/adapters/SatSnapshotProviders.test.ts": "3469749d7f4d922667aa509347527a0df24dc81a4936d35c0fcabb4cdd680d2d",
+      "packages/sdk/tests/unit/v3/bitcoin.test.ts": "1b3869019be1e7c81522fccf310a426ff53fa1b4861d0ec111b47dd3df4e8d97"
+    }
+  },
+  "closures": [
+    {
+      "#": 1,
+      "status": "closed",
+      "reason": "Background replay sends the retained parent before the reveal; manual recovery also retries the parent after missing-input rejection for both commit_broadcast and reveal_broadcast, journaling before network writes."
+    },
+    {
+      "#": 2,
+      "status": "closed",
+      "reason": "General authenticated quota is consumed on admission and the inscription-user cap is checked before ordinal classification or full continuation resolution."
+    },
+    {
+      "#": 3,
+      "status": "closed",
+      "reason": "Every snapshot has a validated total request ceiling and monotonic deadline; stalled calls race cancellation, later reads stop, and native provider fetches receive the shared AbortSignal."
+    },
+    {
+      "#": 4,
+      "status": "closed",
+      "reason": "The shared verifier reconstructs the single-leaf Taproot commitment including control parity, checks strict inscription script shape and default Schnorr signature against the actual parent output, and is invoked by SDK recovery and direct HTTP admission before persistence/broadcast."
+    },
+    {
+      "#": 5,
+      "status": "closed",
+      "reason": "Title edits append asset.update({ name: title }) so signed CEL state and cold-recovered titles agree."
+    },
+    {
+      "#": 6,
+      "status": "closed",
+      "reason": "Snapshot bindings only include explicitly WebVH or Bitcoin aliases, excluding the genesis did:cel alias."
+    },
+    {
+      "#": 7,
+      "status": "closed",
+      "reason": "HostedEvidence is re-exported by the types subpath and exercised by the public type fixture."
+    },
+    {
+      "#": 8,
+      "status": "closed",
+      "reason": "Explicit inline resource selection now searches all current resources while default selection retains changed-resource behavior."
+    },
+    {
+      "#": 10,
+      "status": "closed",
+      "reason": "Account-keyed component remounts and layout-effect generation invalidation guard asynchronous recovery success, failure, follow-up reads, cleanup, and unmounts."
+    }
+  ],
+  "new_findings": [],
+  "verification": [
+    {
+      "kind": "reviewer-run focused SDK regression",
+      "command": "bun test tests/security/cel3-inscription-custody.test.ts tests/unit/adapters/SatSnapshotProviders.test.ts tests/unit/v3/bitcoin.test.ts",
+      "result": "56 pass, 0 fail, 158 assertions",
+      "log": "/tmp/originals-followup-review-sdk-tests.log"
+    },
+    {
+      "kind": "inspected focused server result and regression code",
+      "result": "108 pass, 0 fail, 543 assertions; includes manual restart/double eviction, journal-before-network and failed journal refusal",
+      "log": "/tmp/release-manual-eviction-green.log"
+    },
+    {
+      "kind": "read-only dependency verification",
+      "evidence": [
+        "micro-ordinals parseInscriptions(script,true) verifies the strict CHECKSIG/envelope shape and complete script consumption",
+        "@scure/btc-signer p2tr reconstructs the TapLeaf/TapTweak output and control-block parity",
+        "New real React browser regressions cover stale resolve, reject, list response, account remount and unmount."
+      ]
+    }
+  ],
+  "followup_correction": {
+    "finding": 1,
+    "initial_result": "partially closed",
+    "resolution": "The initial follow-up identified the unchanged manual reveal_broadcast missing-parent path. The author added that branch and durable journaling, with failing-then-passing focused regressions; reinspection confirms closure."
+  },
+  "limitations": [
+    "This consumes the completed eleven-lens review and checks the nine fixes; it is not a fresh full-tree review.",
+    "Reviewer directly reran the focused SDK group; broader suites and browser execution remain parent-owned evidence.",
+    "Production provider completeness, exact media transport, backups, live custody and owner mainnet proof remain separate release gates."
+  ],
+  "verdict": "All nine reviewed code findings closed; no concrete regression found in the fix diff.",
+  "completed_at": "2026-09-06T16:43:44.214246+00:00"
+}

@@ -1,3 +1,4 @@
+// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for issues #346 and #352:
  *
@@ -9,7 +10,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../../src';
+import { OriginalsSDK } from '../../previous-sdk';
 import { MockOrdinalsProvider } from '../../mocks/adapters';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import type { AssetMigratedEvent, AssetTransferredEvent, BatchProgressEvent, VerificationCompletedEvent } from '../../../src/events/types';

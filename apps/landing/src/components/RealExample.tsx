@@ -90,7 +90,7 @@ export function RealExample() {
               ) : (
                 <>
                   <ul className="example-checks">
-                    {(['hash', 'log', 'credential'] as const).map((id) => {
+                    {(['hash', 'log', 'cel'] as const).map((id) => {
                       const check = result?.checks.find((c) => c.id === id);
                       const status = !check ? 'pending' : check.ok ? 'ok' : 'fail';
                       return (
@@ -132,9 +132,9 @@ export function RealExample() {
                         </dd>
                       </div>
                       <div>
-                        <dt>{realExample.fields.credential}</dt>
+                        <dt>{realExample.fields.profile}</dt>
                         <dd>
-                          <code>{result.credentialTypes.join(' · ')}</code>
+                          <code>{result.profile}</code>
                         </dd>
                       </div>
                       {result.issuedAt && (

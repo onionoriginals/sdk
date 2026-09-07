@@ -5,7 +5,7 @@
  * re-authentication dips the auth identity through anonymous.
  */
 import { describe, test, expect } from 'bun:test';
-import { signingGate, signingGateMessage, identityTransition } from './Demo';
+import { signingGate, signingGateMessage, identityTransition } from './demo-logic';
 import { signOutIntent } from '../auth/sign-out';
 import { demo } from '../content';
 
@@ -156,4 +156,12 @@ describe('signingGate: a failed bootstrap is its own state', () => {
     const panel = source.slice(start, source.indexOf("gate === 'reauth' ? (", start));
     expect(panel).toContain('signingNotice ?? signingGateMessage(gate, network, signing)');
   });
+});
+
+
+test('the unavailable panel shows the bound-key refusal when supplied', async () => {
+  const source = await Bun.file(new URL('./Demo.tsx', import.meta.url)).text();
+  const start = source.indexOf("gate === 'unavailable' ? (");
+  const panel = source.slice(start, source.indexOf("gate === 'reauth' ? (", start));
+  expect(panel).toContain('signingNotice ?? signingGateMessage(gate, network, signing)');
 });

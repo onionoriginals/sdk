@@ -12,8 +12,8 @@
  * What runs is the shipped path, not an analogue of it: the server's deposit,
  * fee, sat, prevtx and inscribe routes (`createBitcoinRoutes`), the browser's
  * `HttpOrdinalsProvider` + `TurnkeySatSigner` + `selectFundingUtxos`, and the
- * SDK's `inscribeOnBitcoin` → `inscribeOnSat` → commit/reveal builders. The
- * only substitution is the signature: a local key stands in for the Turnkey
+ * SDK's `prepareBitcoinPublication` → `publishPreparedToBitcoin` → commit/reveal builders.
+ * Hosted storage is an in-memory fixture. A local key stands in for the Turnkey
  * API call (`DRY_RUN_WIF`), or, without one, the commit is left UNSIGNED and
  * the record says so.
  *
@@ -21,10 +21,11 @@
  * throws on every broadcast-shaped method, and `/api/btc/broadcast` is not
  * wired into the harness at all. The inscribe route therefore runs every
  * invariant, persists the pair, and fails at the broadcast step with the
- * sentinel below. Anything else (a 200, a txid) is reported as a FAILURE.
+ * sentinel below. The SDK must return broadcast-unknown and the durable pair
+ * must remain signed; a submitted result is a FAILURE.
  *
  * Optional env: DRY_RUN_ADDRESS (deposit address; derived from the WIF when
- * given), DRY_RUN_PAYLOAD (a text file to inscribe; default: generated SVG),
+ * given), DRY_RUN_PAYLOAD (a binary or text file to inscribe; default: generated SVG),
  * DRY_RUN_CONTENT_TYPE, DRY_RUN_JSON (write the machine-readable report here).
  * Indexer env is the server's: BTC_INDEXER_API / BTC_INDEXER_TOKEN.
  */
@@ -35,8 +36,8 @@ import * as btc from '@scure/btc-signer';
 import { base58check, hex } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
-import { OriginalsSDK, MemoryStorageAdapter, QuickNodeProvider } from '@originals/sdk';
-import { cbor } from '@originals/sdk/cel';
+import { MemoryStorageAdapter, QuickNodeProvider, OriginalsSDK, createLocalSigner, parseDocument, verifyHistory, encodeDocument } from '@originals/sdk';
+import type { CelSigner, PreparedBitcoinPublication, SubmittedBitcoinAsset } from '@originals/sdk';
 import type { BitcoinSigner, OrdinalsProvider } from '@originals/sdk';
 import { OrdMockProvider } from '@originals/sdk/testing';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
@@ -62,8 +63,7 @@ import { createMoneyLogger } from '../server/money-log';
 import { HttpOrdinalsProvider } from '../src/sdk/http-ordinals-provider';
 import { TurnkeySatSigner } from '../src/sdk/turnkey-sat-signer';
 import { addNonWitnessUtxos } from '../src/sdk/psbt-prevtx';
-import { selectFundingUtxos, inscriptionContentBytes, type DepositInfo } from '../src/components/Demo';
-import type { DemoAssetState } from '../src/sdk/engine';
+import { selectFundingUtxos, type DepositInfo } from '../src/components/demo-logic';
 import type { TurnkeyBitcoinClient } from '../src/auth/turnkey-session';
 import { generateArtwork } from '../src/sdk/artwork';
 
@@ -103,7 +103,7 @@ export function neverBroadcast<T extends OrdinalsProvider>(inner: T): { provider
 }
 
 export interface DryRunPayload {
-  content: string;
+  content: Uint8Array;
   contentType: string;
   filename: string;
 }
@@ -196,8 +196,8 @@ export interface DryRunReport {
     bodyBytes: number;
     bodySha256: string | null;
     metadataBytes: number;
-    /** `didDocument.id` decoded from the CBOR metadata; null when absent or undecodable. */
-    metadataDidDocumentId: string | null;
+    /** Verified complete CEL boundary alias from CBOR; null when invalid or absent. */
+    metadataBoundaryDid: string | null;
     controlBlockVersion: number | null;
     internalKey: string | null;
     rebuildsCommitOutput: boolean;
@@ -343,7 +343,7 @@ export function decodeEnvelope(leafScript: Uint8Array): { contentType: string | 
 /**
  * Verify every P2WPKH input signature of a finalized commit against its
  * BIP-143 sighash. A well-shaped witness with a bad signature must not pass:
- * the node would reject it, and PASS means "a node would accept this".
+ * the node would reject it, so transaction structure alone cannot pass.
  */
 export function verifyCommitSignatures(
   txHex: string,
@@ -406,12 +406,14 @@ export function verifyRevealSignature(
   return { ok: valid, detail: `Schnorr ${valid ? 'valid' : 'INVALID'} (sighash 0x${hashType.toString(16)})`, leafKey: hexOf(leafKeyOp) };
 }
 
-/** The `didDocument.id` inside the envelope's CBOR metadata, decoded structurally, or null. */
-export function didDocumentIdOf(metadata: Uint8Array): string | null {
+/** Verify the complete CEL boundary, including its signed migration, directly from raw CBOR. */
+export function boundaryDidOf(metadata: Uint8Array): string | null {
   try {
-    const decoded = cbor.decode<{ didDocument?: { id?: unknown } }>(metadata);
-    const id = decoded?.didDocument?.id;
-    return typeof id === 'string' ? id : null;
+    const document = parseDocument(metadata, 'cbor');
+    const history = verifyHistory(document);
+    const last = document.log.at(-1)?.event.operation;
+    return history.status === 'authenticated' && history.state.layer === 'btco' && last?.type === 'migrate'
+      ? history.state.alias : null;
   } catch {
     return null;
   }
@@ -477,16 +479,15 @@ export function resolvePayload(env: Record<string, string | undefined>): DryRunP
   const path = env.DRY_RUN_PAYLOAD;
   if (!path) {
     const art = generateArtwork('Dry run', 'Artwork', 526);
-    return { content: art.svg, contentType: 'image/svg+xml', filename: 'artwork.svg' };
+    return { content: utf8(art.svg), contentType: 'image/svg+xml', filename: 'artwork.svg' };
   }
   const bytes = readFileSync(path);
-  let content: string;
-  try {
-    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error(`${path} is not UTF-8 text. The landing inscribes text-shaped bytes only (SVG, text, JSON); binary payloads are #540.`);
-  }
+  const content = new Uint8Array(bytes);
   const byExt: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
     '.svg': 'image/svg+xml',
     '.txt': 'text/plain',
     '.md': 'text/plain',
@@ -508,7 +509,7 @@ export function resolvePayload(env: Record<string, string | undefined>): DryRunP
 export function mockFixture(opts: { network: BtcNet; privateKey?: Uint8Array; contentBytes: number; ordinals?: OrdinalLookup | null }): DryRunWorld & { address: string; depositTxid: string; values: number[]; inscribedOutpoint: string } {
   const privateKey = opts.privateKey ?? hex.decode('5'.repeat(64));
   const address = p2wpkhAddressOf(privateKey, opts.network);
-  const provider = new OrdMockProvider();
+  const provider: OrdMockProvider & OrdinalsProvider = new OrdMockProvider();
   const feeRate = 5; // OrdMockProvider's default estimate
   const oneInput = estimateInscriptionCostSats({ feeRate, inputs: 1, contentBytes: opts.contentBytes, commitOutputsVB: [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB] });
   const twoInputs = estimateInscriptionCostSats({ feeRate, inputs: 2, contentBytes: opts.contentBytes, commitOutputsVB: [P2TR_OUTPUT_VB, P2WPKH_OUTPUT_VB] });
@@ -521,6 +522,15 @@ export function mockFixture(opts: { network: BtcNet; privateKey?: Uint8Array; co
   const depositHex = hex.encode(deposit.unsignedTx);
   const depositTxid = parseTx(depositHex).id;
   const inscribedOutpoint = `${depositTxid}:2`;
+  // Explicit fixture evidence: this is protocol construction, not an observed chain.
+  provider.getSatSnapshot = async (sat: string) => ({
+    network: opts.network, sat,
+    tipBefore: { height: 100, hash: 'b'.repeat(64) },
+    tipAfter: { height: 100, hash: 'b'.repeat(64) },
+    indexTip: { height: 100, hash: 'b'.repeat(64) },
+    indexHealthy: true, enumerationComplete: true, blocks: [], publications: [],
+    ownership: { owner: address, satpoint: `${depositTxid}:0:0` },
+  });
   const utxos = values.map((value, vout) => ({ txid: depositTxid, vout, value, status: { confirmed: true } }));
   const indexer: IndexerConfig = { api: 'https://indexer.mock' };
   const fetchImpl = (async (input: RequestInfo | URL) => {
@@ -545,21 +555,19 @@ function sessionCookie(sub: string, secret: string): string {
   return serializeCookie(getAuthCookieConfig(signToken(sub, 'dry-run@localhost', undefined, { secret })));
 }
 
-function sdkFor(network: BtcNet, provider: OrdinalsProvider, keys: Map<string, string>): ReturnType<typeof OriginalsSDK.create> {
+function sdkFor(network: BtcNet, provider: OrdinalsProvider, signer: CelSigner, storage = new MemoryStorageAdapter()): ReturnType<typeof OriginalsSDK.create> {
   return OriginalsSDK.create({
-    network,
-    webvhNetwork: network === 'mainnet' ? 'pichu' : 'cleffa',
-    defaultKeyType: 'Ed25519',
-    ordinalsProvider: provider,
-    storageAdapter: new MemoryStorageAdapter(),
-    enableLogging: false,
-    logging: { level: 'error' },
-    keyStore: {
-      async getPrivateKey(id: string) { return keys.get(id) ?? null; },
-      async setPrivateKey(id: string, key: string) { keys.set(id, key); },
-      getAllVerificationMethodIds() { return [...keys.keys()]; },
+    network, signer, ordinalsProvider: provider,
+    // In-memory hosted fixture with canonical HTTPS names. No public upload occurs.
+    storageAdapter: {
+      async putObject(domain, path, content) {
+        await storage.putObject(domain, path, content);
+        return `https://${domain}/${path.replace(/^\/+/, '')}`;
+      },
+      getObject: storage.getObject.bind(storage), exists: storage.exists.bind(storage),
     },
-  } as unknown as Parameters<typeof OriginalsSDK.create>[0]);
+    enableLogging: false, logging: { level: 'error' },
+  });
 }
 
 export async function runDryRun(opts: DryRunOptions): Promise<DryRunReport> {
@@ -586,30 +594,22 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   const { network, mode, payload } = opts;
   const net = scureNetwork(network);
 
-  // 1. The asset, exactly as the demo makes it: payload + metadata.json, then
-  //    published. The provider's fetch is bound once the routes exist below.
+  // 1. A CEL 3 asset with exact resource bytes, then a separate signed WebVH publication. The provider's fetch is bound once the routes exist below.
   let routeFetchImpl: FetchLike = () => Promise.reject(new Error('dry run: routes not built yet'));
-  const keys = new Map<string, string>();
+  const controller = createLocalSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const storage = new MemoryStorageAdapter();
   const sdkProvider = new HttpOrdinalsProvider({ baseUrl: 'http://dry-run.local', fetchImpl: ((i, init) => routeFetchImpl(i, init)) as typeof fetch });
-  const sdk = sdkFor(network, sdkProvider, keys);
-  const payloadBytes = utf8(payload.content);
+  const sdk = sdkFor(network, sdkProvider, controller, storage);
+  const payloadBytes = new Uint8Array(payload.content);
   const payloadHash = sha256Hex(payloadBytes);
-  const metadata = JSON.stringify(
-    { title: 'Dry run', medium: 'Artwork', creator: 'dry-run-inscription', created: new Date().toISOString(), artwork: { file: payload.filename, sha256: payloadHash } },
-    null,
-    2
-  );
-  const asset = await sdk.lifecycle.createAsset([
-    { id: payload.filename, type: payload.contentType.startsWith('image/') ? 'image' : 'text', content: payload.content, contentType: payload.contentType, hash: payloadHash, size: payloadBytes.length },
-    { id: 'metadata.json', type: 'data', content: metadata, contentType: 'application/json', hash: sha256Hex(utf8(metadata)), size: utf8(metadata).length },
-  ]);
-  await sdk.lifecycle.publishToWeb(asset, opts.webvhDomain);
-  const didWebvh = (asset.bindings as Record<string, string> | undefined)?.['did:webvh'] ?? null;
-  const contentBytesHint = inscriptionContentBytes({
-    resource: { content: payload.content },
-    metadata: { content: metadata },
-    celLog: asset.celLog?.events ?? [],
-  } as unknown as DemoAssetState);
+  const local = await sdk.lifecycle.createAsset([
+    { id: payload.filename, mediaType: payload.contentType, content: payloadBytes },
+  ], { name: 'Dry run' });
+  const published = await sdk.lifecycle.publishToWeb(local, { domain: opts.webvhDomain });
+  const asset = published.asset;
+  const didWebvh = published.did;
+  // Conservative deposit hint; the actual serialized boundary and fees are checked below.
+  const contentBytesHint = payloadBytes.length + encodeDocument(asset.celLog, 'json').length + 2_048;
 
   const world = typeof opts.world === 'function' ? opts.world(contentBytesHint) : opts.world;
   const address = world.privateKey ? p2wpkhAddressOf(world.privateKey, network) : world.address;
@@ -636,8 +636,8 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
     moneyLog: createMoneyLogger((line) => moneyLog.push(line)),
     fetchImpl: world.fetchImpl,
   });
-  // Only these five are reachable. The broadcast route is deliberately not here.
-  const { deposit, fee, sat, prevTx, inscribe } = routes;
+  // Only the required read and durable submission routes are reachable. The broadcast route is deliberately not here.
+  const { deposit, fee, sat, satSnapshot, prevTx, inscribe } = routes;
 
   const captured = {
     inscribeStatus: null as number | null,
@@ -653,6 +653,7 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
       const headers = new Headers(init?.headers ?? {});
       headers.set('cookie', cookie);
       const req = new Request(url, { method: init?.method ?? 'GET', headers, body: init?.body ?? null });
+      if (url.pathname.startsWith('/api/btc/sat-snapshot/')) return satSnapshot(req, url, 'dry-run');
       switch (url.pathname) {
         case '/api/btc/deposit':
           return deposit(req, url, 'dry-run');
@@ -780,12 +781,16 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   const satSigner: BitcoinSigner = world.privateKey
     ? new TurnkeySatSigner({ client: localKeyClient(world.privateKey), signWith: address, fetchRawTx })
     : unsignedSigner(fetchRawTx);
-  const build = async (signer: BitcoinSigner): Promise<{ error: unknown | null }> => {
+  const build = async (signer: BitcoinSigner): Promise<{ error: unknown | null; result: SubmittedBitcoinAsset | null; prepared: PreparedBitcoinPublication | null }> => {
+    let prepared: PreparedBitcoinPublication | null = null;
     try {
-      await sdk.lifecycle.inscribeOnBitcoin(asset, { fundingUtxos: selection.selected, satSigner: signer, changeAddress: address });
-      return { error: null };
+      prepared = await sdk.lifecycle.prepareBitcoinPublication(asset, {
+        fundingUtxos: selection.selected, satSigner: signer, changeAddress: address, feeRate: routeRate!,
+      });
+      const result = await sdk.lifecycle.publishPreparedToBitcoin(prepared);
+      return { error: null, result, prepared };
     } catch (e) {
-      return { error: e };
+      return { error: e, result: null, prepared };
     }
   };
   const first = await build(satSigner);
@@ -797,8 +802,10 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   report.satoshi = captured.satoshi;
   report.expectedDid = captured.satoshi ? `${network === 'mainnet' ? 'did:btco' : 'did:btco:test'}:${captured.satoshi}` : null;
 
-  const loud = first.error === null;
-  check('never.broadcast', 'The build was refused at the broadcast step and nowhere else', !loud && err?.code === 'INSCRIPTION_SUBMIT_FAILED' && attempts.length >= 1 && captured.broadcastRouteCalls === 0 && String(captured.inscribeBody?.message ?? '').includes(BROADCAST_REFUSED_SENTINEL), loud ? 'FAILURE: inscribeOnBitcoin RESOLVED, which means the pair reached the network. This must never happen in a dry run.' : `provider refusals: ${attempts.join(',') || 'none'}; /api/btc/broadcast calls: ${captured.broadcastRouteCalls}; SDK error: ${err?.code ?? 'none'}${err?.code !== 'INSCRIPTION_SUBMIT_FAILED' ? ` (${err?.message ?? ''})` : ''}`);
+  const loud = first.result?.status === 'submitted';
+  check('never.broadcast', 'The exact signed pair returns broadcast-unknown after the guarded server refuses delivery',
+    first.result?.status === 'broadcast-unknown' && attempts.length >= 1 && captured.broadcastRouteCalls === 0 && String(captured.inscribeBody?.message ?? '').includes(BROADCAST_REFUSED_SENTINEL),
+    loud ? 'FAILURE: publication RESOLVED as submitted: the broadcast guard was bypassed.' : `provider refusals: ${attempts.join(',') || 'none'}; /api/btc/broadcast calls: ${captured.broadcastRouteCalls}; status: ${first.result?.status ?? 'none'}; SDK error: ${err?.code ?? 'none'} (${err?.message ?? ''})`);
   if (!submitted) {
     report.server.buildError = err?.message ?? String(first.error);
     check('server.reached', 'The signed pair reached the inscribe route', false, `nothing was submitted: ${report.server.buildError}`);
@@ -867,7 +874,7 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
       bodyBytes: decoded.body.length,
       bodySha256: sha256Hex(decoded.body),
       metadataBytes: decoded.metadata.length,
-      metadataDidDocumentId: didDocumentIdOf(decoded.metadata),
+      metadataBoundaryDid: boundaryDidOf(decoded.metadata),
       controlBlockVersion: controlBlock[0],
       internalKey: hexOf(internalKey),
       rebuildsCommitOutput: rebuilt,
@@ -881,29 +888,17 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
   check('reveal.scriptpath', 'Reveal is a 3-item script-path spend whose leaf + internal key rebuild commit output 0', !!envelope && envelope.rebuildsCommitOutput && tapscriptV0, envelope ? `witness [sig, leaf, control block]; leaf version 0x${((envelope.controlBlockVersion ?? 0) & 0xfe).toString(16)}; internal key ${envelope.internalKey}; rebuild matches: ${envelope.rebuildsCommitOutput}` : `witness has ${witness.length} items`);
   check('reveal.signed', 'Reveal Schnorr signature verifies against the leaf key over the BIP-341 sighash', !!envelope && envelope.signature.ok && envelope.signature.leafKey === envelope.internalKey, envelope ? `${envelope.signature.detail}; leaf key ${envelope.signature.leafKey}${envelope.signature.leafKey === envelope.internalKey ? ' (= internal key)' : ' (differs from internal key)'}` : 'no envelope');
   check('reveal.envelope', 'Envelope carries the payload bytes and content type unchanged', !!envelope && envelope.contentType === payload.contentType && envelope.bodySha256 === payloadHash, envelope ? `contentType ${envelope.contentType}; body ${envelope.bodyBytes} bytes sha256 ${envelope.bodySha256}; metadata ${envelope.metadataBytes} bytes` : 'no envelope');
-  check('sat.identity', 'Metadata didDocument.id is did:btco:<first sat of identity input>; inscription id is reveal:i0', !!envelope && report.expectedDid !== null && envelope.metadataDidDocumentId === report.expectedDid && report.inscriptionId === `${reveal.txid}i0`, `sat ${report.satoshi} (first sat of ${commit.inputs[0]?.outpoint}) → expected ${report.expectedDid}, metadata didDocument.id ${envelope?.metadataDidDocumentId ?? 'n/a'}; ordinal FIFO: commit vout 0 offset 0 → reveal vout 0 offset 0 → ${report.inscriptionId}`);
+  check('sat.identity', 'Verified CEL boundary alias is did:btco:<first sat of identity input>; inscription id is reveal:i0', !!envelope && report.expectedDid !== null && envelope.metadataBoundaryDid === report.expectedDid && report.inscriptionId === `${reveal.txid}i0`, `sat ${report.satoshi} (first sat of ${commit.inputs[0]?.outpoint}) → expected ${report.expectedDid}, metadata CEL boundary alias ${envelope?.metadataBoundaryDid ?? 'n/a'}; ordinal FIFO: commit vout 0 offset 0 → reveal vout 0 offset 0 → ${report.inscriptionId}`);
 
-  // 8. Freshness: build again from the same inputs; the reveal key must differ.
-  store.bindDepositAddress('dry-run-2', network, address);
-  const secondFetch = routeFetch('dry-run-2');
-  const sdk2 = sdkFor(network, new HttpOrdinalsProvider({ baseUrl: 'http://dry-run.local', fetchImpl: secondFetch }), keys);
-  const fetchRawTx2 = async (txid: string): Promise<string> => {
-    const res = await secondFetch(`http://dry-run.local/api/btc/prevtx?txid=${txid}`);
-    if (!res.ok) throw new Error(`prevtx route ${res.status}`);
-    return ((await res.json()) as { hex: string }).hex;
-  };
-  const signer2 = world.privateKey ? new TurnkeySatSigner({ client: localKeyClient(world.privateKey), signWith: address, fetchRawTx: fetchRawTx2 }) : unsignedSigner(fetchRawTx2);
-  Object.assign(captured, { inscribeRequest: null });
-  try {
-    await sdk2.lifecycle.inscribeOnBitcoin(asset, { fundingUtxos: selection.selected, satSigner: signer2, changeAddress: address });
-    report.server.buildError = 'second build RESOLVED: a broadcast happened';
-  } catch { /* refused at broadcast, as the first was */ }
-  const secondRequest = (captured as { inscribeRequest: { revealTxHex: string } | null }).inscribeRequest;
-  const secondWitness = secondRequest ? parseTx(secondRequest.revealTxHex).getInput(0).finalScriptWitness : undefined;
+  // 8. A second preparation must produce a fresh reveal key, without needing submission.
+  const second = await sdk.lifecycle.prepareBitcoinPublication(asset, {
+    fundingUtxos: selection.selected, satSigner, changeAddress: address, feeRate: routeRate!,
+  });
+  const secondWitness = parseTx(second.transactions.revealTxHex).getInput(0).finalScriptWitness;
   report.freshness.secondInternalKey = secondWitness && secondWitness.length === 3 ? hexOf(secondWitness[2].slice(1, 33)) : null;
   const fresh = !!report.freshness.firstInternalKey && !!report.freshness.secondInternalKey && report.freshness.firstInternalKey !== report.freshness.secondInternalKey && report.freshness.firstInternalKey !== fundingKeyXOnly;
   check('reveal.freshkey', 'Reveal address derives from a fresh random keypair, not the funding key', fresh, `build 1 internal key ${report.freshness.firstInternalKey}; build 2 ${report.freshness.secondInternalKey}; funding key (x-only) ${fundingKeyXOnly ?? 'n/a (unsigned)'}`);
-  check('never.broadcast.second', 'Second build was also refused; no broadcast route call ever happened', report.server.buildError === null && attempts.length >= 2 && captured.broadcastRouteCalls === 0, `provider refusals so far: ${attempts.length}; broadcast route calls: ${captured.broadcastRouteCalls}`);
+  check('never.broadcast.second', 'Second preparation performs no additional submission or broadcast', attempts.length === 1 && captured.broadcastRouteCalls === 0, `provider refusals so far: ${attempts.length}; broadcast route calls: ${captured.broadcastRouteCalls}`);
   report.server.broadcastRouteCalls = captured.broadcastRouteCalls;
 
   const failed = checks.some((c) => c.result === 'fail');
@@ -952,7 +947,7 @@ export function renderReport(r: DryRunReport): string {
   if (r.envelope) {
     L.push(`envelope: ${r.envelope.contentType}, body ${r.envelope.bodyBytes} bytes (sha256 ${r.envelope.bodySha256}), metadata ${r.envelope.metadataBytes} bytes, control block v0x${r.envelope.controlBlockVersion?.toString(16)}`);
     L.push(`leaf + internal key rebuild commit output 0: ${r.envelope.rebuildsCommitOutput}`);
-    L.push(`reveal signature: ${r.envelope.signature.detail}; metadata didDocument.id: ${r.envelope.metadataDidDocumentId ?? 'n/a'}`);
+    L.push(`reveal signature: ${r.envelope.signature.detail}; metadata CEL boundary alias: ${r.envelope.metadataBoundaryDid ?? 'n/a'}`);
   }
   h('Where the sat lands');
   L.push(`identity input: ${r.commit?.inputs[0]?.outpoint ?? 'n/a'}; its first sat per the sat index: ${r.satoshi ?? 'n/a'}`);
@@ -969,7 +964,7 @@ export function renderReport(r: DryRunReport): string {
   h('Checklist');
   for (const c of r.checks) L.push(`[${c.result === 'pass' ? 'PASS' : c.result === 'fail' ? 'FAIL' : 'SKIP'}] ${c.id}: ${c.label}`, `       ${c.detail}`);
   h('Judgement');
-  if (r.verdict === 'pass') L.push(`PASS: every property holds. As far as this harness can judge, broadcasting this pair would have been correct.${r.mode === 'mock' ? ' (Mock provider and fixture: this proves the code path, not the chain.)' : ''}`);
+  if (r.verdict === 'pass') L.push(`PASS: every property holds for the constructed pair. Chain acceptance was not exercised.${r.mode === 'mock' ? ' (Mock provider and fixture: this proves the code path, not the chain.)' : ''}`);
   else if (r.verdict === 'incomplete') L.push('INCOMPLETE: no property failed, but the skipped rows above were not exercised (set DRY_RUN_WIF to sign). Do not treat this as a signed dry run.');
   else L.push(`FAIL: ${r.checks.filter((c) => c.result === 'fail').map((c) => c.id).join(', ')}. Broadcasting this pair would NOT have been correct.`);
   return L.join('\n');
@@ -981,7 +976,7 @@ async function main(): Promise<void> {
   const network: BtcNet = chain === 'mainnet' ? 'mainnet' : 'testnet';
   const payload = resolvePayload(env);
   const privateKey = env.DRY_RUN_WIF ? privateKeyFromWif(env.DRY_RUN_WIF, network) : undefined;
-  const webvhDomain = env.VITE_WEBVH_HOST || (network === 'mainnet' ? 'originals.build' : 'localhost');
+  const webvhDomain = env.VITE_WEBVH_HOST || (network === 'mainnet' ? 'originals.build' : 'dry-run.localhost');
   let report: DryRunReport;
   if (env.QUICKNODE_ENDPOINT) {
     const indexer = resolveIndexer(env, network);
@@ -993,7 +988,7 @@ async function main(): Promise<void> {
       world: {
         address: env.DRY_RUN_ADDRESS,
         privateKey,
-        readProvider: new QuickNodeProvider({ endpoint: env.QUICKNODE_ENDPOINT, expectedNetwork: network }),
+        readProvider: new QuickNodeProvider({ endpoint: env.QUICKNODE_ENDPOINT, expectedNetwork: network, contentBaseUrl: env.QUICKNODE_CONTENT_BASE_URL, contentEncoding: env.QUICKNODE_CONTENT_ENCODING === 'base64' ? 'base64' : env.QUICKNODE_CONTENT_ENCODING === 'utf8' ? 'utf8' : 'auto' }),
         ordinals: cachedOrdinalLookup(quickNodeOrdinalLookup({ endpoint: env.QUICKNODE_ENDPOINT })),
         indexer,
       },
