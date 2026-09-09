@@ -1,4 +1,6 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, spyOn } from "bun:test";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import preparedWeb from "../../../../packages/sdk/tests/fixtures/identity/sdk3-web-publication.json";
 import { Buffer as BrowserBuffer } from "buffer/";
 import { installCel3Host, engineWithSigner } from "./cel3-test-helpers";
 import {
@@ -206,4 +208,29 @@ test('saved SDK 3 publication keys remain visible only for the owning account an
   localStorage.removeItem(key);
   localStorage.setItem(key + 'unrelated', saved);
   expect(localPublicationRecoveries('sub-1')).toEqual([]);
+});
+
+
+test("recovery discovery verifies every retained proof once and rejects substituted history or identity", () => {
+  host = installCel3Host("sub-1");
+  const key = `originals:web-publication:sub-1:${preparedWeb.asset.assetDid}`;
+  localStorage.setItem(key, JSON.stringify(preparedWeb));
+  const verify = spyOn(ed25519, "verify");
+  try {
+    expect(localPublicationRecoveries("sub-1")).toHaveLength(1);
+    expect(verify.mock.calls.length).toBe(preparedWeb.asset.eventLog.log.length);
+  } finally {
+    verify.mockRestore();
+  }
+  const forged = structuredClone(preparedWeb);
+  forged.asset.eventLog.log[0].event.operation.data.name = "forged recovery";
+  localStorage.setItem(key, JSON.stringify(forged));
+  expect(localPublicationRecoveries("sub-1")).toEqual([]);
+  const mismatch = { ...preparedWeb, asset: {
+    format: "originals/asset", version: 4,
+    assetId: "ni:///sha-256;" + "A".repeat(43),
+    eventLog: preparedWeb.asset.eventLog, resources: preparedWeb.asset.resources,
+  } };
+  localStorage.setItem(key, JSON.stringify(mismatch));
+  expect(localPublicationRecoveries("sub-1")).toEqual([]);
 });

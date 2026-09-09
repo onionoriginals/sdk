@@ -100,9 +100,21 @@ import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
 import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 
 // SDK 4 identity change: stable offline subpath plus explicit SDK 3 read aliases.
-import { parseAssetEnvelope } from '@originals/sdk/asset-envelope';
+import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from '@originals/sdk/asset-envelope';
+import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
+import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
 import { deriveAssetId, deriveDid, normalizeAssetId, assetDigest } from '@originals/sdk/cel';
 const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
+const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
+const inspectedEnvelope: AssetEnvelope = inspected.envelope;
+const inspectedState: DeepReadonly<AssetState> = inspected.history.state;
+inspectRootEnvelope(envelope);
+inspectLocalEnvelope(envelope);
+// @ts-expect-error Structural decoding is internal; public readers authenticate history.
+import { decodeEnvelope } from '@originals/sdk/asset-envelope';
+// @ts-expect-error Authenticated state is immutable.
+inspectedState.name = 'replacement';
+void inspectedEnvelope;
 const currentVersion: 4 = currentEnvelope.version;
 const canonicalAssetId: string = state.assetId;
 const legacyAlias: string = state.didCel;

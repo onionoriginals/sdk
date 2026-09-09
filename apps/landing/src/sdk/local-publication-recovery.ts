@@ -1,9 +1,8 @@
-import { parseAssetEnvelope } from "@originals/sdk/asset-envelope";
+import { inspectAssetEnvelope } from "@originals/sdk/asset-envelope";
 import type {
   PreparedBitcoinPublication,
   PreparedWebPublication,
 } from "@originals/sdk";
-import { verifyHistory } from "@originals/sdk/cel";
 import { digestMultibaseSha256Hex } from "../pages/original-detail-data";
 
 export interface LocalPublicationRecovery {
@@ -43,10 +42,8 @@ export function localPublicationRecoveries(
         prepared.format !== `originals/${kind}-publication`
       )
         continue;
-      const envelope = parseAssetEnvelope(prepared.asset);
-      const state = verifyHistory(envelope.eventLog, {
-        expectedAssetId: envelope.assetId,
-      }).state;
+      const { history } = inspectAssetEnvelope(prepared.asset);
+      const state = history.state;
       // Match only this account and the exact verified genesis, including old saved keys.
       if (![state.assetId, state.didCel].some((id) => key === recoveryStorageKey(kind, account, id))) continue;
       results.push({

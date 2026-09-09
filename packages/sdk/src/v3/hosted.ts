@@ -22,7 +22,7 @@ import type { DIDDocument } from "../types/did.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
 import { attachment, resourceCatalog } from "./resources.js";
-import { byteBudget, readEnvelope } from "./envelope.js";
+import { byteBudget, decodeEnvelope } from "./envelope.js";
 import { captureSigner } from "./options.js";
 import type { AssetEnvelope, OriginalsConfig, LoadedAsset } from "./types.js";
 import type { AssetResolver } from "./resolution.js";
@@ -222,7 +222,7 @@ export class HostedAssets {
     resolver?: AssetResolver,
   ): Promise<PublishedWebAsset> {
     const prepared = structuredClone(input);
-    const envelope = readEnvelope(prepared.asset);
+    const envelope = decodeEnvelope(prepared.asset);
     if (envelope.unverified?.localResources.length)
       return error("ASSET_WEB_STATE", "Unsigned drafts cannot be published");
     if (

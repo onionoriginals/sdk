@@ -30,7 +30,7 @@ import {
   type PreparedInscriptionOnSat,
 } from "../bitcoin/inscribe-on-sat.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
-import { readEnvelope } from "./envelope.js";
+import { decodeEnvelope } from "./envelope.js";
 import { captureSigner } from "./options.js";
 import { AssetResolver, btcoDid } from "./resolution.js";
 import type { AssetEnvelope, OriginalsConfig } from "./types.js";
@@ -129,7 +129,7 @@ export class BitcoinPublications {
     options: BitcoinPublicationOptions,
   ): Promise<PreparedBitcoinPublication> {
     // Copy all mutable publication input before any provider/signing await.
-    const envelope = readEnvelope(input.serialize());
+    const envelope = decodeEnvelope(input.serialize());
     const asset = new OriginalsAsset(
       envelope.eventLog,
       envelope.resources,
@@ -367,7 +367,7 @@ export class BitcoinPublications {
         "ASSET_BITCOIN_PUBLICATION",
         "Unsupported prepared Bitcoin publication",
       );
-    const envelope = readEnvelope(input.asset),
+    const envelope = decodeEnvelope(input.asset),
       document = validateDocument(input.document);
     if (envelope.unverified?.localResources.length)
       invalid(

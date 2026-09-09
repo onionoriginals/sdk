@@ -7,6 +7,7 @@ import {
   validateDocument,
   normalizeAssetId,
   verifyHistory,
+  type VerifiedHistory,
 } from "@originals/cel/v3";
 import type {
   AssetEnvelope,
@@ -322,8 +323,10 @@ function parseEnvelopeJson(input: string): unknown {
   return JSON.parse(input) as unknown;
 }
 
-/** Parse the unsigned container without relaxing the signed CEL's own parser or limits. */
-export function readEnvelope(input: unknown): AssetEnvelope {
+/** @internal Structural decoding only: the caller must authenticate history and bind the declared identity.
+ * Not exported by any package entry point. Signed CEL syntax and container budgets remain strict.
+ */
+export function decodeEnvelope(input: unknown): AssetEnvelope {
   let raw = input;
   if (typeof input === "string") {
     try {
@@ -356,7 +359,6 @@ export function readEnvelope(input: unknown): AssetEnvelope {
   const assetId = normalizeAssetId(identity);
   const budget = new AttachmentBudget();
   const eventLog = validateDocument(value.eventLog);
-  verifyHistory(eventLog, { expectedAssetId: assetId });
   const envelope: AssetEnvelope = {
     format: "originals/asset",
     version: 4,
@@ -376,4 +378,24 @@ export function readEnvelope(input: unknown): AssetEnvelope {
     ...(envelope.unverified?.localResources ?? []),
   ]);
   return envelope;
+}
+
+/** Offline controller-history inspection; resource byte binding and publication evidence are not checked. */
+export interface AssetEnvelopeInspection {
+  /** Detached, mutable normalized container. Editing it does not alter the authenticated history result. */
+  envelope: AssetEnvelope;
+  /** Immutable state derived from verified signatures, links, transitions and the declared genesis identity. */
+  history: VerifiedHistory;
+}
+
+/** Parse a strict envelope and authenticate its controller history once, without network I/O. */
+export function inspectAssetEnvelope(input: unknown): AssetEnvelopeInspection {
+  const envelope = decodeEnvelope(input);
+  const history = verifyHistory(envelope.eventLog, { expectedAssetId: envelope.assetId });
+  return { envelope, history };
+}
+
+/** Parse and authenticate a strict envelope, returning its detached, mutable normalized container. */
+export function readEnvelope(input: unknown): AssetEnvelope {
+  return inspectAssetEnvelope(input).envelope;
 }

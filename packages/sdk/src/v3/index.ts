@@ -11,4 +11,4 @@ export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, 
 
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./bitcoin.js";
 
-export { readEnvelope as parseAssetEnvelope } from "./envelope.js";
+export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./envelope.js";

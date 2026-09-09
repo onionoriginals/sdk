@@ -126,3 +126,19 @@ new npm publication, or a new public-chain transcript. The existing release map'
 separate API/spec, clean-browser mainnet and release sign-off gates remain distinct.
 
 Supplemental shutdown-probe review: [pinned receipt](evidence/identity-regtest-completion/supplemental-review.json), no remaining findings at commit `1eab0c1f`.
+
+## Greptile follow-up — September 8, 2026 Pacific
+
+The previously deferred duplicate envelope authentication is now fixed. Internal
+ingestion decodes the container before the asset constructor authenticates it;
+the public parser still authenticates every input. Browser recovery uses
+`inspectAssetEnvelope` to receive the normalized envelope and immutable verified
+history together. No caller-supplied trust token or shared cache was added.
+
+Signature-count regressions on the archived two-entry SDK 3 fixture show recovery
+discovery uses two checks instead of four, and loading uses six instead of eight.
+The pre-existing asset verification passes remain unchanged. Forged histories and
+mismatched identities still fail; prepared publication rejects forgery before I/O.
+Both real browser/Core/ord restart scenarios passed again with zero signatures
+after restart. The inspection API's detached-envelope and immutable-history
+contracts are covered by runtime tests and the public consumer type fixture.
