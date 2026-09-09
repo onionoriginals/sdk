@@ -114,4 +114,4 @@ if (tti.status !== 0) {
   console.error('[landing-ci] FAILED: TTI budget check');
   process.exit(tti.status ?? 1);
 }
-console.log('\n[landing-ci] PASS — build clean, lifecycle ran, zero console errors, nothing clips at 320/375/414, TTI within budget');
+console.log('\n[landing-ci] PASS — build clean, local signed asset recovered, zero console errors, nothing clips at 320/375/414, TTI within budget');

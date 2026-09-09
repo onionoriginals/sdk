@@ -1,0 +1,210 @@
+{
+  "format": "originals/bitcoin-publication",
+  "version": 3,
+  "kind": "boundary",
+  "asset": {
+    "format": "originals/asset",
+    "version": 3,
+    "assetDid": "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+    "eventLog": {
+      "log": [
+        {
+          "event": {
+            "operation": {
+              "type": "create",
+              "data": {
+                "profile": "originals/cel/3",
+                "controller": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+                "createdAt": "2026-09-07T07:30:19.548Z",
+                "nonce": "j45AvU900kRPzBr4_bh3iw",
+                "resources": [
+                  {
+                    "id": "legacy.bin",
+                    "mediaType": "application/octet-stream",
+                    "digestMultibase": "uEiAE01Oly7B4BB9CICBwYpBt8GI43dX_XGshuPrEtD5GeQ"
+                  }
+                ],
+                "name": "SDK 3 compatibility fixture"
+              }
+            }
+          },
+          "proof": [
+            {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "proofPurpose": "assertionMethod",
+              "created": "2026-09-07T07:30:19.552Z",
+              "proofValue": "z4fpgzKnAqpopGJkfwpbb2pfMVrJLb8kzwktAdUD5ixayYutNc3TkeRb39378UV9y1UY8A4vLq5MxdPERHchXg9vv"
+            }
+          ]
+        },
+        {
+          "event": {
+            "previousEvent": "uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+            "operation": {
+              "type": "migrate",
+              "data": {
+                "profile": "originals/cel/3",
+                "from": "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+                "to": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+                "layer": "webvh",
+                "migratedAt": "2026-09-07T07:30:19.698Z"
+              }
+            }
+          },
+          "proof": [
+            {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "proofPurpose": "assertionMethod",
+              "created": "2026-09-07T07:30:19.700Z",
+              "proofValue": "z2r1hfYDBeyTAQLHjBZhKfX6UTsQqnofwZSWEHtMf9B2Shrue4iyAyJ1nGDuNRNcX5sma2P5PiJN2KmMgGCRGjTH3"
+            }
+          ]
+        },
+        {
+          "event": {
+            "previousEvent": "uEiDp2pm4URITlJ3aawjdKoEgapUXfpo3v-XzZ4xnvlbTlg",
+            "operation": {
+              "type": "migrate",
+              "data": {
+                "profile": "originals/cel/3",
+                "from": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+                "to": "did:btco:reg:1250000000",
+                "layer": "btco",
+                "migratedAt": "2026-09-07T07:39:51.932Z"
+              }
+            }
+          },
+          "proof": [
+            {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "proofPurpose": "assertionMethod",
+              "created": "2026-09-07T07:39:51.933Z",
+              "proofValue": "z4hHz7PdNmhfxZCYyBLGzDtTXMp5ATp4RavVLtVV4CNdkckKKQQSbpvcsepoSnTahHatN7AMe3AkurfzbGnqhLrDr"
+            }
+          ]
+        }
+      ]
+    },
+    "resources": [
+      {
+        "id": "legacy.bin",
+        "version": 1,
+        "digestMultibase": "uEiAE01Oly7B4BB9CICBwYpBt8GI43dX_XGshuPrEtD5GeQ",
+        "content": {
+          "encoding": "base64",
+          "data": "AP+ABw=="
+        }
+      }
+    ]
+  },
+  "document": {
+    "log": [
+      {
+        "event": {
+          "operation": {
+            "type": "create",
+            "data": {
+              "profile": "originals/cel/3",
+              "controller": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "createdAt": "2026-09-07T07:30:19.548Z",
+              "nonce": "j45AvU900kRPzBr4_bh3iw",
+              "resources": [
+                {
+                  "id": "legacy.bin",
+                  "mediaType": "application/octet-stream",
+                  "digestMultibase": "uEiAE01Oly7B4BB9CICBwYpBt8GI43dX_XGshuPrEtD5GeQ"
+                }
+              ],
+              "name": "SDK 3 compatibility fixture"
+            }
+          }
+        },
+        "proof": [
+          {
+            "type": "DataIntegrityProof",
+            "cryptosuite": "eddsa-jcs-2022",
+            "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+            "proofPurpose": "assertionMethod",
+            "created": "2026-09-07T07:30:19.552Z",
+            "proofValue": "z4fpgzKnAqpopGJkfwpbb2pfMVrJLb8kzwktAdUD5ixayYutNc3TkeRb39378UV9y1UY8A4vLq5MxdPERHchXg9vv"
+          }
+        ]
+      },
+      {
+        "event": {
+          "previousEvent": "uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+          "operation": {
+            "type": "migrate",
+            "data": {
+              "profile": "originals/cel/3",
+              "from": "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+              "to": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+              "layer": "webvh",
+              "migratedAt": "2026-09-07T07:30:19.698Z"
+            }
+          }
+        },
+        "proof": [
+          {
+            "type": "DataIntegrityProof",
+            "cryptosuite": "eddsa-jcs-2022",
+            "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+            "proofPurpose": "assertionMethod",
+            "created": "2026-09-07T07:30:19.700Z",
+            "proofValue": "z2r1hfYDBeyTAQLHjBZhKfX6UTsQqnofwZSWEHtMf9B2Shrue4iyAyJ1nGDuNRNcX5sma2P5PiJN2KmMgGCRGjTH3"
+          }
+        ]
+      },
+      {
+        "event": {
+          "previousEvent": "uEiDp2pm4URITlJ3aawjdKoEgapUXfpo3v-XzZ4xnvlbTlg",
+          "operation": {
+            "type": "migrate",
+            "data": {
+              "profile": "originals/cel/3",
+              "from": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+              "to": "did:btco:reg:1250000000",
+              "layer": "btco",
+              "migratedAt": "2026-09-07T07:39:51.932Z"
+            }
+          }
+        },
+        "proof": [
+          {
+            "type": "DataIntegrityProof",
+            "cryptosuite": "eddsa-jcs-2022",
+            "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+            "proofPurpose": "assertionMethod",
+            "created": "2026-09-07T07:39:51.933Z",
+            "proofValue": "z4hHz7PdNmhfxZCYyBLGzDtTXMp5ATp4RavVLtVV4CNdkckKKQQSbpvcsepoSnTahHatN7AMe3AkurfzbGnqhLrDr"
+          }
+        ]
+      }
+    ]
+  },
+  "transactions": {
+    "version": 1,
+    "network": "regtest",
+    "satoshi": "1250000000",
+    "inscriptionId": "c9d6f6bec1fc08b2af92a40162fad868a283d5c2bfe3b852df4a69d6f7a14cc3i0",
+    "commitTxId": "48cddcea3a6363863b54321da063ead3fd40d2ab7107356324342087df9f6d89",
+    "revealTxId": "c9d6f6bec1fc08b2af92a40162fad868a283d5c2bfe3b852df4a69d6f7a14cc3",
+    "signedCommitHex": "0200000000010112121212121212121212121212121212121212121212121212121212121212120000000000fdffffff028e070000000000002251208a9cc9025b66da973f800fb7d2824d965307a1b3af00825524dddfb89d432022e07d01000000000016001479b000887626b294a914501a4cd226b58b23598302483045022100966541748d80c23bceeb804716398d3e95b6aa2d9d06949f1d74f2d96a5600f5022039a23e2e4108e93a9074022eea10eb95b3bc3a0306606f63d355c172290b93580121031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f00000000",
+    "revealTxHex": "02000000000101896d9fdf8720342463350771abd240fdd3ea63a01d32543b8663633aeadccd480000000000fdffffff01220200000000000016001479b000887626b294a914501a4cd226b58b235983034091601b6bdad0a3464588046907aa111e1eaab84f9721e7836abcd12880290504f117e949f448c965d170fdbb7a0ffa58c0d987d01aef9542cd1200d37fdb8291fdb50820516ed086762aea4f385fb046f6758ccfec16ddb2ee141703dc9a7f564049c6e0ac0063036f72640101186170706c69636174696f6e2f6f637465742d73747265616d01054d0802a1636c6f6783a2656576656e74a1696f7065726174696f6ea26464617461a66a636f6e74726f6c6c657278386469643a6b65793a7a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273696372656174656441747818323032362d30392d30375430373a33303a31392e3534385a646e616d65781b53444b203320636f6d7061746962696c6974792066697874757265656e6f6e6365766a34354176553930306b52507a4272345f62683369776770726f66696c656f6f726967696e616c732f63656c2f33697265736f757263657381a36f6469676573744d756c746962617365782f754569414530314f6c79374234424239434943427759704274384749343364585f58477368755072457444354765516269646a6c65676163792e62696e696d656469615479706578186170706c69636174696f6e2f6f637465742d73747265616d6474797065666372656174656570726f6f6681a667637265617465647818323032362d30392d30375430373a33303a31392e3535325a6b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f646a70726f6f6656616c756578597a346670677a4b6e4171706f70474a6b66777062623270664d56724a4c62386b7a776b74416455443569786179597501054d0802744e6333546b655262333933373855563979315559384134764c71354d7864504552486368586739767664747970657244617461496e7465677269747950726f6f6672766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273237a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273a2656576656e74a2696f7065726174696f6ea26464617461a56466726f6d78376469643a63656c3a7545694345784e5844307130326b4575323043385751656b313144533154696136594d70646e716d392d7173376b41656c617965726577656276686a6d6967726174656441747818323032362d30392d30375430373a33303a31392e3639385a6770726f66696c656f6f726967696e616c732f63656c2f3362746f78886469643a77656276683a516d637a6a354731384451476355645a554636376741314a3736505a384876323155546646506e774e43513648543a6578616d706c652e636f6d3a7075626c69736865643a616e6f6e796d6f75733a7545694345784e5844307130326b4575323043385751656b313144533154696136594d70646e716d392d7173376b416474797065676d6967726174656d70726576696f75734576656e7401054d0802782f7545694345784e5844307130326b4575323043385751656b313144533154696136594d70646e716d392d7173376b416570726f6f6681a667637265617465647818323032362d30392d30375430373a33303a31392e3730305a6b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f646a70726f6f6656616c756578597a327231686659444265795441514c486a425a684b66583655547351716e6f66775a53574548744d66394232536872756534697941794a316e4744754e524e635835736d6132503550694a4e324b6d4d67474352476a54483364747970657244617461496e7465677269747950726f6f6672766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273237a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273a2656576656e74a2696f7065726174696f6ea26464617461a56466726f6d78886469643a77656276683a516d637a6a354731384451476355645a554636376741314a3736505a384876323155546646506e774e43513648543a6578616d706c652e636f6d3a7075626c69736865643a616e6f6e796d6f75733a01054d08027545694345784e5844307130326b4575323043385751656b313144533154696136594d70646e716d392d7173376b41656c61796572646274636f6a6d6967726174656441747818323032362d30392d30375430373a33393a35312e3933325a6770726f66696c656f6f726967696e616c732f63656c2f3362746f776469643a6274636f3a7265673a313235303030303030306474797065676d6967726174656d70726576696f75734576656e74782f754569447032706d34555249546c4a336161776a644b6f45676170555866706f33762d587a5a34786e766c62546c676570726f6f6681a667637265617465647818323032362d30392d30375430373a33393a35312e3933335a6b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f646a70726f6f6656616c756578597a3468487a3750644e6d6866785a435979424c477a447454584d703541547034526176564c74565634434e646b636b4b4b515153627076637365706f536e5461684861744e37414d6533416b7572667a62476e71684c72447264747970657244617461496e7465677269747950726f6f6672766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b010534676273237a364d6b746f6a484e3944386f62616b374339776a70547a4352726445357a433663787435414e55466e51736b676273000400ff80076821c0516ed086762aea4f385fb046f6758ccfec16ddb2ee141703dc9a7f564049c6e000000000",
+    "fundingUtxos": [
+      {
+        "txid": "1212121212121212121212121212121212121212121212121212121212121212",
+        "vout": 0,
+        "value": 100000,
+        "scriptPubKey": "001479b000887626b294a914501a4cd226b58b235983"
+      }
+    ],
+    "changeAddress": "bcrt1q0xcqpzrky6eff2g52qdye53xkk9jxkvrl4xfg5"
+  }
+}

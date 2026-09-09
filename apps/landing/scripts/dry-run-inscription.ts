@@ -168,7 +168,7 @@ export interface DryRunReport {
   address: string;
   signing: 'local-key' | 'unsigned';
   payload: { filename: string; contentType: string; bytes: number; sha256: string };
-  asset: { didCel: string; didWebvh: string | null; contentBytesHint: number };
+  asset: { assetId: string; didWebvh: string | null; contentBytesHint: number };
   fee: {
     rawEstimateSatVb: number | null;
     routeRateSatVb: number | null;
@@ -744,7 +744,7 @@ async function runDryRunInner(opts: DryRunOptions, sdkNotes: string[]): Promise<
     address,
     signing: world.privateKey ? 'local-key' : 'unsigned',
     payload: { filename: payload.filename, contentType: payload.contentType, bytes: payloadBytes.length, sha256: payloadHash },
-    asset: { didCel: asset.id, didWebvh, contentBytesHint },
+    asset: { assetId: asset.id, didWebvh, contentBytesHint },
     fee: { rawEstimateSatVb: rawEstimate, routeRateSatVb: routeRate, bufferMultiplier: 1.5, quotedCostSats: depositInfo?.estimatedCostSats ?? null, rederivedQuoteSats: null },
     deposit: depositInfo,
     depositError,
@@ -914,7 +914,7 @@ export function renderReport(r: DryRunReport): string {
   L.push(`DRY-RUN INSCRIPTION RECORD (${r.mode.toUpperCase()} ${r.mode === 'mock' ? 'PROVIDER AND FIXTURE, NOT THE CHAIN' : 'READS, NEVER BROADCAST'})`);
   L.push(`network: ${r.network}   deposit address: ${r.address}   signing: ${r.signing}`);
   L.push(`payload: ${r.payload.filename} (${r.payload.contentType}, ${r.payload.bytes} bytes, sha256 ${r.payload.sha256})`);
-  L.push(`asset: ${r.asset.didCel}${r.asset.didWebvh ? ` → ${r.asset.didWebvh}` : ''}; content-bytes hint sent to the quote: ${r.asset.contentBytesHint}`);
+  L.push(`asset: ${r.asset.assetId}${r.asset.didWebvh ? ` → ${r.asset.didWebvh}` : ''}; content-bytes hint sent to the quote: ${r.asset.contentBytesHint}`);
   h('Fee');
   L.push(`live estimate (provider.estimateFee(1)): ${r.fee.rawEstimateSatVb} sat/vB → route rate (ceil): ${r.fee.routeRateSatVb} sat/vB`);
   L.push(`buffered quote (deposit route, x${r.fee.bufferMultiplier} + ${POSTAGE_SATS} postage): ${r.fee.quotedCostSats} sats; re-derived for the selected input count: ${r.fee.rederivedQuoteSats}`);

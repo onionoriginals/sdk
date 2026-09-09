@@ -41,6 +41,11 @@
       "types": "./dist/v3/index.d.ts",
       "import": "./dist/v3/index.js",
       "default": "./dist/v3/index.js"
+    },
+    "./asset-envelope": {
+      "types": "./dist/asset-envelope.d.ts",
+      "import": "./dist/asset-envelope.js",
+      "default": "./dist/asset-envelope.js"
     }
   },
   "scripts": {

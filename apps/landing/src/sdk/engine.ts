@@ -1,3 +1,4 @@
+import { assetDigest } from "@originals/sdk/cel";
 /** Browser creator flow using the public CEL 3 SDK and explicit controller custody. */
 import { recoveryStorageKey } from "./local-publication-recovery";
 import { fundingSignerAddress } from "../auth/turnkey-session";
@@ -389,9 +390,9 @@ export class DemoEngine {
                       "published",
                       "accounts",
                       this.subOrgId,
-                      this.asset.id.slice(8),
+                      assetDigest(this.asset.id),
                     ]
-                  : ["published", "anonymous", this.asset.id.slice(8)],
+                  : ["published", "anonymous", assetDigest(this.asset.id)],
             }
           : {}),
       },

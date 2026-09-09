@@ -30,6 +30,7 @@
     "version": "changeset version",
     "release": "changeset publish",
     "regtest": "bun scripts/regtest/run.ts",
+    "regtest:browser": "bun scripts/regtest/run.ts --browser",
     "regtest:install": "bun scripts/regtest/install.ts"
   },
   "author": "Aviary Tech",

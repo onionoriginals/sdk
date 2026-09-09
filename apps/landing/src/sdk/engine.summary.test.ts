@@ -4,7 +4,7 @@ import { demo } from '../content';
 
 describe('honesty labels', () => {
   test('content: create step no longer claims a did:peer identity', () => {
-    expect(demo.steps[0].description).toContain('did:cel');
+    expect(demo.steps[0].description).toContain('signed genesis');
     expect(demo.steps[0].description).not.toContain('did:peer identity');
   });
 
@@ -12,7 +12,7 @@ describe('honesty labels', () => {
     expect(demo.steps[1].description.toLowerCase()).toMatch(/host|resolv/);
   });
 
-  test('asset:created summary says did:cel, not "a private did:peer identity"', async () => {
+  test('asset:created summary names its ni identity, not "a private did:peer identity"', async () => {
     const engine = new DemoEngine();
     const summaries: string[] = [];
     engine.on((e) => {
@@ -20,7 +20,7 @@ describe('honesty labels', () => {
     });
     await engine.create('Test Piece', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect(summaries.length).toBe(1);
-    expect(summaries[0]).toContain('did:cel');
+    expect(summaries[0]).toContain('ni:///sha-256;');
     expect(summaries[0]).not.toContain('did:peer identity');
   });
 });

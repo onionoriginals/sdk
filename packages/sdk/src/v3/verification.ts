@@ -22,7 +22,7 @@ export function summarizeVerification(
         (hosted?.status === "verified" && hosted.head === history.state.head) ||
         (publication?.status === "accepted" &&
           publication.state.head === history.state.head &&
-          publication.state.didCel === history.state.didCel)),
+          publication.state.assetId === history.state.assetId)),
     history,
     resources: missingResources.length ? "incomplete" : "verified",
     missingResources,

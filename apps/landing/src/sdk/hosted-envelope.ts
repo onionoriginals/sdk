@@ -83,8 +83,8 @@ export function hostedAssetEnvelope(
     return {
       envelope: {
         format: "originals/asset",
-        version: 3,
-        assetDid: history.state.didCel,
+        version: 4,
+        assetId: history.state.assetId,
         eventLog: document,
         resources,
       },

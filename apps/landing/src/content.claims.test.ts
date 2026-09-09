@@ -72,11 +72,11 @@ describe('the page states the indexer trust assumption', () => {
   });
 });
 
-describe('the page distinguishes CEL provenance from DID-method compatibility', () => {
-  test('the protocol section acknowledges the existing method and the format mismatch', () => {
-    expect(protocol.standardsNote).toMatch(/file and document provenance/i);
-    expect(protocol.standardsNote).toMatch(/existing W3C CCG did:cel draft method/);
-    expect(protocol.standardsNote).toMatch(/different format/);
-    expect(protocol.standardsNote).not.toMatch(/did:cel is ours|not registered|unregistered/i);
+describe('the page separates CEL provenance from DID methods', () => {
+  test('the protocol section names ni identity and disclaims did:cel implementation', () => {
+    expect(protocol.standardsNote).toMatch(/Cryptographic Event Logs/);
+    expect(protocol.standardsNote).toMatch(/ni: hash identifiers/);
+    expect(protocol.standardsNote).toMatch(/did:cel method is not defined or implemented by Originals/);
+    expect(protocol.standardsNote).not.toMatch(/did:cel is ours/);
   });
 });

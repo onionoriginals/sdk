@@ -1,3 +1,4 @@
+import { sameAssetIdentity } from "@originals/sdk/cel";
 /**
  * Live, in-browser verification of one of the user's published Originals.
  *
@@ -105,9 +106,9 @@ export async function verifyOriginal(input: {
       celOk =
         logOk &&
         history.state.aliases.includes(input.did) &&
-        !!method?.doc?.alsoKnownAs?.includes(history.state.didCel);
+        !!method?.doc?.alsoKnownAs?.some((alias) => sameAssetIdentity(alias, history.state.assetId));
       celDetail = celOk
-        ? `${document.log.length} signed controller events and the WebVH backlink verified → ${short(history.state.didCel)}`
+        ? `${document.log.length} signed controller events and the WebVH backlink verified → ${short(history.state.assetId)}`
         : "CEL history and method log do not bind to this Original";
     } catch {
       celDetail = "CEL 3 controller history did not verify";

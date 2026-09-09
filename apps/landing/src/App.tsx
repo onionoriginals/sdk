@@ -52,7 +52,7 @@ function RoutedApp() {
 }
 
 /**
- * Headless CI harness (?smoke=1): runs the full real-SDK lifecycle and dumps
+ * Headless CI harness (?smoke=1): creates and independently reloads a local signed asset, then dumps
  * the result for scripts/smoke.mjs to assert on. Not linked from the page.
  *
  * R12: the auto-run is MOCK-BUILD ONLY. It executes unauthenticated on load,
@@ -82,11 +82,15 @@ function SmokeTest() {
       engine.on((e) => events.push(e.type));
       const art = generateArtwork('Smoke Test', 'Artwork', 1);
       const s1 = await engine.create('Smoke Test', 'Artwork', art.svg);
-      const s2 = await engine.publish();
-      const s3 = await engine.inscribe({ feeRate: 7 });
+      const { OriginalsSDK } = await import('@originals/sdk');
+      const envelope = JSON.stringify(engine.asset!.serialize());
+      const recovered = await OriginalsSDK.create().lifecycle.loadAsset(envelope);
+      if (!recovered.verification.verified || recovered.asset.id !== engine.asset!.id) {
+        throw new Error('Fresh local verification did not recover the same asset');
+      }
       setOut(
         JSON.stringify(
-          { l1: s1.layer, l2: s2.layer, l3: s3.layer, events, tx: s3.inscription?.txid },
+          { layer: s1.layer, assetId: recovered.asset.id, verified: true, events },
           null,
           2
         )

@@ -9,7 +9,7 @@ export const site = {
    * Originals copy most people meet, so it speaks to the creator the rest of
    * the page was rewritten for — not to a developer shopping for a package.
    * The old pair ('Originals SDK — …', 'Create, publish, and inscribe digital
-   * assets … did:cel → did:webvh → did:btco') named the library and three DID
+   * assets … local CEL → did:webvh → did:btco') named the library and three DID
    * methods before it named anything a creator wants. Title stays under 60
    * characters and description under 155 so neither is truncated in search.
    */
@@ -129,7 +129,7 @@ export const hero = {
 export const layers = [
   {
     id: 'did:cel' as const,
-    name: 'did:cel',
+    name: 'Local CEL',
     title: 'Create',
     role: 'Private draft',
     blurb: 'Born offline as a signed event log. Free, instant, and invisible until you say otherwise.',
@@ -223,7 +223,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:cel',
       description:
-        'Hashes the artwork’s bytes and mints its did:cel genesis — a signed event log, entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log, entirely in this tab, no server involved.'
     },
     {
       id: 'publish',
@@ -268,7 +268,7 @@ export const demo = {
   revise: {
     heading: 'Edit it — the log keeps every version',
     body:
-      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. At did:cel that is free and offline; once published, the SDK uploads each new byte version before replacing the hosted CEL. Old versions stay resolvable.',
+      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. Before publication that is free and offline; once published, the SDK uploads each new byte version before replacing the hosted CEL. Old versions stay resolvable.',
     regenerateAction: 'Shuffle artwork',
     action: 'Commit update',
     pending: 'Signing update…',
@@ -541,7 +541,7 @@ export const demo = {
     rateLimited:
       'That’s a lot of publishing at once, so the demo host asked us to slow down. Wait a few seconds and publish again — nothing you’ve made is lost, your Original is still signed and safe in this tab.',
     unavailable:
-      'We couldn’t host the signed log just now, so your Original is still at did:cel — real, signed, and safe in this tab. Try publishing again in a moment.',
+      'We couldn’t host the signed log just now, so your Original is still local — real, signed, and safe in this tab. Try publishing again in a moment.',
     quotaFull:
       'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still resolvable.',
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
@@ -675,7 +675,7 @@ export const originalDetail = {
   checkLabels: {
     hash: 'Resource bytes match their declared sha-256',
     log: 'did:webvh log — SCID and Ed25519 proof chain verify',
-    cel: 'CEL event chain verifies back to the did:cel genesis'
+    cel: 'CEL event chain verifies back to the signed genesis'
   },
   artifactsMissing:
     'The signed artifacts could not be fetched in this environment — they resolve at the production origin.',
@@ -688,7 +688,7 @@ export const originalDetail = {
       create: {
         title: 'Created',
         blurb:
-          'Born as a did:cel genesis — a signed event log minted in the browser, no server involved. The resource bytes were hashed and sealed into the very first event.'
+          'Born as a signed genesis — a signed event log minted in the browser, no server involved. The resource bytes were hashed and sealed into the very first event.'
       },
       publish: {
         title: 'Published',
@@ -755,7 +755,7 @@ export const realExample = {
   eyebrow: 'A real Original',
   headline: 'Don’t take our word for it.',
   subhead:
-    '“First Light” is a genuine Original, minted with this SDK: real keys, a real did:cel genesis event log, a did:webvh identity with a signed method history and a CEL 3 controller history. These bundled artifacts demonstrate local signature verification; they do not claim a live DNS or Bitcoin publication. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
+    '“First Light” is a genuine Original, minted with this SDK: real keys, a real signed genesis event log, a did:webvh identity with a signed method history and a CEL 3 controller history. These bundled artifacts demonstrate local signature verification; they do not claim a live DNS or Bitcoin publication. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
   checkLabels: {
     hash: 'Artwork bytes match their declared sha-256',
     log: 'did:webvh log — SCID and Ed25519 proof chain verify',
@@ -786,13 +786,12 @@ export const protocol = {
   eyebrow: 'The protocol',
   headline: 'Three layers. One direction.',
   subhead:
-    'Assets migrate unidirectionally — did:cel → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
+    'Assets migrate unidirectionally — local CEL → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
   migrationNote:
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
-  // CEL file provenance and the existing CCG did:cel method are separate contracts.
-  // Keep the current identifier mismatch explicit until #583 is resolved.
+  // Generic CEL application provenance and DID-method identity are separate standards.
   standardsNote:
-    'Originals uses cryptographic event logs (CELs) for file and document provenance. Its current did:cel asset identifiers use a different format from the existing W3C CCG did:cel draft method.',
+    'Originals uses CCG Cryptographic Event Logs for signed file history and standard ni: hash identifiers for assets. WebVH and Bitcoin supply publication identities. The separate did:cel method is not defined or implemented by Originals.',
   columns: [
     {
       layer: 'did:cel',
@@ -866,7 +865,7 @@ export const footer = {
   tagline: 'Provenance that survives the internet.',
   license: 'MIT licensed. Built by Aviary Tech.',
   bottomLeft: '© 2026 Aviary Tech · MIT License',
-  bottomRight: 'did:cel → did:webvh → did:btco',
+  bottomRight: 'local CEL → did:webvh → did:btco',
   columns: [
     {
       title: 'Project',

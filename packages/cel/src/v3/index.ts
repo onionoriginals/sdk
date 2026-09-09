@@ -8,3 +8,4 @@ export * from "./proofs.js";
 export * from "./dids.js";
 export * from "./history.js";
 export * from "./publications.js";
+export * from "./identity.js";

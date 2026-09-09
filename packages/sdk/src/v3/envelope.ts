@@ -5,6 +5,9 @@ import {
   copyValue,
   validateDigest,
   validateDocument,
+  normalizeAssetId,
+  verifyHistory,
+  type VerifiedHistory,
 } from "@originals/cel/v3";
 import type {
   AssetEnvelope,
@@ -13,7 +16,7 @@ import type {
 } from "./types.js";
 
 export const ASSET_ENVELOPE_FORMAT = 'originals/asset' as const;
-export const ASSET_ENVELOPE_VERSION = 3 as const;
+export const ASSET_ENVELOPE_VERSION = 4 as const;
 
 /** SDK interchange budgets, separate from the smaller limits on signed CEL metadata. */
 export const ASSET_LIMITS = Object.freeze({
@@ -320,8 +323,10 @@ function parseEnvelopeJson(input: string): unknown {
   return JSON.parse(input) as unknown;
 }
 
-/** Parse the unsigned container without relaxing the signed CEL's own parser or limits. */
-export function readEnvelope(input: unknown): AssetEnvelope {
+/** @internal Structural decoding only: the caller must authenticate history and bind the declared identity.
+ * Not exported by any package entry point. Signed CEL syntax and container budgets remain strict.
+ */
+export function decodeEnvelope(input: unknown): AssetEnvelope {
   let raw = input;
   if (typeof input === "string") {
     try {
@@ -336,28 +341,29 @@ export function readEnvelope(input: unknown): AssetEnvelope {
     }
   }
   const value = record(raw);
-  if (value.format !== "originals/asset" || value.version !== 3)
+  if (value.format !== "originals/asset" || ![3, 4].includes(value.version as number))
     throw new CelError(
       "unsupported",
       "ASSET_ENVELOPE_VERSION",
-      "Expected an originals/asset version-3 envelope; earlier formats are not translated",
+      "Expected an originals/asset version-3 or version-4 envelope with CEL 3 history",
     );
   fields(
     value,
-    ["format", "version", "assetDid", "eventLog", "resources"],
+    ["format", "version", value.version === 3 ? "assetDid" : "assetId", "eventLog", "resources"],
     ["unverified"],
   );
-  requireAsset(
-    typeof value.assetDid === "string",
-    "ASSET_ENVELOPE",
-    "Envelope needs a genesis assetDid",
-  );
+  const identity = value.version === 3 ? value.assetDid : value.assetId;
+  requireAsset(typeof identity === "string" &&
+    identity.startsWith(value.version === 3 ? "did:cel:" : "ni:///sha-256;"),
+    "ASSET_ENVELOPE", "Envelope identity must match its declared version");
+  const assetId = normalizeAssetId(identity);
   const budget = new AttachmentBudget();
+  const eventLog = validateDocument(value.eventLog);
   const envelope: AssetEnvelope = {
     format: "originals/asset",
-    version: 3,
-    assetDid: value.assetDid,
-    eventLog: validateDocument(value.eventLog),
+    version: 4,
+    assetId,
+    eventLog,
     resources: copyAttachments(value.resources, budget),
   };
   if (Object.prototype.hasOwnProperty.call(value, "unverified")) {
@@ -372,4 +378,24 @@ export function readEnvelope(input: unknown): AssetEnvelope {
     ...(envelope.unverified?.localResources ?? []),
   ]);
   return envelope;
+}
+
+/** Offline controller-history inspection; resource byte binding and publication evidence are not checked. */
+export interface AssetEnvelopeInspection {
+  /** Detached, mutable normalized container. Editing it does not alter the authenticated history result. */
+  envelope: AssetEnvelope;
+  /** Immutable state derived from verified signatures, links, transitions and the declared genesis identity. */
+  history: VerifiedHistory;
+}
+
+/** Parse a strict envelope and authenticate its controller history once, without network I/O. */
+export function inspectAssetEnvelope(input: unknown): AssetEnvelopeInspection {
+  const envelope = decodeEnvelope(input);
+  const history = verifyHistory(envelope.eventLog, { expectedAssetId: envelope.assetId });
+  return { envelope, history };
+}
+
+/** Parse and authenticate a strict envelope, returning its detached, mutable normalized container. */
+export function readEnvelope(input: unknown): AssetEnvelope {
+  return inspectAssetEnvelope(input).envelope;
 }

@@ -1,6 +1,10 @@
-# Getting started with Originals SDK 3
+# Getting started with Originals SDK 4
 
-Install `@originals/sdk` using a Node version supported by its `engines` field.
+This checkout documents the SDK 4 identity update; SDK 3.0.0 is already published.
+Use a Node version supported by the chosen package's `engines` field. Existing
+SDK 3 users should first read [the SDK 4 migration guide](MIGRATION_4.0.md).
+An Original records signed file/version claims; `asset.id` is now the canonical
+`ni` genesis commitment, separate from controller identity and publication aliases.
 Follow the byte-based, explicit-custody example in
 [the package README](../packages/sdk/README.md), then read
 [the CEL 3 API guide](../packages/sdk/V3.md) before publishing.

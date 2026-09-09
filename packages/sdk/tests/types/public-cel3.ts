@@ -98,3 +98,35 @@ import type { AssetTransferredEvent } from '@originals/sdk';
 import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
 // @ts-expect-error The types subpath must not revive the removed confirmation contract.
 import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
+
+// SDK 4 identity change: stable offline subpath plus explicit SDK 3 read aliases.
+import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from '@originals/sdk/asset-envelope';
+import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
+import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
+import { deriveAssetId, deriveDid, normalizeAssetId, assetDigest } from '@originals/sdk/cel';
+const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
+const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
+const inspectedEnvelope: AssetEnvelope = inspected.envelope;
+const inspectedState: DeepReadonly<AssetState> = inspected.history.state;
+inspectRootEnvelope(envelope);
+inspectLocalEnvelope(envelope);
+// @ts-expect-error Structural decoding is internal; public readers authenticate history.
+import { decodeEnvelope } from '@originals/sdk/asset-envelope';
+// @ts-expect-error Authenticated state is immutable.
+inspectedState.name = 'replacement';
+void inspectedEnvelope;
+const currentVersion: 4 = currentEnvelope.version;
+const canonicalAssetId: string = state.assetId;
+const legacyAlias: string = state.didCel;
+const legacyEnvelope = {
+  format: 'originals/asset', version: 3, assetDid: legacyAlias,
+  eventLog: loaded.celLog, resources: currentEnvelope.resources,
+};
+await SDK.create().lifecycle.loadAsset(legacyEnvelope);
+verifyHistory(loaded.celLog, {expectedDid: legacyAlias, expectedAssetId: canonicalAssetId});
+const canonicalFromEvent: string = deriveAssetId(loaded.celLog.log[0].event);
+const legacyFromEvent: string = deriveDid(loaded.celLog.log[0].event);
+const digest: string = assetDigest(normalizeAssetId(legacyFromEvent));
+// @ts-expect-error New envelopes do not expose the removed unsigned field.
+currentEnvelope.assetDid;
+void currentVersion; void canonicalFromEvent; void digest;

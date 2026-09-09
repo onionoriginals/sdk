@@ -18,7 +18,7 @@ import type {
 } from "./resolution.js";
 import { createNonce, signEvent, CelError } from "@originals/cel/v3";
 import { OriginalsAsset } from "./OriginalsAsset.js";
-import { readEnvelope, record, fields, requireAsset } from "./envelope.js";
+import { decodeEnvelope, record, fields, requireAsset } from "./envelope.js";
 import { mutationOptions, captureSigner } from "./options.js";
 import { prepareResources } from "./resources.js";
 import type {
@@ -184,12 +184,12 @@ export class LifecycleManager {
       "ASSET_OPTIONS",
       "allowPartial must be a boolean",
     );
-    const envelope = readEnvelope(input);
+    const envelope = decodeEnvelope(input);
     const asset = new OriginalsAsset(
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       envelope.unverified?.localResources,
       this.resolver,
     );

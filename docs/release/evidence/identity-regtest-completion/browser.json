@@ -1,0 +1,75 @@
+{
+  "status": "passed",
+  "scenarios": [
+    {
+      "status": "passed",
+      "fault": "commit-response-lost",
+      "versions": {
+        "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+        "ord": "ord 0.29.0",
+        "chromium": "152.0.7977.77"
+      },
+      "assetId": "ni:///sha-256;e3Si5LZxEg83AeG5IFjofb1OvYcOzNWqYwHZ58X-rSw",
+      "webDid": "did:webvh:QmYRsphE5txSTrvYo1vX9mp8pE3U4VEvYyasTgz49v6zaR:regtest-54004.localhost%3A54004:published:accounts:disposable-regtest-creator:uEiB7dKLktnESDzcB4bkgWOh9vU69hw7M1apjAdnnxf6tLA",
+      "btcoDid": "did:btco:reg:9998999718",
+      "satoshi": "9998999718",
+      "head": "uEiCv6S9Pg4pxbGeTugFa1qVmsLiFfmVlAsxUE8-6vdEcmg",
+      "resourceSha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+      "resourceBytes": 68,
+      "commitTxId": "677eb2826aca3324df078e63675276d56c42496f85f4d1594543056bde798d03",
+      "revealTxId": "e679f862e88f196672014e2a977d7f6bda5c969514a120daab1c1ff245e409e0",
+      "inscriptionId": "e679f862e88f196672014e2a977d7f6bda5c969514a120daab1c1ff245e409e0i0",
+      "commitBytesSha256": "76734d6d42885c5120a994ce30a5c8b2133054c59875f0090111bf1b4e003e65",
+      "revealBytesSha256": "06257b4e93999105fd3174ccd9f1b0188180f84320a2b5e7058c1f7e66106ff2",
+      "firstServerPid": 1506,
+      "secondServerPid": 1586,
+      "coreAndOrdRestarted": true,
+      "signaturesBeforeRestart": 5,
+      "signaturesAfterRestart": 0,
+      "broadcasts": 3,
+      "resourceEvidence": {
+        "inline": "browser-proof.png",
+        "hosted": "metadata.json",
+        "fullVerification": true
+      },
+      "externalRequests": [],
+      "artifacts": "/tmp/originals-browser-regtest/commit-response-lost",
+      "completedAt": "2026-09-07T07:40:57.469Z"
+    },
+    {
+      "status": "passed",
+      "fault": "reveal-rejected",
+      "versions": {
+        "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+        "ord": "ord 0.29.0",
+        "chromium": "152.0.7977.77"
+      },
+      "assetId": "ni:///sha-256;UiKLnCeXGM53giNEh8qZI3pUYa920z1HsBjXSgKNMQI",
+      "webDid": "did:webvh:QmZZf5g1xLN1YrNDrBRPZGw7QRNaiDXUPYXk5DMnmrtNzr:regtest-54250.localhost%3A54250:published:accounts:disposable-regtest-creator:uEiBSIoucJ5cYzneCI0SHypkjelRhr3bTPUewGNdKAo0xAg",
+      "btcoDid": "did:btco:reg:5000000000",
+      "satoshi": "5000000000",
+      "head": "uEiDeYj5OavsLSqZwRC12Ab4vFZ2xRQmyjOwwmBnQu1Dhxw",
+      "resourceSha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+      "resourceBytes": 68,
+      "commitTxId": "d0d5babeea44524f642739b7944ca915e3f7255a841535183bdb9467c45f427f",
+      "revealTxId": "26e2d69b97eaba9e44e638efddeff1e3c232bdf09be68702e12621ecd50ddc9f",
+      "inscriptionId": "26e2d69b97eaba9e44e638efddeff1e3c232bdf09be68702e12621ecd50ddc9fi0",
+      "commitBytesSha256": "bbf92383e0374f7ee2b10c55fe4d44ad2c102e589eb03903199b88733bb84fc3",
+      "revealBytesSha256": "37e143542d70f9b2d6ebc81d7c880449a91a39f17e83a680e0397b8804c2f72c",
+      "firstServerPid": 2819,
+      "secondServerPid": 3079,
+      "coreAndOrdRestarted": true,
+      "signaturesBeforeRestart": 5,
+      "signaturesAfterRestart": 0,
+      "broadcasts": 3,
+      "resourceEvidence": {
+        "inline": "browser-proof.png",
+        "hosted": "metadata.json",
+        "fullVerification": true
+      },
+      "externalRequests": [],
+      "artifacts": "/tmp/originals-browser-regtest/reveal-rejected",
+      "completedAt": "2026-09-07T07:41:20.164Z"
+    }
+  ]
+}
