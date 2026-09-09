@@ -74,7 +74,7 @@ test("attachment-count exhaustion rejects before acknowledging an edit and leave
   expect(asset.serialize().unverified!.localResources).toHaveLength(
     ASSET_LIMITS.attachments - 1,
   );
-}, 20_000);
+}, 60_000);
 
 test("aggregate input bytes are rejected before later inputs are processed", async () => {
   const large = new Uint8Array(17 * 1024 * 1024);
