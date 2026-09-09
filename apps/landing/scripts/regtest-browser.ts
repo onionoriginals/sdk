@@ -27,7 +27,7 @@ const chrome = process.env.CHROMIUM_PATH ?? process.env.CHROME_BIN ??
 assert.ok(existsSync(chrome), `Chromium is required; set CHROMIUM_PATH (tried ${chrome})`);
 const requested = process.env.REGTEST_BROWSER_FAULT;
 assert.ok(!requested || ['commit-response-lost', 'reveal-rejected'].includes(requested), 'Unknown REGTEST_BROWSER_FAULT');
-const faults: FixtureConfig['fault'][] = requested ? [requested as FixtureConfig['fault']] : ['commit-response-lost', 'reveal-rejected'];
+const faults: Array<FixtureConfig['fault']> = requested ? [requested as FixtureConfig['fault']] : ['commit-response-lost', 'reveal-rejected'];
 const artifactRoot = resolve(process.env.REGTEST_BROWSER_ARTIFACTS_DIR ?? process.env.REGTEST_LOGS_DIR ?? join(tmpdir(), `originals-regtest-browser-${Date.now()}`));
 await mkdir(artifactRoot, { recursive: true });
 const childScenario = process.env.REGTEST_BROWSER_CHILD === '1';
@@ -35,7 +35,7 @@ if (!childScenario) await rm(join(artifactRoot, 'receipt.json'), { force: true }
 // Vite and Bun's explicit-CA TLS state are process-global. Each independently
 // certified scenario gets its own process; only completed receipts aggregate.
 if (!requested) {
-  const scenarios: unknown[] = [];
+  const scenarios: Array<unknown> = [];
   for (const fault of faults) {
     const child = Bun.spawn([process.execPath, fileURLToPath(import.meta.url)], {
       cwd: landing, env: { ...process.env, REGTEST_BROWSER_FAULT: fault, REGTEST_BROWSER_CHILD: '1', REGTEST_BROWSER_ARTIFACTS_DIR: artifactRoot },
@@ -59,7 +59,7 @@ const failureDetail = (error: unknown): string => error instanceof Error
   ? `${error.stack ?? error.message}${error.cause ? `\nCaused by: ${failureDetail(error.cause)}` : ''}`
   : String(error);
 assert.deepEqual(Array.from(png.slice(0, 8)), [137, 80, 78, 71, 13, 10, 26, 10]);
-const receipts: Record<string, unknown>[] = [];
+const receipts: Array<Record<string, unknown>> = [];
 
 for (const fault of faults) {
   const artifacts = join(artifactRoot, fault);
@@ -67,7 +67,7 @@ for (const fault of faults) {
   for (const name of ['receipt.json', 'failure.json', 'failure.png', 'failure.html', '01-interrupted.png', '02-recovered.png']) {
     await rm(join(artifacts, name), { force: true });
   }
-  const events: Record<string, unknown>[] = [];
+  const events: Array<Record<string, unknown>> = [];
   const checkpoint = (stage: string, details: Record<string, unknown> = {}) => {
     const event = { stage, fault, at: new Date().toISOString(), ...details };
     events.push(event); console.log(JSON.stringify(event));
@@ -82,9 +82,9 @@ for (const fault of faults) {
   let app: ReturnType<typeof Bun.spawn> | undefined;
   let context: BrowserContext | undefined;
   let page: Page | undefined;
-  const externalRequests: string[] = [];
-  const browserErrors: string[] = [];
-  const browserConsole: string[] = [];
+  const externalRequests: Array<string> = [];
+  const browserErrors: Array<string> = [];
+  const browserConsole: Array<string> = [];
   let serverGeneration = 0;
   const stopApp = async () => {
     if (!app || app.exitCode !== null) return;
