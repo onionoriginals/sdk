@@ -14,6 +14,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
 import { installCel3Host, engineWithSigner } from './cel3-test-helpers';
+import { demoFailureMessage } from '../components/demo-logic';
 
 const SVG = (id: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"></svg>`;
@@ -73,6 +74,26 @@ describe('anonymous authoring custody after reload (#598)', () => {
     await expect(
       reloaded.update('New Title', 'Artwork', SVG('v2')),
     ).rejects.not.toThrow(/CEL_AUTHORITY/);
+  });
+
+  test('the clear message actually reaches the visitor through the UI error path', async () => {
+    // Demo.tsx never renders a raw thrown message — every catch routes
+    // through demoFailureMessage(), which discards anything that isn't a
+    // DemoCopyError (or a recognised hosting-adapter failure) in favor of
+    // generic copy. A plain Error here would be silently replaced on screen.
+    const engine = new DemoEngine();
+    await engine.create('Mine', 'Artwork', SVG('v1'));
+    const published = await engine.publish();
+
+    const reloaded = new DemoEngine();
+    await reloaded.hydrateFromWeb(published.webvhDid!);
+
+    const err = await reloaded
+      .update('New Title', 'Artwork', SVG('v2'))
+      .catch((e: unknown) => e);
+    expect(demoFailureMessage(err)).toMatch(
+      /anonymous authoring keys live only in the tab/i,
+    );
   });
 
   test('the same anonymous tab keeps full edit access without a reload', async () => {

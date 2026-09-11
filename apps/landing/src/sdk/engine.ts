@@ -24,6 +24,7 @@ import {
   type InscribeOnSatResult,
 } from "@originals/sdk";
 import { digestMultibaseSha256Hex } from "../pages/original-detail-data";
+import { DemoCopyError } from "../components/demo-logic";
 export type EntryAuthorClass = "creator" | "holder";
 import { OrdMockProvider } from "@originals/sdk/testing";
 import { HttpHostingStorageAdapter } from "./http-hosting-adapter";
@@ -259,7 +260,11 @@ export class DemoEngine {
       !this.authed &&
       asset.state.layer !== "cel";
     if (!isAnonymousCustodyLoss) return err;
-    return new Error(
+    // A DemoCopyError, not a plain Error: demoFailureMessage() only ever
+    // surfaces DemoCopyError's own message to the visitor (Demo.tsx),
+    // replacing everything else with generic failure copy. A plain Error
+    // here would have this exact explanation silently discarded.
+    return new DemoCopyError(
       "This browser can no longer sign changes to this Original. Anonymous authoring keys live only in the tab that created them, so a reload replaced it with a new one — the earlier key, and write access to this Original, are gone for good in this browser. Sign in before publishing next time to keep editing access across reloads.",
     );
   }
