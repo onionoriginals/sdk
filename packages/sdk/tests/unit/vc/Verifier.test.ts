@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterEach, afterAll, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterEach, afterAll, beforeEach, spyOn } from 'bun:test';
 import { Verifier } from '../../../src/vc/Verifier';
 import { Issuer } from '../../../src/vc/Issuer';
 import * as ed25519 from '@noble/ed25519';
@@ -485,6 +485,134 @@ describe('diwings Verifier', () => {
     expect(result.verified).toBe(true);
   });
 });
+
+describe('checkProofPurpose relationship matching (issue #593 / H05)', () => {
+  const dmWebvh = new DIDManager({} as any);
+  const webvhDid = 'did:webvh:example.com:h05issuer';
+  const webvhSk = new Uint8Array(32).map((_, i) => (i + 21) & 0xff);
+  const webvhPk = ed25519.getPublicKey(webvhSk);
+  const webvhVm = {
+    id: `${webvhDid}#key-1`,
+    controller: webvhDid,
+    type: 'Multikey',
+    publicKeyMultibase: multikey.encodePublicKey(webvhPk, 'Ed25519'),
+    secretKeyMultibase: multikey.encodePrivateKey(webvhSk, 'Ed25519')
+  };
+
+  // A resolvable DID document for webvhDid, publishing webvhVm's key material
+  // (so proof signature verification succeeds) plus a caller-supplied
+  // assertionMethod relationship array (the thing under test).
+  function docWithAssertionMethod(assertionMethod: unknown[]) {
+    return {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: webvhDid,
+      verificationMethod: [
+        { id: webvhVm.id, controller: webvhDid, type: 'Multikey', publicKeyMultibase: webvhVm.publicKeyMultibase }
+      ],
+      assertionMethod
+    };
+  }
+
+  async function issueTestCredential() {
+    const issuer = new Issuer(dmWebvh, webvhVm);
+    return issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'H05'],
+        issuer: webvhDid,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:h05subject' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+  }
+
+  test('a foreign absolute DID URL that only shares a fragment does not authorize the proof key', async () => {
+    const vc = await issueTestCredential();
+    // The DID document authorizes a DIFFERENT DID's #key-1 for assertions;
+    // the proof's own key is webvhDid#key-1. Fragment-only matching (the
+    // pre-fix behavior) would wrongly treat these as the same key.
+    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+      docWithAssertionMethod(['did:webvh:example.com:other#key-1']) as any
+    );
+    const verifier = new Verifier(dmWebvh);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors.some(e => /not authorized for assertionMethod/i.test(e))).toBe(true);
+  });
+
+  test('a bare "#key-1" relationship entry resolves against the DID document\'s own id and authorizes', async () => {
+    const vc = await issueTestCredential();
+    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+      docWithAssertionMethod(['#key-1']) as any
+    );
+    const verifier = new Verifier(dmWebvh);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(true);
+  });
+
+  test('the exact absolute verification method id still authorizes', async () => {
+    const vc = await issueTestCredential();
+    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+      docWithAssertionMethod([webvhVm.id]) as any
+    );
+    const verifier = new Verifier(dmWebvh);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(true);
+  });
+
+  test('an embedded verification-method object under the relationship is matched the same way', async () => {
+    const vc = await issueTestCredential();
+    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+      docWithAssertionMethod([
+        { id: 'did:webvh:example.com:other#key-1', type: 'Multikey', controller: 'did:webvh:example.com:other' }
+      ]) as any
+    );
+    const verifier = new Verifier(dmWebvh);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+  });
+
+  test('a hosted DID (did:webvh) that fails to resolve fails closed instead of an unqualified success', async () => {
+    const vc = await issueTestCredential();
+    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(null);
+    const verifier = new Verifier(dmWebvh);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(false);
+    expect(res.errors.some(e => /cannot verify assertionMethod authorization/i.test(e))).toBe(true);
+  });
+
+  test('a self-certifying did:key with no resolvable document still verifies via controller binding + signature', async () => {
+    // did:key publishes no separate relationship document by design; this is
+    // the existing, intentional skip-the-relationship-check path, contrasted
+    // with the did:webvh fail-closed case above.
+    const dmKey = new DIDManager({} as any);
+    const did = 'did:key:h05control';
+    const sk = new Uint8Array(32).map((_, i) => (i + 31) & 0xff);
+    const pk = ed25519.getPublicKey(sk);
+    const vm = {
+      id: `${did}#keys-1`,
+      controller: did,
+      type: 'Multikey',
+      publicKeyMultibase: multikey.encodePublicKey(pk, 'Ed25519'),
+      secretKeyMultibase: multikey.encodePrivateKey(sk, 'Ed25519')
+    };
+    registerVerificationMethod(vm);
+    const issuer = new Issuer(dmKey, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'H05Control'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:h05controlsubject' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const verifier = new Verifier(dmKey);
+    const res = await verifier.verifyCredential(vc);
+    expect(res.verified).toBe(true);
+  });
+});
+
 
 /** Inlined from Verifier.array-context-and-proof.part.ts */
 

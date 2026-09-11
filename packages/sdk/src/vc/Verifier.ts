@@ -218,9 +218,14 @@ export class Verifier {
    * `assertionMethod` for credentials, `authentication` for presentations.
    * When the verification method's DID document is resolvable and declares the
    * corresponding relationship, the verification method must also be listed
-   * (by reference or embedded) under that relationship. Unresolvable DIDs
-   * skip the relationship check — the key itself is still authenticated by
-   * the controller binding plus signature verification.
+   * (by reference or embedded) under that relationship — matched by complete
+   * resolved DID URL, never by fragment alone (see H05 / issue #593). A DID
+   * method this DIDManager cannot resolve at all (did:key, which is
+   * self-certifying and publishes no separate document) skips the
+   * relationship check — the key itself is still authenticated by the
+   * controller binding plus signature verification. A method that DOES
+   * publish a relationship document (did:webvh / did:btco / did:cel) but
+   * failed to resolve one fails closed instead.
    */
   private async checkProofPurpose(
     proof: unknown,
@@ -242,12 +247,34 @@ export class Verifier {
 
     const vmDid = verificationMethod.split('#')[0];
     let didDoc: { [k: string]: unknown } | null = null;
+    let resolutionFailed = false;
     try {
       didDoc = (await this.didManager.resolveDID(vmDid)) as { [k: string]: unknown } | null;
     } catch {
       didDoc = null;
+      resolutionFailed = true;
     }
     if (!didDoc) {
+      // A DID method this DIDManager does not know how to resolve at all
+      // (chiefly the self-certifying did:key, which publishes no separate
+      // relationship document by design) falls back to the controller
+      // binding + signature check that already ran — there is no
+      // authorization evidence to be missing. A method DIDManager DOES know
+      // how to resolve (did:webvh / did:btco / did:cel) but that failed to
+      // produce a document is different: a relationship document was
+      // expected and is unavailable, so per H05's acceptance criteria this
+      // must not silently report success.
+      const expectsDocument = vmDid.startsWith('did:webvh:') || vmDid.startsWith('did:btco:') || vmDid.startsWith('did:cel:');
+      if (expectsDocument) {
+        return {
+          verified: false,
+          errors: [
+            resolutionFailed
+              ? `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} failed to resolve`
+              : `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} is unavailable`
+          ]
+        };
+      }
       return { verified: true, errors: [] };
     }
 
@@ -261,10 +288,18 @@ export class Verifier {
       };
     }
 
-    const fragment = verificationMethod.split('#')[1];
+    // Resolve each relationship entry to an absolute DID URL exactly as DID
+    // Core's relative-reference resolution requires — a bare "#key-1" entry
+    // means "this DID document's own key-1" — and compare complete resolved
+    // DID URLs only. Comparing by fragment alone (the prior behavior) let a
+    // relationship entry naming a completely different, foreign DID such as
+    // "did:example:other#key-1" authorize an unrelated proof key
+    // "did:example:issuer#key-1" merely because the fragments coincided
+    // (H05): the DID prefix must match too, not just the fragment.
+    const didDocId = typeof didDoc.id === 'string' ? didDoc.id : vmDid;
+    const resolveEntryId = (id: string): string => (id.startsWith('#') ? `${didDocId}${id}` : id);
     const matches = (id: unknown): boolean =>
-      typeof id === 'string' &&
-      (id === verificationMethod || (fragment !== undefined && id.split('#')[1] === fragment));
+      typeof id === 'string' && resolveEntryId(id) === verificationMethod;
     const authorized = relationship.some((entry) =>
       typeof entry === 'string' ? matches(entry) : matches((entry as { id?: unknown })?.id)
     );
