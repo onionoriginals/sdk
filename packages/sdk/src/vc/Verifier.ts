@@ -115,6 +115,38 @@ export class Verifier {
       const proofValue = vc.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
 
+      // Refuse to silently reduce a proof array to "verify proof[0]". A proof
+      // array implies multiple proofs matter (e.g. a multi-sig threshold),
+      // but this ordinary single-proof path has no dependency/threshold
+      // semantics for the rest of the array — checking only proof[0] would
+      // let a credential "verify" while every other proof, and any policy
+      // those proofs were meant to satisfy, goes unchecked (issue #604).
+      if (Array.isArray(proofValue) && proofValue.length > 1) {
+        return {
+          verified: false,
+          errors: [
+            'Credential has multiple proofs; verifyCredential only checks a single proof and cannot ' +
+            'evaluate the rest of the array. Use verifyCredentialMultiSig() with an explicit MultiSigPolicy ' +
+            'to verify a multi-proof credential.'
+          ]
+        };
+      }
+      // A proof declaring previousProof implies a Data Integrity proof chain,
+      // but nothing in this SDK creates or traverses that dependency graph —
+      // DataIntegrityProofManager.createProof rejects previousProof outright,
+      // and verification here never inspects it. Accepting such a proof would
+      // let a caller believe a chained/dependent approval was checked when
+      // only a standalone signature was (issue #604).
+      if ((proof as { previousProof?: unknown } | undefined)?.previousProof !== undefined) {
+        return {
+          verified: false,
+          errors: [
+            'Proof declares previousProof, but this SDK does not verify Data Integrity proof chains. ' +
+            'The dependency was not checked.'
+          ]
+        };
+      }
+
       // Bind the signing key to the credential issuer. The proof is verified
       // against whatever key `proof.verificationMethod` resolves to, so without
       // this check an attacker can sign a credential that names a trusted
@@ -602,6 +634,28 @@ export class Verifier {
       }
       const proofValue = vp.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // See the matching guard in verifyCredential (issue #604): a proof
+      // array is not reducible to "verify proof[0]", and there is no
+      // multi-proof presentation policy in this SDK to redirect to.
+      if (Array.isArray(proofValue) && proofValue.length > 1) {
+        return {
+          verified: false,
+          errors: [
+            'Presentation has multiple proofs; verifyPresentation only checks a single proof and cannot ' +
+            'evaluate the rest of the array.'
+          ]
+        };
+      }
+      if ((proof as { previousProof?: unknown } | undefined)?.previousProof !== undefined) {
+        return {
+          verified: false,
+          errors: [
+            'Proof declares previousProof, but this SDK does not verify Data Integrity proof chains. ' +
+            'The dependency was not checked.'
+          ]
+        };
+      }
 
       // Bind the presentation proof to the holder: the key that signs the
       // presentation must be controlled by the DID named as `holder`. Without

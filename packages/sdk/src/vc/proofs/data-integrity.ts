@@ -47,6 +47,18 @@ export class DataIntegrityProofManager {
       );
     }
     const opts: ProofOptions = { ...options, type: 'DataIntegrityProof' };
+    // Fail loudly rather than silently drop caller intent. No code in this
+    // SDK creates or verifies a Data Integrity proof chain (issue #604): a
+    // caller who supplies `previousProof` would otherwise believe this proof
+    // was chained to a prior one when nothing of the sort happened. `created`
+    // is different — the cryptosuite layer now honors a caller-supplied
+    // value (falling back to the current time), so it does not need the same
+    // guard.
+    if (opts.previousProof !== undefined) {
+      throw new Error(
+        'ProofOptions.previousProof is not supported: this SDK does not create or verify Data Integrity proof chains.'
+      );
+    }
     if (opts.cryptosuite === BBS_CRYPTOSUITE) {
       throw new Error(BBS_DISABLED_MESSAGE);
     }

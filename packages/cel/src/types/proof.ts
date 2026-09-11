@@ -43,6 +43,13 @@ export interface DataIntegrityProof {
   proofValue: string;
   /** Optional proof identifier */
   id?: string;
-  /** Reference to a previous proof (for proof chains) */
+  /**
+   * Reference to a previous proof (for proof chains). Retained on the shared
+   * envelope for type/interop completeness only — no code in this SDK
+   * creates, traverses, or verifies this dependency. `DataIntegrityProofManager
+   * .createProof` rejects a caller-supplied value outright, and
+   * `Verifier.verifyCredential`/`verifyPresentation` fail closed if an
+   * incoming proof declares it (see onionoriginals/sdk#604).
+   */
   previousProof?: string | string[];
 }

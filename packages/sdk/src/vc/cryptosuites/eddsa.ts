@@ -97,7 +97,10 @@ export class EdDSACryptosuiteManager {
       '@context': documentContext ?? 'https://w3id.org/security/data-integrity/v2',
       type: 'DataIntegrityProof',
       cryptosuite: 'eddsa-rdfc-2022',
-      created: new Date().toISOString(),
+      // Honor a caller-supplied timestamp instead of silently overwriting it
+      // (issue #604) — a caller who explicitly set `created` would otherwise
+      // have no way to tell their value was discarded.
+      created: options.created ?? new Date().toISOString(),
       verificationMethod: options.verificationMethod,
       proofPurpose: options.proofPurpose || 'assertionMethod',
       ...(options.challenge && { challenge: options.challenge }),
