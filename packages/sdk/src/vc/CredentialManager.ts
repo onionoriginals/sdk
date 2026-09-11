@@ -26,7 +26,7 @@ import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager } from './cryptosuites/eddsa.js';
 import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
-import { credentialStatusEntries } from './credentialStatus.js';
+import { credentialStatusEntries, isCredentialStatusEntry, describeMalformedStatusEntry } from './credentialStatus.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 import { StructuredError } from '@originals/cel';
@@ -448,6 +448,16 @@ export class CredentialManager {
    * whenever `revoked` or `suspended` is true (issue #345), so callers gating
    * on `verified` alone cannot accept a revoked credential.
    *
+   * `credentialStatus` may declare more than one entry (VCDM 2.0 permits an
+   * array); every entry is evaluated, but all of them are checked against the
+   * single `statusListCredential` supplied here. An entry whose own
+   * `statusListCredential` reference does not match the supplied list fails
+   * closed with a clear mismatch error rather than being skipped — this
+   * method cannot confirm a credential whose entries reference more than one
+   * distinct list. For that case, use `Verifier.checkCredentialStatus` /
+   * `Verifier.verifyCredential` with a `statusListResolver`, which resolves
+   * each entry's own reference independently.
+   *
    * @param credential - The credential to verify
    * @param statusListCredential - The resolved status list credential (required if credential has credentialStatus)
    * @returns Result with signature validity and revocation status
@@ -493,6 +503,13 @@ export class CredentialManager {
         errors.push('Credential has a credentialStatus but no status list credential was provided');
       } else {
         for (const status of entries) {
+          if (!isCredentialStatusEntry(status)) {
+            // A malformed array element must fail closed the same as any
+            // other unevaluable entry, not throw when `.type` is read below.
+            verified = false;
+            errors.push(`Credential declares a malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
+            continue;
+          }
           if (status.type !== 'BitstringStatusListEntry') {
             // Unsupported status mechanism: this verifier cannot evaluate it,
             // so the credential's status through this entry is unknown. Fail
@@ -1292,6 +1309,9 @@ export class CredentialManager {
       );
     }
     const status = entries[0];
+    if (!isCredentialStatusEntry(status)) {
+      throw new Error(`Malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
+    }
     if (status.type !== 'BitstringStatusListEntry') {
       throw new Error(
         `Unsupported credentialStatus type: '${status.type}'. Expected 'BitstringStatusListEntry'`

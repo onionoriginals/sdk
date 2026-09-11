@@ -7,7 +7,7 @@ import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
-import { credentialStatusEntries } from './credentialStatus.js';
+import { credentialStatusEntries, isCredentialStatusEntry, describeMalformedStatusEntry } from './credentialStatus.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
@@ -288,6 +288,13 @@ export class Verifier {
 
     const errors: string[] = [];
     for (const status of entries) {
+      if (!isCredentialStatusEntry(status)) {
+        // A malformed array element (not an object, or no string `type`)
+        // must fail closed the same as any other unevaluable entry, not
+        // throw when the checks below read `.type` off it.
+        errors.push(`Credential declares a malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
+        continue;
+      }
       if (status.type !== 'BitstringStatusListEntry') {
         // Unsupported status mechanism: this verifier has no way to evaluate
         // it, so the credential's status through this entry is unknown. Fail

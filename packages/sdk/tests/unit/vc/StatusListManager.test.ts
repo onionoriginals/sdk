@@ -838,6 +838,37 @@ describe('StatusListManager', () => {
       expect(result.errors.some(e => /Unsupported credentialStatus type/.test(e))).toBe(true);
     });
 
+    test('#592 verifyCredentialWithStatus fails closed on a malformed credentialStatus array entry instead of throwing', async () => {
+      // A non-object array element (attacker-controlled JSON) must not crash
+      // `.type` property access in the status-evaluation loop — it must fail
+      // the credential closed with a clear error instead.
+      const { OriginalsSDK } = await import('../../../src');
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      (sdk.credentials as any).verifyCredential = async () => true;
+
+      const statusListVC = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/3',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: [null, 'not-an-object'],
+      };
+
+      const result = await sdk.credentials.verifyCredentialWithStatus(
+        credential as any,
+        statusListVC
+      );
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /malformed credentialStatus entry/i.test(e))).toBe(true);
+    });
+
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });

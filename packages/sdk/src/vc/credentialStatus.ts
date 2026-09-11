@@ -18,3 +18,29 @@ export function credentialStatusEntries(vc: VerifiableCredential): CredentialSta
   if (!status) return [];
   return Array.isArray(status) ? status : [status];
 }
+
+/**
+ * Type guard for a well-formed `credentialStatus` entry. `credentialStatus`
+ * (and each element of it, when array-shaped) comes from the credential being
+ * verified — untrusted input. An element that isn't an object, or has no
+ * string `type`, must not reach `.type`/`.statusListCredential` property
+ * access in the status-checking paths: reading a property off `null` throws,
+ * which would let one malformed array entry crash verification instead of
+ * failing the credential closed like every other unevaluable entry does.
+ */
+export function isCredentialStatusEntry(value: unknown): value is CredentialStatus {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { type?: unknown }).type === 'string'
+  );
+}
+
+/** JSON.stringify for an error message, safe against non-serializable (e.g. circular) untrusted input. */
+export function describeMalformedStatusEntry(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}

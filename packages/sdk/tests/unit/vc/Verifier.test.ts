@@ -375,6 +375,26 @@ describe('diwings Verifier', () => {
     expect(result.errors.some(e => /Unsupported credentialStatus type/.test(e))).toBe(true);
   });
 
+  test('#592 fails closed on a malformed credentialStatus array entry instead of throwing', async () => {
+    const verifier = new Verifier(didManager, {
+      statusListResolver: async () => { throw new Error('must not be called for a malformed entry'); },
+    });
+    const vc = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:key:subject-592d' },
+      // A non-object array element (attacker-controlled JSON) must not crash
+      // `.type` property access — it must fail the credential closed.
+      credentialStatus: [null, 'not-an-object', 42],
+    } as any;
+
+    const result = await verifier.checkCredentialStatus(vc);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /malformed credentialStatus entry/i.test(e))).toBe(true);
+    expect(result.errors.length).toBe(3);
+  });
+
   test('#304 caches the status list proof verification across credentials sharing the list', async () => {
     const listId = 'https://issuer.example/status/304/1';
     // A resolved status list; the SAME immutable document is returned every
