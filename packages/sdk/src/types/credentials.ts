@@ -19,7 +19,14 @@ export interface VerifiableCredential {
   /** @deprecated VCDM 1.1 expiry timestamp — read-only legacy field; emit `validUntil`. */
   expirationDate?: string;
   credentialSubject: CredentialSubject;
-  credentialStatus?: CredentialStatus;
+  /**
+   * VCDM 2.0 permits either a single status entry or an array of them (a
+   * credential may declare more than one status mechanism, e.g. separate
+   * revocation and suspension entries). Every verification path must read
+   * this through `credentialStatusEntries()` rather than casting to a
+   * singleton, or an array-shaped value silently skips status checking.
+   */
+  credentialStatus?: CredentialStatus | CredentialStatus[];
   proof?: Proof | Proof[];
 }
 

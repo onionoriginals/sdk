@@ -13,6 +13,7 @@ import type {
 import type { OriginalsConfig } from '../types/common.js';
 import type { DIDManager } from '../did/DIDManager.js';
 import { checkCredentialValidityPeriod } from './Verifier.js';
+import { credentialStatusEntries } from './credentialStatus.js';
 import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
@@ -294,15 +295,16 @@ export class MultiSigManager {
     }
 
     // Fail closed on revocation. Single-sig verification refuses to accept a
-    // credential that declares a BitstringStatusListEntry status it cannot check;
-    // the multi-sig path has no status-list resolver, so silently ignoring a
-    // declared status would let a revoked m-of-n credential verify. Refuse
-    // instead and direct the caller to a resolver-backed status check.
-    const credentialStatus = (credential as { credentialStatus?: { type?: unknown } }).credentialStatus;
-    if (credentialStatus && credentialStatus.type === 'BitstringStatusListEntry') {
+    // credential that declares a status entry it cannot check; the multi-sig
+    // path has no status-list resolver, so silently ignoring a declared
+    // status would let a revoked m-of-n credential verify. Refuse instead and
+    // direct the caller to a resolver-backed status check. credentialStatus
+    // may be a singleton or an array (VCDM 2.0) — read it through the shared
+    // helper so an array-shaped value cannot skip this check (issue #592).
+    if (credentialStatusEntries(credential).length > 0) {
       result.verified = false;
       result.errors.push(
-        'Credential declares a BitstringStatusListEntry status that the multi-sig verifier cannot check. ' +
+        'Credential declares a credentialStatus that the multi-sig verifier cannot check. ' +
         'Verify revocation via CredentialManager.verifyCredential with a configured statusListResolver.'
       );
     }
