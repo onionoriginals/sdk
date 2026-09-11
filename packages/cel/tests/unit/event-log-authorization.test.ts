@@ -226,7 +226,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
 
     const result = await verifyEventLog(forged as any);
     expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /not a key embedded in the self-certifying DID/.test(e))).toBe(true);
+    expect(result.errors.some(e => /is not a key of the genesis DID/.test(e))).toBe(true);
   });
 
   it('refuses a LEGACY did:peer data.did log outright — did:peer support is removed entirely', async () => {
@@ -262,7 +262,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
 
     const result = await verifyEventLog(log as any);
     expect(result.verified).toBe(false);
-    expect(result.errors.some(e => /not a key embedded in the self-certifying DID/.test(e))).toBe(true);
+    expect(result.errors.some(e => /is not a key of the genesis DID/.test(e))).toBe(true);
   });
 
   it('derives btco state without a BitcoinManager (network read from signed data)', async () => {

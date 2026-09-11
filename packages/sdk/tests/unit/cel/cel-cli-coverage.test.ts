@@ -86,14 +86,22 @@ function makeMockSigner(_vm?: string): (data: unknown) => Promise<DataIntegrityP
   return cliSigner.signer;
 }
 
-/** LEGACY genesis shape (pre-did:cel) — kept as the legacy-fixture per behavior. */
-function makePeerAssetData(name: string) {
+/**
+ * LEGACY genesis shape (pre-did:cel) — kept as the legacy-fixture per
+ * behavior. `did` defaults to a non-self-certifying placeholder for fixtures
+ * that only exercise inspect/history plumbing (never asked to fully verify).
+ * A fixture whose log must pass `verifyEventLog`/`verifyCommand` MUST pass a
+ * `did` the signing key actually controls (#590: legacy `data.did` binds to
+ * the create-event signer, same as `data.controller` — no trust-on-first-use
+ * for an unrelated key).
+ */
+function makePeerAssetData(name: string, did = 'did:webvh:legacy.example:4z123456789abcdef') {
   return {
     name,
-    did: 'did:webvh:legacy.example:4z123456789abcdef',
+    did,
     layer: 'peer' as const,
     resources: [],
-    creator: 'did:webvh:legacy.example:4z123456789abcdef',
+    creator: did,
     createdAt: new Date().toISOString(),
   };
 }
@@ -521,7 +529,7 @@ describe('CEL-CLI-009/error: unknown command', () => {
 describe('CEL-CLI-010/happy: parse long flags', () => {
   it('parses --log <path> and passes it to verifyCommand', async () => {
     const { signer, verificationMethod } = await makeRealDidKeySigner();
-    const log = await createEventLog(makePeerAssetData('parse test'), {
+    const log = await createEventLog(makePeerAssetData('parse test', verificationMethod.split('#')[0]), {
       signer, verificationMethod, proofPurpose: 'assertionMethod',
     });
 
@@ -609,7 +617,7 @@ describe('CEL-CLI-010/happy: flags with spaces in values (path with space)', () 
     const filePath = path.join(dir, 'log.cel.json');
 
     const { signer, verificationMethod } = await makeRealDidKeySigner();
-    const log = await createEventLog(makePeerAssetData('space test'), {
+    const log = await createEventLog(makePeerAssetData('space test', verificationMethod.split('#')[0]), {
       signer, verificationMethod, proofPurpose: 'assertionMethod',
     });
     fs.writeFileSync(filePath, serializeEventLogJson(log));
@@ -628,7 +636,7 @@ describe('CEL-CLI-010/happy: flags with spaces in values (path with space)', () 
 describe('CEL-CLI-012/happy: exit code 0 on success', () => {
   it('verifyCommand returns success:true and verified:true for valid log', async () => {
     const { signer, verificationMethod } = await makeRealDidKeySigner();
-    const log = await createEventLog(makePeerAssetData('Exit0 Asset'), {
+    const log = await createEventLog(makePeerAssetData('Exit0 Asset', verificationMethod.split('#')[0]), {
       signer, verificationMethod, proofPurpose: 'assertionMethod',
     });
 

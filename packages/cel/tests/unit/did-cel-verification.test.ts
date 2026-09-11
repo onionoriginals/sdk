@@ -124,6 +124,80 @@ describe('did:cel self-certification', () => {
     expect(legitResult.verified).toBe(true);
   });
 
+  test('#590 legacy genesis dispatch cannot substitute a controller for a non-self-certifying data.did', async () => {
+    // Attack: forge a genesis whose legacy `data.did` names a victim's
+    // non-self-certifying identifier (a did:webvh here — did:web, an old-scheme
+    // did:cel string, etc. are the same shape), self-sign with an UNRELATED
+    // did:key, and ask verifyEventLog to confirm the log backs that identifier.
+    // Before the fix this passed: trust-on-first-use authorized the attacker's
+    // key outright, and `expectedDid === legacyDid` was a bare string compare
+    // against the attacker-supplied field with no authority behind it.
+    const attacker = await makeRealSigner();
+    const victimDid = 'did:webvh:example.com:victim';
+    const forgedLog = await createEventLog(
+      { name: 'A', did: victimDid, layer: 'peer', resources: [], creator: victimDid, createdAt: 'x' },
+      { signer: attacker.signer, verificationMethod: attacker.vm }
+    );
+    const forgedResult = await verifyEventLog(forgedLog, { expectedDid: victimDid });
+    expect(forgedResult.verified).toBe(false);
+
+    // Even without an expectedDid check, the log itself must not verify: an
+    // unauthenticated legacyDid claim is not a valid genesis, full stop.
+    const forgedNoExpect = await verifyEventLog(forgedLog);
+    expect(forgedNoExpect.verified).toBe(false);
+  });
+
+  test('#590 non-self-certifying legacy data.did binds via VM-DID equality + resolver, like the controller branch', async () => {
+    // Positive control mirroring the resolver-backed `controller` test above:
+    // a legacy genesis whose `data.did` is resolver-backed verifies when the
+    // create proof's VM names that exact DID and the resolver vouches for the
+    // signing key — and still fails when an attacker stamps the victim's VM
+    // but signs with a different key.
+    const victimPriv = crypto.getRandomValues(new Uint8Array(32));
+    const victimPub = await ed25519.getPublicKeyAsync(victimPriv);
+    const attackerPriv = crypto.getRandomValues(new Uint8Array(32));
+    const victimDid = 'did:webvh:example.com:victim2';
+    const victimVm = `${victimDid}#key-0`;
+
+    const vmSigner = (priv: Uint8Array, vm: string) => async (data: unknown) => ({
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: '2020-01-01T00:00:00Z',
+      verificationMethod: vm,
+      proofPurpose: 'assertionMethod',
+      proofValue: multikey.encodeMultibase(
+        new Uint8Array(await ed25519.signAsync(canonicalizeEvent(data), priv))
+      ),
+    });
+    const resolveKey = async (vm: string) => (vm === victimVm ? victimPub : null);
+
+    const forgedLog = await createEventLog(
+      { name: 'A', did: victimDid, layer: 'peer', resources: [], creator: victimDid, createdAt: 'x' },
+      { signer: vmSigner(attackerPriv, victimVm) as any, verificationMethod: victimVm }
+    );
+    const forgedResult = await verifyEventLog(forgedLog, { expectedDid: victimDid, resolveKey });
+    expect(forgedResult.verified).toBe(false);
+
+    const legitLog = await createEventLog(
+      { name: 'A', did: victimDid, layer: 'peer', resources: [], creator: victimDid, createdAt: 'x' },
+      { signer: vmSigner(victimPriv, victimVm) as any, verificationMethod: victimVm }
+    );
+    const legitResult = await verifyEventLog(legitLog, { expectedDid: victimDid, resolveKey });
+    expect(legitResult.verified).toBe(true);
+    expect(legitResult.assetDid).toBe(victimDid);
+  });
+
+  test('#590 a genesis carrying both legacy data.did and data.controller is rejected as ambiguous', async () => {
+    const { signer, didKey, vm } = await makeRealSigner();
+    const log = await createEventLog(
+      { name: 'A', did: didKey, controller: didKey, resources: [], createdAt: 'x' },
+      { signer, verificationMethod: vm }
+    );
+    const result = await verifyEventLog(log);
+    expect(result.verified).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/ambiguous/i);
+  });
+
   test('legacy data.did logs verify exactly as before and report assetDid', async () => {
     // Legacy shape: the asset DID is embedded in data.did (a self-certifying
     // did:key). This pins the dual-accept contract — legacy must stay green.
