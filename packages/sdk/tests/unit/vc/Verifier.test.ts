@@ -484,6 +484,92 @@ describe('diwings Verifier', () => {
     expect(result.validSignatures).toBe(1);
     expect(result.verified).toBe(true);
   });
+
+  // #604: verifyCredential/verifyPresentation must not silently reduce a
+  // proof array to "verify proof[0]" — that would let every other proof in
+  // the array, and whatever policy required them, go unchecked.
+  test('verifyCredential rejects a multi-proof array instead of checking only proof[0]', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const proof = Array.isArray(vc.proof) ? vc.proof[0] : vc.proof;
+    // Two genuinely valid proofs — this must still be rejected by the
+    // ordinary single-proof API rather than quietly verifying proof[0].
+    const multiProof = { ...vc, proof: [proof, proof] } as any;
+
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(multiProof);
+    expect(res.verified).toBe(false);
+    expect(res.errors?.some(e => /multiple proofs/i.test(e))).toBe(true);
+    expect(res.errors?.some(e => /verifyCredentialMultiSig/.test(e))).toBe(true);
+  });
+
+  test('verifyPresentation rejects a multi-proof array instead of checking only proof[0]', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vp = await issuer.issuePresentation(
+      {
+        type: ['VerifiablePresentation'],
+        holder: did
+      } as any,
+      { proofPurpose: 'authentication' }
+    );
+    const proof = Array.isArray(vp.proof) ? vp.proof[0] : vp.proof;
+    const multiProof = { ...vp, proof: [proof, proof] } as any;
+
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyPresentation(multiProof);
+    expect(res.verified).toBe(false);
+    expect(res.errors?.some(e => /multiple proofs/i.test(e))).toBe(true);
+  });
+
+  // #604: a proof declaring `previousProof` implies a Data Integrity proof
+  // chain, but nothing in this SDK verifies that dependency — accepting it
+  // would let a caller believe a chained approval was checked when only a
+  // standalone signature was.
+  test('verifyCredential rejects a proof that declares previousProof', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+    const proof = Array.isArray(vc.proof) ? vc.proof[0] : vc.proof;
+    const chained = { ...vc, proof: { ...(proof as object), previousProof: 'urn:uuid:prior-proof' } } as any;
+
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyCredential(chained);
+    expect(res.verified).toBe(false);
+    expect(res.errors?.some(e => /previousProof/.test(e))).toBe(true);
+  });
+
+  test('verifyPresentation rejects a proof that declares previousProof', async () => {
+    const issuer = new Issuer(didManager, vm);
+    const vp = await issuer.issuePresentation(
+      {
+        type: ['VerifiablePresentation'],
+        holder: did
+      } as any,
+      { proofPurpose: 'authentication' }
+    );
+    const proof = Array.isArray(vp.proof) ? vp.proof[0] : vp.proof;
+    const chained = { ...vp, proof: { ...(proof as object), previousProof: 'urn:uuid:prior-proof' } } as any;
+
+    const verifier = new Verifier(didManager);
+    const res = await verifier.verifyPresentation(chained);
+    expect(res.verified).toBe(false);
+    expect(res.errors?.some(e => /previousProof/.test(e))).toBe(true);
+  });
 });
 
 /** Inlined from Verifier.array-context-and-proof.part.ts */
