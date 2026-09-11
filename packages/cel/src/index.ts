@@ -8,7 +8,9 @@
 
 export * from './types.js';
 export * from './hash.js';
-export * from './canonicalize.js';
+// canonicalizeEvent and its derivatives are previous-format-only (see
+// legacy.ts for why) and are intentionally not exported from this root;
+// import them from '@originals/cel/legacy'.
 export { DID_CEL_PREFIX, deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, createCelDidDocument, resolveDidCel } from './celDid.js';
 export * from './btcoDid.js';
 export * from './resourceHead.js';

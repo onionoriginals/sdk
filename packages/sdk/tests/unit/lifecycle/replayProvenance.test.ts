@@ -26,7 +26,7 @@ import { replayProvenance } from '../../../src/lifecycle/replayProvenance';
 import { hashResource } from '../../../src/utils/validation';
 import { createEventLog } from '@originals/cel';
 import { multikey } from '@originals/cel';
-import { canonicalizeEvent } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel/legacy';
 import * as ed25519 from '@noble/ed25519';
 
 const VALID_ADDR = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';

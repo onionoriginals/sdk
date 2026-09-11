@@ -17,7 +17,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { multikey } from '@originals/cel';
 import { computeDigestMultibase } from '@originals/cel';
-import { canonicalizeEntryForChain } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel/legacy';
 import { verifyEventLog } from '@originals/cel';
 import { replayProvenance } from '../../src/lifecycle/replayProvenance';
 import { deriveDidCel } from '@originals/cel';

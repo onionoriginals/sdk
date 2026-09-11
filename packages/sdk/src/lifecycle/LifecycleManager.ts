@@ -43,7 +43,7 @@ import { PeerCelManager } from '@originals/cel';
 import { appendEvent } from '@originals/cel';
 import { computeDigestMultibase, digestMultibaseEquals, decodeDigestMultibase, resourcePathSegment } from '@originals/cel';
 import { mostRecentResourceHead } from '@originals/cel';
-import { canonicalizeEntryForChain } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel/legacy';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import type { EventLog, LogEntry, ExternalReference, WitnessProof, OrdinalsLookup, VerificationResult } from '@originals/cel';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
