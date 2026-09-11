@@ -318,7 +318,12 @@ At minimum distinguish `invalid` (malformed or failed validation),
 checks with their scope. No parse-only, signature-only, offline-btco, partial
 provider or unchecked custom-verifier result may be presented as a fully verified
 Original. The fold/resolver decides how invalid unrelated sat publications are
-skipped without claiming unavailable history is complete.
+skipped without claiming unavailable history is complete. Nor may a *complete*
+provider snapshot be presented as independently verified Bitcoin consensus: a
+Bitcoin resolution result is qualified by `chainEvidence`
+(`'provider-asserted'` unless the adapter's chain/tip/block facts came from an
+independently validating node), and callers must not upgrade a
+provider-asserted result to an unqualified verification claim.
 
 Legacy `{events:...}`, `{celLog:...}`, `{didDocument,celLog}`, entry-level
 `type`/`data`, custom `OriginalsCelProof`, old suite labels, `transfer`, holder

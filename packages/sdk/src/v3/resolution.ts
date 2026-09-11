@@ -49,6 +49,10 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    /** See {@link SatSnapshot.chainEvidence}. Present only on an accepted resolution. */
+    chainEvidence?: "provider-asserted" | "node-validated";
+    /** See {@link SatSnapshot.source}. */
+    source?: string;
   };
 }
 
@@ -263,6 +267,10 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        chainEvidence: result.resolution.chainEvidence,
+        ...(result.resolution.source !== undefined
+          ? { source: result.resolution.source }
+          : {}),
       },
     };
   }

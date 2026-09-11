@@ -28,7 +28,7 @@ const chains: Record<string, BitcoinNetwork> = { main: 'mainnet', mainnet: 'main
 const networkOf = (value: unknown): BitcoinNetwork | undefined => typeof value === 'string' && Object.prototype.hasOwnProperty.call(chains, value) ? chains[value] : undefined;
 
 /** No decoded metadata, delegated bytes, incomplete bodies or moving index can attest a CEL 3 head. */
-export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, budget: SatSnapshotBudget = {}): Promise<SatSnapshot> {
+export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, budget: SatSnapshotBudget = {}, source?: string): Promise<SatSnapshot> {
   const timeoutMs = budget.timeoutMs ?? 30_000;
   const maxRequests = budget.maxRequests ?? 512;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000 ||
@@ -64,11 +64,11 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
       inscription: id => call(() => reader.inscription(id, signal)),
       content: id => call(() => reader.content(id, signal)),
       metadata: id => call(() => reader.metadata(id, signal)),
-    }, satoshi, expectedNetwork);
+    }, satoshi, expectedNetwork, source);
   } finally { clearTimeout(timer); }
 }
 
-async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
+async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, source?: string): Promise<SatSnapshot> {
   parseAssetDid('did:btco:' + satoshi);
   const readTip = async () => {
     const info = object(await reader.rpc('getblockchaininfo', []));
@@ -142,5 +142,8 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   if (after.network !== before.network || after.height !== before.height || after.hash !== before.hash) throw new StructuredError('SAT_SNAPSHOT_CHAIN_CHANGED', 'Core chain changed during sat observation');
   return { network: before.network, sat: satoshi, tipBefore: { height: before.height, hash: before.hash },
     tipAfter: { height: after.height, hash: after.hash }, indexTip, indexHealthy: true, enumerationComplete: true,
-    blocks: [...blocks.values()], publications, ownership: { owner: sat.address, satpoint: sat.satpoint } };
+    blocks: [...blocks.values()], publications, ownership: { owner: sat.address, satpoint: sat.satpoint },
+    // Chain tip and Ordinals index evidence both came through `reader`, one RPC/transport trust
+    // domain — never claim node-validated chain evidence from this shared collector.
+    chainEvidence: 'provider-asserted', ...(source !== undefined ? { source } : {}) };
 }
