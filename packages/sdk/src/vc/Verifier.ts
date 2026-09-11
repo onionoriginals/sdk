@@ -261,10 +261,18 @@ export class Verifier {
       };
     }
 
-    const fragment = verificationMethod.split('#')[1];
+    // Relationship entries may be published as a DID-relative reference
+    // (e.g. "#key-1") against the SAME document; normalize those to an
+    // absolute DID URL before comparing. A foreign, already-absolute entry
+    // (e.g. "did:example:other#key-1") must be compared in full — matching
+    // it by fragment alone would let any DID document that happens to
+    // reference a same-named key on a *different* DID authorize this
+    // verificationMethod, regardless of which DID actually controls it.
+    const docId = typeof didDoc.id === 'string' ? didDoc.id : vmDid;
+    const normalizeRelationshipId = (id: string): string =>
+      id.startsWith('#') ? `${docId}${id}` : id;
     const matches = (id: unknown): boolean =>
-      typeof id === 'string' &&
-      (id === verificationMethod || (fragment !== undefined && id.split('#')[1] === fragment));
+      typeof id === 'string' && normalizeRelationshipId(id) === verificationMethod;
     const authorized = relationship.some((entry) =>
       typeof entry === 'string' ? matches(entry) : matches((entry as { id?: unknown })?.id)
     );

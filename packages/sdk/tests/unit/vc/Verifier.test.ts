@@ -120,6 +120,74 @@ describe('diwings Verifier', () => {
     expect(res.errors[0]).toContain('proofPurpose');
   });
 
+  test('#593 rejects a proof authorized only by a foreign relationship entry sharing its fragment', async () => {
+    // The issuer's OWN DID document lists a foreign, absolute verification
+    // method reference under `assertionMethod` — e.g. a botched/attacker-
+    // influenced document entry `did:example:other#keys-1` — that happens to
+    // share the fragment "keys-1" with our real, correctly-issuer-bound
+    // verificationMethod `did:key:issuer1#keys-1`. Matching by fragment alone
+    // would incorrectly treat the foreign entry as authorizing this key. The
+    // document does NOT list the real verificationMethod itself, so
+    // authorization must fail.
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+
+    const originalResolveDID = didManager.resolveDID.bind(didManager);
+    (didManager as any).resolveDID = async (d: string) => {
+      if (d === did) {
+        return { id: did, assertionMethod: ['did:example:other#keys-1'] };
+      }
+      return originalResolveDID(d);
+    };
+    try {
+      const verifier = new Verifier(didManager);
+      const res = await verifier.verifyCredential(vc);
+      expect(res.verified).toBe(false);
+      expect(res.errors.some(e => /not authorized for assertionMethod/i.test(e))).toBe(true);
+    } finally {
+      (didManager as any).resolveDID = originalResolveDID;
+    }
+  });
+
+  test('#593 authorizes a proof via a DID-relative relationship entry normalized against the document id', async () => {
+    // A relationship entry published as a bare fragment ("#keys-1") refers to
+    // a verification method on the SAME document; it must normalize to
+    // `${didDoc.id}#keys-1` and match the real, issuer-bound verificationMethod.
+    const issuer = new Issuer(didManager, vm);
+    const vc = await issuer.issueCredential(
+      {
+        type: ['VerifiableCredential', 'Test'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:key:subject1' }
+      } as any,
+      { proofPurpose: 'assertionMethod' }
+    );
+
+    const originalResolveDID = didManager.resolveDID.bind(didManager);
+    (didManager as any).resolveDID = async (d: string) => {
+      if (d === did) {
+        return { id: did, assertionMethod: ['#keys-1'] };
+      }
+      return originalResolveDID(d);
+    };
+    try {
+      const verifier = new Verifier(didManager);
+      const res = await verifier.verifyCredential(vc);
+      expect(res.verified).toBe(true);
+    } finally {
+      (didManager as any).resolveDID = originalResolveDID;
+    }
+  });
+
   test('fails when proof missing', async () => {
     const verifier = new Verifier(didManager);
     const badVc: any = {
