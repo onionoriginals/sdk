@@ -11,8 +11,17 @@ import { join } from "node:path";
 
 export const HOST = "demo.test";
 export const SECRET = "landing-test-secret-at-least-32-chars";
-export function installCel3Host(account?: string) {
-  const real = globalThis.fetch;
+
+/**
+ * Bun's test runtime has no `localStorage` global (a real browser always
+ * does), so anonymous flows that now back up their authoring key there
+ * (#598) need it polyfilled explicitly. Call the returned `restore()` in
+ * `afterEach`.
+ */
+export function installLocalStorage(): {
+  storage: Storage;
+  restore: () => void;
+} {
   const oldStorage = Object.getOwnPropertyDescriptor(
     globalThis,
     "localStorage",
@@ -36,6 +45,18 @@ export function installCel3Host(account?: string) {
     configurable: true,
     value: storage,
   });
+  return {
+    storage,
+    restore() {
+      if (oldStorage) Object.defineProperty(globalThis, "localStorage", oldStorage);
+      else delete (globalThis as { localStorage?: Storage }).localStorage;
+    },
+  };
+}
+
+export function installCel3Host(account?: string) {
+  const real = globalThis.fetch;
+  const { storage, restore: restoreStorage } = installLocalStorage();
   const dir = mkdtempSync(join(tmpdir(), "landing-cel3-"));
   const store = createOriginalsStore({ dataDir: dir });
   const originals = createOriginalsRoutes({ jwtSecret: SECRET, store });
@@ -83,9 +104,7 @@ export function installCel3Host(account?: string) {
     fetch: fetchImpl,
     restore() {
       globalThis.fetch = real;
-      if (oldStorage)
-        Object.defineProperty(globalThis, "localStorage", oldStorage);
-      else delete (globalThis as { localStorage?: Storage }).localStorage;
+      restoreStorage();
       rmSync(dir, { recursive: true, force: true });
     },
   };

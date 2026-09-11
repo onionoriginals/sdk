@@ -1,6 +1,15 @@
 import { assetDigest } from "@originals/sdk/cel";
 /** Browser creator flow using the public CEL 3 SDK and explicit controller custody. */
 import { recoveryStorageKey } from "./local-publication-recovery";
+import {
+  persistAnonymousAuthorshipKey,
+  restoreAnonymousAuthorshipKey,
+} from "./anonymous-authorship-backup";
+import {
+  encryptAuthorshipKey,
+  decryptAuthorshipKey,
+  type AuthorshipKeyBackup,
+} from "./key-backup";
 import { fundingSignerAddress } from "../auth/turnkey-session";
 import {
   contentBytes,
@@ -142,6 +151,12 @@ export class DemoEngine {
   private assetResourceHash = "";
 
   private authorshipSigner: CelSigner | null = null;
+  // The raw secret behind an anonymous `authorshipSigner`, kept only so a
+  // durable publication can back it up (#598) — never itself persisted.
+  private anonymousKeyBytes: Uint8Array | null = null;
+  // True once this session's anonymous key has a recoverable copy somewhere
+  // (this browser's storage, or a caller-held explicit export).
+  private anonymousBackupConfirmed = false;
   asset: OriginalsAsset | null = null;
 
   readonly tier: DemoTier;
@@ -192,10 +207,9 @@ export class DemoEngine {
   private async resolveAuthorshipSigner(): Promise<CelSigner> {
     if (this.authorshipSigner) return this.authorshipSigner;
     if (!this.authed) {
-      this.authorshipSigner = createLocalSigner(
-        "Ed25519",
-        crypto.getRandomValues(new Uint8Array(32)),
-      );
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      this.anonymousKeyBytes = bytes;
+      this.authorshipSigner = createLocalSigner("Ed25519", bytes);
       return this.authorshipSigner;
     }
     if (!this.subOrgId)
@@ -240,9 +254,117 @@ export class DemoEngine {
     }
   }
 
+  /**
+   * Encrypt this session's anonymous authoring key under a passphrase the
+   * caller supplies and keeps — a portable backup independent of this
+   * browser's own storage. Signed-in sessions have nothing local to back up:
+   * their controller is already held durably by the account (#598).
+   */
+  async exportAuthorshipKeyBackup(
+    passphrase: string,
+  ): Promise<AuthorshipKeyBackup> {
+    if (this.authed)
+      throw new Error(
+        "Signed-in authorship is already held by your account; there is no local key to back up.",
+      );
+    const signer = await this.resolveAuthorshipSigner();
+    if (!this.anonymousKeyBytes)
+      throw new Error("No local authoring key to back up yet.");
+    const backup = await encryptAuthorshipKey(
+      this.anonymousKeyBytes,
+      signer.controller,
+      passphrase,
+    );
+    this.anonymousBackupConfirmed = true;
+    this.emit(
+      "authorship:backup-exported",
+      `Encrypted a recoverable backup for ${short(signer.controller)}`,
+      { controller: signer.controller },
+    );
+    return backup;
+  }
+
+  /** Restore an anonymous authoring key from a backup made with `exportAuthorshipKeyBackup`. */
+  async restoreAuthorshipFromBackup(
+    backup: AuthorshipKeyBackup,
+    passphrase: string,
+  ): Promise<CelSigner> {
+    if (this.authed)
+      throw new Error(
+        "Signed-in sessions restore authorship by signing in again, not from a key backup.",
+      );
+    const secretKey = await decryptAuthorshipKey(backup, passphrase);
+    const signer = createLocalSigner("Ed25519", secretKey);
+    if (signer.controller !== backup.controller)
+      throw new Error(
+        "This backup does not match the expected authoring key.",
+      );
+    this.anonymousKeyBytes = secretKey;
+    this.authorshipSigner = signer;
+    this.anonymousBackupConfirmed = true;
+    this.emit(
+      "authorship:restored",
+      `Restored ${short(signer.controller)} from an encrypted backup`,
+      { controller: signer.controller },
+    );
+    return signer;
+  }
+
+  /**
+   * Fail-closed gate for durable publication (#598): an anonymous control key
+   * that cannot be restored after a reload must not be allowed to publish. On
+   * first call for a given asset this transparently backs the key up to this
+   * browser's storage so an ordinary reload keeps editing working; a visitor
+   * who wants a copy independent of this browser should call
+   * `exportAuthorshipKeyBackup` themselves first.
+   */
+  private async ensureAnonymousCustodyRecoverable(
+    signer: CelSigner,
+  ): Promise<void> {
+    if (this.authed || this.anonymousBackupConfirmed) return;
+    if (!this.anonymousKeyBytes) {
+      // Not a key this engine generated (e.g. an externally-held signer
+      // supplied by a caller) — the caller already holds it, nothing local
+      // to back up.
+      this.anonymousBackupConfirmed = true;
+      return;
+    }
+    if (!this.asset)
+      throw new Error(
+        "No local authoring key to make recoverable before publishing.",
+      );
+    if (typeof localStorage === "undefined")
+      throw new Error(
+        "This browser has no local storage, so an anonymous authoring key here could not survive a reload. Sign in for durable, recoverable publication, or back it up yourself with exportAuthorshipKeyBackup() first.",
+      );
+    await persistAnonymousAuthorshipKey(
+      this.asset.id,
+      this.anonymousKeyBytes,
+      signer.controller,
+    );
+    this.anonymousBackupConfirmed = true;
+  }
+
+  /** Restore a previously backed-up anonymous authoring key for this asset, if this browser holds one. */
+  private async restoreAnonymousCustody(assetId: string): Promise<void> {
+    if (this.authed || this.authorshipSigner) return;
+    if (typeof localStorage === "undefined") return;
+    const restored = await restoreAnonymousAuthorshipKey(assetId);
+    if (!restored) return;
+    this.anonymousKeyBytes = restored.secretKey;
+    this.authorshipSigner = createLocalSigner("Ed25519", restored.secretKey);
+    this.anonymousBackupConfirmed = true;
+    this.emit(
+      "authorship:restored",
+      `Restored ${short(restored.controller)} from this browser's storage`,
+      { controller: restored.controller },
+    );
+  }
+
   async hydrate(envelope: AssetEnvelope): Promise<DemoAssetState> {
     const { asset } = await this.sdk.lifecycle.loadAsset(envelope);
     this.asset = asset;
+    await this.restoreAnonymousCustody(asset.id);
     const primary = asset.resources[0];
     this.assetResourceHash = primary
       ? (digestMultibaseSha256Hex(primary.digestMultibase) ?? "")
@@ -264,6 +386,7 @@ export class DemoEngine {
   async hydrateFromWeb(did: string): Promise<DemoAssetState> {
     const loaded = await this.sdk.lifecycle.resolveAssetFromWeb(did);
     this.asset = loaded.asset;
+    await this.restoreAnonymousCustody(this.asset.id);
     this.webvhLogUrl = webvhLogUrl(did);
     this.webvhResolved = loaded.verification.verified;
     this.assetTitle =
@@ -377,6 +500,7 @@ export class DemoEngine {
     if (!this.asset) throw new Error("Create an asset first");
 
     const publishSigner = await this.resolveAuthorshipSigner();
+    await this.ensureAnonymousCustodyRecoverable(publishSigner);
     this.pendingWeb ??= await this.sdk.lifecycle.prepareWebPublication(
       this.asset,
       {
@@ -475,6 +599,7 @@ export class DemoEngine {
         "Bitcoin publication requires a funded, signed-in account.",
       );
     const inscribeSigner = await this.resolveAuthorshipSigner();
+    await this.ensureAnonymousCustodyRecoverable(inscribeSigner);
     const satSigner = new TurnkeySatSigner({
       client: opts.funding.signingClient,
       signWith:
