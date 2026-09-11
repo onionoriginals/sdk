@@ -340,8 +340,61 @@ describe('CredentialManager DID path fallback when VM doc lacks type', () => {
   });
 });
 
+describe('CredentialManager legacy verifyCredential fallback resolves with current authority (issue #602)', () => {
+  afterEach(() => {
+    verificationMethodRegistry.clear();
+  });
 
+  test('the direct resolveDID fallback (after a non-retirement document-loader failure) requests mode: "current"', async () => {
+    const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any);
+    const cm = new CredentialManager({ network: 'mainnet', defaultKeyType: 'ES256K' } as any, dm);
 
+    const issuerDid = 'did:webvh:example.com:issuer';
+    const vmId = `${issuerDid}#key-1`;
+    const sk = secp256k1.utils.randomSecretKey();
+    const pk = secp256k1.getPublicKey(sk);
+    const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
+    const pkMb = multikey.encodePublicKey(pk, 'Secp256k1');
+
+    const vc: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+      type: ['VerifiableCredential'],
+      issuer: issuerDid,
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: {},
+    };
+    const signed = await cm.signCredential(vc, skMb, vmId);
+
+    const didDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: issuerDid,
+      verificationMethod: [{ id: vmId, type: 'Multikey', controller: issuerDid, publicKeyMultibase: pkMb }],
+    };
+
+    // First call is the document loader's own resolution attempt (inside
+    // resolveVerificationMethodMultibase's primary path) — fail it for a
+    // NON-security reason (a transient error, not a retirement refusal) so
+    // the direct resolveDID fallback below is exercised. That fallback must
+    // request the same current-authority mode as the loader, not silently
+    // accept a stale/pinned cache entry (issue #602).
+    let calls = 0;
+    const spy = spyOn(dm, 'resolveDID').mockImplementation((async () => {
+      calls++;
+      if (calls === 1) {
+        throw new Error('transient resolution error');
+      }
+      return didDocument;
+    }) as any);
+
+    const verified = await cm.verifyCredential(signed);
+    expect(verified).toBe(true);
+    expect(calls).toBe(2);
+
+    const fallbackCall = (spy.mock.calls as unknown as Array<[string, { mode?: string } | undefined]>)[1];
+    expect(fallbackCall?.[0]).toBe(issuerDid);
+    expect(fallbackCall?.[1]).toEqual({ mode: 'current' });
+  });
+});
 
 /** Inlined from CredentialManager.local-verify.no-did.part.ts */
 

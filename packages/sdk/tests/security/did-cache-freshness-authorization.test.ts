@@ -71,6 +71,23 @@ describe('current-authority resolution wiring (issue #602)', () => {
 
     expect(spy).toHaveBeenCalledWith(did, { mode: 'current' });
   });
+
+  test('resolveDIDWithFreshness reports a genuine cache hit as "cache" even under mode: "current" for non-webvh methods', async () => {
+    // mode: 'current' only forces DIDManager.resolveDID to bypass its cache
+    // for did:webvh (the mutable method this issue targets). For every other
+    // method, resolveDID may still legitimately serve a cached document even
+    // when 'current' was requested — the metadata must say so honestly
+    // rather than mislabel a cache hit as a fresh network read.
+    const didManager = new DIDManager({ network: 'mainnet' } as any);
+    const celDid = 'did:cel:uEiAexampleGenesisDigest';
+    const celDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: celDid } as any;
+    await didManager.cache.set(celDid, celDoc);
+
+    const result = await didManager.resolveDIDWithFreshness(celDid, { mode: 'current' });
+    expect(result.didDocument?.id).toBe(celDid);
+    expect(result.didResolutionMetadata.source).toBe('cache');
+    expect(result.didResolutionMetadata.fresh).toBe(false);
+  });
 });
 
 describe('mutable DID cache cannot supply current authority (issue #602)', () => {

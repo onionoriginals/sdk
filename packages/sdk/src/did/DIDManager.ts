@@ -466,7 +466,16 @@ export class DIDManager {
       };
     }
 
-    if (options?.mode !== 'current') {
+    // `mode: 'current'` only actually makes `resolveDID` bypass its cache for
+    // did:webvh (the one method whose cache entry can go stale behind this
+    // instance's back — see the `requiresFreshResolution` gate above). For
+    // every other method, `resolveDID` may still legitimately serve a cached
+    // document even when 'current' was requested, so this must check the
+    // cache itself rather than assume a network read happened — otherwise a
+    // genuine cache hit gets mislabeled `source: 'network', fresh: true`.
+    const bypassesCache = options?.mode === 'current' && did.startsWith('did:webvh:');
+
+    if (!bypassesCache) {
       const cached = await this.cache.getWithMetadata(did);
       if (cached) {
         return {
@@ -481,7 +490,7 @@ export class DIDManager {
       }
     }
 
-    const didDocument = await this.resolveDID(did, { mode: 'current' });
+    const didDocument = await this.resolveDID(did, options?.mode === 'current' ? { mode: 'current' } : undefined);
     if (!didDocument) {
       return {
         didDocument: null,
