@@ -219,13 +219,15 @@ export class Verifier {
    * When the verification method's DID document is resolvable and declares the
    * corresponding relationship, the verification method must also be listed
    * (by reference or embedded) under that relationship — matched by complete
-   * resolved DID URL, never by fragment alone (see H05 / issue #593). A DID
-   * method this DIDManager cannot resolve at all (did:key, which is
-   * self-certifying and publishes no separate document) skips the
-   * relationship check — the key itself is still authenticated by the
-   * controller binding plus signature verification. A method that DOES
-   * publish a relationship document (did:webvh / did:btco / did:cel) but
-   * failed to resolve one fails closed instead.
+   * resolved DID URL, never by fragment alone (see H05 / issue #593). Only
+   * did:key — the one self-certifying method with no separate relationship
+   * document by design — skips the check when unresolvable, falling back to
+   * the controller binding plus signature verification that already ran.
+   * Every other DID method (did:webvh, did:btco, did:cel, and any future
+   * method DIDManager learns to resolve) fails closed when its document is
+   * unavailable, rather than allow-listing only the methods known today —
+   * an unlisted method must not silently regain the fail-open behavior this
+   * fix removes.
    */
   private async checkProofPurpose(
     proof: unknown,
@@ -255,27 +257,27 @@ export class Verifier {
       resolutionFailed = true;
     }
     if (!didDoc) {
-      // A DID method this DIDManager does not know how to resolve at all
-      // (chiefly the self-certifying did:key, which publishes no separate
-      // relationship document by design) falls back to the controller
-      // binding + signature check that already ran — there is no
-      // authorization evidence to be missing. A method DIDManager DOES know
-      // how to resolve (did:webvh / did:btco / did:cel) but that failed to
-      // produce a document is different: a relationship document was
-      // expected and is unavailable, so per H05's acceptance criteria this
-      // must not silently report success.
-      const expectsDocument = vmDid.startsWith('did:webvh:') || vmDid.startsWith('did:btco:') || vmDid.startsWith('did:cel:');
-      if (expectsDocument) {
-        return {
-          verified: false,
-          errors: [
-            resolutionFailed
-              ? `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} failed to resolve`
-              : `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} is unavailable`
-          ]
-        };
+      // did:key is the SDK's one self-certifying DID method: the identifier
+      // IS the public key, it publishes no separate relationship document by
+      // design, and there is therefore no authorization evidence to be
+      // missing — the controller binding + signature check already ran.
+      // Every other method is document-backed (or, if some future method
+      // isn't, it must say so explicitly here, not by falling through a
+      // permissive default) and fails closed when its document is
+      // unavailable per H05's acceptance criteria: missing authorization
+      // evidence must never produce an unqualified success.
+      const isSelfCertifying = vmDid.startsWith('did:key:');
+      if (isSelfCertifying) {
+        return { verified: true, errors: [] };
       }
-      return { verified: true, errors: [] };
+      return {
+        verified: false,
+        errors: [
+          resolutionFailed
+            ? `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} failed to resolve`
+            : `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} is unavailable`
+        ]
+      };
     }
 
     const relationship = didDoc[expectedPurpose];

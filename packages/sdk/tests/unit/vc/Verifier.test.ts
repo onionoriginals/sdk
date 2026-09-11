@@ -487,7 +487,6 @@ describe('diwings Verifier', () => {
 });
 
 describe('checkProofPurpose relationship matching (issue #593 / H05)', () => {
-  const dmWebvh = new DIDManager({} as any);
   const webvhDid = 'did:webvh:example.com:h05issuer';
   const webvhSk = new Uint8Array(32).map((_, i) => (i + 21) & 0xff);
   const webvhPk = ed25519.getPublicKey(webvhSk);
@@ -513,9 +512,13 @@ describe('checkProofPurpose relationship matching (issue #593 / H05)', () => {
     };
   }
 
-  async function issueTestCredential() {
-    const issuer = new Issuer(dmWebvh, webvhVm);
-    return issuer.issueCredential(
+  // A fresh DIDManager (and matching Issuer/credential) per case, so each
+  // test's resolveDID spy is scoped to its own instance instead of a shared
+  // mutable object other tests could leak state through.
+  async function setupCase(): Promise<{ dm: DIDManager; vc: any }> {
+    const dm = new DIDManager({} as any);
+    const issuer = new Issuer(dm, webvhVm);
+    const vc = await issuer.issueCredential(
       {
         type: ['VerifiableCredential', 'H05'],
         issuer: webvhDid,
@@ -524,58 +527,59 @@ describe('checkProofPurpose relationship matching (issue #593 / H05)', () => {
       } as any,
       { proofPurpose: 'assertionMethod' }
     );
+    return { dm, vc };
   }
 
   test('a foreign absolute DID URL that only shares a fragment does not authorize the proof key', async () => {
-    const vc = await issueTestCredential();
+    const { dm, vc } = await setupCase();
     // The DID document authorizes a DIFFERENT DID's #key-1 for assertions;
     // the proof's own key is webvhDid#key-1. Fragment-only matching (the
     // pre-fix behavior) would wrongly treat these as the same key.
-    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+    spyOn(dm, 'resolveDID').mockResolvedValue(
       docWithAssertionMethod(['did:webvh:example.com:other#key-1']) as any
     );
-    const verifier = new Verifier(dmWebvh);
+    const verifier = new Verifier(dm);
     const res = await verifier.verifyCredential(vc);
     expect(res.verified).toBe(false);
     expect(res.errors.some(e => /not authorized for assertionMethod/i.test(e))).toBe(true);
   });
 
   test('a bare "#key-1" relationship entry resolves against the DID document\'s own id and authorizes', async () => {
-    const vc = await issueTestCredential();
-    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+    const { dm, vc } = await setupCase();
+    spyOn(dm, 'resolveDID').mockResolvedValue(
       docWithAssertionMethod(['#key-1']) as any
     );
-    const verifier = new Verifier(dmWebvh);
+    const verifier = new Verifier(dm);
     const res = await verifier.verifyCredential(vc);
     expect(res.verified).toBe(true);
   });
 
   test('the exact absolute verification method id still authorizes', async () => {
-    const vc = await issueTestCredential();
-    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+    const { dm, vc } = await setupCase();
+    spyOn(dm, 'resolveDID').mockResolvedValue(
       docWithAssertionMethod([webvhVm.id]) as any
     );
-    const verifier = new Verifier(dmWebvh);
+    const verifier = new Verifier(dm);
     const res = await verifier.verifyCredential(vc);
     expect(res.verified).toBe(true);
   });
 
   test('an embedded verification-method object under the relationship is matched the same way', async () => {
-    const vc = await issueTestCredential();
-    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(
+    const { dm, vc } = await setupCase();
+    spyOn(dm, 'resolveDID').mockResolvedValue(
       docWithAssertionMethod([
         { id: 'did:webvh:example.com:other#key-1', type: 'Multikey', controller: 'did:webvh:example.com:other' }
       ]) as any
     );
-    const verifier = new Verifier(dmWebvh);
+    const verifier = new Verifier(dm);
     const res = await verifier.verifyCredential(vc);
     expect(res.verified).toBe(false);
   });
 
   test('a hosted DID (did:webvh) that fails to resolve fails closed instead of an unqualified success', async () => {
-    const vc = await issueTestCredential();
-    spyOn(dmWebvh, 'resolveDID').mockResolvedValue(null);
-    const verifier = new Verifier(dmWebvh);
+    const { dm, vc } = await setupCase();
+    spyOn(dm, 'resolveDID').mockResolvedValue(null);
+    const verifier = new Verifier(dm);
     const res = await verifier.verifyCredential(vc);
     expect(res.verified).toBe(false);
     expect(res.errors.some(e => /cannot verify assertionMethod authorization/i.test(e))).toBe(true);
@@ -715,8 +719,8 @@ describe('Verifier with default document loader (no options)', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2', 'https://w3id.org/security/data-integrity/v2'],
       type: ['VerifiableCredential'],
-      issuer: 'did:example:issuer',
-      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' }
+      issuer: 'did:key:issuer',
+      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:key:issuer#k', proofPurpose: 'assertionMethod' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -731,8 +735,8 @@ describe('Verifier with default document loader (no options)', () => {
     const vp: any = {
       '@context': ['https://www.w3.org/ns/credentials/v2', 'https://w3id.org/security/data-integrity/v2'],
       type: ['VerifiablePresentation'],
-      holder: 'did:example:holder',
-      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
+      holder: 'did:key:holder',
+      proof: { cryptosuite: 'data-integrity', verificationMethod: 'did:key:holder#k', proofPurpose: 'authentication' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -757,7 +761,7 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
-    const res = await verifier.verifyCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } } as any, {
+    const res = await verifier.verifyCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential'], issuer: 'did:key:issuer', proof: { verificationMethod: 'did:key:issuer#k', proofPurpose: 'assertionMethod' } } as any, {
       documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
     });
     expect(res.verified).toBe(true);
@@ -771,7 +775,7 @@ describe('Verifier with mocked DataIntegrityProofManager', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const verifier = new Verifier(new DIDManager({} as any));
-    const res = await verifier.verifyPresentation({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiablePresentation'], holder: 'did:example:holder', proof: { verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' } } as any, {
+    const res = await verifier.verifyPresentation({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiablePresentation'], holder: 'did:key:holder', proof: { verificationMethod: 'did:key:holder#k', proofPurpose: 'authentication' } } as any, {
       documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null })
     });
     expect(res.verified).toBe(false);
@@ -837,7 +841,7 @@ describe('Verifier error branches', () => {
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
     const localVerifier = new Verifier(new DIDManager({} as any));
-    const res = await localVerifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
+    const res = await localVerifier.verifyCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:key:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:key:issuer#k', proofPurpose: 'assertionMethod' } } as any, { documentLoader: async () => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: '', contextUrl: null }) });
     expect(res.verified).toBe(false);
     expect(res.errors[0]).toBe('Verification failed');
     mod.DataIntegrityProofManager.verifyProof = orig;
@@ -979,8 +983,8 @@ describe('Verifier success branches', () => {
     const vc: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential'],
-      issuer: 'did:example:issuer',
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' }
+      issuer: 'did:key:issuer',
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:key:issuer#k', proofPurpose: 'assertionMethod' }
     };
     const mod = require('../../../src/vc/proofs/data-integrity');
     const orig = mod.DataIntegrityProofManager.verifyProof;
@@ -1005,8 +1009,8 @@ describe('Verifier success branches', () => {
     const vp1: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
-      holder: 'did:example:holder',
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
+      holder: 'did:key:holder',
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:key:holder#k', proofPurpose: 'authentication' }
     };
     const { Verifier } = await import('../../../src/vc/Verifier');
     const { DIDManager } = await import('../../../src/did/DIDManager');
@@ -1020,11 +1024,11 @@ describe('Verifier success branches', () => {
     const vp2: any = {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiablePresentation'],
-      holder: 'did:example:holder',
+      holder: 'did:key:holder',
       verifiableCredential: [
-        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:example:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod' } }
+        { '@context': ['https://www.w3.org/2018/credentials/v1'], type: ['VerifiableCredential'], issuer: 'did:key:issuer', proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:key:issuer#k', proofPurpose: 'assertionMethod' } }
       ],
-      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:example:holder#k', proofPurpose: 'authentication' }
+      proof: { cryptosuite: 'eddsa-rdfc-2022', verificationMethod: 'did:key:holder#k', proofPurpose: 'authentication' }
     };
     const res2 = await localVerifier.verifyPresentation(vp2, {
       documentLoader: async (iri: string) => ({ document: { '@context': { '@version': 1.1 } }, documentUrl: iri, contextUrl: null })
