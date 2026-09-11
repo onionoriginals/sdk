@@ -60,4 +60,29 @@ describe('createDidManagerKeyResolver', () => {
     const key = await resolve(VM_ID);
     expect(key).toBeNull();
   });
+
+  it('requests current-authority resolution (mode: "current"), not a cached/pinned read (issue #602)', async () => {
+    // Resolving a signer's key is an authorization decision: a mutable
+    // method's cache entry (however recent, even pinned) must not keep an
+    // externally-retired key accepted. The resolver must ask its DID
+    // resolver for the live/current document rather than accept a cache
+    // policy's default.
+    let receivedOptions: { mode?: string } | undefined;
+    const doc: DIDDocument = {
+      '@context': ['https://www.w3.org/ns/did/v1'],
+      id: DID,
+      verificationMethod: [baseVM()]
+    };
+    const didManager: CelDidResolver = {
+      resolveDID: async (calledDid, options) => {
+        receivedOptions = options;
+        return calledDid === DID ? doc : null;
+      }
+    };
+    const resolve = createDidManagerKeyResolver(didManager);
+
+    const key = await resolve(VM_ID);
+    expect(key).not.toBeNull();
+    expect(receivedOptions).toEqual({ mode: 'current' });
+  });
 });

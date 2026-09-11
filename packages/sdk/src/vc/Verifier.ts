@@ -243,7 +243,10 @@ export class Verifier {
     const vmDid = verificationMethod.split('#')[0];
     let didDoc: { [k: string]: unknown } | null = null;
     try {
-      didDoc = (await this.didManager.resolveDID(vmDid)) as { [k: string]: unknown } | null;
+      // Proof-purpose authorization is a current-authority decision: a
+      // cached (even pinned) pre-rotation document must not keep an
+      // externally-retired key authorized (issue #602).
+      didDoc = (await this.didManager.resolveDID(vmDid, { mode: 'current' })) as { [k: string]: unknown } | null;
     } catch {
       didDoc = null;
     }

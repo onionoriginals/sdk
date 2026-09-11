@@ -437,13 +437,74 @@ export class DIDManager {
     return null;
   }
 
-  async resolveDID(did: string, options?: { skipCache?: boolean }): Promise<DIDDocument | null> {
+  async resolveDID(did: string, options?: DIDResolutionOptions): Promise<DIDDocument | null> {
     return this.resolveDIDWithPath(did, options, new Set());
+  }
+
+  /**
+   * Resolve a DID together with freshness metadata: whether the document
+   * came from cache, an explicit offline snapshot, or a live re-resolution,
+   * plus when it was resolved and whether the cache entry is pinned
+   * (issue #602). Security-sensitive authorization decisions should request
+   * `mode: 'current'` (as `Verifier`, `DocumentLoader`, and the CEL key
+   * resolver already do internally) rather than branch on this metadata.
+   */
+  async resolveDIDWithFreshness(
+    did: string,
+    options?: { mode?: 'cache' | 'current' | 'offline' }
+  ): Promise<DIDResolutionResult> {
+    if (options?.mode === 'offline') {
+      const cached = await this.cache.getWithMetadata(did);
+      return {
+        didDocument: cached?.document ?? null,
+        didResolutionMetadata: {
+          source: 'offline-snapshot',
+          fresh: false,
+          resolvedAt: cached?.resolvedAt ?? null,
+          pinned: cached?.pinned ?? false,
+        },
+      };
+    }
+
+    if (options?.mode !== 'current') {
+      const cached = await this.cache.getWithMetadata(did);
+      if (cached) {
+        return {
+          didDocument: cached.document,
+          didResolutionMetadata: {
+            source: 'cache',
+            fresh: false,
+            resolvedAt: cached.resolvedAt,
+            pinned: cached.pinned,
+          },
+        };
+      }
+    }
+
+    const didDocument = await this.resolveDID(did, { mode: 'current' });
+    if (!didDocument) {
+      return {
+        didDocument: null,
+        didResolutionMetadata: { source: 'network', fresh: false, resolvedAt: null, pinned: false },
+      };
+    }
+    // Read back what resolveDID just persisted so resolvedAt/pinned reflect
+    // the actual cache entry rather than an approximate timestamp.
+    const stored = await this.cache.getWithMetadata(did);
+    return {
+      didDocument,
+      didResolutionMetadata: {
+        source: 'network',
+        fresh: true,
+        resolvedAt: stored?.resolvedAt ?? Date.now(),
+        pinned: stored?.pinned ?? false,
+      },
+    };
   }
 
   private async resolveDIDWithPath(
     did: string,
-    options: { skipCache?: boolean } | undefined,
+    options: DIDResolutionOptions | undefined,
     btcoPath: ReadonlySet<string>
   ): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
@@ -484,9 +545,18 @@ export class DIDManager {
         } catch { return null; }
       }
 
-      // Check cache first (unless skipCache is set). The read is best-effort:
-      // a throwing storage adapter must not crash resolution — treat it as a miss.
-      if (!options?.skipCache) {
+      // Check cache first (unless skipCache is set, or the caller requested
+      // `mode: 'current'` for a mutable method). did:webvh authority can be
+      // rotated/recovered by another process/host at any time; a verifier
+      // deciding whether a key is PRESENTLY authorized must not accept a
+      // cached (however recent, and even pinned) pre-rotation document as
+      // current-authority evidence — that cache can only be invalidated by
+      // this same DIDManager instance's own mutations (issue #602). Other
+      // methods are unaffected: did:btco already re-reads verified chain
+      // state above regardless of cache, and did:key never populates this
+      // cache at all (it's synthesized locally by DocumentLoader).
+      const requiresFreshResolution = options?.mode === 'current' && did.startsWith('did:webvh:');
+      if (!options?.skipCache && !requiresFreshResolution) {
         let cached: DIDDocument | null = null;
         try {
           cached = await this.cache.get(did);
@@ -789,6 +859,39 @@ interface DIDLogEntry {
 }
 
 type DIDLog = DIDLogEntry[];
+
+/**
+ * Options controlling DID resolution freshness (issue #602).
+ */
+export interface DIDResolutionOptions {
+  /** @deprecated use `mode: 'current'` instead. */
+  skipCache?: boolean;
+  /**
+   * - `'cache'` (default): return a cached document when present, subject to
+   *   the usual TTL/pinning rules.
+   * - `'current'`: for mutable methods (did:webvh), bypass the cache read
+   *   entirely and always re-resolve live, so an externally rotated or
+   *   recovered DID cannot remain authoritative from a stale or pinned
+   *   cache entry. Required for security-sensitive authorization decisions.
+   */
+  mode?: 'cache' | 'current';
+}
+
+export interface DIDResolutionMetadata {
+  /** Where the returned document came from. */
+  source: 'cache' | 'network' | 'offline-snapshot';
+  /** Whether this resolution bypassed the cache to read live state. */
+  fresh: boolean;
+  /** When the returned document was resolved/cached, or null if unresolved. */
+  resolvedAt: number | null;
+  /** Whether the cache entry backing this result is pinned. */
+  pinned: boolean;
+}
+
+export interface DIDResolutionResult {
+  didDocument: DIDDocument | null;
+  didResolutionMetadata: DIDResolutionMetadata;
+}
 
 export interface CreateWebVHOptions {
   domain: string; // Required — the type enforces it and a blank value throws WEBVH_DOMAIN_REQUIRED at runtime (#531)
