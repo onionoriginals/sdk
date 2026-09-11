@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
+import { installLocalStorage } from './cel3-test-helpers';
 
 // R15: a store that is already full must not break the demo for the NEXT
 // visitor. Before eviction this run failed at the first host write with a raw
@@ -34,8 +35,10 @@ function installHostFetch(store: ReturnType<typeof createWebvhHostStore>, client
 describe('a full anonymous demo run against a store at capacity', () => {
   let store: ReturnType<typeof createWebvhHostStore>;
   let restore: () => void;
+  let restoreStorage: () => void;
 
   beforeEach(async () => {
+    restoreStorage = installLocalStorage().restore;
     (import.meta as unknown as { env: Record<string, string> }).env ??= {};
     (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = host;
     // Small caps so "at capacity" is reachable, then fill them from OTHER
@@ -59,7 +62,10 @@ describe('a full anonymous demo run against a store at capacity', () => {
     expect(store.stats().entries).toBe(12);
     restore = installHostFetch(store, 'new-visitor');
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
 
   test('a new visitor still creates, publishes and resolves', async () => {
     const engine = new DemoEngine();
