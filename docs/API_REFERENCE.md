@@ -245,8 +245,9 @@ const signedCredential = await sdk.credentials.signCredential(credential, {
 ```
 
 **Supported Cryptosuites:**
-- `eddsa-rdfc-2022` - EdDSA signatures (recommended)
-- `bbs-2023` - BBS+ signatures for selective disclosure
+- `eddsa-rdfc-2022` - EdDSA signatures
+
+`bbs-2023` (BBS+ selective disclosure) is parked and disabled: signing with it throws, and a credential carrying a `bbs-2023` proof never verifies (see [#591](https://github.com/onionoriginals/sdk/issues/591)).
 
 #### `verifyCredential(credential)`
 
