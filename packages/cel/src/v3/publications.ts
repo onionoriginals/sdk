@@ -38,6 +38,21 @@ export interface PublicationObservation {
         metadata: Uint8Array | null;
       };
 }
+/**
+ * Whether chain/tip/block facts came from an independently validating Bitcoin
+ * node ("node-validated") or are trusted assertions from the same service that
+ * supplies Ordinals interpretation ("provider-asserted"). "unavailable" means no
+ * snapshot was ever obtained (for example, no provider is configured at all) —
+ * distinct from a provider having supplied and stood behind a snapshot, and
+ * therefore never a valid {@link SatSnapshot.chainEvidence} claim: obtaining a
+ * snapshot at all rules it out. No adapter in this package performs
+ * independent validation today; omit the field on a real snapshot to get the
+ * honest "provider-asserted" default rather than claiming a stronger
+ * guarantee.
+ */
+export type ChainEvidence = "unavailable" | "provider-asserted" | "node-validated";
+/** A snapshot was obtained, so its own evidence can only be a live claim, never "unavailable". */
+export type SnapshotChainEvidence = Exclude<ChainEvidence, "unavailable">;
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;
@@ -52,6 +67,13 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /**
+   * Defaults to "provider-asserted" when omitted. `resolveSat` passes an
+   * explicit claim straight through into the resolution's `chainEvidence`
+   * without relabeling it. See {@link ChainEvidence} and
+   * {@link SnapshotChainEvidence}.
+   */
+  chainEvidence?: SnapshotChainEvidence;
 }
 export type ResolutionFailure =
   | "invalid"
@@ -75,11 +97,13 @@ export type SatResolution = Readonly<
       reason: string;
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: ChainEvidence;
     }
   | {
       status: "accepted";
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: ChainEvidence;
       tip: Readonly<ChainTip>;
       state: DeepReadonly<AssetState>;
       history: VerifiedHistory;
@@ -98,7 +122,13 @@ const validTip = (tip: ChainTip | undefined): boolean =>
   !!tip && integer(tip.height) && hash(tip.hash);
 const sameTip = (a: ChainTip, b: ChainTip): boolean =>
   a.height === b.height && a.hash === b.hash;
-const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
+interface FailureShape {
+  status: ResolutionFailure;
+  reason: string;
+  scope: "sat";
+  crossSatCanonicality: "unknown";
+}
+const baseFailure = (status: ResolutionFailure, reason: string): FailureShape => ({
   status,
   reason,
   scope: "sat",
@@ -113,6 +143,17 @@ export function resolveSat(
   snapshot: SatSnapshot,
   options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
 ): SatResolution {
+  // A snapshot was obtained, so "unavailable" is not a reachable input here
+  // (see SnapshotChainEvidence); only "node-validated" is ever an upgrade
+  // over the honest "provider-asserted" floor.
+  const chainEvidence: ChainEvidence =
+    snapshot.chainEvidence === "node-validated"
+      ? "node-validated"
+      : "provider-asserted";
+  const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
+    ...baseFailure(status, reason),
+    chainEvidence,
+  });
   const prefix =
     snapshot.network === "mainnet"
       ? ""
@@ -435,6 +476,7 @@ export function resolveSat(
     status: "accepted",
     scope: "sat",
     crossSatCanonicality: "unknown",
+    chainEvidence,
     tip: { ...snapshot.tipBefore },
     state: history.state,
     history,

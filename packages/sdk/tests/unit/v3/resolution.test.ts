@@ -99,6 +99,9 @@ test("a fresh consumer resolves binary bytes and DID authority from the same acc
   expect(result.asset.resources[0].content).toEqual(png);
   expect(result.resolution.state.controller).toBe(signer.controller);
   expect(result.verification.resources).toBe("verified");
+  // The snapshot never claimed independent chain validation, so acceptance must
+  // not be reported as anything stronger than a provider-asserted observation.
+  expect(result.resolution.chainEvidence).toBe("provider-asserted");
   const did = await sdk.did.resolveDID("did:btco:reg:123");
   expect(did?.id).toBe("did:btco:reg:123");
   expect(did?.controller).toEqual([signer.controller]);
@@ -106,6 +109,16 @@ test("a fresh consumer resolves binary bytes and DID authority from the same acc
   const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
   expect(metadata.didDocumentMetadata.ownership).toEqual(snapshot.ownership);
   expect(metadata.didDocumentMetadata.head).toBe(result.asset.state.head);
+  expect(metadata.didDocumentMetadata.chainEvidence).toBe("provider-asserted");
+});
+
+test("an unsupported-capability DID resolution reports no chain evidence was even obtained, without a configured provider", async () => {
+  const sdk = OriginalsSDK.create({ network: "regtest" });
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didResolutionMetadata.status).toBe("unsupported-capability");
+  // No provider was consulted at all, so this must not be confused with a
+  // provider having actually supplied and stood behind a snapshot.
+  expect(metadata.didDocumentMetadata.chainEvidence).toBe("unavailable");
 });
 
 test("network recovery and verify re-read the accepted head instead of trusting serialized Bitcoin claims", async () => {

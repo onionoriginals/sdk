@@ -9,6 +9,7 @@ import {
   type SatSnapshot,
   type SatResolution,
   type BitcoinNetwork,
+  type ChainEvidence,
 } from "@originals/cel/v3";
 import type { DIDDocument } from "../types/did.js";
 import { summarizeVerification } from "./verification.js";
@@ -49,6 +50,8 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    /** Whether chain facts came from an independently validating node or a provider assertion. See {@link ChainEvidence}. */
+    chainEvidence: ChainEvidence;
   };
 }
 
@@ -60,11 +63,13 @@ export function btcoDid(sat: string, network: BitcoinNetwork): string {
 const failure = (
   status: Exclude<SatResolution["status"], "accepted">,
   reason: string,
+  chainEvidence: ChainEvidence = "provider-asserted",
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence,
 });
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
@@ -110,6 +115,7 @@ export class AssetResolver {
         resolution: failure(
           "unsupported-capability",
           "A complete sat snapshot provider is required",
+          "unavailable",
         ) as SatResolution,
       };
     try {
@@ -250,7 +256,11 @@ export class AssetResolver {
       return {
         didDocument: null,
         didResolutionMetadata: { status: result.status, error: result.reason },
-        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown" },
+        didDocumentMetadata: {
+          scope: "sat",
+          crossSatCanonicality: "unknown",
+          chainEvidence: result.chainEvidence,
+        },
       };
     return {
       didDocument: result.didDocument,
@@ -263,6 +273,7 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        chainEvidence: result.resolution.chainEvidence,
       },
     };
   }
