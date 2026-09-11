@@ -91,6 +91,19 @@ export class EdDSACryptosuiteManager {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   private static async createProofConfiguration(options: any, documentContext?: unknown): Promise<any> {
+    // Fail loudly instead of silently dropping a chain reference (issue
+    // #604). This is the single choke point every proof-creation path
+    // (createProof's local-key path, and computeSigningInput's
+    // external-signer path used by CredentialManager/MultiSigManager) routes
+    // through, so the guard here cannot be bypassed by calling
+    // EdDSACryptosuiteManager directly — unlike a check placed only in the
+    // higher-level DataIntegrityProofManager wrapper, which callers of this
+    // exported class skip entirely.
+    if (options.previousProof !== undefined) {
+      throw new Error(
+        'ProofOptions.previousProof is not supported: this SDK does not create or verify Data Integrity proof chains.'
+      );
+    }
     // Per eddsa-rdfc-2022, the proof configuration is canonicalized with the
     // secured document's @context so create and verify hash identical data.
     return {
