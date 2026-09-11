@@ -242,6 +242,75 @@ test("rotation and updates in one later publication retire the prior key indepen
   }
 });
 
+test("a holder-only CEL-shaped inscription cannot substitute creator authority; live possession stays separately visible", async () => {
+  const { snapshot, log } = await boundary();
+  const holder = createLocalSigner("Ed25519", new Uint8Array(32).fill(9));
+  const forgedRotation = await signEvent(
+    {
+      previousEvent: eventDigest(log.log.at(-1)!.event),
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile: "originals/cel/3",
+          newController: holder.controller,
+          rotatedAt: "2026-09-06T00:00:01Z",
+        },
+      },
+    },
+    holder,
+  );
+  const holderTx = "e".repeat(64),
+    holderHash = "f".repeat(64);
+  snapshot.tipBefore =
+    snapshot.tipAfter =
+    snapshot.indexTip =
+      { height: 101, hash: holderHash };
+  snapshot.blocks.push({ height: 101, hash: holderHash, txids: [holderTx] });
+  snapshot.ownership = { owner: "holder-after-sale", satpoint: holderTx + ":0:0" };
+  snapshot.publications.push({
+    id: holderTx + "i0",
+    revealTxid: holderTx,
+    network: "regtest",
+    sat: "123",
+    confirmed: true,
+    creation: {
+      height: 101,
+      blockHash: holderHash,
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeDocument({ log: [forgedRotation] }, "json"),
+      metadata: null,
+    },
+  });
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  // Buying/holding the sat never rewrites creator authority by itself.
+  expect(result.asset.state.controller).toBe(signer.controller);
+  expect(result.resolution.state.controller).toBe(signer.controller);
+  expect(
+    result.resolution.diagnostics.some(
+      (d) => d.inscriptionId === holderTx + "i0" && d.code === "CEL_AUTHORITY",
+    ),
+  ).toBe(true);
+  // Live possession is still observable, and disagrees with authorship on purpose.
+  expect(result.resolution.ownership.owner).toBe("holder-after-sale");
+  // Generic DID resolution and asset resolution agree on the same rejected authority state.
+  const did = await sdk.did.resolveDID("did:btco:reg:123");
+  expect(did?.controller).toEqual([signer.controller]);
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.ownership?.owner).toBe(
+    "holder-after-sale",
+  );
+});
+
 test('resolution retries a changing snapshot and bounds failures if the chain cannot stabilize', async () => {
   const { snapshot } = await boundary(); let calls = 0;
   const changing = structuredClone(snapshot); changing.tipAfter.hash = 'e'.repeat(64);
