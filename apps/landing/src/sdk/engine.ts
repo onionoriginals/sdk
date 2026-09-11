@@ -15,6 +15,7 @@ export { short };
 import {
   OriginalsSDK,
   createLocalSigner,
+  CelError,
   type CelSigner,
   type AssetEnvelope,
   type OriginalsAsset,
@@ -23,6 +24,7 @@ import {
   type InscribeOnSatResult,
 } from "@originals/sdk";
 import { digestMultibaseSha256Hex } from "../pages/original-detail-data";
+import { DemoCopyError } from "../components/demo-logic";
 export type EntryAuthorClass = "creator" | "holder";
 import { OrdMockProvider } from "@originals/sdk/testing";
 import { HttpHostingStorageAdapter } from "./http-hosting-adapter";
@@ -240,6 +242,33 @@ export class DemoEngine {
     }
   }
 
+  /**
+   * An anonymous authoring key lives only in this browser tab (#598): a
+   * reload builds a fresh `DemoEngine` with no memory of it, so
+   * `resolveAuthorshipSigner()` mints a different key and the CEL layer
+   * correctly refuses to sign with it (`CEL_AUTHORITY`). Left alone, that
+   * surfaces as an opaque protocol error with no way for the visitor to tell
+   * "you lost write access" from an unrelated bug. This only replaces the
+   * message for exactly that anonymous, already-published case; every other
+   * failure — including a signed-in controller mismatch — passes through
+   * unchanged.
+   */
+  private explainAuthorityLoss(err: unknown, asset: OriginalsAsset): unknown {
+    const isAnonymousCustodyLoss =
+      err instanceof CelError &&
+      err.code === "CEL_AUTHORITY" &&
+      !this.authed &&
+      asset.state.layer !== "cel";
+    if (!isAnonymousCustodyLoss) return err;
+    // A DemoCopyError, not a plain Error: demoFailureMessage() only ever
+    // surfaces DemoCopyError's own message to the visitor (Demo.tsx),
+    // replacing everything else with generic failure copy. A plain Error
+    // here would have this exact explanation silently discarded.
+    return new DemoCopyError(
+      "This browser can no longer sign changes to this Original. Anonymous authoring keys live only in the tab that created them, so a reload replaced it with a new one — the earlier key, and write access to this Original, are gone for good in this browser. Sign in before publishing next time to keep editing access across reloads.",
+    );
+  }
+
   async hydrate(envelope: AssetEnvelope): Promise<DemoAssetState> {
     const { asset } = await this.sdk.lifecycle.loadAsset(envelope);
     this.asset = asset;
@@ -337,37 +366,42 @@ export class DemoEngine {
     const svgHash = toHex(sha256(contentBytes(src.content)));
     const authorship = await this.resolveAuthorshipSigner();
     const signed = authorship ? { signer: authorship } : undefined;
-    if (
-      svgHash !== current.resource.hash ||
-      src.contentType !== current.resource.contentType
-    ) {
-      await asset.addResourceVersion(
-        current.resource.id,
-        src.content,
-        src.contentType,
-        signed,
-      );
-      this.assetResourceHash = svgHash; // the /me summary posts this on publish
-    }
-    if (current.metadata) {
-      const next = buildMetadata({
-        title,
-        style,
-        created: createdAtOf(current.metadata.content),
-        artworkHash: svgHash,
-        artworkFile: current.resource.id,
-      });
-      if (next !== current.metadata.content) {
+    try {
+      if (
+        svgHash !== current.resource.hash ||
+        src.contentType !== current.resource.contentType
+      ) {
         await asset.addResourceVersion(
-          current.metadata.id,
-          next,
-          "application/json",
+          current.resource.id,
+          src.content,
+          src.contentType,
           signed,
         );
+        this.assetResourceHash = svgHash; // the /me summary posts this on publish
       }
-    }
+      if (current.metadata) {
+        const next = buildMetadata({
+          title,
+          style,
+          created: createdAtOf(current.metadata.content),
+          artworkHash: svgHash,
+          artworkFile: current.resource.id,
+        });
+        if (next !== current.metadata.content) {
+          await asset.addResourceVersion(
+            current.metadata.id,
+            next,
+            "application/json",
+            signed,
+          );
+        }
+      }
 
-    if (asset.state.name !== title) await asset.update({ name: title }, signed);
+      if (asset.state.name !== title)
+        await asset.update({ name: title }, signed);
+    } catch (err) {
+      throw this.explainAuthorityLoss(err, asset);
+    }
     this.assetTitle = title;
     if (asset.state.layer === "webvh") await this.publish();
     return this.snapshot();
