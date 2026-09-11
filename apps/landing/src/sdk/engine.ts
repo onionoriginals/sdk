@@ -154,9 +154,16 @@ export class DemoEngine {
   // The raw secret behind an anonymous `authorshipSigner`, kept only so a
   // durable publication can back it up (#598) — never itself persisted.
   private anonymousKeyBytes: Uint8Array | null = null;
-  // True once this session's anonymous key has a recoverable copy somewhere
-  // (this browser's storage, or a caller-held explicit export).
-  private anonymousBackupConfirmed = false;
+  // True once the CALLER holds a portable backup of this session's key
+  // (export, or a restore from one) — independent of which asset it later
+  // signs, so it satisfies custody for every asset this key touches.
+  private anonymousKeyBackedUpExplicitly = false;
+  // Asset ids for which THIS browser already holds a transparent local
+  // backup. One engine's cached signer can author more than one asset
+  // (`resolveAuthorshipSigner` reuses it), so this is per-asset rather than
+  // a single flag — otherwise backing up asset A would wrongly skip backing
+  // up asset B signed by the same, already-"confirmed" key.
+  private readonly anonymousBackedUpAssetIds = new Set<string>();
   asset: OriginalsAsset | null = null;
 
   readonly tier: DemoTier;
@@ -275,7 +282,7 @@ export class DemoEngine {
       signer.controller,
       passphrase,
     );
-    this.anonymousBackupConfirmed = true;
+    this.anonymousKeyBackedUpExplicitly = true;
     this.emit(
       "authorship:backup-exported",
       `Encrypted a recoverable backup for ${short(signer.controller)}`,
@@ -301,7 +308,7 @@ export class DemoEngine {
       );
     this.anonymousKeyBytes = secretKey;
     this.authorshipSigner = signer;
-    this.anonymousBackupConfirmed = true;
+    this.anonymousKeyBackedUpExplicitly = true;
     this.emit(
       "authorship:restored",
       `Restored ${short(signer.controller)} from an encrypted backup`,
@@ -316,23 +323,26 @@ export class DemoEngine {
    * first call for a given asset this transparently backs the key up to this
    * browser's storage so an ordinary reload keeps editing working; a visitor
    * who wants a copy independent of this browser should call
-   * `exportAuthorshipKeyBackup` themselves first.
+   * `exportAuthorshipKeyBackup` themselves first. One engine's signer can go
+   * on to author more than one asset (`resolveAuthorshipSigner` caches it),
+   * so this tracks which asset ids are already backed up rather than a
+   * single flag for the whole session.
    */
   private async ensureAnonymousCustodyRecoverable(
     signer: CelSigner,
   ): Promise<void> {
-    if (this.authed || this.anonymousBackupConfirmed) return;
+    if (this.authed || this.anonymousKeyBackedUpExplicitly) return;
     if (!this.anonymousKeyBytes) {
       // Not a key this engine generated (e.g. an externally-held signer
       // supplied by a caller) — the caller already holds it, nothing local
       // to back up.
-      this.anonymousBackupConfirmed = true;
       return;
     }
     if (!this.asset)
       throw new Error(
         "No local authoring key to make recoverable before publishing.",
       );
+    if (this.anonymousBackedUpAssetIds.has(this.asset.id)) return;
     if (typeof localStorage === "undefined")
       throw new Error(
         "This browser has no local storage, so an anonymous authoring key here could not survive a reload. Sign in for durable, recoverable publication, or back it up yourself with exportAuthorshipKeyBackup() first.",
@@ -342,7 +352,7 @@ export class DemoEngine {
       this.anonymousKeyBytes,
       signer.controller,
     );
-    this.anonymousBackupConfirmed = true;
+    this.anonymousBackedUpAssetIds.add(this.asset.id);
   }
 
   /** Restore a previously backed-up anonymous authoring key for this asset, if this browser holds one. */
@@ -351,13 +361,22 @@ export class DemoEngine {
     if (typeof localStorage === "undefined") return;
     const restored = await restoreAnonymousAuthorshipKey(assetId);
     if (!restored) return;
+    const signer = createLocalSigner("Ed25519", restored.secretKey);
+    if (signer.controller !== restored.controller) {
+      // The decrypted key doesn't match the controller recorded alongside
+      // it — treat the backup as unusable rather than sign with it. The
+      // next resolveAuthorshipSigner() falls back to a fresh key, which the
+      // SDK's own controller check then safely refuses to use for edits.
+      log("authorship:restore-mismatch", { assetId, expected: restored.controller, got: signer.controller });
+      return;
+    }
     this.anonymousKeyBytes = restored.secretKey;
-    this.authorshipSigner = createLocalSigner("Ed25519", restored.secretKey);
-    this.anonymousBackupConfirmed = true;
+    this.authorshipSigner = signer;
+    this.anonymousBackedUpAssetIds.add(assetId);
     this.emit(
       "authorship:restored",
-      `Restored ${short(restored.controller)} from this browser's storage`,
-      { controller: restored.controller },
+      `Restored ${short(signer.controller)} from this browser's storage`,
+      { controller: signer.controller },
     );
   }
 

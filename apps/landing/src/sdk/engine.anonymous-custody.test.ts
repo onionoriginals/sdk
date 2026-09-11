@@ -67,6 +67,50 @@ describe('anonymous authorship custody survives a reload (#598)', () => {
     expect(state.webvhDid).toContain(':published:anonymous:');
   });
 
+  test('a second asset authored by the same cached anonymous signer gets its OWN backup too', async () => {
+    // resolveAuthorshipSigner() caches one key per engine instance, so a
+    // single anonymous session can author more than one asset with it. The
+    // per-asset local backup must not be skipped for the second asset just
+    // because the first asset's backup already satisfied custody.
+    host = installCel3Host();
+    const engine = new DemoEngine();
+    const first = await engine.create('First', 'Upload', 'bytes one');
+    const firstPublished = await engine.publish();
+
+    const second = await engine.create('Second', 'Upload', 'bytes two');
+    expect(second.did).not.toBe(first.did);
+    const secondPublished = await engine.publish();
+
+    expect(localStorage.getItem(anonymousAuthorshipStorageKey(first.did))).not.toBeNull();
+    expect(localStorage.getItem(anonymousAuthorshipStorageKey(second.did))).not.toBeNull();
+
+    const coldSecond = new DemoEngine();
+    await coldSecond.hydrateFromWeb(secondPublished.webvhDid!);
+    const updated = await coldSecond.update('Second, revised', 'Upload', 'more bytes');
+    expect(updated.resource.version).toBe(2);
+  });
+
+  test('a transparent local backup whose decrypted key does not match its recorded controller is refused, not silently used', async () => {
+    host = installCel3Host();
+    const engine = new DemoEngine();
+    const state = await engine.create('Original', 'Upload', 'bytes');
+    const published = await engine.publish();
+
+    // Corrupt the stored backup's controller so it no longer matches the key
+    // it actually decrypts to (simulating a tampered or foreign entry).
+    const key = anonymousAuthorshipStorageKey(state.did);
+    const stored = JSON.parse(localStorage.getItem(key)!);
+    stored.backup.controller = 'did:key:zNotTheRealController';
+    localStorage.setItem(key, JSON.stringify(stored));
+
+    const cold = new DemoEngine();
+    await cold.hydrateFromWeb(published.webvhDid!);
+    // The mismatched backup was refused, so hydrate left no signer restored
+    // — the next update falls back to a fresh, unrelated key and the SDK's
+    // own controller check refuses it, exactly as it would with no backup.
+    await expect(cold.update('Renamed', 'Upload', 'more bytes')).rejects.toThrow();
+  });
+
   test('signed-in publication survives a fresh engine/session and keeps editing', async () => {
     host = installCel3Host('sub-1');
     const signer = createLocalSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
