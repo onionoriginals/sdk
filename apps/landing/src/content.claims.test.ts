@@ -64,14 +64,22 @@ describe('the page claims a signed history, not authorship or global priority', 
     // Bitcoin resolution is sat-scoped (`crossSatCanonicality: 'unknown'`):
     // the protocol cannot rule out a competing creation signed on another
     // sat, so "first" / "who was first" overstates what it actually proves.
-    const offenders = allCopy().filter((s) => /\bpublished it first\b|\bwho was first\b|\bprove(?:s)? .*\bfirst\b/i.test(s));
+    // Covers the literal phrasings that were live plus the paraphrases a
+    // routine copy edit could reach for instead (flagged in review on #623).
+    const firstPublicationClaim =
+      /\bpublished it first\b|\bwho was first\b|\bfirst to publish\b|\bpublication priority\b|\bpriority of publication\b|\bprove(?:s)? .*\bfirst\b/i;
+    const offenders = allCopy().filter((s) => firstPublicationClaim.test(s));
     expect(offenders).toEqual([]);
   });
 
   test('no copy claims Bitcoin anchoring happens the moment you publish (#605)', () => {
     // Publishing to the web (did:webvh) and inscribing on Bitcoin (did:btco)
-    // are separate, sequential lifecycle steps, never simultaneous.
-    const offenders = allCopy().filter((s) => /the moment you publish/i.test(s));
+    // are separate, sequential lifecycle steps, never simultaneous. Covers
+    // "the moment you publish" plus equivalent instant-anchoring phrasings
+    // (flagged in review on #623).
+    const instantAnchoringClaim =
+      /the moment you publish\b|\banchor(?:ed|s|ing)?\s+(?:the moment|when|as soon as|instantly when)\s+you publish\b/i;
+    const offenders = allCopy().filter((s) => instantAnchoringClaim.test(s));
     expect(offenders).toEqual([]);
   });
 });
