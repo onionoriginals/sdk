@@ -13,11 +13,23 @@ export interface ProofOptions {
   previousProof?: string | string[];
   challenge?: string;
   domain?: string;
-  /** BBS+ (bbs-2023) base-proof creation: pointers to make mandatory. */
-  mandatoryPointers?: string[];
-  /** BBS+ (bbs-2023): optional public key (derived from privateKey if omitted). */
-  publicKey?: Uint8Array | string;
 }
+
+/**
+ * BBS+ selective disclosure (`bbs-2023`) is parked. The cryptosuite let a
+ * holder derive a proof that hid `validUntil` / `credentialStatus` and still
+ * verified (#591), and the base-proof pointer contract needed to close that
+ * cannot be retrofitted onto already-issued credentials. Rather than ship a
+ * verifier that has to guess which disclosures a proof was allowed to omit,
+ * the suite is disabled end to end: nothing signs, derives, or verifies it.
+ *
+ * Both dispatch points below name the suite explicitly so a `bbs-2023` proof
+ * fails as "disabled", not as an unknown string a caller might think is a
+ * typo. The rejection is the whole contract: a BBS proof is never `verified`.
+ */
+export const BBS_CRYPTOSUITE = 'bbs-2023';
+export const BBS_DISABLED_MESSAGE =
+  'Cryptosuite bbs-2023 is disabled: BBS+ selective disclosure is parked (see onionoriginals/sdk#591). Sign and verify credentials with eddsa-rdfc-2022.';
 
 export class DataIntegrityProofManager {
   static async createProof(document: any, options: ProofOptions): Promise<DataIntegrityProof> {
@@ -35,12 +47,8 @@ export class DataIntegrityProofManager {
       );
     }
     const opts: ProofOptions = { ...options, type: 'DataIntegrityProof' };
-    // Route bbs-2023 through the BBS backend so createProof is symmetric with
-    // verifyProof (which already dispatches bbs-2023). Lazily imported to keep
-    // the BBS backend out of the eddsa-only path.
-    if (opts.cryptosuite === 'bbs-2023') {
-      const { BBSCryptosuiteManager } = await import('../cryptosuites/bbsCryptosuite.js');
-      return await BBSCryptosuiteManager.createProof(document, opts);
+    if (opts.cryptosuite === BBS_CRYPTOSUITE) {
+      throw new Error(BBS_DISABLED_MESSAGE);
     }
     if (opts.cryptosuite !== 'eddsa-rdfc-2022') {
       throw new Error(`Unsupported cryptosuite: ${opts.cryptosuite}`);
@@ -55,13 +63,11 @@ export class DataIntegrityProofManager {
     if ((proof as { type?: unknown })?.type !== 'DataIntegrityProof') {
       return { verified: false, errors: [`Unsupported proof type: ${String((proof as { type?: unknown })?.type)}`] };
     }
-    // Route bbs-2023 through the same hardened path as eddsa-rdfc-2022 so
-    // Verifier's issuer-binding, proofPurpose, validity-period, and status
-    // checks apply to BBS credentials too (issue #315). Dynamically imported,
-    // like CredentialManager, to keep the BBS backend lazy.
-    if (proof.cryptosuite === 'bbs-2023') {
-      const { BBSCryptosuiteManager } = await import('../cryptosuites/bbsCryptosuite.js');
-      return await BBSCryptosuiteManager.verifyProof(document, proof, options);
+    // Fail closed on the parked suite before the generic guard so the error
+    // says why. A base proof and a derived proof both carry this cryptosuite,
+    // so neither form can reach a `verified: true` (#591).
+    if (proof.cryptosuite === BBS_CRYPTOSUITE) {
+      return { verified: false, errors: [BBS_DISABLED_MESSAGE] };
     }
     if (proof.cryptosuite !== 'eddsa-rdfc-2022') {
       return { verified: false, errors: [`Unsupported cryptosuite: ${proof.cryptosuite}`] };

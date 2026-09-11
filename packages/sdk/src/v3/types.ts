@@ -29,11 +29,11 @@ export interface ResourceAttachment {
   content: { encoding: "base64"; data: string };
 }
 
-/** CEL 3 interchange. Version 1/2 envelopes and previous CEL representations are not accepted. */
+/** CEL 3 interchange with a named-information asset identity. The reader also authenticates v3 containers. */
 export interface AssetEnvelope {
   format: "originals/asset";
-  version: 3;
-  assetDid: string;
+  version: 4;
+  assetId: string;
   eventLog: CelDocument;
   resources: ResourceAttachment[];
   /** Retained editing material, never authenticated history or a claimed resource version. */

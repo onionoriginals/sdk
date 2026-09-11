@@ -240,7 +240,7 @@
         },
         "from": {
           "type": "string",
-          "pattern": "^did:(cel|webvh):[^\\s]+$",
+          "pattern": "^(ni:///sha-256;[A-Za-z0-9_-]{43}|did:(cel|webvh):[^\\s]+)$",
           "maxLength": 8192
         },
         "to": {

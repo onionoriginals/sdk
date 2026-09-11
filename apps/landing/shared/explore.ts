@@ -1,7 +1,7 @@
 /** Public discovery projection. Account, funding and claimed Bitcoin state never enter this DTO. */
 export interface PublishedOriginal {
   did: string;
-  assetDid: string;
+  assetId: string;
   title: string;
   createdAt: string;
   controller: string;

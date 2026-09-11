@@ -1,0 +1,137 @@
+{
+  "format": "originals/web-publication",
+  "version": 3,
+  "did": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+  "asset": {
+    "format": "originals/asset",
+    "version": 3,
+    "assetDid": "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+    "eventLog": {
+      "log": [
+        {
+          "event": {
+            "operation": {
+              "type": "create",
+              "data": {
+                "profile": "originals/cel/3",
+                "controller": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+                "createdAt": "2026-09-07T07:30:19.548Z",
+                "nonce": "j45AvU900kRPzBr4_bh3iw",
+                "resources": [
+                  {
+                    "id": "legacy.bin",
+                    "mediaType": "application/octet-stream",
+                    "digestMultibase": "uEiAE01Oly7B4BB9CICBwYpBt8GI43dX_XGshuPrEtD5GeQ"
+                  }
+                ],
+                "name": "SDK 3 compatibility fixture"
+              }
+            }
+          },
+          "proof": [
+            {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "proofPurpose": "assertionMethod",
+              "created": "2026-09-07T07:30:19.552Z",
+              "proofValue": "z4fpgzKnAqpopGJkfwpbb2pfMVrJLb8kzwktAdUD5ixayYutNc3TkeRb39378UV9y1UY8A4vLq5MxdPERHchXg9vv"
+            }
+          ]
+        },
+        {
+          "event": {
+            "previousEvent": "uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+            "operation": {
+              "type": "migrate",
+              "data": {
+                "profile": "originals/cel/3",
+                "from": "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+                "to": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+                "layer": "webvh",
+                "migratedAt": "2026-09-07T07:30:19.698Z"
+              }
+            }
+          },
+          "proof": [
+            {
+              "type": "DataIntegrityProof",
+              "cryptosuite": "eddsa-jcs-2022",
+              "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+              "proofPurpose": "assertionMethod",
+              "created": "2026-09-07T07:30:19.700Z",
+              "proofValue": "z2r1hfYDBeyTAQLHjBZhKfX6UTsQqnofwZSWEHtMf9B2Shrue4iyAyJ1nGDuNRNcX5sma2P5PiJN2KmMgGCRGjTH3"
+            }
+          ]
+        }
+      ]
+    },
+    "resources": [
+      {
+        "id": "legacy.bin",
+        "version": 1,
+        "digestMultibase": "uEiAE01Oly7B4BB9CICBwYpBt8GI43dX_XGshuPrEtD5GeQ",
+        "content": {
+          "encoding": "base64",
+          "data": "AP+ABw=="
+        }
+      }
+    ]
+  },
+  "didLog": [
+    {
+      "versionId": "1-QmX7yqZzpvagCo8TYnCUqjuvdcW1q2UrmuQaqmBw7NNZ53",
+      "versionTime": "2026-09-07T07:30:19Z",
+      "parameters": {
+        "method": "did:webvh:1.0",
+        "scid": "Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT",
+        "updateKeys": [
+          "z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs"
+        ],
+        "portable": false,
+        "nextKeyHashes": [],
+        "watchers": [],
+        "witness": {},
+        "deactivated": false
+      },
+      "state": {
+        "@context": [
+          "https://www.w3.org/ns/did/v1",
+          "https://w3id.org/security/multikey/v1"
+        ],
+        "id": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+        "controller": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA",
+        "verificationMethod": [
+          {
+            "id": "#key-0",
+            "type": "Multikey",
+            "publicKeyMultibase": "z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+            "controller": "did:webvh:Qmczj5G18DQGcUdZUF67gA1J76PZ8Hv21UTfFPnwNCQ6HT:example.com:published:anonymous:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA"
+          }
+        ],
+        "authentication": [
+          "#key-0"
+        ],
+        "assertionMethod": [
+          "#key-0"
+        ],
+        "keyAgreement": [],
+        "capabilityDelegation": [],
+        "capabilityInvocation": [],
+        "alsoKnownAs": [
+          "did:cel:uEiCExNXD0q02kEu20C8WQek11DS1Tia6YMpdnqm9-qs7kA"
+        ]
+      },
+      "proof": [
+        {
+          "type": "DataIntegrityProof",
+          "cryptosuite": "eddsa-jcs-2022",
+          "verificationMethod": "did:key:z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs#z6MktojHN9D8obak7C9wjpTzCRrdE5zC6cxt5ANUFnQskgbs",
+          "created": "2026-09-07T07:30:19Z",
+          "proofPurpose": "assertionMethod",
+          "proofValue": "zGXNhrZRQXFZ2fzRDVUJqn5Mb3mZ8WMsp4iEQwcftTQpzye2H34ZaNYSboe9UpZSYoHr9QZvnaw2Wtm8CSWxFXQT"
+        }
+      ]
+    }
+  ]
+}

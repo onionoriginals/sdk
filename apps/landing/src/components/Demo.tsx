@@ -1224,7 +1224,7 @@ export function Demo() {
 }
 
 function DidList({ asset }: { asset: DemoAssetState }) {
-  const entries: Array<[string, string]> = [['did:cel', asset.did]];
+  const entries: Array<[string, string]> = [['Asset ID', asset.did]];
   if (asset.webvhDid) entries.push(['did:webvh', asset.webvhDid]);
   if (asset.btcoDid) entries.push(['did:btco', asset.btcoDid]);
   return (

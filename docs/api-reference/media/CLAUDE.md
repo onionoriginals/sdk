@@ -171,12 +171,11 @@ An Original asset **IS a CEL** (Cryptographic Event Log, src/cel/): every *autho
 
 **CredentialManager (CredentialManager.ts)** - W3C Verifiable Credential handling
 - JSON-LD credential signing (not JWT)
-- Data Integrity proofs using EdDSA and BBS+ cryptosuites
+- Data Integrity proofs using the EdDSA cryptosuite (`eddsa-rdfc-2022`); BBS+ (`bbs-2023`) is parked and fails closed (#591)
 - Integration with DIDManager for issuer/subject resolution
 
 **Cryptosuites (vc/cryptosuites/)**
 - `eddsa.ts` - EdDSA signatures (Ed25519)
-- `bbs.ts` - BBS+ signatures for selective disclosure
 - No JSON Web Keys - uses multibase Multikey encoding
 
 ### Storage Abstraction (src/storage/)

@@ -42,7 +42,7 @@ export async function verifyExample(): Promise<VerifiedExample> {
     title: manifest.title,
     medium: manifest.style,
     artworkDataUri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(artworkSvg)}`,
-    dids: { cel: history.state.didCel, webvh: manifest.dids["did:webvh"] },
+    dids: { cel: history.state.assetId, webvh: manifest.dids["did:webvh"] },
     profile: "originals/cel/3",
     issuedAt: history.state.createdAt,
     checks,

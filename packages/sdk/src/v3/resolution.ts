@@ -25,6 +25,8 @@ export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
 export interface AssetResolutionOptions {
+  expectedAssetId?: string;
+  /** @deprecated Use expectedAssetId. */
   expectedDid?: string;
 }
 export type AssetResolution =
@@ -201,7 +203,7 @@ export class AssetResolver {
       document,
       attachments,
       this.config,
-      resolution.state.didCel,
+      resolution.state.assetId,
       [],
       this,
     );

@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDocument, verifyHistory } from '@originals/sdk/cel';
+import { parseDocument, verifyHistory, sameAssetIdentity } from '@originals/sdk/cel';
 import { Ed25519Verifier } from '@originals/sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import type { PublishedOriginal } from '../shared/explore';
@@ -75,7 +75,7 @@ export function createExploreRoutes({
                 resolved.did !== row.did ||
                 resolved.doc?.id !== row.did ||
                 resolved.meta.deactivated ||
-                !resolved.doc.alsoKnownAs?.includes(state.didCel)
+                !resolved.doc.alsoKnownAs?.some((alias: string) => sameAssetIdentity(alias, state.assetId))
               )
                 continue;
               const primary = state.resources[0];
@@ -84,7 +84,7 @@ export function createExploreRoutes({
               const digest = primary?.digestMultibase;
               found.set(row.did, {
                 did: row.did,
-                assetDid: state.didCel,
+                assetId: state.assetId,
                 title: state.name || 'Untitled Original',
                 createdAt: state.createdAt,
                 controller: state.controller,
@@ -163,7 +163,7 @@ export function createExploreRoutes({
         const query = q.toLocaleLowerCase();
         const matches = query
           ? all.filter((row) =>
-              [row.title, row.did, row.assetDid, row.controller].some((v) =>
+              [row.title, row.did, row.assetId, row.controller].some((v) =>
                 v.toLocaleLowerCase().includes(query),
               ),
             )

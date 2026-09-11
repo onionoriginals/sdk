@@ -1,5 +1,11 @@
 # Upgrading to `@originals/sdk` 3.0
 
+> Historical guide for the already-published 3.0.0 release. The current
+> [SDK 4 migration guide](MIGRATION_4.0.md) supersedes identity and envelope
+> details. SDK 4 reads strict SDK 3 CEL 3 envelopes without rewriting signed
+> history; this does not restore pre-CEL-3 compatibility. The API-guide links
+> below now describe the current checkout.
+
 SDK 3.0 uses CEL 3 for asset creation, mutation, publication and recovery.
 This changes the asset format and custody contract. The [released API guide](../packages/sdk/V3.md)
 is the complete reference; the earlier asset APIs are not a compatibility path.

@@ -31,7 +31,7 @@ test("creator can serialize exact PNG bytes and a fresh SDK derives the same aut
   });
   expect(await asset.verify()).toBe(true);
   const envelope = asset.serialize();
-  expect(envelope.version).toBe(3);
+  expect(envelope.version).toBe(4);
   expect(envelope.resources[0].content.encoding).toBe("base64");
   const { asset: restored, verification } =
     await OriginalsSDK.create().lifecycle.loadAsset(JSON.stringify(envelope));

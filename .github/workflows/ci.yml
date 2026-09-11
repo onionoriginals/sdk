@@ -144,7 +144,7 @@ jobs:
 
       # apps/ is outside the ./packages/* filter every other job uses, so SDK
       # entry-point breakage lands green and fails at deploy (#470, plan 046 §4).
-      # Not landing:ci — that page-drive needs an API server + TURNKEY_* secrets.
+      # Full creator/browser/Core/ord recovery runs separately in regtest.yml.
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 

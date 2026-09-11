@@ -1,0 +1,109 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "scope": {
+    "base": "349219265a890a75b3e088e5352856237b4caa7d",
+    "branch": "codex/identity-regtest-completion",
+    "head_sha": "8351976159866c8770dcdcb93a9c4ba2678e43e5",
+    "pr_url": null,
+    "files_changed": 96,
+    "mode": "local-aligned",
+    "diff_sha256": "1ec51114d0e033b949d949ece244d74215478ef45499e5af1a85875b39b07a93"
+  },
+  "intent": "Complete issues 583, 570 and 572: canonical ni asset identity with strict SDK 3 artifact reads and SDK 4/CEL 2 major changes; real Core/ord restart controls and actual Chromium inscription recovery without fresh signing.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "project-standards",
+    "testing",
+    "maintainability",
+    "security",
+    "api-contract",
+    "reliability",
+    "julik-frontend-races",
+    "adversarial-claude"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "readEnvelope and subsequent callers repeat authenticated-history verification. The duplication is confirmed, but no measured failure or exceeded budget was established; reuse is an optional optimization that must preserve authentication at every public input boundary.",
+    "Repository call sites were inspected through text search; undocumented consumers outside the repository were not exhaustively reviewed."
+  ],
+  "testing_gaps": [
+    "The real Chromium proof uses one fixed account and newly written SDK 4 recovery records. Account transitions and historical SDK 3 browser-key isolation have unit coverage, but are not combined in the mounted Chromium recovery scenario."
+  ],
+  "coverage": {
+    "local_reviewers_completed": 8,
+    "failed_reviewers": [],
+    "standards": "CLAUDE.md fallback governs all changed paths; no applicable CODING_STANDARDS.md.",
+    "selection": {
+      "testing": "changed fixtures, browser harness and meaningful runtime branches",
+      "maintainability": "large structural diff exceeding 200 executable lines",
+      "security": "identity authentication and disposable custody endpoint isolation",
+      "api-contract": "published package identity, container fields and deprecated APIs",
+      "reliability": "restart lifecycle and retained publication recovery",
+      "julik-frontend-races": "auth mounting and async UI recovery boundaries",
+      "adversarial-claude": "signature/persistence boundaries and CI verification fidelity"
+    },
+    "cross_model": {
+      "cross_model_route": "claude",
+      "cross_model_target": "claude",
+      "cross_model_harness": "claude",
+      "model_requested": "claude-opus-5",
+      "model_actual": "claude-opus-5",
+      "effort_requested": "high",
+      "effort_actual": "unverified",
+      "receipt_supported": true,
+      "independence_verified": true
+    },
+    "peer_lifecycle": "Completed; artifact read through verified runner result; consumed terminal job directory deleted.",
+    "suppressed_by_confidence": {
+      "50": 4
+    },
+    "malformed_returns": 0,
+    "malformed_findings": 0,
+    "validator": {
+      "batch_count": 1,
+      "selected": 3,
+      "cross_model_shortcut_count": 0,
+      "verdicts": [
+        {
+          "#": 1,
+          "validated": false,
+          "reason": "The migration contract promises SDK 4 reading unchanged SDK 3 artifacts; it does not require SDK 3 readers to accept new SDK 4 publications."
+        },
+        {
+          "#": 2,
+          "validated": true,
+          "reason": "readEnvelope verifies CEL proofs and callers immediately verify again; redundant synchronous cryptographic work is mechanically present."
+        },
+        {
+          "#": 3,
+          "validated": false,
+          "reason": "terminate awaits child.exited after SIGKILL and restart awaits stopChildren before endpoint probes; the alleged surviving daemon cannot follow the cited path."
+        }
+      ],
+      "dropped": 2,
+      "validation_degraded": []
+    },
+    "mode_aware_demotion_count": 1,
+    "demotion_reason": "Confirmed duplicate verification is advisory efficiency work without a measured user-visible failure or violated contract; it remains in residual_risks.",
+    "resolved_advisories": [
+      "Published SDK 3 Bitcoin wrapper fixture now proves exact-pair recovery without custody.",
+      "Public declaration fixture now checks deprecated identity APIs, the v4 envelope and new package subpaths."
+    ],
+    "peer_scope_note": "Peer began with the tracked snapshot before later compatibility/type fixtures and retained proof artifacts. Local testing and orchestrator inspection covered those additive files; no runtime source changes followed the peer snapshot.",
+    "integration_note": "origin/main 4a72744 merged into HEAD83519761; runtime/source/test files match pre-merge snapshot4caeb08d. Only an upstream empty documentation changeset was added by integration.",
+    "verification": "This review ran no tests or builds. Parent owns passing package/type/lint/Node ESM/browser checks and real Core/ord/Chromium receipts. Local 3-second TTI gate still fails in both baseline and new tree; no threshold was weakened.",
+    "settlement_suppression": "Not evaluated: no plan discovered. Explicit migration contracts establish backward reads, not old-reader/new-data compatibility.",
+    "untracked_excluded": []
+  },
+  "artifact_path": "/tmp/compound-engineering-501/ce-code-review/20260907-003521-535836cb",
+  "run_id": "20260907-003521-535836cb"
+}

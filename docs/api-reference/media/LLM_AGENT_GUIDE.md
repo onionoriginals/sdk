@@ -989,22 +989,14 @@ const result = await sdk.credentials.verifyCredentialChain(credentials);
 // { valid: boolean, errors: string[], chainLength: number }
 ```
 
-### BBS+ Selective Disclosure
+### JSON Pointer Field Access
+
+BBS+ selective disclosure (`bbs-2023`) is parked and disabled: `prepareSelectiveDisclosure`
+and `deriveSelectiveProof` no longer exist, signing with `cryptosuite: 'bbs-2023'` throws,
+and a credential carrying a `bbs-2023` proof never verifies (see
+[#591](https://github.com/onionoriginals/sdk/issues/591)). Use `eddsa-rdfc-2022`.
 
 ```typescript
-// Prepare for selective disclosure
-const prepared = await sdk.credentials.prepareSelectiveDisclosure(credential, {
-  mandatoryPointers: ['/credentialSubject/id'],
-  selectivePointers: ['/credentialSubject/name', '/credentialSubject/email']
-});
-
-// Create derived proof
-const derived = await sdk.credentials.deriveSelectiveProof(
-  credential,
-  ['/credentialSubject/id', '/credentialSubject/name']
-);
-// { credential, disclosedFields, hiddenFields }
-
 // Get field by JSON Pointer
 const value = sdk.credentials.getFieldByPointer(credential, '/credentialSubject/name');
 ```

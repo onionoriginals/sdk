@@ -1,0 +1,71 @@
+{
+  "result": "pass",
+  "chain": "regtest",
+  "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+  "ord": "ord 0.29.0",
+  "inscriptionId": "82fc9d3722a38a6e017d9c6504469f15bff05d0e1ab6bd7223c9dc3f880bcf7fi0",
+  "inscriptionSat": 5000000000,
+  "contentSha256": "446202974996f85954ceb12b80a9327b2ec8826bfac31c6c2306923ea104fe5c",
+  "restarts": [
+    {
+      "target": "ord",
+      "preservedTip": "6e11da71a1f937ae7dce841d7d236db2e60df4658e104f2b16eb19478adb2891",
+      "preservedHeight": 103,
+      "indexedNextBlock": "15094ce2e477741d491ebfa7b68a7de6a4f06db3c14d10e9b9ecb3b54b9c63da",
+      "cookieRotated": false
+    },
+    {
+      "target": "core",
+      "preservedTip": "15094ce2e477741d491ebfa7b68a7de6a4f06db3c14d10e9b9ecb3b54b9c63da",
+      "preservedHeight": 104,
+      "indexedNextBlock": "6de401d31fdd8230af4b74cc5aa41269ae822d063be621957749bc2782096cd2",
+      "cookieRotated": true
+    },
+    {
+      "target": "both",
+      "preservedTip": "6de401d31fdd8230af4b74cc5aa41269ae822d063be621957749bc2782096cd2",
+      "preservedHeight": 105,
+      "indexedNextBlock": "302bbb2966b0522fd4c2a5bfe45da3a3e48b90e89692ad5e43edb2caa8fc8eb6",
+      "cookieRotated": true
+    }
+  ],
+  "dataDir": "/var/folders/8d/12c7x8091yg51n30wlqqzdv80000gn/T/originals-regtest-rCjbyu",
+  "logs": [
+    "bitcoin.1.error.log",
+    "bitcoin.1.log",
+    "bitcoin.2.error.log",
+    "bitcoin.2.log",
+    "bitcoin.3.error.log",
+    "bitcoin.3.log",
+    "bitcoin.4.error.log",
+    "bitcoin.4.log",
+    "bitcoin.error.log",
+    "bitcoin.log",
+    "ord.1.error.log",
+    "ord.1.log",
+    "ord.2.error.log",
+    "ord.2.log",
+    "ord.3.error.log",
+    "ord.3.log",
+    "ord.4.error.log",
+    "ord.4.log",
+    "ord.error.log",
+    "ord.log"
+  ],
+  "checks": [
+    "mature funded wallet",
+    "real mined inscription",
+    "ord-only restart",
+    "Core-only restart",
+    "combined restart",
+    "same chain and wallet balances",
+    "cookie refresh",
+    "inscription satpoint and bytes preserved",
+    "new block indexed after each restart",
+    "serialized concurrent restarts",
+    "failed restart rejects and stops both endpoints",
+    "repeat stop is safe",
+    "restart after stop rejects",
+    "all process-generation logs retained"
+  ]
+}

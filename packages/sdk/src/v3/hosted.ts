@@ -7,6 +7,8 @@ import {
   decodeUtf8,
   encodeDocument,
   parseAssetDid,
+  assetDigest,
+  sameAssetIdentity,
   parseDocument,
   signEvent,
   verifyHistory,
@@ -20,7 +22,7 @@ import type { DIDDocument } from "../types/did.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
 import { attachment, resourceCatalog } from "./resources.js";
-import { byteBudget, readEnvelope } from "./envelope.js";
+import { byteBudget, decodeEnvelope } from "./envelope.js";
 import { captureSigner } from "./options.js";
 import type { AssetEnvelope, OriginalsConfig, LoadedAsset } from "./types.js";
 import type { AssetResolver } from "./resolution.js";
@@ -126,7 +128,7 @@ export class HostedAssets {
         .trim()
         .split("\n")
         .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
-      await this.method(state.alias, didLog, state.didCel);
+      await this.method(state.alias, didLog, state.assetId);
       return {
         format: "originals/web-publication",
         version: 3,
@@ -138,7 +140,7 @@ export class HostedAssets {
     const paths = options.paths ?? [
       "published",
       "anonymous",
-      asset.id.slice(8),
+      assetDigest(asset.id),
     ];
     const key = methodSigner.controller.slice(8);
     const { prepareDataForSigning } = await import("didwebvh-ts");
@@ -205,7 +207,7 @@ export class HostedAssets {
     if (
       resolved.did !== did ||
       doc?.id !== did ||
-      !doc.alsoKnownAs?.includes(expectedDid) ||
+      !doc.alsoKnownAs?.some((alias) => sameAssetIdentity(alias, expectedDid)) ||
       resolved.meta.deactivated
     )
       return error(
@@ -220,7 +222,7 @@ export class HostedAssets {
     resolver?: AssetResolver,
   ): Promise<PublishedWebAsset> {
     const prepared = structuredClone(input);
-    const envelope = readEnvelope(prepared.asset);
+    const envelope = decodeEnvelope(prepared.asset);
     if (envelope.unverified?.localResources.length)
       return error("ASSET_WEB_STATE", "Unsigned drafts cannot be published");
     if (
@@ -232,7 +234,7 @@ export class HostedAssets {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       [],
       resolver,
     );
@@ -324,7 +326,7 @@ export class HostedAssets {
       .trim()
       .split("\n")
       .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
-    const didDocument = await this.method(did, log, history.state.didCel);
+    const didDocument = await this.method(did, log, history.state.assetId);
     const resources = [];
     let total = 0;
     for (const resource of resourceCatalog(document)) {
@@ -345,13 +347,13 @@ export class HostedAssets {
     }
     const envelope: AssetEnvelope = {
       format: "originals/asset",
-      version: 3,
-      assetDid: history.state.didCel,
+      version: 4,
+      assetId: history.state.assetId,
       eventLog: document,
       resources,
     };
     // Performs digest/reference matching, including hostile substituted media.
-    new OriginalsAsset(document, resources, {}, history.state.didCel);
+    new OriginalsAsset(document, resources, {}, history.state.assetId);
     return { document, envelope, didDocument };
   }
 
@@ -359,7 +361,7 @@ export class HostedAssets {
     try {
       const read = await this.read(did);
       const state = verifyHistory(read.document).state;
-      return state.didCel === expectedDid
+      return sameAssetIdentity(state.assetId, expectedDid)
         ? { status: "verified", did, head: state.head }
         : { status: "incomplete", did, reason: "Genesis mismatch" };
     } catch {
@@ -377,7 +379,7 @@ export class HostedAssets {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       [],
       resolver,
     );

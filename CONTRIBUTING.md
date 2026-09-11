@@ -84,7 +84,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/). 
 feat(sdk): add batch credential signing
 fix(bitcoin): correct fee estimation for large inscriptions
 docs(sdk): update WebVH network configuration guide
-test(vc): add BBS+ selective disclosure edge cases
+test(vc): add status-list revocation edge cases
 ```
 
 Commits are validated by a commit-lint hook — your commit will be rejected if it doesn't match the format.

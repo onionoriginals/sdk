@@ -1,5 +1,10 @@
 # Regtest implementation and validation record
 
+Historical September 5 snapshot: implementation status, envelope versions and
+CI statements below describe that earlier branch. For current commands, CEL 3 /
+version-4 envelopes and browser/node restart evidence, use [the current guide](README.md),
+[browser verification](browser-verification.md) and [restart verification](restart-verification.md).
+
 Date: 2026-09-05. Branch: `codex/regtest-flow`.
 Base and HEAD: `071b898420dd1052f4e4d34a27e59bea167784d0`.
 The implementation is an uncommitted local diff in an isolated worktree. The

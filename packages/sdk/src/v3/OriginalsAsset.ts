@@ -69,7 +69,7 @@ export class OriginalsAsset {
   }
   /** Stable genesis identity, independent of later aliases or proofs. */
   get id(): string {
-    return this.state.didCel;
+    return this.state.assetId;
   }
   /** Detached log copy; mutating it cannot replace this instance's accepted history. */
   get celLog(): CelDocument {
@@ -364,11 +364,11 @@ export class OriginalsAsset {
     const state = this.state;
     const publication =
       state.layer === "btco" && this.resolver
-        ? await this.resolver.check(state.alias, state.didCel)
+        ? await this.resolver.check(state.alias, state.assetId)
         : undefined;
     const hosted =
       state.layer === "webvh" && this.resolver
-        ? await this.resolver.checkWeb(state.alias, state.didCel)
+        ? await this.resolver.checkWeb(state.alias, state.assetId)
         : undefined;
     return summarizeVerification(this, publication, hosted);
   }
@@ -382,8 +382,8 @@ export class OriginalsAsset {
   serialize(): AssetEnvelope {
     return {
       format: "originals/asset",
-      version: 3,
-      assetDid: this.id,
+      version: 4,
+      assetId: this.id,
       eventLog: this.celLog,
       resources: copyAttachments(this.#attachments),
       ...(this.#localResources.length

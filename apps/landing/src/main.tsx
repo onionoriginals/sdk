@@ -1,5 +1,4 @@
-// Must be first: sets globalThis.Buffer before the eagerly-imported auth/Turnkey
-// modules (via AuthProvider) evaluate and reference it.
+// Install browser globals before the application graph evaluates.
 import './shims/buffer-global';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -13,8 +12,8 @@ import './design/global.css';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    {new URLSearchParams(location.search).has('smoke')
+      ? <App />
+      : <AuthProvider><App /></AuthProvider>}
   </React.StrictMode>
 );

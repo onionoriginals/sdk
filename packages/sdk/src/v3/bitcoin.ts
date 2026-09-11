@@ -30,7 +30,7 @@ import {
   type PreparedInscriptionOnSat,
 } from "../bitcoin/inscribe-on-sat.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
-import { readEnvelope } from "./envelope.js";
+import { decodeEnvelope } from "./envelope.js";
 import { captureSigner } from "./options.js";
 import { AssetResolver, btcoDid } from "./resolution.js";
 import type { AssetEnvelope, OriginalsConfig } from "./types.js";
@@ -129,12 +129,12 @@ export class BitcoinPublications {
     options: BitcoinPublicationOptions,
   ): Promise<PreparedBitcoinPublication> {
     // Copy all mutable publication input before any provider/signing await.
-    const envelope = readEnvelope(input.serialize());
+    const envelope = decodeEnvelope(input.serialize());
     const asset = new OriginalsAsset(
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       envelope.unverified?.localResources,
       this.resolver,
     );
@@ -181,7 +181,7 @@ export class BitcoinPublications {
         "Only the current controller can sign the boundary migration",
       );
     if (state.layer === "webvh") {
-      const hosted = await this.resolver.checkWeb(state.alias, state.didCel);
+      const hosted = await this.resolver.checkWeb(state.alias, state.assetId);
       if (hosted.status !== "verified" || hosted.head !== state.head)
         invalid(
           "ASSET_WEBVH_BINDING",
@@ -267,7 +267,7 @@ export class BitcoinPublications {
             );
           accepted = resolution.state;
           if (
-            accepted.didCel !== state.didCel ||
+            accepted.assetId !== state.assetId ||
             full.log.length <= accepted.entryCount ||
             eventDigest(full.log[accepted.entryCount - 1].event) !==
               accepted.head
@@ -367,7 +367,7 @@ export class BitcoinPublications {
         "ASSET_BITCOIN_PUBLICATION",
         "Unsupported prepared Bitcoin publication",
       );
-    const envelope = readEnvelope(input.asset),
+    const envelope = decodeEnvelope(input.asset),
       document = validateDocument(input.document);
     if (envelope.unverified?.localResources.length)
       invalid(
@@ -378,7 +378,7 @@ export class BitcoinPublications {
       envelope.eventLog,
       envelope.resources,
       this.config,
-      envelope.assetDid,
+      envelope.assetId,
       [],
       this.resolver,
     );
