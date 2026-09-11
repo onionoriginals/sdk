@@ -43,12 +43,16 @@ export interface PublicationObservation {
  * node ("node-validated") or are trusted assertions from the same service that
  * supplies Ordinals interpretation ("provider-asserted"). "unavailable" means no
  * snapshot was ever obtained (for example, no provider is configured at all) —
- * distinct from a provider having supplied and stood behind a snapshot. No
- * adapter in this package performs independent validation today; omit the
- * field on a real snapshot to get the honest "provider-asserted" default
- * rather than claiming a stronger guarantee.
+ * distinct from a provider having supplied and stood behind a snapshot, and
+ * therefore never a valid {@link SatSnapshot.chainEvidence} claim: obtaining a
+ * snapshot at all rules it out. No adapter in this package performs
+ * independent validation today; omit the field on a real snapshot to get the
+ * honest "provider-asserted" default rather than claiming a stronger
+ * guarantee.
  */
 export type ChainEvidence = "unavailable" | "provider-asserted" | "node-validated";
+/** A snapshot was obtained, so its own evidence can only be a live claim, never "unavailable". */
+export type SnapshotChainEvidence = Exclude<ChainEvidence, "unavailable">;
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;
@@ -66,10 +70,10 @@ export interface SatSnapshot {
   /**
    * Defaults to "provider-asserted" when omitted. `resolveSat` passes an
    * explicit claim straight through into the resolution's `chainEvidence`
-   * without relabeling it — including a self-contradictory "unavailable" on
-   * an otherwise-complete snapshot. See {@link ChainEvidence}.
+   * without relabeling it. See {@link ChainEvidence} and
+   * {@link SnapshotChainEvidence}.
    */
-  chainEvidence?: ChainEvidence;
+  chainEvidence?: SnapshotChainEvidence;
 }
 export type ResolutionFailure =
   | "invalid"
@@ -139,13 +143,12 @@ export function resolveSat(
   snapshot: SatSnapshot,
   options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
 ): SatResolution {
-  // Pass an explicit snapshot claim straight through, whatever it is; only an
-  // omitted claim gets the honest "provider-asserted" floor. Never relabel a
-  // provider's own "unavailable"/"node-validated" claim to something else.
+  // A snapshot was obtained, so "unavailable" is not a reachable input here
+  // (see SnapshotChainEvidence); only "node-validated" is ever an upgrade
+  // over the honest "provider-asserted" floor.
   const chainEvidence: ChainEvidence =
-    snapshot.chainEvidence === "node-validated" ||
-    snapshot.chainEvidence === "unavailable"
-      ? snapshot.chainEvidence
+    snapshot.chainEvidence === "node-validated"
+      ? "node-validated"
       : "provider-asserted";
   const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
     ...baseFailure(status, reason),
