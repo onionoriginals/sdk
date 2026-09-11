@@ -195,6 +195,15 @@ export class DemoEngine {
         "Ed25519",
         crypto.getRandomValues(new Uint8Array(32)),
       );
+      // Unlike the Turnkey-held key below, this one lives only in this tab's
+      // memory: say so now, at mint time, rather than let a later reload
+      // discover it silently (issue #598 — "do not silently create a
+      // durable hosted asset whose controller disappears with the tab").
+      this.emit(
+        "authorship:ephemeral",
+        `Authoring as ${short(this.authorshipSigner.controller)} — held only in this browser tab; it will not survive a reload, and this Original could not be edited again without it`,
+        { verificationMethodId: this.authorshipSigner.controller },
+      );
       return this.authorshipSigner;
     }
     if (!this.subOrgId)

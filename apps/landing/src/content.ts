@@ -547,8 +547,14 @@ export const demo = {
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
+    //
+    // Names two separate risks, not one: the shared demo path expires the
+    // hosted log after a couple of hours regardless of the browser, but the
+    // signing key that can *edit* it is lost far sooner — on the next reload
+    // of this tab, whether or not the log itself is still there to view
+    // (issue #598).
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
+      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. It also means the key that can edit this Original lives only in this browser tab — reload or close it and the log may still be there to view, but nothing can add to it any more. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history, and your key comes back with you.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
