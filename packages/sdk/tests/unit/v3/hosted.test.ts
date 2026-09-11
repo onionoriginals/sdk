@@ -252,3 +252,31 @@ test('a well-formed but mismatched public log fails closed under requirePublicRe
     }),
   ).rejects.toThrow('not independently reachable');
 });
+
+// A log that still resolves to the SAME DID and asset binding is not
+// necessarily *this* publication — a stale cached copy would resolve just
+// as validly. The check must compare exact published bytes, not merely
+// "does this independently resolve to the right DID", or a stale-but-genuine
+// public copy would be labeled independently-verified.
+test('a byte-different copy of this exact DID and asset fails closed even though it independently resolves fine', async () => {
+  const store = storage();
+  let publicBytes: Uint8Array | null = null;
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+    publicReachability: async () => publicBytes,
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: 'example.com',
+  });
+  // Stale by exactly one trailing byte: still the same DID, still a
+  // validly resolving log, still bound to the same asset genesis.
+  publicBytes = new TextEncoder().encode(
+    prepared.didLog.map((entry) => JSON.stringify(entry)).join('\n') + '\n\n',
+  );
+  await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
+    'not independently reachable',
+  );
+});

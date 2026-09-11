@@ -9,6 +9,8 @@ export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDReso
 
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./hosted.js";
 
+export { fetchPublicReachabilityCheck } from "./hosted.js";
+
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./bitcoin.js";
 
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./envelope.js";

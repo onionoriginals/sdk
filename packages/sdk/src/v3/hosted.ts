@@ -77,13 +77,43 @@ export interface HostedAssetsOptions {
    */
   requirePublicReachability?: boolean;
 }
-/** A ready-made `publicReachability` check: a real HTTPS GET, bypassing any configured storage adapter entirely. */
+/**
+ * A ready-made `publicReachability` check: a real HTTPS GET, bypassing any
+ * configured storage adapter entirely. Bounded so a slow or oversized
+ * response (a hung connection, or a host that streams far more than a DID
+ * log could ever legitimately be) cannot block or exhaust publication.
+ */
 export async function fetchPublicReachabilityCheck(
   url: string,
 ): Promise<Uint8Array | null> {
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return new Uint8Array(await response.arrayBuffer());
+  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok || !response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      byteBudget(total);
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 export interface HostedEvidence {
   status: "verified" | "incomplete";
@@ -258,6 +288,14 @@ export class HostedAssets {
     input: PreparedWebPublication,
     resolver?: AssetResolver,
   ): Promise<PublishedWebAsset> {
+    if (
+      this.hostingOptions.requirePublicReachability &&
+      !this.hostingOptions.publicReachability
+    )
+      return error(
+        "ASSET_WEB_REACHABILITY_CHECK_REQUIRED",
+        "Configure a publicReachability check before requiring independent verification",
+      );
     const prepared = structuredClone(input);
     const envelope = decodeEnvelope(prepared.asset);
     if (envelope.unverified?.localResources.length)
@@ -337,7 +375,6 @@ export class HostedAssets {
       domain,
       prefix,
       prepared,
-      asset.id,
     );
     return { status: "published", did: prepared.did, asset, hostingEvidence };
   }
@@ -348,33 +385,28 @@ export class HostedAssets {
    * itself, not that the advertised HTTPS URL is reachable from anywhere
    * else. A configured `publicReachability` check is the one path that asks
    * a source other than the write-side adapter.
+   *
+   * Comparing exact bytes against the just-written `did.jsonl`, rather than
+   * independently re-resolving the fetched log, matters: a log that still
+   * resolves to this same DID and asset binding is not necessarily *this*
+   * publication — a stale cached copy missing this exact update would
+   * resolve just as validly. Only byte-for-byte agreement with what was
+   * just published proves the public copy is current, not merely genuine.
    */
   private async confirmPublicReachability(
     domain: string,
     prefix: string,
     prepared: PreparedWebPublication,
-    expectedDid: string,
   ): Promise<HostingEvidence> {
     const checker = this.hostingOptions.publicReachability;
-    if (!checker) {
-      if (this.hostingOptions.requirePublicReachability)
-        return error(
-          "ASSET_WEB_REACHABILITY_CHECK_REQUIRED",
-          "Configure a publicReachability check before requiring independent verification",
-        );
-      return "adapter-asserted";
-    }
+    if (!checker) return "adapter-asserted";
+    const published = new TextEncoder().encode(
+      prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    );
     let verified = false;
     try {
       const fetched = await checker(`https://${domain}/${prefix}did.jsonl`);
-      if (fetched) {
-        const log = decodeUtf8(fetched)
-          .trim()
-          .split("\n")
-          .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
-        await this.method(prepared.did, log, expectedDid);
-        verified = true;
-      }
+      verified = !!fetched && bytesEqual(fetched, published);
     } catch {
       verified = false;
     }
