@@ -869,6 +869,91 @@ describe('StatusListManager', () => {
       expect(result.errors.some(e => /malformed credentialStatus entry/i.test(e))).toBe(true);
     });
 
+    test('#592 verifyCredentialWithStatus verifies entries that reference two different supplied status lists', async () => {
+      // A credential can legitimately declare separate revocation and
+      // suspension entries backed by two distinct lists. Passing an array of
+      // status list credentials must let every entry be checked against the
+      // list it actually names, not just the first/only one supplied.
+      const { OriginalsSDK } = await import('../../../src');
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      (sdk.credentials as any).verifyCredential = async () => true;
+
+      const revocationList = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/4-revocation',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      const revocationEntry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/592/4-revocation',
+        1,
+        'revocation'
+      );
+      const suspensionList = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/4-suspension',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'suspension',
+      });
+      const suspendedSuspensionList = sdk.statusList.setStatus(suspensionList, 2, true);
+      const suspensionEntry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/592/4-suspension',
+        2,
+        'suspension'
+      );
+
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: [revocationEntry, suspensionEntry],
+      };
+
+      // Neither entry alone matches the wrong list: only supplying the array
+      // of both lets both be evaluated correctly.
+      const result = await sdk.credentials.verifyCredentialWithStatus(
+        credential as any,
+        [revocationList, suspendedSuspensionList]
+      );
+      expect(result.suspended).toBe(true);
+      expect(result.revoked).toBe(false);
+      expect(result.verified).toBe(false);
+      expect(result.errors).toContain('Credential has been suspended');
+    });
+
+    test('#592 verifyCredentialWithStatus fails closed on an entry whose list was not among the supplied lists', async () => {
+      const { OriginalsSDK } = await import('../../../src');
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      (sdk.credentials as any).verifyCredential = async () => true;
+
+      const suppliedList = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/5-supplied',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      const otherEntry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/592/5-not-supplied',
+        0,
+        'revocation'
+      );
+
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: [otherEntry],
+      };
+
+      const result = await sdk.credentials.verifyCredentialWithStatus(
+        credential as any,
+        suppliedList
+      );
+      expect(result.verified).toBe(false);
+      expect(result.errors.some(e => /does not match the id of any supplied status list credential/.test(e))).toBe(true);
+    });
+
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });

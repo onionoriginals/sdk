@@ -449,22 +449,24 @@ export class CredentialManager {
    * on `verified` alone cannot accept a revoked credential.
    *
    * `credentialStatus` may declare more than one entry (VCDM 2.0 permits an
-   * array); every entry is evaluated, but all of them are checked against the
-   * single `statusListCredential` supplied here. An entry whose own
-   * `statusListCredential` reference does not match the supplied list fails
-   * closed with a clear mismatch error rather than being skipped — this
-   * method cannot confirm a credential whose entries reference more than one
-   * distinct list. For that case, use `Verifier.checkCredentialStatus` /
-   * `Verifier.verifyCredential` with a `statusListResolver`, which resolves
-   * each entry's own reference independently.
+   * array), and different entries may reference different status lists (e.g.
+   * separate revocation and suspension lists). `statusListCredential` accepts
+   * either one credential or an array of them; every declared entry is
+   * evaluated against whichever supplied list its own `statusListCredential`
+   * reference names. An entry whose reference does not match any supplied
+   * list fails closed with a clear "no matching list supplied" error rather
+   * than being skipped. For a resolver-based alternative that fetches each
+   * entry's list on demand instead of requiring the caller to supply all of
+   * them up front, use `Verifier.checkCredentialStatus` /
+   * `Verifier.verifyCredential` with a `statusListResolver`.
    *
    * @param credential - The credential to verify
-   * @param statusListCredential - The resolved status list credential (required if credential has credentialStatus)
+   * @param statusListCredential - The resolved status list credential(s) (required if credential has credentialStatus); pass an array when entries reference more than one list
    * @returns Result with signature validity and revocation status
    */
   async verifyCredentialWithStatus(
     credential: VerifiableCredential,
-    statusListCredential?: VerifiableCredential
+    statusListCredential?: VerifiableCredential | VerifiableCredential[]
   ): Promise<{
     verified: boolean;
     revoked: boolean;
@@ -490,8 +492,13 @@ export class CredentialManager {
     // singleton or an array (VCDM 2.0); every declared entry is evaluated so
     // an array-shaped value cannot skip status checking entirely (issue #592).
     const entries = credentialStatusEntries(credential);
+    const suppliedLists: VerifiableCredential[] = !statusListCredential
+      ? []
+      : Array.isArray(statusListCredential)
+        ? statusListCredential
+        : [statusListCredential];
     if (entries.length > 0) {
-      if (!statusListCredential) {
+      if (suppliedLists.length === 0) {
         // Fail closed: the credential declares a status entry but no status
         // list was supplied to evaluate it. Leaving `verified: true` here would
         // report an unknown revocation state as "valid", so a caller gating on
@@ -523,16 +530,29 @@ export class CredentialManager {
           }
           const bitstringStatus = status as BitstringStatusListEntry;
           try {
+            // Different entries may reference different lists (e.g. separate
+            // revocation and suspension lists) — pick the supplied list this
+            // entry actually names rather than always checking against the
+            // first/only one. No match means this entry cannot be evaluated
+            // with what the caller supplied.
+            const matchingList = suppliedLists.find((list) => list.id === bitstringStatus.statusListCredential);
+            if (!matchingList) {
+              throw new Error(
+                `This entry's statusListCredential reference (${bitstringStatus.statusListCredential}) does not match ` +
+                `the id of any supplied status list credential`
+              );
+            }
+
             // Trust checks (issue #238, shared with Verifier via
-            // validateStatusListCredentialTrust — issue #301): the supplied
-            // status list credential must be the referenced one, must carry a
-            // valid proof, and must be issued by the checked credential's
-            // issuer — otherwise a holder can hand the verifier a fabricated
-            // all-zeros list and bypass revocation.
+            // validateStatusListCredentialTrust — issue #301): the matched
+            // status list credential must carry a valid proof and must be
+            // issued by the checked credential's issuer — otherwise a holder
+            // can hand the verifier a fabricated all-zeros list and bypass
+            // revocation.
             const trust = await validateStatusListCredentialTrust(
               credential,
               bitstringStatus,
-              statusListCredential,
+              matchingList,
               async (listVC) => {
                 const ok = await this.verifyCredential(listVC);
                 return { verified: ok, errors: [] };
@@ -542,7 +562,7 @@ export class CredentialManager {
               throw new Error(trust.errors.join('; '));
             }
 
-            const result = this.statusList.checkStatus(bitstringStatus, statusListCredential);
+            const result = this.statusList.checkStatus(bitstringStatus, matchingList);
             if (result.isSet) {
               // A determinate revoked/suspended state must fail verification:
               // a caller gating on `verified` alone would otherwise accept a
