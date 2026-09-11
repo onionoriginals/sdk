@@ -48,6 +48,42 @@ export interface PublishedWebAsset {
   status: "published";
   did: string;
   asset: OriginalsAsset;
+  /**
+   * 'independently-verified' only when a `publicReachability` check fetched the
+   * advertised URL through a path separate from the write-side storage adapter
+   * and confirmed it serves this exact method history. 'adapter-asserted' means
+   * only the same storage adapter that wrote the log was asked to read it back —
+   * true today of every publication with no `publicReachability` configured.
+   */
+  hostingEvidence: HostingEvidence;
+}
+export type HostingEvidence = "adapter-asserted" | "independently-verified";
+/**
+ * Fetches a publicly advertised hosted URL independently of the storage adapter
+ * used to write it. Returning `null` means the URL could not be confirmed public;
+ * throwing is treated the same way. Core cannot verify the checker itself is
+ * independent — only that supplying one is an explicit, non-default choice.
+ */
+export type PublicReachabilityCheck = (
+  url: string,
+) => Promise<Uint8Array | null>;
+export interface HostedAssetsOptions {
+  /** Independent confirmation that the advertised WebVH log is actually public. */
+  publicReachability?: PublicReachabilityCheck;
+  /**
+   * Fail publication instead of silently labeling it 'adapter-asserted' when the
+   * advertised log cannot be independently confirmed reachable. Requires
+   * `publicReachability` to also be configured.
+   */
+  requirePublicReachability?: boolean;
+}
+/** A ready-made `publicReachability` check: a real HTTPS GET, bypassing any configured storage adapter entirely. */
+export async function fetchPublicReachabilityCheck(
+  url: string,
+): Promise<Uint8Array | null> {
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  return new Uint8Array(await response.arrayBuffer());
 }
 export interface HostedEvidence {
   status: "verified" | "incomplete";
@@ -78,6 +114,7 @@ export class HostedAssets {
   constructor(
     private readonly storage: StorageAdapter,
     private readonly config: OriginalsConfig,
+    private readonly hostingOptions: HostedAssetsOptions = {},
   ) {}
 
   async prepare(
@@ -296,7 +333,59 @@ export class HostedAssets {
         },
       );
     }
-    return { status: "published", did: prepared.did, asset };
+    const hostingEvidence = await this.confirmPublicReachability(
+      domain,
+      prefix,
+      prepared,
+      asset.id,
+    );
+    return { status: "published", did: prepared.did, asset, hostingEvidence };
+  }
+
+  /**
+   * Every write above went through `this.storage`. Reading the result back
+   * through that same adapter would only prove the adapter agrees with
+   * itself, not that the advertised HTTPS URL is reachable from anywhere
+   * else. A configured `publicReachability` check is the one path that asks
+   * a source other than the write-side adapter.
+   */
+  private async confirmPublicReachability(
+    domain: string,
+    prefix: string,
+    prepared: PreparedWebPublication,
+    expectedDid: string,
+  ): Promise<HostingEvidence> {
+    const checker = this.hostingOptions.publicReachability;
+    if (!checker) {
+      if (this.hostingOptions.requirePublicReachability)
+        return error(
+          "ASSET_WEB_REACHABILITY_CHECK_REQUIRED",
+          "Configure a publicReachability check before requiring independent verification",
+        );
+      return "adapter-asserted";
+    }
+    let verified = false;
+    try {
+      const fetched = await checker(`https://${domain}/${prefix}did.jsonl`);
+      if (fetched) {
+        const log = decodeUtf8(fetched)
+          .trim()
+          .split("\n")
+          .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
+        await this.method(prepared.did, log, expectedDid);
+        verified = true;
+      }
+    } catch {
+      verified = false;
+    }
+    if (verified) return "independently-verified";
+    if (this.hostingOptions.requirePublicReachability)
+      throw new StructuredError(
+        "ASSET_WEB_PUBLIC_UNREACHABLE",
+        "Publication wrote successfully but the advertised DID log is not independently reachable at its public URL; retry once hosting is public",
+        { publication: prepared },
+      );
+    return "adapter-asserted";
   }
 
   async read(

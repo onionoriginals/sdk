@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner, assetDigest } from "@originals/cel/v3";
+import { createLocalSigner, assetDigest, parseAssetDid } from "@originals/cel/v3";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
@@ -154,4 +154,101 @@ test('a terminal hosted history can be published and remains deactivated for fre
   const loaded = await sdk.lifecycle.resolveAssetFromWeb(initial.did);
   expect(loaded.asset.state.active).toBe(false);
   expect(loaded.verification.verified).toBe(true);
+});
+
+// #601: a private/in-memory adapter can satisfy the storage interface without the
+// advertised HTTPS URL being reachable from anywhere else. Without an independent
+// check, publication must say so honestly rather than implying public reachability.
+test('publication is labeled adapter-asserted by default; an independent publicReachability check upgrades the label', async () => {
+  const store = storage();
+  const unchecked = OriginalsSDK.create({ signer, storageAdapter: store });
+  const bareResult = await unchecked.lifecycle.publishToWeb(
+    await unchecked.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  expect(bareResult.hostingEvidence).toBe('adapter-asserted');
+
+  const checked = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    // A real deployment would fetch this over the network, independent of `store`.
+    // This test only exercises the resulting content-matching/labeling logic.
+    publicReachability: async (url) => {
+      const path = new URL(url).pathname.slice(1);
+      const file = await store.getObject('example.com', path);
+      return file?.content ?? null;
+    },
+  });
+  const verifiedResult = await checked.lifecycle.publishToWeb(
+    await checked.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  expect(verifiedResult.hostingEvidence).toBe('independently-verified');
+});
+
+test('requirePublicReachability without a configured check fails closed instead of silently skipping it', async () => {
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: storage(),
+    requirePublicReachability: true,
+  });
+  await expect(
+    sdk.lifecycle.publishToWeb(await sdk.lifecycle.createAsset([]), {
+      domain: 'example.com',
+    }),
+  ).rejects.toThrow(/publicReachability check/);
+});
+
+test('requirePublicReachability fails closed while hosting is unreachable, and the identical prepared publication succeeds once it is not', async () => {
+  const store = storage();
+  let publiclyReachable = false;
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+    publicReachability: async (url) => {
+      if (!publiclyReachable) return null;
+      const path = new URL(url).pathname.slice(1);
+      const file = await store.getObject('example.com', path);
+      return file?.content ?? null;
+    },
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: 'example.com',
+  });
+  await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
+    'not independently reachable',
+  );
+  // No public evidence was ever obtained; the asset must stay unpublished locally.
+  expect(asset.state.layer).toBe('cel');
+  publiclyReachable = true;
+  const published = await sdk.lifecycle.publishPreparedToWeb(
+    JSON.parse(JSON.stringify(prepared)),
+  );
+  expect(published.hostingEvidence).toBe('independently-verified');
+});
+
+test('a well-formed but mismatched public log fails closed under requirePublicReachability rather than passing on shape alone', async () => {
+  const decoyStore = storage();
+  const decoySdk = OriginalsSDK.create({ signer, storageAdapter: decoyStore });
+  const decoy = await decoySdk.lifecycle.publishToWeb(
+    await decoySdk.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  const decoyPath = new URL(parseAssetDid(decoy.did).logUrl).pathname.slice(1);
+  const decoyLog = (await decoyStore.getObject('example.com', decoyPath))!.content;
+
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: storage(),
+    requirePublicReachability: true,
+    // Reachable, well-formed WebVH log — just not the one that was just published.
+    publicReachability: async () => decoyLog,
+  });
+  await expect(
+    sdk.lifecycle.publishToWeb(await sdk.lifecycle.createAsset([]), {
+      domain: 'example.com',
+    }),
+  ).rejects.toThrow('not independently reachable');
 });
