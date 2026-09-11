@@ -1,6 +1,6 @@
 import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '@originals/cel';
+import { multikey, StructuredError } from '@originals/cel';
 import { signingInput } from '../../crypto/signingInput.js';
 
 // Re-export canonical DataIntegrityProof from shared types
@@ -100,7 +100,8 @@ export class EdDSACryptosuiteManager {
     // higher-level DataIntegrityProofManager wrapper, which callers of this
     // exported class skip entirely.
     if (options.previousProof !== undefined) {
-      throw new Error(
+      throw new StructuredError(
+        'PROOF_CHAIN_UNSUPPORTED',
         'ProofOptions.previousProof is not supported: this SDK does not create or verify Data Integrity proof chains.'
       );
     }

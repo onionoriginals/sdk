@@ -1,3 +1,4 @@
+import { StructuredError } from '@originals/cel';
 import { EdDSACryptosuiteManager, type DataIntegrityProof } from '../cryptosuites/eddsa.js';
 
 export interface VerificationResult { verified: boolean; errors?: string[] }
@@ -55,7 +56,8 @@ export class DataIntegrityProofManager {
     // value (falling back to the current time), so it does not need the same
     // guard.
     if (opts.previousProof !== undefined) {
-      throw new Error(
+      throw new StructuredError(
+        'PROOF_CHAIN_UNSUPPORTED',
         'ProofOptions.previousProof is not supported: this SDK does not create or verify Data Integrity proof chains.'
       );
     }
