@@ -760,6 +760,84 @@ describe('StatusListManager', () => {
       expect(result2.errors).toContain('Credential has been revoked');
     });
 
+    test('#592 verifyCredentialWithStatus detects revocation through an array-shaped credentialStatus', async () => {
+      // Regression: credentialStatus may be VCDM 2.0's array shape, not only a
+      // singleton object. Reading it as a singleton left `.type` undefined for
+      // an array, silently skipping the whole revocation check — a revoked
+      // credential verified as not-revoked. Wrapping the identical entry in an
+      // array must produce the identical (revoked) outcome as the singleton.
+      const { OriginalsSDK } = await import('../../../src');
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      (sdk.credentials as any).verifyCredential = async () => true;
+
+      const statusListVC = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/1',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      const entry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/592/1',
+        7,
+        'revocation'
+      );
+      const revokedList = sdk.statusList.setStatus(statusListVC, 7, true);
+
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: [entry],
+      };
+
+      const result = await sdk.credentials.verifyCredentialWithStatus(
+        credential as any,
+        revokedList
+      );
+      expect(result.revoked).toBe(true);
+      expect(result.verified).toBe(false);
+      expect(result.errors).toContain('Credential has been revoked');
+    });
+
+    test('#592 verifyCredentialWithStatus fails closed on an array entry of an unsupported status type', async () => {
+      // Every declared credentialStatus entry must be evaluated: a mix of one
+      // supported (not-revoked) entry and one unsupported entry must still
+      // fail, not silently pass because the supported entry alone looked fine.
+      const { OriginalsSDK } = await import('../../../src');
+      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      (sdk.credentials as any).verifyCredential = async () => true;
+
+      const statusListVC = sdk.statusList.createStatusListCredential({
+        id: 'https://example.com/status/592/2',
+        issuer: 'did:example:issuer',
+        statusPurpose: 'revocation',
+      });
+      const entry = sdk.statusList.allocateStatusEntry(
+        'https://example.com/status/592/2',
+        3,
+        'revocation'
+      );
+
+      const credential = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject' },
+        credentialStatus: [entry, { id: 'https://example.com/status/other#0', type: 'SomeOtherStatusListEntry2021' }],
+      };
+
+      // Index 3 was never set — the supported entry alone is "not revoked".
+      const result = await sdk.credentials.verifyCredentialWithStatus(
+        credential as any,
+        statusListVC
+      );
+      expect(result.verified).toBe(false);
+      expect(result.revoked).toBe(false);
+      expect(result.errors.some(e => /Unsupported credentialStatus type/.test(e))).toBe(true);
+    });
+
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });

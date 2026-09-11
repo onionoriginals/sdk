@@ -615,7 +615,7 @@ describe('MultiSigManager', () => {
       const result = await manager.verifyMultiSig(signed, policy);
       expect(result.verified).toBe(false);
       expect(result.validSignatures).toBe(2);
-      expect(result.errors.some(e => e.includes('BitstringStatusListEntry'))).toBe(true);
+      expect(result.errors.some(e => e.includes('credentialStatus'))).toBe(true);
     });
 
     test('rejects when threshold not met', async () => {

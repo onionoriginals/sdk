@@ -7,6 +7,7 @@ import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { credentialStatusEntries } from './credentialStatus.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
@@ -154,24 +155,11 @@ export class Verifier {
         return validityResult;
       }
 
-      // Check credential status (revocation/suspension) if requested. Only
-      // BitstringStatusListEntry is evaluable by this verifier; unknown
-      // status types are ignored (checkCredentialStatus treats them as
-      // no-ops), so they must not trip the fail-closed resolver check.
-      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
-      if (options.checkStatus !== false && statusType === 'BitstringStatusListEntry') {
-        if (!this.statusListResolver) {
-          // Fail closed: the credential declares a status entry but this
-          // verifier has no way to check it. Silently returning verified
-          // would accept revoked credentials.
-          return {
-            verified: false,
-            errors: [
-              'Credential declares credentialStatus but no statusListResolver is configured. ' +
-              'Provide a statusListResolver, or pass checkStatus: false to explicitly skip revocation checking.'
-            ]
-          };
-        }
+      // Check credential status (revocation/suspension) if requested.
+      // checkCredentialStatus evaluates every declared entry (credentialStatus
+      // may be a singleton or an array — issue #592) and fails closed on
+      // anything it cannot evaluate, so no gating on entry shape belongs here.
+      if (options.checkStatus !== false) {
         const statusResult = await this.checkCredentialStatus(vc);
         if (!statusResult.verified) {
           return statusResult;
@@ -286,46 +274,75 @@ export class Verifier {
   }
 
   /**
-   * Check a credential's revocation/suspension status against its status list.
-   * Requires a statusListResolver to be configured.
+   * Check a credential's revocation/suspension status against its status
+   * list(s). `credentialStatus` may be a singleton or an array (VCDM 2.0);
+   * every declared entry is evaluated — a single revoked/suspended or
+   * otherwise-unevaluable entry fails the credential (issue #592), same as a
+   * single declared entry always has.
    */
   async checkCredentialStatus(vc: VerifiableCredential): Promise<VerificationResult> {
-    const status = vc.credentialStatus as BitstringStatusListEntry | undefined;
-    if (!status || status.type !== 'BitstringStatusListEntry') {
+    const entries = credentialStatusEntries(vc);
+    if (entries.length === 0) {
       return { verified: true, errors: [] };
     }
 
-    if (!this.statusListResolver) {
-      return { verified: false, errors: ['No status list resolver configured'] };
-    }
-
-    const statusListVC = await this.statusListResolver(status.statusListCredential);
-    if (!statusListVC) {
-      return { verified: false, errors: [`Could not resolve status list credential: ${status.statusListCredential}`] };
-    }
-
-    // The status list credential itself must be trustworthy before its bits
-    // decide revocation. Without these checks a holder (or a poisoned
-    // resolver channel) can supply a fabricated all-zeros list and bypass
-    // revocation entirely (issue #238). Per the W3C Bitstring Status List
-    // algorithm the verifier must validate the status list credential.
-    const trust = await this.validateStatusListCredential(vc, status, statusListVC);
-    if (!trust.verified) {
-      return trust;
-    }
-
-    const manager = new StatusListManager();
-    try {
-      const checkResult = manager.checkStatus(status, statusListVC);
-      if (checkResult.isSet) {
-        const action = checkResult.statusPurpose === 'revocation' ? 'revoked' : 'suspended';
-        return { verified: false, errors: [`Credential has been ${action}`] };
+    const errors: string[] = [];
+    for (const status of entries) {
+      if (status.type !== 'BitstringStatusListEntry') {
+        // Unsupported status mechanism: this verifier has no way to evaluate
+        // it, so the credential's status through this entry is unknown. Fail
+        // closed rather than silently treating an unrecognized entry as "not
+        // revoked".
+        errors.push(
+          `Unsupported credentialStatus type '${status.type}': this verifier cannot evaluate it, ` +
+          'so the credential\'s status through this entry is unknown.'
+        );
+        continue;
       }
-      return { verified: true, errors: [] };
-    } catch (e) {
-      const error = e as Error;
-      return { verified: false, errors: [`Status check failed: ${error.message}`] };
+
+      if (!this.statusListResolver) {
+        // Fail closed: the credential declares a status entry but this
+        // verifier has no way to check it. Silently returning verified
+        // would accept revoked credentials.
+        errors.push(
+          'Credential declares credentialStatus but no statusListResolver is configured. ' +
+          'Provide a statusListResolver, or pass checkStatus: false to explicitly skip revocation checking.'
+        );
+        continue;
+      }
+
+      const bitstringStatus = status as BitstringStatusListEntry;
+      const statusListVC = await this.statusListResolver(bitstringStatus.statusListCredential);
+      if (!statusListVC) {
+        errors.push(`Could not resolve status list credential: ${bitstringStatus.statusListCredential}`);
+        continue;
+      }
+
+      // The status list credential itself must be trustworthy before its bits
+      // decide revocation. Without these checks a holder (or a poisoned
+      // resolver channel) can supply a fabricated all-zeros list and bypass
+      // revocation entirely (issue #238). Per the W3C Bitstring Status List
+      // algorithm the verifier must validate the status list credential.
+      const trust = await this.validateStatusListCredential(vc, bitstringStatus, statusListVC);
+      if (!trust.verified) {
+        errors.push(...trust.errors);
+        continue;
+      }
+
+      const manager = new StatusListManager();
+      try {
+        const checkResult = manager.checkStatus(bitstringStatus, statusListVC);
+        if (checkResult.isSet) {
+          const action = checkResult.statusPurpose === 'revocation' ? 'revoked' : 'suspended';
+          errors.push(`Credential has been ${action}`);
+        }
+      } catch (e) {
+        const error = e as Error;
+        errors.push(`Status check failed: ${error.message}`);
+      }
     }
+
+    return errors.length > 0 ? { verified: false, errors } : { verified: true, errors: [] };
   }
 
   /**
@@ -534,25 +551,14 @@ export class Verifier {
         result.errors.push(...validity.errors);
       }
 
-      // Enforce revocation. When this verifier has a status list resolver,
-      // check the declared status like the single-sig path does; without one,
-      // fail closed on a declared BitstringStatusListEntry rather than
-      // silently accepting a possibly-revoked credential (issue #340).
-      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
-      if (statusType === 'BitstringStatusListEntry') {
-        if (this.statusListResolver) {
-          const statusResult = await this.checkCredentialStatus(vc);
-          if (!statusResult.verified) {
-            result.verified = false;
-            result.errors.push(...statusResult.errors);
-          }
-        } else {
-          result.verified = false;
-          result.errors.push(
-            'Credential declares credentialStatus but no statusListResolver is configured. ' +
-            'Provide a statusListResolver to check revocation for multi-sig credentials.'
-          );
-        }
+      // Enforce revocation the same way the single-sig path does —
+      // checkCredentialStatus evaluates every declared entry (singleton or
+      // array, issue #592) and fails closed on anything it cannot evaluate,
+      // including a missing resolver (issue #340).
+      const statusResult = await this.checkCredentialStatus(vc);
+      if (!statusResult.verified) {
+        result.verified = false;
+        result.errors.push(...statusResult.errors);
       }
 
       // Check timelock

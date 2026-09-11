@@ -293,6 +293,88 @@ describe('diwings Verifier', () => {
     expect(skipped.verified).toBe(true);
   });
 
+  test('#592 evaluates a revoked entry the same way whether credentialStatus is a singleton or an array', async () => {
+    // Before the fix, `(vc.credentialStatus as BitstringStatusListEntry)?.type`
+    // read `undefined` for an array-shaped value, so the whole status check —
+    // including the fail-closed "no resolver" branch — was skipped entirely.
+    // Wrapping the identical revoked entry in a one-element array must produce
+    // the identical (revoked) outcome as the singleton form.
+    const listId = 'https://issuer.example/status/592/1';
+    const slm = new StatusListManager();
+    const revokedList = slm.setStatus(
+      slm.createStatusListCredential({ id: listId, issuer: did, statusPurpose: 'revocation' }),
+      7,
+      true
+    ) as any;
+    revokedList.proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zStub592a' };
+
+    const verifier = new Verifier(didManager, { statusListResolver: async () => revokedList });
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
+
+    const statusEntry = {
+      type: 'BitstringStatusListEntry',
+      statusPurpose: 'revocation',
+      statusListIndex: '7',
+      statusListCredential: listId,
+    };
+    const mkCred = (status: unknown) => ({
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:key:subject-592a' },
+      credentialStatus: status,
+    } as any);
+
+    const singleton = await verifier.checkCredentialStatus(mkCred(statusEntry));
+    const asArray = await verifier.checkCredentialStatus(mkCred([statusEntry]));
+
+    expect(singleton.verified).toBe(false);
+    expect(asArray.verified).toBe(false);
+    expect(asArray.errors.some(e => /revoked/i.test(e))).toBe(true);
+  });
+
+  test('#592 fails closed on a credentialStatus entry of an unsupported type instead of silently accepting it', async () => {
+    const verifier = new Verifier(didManager, {
+      statusListResolver: async () => { throw new Error('must not be called for an unsupported type'); },
+    });
+    const vc = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:key:subject-592b' },
+      credentialStatus: { id: 'https://example.com/status/other#0', type: 'SomeOtherStatusListEntry2021' },
+    } as any;
+
+    const result = await verifier.checkCredentialStatus(vc);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /Unsupported credentialStatus type/.test(e))).toBe(true);
+  });
+
+  test('#592 evaluates every array entry: an unsupported second entry fails even when the first is a clean BitstringStatusListEntry', async () => {
+    const listId = 'https://issuer.example/status/592/2';
+    const slm = new StatusListManager();
+    const cleanList = slm.createStatusListCredential({ id: listId, issuer: did, statusPurpose: 'revocation' }) as any;
+    cleanList.proof = { type: 'DataIntegrityProof', cryptosuite: 'eddsa-rdfc-2022', proofValue: 'zStub592b' };
+
+    const verifier = new Verifier(didManager, { statusListResolver: async () => cleanList });
+    (verifier as any).verifyCredential = async () => ({ verified: true, errors: [] });
+
+    const vc = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      issuer: did,
+      credentialSubject: { id: 'did:key:subject-592c' },
+      credentialStatus: [
+        { type: 'BitstringStatusListEntry', statusPurpose: 'revocation', statusListIndex: '3', statusListCredential: listId },
+        { id: 'https://example.com/status/other#0', type: 'SomeOtherStatusListEntry2021' },
+      ],
+    } as any;
+
+    const result = await verifier.checkCredentialStatus(vc);
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => /Unsupported credentialStatus type/.test(e))).toBe(true);
+  });
+
   test('#304 caches the status list proof verification across credentials sharing the list', async () => {
     const listId = 'https://issuer.example/status/304/1';
     // A resolved status list; the SAME immutable document is returned every

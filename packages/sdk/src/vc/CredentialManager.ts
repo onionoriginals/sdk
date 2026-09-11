@@ -26,6 +26,7 @@ import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager } from './cryptosuites/eddsa.js';
 import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { credentialStatusEntries } from './credentialStatus.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 import { StructuredError } from '@originals/cel';
@@ -475,9 +476,11 @@ export class CredentialManager {
       errors.push(`Signature verification error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Check revocation status if applicable
-    const status = credential.credentialStatus as BitstringStatusListEntry | undefined;
-    if (status?.type === 'BitstringStatusListEntry') {
+    // Check revocation status if applicable. credentialStatus may be a
+    // singleton or an array (VCDM 2.0); every declared entry is evaluated so
+    // an array-shaped value cannot skip status checking entirely (issue #592).
+    const entries = credentialStatusEntries(credential);
+    if (entries.length > 0) {
       if (!statusListCredential) {
         // Fail closed: the credential declares a status entry but no status
         // list was supplied to evaluate it. Leaving `verified: true` here would
@@ -487,50 +490,64 @@ export class CredentialManager {
         // (Verifier.verifyCredential), which rejects a credential whose declared
         // status cannot be checked.
         verified = false;
-        errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
+        errors.push('Credential has a credentialStatus but no status list credential was provided');
       } else {
-        try {
-          // Trust checks (issue #238, shared with Verifier via
-          // validateStatusListCredentialTrust — issue #301): the supplied
-          // status list credential must be the referenced one, must carry a
-          // valid proof, and must be issued by the checked credential's
-          // issuer — otherwise a holder can hand the verifier a fabricated
-          // all-zeros list and bypass revocation.
-          const trust = await validateStatusListCredentialTrust(
-            credential,
-            status,
-            statusListCredential,
-            async (listVC) => {
-              const ok = await this.verifyCredential(listVC);
-              return { verified: ok, errors: [] };
-            }
-          );
-          if (!trust.verified) {
-            throw new Error(trust.errors.join('; '));
-          }
-
-          const result = this.statusList.checkStatus(status, statusListCredential);
-          if (result.isSet) {
-            // A determinate revoked/suspended state must fail verification:
-            // a caller gating on `verified` alone would otherwise accept a
-            // revoked credential (issue #345). This aligns with
-            // Verifier.checkCredentialStatus, which returns verified: false
-            // for the same state.
+        for (const status of entries) {
+          if (status.type !== 'BitstringStatusListEntry') {
+            // Unsupported status mechanism: this verifier cannot evaluate it,
+            // so the credential's status through this entry is unknown. Fail
+            // closed rather than silently ignoring it.
             verified = false;
-            if (result.statusPurpose === 'revocation') {
-              revoked = true;
-              errors.push('Credential has been revoked');
-            } else {
-              suspended = true;
-              errors.push('Credential has been suspended');
-            }
+            errors.push(
+              `Unsupported credentialStatus type '${status.type}': this verifier cannot evaluate it, ` +
+              'so the credential\'s status through this entry is unknown.'
+            );
+            continue;
           }
-        } catch (err) {
-          // Fail closed: a status entry that cannot be evaluated (purpose
-          // mismatch, out-of-range index, corrupt encodedList) must not be
-          // treated as "not revoked".
-          verified = false;
-          errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
+          const bitstringStatus = status as BitstringStatusListEntry;
+          try {
+            // Trust checks (issue #238, shared with Verifier via
+            // validateStatusListCredentialTrust — issue #301): the supplied
+            // status list credential must be the referenced one, must carry a
+            // valid proof, and must be issued by the checked credential's
+            // issuer — otherwise a holder can hand the verifier a fabricated
+            // all-zeros list and bypass revocation.
+            const trust = await validateStatusListCredentialTrust(
+              credential,
+              bitstringStatus,
+              statusListCredential,
+              async (listVC) => {
+                const ok = await this.verifyCredential(listVC);
+                return { verified: ok, errors: [] };
+              }
+            );
+            if (!trust.verified) {
+              throw new Error(trust.errors.join('; '));
+            }
+
+            const result = this.statusList.checkStatus(bitstringStatus, statusListCredential);
+            if (result.isSet) {
+              // A determinate revoked/suspended state must fail verification:
+              // a caller gating on `verified` alone would otherwise accept a
+              // revoked credential (issue #345). This aligns with
+              // Verifier.checkCredentialStatus, which returns verified: false
+              // for the same state.
+              verified = false;
+              if (result.statusPurpose === 'revocation') {
+                revoked = true;
+                errors.push('Credential has been revoked');
+              } else {
+                suspended = true;
+                errors.push('Credential has been suspended');
+              }
+            }
+          } catch (err) {
+            // Fail closed: a status entry that cannot be evaluated (purpose
+            // mismatch, out-of-range index, corrupt encodedList) must not be
+            // treated as "not revoked".
+            verified = false;
+            errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     }
@@ -1258,13 +1275,23 @@ export class CredentialManager {
   }
 
   /**
-   * Extract and validate the BitstringStatusListEntry from a credential.
+   * Extract and validate the single BitstringStatusListEntry from a
+   * credential. `credentialStatus` may be an array (VCDM 2.0); this
+   * management path (revoke/suspend/check a specific list) requires the
+   * caller's credential to declare exactly one entry, since guessing which
+   * of several entries to act on would risk updating the wrong status list.
    */
   private extractStatusEntry(credential: VerifiableCredential): BitstringStatusListEntry {
-    const status = credential.credentialStatus;
-    if (!status) {
+    const entries = credentialStatusEntries(credential);
+    if (entries.length === 0) {
       throw new Error('Credential has no credentialStatus field');
     }
+    if (entries.length > 1) {
+      throw new Error(
+        'Credential declares multiple credentialStatus entries; this operation requires exactly one.'
+      );
+    }
+    const status = entries[0];
     if (status.type !== 'BitstringStatusListEntry') {
       throw new Error(
         `Unsupported credentialStatus type: '${status.type}'. Expected 'BitstringStatusListEntry'`
