@@ -218,9 +218,16 @@ export class Verifier {
    * `assertionMethod` for credentials, `authentication` for presentations.
    * When the verification method's DID document is resolvable and declares the
    * corresponding relationship, the verification method must also be listed
-   * (by reference or embedded) under that relationship. Unresolvable DIDs
-   * skip the relationship check — the key itself is still authenticated by
-   * the controller binding plus signature verification.
+   * (by reference or embedded) under that relationship — matched by complete
+   * resolved DID URL, never by fragment alone (see H05 / issue #593). Only
+   * did:key — the one self-certifying method with no separate relationship
+   * document by design — skips the check when unresolvable, falling back to
+   * the controller binding plus signature verification that already ran.
+   * Every other DID method (did:webvh, did:btco, did:cel, and any future
+   * method DIDManager learns to resolve) fails closed when its document is
+   * unavailable, rather than allow-listing only the methods known today —
+   * an unlisted method must not silently regain the fail-open behavior this
+   * fix removes.
    */
   private async checkProofPurpose(
     proof: unknown,
@@ -242,13 +249,35 @@ export class Verifier {
 
     const vmDid = verificationMethod.split('#')[0];
     let didDoc: { [k: string]: unknown } | null = null;
+    let resolutionFailed = false;
     try {
       didDoc = (await this.didManager.resolveDID(vmDid)) as { [k: string]: unknown } | null;
     } catch {
       didDoc = null;
+      resolutionFailed = true;
     }
     if (!didDoc) {
-      return { verified: true, errors: [] };
+      // did:key is the SDK's one self-certifying DID method: the identifier
+      // IS the public key, it publishes no separate relationship document by
+      // design, and there is therefore no authorization evidence to be
+      // missing — the controller binding + signature check already ran.
+      // Every other method is document-backed (or, if some future method
+      // isn't, it must say so explicitly here, not by falling through a
+      // permissive default) and fails closed when its document is
+      // unavailable per H05's acceptance criteria: missing authorization
+      // evidence must never produce an unqualified success.
+      const isSelfCertifying = vmDid.startsWith('did:key:');
+      if (isSelfCertifying) {
+        return { verified: true, errors: [] };
+      }
+      return {
+        verified: false,
+        errors: [
+          resolutionFailed
+            ? `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} failed to resolve`
+            : `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} is unavailable`
+        ]
+      };
     }
 
     const relationship = didDoc[expectedPurpose];
@@ -261,10 +290,21 @@ export class Verifier {
       };
     }
 
-    const fragment = verificationMethod.split('#')[1];
+    // Resolve each relationship entry to an absolute DID URL exactly as DID
+    // Core's relative-reference resolution requires — any entry that is not
+    // itself an absolute "did:...' DID URL is a relative DID URL (typically
+    // "#key-1", but also the "/path", ";params", and "?query" forms DID Core
+    // permits) that means "resolve against this DID document's own id" — and
+    // compare complete resolved DID URLs only. Comparing by fragment alone
+    // (the prior behavior) let a relationship entry naming a completely
+    // different, foreign DID such as "did:example:other#key-1" authorize an
+    // unrelated proof key "did:example:issuer#key-1" merely because the
+    // fragments coincided (H05): the DID prefix must match too, not just the
+    // fragment.
+    const didDocId = typeof didDoc.id === 'string' ? didDoc.id : vmDid;
+    const resolveEntryId = (id: string): string => (id.startsWith('did:') ? id : `${didDocId}${id}`);
     const matches = (id: unknown): boolean =>
-      typeof id === 'string' &&
-      (id === verificationMethod || (fragment !== undefined && id.split('#')[1] === fragment));
+      typeof id === 'string' && resolveEntryId(id) === verificationMethod;
     const authorized = relationship.some((entry) =>
       typeof entry === 'string' ? matches(entry) : matches((entry as { id?: unknown })?.id)
     );
