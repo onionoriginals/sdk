@@ -265,3 +265,136 @@ test("resolution retries provider-detected chain movement without accepting part
   expect((await sdk.lifecycle.resolveAssetFromSat("123")).status).toBe("accepted");
   expect(reads).toBe(2);
 });
+
+test("an accepted resolution and its DID metadata are labeled provider-asserted unless the adapter itself claims independent chain validation", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.chainEvidence).toBe("provider-asserted");
+  expect(result.resolution.source).toBeUndefined();
+  expect(result.verification.publication?.chainEvidence).toBe("provider-asserted");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.chainEvidence).toBe("provider-asserted");
+
+  // Core never upgrades the label on its own -- only an adapter's explicit claim does.
+  const validated: SatSnapshot = {
+    ...snapshot,
+    chainEvidence: "node-validated",
+    source: "regtest-core+ord",
+  };
+  const validatedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => validated },
+  });
+  const validatedResult = await validatedSdk.lifecycle.resolveAssetFromSat("123");
+  if (validatedResult.status !== "accepted") throw new Error(validatedResult.status);
+  expect(validatedResult.resolution.chainEvidence).toBe("node-validated");
+  expect(validatedResult.resolution.source).toBe("regtest-core+ord");
+});
+
+test("a provider that fabricates a self-consistent alternate tip, or silently omits a later publication, still only ever yields a provider-asserted result", async () => {
+  const { snapshot, log } = await boundary();
+
+  // (a) A relocated but internally self-consistent chain state: resolveSat can
+  // only check internal consistency, never independently authenticate the tip
+  // it was handed, so it must accept this -- the honesty has to live in the
+  // chainEvidence label, not in a rejection that core has no way to make.
+  const altHash = "f".repeat(64);
+  const fabricated: SatSnapshot = structuredClone(snapshot);
+  fabricated.tipBefore = fabricated.tipAfter = fabricated.indexTip = {
+    height: 9000,
+    hash: altHash,
+  };
+  fabricated.blocks = [{ height: 9000, hash: altHash, txids: [txid] }];
+  fabricated.publications[0] = {
+    ...fabricated.publications[0],
+    creation: {
+      height: 9000,
+      blockHash: altHash,
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+  };
+  const fabricatedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => fabricated },
+  });
+  const fabricatedResult =
+    await fabricatedSdk.lifecycle.resolveAssetFromSat("123");
+  if (fabricatedResult.status !== "accepted")
+    throw new Error(fabricatedResult.status);
+  expect(fabricatedResult.resolution.tip).toEqual({
+    height: 9000,
+    hash: altHash,
+  });
+  expect(fabricatedResult.resolution.chainEvidence).toBe("provider-asserted");
+
+  // (b) A later publication genuinely exists but the provider's enumeration
+  // silently drops it while still asserting enumerationComplete: true.
+  // resolveSat has no way to detect the omission -- it resolves the earlier
+  // state as though it were current -- so an omitted-publication result must
+  // never read as anything stronger than provider-asserted either.
+  const laterUpdate = await signEvent(
+    {
+      previousEvent: eventDigest(log.log.at(-1)!.event),
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", name: "Never observed" },
+      },
+    },
+    signer,
+  );
+  const nextTx = "c".repeat(64),
+    nextHash = "d".repeat(64);
+  const complete: SatSnapshot = structuredClone(snapshot);
+  complete.tipBefore =
+    complete.tipAfter =
+    complete.indexTip =
+      { height: 101, hash: nextHash };
+  complete.blocks.push({ height: 101, hash: nextHash, txids: [nextTx] });
+  complete.publications.unshift({
+    id: nextTx + "i0",
+    revealTxid: nextTx,
+    network: "regtest",
+    sat: "123",
+    confirmed: true,
+    creation: {
+      height: 101,
+      blockHash: nextHash,
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeDocument({ log: [laterUpdate] }, "json"),
+      metadata: null,
+    },
+  });
+  const omitting: SatSnapshot = structuredClone(snapshot);
+  const completeSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => complete },
+  });
+  const completeResult =
+    await completeSdk.lifecycle.resolveAssetFromSat("123");
+  if (completeResult.status !== "accepted")
+    throw new Error(completeResult.status);
+  expect(completeResult.asset.state.name).toBe("Never observed");
+  expect(completeResult.resolution.chainEvidence).toBe("provider-asserted");
+
+  const omittingSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => omitting },
+  });
+  const omittedResult =
+    await omittingSdk.lifecycle.resolveAssetFromSat("123");
+  if (omittedResult.status !== "accepted")
+    throw new Error(omittedResult.status);
+  expect(omittedResult.asset.state.name).not.toBe("Never observed");
+  expect(omittedResult.resolution.chainEvidence).toBe("provider-asserted");
+});

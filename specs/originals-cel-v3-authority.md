@@ -129,6 +129,17 @@ does not prove no copy or competing creation exists on another sat. Report
 `scope: sat` and cross-sat canonicality as unknown; never claim global uniqueness
 from the current production adapters. Missing capabilities must produce an
 unavailable/incomplete result, not fabricated ordering or an empty enumeration.
+The resolution result additionally reports `chainEvidence: 'provider-asserted'
+| 'node-validated'`, labeling whether the snapshot's chain/tip/block facts came
+from an independently validating Bitcoin node or only from the same
+RPC/index trust domain that supplied the Ordinals interpretation. Core cannot
+authenticate this claim; every current production adapter (QuickNode, regtest)
+reports `'provider-asserted'` because its chain RPC and Ordinals index share
+one endpoint. A self-consistent but incorrect snapshot — one that omits a
+later publication while still asserting `enumerationComplete: true`, or one
+whose tip/blocks/publications are internally coherent but do not reflect the
+real chain — cannot be rejected by this check alone; it can only ever be
+labeled `'provider-asserted'`, never presented as independently verified.
 
 ## One total order, then whole-publication acceptance
 
@@ -208,10 +219,12 @@ a fully inspected invalid application claim.
 
 The result exposes separate facts: authenticated history/prefix, whether the sat
 enumeration was complete, the chain snapshot, current head at that snapshot,
-and live ownership at that snapshot. An offline or incomplete result must not
-collapse to an unconditional `verified: true`. A deactivated Original may still
-return authenticated history and ownership metadata; ordinary DID resolution
-must indicate deactivation rather than presenting an active authority document.
+live ownership at that snapshot, and whether that chain snapshot came from an
+independently validating source or an asserting provider (`chainEvidence`). An
+offline or incomplete result must not collapse to an unconditional
+`verified: true`. A deactivated Original may still return authenticated
+history and ownership metadata; ordinary DID resolution must indicate
+deactivation rather than presenting an active authority document.
 
 ## Reorganizations, caching and writers
 

@@ -52,6 +52,13 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /** Self-reported trust tier for this snapshot's chain/tip/block facts. Core cannot verify this
+   * claim; treated as "provider-asserted" unless the adapter declares "node-validated" because its
+   * tip, active blocks and reveal-transaction membership came from an independently validating
+   * Bitcoin node rather than the same RPC/index endpoint that supplied Ordinals interpretation. */
+  chainEvidence?: "provider-asserted" | "node-validated";
+  /** Optional non-secret description of the adapter/provider that produced this snapshot, for diagnostics only. */
+  source?: string;
 }
 export type ResolutionFailure =
   | "invalid"
@@ -88,6 +95,10 @@ export type SatResolution = Readonly<
       pending: readonly string[];
       diagnostics: readonly Readonly<{ inscriptionId: string; code: string }>[];
       webvhBinding: "unverified";
+      /** See {@link SatSnapshot.chainEvidence}. Never implies independently validated Bitcoin consensus. */
+      chainEvidence: "provider-asserted" | "node-validated";
+      /** See {@link SatSnapshot.source}. */
+      source?: string;
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -443,6 +454,11 @@ export function resolveSat(
     pending,
     diagnostics,
     webvhBinding: "unverified",
+    chainEvidence:
+      snapshot.chainEvidence === "node-validated"
+        ? "node-validated"
+        : "provider-asserted",
+    ...(typeof snapshot.source === "string" ? { source: snapshot.source } : {}),
   };
   freeze<unknown>(result);
   return result;

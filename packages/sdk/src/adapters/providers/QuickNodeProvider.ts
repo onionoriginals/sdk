@@ -600,7 +600,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (typeof metadata !== 'string') throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata must be a hex string');
         return metadata;
       },
-    }, satoshi, this.expectedNetwork, this.snapshotBudget);
+    }, satoshi, this.expectedNetwork, this.snapshotBudget, 'quicknode');
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {
