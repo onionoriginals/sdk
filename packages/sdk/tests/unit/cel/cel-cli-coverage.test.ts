@@ -36,7 +36,7 @@ import type { DataIntegrityProof, EventLog } from '@originals/cel';
 
 // Multikey + canonicalize for real Ed25519 proofs
 import { multikey } from '@originals/cel';
-import { canonicalizeEvent } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel/legacy';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

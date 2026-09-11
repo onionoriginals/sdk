@@ -26,10 +26,10 @@ import {
   deriveDidCel,
   hexSha256ToDigestMultibase,
   computeDigestMultibase,
-  canonicalizeEntryForChain,
   verifyEventLog,
 } from '@originals/cel';
 import type { EventLog, LogEntry, DataIntegrityProof, DIDDocument } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel/legacy';
 import { hashResource } from '../../../src/utils/validation';
 
 const contentHex = hashResource(Buffer.from('the-work', 'utf8'));

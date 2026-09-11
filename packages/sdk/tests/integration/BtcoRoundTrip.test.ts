@@ -4,7 +4,7 @@ import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { computeDigestMultibase } from '@originals/cel';
-import { canonicalizeEntryForChain } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel/legacy';
 import { verifyEventLog } from '@originals/cel';
 
 describe('did:btco round-trip (#375)', () => {

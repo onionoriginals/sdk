@@ -8,7 +8,7 @@
 import { describe, test, expect } from 'bun:test';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { signingInput } from '../../../src/crypto/signingInput';
-import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '@originals/cel';
+import { canonicalizeEvent, canonicalizeEntryForChain, witnessSigningBytes } from '@originals/cel/legacy';
 import { verifyDidKeyProof, CEL_CRYPTOSUITE } from '@originals/cel';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { multikey } from '@originals/cel';

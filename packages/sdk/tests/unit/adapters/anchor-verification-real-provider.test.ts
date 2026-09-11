@@ -22,8 +22,6 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
 import {
   multikey,
-  canonicalizeEvent,
-  canonicalizeEntryForChain,
   computeDigestMultibase,
   createEventLog,
   appendEvent,
@@ -33,6 +31,7 @@ import {
   type LogEntry,
   type OrdinalsLookup,
 } from '@originals/cel';
+import { canonicalizeEvent, canonicalizeEntryForChain } from '@originals/cel/legacy';
 import { QuickNodeProvider } from '../../../src/adapters/providers/QuickNodeProvider';
 
 const ENDPOINT = 'https://example-name.btc.quiknode.pro/test-token/';

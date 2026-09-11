@@ -29,7 +29,7 @@ import {
   type ExternalReference,
 } from '../previous-sdk';
 import { multikey } from '@originals/cel';
-import { canonicalizeEvent } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel/legacy';
 
 /**
  * Creates a real Ed25519 signer so that verifyEventLog performs full

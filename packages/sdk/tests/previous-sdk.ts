@@ -45,7 +45,7 @@ export {
   decodeDigestMultibase,
   digestMultibaseEquals,
 } from '@originals/cel';
-export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel';
+export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel/legacy';
 // The CEL proof labels: one written, one accepted for logs sealed under the
 // previous name. The suite pair is plan 042; the type pair renames the claim
 // `DataIntegrityProof` made and never implemented.
