@@ -7,12 +7,10 @@
 
 import { describe, test, expect, beforeEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
-import { bls12_381 as bls } from '@noble/curves/bls12-381.js';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { Verifier } from '../../../src/vc/Verifier';
 import { StatusListManager } from '../../../src/vc/StatusListManager';
-import { BBSCryptosuiteManager } from '../../../src/vc/cryptosuites/bbsCryptosuite';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { multikey } from '@originals/cel';
@@ -20,7 +18,6 @@ import {
   verificationMethodRegistry,
   registerVerificationMethod,
 } from '../../../src/vc/documentLoader';
-import { PRELOADED_CONTEXTS } from '../../../src/utils/serialization';
 import type {
   VerifiableCredential,
   EscrowPolicy,
@@ -34,15 +31,6 @@ import type {
 const config: OriginalsConfig = {
   network: 'regtest',
   defaultKeyType: 'Ed25519',
-};
-
-/** Minimal document loader backed by the SDK's bundled context cache. */
-const preloadedLoader = async (url: string) => {
-  const doc = (PRELOADED_CONTEXTS as Record<string, unknown>)[url];
-  if (doc) return { document: doc, documentUrl: url, contextUrl: null as null };
-  // For DID URLs return a stub that satisfies the loader contract
-  if (url.startsWith('did:')) return { document: { '@context': [] }, documentUrl: url, contextUrl: null as null };
-  throw new Error(`Document not found in preloaded contexts: ${url}`);
 };
 
 // ─── VC-001 ──────────────────────────────────────────────────────────────────
@@ -453,203 +441,6 @@ describe('VC-008/error – corporate policy with unassigned mandatory role is re
     try { mgr.validateCorporatePolicy(policy); } catch (e) { msg = (e as Error).message; }
     expect(msg).toContain('Mandatory role');
     expect(msg).toContain('Treasurer');
-  });
-});
-
-// ─── VC-010 ──────────────────────────────────────────────────────────────────
-
-describe('VC-010 – prepareSelectiveDisclosure requires a BBS+ key', () => {
-  const cm = new CredentialManager(config, new DIDManager(config as never));
-
-  const credential: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-    type: ['VerifiableCredential'],
-    issuer: 'did:key:issuer',
-    issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: {
-      id: 'did:key:subject',
-      name: 'Alice',
-      email: 'alice@example.com',
-      age: 30,
-    },
-  };
-
-  // This described a "metadata-only mode": pointer arrays returned, no proof
-  // created. It read as success, so callers shipped credentials that could
-  // never be selectively disclosed — including the example in the LLM guide.
-  test('throws instead of returning a metadata-only result', async () => {
-    await expect(
-      cm.prepareSelectiveDisclosure(credential, {
-        mandatoryPointers: ['/issuer', '/issuanceDate', '/credentialSubject/id'],
-        selectivePointers: ['/credentialSubject/name', '/credentialSubject/age'],
-      })
-    ).rejects.toThrow(/BBS\+ key pair|privateKey/);
-  });
-
-  test('pointer validation still runs before the key check', async () => {
-    // Ordering matters: a caller with both problems should hear about the
-    // malformed pointer, which is the one they can see in their own code.
-    await expect(
-      cm.prepareSelectiveDisclosure(credential, {
-        mandatoryPointers: ['issuer'],
-      })
-    ).rejects.toThrow(/Invalid JSON Pointer/);
-  });
-});
-
-describe('VC-010/invalid-input – invalid JSON Pointer in selective or mandatory pointer list', () => {
-  const cm = new CredentialManager(config, new DIDManager(config as never));
-  const credential: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1'],
-    type: ['VerifiableCredential'],
-    issuer: 'did:key:issuer',
-    issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: { id: 'did:key:subject' },
-  };
-
-  test('rejects selective pointer missing leading slash with "Invalid JSON Pointer"', async () => {
-    await expect(
-      cm.prepareSelectiveDisclosure(credential, {
-        mandatoryPointers: ['/issuer'],
-        selectivePointers: ['credentialSubject/name'],  // missing /
-      })
-    ).rejects.toThrow(/Invalid JSON Pointer/);
-  });
-
-  test('rejects mandatory pointer missing leading slash with "Invalid JSON Pointer"', async () => {
-    await expect(
-      cm.prepareSelectiveDisclosure(credential, {
-        mandatoryPointers: ['issuer'],   // missing /
-      })
-    ).rejects.toThrow(/Invalid JSON Pointer/);
-  });
-});
-
-// ─── VC-011 ──────────────────────────────────────────────────────────────────
-
-describe('VC-011 – deriveSelectiveProof refuses a credential with no BBS+ base proof', () => {
-  // This used to assert the fallback: the credential returned UNCHANGED while
-  // hiddenFields claimed /credentialSubject/email was withheld. That is a
-  // fail-open disclosure bug, so the fallback now throws instead.
-  const cm = new CredentialManager(config, new DIDManager(config as never));
-
-  const credential: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-    type: ['VerifiableCredential'],
-    issuer: 'did:key:issuer',
-    issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: {
-      id: 'did:key:subject',
-      name: 'Alice',
-      email: 'alice@example.com',
-    },
-  };
-
-  test('throws rather than returning every field while reporting some as hidden', async () => {
-    await expect(
-      cm.deriveSelectiveProof(credential, ['/issuer', '/credentialSubject/name'])
-    ).rejects.toThrow(/bbs-2023 base proof/);
-  });
-
-  test('the error names what is missing so the caller knows the fix', async () => {
-    await expect(
-      cm.deriveSelectiveProof(credential, ['/issuer'])
-    ).rejects.toThrow(/prepareSelectiveDisclosure/);
-  });
-
-  test('throws "Invalid JSON Pointer" for field path without leading slash', async () => {
-    await expect(
-      cm.deriveSelectiveProof(credential, ['issuer'])
-    ).rejects.toThrow(/Invalid JSON Pointer/);
-  });
-});
-
-describe('VC-011/boundary – deriveSelectiveProof rejects unsigned credentials at every disclosure size', () => {
-  const cm = new CredentialManager(config, new DIDManager(config as never));
-
-  const credential: VerifiableCredential = {
-    '@context': ['https://www.w3.org/2018/credentials/v1'],
-    type: ['VerifiableCredential'],
-    issuer: 'did:key:issuer',
-    issuanceDate: '2024-01-01T00:00:00Z',
-    credentialSubject: { id: 'did:key:subject', name: 'Alice' },
-  };
-
-  // The empty list was the worst case of the old fallback: it reported EVERY
-  // field as hidden while returning all of them.
-  test('empty disclosure list throws rather than reporting every field as hidden', async () => {
-    await expect(cm.deriveSelectiveProof(credential, [])).rejects.toThrow(
-      /bbs-2023 base proof/
-    );
-  });
-
-  test('disclosing every path throws too — the credential is still unsigned', async () => {
-    const allPaths = [
-      '/@context',
-      '/type',
-      '/issuer',
-      '/issuanceDate',
-      '/credentialSubject',
-      '/credentialSubject/id',
-      '/credentialSubject/name',
-    ];
-    await expect(cm.deriveSelectiveProof(credential, allPaths)).rejects.toThrow(
-      /bbs-2023 base proof/
-    );
-  });
-});
-
-// ─── VC-013 ──────────────────────────────────────────────────────────────────
-
-describe('VC-013/happy – BBSCryptosuiteManager.createProof (selective-disclosure baseline)', () => {
-  test('createProof with a real BLS12-381 key produces a bbs-2023 base proof', async () => {
-    const sk = bls.utils.randomSecretKey();
-
-    const proof = await BBSCryptosuiteManager.createProof(
-      {
-        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-        type: ['VerifiableCredential'],
-        issuer: 'did:key:issuer',
-        issuanceDate: '2024-01-01T00:00:00Z',
-        credentialSubject: { id: 'did:key:subject' },
-      },
-      {
-        verificationMethod: 'did:key:issuer#bbs-1',
-        proofPurpose: 'assertionMethod',
-        // public key is derived from the secret key when omitted
-        privateKey: sk,
-        documentLoader: preloadedLoader,
-        mandatoryPointers: ['/issuer', '/issuanceDate'],
-      }
-    );
-
-    expect(proof.type).toBe('DataIntegrityProof');
-    expect(proof.cryptosuite).toBe('bbs-2023');
-    expect(proof.proofPurpose).toBe('assertionMethod');
-    expect(typeof proof.proofValue).toBe('string');
-    // multibase-base64url-no-pad base proof
-    expect(proof.proofValue.startsWith('u')).toBe(true);
-  });
-
-  test('createProof without private key throws "Private key required"', async () => {
-    await expect(
-      BBSCryptosuiteManager.createProof(
-        {
-          '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-          type: ['VerifiableCredential'],
-          issuer: 'did:key:issuer',
-          issuanceDate: '2024-01-01T00:00:00Z',
-          credentialSubject: { id: 'did:key:subject' },
-        },
-        {
-          verificationMethod: 'did:key:issuer#bbs-1',
-          proofPurpose: 'assertionMethod',
-          // No privateKey provided
-          documentLoader: preloadedLoader,
-          mandatoryPointers: ['/issuer'],
-        }
-      )
-    ).rejects.toThrow(/Private key required/);
   });
 });
 

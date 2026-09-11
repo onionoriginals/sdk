@@ -14,20 +14,19 @@ describe('DataIntegrityProofManager branches', () => {
     } as any)).rejects.toThrow('Unsupported cryptosuite');
   });
 
-  // createProof must be symmetric with verifyProof: bbs-2023 is dispatched to
-  // the BBS backend, not rejected as an unsupported cryptosuite.
-  test('bbs-2023 on create dispatches to the BBS cryptosuite', async () => {
-    // Missing privateKey → BBS backend throws its own error, proving dispatch
-    // reached it rather than the "Unsupported cryptosuite" guard.
+  // bbs-2023 is parked (#591): createProof must refuse it by name so the
+  // caller learns the suite is disabled, not that they misspelled it.
+  test('bbs-2023 on create is rejected as disabled', async () => {
     await expect(DataIntegrityProofManager.createProof(
       { '@context': [], id: 'x', issuer: 'did:example:issuer' },
       {
         verificationMethod: 'did:example:issuer#k',
         proofPurpose: 'assertionMethod',
         type: 'DataIntegrityProof',
-        cryptosuite: 'bbs-2023'
+        cryptosuite: 'bbs-2023',
+        privateKey: new Uint8Array(32)
       } as any
-    )).rejects.toThrow('Private key required for BBS+ proof creation');
+    )).rejects.toThrow('Cryptosuite bbs-2023 is disabled');
   });
 
   test('unsupported cryptosuite on verify returns false', async () => {
@@ -94,19 +93,18 @@ describe('DataIntegrityProofManager branches', () => {
     expect(proof.proofValue.startsWith('z')).toBe(true);
   });
 
-  // Issue #315: bbs-2023 must be routed to the BBS cryptosuite (with its
-  // issuer↔verificationMethod binding), not rejected as unsupported.
-  test('bbs-2023 on verify dispatches to the BBS cryptosuite', async () => {
+  // bbs-2023 is parked (#591): verifyProof fails closed on the suite itself,
+  // before any key resolution, so no base or derived BBS proof can verify.
+  test('bbs-2023 on verify is rejected as disabled', async () => {
     const res = await DataIntegrityProofManager.verifyProof(
-      { id: 'x', issuer: 'did:example:victim' },
+      { id: 'x', issuer: 'did:example:issuer' },
       {
         type: 'DataIntegrityProof', cryptosuite: 'bbs-2023',
-        verificationMethod: 'did:example:attacker#k', proofPurpose: 'assertionMethod', proofValue: 'z'
+        verificationMethod: 'did:example:issuer#k', proofPurpose: 'assertionMethod', proofValue: 'u'
       } as any,
       { documentLoader: async () => ({ document: {}, documentUrl: '', contextUrl: null }) }
     );
     expect(res.verified).toBe(false);
-    // Rejected by the BBS issuer-binding check, not as an unknown cryptosuite.
-    expect(res.errors?.[0]).toContain('does not match issuer');
+    expect(res.errors?.[0]).toContain('Cryptosuite bbs-2023 is disabled');
   });
 });

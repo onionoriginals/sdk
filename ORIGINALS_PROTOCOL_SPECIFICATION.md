@@ -491,7 +491,7 @@ later layer exists to provide.
 **Signing Requirements:**
 1. MUST be signed by authorized issuer
 2. EdDSA (Ed25519) is default algorithm
-3. BBS+ MAY be used for selective disclosure
+3. BBS+ selective disclosure is parked: implementations MUST reject `bbs-2023` proofs until a disclosure profile that cannot hide validity or status constraints is specified
 4. External signers MUST be supported
 
 **Signing Authority by Layer:**
@@ -499,10 +499,10 @@ later layer exists to provide.
 - `did:webvh`: Domain controller (same logical owner) signs re-issued credentials using the verification method published in the DID log; migrations MUST rotate or delegate keys before web hosting changes hands.
 - `did:btco`: The creator's key lineage is FROZEN at inscription — it cannot be rotated, and holding the satoshi grants no control over the key set. The satoshi holder may append their own entries, signed with their own key and witnessed by a reinscription that postdates the anchor, but those entries are restricted to a holder allowlist and MUST NOT make authenticity claims about the work. A holder is therefore not the credential authority for anything the creator asserted.
 
-**Selective Disclosure (Optional):**
-- BBS+ cryptosuite enables hiding specific claims
-- MAY be used for privacy-sensitive credentials
-- MUST preserve verifiability of selective claims
+**Selective Disclosure (Parked):**
+- BBS+ selective disclosure is not part of the current protocol; a derived proof could hide `validUntil` and `credentialStatus` while still verifying
+- Implementations MUST NOT accept a `bbs-2023` proof as verified
+- A future selective-disclosure profile MUST make validity and status constraints mandatory disclosures
 
 **Bitcoin Anchoring Credential Requirements:**
 1. MUST be generated for every did:webvh → did:btco or did:cel → did:btco migration
@@ -628,7 +628,6 @@ such and cannot make authenticity claims.
 - ⚠️ Storage adapters
 
 **Tier 3 - Advanced Features (MAY implement):**
-- BBS+ selective disclosure
 - Automated fee optimization
 - Migration rate limiting
 - Admin dashboards
@@ -742,7 +741,7 @@ Before claiming Originals Protocol v1.0 compliance:
 | Migrate cel→btco | <10min | Bitcoin dependent |
 | Batch 100 assets | <10s | For cel→webvh |
 | Batch 10 assets | <100min | For webvh→btco |
-| Credential signing | <500ms | EdDSA or BBS+ |
+| Credential signing | <500ms | EdDSA |
 | Credential verification | <200ms | Local verification |
 
 ### Scalability Requirements

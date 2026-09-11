@@ -38,9 +38,7 @@ export {
   type ResourceUpdatedSubject,
   type MigrationSubject,
   type OwnershipSubject,
-  type CredentialChainOptions,
-  type SelectiveDisclosureOptions,
-  type DerivedProofResult
+  type CredentialChainOptions
 } from './vc/CredentialManager.js';
 export {
   StatusListManager,
@@ -64,9 +62,6 @@ export {
   estimateTransactionSize
 } from './bitcoin/utxo-selection.js';
 export { calculateFee } from './bitcoin/fee-calculation.js';
-export { BBSCryptosuiteUtils } from './vc/cryptosuites/bbs.js';
-export { BBSCryptosuiteManager } from './vc/cryptosuites/bbsCryptosuite.js';
-export type { BBSProofOptions, BBSDeriveOptions, BBSVerifyOptions } from './vc/cryptosuites/bbsCryptosuite.js';
 // Remote-signer verification toolkit (plan 043): the verifier, the EdDSA suite
 // (shared signing-input construction), and the JSON-LD document loader.
 export { Verifier } from './vc/Verifier.js';
