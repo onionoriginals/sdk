@@ -77,9 +77,9 @@ export {
   type CelAssetData,
   type PeerAssetData,
   type PeerCelConfig,
-} from '@originals/cel';
-export { WebVHCelManager } from '@originals/cel';
-export { BtcoCelManager } from '@originals/cel';
+} from '@originals/cel/legacy';
+export { WebVHCelManager } from '@originals/cel/legacy';
+export { BtcoCelManager } from '@originals/cel/legacy';
 export type { WitnessService } from '@originals/cel';
 export { HttpWitness, HttpWitnessError } from '@originals/cel';
 export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from '@originals/cel';

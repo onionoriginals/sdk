@@ -121,6 +121,10 @@ jobs:
         working-directory: packages/sdk
         run: bun run typecheck:public
 
+      - name: Verify legacy CEL layer managers are absent from the CEL package root
+        working-directory: packages/cel
+        run: bun run typecheck:public
+
       # Node-only features must load their modules lazily so browser/edge
       # consumers can still import the package. One static `import 'node:fs'`
       # in the graph breaks that for everyone and is invisible until bundling.

@@ -29,7 +29,11 @@ export {
   verifyDidKeyProof,
   structuralCheckReason,
 } from './proofVerification.js';
-export * from './layers/index.js';
+// The pre-CEL-3 layer managers (PeerCelManager/WebVHCelManager/BtcoCelManager)
+// are retained only for the previous-format lifecycle and its regression
+// tests; they are not the compatibility path for CEL 3 / SDK 3.0 (issue
+// #597). They are deliberately not re-exported from this root — import
+// '@originals/cel/legacy' if that retained code is what you need.
 export * from './OriginalsCel.js';
 export * from './keyResolver.js';
 export {

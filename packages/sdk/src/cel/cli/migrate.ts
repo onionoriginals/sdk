@@ -14,9 +14,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLog, DataIntegrityProof } from '@originals/cel';
-import { WebVHCelManager } from '@originals/cel';
-import { BtcoCelManager } from '@originals/cel';
-import type { CelSigner } from '@originals/cel';
+import { WebVHCelManager } from '@originals/cel/legacy';
+import { BtcoCelManager } from '@originals/cel/legacy';
+import type { CelSigner } from '@originals/cel/legacy';
 import { parseEventLogJson } from '@originals/cel';
 import { parseEventLogCbor } from '@originals/cel';
 import { serializeEventLogJson } from '@originals/cel';
