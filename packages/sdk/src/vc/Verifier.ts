@@ -291,15 +291,18 @@ export class Verifier {
     }
 
     // Resolve each relationship entry to an absolute DID URL exactly as DID
-    // Core's relative-reference resolution requires — a bare "#key-1" entry
-    // means "this DID document's own key-1" — and compare complete resolved
-    // DID URLs only. Comparing by fragment alone (the prior behavior) let a
-    // relationship entry naming a completely different, foreign DID such as
-    // "did:example:other#key-1" authorize an unrelated proof key
-    // "did:example:issuer#key-1" merely because the fragments coincided
-    // (H05): the DID prefix must match too, not just the fragment.
+    // Core's relative-reference resolution requires — any entry that is not
+    // itself an absolute "did:...' DID URL is a relative DID URL (typically
+    // "#key-1", but also the "/path", ";params", and "?query" forms DID Core
+    // permits) that means "resolve against this DID document's own id" — and
+    // compare complete resolved DID URLs only. Comparing by fragment alone
+    // (the prior behavior) let a relationship entry naming a completely
+    // different, foreign DID such as "did:example:other#key-1" authorize an
+    // unrelated proof key "did:example:issuer#key-1" merely because the
+    // fragments coincided (H05): the DID prefix must match too, not just the
+    // fragment.
     const didDocId = typeof didDoc.id === 'string' ? didDoc.id : vmDid;
-    const resolveEntryId = (id: string): string => (id.startsWith('#') ? `${didDocId}${id}` : id);
+    const resolveEntryId = (id: string): string => (id.startsWith('did:') ? id : `${didDocId}${id}`);
     const matches = (id: unknown): boolean =>
       typeof id === 'string' && resolveEntryId(id) === verificationMethod;
     const authorized = relationship.some((entry) =>
