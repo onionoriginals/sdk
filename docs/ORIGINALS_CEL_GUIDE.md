@@ -464,7 +464,7 @@ interface AssetState {
 For more control, use layer-specific managers directly:
 
 ```typescript
-import { PeerCelManager, WebVHCelManager, BtcoCelManager } from '@originals/sdk';
+import { PeerCelManager, WebVHCelManager, BtcoCelManager } from '@originals/cel/legacy';
 
 // Peer layer
 const peer = new PeerCelManager(signer);
