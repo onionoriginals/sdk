@@ -48,6 +48,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit -p .",
+    "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/legacy-export-surface.ts",
     "test": "bun test tests/",
     "test:coverage": "bun test tests/ --coverage",
     "test:ci": "bash -o pipefail -c 'bun test tests/ --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
