@@ -223,7 +223,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:cel',
       description:
-        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log, entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log that stays private, never uploaded or hosted anywhere until you publish. Signed in, it’s signed by your Turnkey-held key; otherwise it’s signed and kept entirely in this tab.'
     },
     {
       id: 'publish',
@@ -688,7 +688,7 @@ export const originalDetail = {
       create: {
         title: 'Created',
         blurb:
-          'Born as a signed genesis — a signed event log minted in the browser, no server involved. The resource bytes were hashed and sealed into the very first event.'
+          'Born as a signed genesis — a signed event log kept private, never hosted anywhere until published. The resource bytes were hashed and sealed into the very first event.'
       },
       publish: {
         title: 'Published',
