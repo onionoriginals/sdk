@@ -103,6 +103,43 @@ test("accepts the complete boundary at a stable declared snapshot, with possessi
   expect(result.ownership.owner).toBe("A");
 });
 
+test("chain evidence defaults to provider-asserted when the snapshot does not claim independent validation", () => {
+  const scenario = fixtures.cases[0];
+  const snapshot = observations(scenario);
+  expect(snapshot.chainEvidence).toBeUndefined();
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  expect(result.chainEvidence).toBe("provider-asserted");
+});
+
+test("chain evidence is never upgraded past what the snapshot itself claims", () => {
+  const scenario = fixtures.cases[0];
+  // A provider that merely asserts chain facts must never come back labeled
+  // node-validated: the label reflects the snapshot, not resolveSat's own checks.
+  const providerAsserted = resolveSat({
+    ...observations(scenario),
+    chainEvidence: "provider-asserted",
+  });
+  expect(providerAsserted.chainEvidence).toBe("provider-asserted");
+  // A snapshot that does explicitly claim independent validation is passed through
+  // as-is; resolveSat has no way to independently confirm that claim itself.
+  const nodeValidated = resolveSat({
+    ...observations(scenario),
+    chainEvidence: "node-validated",
+  });
+  expect(nodeValidated.chainEvidence).toBe("node-validated");
+});
+
+test("chain evidence is present even on a rejected resolution", () => {
+  const scenario = fixtures.cases[0];
+  const result = resolveSat({
+    ...observations(scenario),
+    indexHealthy: false,
+  });
+  expect(result.status).not.toBe("accepted");
+  expect(result.chainEvidence).toBe("provider-asserted");
+});
+
 for (const scenario of fixtures.cases)
   test(`worked history: ${scenario.id}`, () => {
     const snapshot = observations(scenario);

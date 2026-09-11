@@ -38,6 +38,14 @@ export interface PublicationObservation {
         metadata: Uint8Array | null;
       };
 }
+/**
+ * Whether chain/tip/block facts came from an independently validating Bitcoin
+ * node ("node-validated") or are trusted assertions from the same service that
+ * supplies Ordinals interpretation ("provider-asserted"). No adapter in this
+ * package performs independent validation today; omit the field to get the
+ * honest "provider-asserted" default rather than claiming a stronger guarantee.
+ */
+export type ChainEvidence = "provider-asserted" | "node-validated";
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;
@@ -52,6 +60,8 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /** Defaults to "provider-asserted" when omitted. See {@link ChainEvidence}. */
+  chainEvidence?: ChainEvidence;
 }
 export type ResolutionFailure =
   | "invalid"
@@ -75,11 +85,13 @@ export type SatResolution = Readonly<
       reason: string;
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: ChainEvidence;
     }
   | {
       status: "accepted";
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: ChainEvidence;
       tip: Readonly<ChainTip>;
       state: DeepReadonly<AssetState>;
       history: VerifiedHistory;
@@ -98,7 +110,13 @@ const validTip = (tip: ChainTip | undefined): boolean =>
   !!tip && integer(tip.height) && hash(tip.hash);
 const sameTip = (a: ChainTip, b: ChainTip): boolean =>
   a.height === b.height && a.hash === b.hash;
-const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
+interface FailureShape {
+  status: ResolutionFailure;
+  reason: string;
+  scope: "sat";
+  crossSatCanonicality: "unknown";
+}
+const baseFailure = (status: ResolutionFailure, reason: string): FailureShape => ({
   status,
   reason,
   scope: "sat",
@@ -113,6 +131,14 @@ export function resolveSat(
   snapshot: SatSnapshot,
   options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
 ): SatResolution {
+  const chainEvidence: ChainEvidence =
+    snapshot.chainEvidence === "node-validated"
+      ? "node-validated"
+      : "provider-asserted";
+  const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
+    ...baseFailure(status, reason),
+    chainEvidence,
+  });
   const prefix =
     snapshot.network === "mainnet"
       ? ""
@@ -435,6 +461,7 @@ export function resolveSat(
     status: "accepted",
     scope: "sat",
     crossSatCanonicality: "unknown",
+    chainEvidence,
     tip: { ...snapshot.tipBefore },
     state: history.state,
     history,
