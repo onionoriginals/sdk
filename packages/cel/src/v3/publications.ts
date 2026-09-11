@@ -63,7 +63,12 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
-  /** Defaults to "provider-asserted" when omitted. See {@link ChainEvidence}. */
+  /**
+   * Defaults to "provider-asserted" when omitted. `resolveSat` passes an
+   * explicit claim straight through into the resolution's `chainEvidence`
+   * without relabeling it — including a self-contradictory "unavailable" on
+   * an otherwise-complete snapshot. See {@link ChainEvidence}.
+   */
   chainEvidence?: ChainEvidence;
 }
 export type ResolutionFailure =
@@ -134,9 +139,13 @@ export function resolveSat(
   snapshot: SatSnapshot,
   options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
 ): SatResolution {
+  // Pass an explicit snapshot claim straight through, whatever it is; only an
+  // omitted claim gets the honest "provider-asserted" floor. Never relabel a
+  // provider's own "unavailable"/"node-validated" claim to something else.
   const chainEvidence: ChainEvidence =
-    snapshot.chainEvidence === "node-validated"
-      ? "node-validated"
+    snapshot.chainEvidence === "node-validated" ||
+    snapshot.chainEvidence === "unavailable"
+      ? snapshot.chainEvidence
       : "provider-asserted";
   const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
     ...baseFailure(status, reason),

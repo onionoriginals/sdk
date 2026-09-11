@@ -130,6 +130,19 @@ test("chain evidence is never upgraded past what the snapshot itself claims", ()
   expect(nodeValidated.chainEvidence).toBe("node-validated");
 });
 
+test("chain evidence is never relabeled: an explicit unavailable claim is passed through, not upgraded", () => {
+  const scenario = fixtures.cases[0];
+  // A provider that supplies a complete snapshot but explicitly disclaims its
+  // own chain evidence must not be quietly upgraded to provider-asserted:
+  // resolveSat only fills in a default when the field is omitted entirely.
+  const result = resolveSat({
+    ...observations(scenario),
+    chainEvidence: "unavailable",
+  });
+  expect(result.status).toBe("accepted");
+  expect(result.chainEvidence).toBe("unavailable");
+});
+
 test("chain evidence is present even on a rejected resolution", () => {
   const scenario = fixtures.cases[0];
   const result = resolveSat({
