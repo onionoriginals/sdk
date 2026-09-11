@@ -41,11 +41,14 @@ export interface PublicationObservation {
 /**
  * Whether chain/tip/block facts came from an independently validating Bitcoin
  * node ("node-validated") or are trusted assertions from the same service that
- * supplies Ordinals interpretation ("provider-asserted"). No adapter in this
- * package performs independent validation today; omit the field to get the
- * honest "provider-asserted" default rather than claiming a stronger guarantee.
+ * supplies Ordinals interpretation ("provider-asserted"). "unavailable" means no
+ * snapshot was ever obtained (for example, no provider is configured at all) —
+ * distinct from a provider having supplied and stood behind a snapshot. No
+ * adapter in this package performs independent validation today; omit the
+ * field on a real snapshot to get the honest "provider-asserted" default
+ * rather than claiming a stronger guarantee.
  */
-export type ChainEvidence = "provider-asserted" | "node-validated";
+export type ChainEvidence = "unavailable" | "provider-asserted" | "node-validated";
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;

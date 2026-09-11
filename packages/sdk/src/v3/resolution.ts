@@ -63,12 +63,13 @@ export function btcoDid(sat: string, network: BitcoinNetwork): string {
 const failure = (
   status: Exclude<SatResolution["status"], "accepted">,
   reason: string,
+  chainEvidence: ChainEvidence = "provider-asserted",
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
-  chainEvidence: "provider-asserted",
+  chainEvidence,
 });
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
@@ -114,6 +115,7 @@ export class AssetResolver {
         resolution: failure(
           "unsupported-capability",
           "A complete sat snapshot provider is required",
+          "unavailable",
         ) as SatResolution,
       };
     try {
