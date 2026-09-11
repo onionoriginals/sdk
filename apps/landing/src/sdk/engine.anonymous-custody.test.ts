@@ -122,11 +122,17 @@ describe('signed-in authoring custody after a fresh session (#598)', () => {
   let host: ReturnType<typeof installCel3Host>;
   afterEach(() => host?.restore());
 
-  test('a Turnkey-restored key can keep editing after a fresh engine/session', async () => {
+  test('unlike the anonymous case, a fresh engine given the SAME signed-in key can keep editing', async () => {
     host = installCel3Host('sub-1');
-    // engineWithSigner injects the key directly, standing in for the same
-    // Turnkey account deterministically re-deriving it in a fresh session —
-    // unlike the anonymous case, this key is not regenerated on reload.
+    // This stands in for Turnkey re-deriving the same account key in a
+    // fresh session (as `resolveAuthorshipSigner` does for a real signed-in
+    // visitor) by injecting that key directly, the same test double already
+    // used for signed-in coverage elsewhere (engine.durable-publish.test.ts,
+    // engine.revise-authorship.test.ts). It does NOT exercise Turnkey's own
+    // openSessionKey/account-derivation network path — that belongs to the
+    // auth package's own tests. What this proves: given the same controller
+    // key, the CEL layer accepts an update from a brand-new engine instance,
+    // unlike the anonymous case where the key itself cannot be reproduced.
     const { engine, signer } = engineWithSigner('sub-1');
     await engine.create('Mine', 'Artwork', SVG('v1'));
     const published = await engine.publish();
