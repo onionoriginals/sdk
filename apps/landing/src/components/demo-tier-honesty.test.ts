@@ -173,6 +173,15 @@ describe('the published log’s durability (R7)', () => {
     expect(note).toMatch(/sign in|signed in/i);
   });
 
+  // #598: the hosted log surviving for hours must not read as a promise that
+  // the visitor can still EDIT it after a reload — that needs the key, which
+  // is lost far sooner than the log is.
+  test('the caveat also names the third, sharper risk: the editing key does not survive a reload', () => {
+    const note = demo.hosting.temporaryNote;
+    expect(note).toMatch(/key/i);
+    expect(note).toMatch(/reload|this (browser )?tab/i);
+  });
+
   test('it is rendered in the publish step, not only after the log exists', async () => {
     // No DOM test infrastructure here, so this asserts placement in the
     // source: the note has to sit inside the steps list (which renders from
