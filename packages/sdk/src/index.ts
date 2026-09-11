@@ -213,7 +213,9 @@ export * as v3 from './v3/index.js';
 
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./v3/resolution.js";
 
-export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from "./v3/hosted.js";
+export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./v3/hosted.js";
+
+export { fetchPublicReachabilityCheck } from "./v3/hosted.js";
 
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./v3/bitcoin.js";
 

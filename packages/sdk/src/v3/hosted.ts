@@ -48,6 +48,72 @@ export interface PublishedWebAsset {
   status: "published";
   did: string;
   asset: OriginalsAsset;
+  /**
+   * 'independently-verified' only when a `publicReachability` check fetched the
+   * advertised URL through a path separate from the write-side storage adapter
+   * and confirmed it serves this exact method history. 'adapter-asserted' means
+   * only the same storage adapter that wrote the log was asked to read it back —
+   * true today of every publication with no `publicReachability` configured.
+   */
+  hostingEvidence: HostingEvidence;
+}
+export type HostingEvidence = "adapter-asserted" | "independently-verified";
+/**
+ * Fetches a publicly advertised hosted URL independently of the storage adapter
+ * used to write it. Returning `null` means the URL could not be confirmed public;
+ * throwing is treated the same way. Core cannot verify the checker itself is
+ * independent — only that supplying one is an explicit, non-default choice.
+ */
+export type PublicReachabilityCheck = (
+  url: string,
+) => Promise<Uint8Array | null>;
+export interface HostedAssetsOptions {
+  /** Independent confirmation that the advertised WebVH log is actually public. */
+  publicReachability?: PublicReachabilityCheck;
+  /**
+   * Fail publication instead of silently labeling it 'adapter-asserted' when the
+   * advertised log cannot be independently confirmed reachable. Requires
+   * `publicReachability` to also be configured.
+   */
+  requirePublicReachability?: boolean;
+}
+/**
+ * A ready-made `publicReachability` check: a real HTTPS GET, bypassing any
+ * configured storage adapter entirely. Bounded so a slow or oversized
+ * response (a hung connection, or a host that streams far more than a DID
+ * log could ever legitimately be) cannot block or exhaust publication.
+ */
+export async function fetchPublicReachabilityCheck(
+  url: string,
+): Promise<Uint8Array | null> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok || !response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      byteBudget(total);
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 export interface HostedEvidence {
   status: "verified" | "incomplete";
@@ -78,6 +144,7 @@ export class HostedAssets {
   constructor(
     private readonly storage: StorageAdapter,
     private readonly config: OriginalsConfig,
+    private readonly hostingOptions: HostedAssetsOptions = {},
   ) {}
 
   async prepare(
@@ -221,6 +288,14 @@ export class HostedAssets {
     input: PreparedWebPublication,
     resolver?: AssetResolver,
   ): Promise<PublishedWebAsset> {
+    if (
+      this.hostingOptions.requirePublicReachability &&
+      !this.hostingOptions.publicReachability
+    )
+      return error(
+        "ASSET_WEB_REACHABILITY_CHECK_REQUIRED",
+        "Configure a publicReachability check before requiring independent verification",
+      );
     const prepared = structuredClone(input);
     const envelope = decodeEnvelope(prepared.asset);
     if (envelope.unverified?.localResources.length)
@@ -296,7 +371,53 @@ export class HostedAssets {
         },
       );
     }
-    return { status: "published", did: prepared.did, asset };
+    const hostingEvidence = await this.confirmPublicReachability(
+      domain,
+      prefix,
+      prepared,
+    );
+    return { status: "published", did: prepared.did, asset, hostingEvidence };
+  }
+
+  /**
+   * Every write above went through `this.storage`. Reading the result back
+   * through that same adapter would only prove the adapter agrees with
+   * itself, not that the advertised HTTPS URL is reachable from anywhere
+   * else. A configured `publicReachability` check is the one path that asks
+   * a source other than the write-side adapter.
+   *
+   * Comparing exact bytes against the just-written `did.jsonl`, rather than
+   * independently re-resolving the fetched log, matters: a log that still
+   * resolves to this same DID and asset binding is not necessarily *this*
+   * publication — a stale cached copy missing this exact update would
+   * resolve just as validly. Only byte-for-byte agreement with what was
+   * just published proves the public copy is current, not merely genuine.
+   */
+  private async confirmPublicReachability(
+    domain: string,
+    prefix: string,
+    prepared: PreparedWebPublication,
+  ): Promise<HostingEvidence> {
+    const checker = this.hostingOptions.publicReachability;
+    if (!checker) return "adapter-asserted";
+    const published = new TextEncoder().encode(
+      prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    );
+    let verified = false;
+    try {
+      const fetched = await checker(`https://${domain}/${prefix}did.jsonl`);
+      verified = !!fetched && bytesEqual(fetched, published);
+    } catch {
+      verified = false;
+    }
+    if (verified) return "independently-verified";
+    if (this.hostingOptions.requirePublicReachability)
+      throw new StructuredError(
+        "ASSET_WEB_PUBLIC_UNREACHABLE",
+        "Publication wrote successfully but the advertised DID log is not independently reachable at its public URL; retry once hosting is public",
+        { publication: prepared },
+      );
+    return "adapter-asserted";
   }
 
   async read(
