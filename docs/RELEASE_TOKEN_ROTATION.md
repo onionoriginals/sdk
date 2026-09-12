@@ -29,12 +29,26 @@ workflow change can do. For every package (`@originals/cel`, `@originals/sdk`,
 4. This account/management action falls under npm's 2FA-bypass restrictions
    (see below) and needs an interactive session with 2FA, same as rotating a
    token.
+5. Once all three are registered and verified, open the gate in `release.yml`
+   by setting the non-secret repository variable it checks before publishing:
 
-Until every package has a trusted publisher configured, the OIDC publish step
-in `release.yml` will fail on that package. **Configure all three before
-merging a Version Packages PR** — `changeset publish` publishes all pending
-packages in one run, and if only some are registered, it can publish those
-before failing on one that is not, leaving the release partially out.
+   ```sh
+   gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true
+   ```
+
+   There is no read-only API the workflow can use to confirm registration
+   itself (npm whoami cannot validate OIDC trust — the exchange only happens
+   during an actual publish attempt), so the `publish` job's first step fails
+   loudly with a link back to these instructions until this variable reads
+   `true`. It stays `true` afterward; there is no per-release reset.
+
+Until every package has a trusted publisher configured **and**
+`NPM_TRUSTED_PUBLISHING_READY` is set, `release.yml`'s `publish` job refuses to
+run at all. **Configure and confirm all three before merging a Version
+Packages PR** — once the gate is open, `changeset publish` publishes all
+pending packages in one run, and if any package's registration was missed or
+misconfigured despite the gate, it can publish the others before failing on
+that one, leaving the release partially out.
 
 **Recovery if that happens:** finish registering the remaining package(s),
 then re-run the `publish` job (or push a no-op commit and let `check-publish`
@@ -150,12 +164,16 @@ by CI.
 
 The CLI/action upgrades (`@changesets/cli` v3, `changesets/action@v2`, Node 24
 release runtime) are complete, and `release.yml`'s publish step now
-authenticates purely via OIDC — it has no code path back to `NPM_TOKEN`. What
-remains is the npm-side trusted-publisher registration (see above), which only
-an account owner with 2FA can do, and then one real release to prove the
-end-to-end flow. Once that release succeeds, delete/revoke `NPM_TOKEN`, retire
-`npm-token-expiry.yml`'s tracking issue, and close the corresponding rotation
-issue — there is nothing left to rotate.
+authenticates purely via OIDC — it has no code path back to `NPM_TOKEN`. The
+`publish` job additionally refuses to run at all until the
+`NPM_TRUSTED_PUBLISHING_READY` repository variable is set (see "Trusted
+publisher setup" above), so an incomplete migration fails the job immediately
+with instructions rather than reaching npm unauthenticated. What remains is
+the npm-side trusted-publisher registration itself, which only an account
+owner with 2FA can do, setting that variable once it's done, and then one real
+release to prove the end-to-end flow. Once that release succeeds,
+delete/revoke `NPM_TOKEN`, retire `npm-token-expiry.yml`'s tracking issue, and
+close the corresponding rotation issue — there is nothing left to rotate.
 
 Sources: [npm token permissions](https://docs.npmjs.com/about-access-tokens/),
 [token creation and inspection](https://docs.npmjs.com/creating-and-viewing-access-tokens/),

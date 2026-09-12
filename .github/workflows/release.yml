@@ -143,6 +143,23 @@ jobs:
     if: needs.check-publish.outputs.shouldPublish == 'true'
     runs-on: ubuntu-latest
     steps:
+      # This publish job has no token fallback (see the OIDC step below) — it
+      # authenticates purely via npm trusted publishing, which requires a
+      # trusted publisher registered on npmjs.com for EACH of @originals/cel,
+      # @originals/sdk, and @originals/auth. There is no read-only API to
+      # confirm that registration from CI (npm whoami cannot validate OIDC
+      # trust; the exchange only happens during an actual publish attempt),
+      # so this is a human-affirmed gate instead: a repo variable that stays
+      # unset until someone has completed and verified all three
+      # registrations, so a Version PR merge before that's done fails loudly
+      # here instead of reaching npm partially unauthenticated. See
+      # "Trusted publisher setup" in docs/RELEASE_TOKEN_ROTATION.md.
+      - name: Confirm npm trusted publishing is registered for all packages
+        if: vars.NPM_TRUSTED_PUBLISHING_READY != 'true'
+        run: |
+          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/cel, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/RELEASE_TOKEN_ROTATION.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v7
         with:

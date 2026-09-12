@@ -58,3 +58,14 @@ test('publish authenticates to npm via OIDC trusted publishing, not a long-lived
   // trusted publishing, so there must be no preflight relying on it.
   assert.ok(!publishSteps.some(step => step.includes('npm whoami --registry=')));
 });
+
+test('publish refuses to run before a human confirms npm trusted publishing is registered', () => {
+  const publishSteps = steps(jobs.publish);
+  const gate = publishSteps.findIndex(step => step.includes("vars.NPM_TRUSTED_PUBLISHING_READY"));
+  const publish = publishSteps.findIndex(step => step.includes('uses: changesets/action@v2'));
+  assert.ok(gate >= 0, 'publish job must gate on the NPM_TRUSTED_PUBLISHING_READY repo variable');
+  assert.equal(gate, 0, 'the readiness gate must be the first step, before any build work');
+  assert.ok(gate < publish);
+  assert.match(publishSteps[gate], /if: vars\.NPM_TRUSTED_PUBLISHING_READY != 'true'/);
+  assert.match(publishSteps[gate], /exit 1/);
+});

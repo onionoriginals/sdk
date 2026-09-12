@@ -19,7 +19,10 @@ publishing.
 
 This requires a trusted publisher registered on npmjs.com for each published
 package (`@originals/cel`, `@originals/sdk`, `@originals/auth`) — org
-`onionoriginals`, repo `sdk`, workflow `release.yml`, no Environment. See
+`onionoriginals`, repo `sdk`, workflow `release.yml`, no Environment. The
+`publish` job's first step refuses to run until the repository variable
+`NPM_TRUSTED_PUBLISHING_READY` is `true`, since there's no read-only way for
+CI to confirm that registration itself. See
 [`docs/RELEASE_TOKEN_ROTATION.md`](../../docs/RELEASE_TOKEN_ROTATION.md) for
 the full setup and current migration status.
 
