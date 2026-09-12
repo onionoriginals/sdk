@@ -10,7 +10,9 @@
  */
 import "../shims/buffer-global";
 import { OriginalsSDK } from "@originals/sdk";
-import type { OrdinalsProvider } from "@originals/sdk";
+import type { OrdinalsProvider, OriginalsAsset } from "@originals/sdk";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { hex } from "@scure/base";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import defaultReceiptJson from "../../public/example/mainnet-receipt.json";
 
@@ -69,8 +71,16 @@ async function checkLive(
   if (result.status !== "accepted") return null;
   if (result.asset.id !== receipt.assetDid) return null;
   if (result.didDocument?.id !== receipt.didBtco) return null;
-  if (!result.resolution.publications.some((p) => p.inscriptionId === receipt.inscriptionId))
-    return null;
+  // Bind the resource-availability claim to the SAME accepted publication the
+  // receipt names, not to the asset's current aggregate state: the sat's
+  // history can carry other, later publications by the time this runs, and
+  // `inscriptionId` alone is not proof that publication is what carried this
+  // resource inline (it might be a log-only delta, or predate the resource).
+  const publication = result.resolution.publications.find(
+    (p) => p.inscriptionId === receipt.inscriptionId,
+  );
+  if (!publication) return null;
+  const resourceOnChain = resourceMatchesReceipt(result.asset, publication, receipt.resource);
   return {
     live: true,
     network: "mainnet",
@@ -79,12 +89,27 @@ async function checkLive(
     sat: receipt.sat,
     revealTxId: receipt.revealTxId,
     resource: receipt.resource,
-    resourceOnChain: !result.verification.missingResources.some(
-      (r) => r.id === receipt.resource.id,
-    ),
+    resourceOnChain,
     observedAt: new Date().toISOString(),
     sourceHref: receipt.sourceHref,
   };
+}
+
+/**
+ * True only when the named publication itself inlined this exact resource id
+ * AND the asset's attached bytes for that resource independently hash to the
+ * receipt's declared sha256 — never trusting the receipt's own digest field,
+ * or a resource made available by a *different* publication, on its say-so.
+ */
+function resourceMatchesReceipt(
+  asset: OriginalsAsset,
+  publication: { inlineResourceIds: readonly string[] },
+  resource: MainnetReceipt["resource"],
+): boolean {
+  if (!publication.inlineResourceIds.includes(resource.id)) return false;
+  const attached = asset.resources.find((r) => r.id === resource.id && r.content);
+  if (!attached?.content) return false;
+  return hex.encode(sha256(attached.content)) === resource.sha256;
 }
 
 /** Never throws: any live-check failure (auth, network, chain mismatch) yields the retained receipt. */

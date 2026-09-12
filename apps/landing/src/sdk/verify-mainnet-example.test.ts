@@ -123,6 +123,173 @@ async function buildFixture(): Promise<{ receipt: MainnetReceipt; provider: Ordi
   return { receipt, provider };
 }
 
+/**
+ * Builds a sat whose FIRST accepted publication (the boundary) is deliberately
+ * log-only (`inlineResourceId: null`), then a SECOND accepted publication (a
+ * delta) that explicitly inlines the unchanged resource. The returned receipt
+ * names the log-only boundary's inscription id — the resource is genuinely
+ * available on this sat's history, but not from that specific publication.
+ */
+async function buildFixtureWithLaterInlineDelta(): Promise<{
+  receipt: MainnetReceipt;
+  provider: OrdinalsProvider;
+}> {
+  const fundingUtxos = [
+    {
+      txid: '56'.repeat(32),
+      vout: 0,
+      value: 100_000,
+      scriptPubKey: Buffer.from(payment.script).toString('hex'),
+    },
+  ];
+  const sat = '600000000000000';
+  const stored = new Map<string, { content: Uint8Array; contentType?: string }>();
+  const snapshot: SatSnapshot = {
+    network: 'mainnet',
+    sat,
+    tipBefore: { height: 900_000, hash: blockHash },
+    tipAfter: { height: 900_000, hash: blockHash },
+    indexTip: { height: 900_000, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [],
+    ownership: { owner: payment.address!, satpoint: fundingUtxos[0].txid + ':0:0' },
+    publications: [],
+  };
+  const provider: OrdinalsProvider = {
+    getFirstSatOfOutput: async () => sat,
+    getSatSnapshot: async () => snapshot,
+    getInscriptionById: async () => null,
+    getInscriptionsBySatoshi: async () => [],
+    broadcastTransaction: async () => {
+      throw new Error('not used by this fixture');
+    },
+    getTransactionStatus: async () => {
+      throw new Error('not used by this fixture');
+    },
+  };
+  const sdk = OriginalsSDK.create({
+    network: 'mainnet',
+    signer,
+    ordinalsProvider: provider,
+    storageAdapter: {
+      putObject: async (domain, path, content, options) => {
+        stored.set(domain + '/' + path, { content: content.slice(), contentType: options?.contentType });
+        return 'https://' + domain + '/' + path;
+      },
+      getObject: async (domain, path) => stored.get(domain + '/' + path) ?? null,
+      exists: async (domain, path) => stored.has(domain + '/' + path),
+    },
+  });
+  const local = await sdk.lifecycle.createAsset([
+    { id: 'tla-logo.png', mediaType: 'image/png', content: png },
+  ]);
+  const { asset } = await sdk.lifecycle.publishToWeb(local, { domain: 'example.com' });
+  const satSigner = {
+    signAndFinalizeCommitPsbt: async (psbt: string) => {
+      const transaction = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), {
+        allowUnknownOutputs: true,
+      });
+      transaction.sign(key);
+      transaction.finalize();
+      return transaction.hex;
+    },
+  };
+  const tx = (hex_: string) =>
+    btc.Transaction.fromRaw(Buffer.from(hex_, 'hex'), {
+      allowUnknownInputs: true,
+      allowUnknownOutputs: true,
+    });
+
+  // Boundary: log-only, despite the asset carrying a real resource.
+  const boundary = await sdk.lifecycle.prepareBitcoinPublication(asset, {
+    fundingUtxos,
+    satSigner,
+    changeAddress: payment.address!,
+    feeRate: 2,
+    inlineResourceId: null,
+  });
+  const boundaryRevealTxId = boundary.transactions.revealTxId;
+  const boundaryInscriptionId = `${boundaryRevealTxId}i0`;
+  snapshot.blocks.push({ height: 900_000, hash: blockHash, txids: [boundaryRevealTxId] });
+  snapshot.publications.push({
+    id: boundaryInscriptionId,
+    revealTxid: boundaryRevealTxId,
+    network: 'mainnet',
+    sat,
+    confirmed: true,
+    creation: { height: 900_000, blockHash, transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: 'complete',
+      mediaType: 'application/cel',
+      bytes: encodeDocument(boundary.document, 'json'),
+      metadata: null,
+    },
+  });
+  snapshot.ownership.satpoint = `${boundaryRevealTxId}:0:0`;
+
+  // Delta: the creator later revises the artwork and inlines the NEW version.
+  // (`loaded.asset` was resolved from a log-only boundary, so it has no local
+  // bytes for the original version — `addResourceVersion` supplies fresh
+  // bytes directly rather than needing that prior version's content.)
+  const loaded = await sdk.lifecycle.resolveAssetFromSat(sat);
+  if (loaded.status !== 'accepted') throw new Error(`fixture: boundary not accepted (${loaded.status})`);
+  const png2 = Uint8Array.from([...png, 1]);
+  await loaded.asset.addResourceVersion('tla-logo.png', png2, 'image/png');
+  const delta = await sdk.lifecycle.prepareBitcoinPublication(loaded.asset, {
+    fundingUtxos: [
+      {
+        txid: boundaryRevealTxId,
+        vout: 0,
+        value: Number(tx(boundary.transactions.revealTxHex).getOutput(0).amount),
+        scriptPubKey: Buffer.from(payment.script).toString('hex'),
+      },
+      { ...fundingUtxos[0], txid: '78'.repeat(32) },
+    ],
+    satSigner,
+    changeAddress: payment.address!,
+    feeRate: 2,
+    inlineResourceId: 'tla-logo.png',
+  });
+  const deltaRevealTxId = delta.transactions.revealTxId;
+  const deltaInscriptionId = `${deltaRevealTxId}i0`;
+  snapshot.blocks.push({ height: 900_001, hash: 'c'.repeat(64), txids: [deltaRevealTxId] });
+  snapshot.tipBefore = snapshot.tipAfter = snapshot.indexTip = { height: 900_001, hash: 'c'.repeat(64) };
+  snapshot.publications.push({
+    id: deltaInscriptionId,
+    revealTxid: deltaRevealTxId,
+    network: 'mainnet',
+    sat,
+    confirmed: true,
+    creation: { height: 900_001, blockHash: 'c'.repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: 'complete',
+      mediaType: 'image/png',
+      bytes: png2,
+      metadata: encodeDocument(delta.document, 'cbor'),
+    },
+  });
+  snapshot.ownership.satpoint = `${deltaRevealTxId}:0:0`;
+
+  const receipt: MainnetReceipt = {
+    assetDid: asset.id,
+    didBtco: `did:btco:${sat}`,
+    sat,
+    // Names the LOG-ONLY boundary, not the delta that actually inlined the resource.
+    inscriptionId: boundaryInscriptionId,
+    revealTxId: boundaryRevealTxId,
+    resource: {
+      id: 'tla-logo.png',
+      mediaType: 'image/png',
+      byteLength: png.length,
+      sha256: hex.encode(sha256(png)),
+    },
+    observedAt: new Date(0).toISOString(),
+    sourceHref: 'https://example.com/evidence.json',
+  };
+  return { receipt, provider };
+}
+
 const arbitraryReceipt: MainnetReceipt = {
   assetDid: 'did:cel:uEiArbitraryArbitraryArbitraryArbitraryArbitraryArbi',
   didBtco: 'did:btco:123456789012345',
@@ -182,6 +349,18 @@ describe('verifyMainnetExample', () => {
     const result = await verifyMainnetExample({ receipt: mismatched, provider });
     expect(result.live).toBe(false);
     expect(result.didBtco).toBe(mismatched.didBtco);
+  });
+
+  test('does not credit a resource to the receipt inscription unless THAT publication itself inlined it', async () => {
+    const { receipt, provider } = await buildFixtureWithLaterInlineDelta();
+    const result = await verifyMainnetExample({ receipt, provider });
+    // The named (log-only) boundary genuinely exists and is still the accepted
+    // genesis of this sat's history, so the identity/inscription check passes...
+    expect(result.live).toBe(true);
+    expect(result.inscriptionId).toBe(receipt.inscriptionId);
+    // ...but the resource must not be reported on-chain: a LATER publication
+    // (not this one) is what actually inlined it.
+    expect(result.resourceOnChain).toBe(false);
   });
 
   test('never throws even when the provider itself is unreachable', async () => {
