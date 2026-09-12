@@ -34,14 +34,14 @@ export function createAuthRoutes(deps: {
 
   const sendOtp: Handler = async (req, _url, clientIp) => {
     const { email } = (await req.json().catch(() => ({}))) as { email?: string };
-    if (!email || !EMAIL_RE.test(email)) return json({ message: 'Invalid email format' }, 400);
+    if (!email || !EMAIL_RE.test(email)) return json({ error: 'invalid_email', message: 'Invalid email format' }, 400);
 
     const normalized = email.trim().toLowerCase();
     const rl = clientLimiter.check(clientIp ?? 'local');
     const em = emailLimiter.check(normalized);
     if (!rl.allowed || !em.allowed) {
       const retryAfterMs = Math.max(rl.retryAfterMs, em.retryAfterMs);
-      return json({ message: 'Too many requests. Please try again later.' }, 429, {
+      return json({ error: 'rate_limited', message: 'Too many requests. Please try again later.' }, 429, {
         'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
       });
     }
@@ -51,14 +51,14 @@ export function createAuthRoutes(deps: {
       return json(result); // { sessionId, message }
     } catch (e) {
       console.error('[auth] send-otp failed:', e); // log cause; don't leak upstream errors to clients
-      return json({ message: 'Failed to send verification code. Please try again.' }, 500);
+      return json({ error: 'send_otp_failed', message: 'Failed to send verification code. Please try again.' }, 500);
     }
   };
 
   const verifyOtp: Handler = async (req, _url, clientIp) => {
     const rl = verifyLimiter.check(clientIp ?? 'local');
     if (!rl.allowed) {
-      return json({ message: 'Too many requests. Please try again later.' }, 429, {
+      return json({ error: 'rate_limited', message: 'Too many requests. Please try again later.' }, 429, {
         'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),
       });
     }
@@ -67,12 +67,12 @@ export function createAuthRoutes(deps: {
       code?: string;
       publicKey?: string;
     };
-    if (!sessionId || !code) return json({ message: 'Session ID and code are required' }, 400);
+    if (!sessionId || !code) return json({ error: 'missing_fields', message: 'Session ID and code are required' }, 400);
 
     try {
       const result = await verifyEmailAuth(sessionId, code, deps.turnkey, deps.sessions, { publicKey });
       if (!result.verified || !result.subOrgId || !result.email) {
-        return json({ message: 'Verification failed' }, 400);
+        return json({ error: 'verification_failed', message: 'Verification failed' }, 400);
       }
       const token = signToken(result.subOrgId, result.email, undefined, { secret: deps.jwtSecret });
       // `secure` is stated, not inferred (SEC-1). getAuthCookieConfig otherwise
@@ -99,18 +99,21 @@ export function createAuthRoutes(deps: {
       );
     } catch (e) {
       console.error('[auth] verify-otp failed:', e); // log cause; generic message so Turnkey internals don't leak
-      return json({ message: 'Verification failed. Please check the code or request a new one.' }, 400);
+      return json(
+        { error: 'verification_failed', message: 'Verification failed. Please check the code or request a new one.' },
+        400
+      );
     }
   };
 
   const me: Handler = async (req) => {
     const token = extractToken(req);
-    if (!token) return json({ message: 'Not authenticated' }, 401);
+    if (!token) return json({ error: 'unauthorized', message: 'Not authenticated' }, 401);
     try {
       const payload = verifyToken(token, { secret: deps.jwtSecret });
       return json({ subOrgId: payload.sub, email: payload.email });
     } catch {
-      return json({ message: 'Invalid or expired token' }, 401);
+      return json({ error: 'invalid_token', message: 'Invalid or expired token' }, 401);
     }
   };
 

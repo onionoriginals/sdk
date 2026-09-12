@@ -36,6 +36,7 @@ describe('auth-routes', () => {
     const { sendOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
     const res = await sendOtp(post('/api/auth/send-otp', { email: 'nope' }), new URL('http://x/api/auth/send-otp'));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_email');
   });
 
   test('sendOtp returns a sessionId and does NOT provision a sub-org', async () => {
@@ -58,12 +59,22 @@ describe('auth-routes', () => {
       last = await sendOtp(post('/api/auth/send-otp', { email: 'rl@b.com' }, { 'x-forwarded-for': '1.1.1.1' }), url);
     }
     expect(last!.status).toBe(429);
+    expect((await last!.json()).error).toBe('rate_limited');
   });
 
   test('me returns 401 without a cookie', async () => {
     const { me } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
     const res = await me(new Request('http://x/api/me'), new URL('http://x/api/me'));
     expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe('unauthorized');
+  });
+
+  test('me returns invalid_token for a token that fails verification', async () => {
+    const { me } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    const req = new Request('http://x/api/me', { headers: { Cookie: 'auth_token=not-a-real-jwt' } });
+    const res = await me(req, new URL('http://x/api/me'));
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe('invalid_token');
   });
 
   test('me returns the payload for a valid token', async () => {
@@ -88,6 +99,51 @@ describe('auth-routes', () => {
     const s = await (await sendOtp(post('/api/auth/send-otp', { email: 'v@b.com' }), new URL('http://x/api/auth/send-otp'))).json();
     const res = await verifyOtp(post('/api/auth/verify-otp', { sessionId: s.sessionId, code: 'abc' }), new URL('http://x/api/auth/verify-otp'));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('verification_failed');
+  });
+
+  test('verifyOtp rejects a missing sessionId/code before Turnkey', async () => {
+    const { verifyOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    const res = await verifyOtp(post('/api/auth/verify-otp', {}), new URL('http://x/api/auth/verify-otp'));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('missing_fields');
+  });
+
+  test('verifyOtp reports verification_failed for an unknown/expired session', async () => {
+    const { verifyOtp } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    const res = await verifyOtp(
+      post('/api/auth/verify-otp', { sessionId: 'nope', code: '123456' }),
+      new URL('http://x/api/auth/verify-otp')
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('verification_failed');
+  });
+});
+
+/**
+ * The auth error shape (#497): every failure carries a machine-readable
+ * `error` code alongside its `message`, matching the `{ error, message? }`
+ * envelope the rest of the landing API (bitcoin.ts, originals-routes.ts)
+ * already uses. Before this, auth-routes was the one surface that returned
+ * `message` only, so a caller could not branch on the failure kind without
+ * parsing display text.
+ */
+describe('auth-routes error shape', () => {
+  test('every named failure response carries both error and message', async () => {
+    const { sendOtp, verifyOtp, me } = createAuthRoutes({ turnkey: mockTurnkey(), sessions, jwtSecret: JWT_SECRET });
+    const url = (p: string) => new URL(`http://x${p}`);
+    const responses = [
+      await sendOtp(post('/api/auth/send-otp', { email: 'nope' }), url('/api/auth/send-otp')),
+      await verifyOtp(post('/api/auth/verify-otp', {}), url('/api/auth/verify-otp')),
+      await verifyOtp(post('/api/auth/verify-otp', { sessionId: 'nope', code: '123456' }), url('/api/auth/verify-otp')),
+      await me(new Request('http://x/api/me'), url('/api/me')),
+    ];
+    for (const res of responses) {
+      const body = (await res.json()) as { error?: string; message?: string };
+      expect(typeof body.error).toBe('string');
+      expect(body.error!.length).toBeGreaterThan(0);
+      expect(typeof body.message).toBe('string');
+    }
   });
 });
 
