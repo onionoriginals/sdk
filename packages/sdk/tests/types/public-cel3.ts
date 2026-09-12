@@ -83,6 +83,11 @@ const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPubl
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
 const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat(prepared.transactions.satoshi);
+// Per-resource-version chain-inline vs off-chain-referenced status is part of the public accepted shape.
+if (resolved.status === "accepted") {
+  const availability: "bitcoin-inline" | "referenced" = resolved.resourceAvailability[0].availability;
+  void availability;
+}
 void hosted; void submitted; void resolved;
 
 // The 3.0 freeze excludes confirmation hooks and event payloads from the former lifecycle.
