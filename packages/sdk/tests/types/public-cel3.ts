@@ -18,8 +18,10 @@ import type {
 } from "@originals/sdk/types";
 import {
   verifyHistory,
+  checkpointFromHistory,
   type AssetState,
   type DeepReadonly,
+  type HistoryCheckpoint,
 } from "@originals/sdk/cel";
 import { OriginalsSDK as LocalSDK } from "@originals/sdk/v3";
 
@@ -45,7 +47,11 @@ const subpathEnvelope: SubpathEnvelope = envelope;
 const loaded: OriginalsAsset = (
   await SDK.create().lifecycle.loadAsset(subpathEnvelope)
 ).asset;
-const state: DeepReadonly<AssetState> = verifyHistory(loaded.celLog).state;
+const history = verifyHistory(loaded.celLog);
+const state: DeepReadonly<AssetState> = history.state;
+const freshness: "unknown" | "checkpoint-consistent" | "externally-anchored" = history.freshness;
+const checkpoint: HistoryCheckpoint = checkpointFromHistory(history);
+void freshness; void checkpoint;
 await LocalSDK.create().lifecycle.loadAsset(loaded.serialize());
 void resource;
 void state;
