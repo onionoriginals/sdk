@@ -1906,6 +1906,41 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
   });
 
   /**
+   * A legacy record that HONESTLY passes re-verification must be upgraded
+   * in place — otherwise every later retry keeps re-deriving economics from
+   * chain state its own prior (successful) attempt has since invalidated.
+   */
+  test('a legacy record is upgraded in place after honestly passing re-verification, surviving a later spent-outpoint retry', async () => {
+    const pair = buildPair(); // honest economics: real change, real fee
+    const { routes, store, broadcasts } = harness();
+    store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:${pair.fundingUtxo.vout}`],
+      changeAddress: pair.changeAddress,
+      status: 'signed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // Deliberately no `economicsVerified` — the record predates the check.
+    });
+
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(store.get('sub-1', pair.commitTxId)!.economicsVerified).toBe(true);
+
+    // Now spend the outpoint out of the indexer (the commit is on-chain) and
+    // retry: the upgraded flag must let this skip re-derivation.
+    spendChainUtxo(routes, { txid: pair.fundingUtxo.txid, vout: pair.fundingUtxo.vout });
+    const retry = await post(routes, pair);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { error?: string }).error).toBeUndefined();
+  });
+
+  /**
    * The indexer/fee-estimate lookups are provider-backed work, same as the
    * ordinal check they sit beside — an authenticated caller who has spent
    * their per-user attempt budget must not be able to keep triggering them.

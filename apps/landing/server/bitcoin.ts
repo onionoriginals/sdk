@@ -1728,6 +1728,23 @@ export function createBitcoinRoutes(deps: {
       if (revealFeeSats > maxRevealFeeSats) {
         return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
       }
+
+      // A legacy record (written before this check existed) just passed
+      // re-verification for the first time: persist the flag now. Without
+      // this, `store.create` below would stay a no-op against the existing
+      // row (as it always is for a matching commitTxId), and a LATER retry
+      // would re-derive economics from chain state THIS attempt's own
+      // broadcast may already have invalidated — refusing a pair that was
+      // genuinely, if belatedly, verified.
+      if (existingByCommitId) {
+        try {
+          store.markEconomicsVerified(sub, commitTxId);
+        } catch (e) {
+          const unreadable = unreadableRecords(sub, e);
+          if (unreadable) return unreadable;
+          throw e;
+        }
+      }
     }
 
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile

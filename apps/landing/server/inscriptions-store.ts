@@ -135,6 +135,17 @@ export interface InscriptionsStore {
    * UI's staleness clock reads.
    */
   markRebroadcast(subOrgId: string, commitTxId: string): void;
+  /**
+   * Stamp a record that just passed the independent economics check
+   * (#493/M07) for the first time — a legacy record written before that
+   * check existed, now upgraded after successfully re-verifying. Without
+   * this, a LATER retry of the same record re-derives economics from chain
+   * state THIS attempt's own broadcast may have already invalidated (its
+   * funding outpoint spent), refusing a pair that was genuinely verified.
+   * Touches ONLY `economicsVerified`, like `markRebroadcast` leaves
+   * `updatedAt` alone — this is bookkeeping, not a status transition.
+   */
+  markEconomicsVerified(subOrgId: string, commitTxId: string): void;
   list(subOrgId: string): InscriptionRecord[];
   /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
@@ -513,6 +524,13 @@ export function createInscriptionsStore(opts: {
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
       rec.rebroadcastAt = new Date(now()).toISOString();
+      writeAll(subOrgId, recs);
+    },
+    markEconomicsVerified(subOrgId, commitTxId) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      rec.economicsVerified = true;
       writeAll(subOrgId, recs);
     },
     list(subOrgId) {
