@@ -1663,17 +1663,26 @@ export function createBitcoinRoutes(deps: {
     // finalized transactions' own measured sizes, never the client's numbers —
     // against an envelope derived from the current fee policy.
     //
-    // Skipped for a retry of an already-persisted commitTxId: those exact
-    // bytes were already vetted, including this envelope, the first time they
-    // were accepted. Re-checking them against a moving fee-rate ceiling and a
-    // live indexer read would make an idempotent resubmission newly fail on
-    // ordinary fee-rate drift or a transient indexer/estimator outage —
-    // precisely the fragility persist-before-broadcast exists to avoid. A
-    // store read that cannot be answered is treated as "not yet vetted": the
-    // safe direction is to re-verify, not to skip verification.
+    // Skipped for a byte-identical retry of an already-persisted pair: those
+    // exact bytes were already vetted, including this envelope, the first
+    // time they were accepted. Re-checking them against a moving fee-rate
+    // ceiling and a live indexer read would make an idempotent resubmission
+    // newly fail on ordinary fee-rate drift or a transient indexer/estimator
+    // outage — precisely the fragility persist-before-broadcast exists to
+    // avoid.
+    //
+    // Keyed on the PERSISTED reveal matching this request's, not merely on
+    // commitTxId: `store.create` below is a no-op when a record for this
+    // commitTxId already exists, but broadcast always uses THIS request's
+    // `revealTxHex` — so matching on commitTxId alone would let a resubmitted
+    // commit paired with a DIFFERENT, unvetted reveal (same taproot script,
+    // shifted postage/fee) skip straight to broadcast. A store read that
+    // cannot be answered is treated as "not yet vetted": the safe direction
+    // is to re-verify, not to skip verification.
     let alreadyVetted: boolean;
     try {
-      alreadyVetted = !!store.get(sub, commitTxId);
+      const existing = store.get(sub, commitTxId);
+      alreadyVetted = !!existing && existing.revealTxHex === revealTxHex;
     } catch {
       alreadyVetted = false;
     }

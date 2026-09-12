@@ -1856,6 +1856,38 @@ describe('POST /api/btc/inscribe — economic envelope (#493 M07)', () => {
     expect(res.status).toBe(200);
     expect(broadcasts.filter((h) => h === pair.signedCommitHex)).toHaveLength(2);
   });
+
+  test('a resubmitted commit paired with a DIFFERENT reveal is re-vetted, not waved through', async () => {
+    // The retry skip is keyed on commitTxId, but broadcast always uses THIS
+    // request's reveal bytes, not the persisted ones (store.create no-ops on
+    // a known commitTxId). Pairing the already-accepted commit with a
+    // substitute reveal that keeps almost nothing as postage is the M07
+    // theft laundered through the retry path instead of through the
+    // commit's own change output — it must still hit the fee ceiling.
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    expect((await post(routes, pair)).status).toBe(200);
+
+    const commit = btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), {
+      allowUnknownInputs: true,
+      allowUnknownOutputs: true,
+    });
+    const altReveal = new btc.Transaction();
+    altReveal.addInput({
+      txid: pair.commitTxId,
+      index: 0,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
+    });
+    altReveal.addOutputAddress(USER_ADDRESS, 500n, btc.TEST_NETWORK); // postage gutted: reveal fee now 19,500
+    INSCRIPTION.finalize(altReveal, commit);
+
+    const res = await post(routes, { ...pair, revealTxHex: hex.encode(altReveal.extract()), revealTxId: altReveal.id });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    // The original, honest broadcast from the first submission is untouched.
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
 });
 
 
