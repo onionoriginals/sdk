@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   verifyHistory,
+  checkpointFromHistory,
   createLocalSigner,
   signEvent,
 } from "../../src/v3/index.js";
@@ -70,3 +71,104 @@ for (const id of [
       }),
     ).toThrow();
   });
+
+test("a first-time verifier with no checkpoint gets authenticated-history freshness only", () => {
+  const result = verifyHistory({ log: [genesis] });
+  expect(result.freshness).toBe("unknown");
+});
+
+test("checkpointFromHistory is a portable claim a different call can independently confirm", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const checkpoint = checkpointFromHistory(initial);
+  expect(checkpoint).toEqual({
+    assetId: initial.state.assetId,
+    head: initial.state.head,
+    entryCount: initial.state.entryCount,
+  });
+
+  // A fresh, unrelated verifyHistory call - not the same object, no WeakSet membership -
+  // still confirms the checkpoint equals the presented history.
+  const same = verifyHistory({ log: [genesis] }, { checkpoint });
+  expect(same.freshness).toBe("checkpoint-consistent");
+
+  // Extending past a checkpoint is also consistent.
+  const rotation = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: B.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const extended = verifyHistory({ log: [genesis, rotation] }, { checkpoint });
+  expect(extended.freshness).toBe("checkpoint-consistent");
+  expect(extended.state.controller).toBe(B.controller);
+
+  // The same boundary check also holds chained through a same-process prefix.
+  const chained = verifyHistory(
+    { log: [rotation] },
+    { prefix: initial, checkpoint },
+  );
+  expect(chained.freshness).toBe("checkpoint-consistent");
+});
+
+test("checkpoint consistency fails closed on wrong asset, rollback, or fork", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const rotation = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: B.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const rotated = verifyHistory({ log: [genesis, rotation] });
+  const rotatedCheckpoint = checkpointFromHistory(rotated);
+
+  // A checkpoint for a different asset never matches, valid-looking or not.
+  expect(() =>
+    verifyHistory(
+      { log: [genesis] },
+      {
+        checkpoint: {
+          assetId: "ni:///sha-256;" + "A".repeat(43),
+          head: initial.state.head,
+          entryCount: 1,
+        },
+      },
+    ),
+  ).toThrow();
+
+  // A shorter presented history than a previously-observed checkpoint is a rollback.
+  expect(() =>
+    verifyHistory({ log: [genesis] }, { checkpoint: rotatedCheckpoint }),
+  ).toThrow();
+
+  // A different, equally-signed continuation from the same point at the same entry count
+  // is an equivocation/fork the checkpoint must catch, not just a signature failure.
+  const altEntry = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: { type: "update", data: { profile, name: "Fork" } },
+    },
+    A,
+  );
+  expect(() =>
+    verifyHistory(
+      { log: [genesis, altEntry] },
+      { checkpoint: rotatedCheckpoint },
+    ),
+  ).toThrow();
+});
