@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { base58 } from "@scure/base";
 import fixtures from "../../../../docs/research/cel-core-vectors/histories.json";
 import {
   resolveSat,
   createLocalSigner,
   signEvent,
+  createNonce,
+  digestBytes,
   encodeDocument,
+  verifyHistory,
   type SatSnapshot,
 } from "../../src/v3/index.js";
 
@@ -271,4 +275,202 @@ test("unmatched inline bytes do not suppress an authorized rotation and continua
     expect(result.publications[1].inlineContentStatus).toBe("unmatched");
     expect(result.publications[1].inlineResourceIds).toEqual([]);
   }
+});
+
+// #378: a boundary/delta carries at most one inline resource body per publication.
+// resourceAvailability must honestly report, per current resource, whether an accepted
+// publication in *this* snapshot actually carried its exact current bytes on-chain.
+const A = createLocalSigner(
+  "Ed25519",
+  new Uint8Array(
+    Buffer.from(
+      "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "hex",
+    ),
+  ),
+);
+const scid = base58.encode(
+  Uint8Array.from([0x12, 0x20, ...createHash("sha256").update("378").digest()]),
+);
+const sat = "5000000001";
+
+async function twoResourceBoundary(resourceA: Uint8Array, resourceB: Uint8Array) {
+  const genesis = await signEvent(
+    {
+      operation: {
+        type: "create",
+        data: {
+          profile: "originals/cel/3",
+          controller: A.controller,
+          createdAt: "2026-09-11T00:00:00Z",
+          nonce: createNonce(),
+          resources: [
+            { id: "a", mediaType: "text/plain", digestMultibase: digestBytes(resourceA) },
+            { id: "b", mediaType: "text/plain", digestMultibase: digestBytes(resourceB) },
+          ],
+        },
+      },
+    },
+    A,
+  );
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: initial.state.assetId,
+          to: `did:webvh:${scid}:example.com:378`,
+          layer: "webvh",
+          migratedAt: "2026-09-11T00:00:01Z",
+        },
+      },
+    },
+    A,
+  );
+  const afterWebvh = verifyHistory({ log: [toWebvh] }, { prefix: initial });
+  const toBtco = await signEvent(
+    {
+      previousEvent: afterWebvh.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: afterWebvh.state.alias,
+          to: `did:btco:reg:${sat}`,
+          layer: "btco",
+          migratedAt: "2026-09-11T00:00:02Z",
+        },
+      },
+    },
+    A,
+  );
+  const afterBtco = verifyHistory({ log: [toBtco] }, { prefix: afterWebvh });
+  expect(afterBtco.state.alias).toBe(`did:btco:reg:${sat}`);
+  return { log: [genesis, toWebvh, toBtco], afterBtco };
+}
+
+function emptySnapshot(): Omit<SatSnapshot, "publications"> {
+  const tip = { height: 200, hash: "b".repeat(64) };
+  return {
+    network: "regtest",
+    sat,
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 200, hash: tip.hash, txids: ["c".repeat(64)] }],
+    ownership: { owner: "holder", satpoint: "d".repeat(64) + ":0:0" },
+  };
+}
+
+function publicationAt(
+  log: unknown[],
+  bytes: Uint8Array,
+  mediaType: string,
+): SatSnapshot["publications"][number] {
+  return {
+    id: "c".repeat(64) + "i0",
+    revealTxid: "c".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 200, blockHash: "b".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType,
+      bytes,
+      metadata: encodeDocument({ log }, "cbor"),
+    },
+  };
+}
+
+test("a two-resource boundary reports bitcoin-inline only for the resource whose bytes were actually inlined", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log } = await twoResourceBoundary(resourceA, resourceB);
+  const snapshot: SatSnapshot = {
+    ...emptySnapshot(),
+    publications: [publicationAt(log, resourceA, "text/plain")],
+  };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  // Removing any host changes nothing here: "b" was never carried on-chain.
+  expect(result.resourceAvailability).toEqual([
+    { id: "a", version: 1, availability: "bitcoin-inline" },
+    { id: "b", version: 1, availability: "referenced" },
+  ]);
+});
+
+test("a delta changing two resources leaves only the resource re-inlined at its new digest recoverable", async () => {
+  const resourceA1 = new TextEncoder().encode("resource A v1"),
+    resourceB1 = new TextEncoder().encode("resource B v1"),
+    resourceA2 = new TextEncoder().encode("resource A v2"),
+    resourceB2 = new TextEncoder().encode("resource B v2");
+  const { log: boundaryLog, afterBtco } = await twoResourceBoundary(
+    resourceA1,
+    resourceB1,
+  );
+  const update = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: {
+          profile: "originals/cel/3",
+          resources: [
+            {
+              id: "a",
+              mediaType: "text/plain",
+              digestMultibase: digestBytes(resourceA2),
+              previousDigestMultibase: digestBytes(resourceA1),
+            },
+            {
+              id: "b",
+              mediaType: "text/plain",
+              digestMultibase: digestBytes(resourceB2),
+              previousDigestMultibase: digestBytes(resourceB1),
+            },
+          ],
+        },
+      },
+    },
+    A,
+  );
+  const boundaryPublication = publicationAt(boundaryLog, resourceA1, "text/plain");
+  const deltaPublication: SatSnapshot["publications"][number] = {
+    ...publicationAt([update], resourceA2, "text/plain"),
+    id: "e".repeat(64) + "i0",
+    revealTxid: "e".repeat(64),
+    creation: { height: 201, blockHash: "f".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+  };
+  const snapshot: SatSnapshot = {
+    ...emptySnapshot(),
+    tipBefore: { height: 201, hash: "f".repeat(64) },
+    tipAfter: { height: 201, hash: "f".repeat(64) },
+    indexTip: { height: 201, hash: "f".repeat(64) },
+    blocks: [
+      { height: 200, hash: "b".repeat(64), txids: ["c".repeat(64)] },
+      { height: 201, hash: "f".repeat(64), txids: ["e".repeat(64)] },
+    ],
+    publications: [boundaryPublication, deltaPublication],
+  };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.resources.map((r) => r.digestMultibase)).toEqual([
+    digestBytes(resourceA2),
+    digestBytes(resourceB2),
+  ]);
+  // "a" was re-inlined at its new digest; the boundary's stale bytes for "a" don't count,
+  // and "b" was never carried on-chain at any digest it currently has: without a host,
+  // only "a"'s bytes remain recoverable.
+  expect(result.resourceAvailability).toEqual([
+    { id: "a", version: 2, availability: "bitcoin-inline" },
+    { id: "b", version: 2, availability: "referenced" },
+  ]);
 });
