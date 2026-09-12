@@ -660,6 +660,12 @@ export function createBitcoinRoutes(deps: {
    * retired. An application recovery horizon, not a Bitcoin finality
    * guarantee — deeper reorgs than this remain possible. Anything that is
    * not a positive integer falls back to the default (`positiveInt`).
+   *
+   * Floored at six (CLAUDE.md's "six-confirmation retention rule"): this
+   * knob exists to let a deployment retain recovery artifacts LONGER than
+   * the default, never shorter — a lower value would silently shrink the
+   * window past a reorg could invalidate a discarded signed pair with
+   * nothing left to recover from.
    */
   recoveryConfirmations?: number;
 }): {
@@ -714,10 +720,12 @@ export function createBitcoinRoutes(deps: {
   // Application recovery horizon, not a Bitcoin finality guarantee. Retain
   // both signed transactions and recheck the chain until this many
   // confirmations — the explicit settlement policy behind the `settled` flag
-  // in the /api/btc/inscribe response (#567). Configurable because different
-  // deployments/networks may want a different depth before treating a
-  // confirmation as final; six is the historical default.
-  const RECOVERY_CONFIRMATIONS = positiveInt(deps.recoveryConfirmations, 6);
+  // in the /api/btc/inscribe response (#567). Configurable UPWARD only: a
+  // deployment may extend this past the default for extra margin, but never
+  // shrink it below six, the repository's documented retention floor
+  // (CLAUDE.md's "six-confirmation retention rule") — going lower would
+  // retire a signed pair's recovery artifacts before that window closes.
+  const RECOVERY_CONFIRMATIONS = Math.max(6, positiveInt(deps.recoveryConfirmations, 6));
 
   // ONE fee source for the money path (R3/KTD3). The deposit quote, the
   // /api/btc/fee estimate the browser builds the inscription against, and the

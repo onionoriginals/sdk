@@ -1688,12 +1688,12 @@ test('one confirmation survives a restart, demotes on reorg, and retires only at
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
 });
 
-test('#567: the settlement threshold is configurable and drives the exposed settled flag', async () => {
+test('#567: the settlement threshold is configurable UPWARD and drives the exposed settled flag', async () => {
   let confirmations = 1;
   let blockHeight = 200;
   const h = harness({
     txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight }),
-    recoveryConfirmations: 2, // NOT the default six
+    recoveryConfirmations: 8, // deliberately ABOVE the default six, never below
   });
   const pair = buildPair();
   await post(h.routes, pair);
@@ -1705,16 +1705,51 @@ test('#567: the settlement threshold is configurable and drives the exposed sett
     }).inscriptions[0];
   };
 
+  confirmations = 6; // meets the historical default, but NOT the configured 8
   let row = await poll();
   expect(row.status).toBe('confirmed');
-  expect(row.settled).toBe(false); // 1 < 2
-  expect(row.confirmations).toBe(1);
+  expect(row.settled).toBe(false);
+  expect(row.confirmations).toBe(6);
   expect(row.confirmedBlockHeight).toBe(200);
   expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
 
-  confirmations = 2;
+  confirmations = 8;
   row = await poll();
-  expect(row.settled).toBe(true); // meets the CONFIGURED threshold, not the default
+  expect(row.settled).toBe(true); // meets the CONFIGURED threshold
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: recoveryConfirmations cannot lower the settlement threshold below six', async () => {
+  let confirmations = 1;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight: 200 }),
+    recoveryConfirmations: 1, // an attempt to shrink the retention window
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean }>;
+    }).inscriptions[0];
+  };
+
+  // A confirmation count that would settle at the requested "1" must NOT
+  // retire the recovery artifacts — the floor holds regardless of config.
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 5;
+  row = await poll();
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 6;
+  row = await poll();
+  expect(row.settled).toBe(true);
   expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
 });
 
