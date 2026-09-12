@@ -12,6 +12,7 @@ import type { EventLog, DataIntegrityProof, WitnessProof } from '../../src/types
 import type { CelBitcoinManager } from '../../src/types';
 import { createRealCelSigner } from '../fixtures/celSigner';
 import { CEL_CRYPTOSUITE } from '../../src/proofVerification';
+import { StructuredError } from '../../src/utils/telemetry';
 
 // One real Ed25519 did:key signer shared by every manager in this file: seal-time
 // self-verification (plan 034) rejects unverifiable proofs, and CEL authority
@@ -867,6 +868,20 @@ describe('BtcoCelManager', () => {
       await expect(manager.migrate(webvhLog)).rejects.toThrow(
         /full CEL boundary history/
       );
+    });
+
+    it('throws a StructuredError with the stable CEL_BTCO_INCOMPLETE_HISTORY code', async () => {
+      const manager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const webvhLog = await createWebvhLog();
+
+      try {
+        await manager.migrate(webvhLog);
+        throw new Error('expected migrate() to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(StructuredError);
+        expect((err as StructuredError).code).toBe('CEL_BTCO_INCOMPLETE_HISTORY');
+        expect((err as StructuredError).name).toBe('StructuredError');
+      }
     });
 
     it('still fails closed when acknowledgeIncompleteHistory is explicitly false', async () => {
