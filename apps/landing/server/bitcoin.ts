@@ -536,6 +536,26 @@ export function estimateInscriptionCostSats(opts: {
   return Math.ceil(opts.feeRate * (commitVB + revealVB) * buffer) + (opts.postageSats ?? POSTAGE_SATS);
 }
 
+/**
+ * A commit's `.vsize` throws ("Transaction is not finalized") the moment ANY
+ * input lacks a witness/scriptSig — which a structurally valid but genuinely
+ * UNSIGNED funding input does. This route never independently verifies the
+ * commit's OWN signature (only the reveal's, via `validateInscriptionReveal`;
+ * an invalid or absent commit signature fails at broadcast instead), so an
+ * unfinalized commit can legitimately reach this far. Fall back to the same
+ * structural estimate the deposit quote sizes itself from — accurate enough
+ * for a fee BOUND, and independent of witness bytes entirely.
+ */
+function safeCommitVsize(commit: btc.Transaction): number {
+  try {
+    return commit.vsize;
+  } catch {
+    const outputsVB = Array.from({ length: commit.outputsLength }, (_, i) => (i === 0 ? P2TR_OUTPUT_VB : P2WPKH_OUTPUT_VB))
+      .reduce((n, vb) => n + vb, 0);
+    return COMMIT_OVERHEAD_VB + outputsVB + COMMIT_INPUT_VB * commit.inputsLength;
+  }
+}
+
 /** Signs a built funding tx and returns broadcast-ready raw tx hex. */
 export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 
@@ -1629,7 +1649,7 @@ export function createBitcoinRoutes(deps: {
       );
     }
     const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
-    const commitVsize = commit.vsize;
+    const commitVsize = safeCommitVsize(commit);
     const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
     if (commitFeeSats > maxCommitFeeSats) {
       return refuse(
