@@ -243,6 +243,13 @@ function registerChainUtxo(routes: ReturnType<typeof harness>['routes'], utxo: {
   registry.set(`${utxo.txid.toLowerCase()}:${utxo.vout}`, utxo);
 }
 
+/** Simulates an outpoint leaving the indexer's confirmed set — spent by a broadcast commit. */
+function spendChainUtxo(routes: ReturnType<typeof harness>['routes'], outpoint: { txid: string; vout: number }) {
+  const registry = chainRegistryByRoutes.get(routes);
+  if (!registry) throw new Error('spendChainUtxo: routes has no indexer registry (was noIndexer set?)');
+  registry.delete(`${outpoint.txid.toLowerCase()}:${outpoint.vout}`);
+}
+
 function harness(opts?: {
   dataDir?: string;
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
@@ -287,9 +294,11 @@ function harness(opts?: {
   // state assert it explicitly rather than relying on the harness.
   if (opts?.bind !== false) store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
   const chainRegistry = new Map<string, { txid: string; vout: number; value: number }>();
+  let indexerFetchCalls = 0;
   const mockFetch = (async (input: unknown) => {
     const url = typeof input === 'string' ? input : String(input);
     if (!/\/address\/[^/]+\/utxo$/.test(url)) throw new Error(`harness: unexpected fetch ${url}`);
+    indexerFetchCalls++;
     const body = JSON.stringify(
       [...chainRegistry.values()].map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, status: { confirmed: true } }))
     );
@@ -305,7 +314,7 @@ function harness(opts?: {
     fetchImpl: mockFetch,
   });
   chainRegistryByRoutes.set(routes, chainRegistry);
-  return { routes, store, broadcasts, dataDir };
+  return { routes, store, broadcasts, dataDir, indexerCallCount: () => indexerFetchCalls };
 }
 
 async function post(routes: ReturnType<typeof harness>['routes'], body: unknown) {
@@ -1840,6 +1849,52 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
     const res = await post(routes, pair);
     expect(res.status).toBe(200);
     expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  /**
+   * A commit's funding outpoint is SPENT the moment it broadcasts — a real
+   * indexer stops listing it as a confirmed, unspent output. A resubmission
+   * of the exact same signed pair (dead-tab recovery, an ambiguous broadcast,
+   * a client that never saw the first 200) must still succeed: `commitTxId`
+   * hashes the exact signed bytes, so a record already filed under it is
+   * proof this exact transaction was already verified, not a new one to
+   * re-check economics for.
+   */
+  test('a retry of an already-persisted pair succeeds even after its funding UTXO is spent', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+
+    // The indexer no longer lists the funding outpoint as confirmed/unspent —
+    // exactly what a real indexer does once the commit is on-chain.
+    spendChainUtxo(routes, { txid: pair.fundingUtxo.txid, vout: pair.fundingUtxo.vout });
+
+    const retry = await post(routes, pair);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { error?: string }).error).toBeUndefined();
+  });
+
+  /**
+   * The indexer/fee-estimate lookups are provider-backed work, same as the
+   * ordinal check they sit beside — an authenticated caller who has spent
+   * their per-user attempt budget must not be able to keep triggering them.
+   */
+  test('the per-user attempt cap is spent BEFORE any indexer lookup, not after', async () => {
+    const { routes, indexerCallCount } = harness();
+    for (let i = 0; i < 10; i++) {
+      const pair = buildPair(`${i}`.repeat(64));
+      expect((await post(routes, pair)).status).toBe(200);
+    }
+    const callsSoFar = indexerCallCount();
+    expect(callsSoFar).toBeGreaterThan(0);
+
+    const capped = await post(routes, buildPair('b'.repeat(64)));
+    expect(capped.status).toBe(429);
+    expect(((await capped.json()) as { error: string }).error).toBe('inscribe_user_cap');
+    // The capped request never reached the indexer.
+    expect(indexerCallCount()).toBe(callsSoFar);
   });
 });
 
