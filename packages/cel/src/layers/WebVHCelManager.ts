@@ -17,6 +17,7 @@ import type { WitnessService } from '../witnesses/WitnessService.js';
 import type { CelSigner } from './PeerCelManager.js';
 import { deriveDidCel } from '../celDid.js';
 import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 /**
  * Configuration options for WebVHCelManager
@@ -188,7 +189,8 @@ export class WebVHCelManager {
     // misinterpret it. Only proceed when the caller has explicitly
     // acknowledged that non-conformance.
     if (!this.config.acknowledgeNonConformantId) {
-      throw new Error(
+      throw new StructuredError(
+        'CEL_WEBVH_NON_CONFORMANT_ID',
         'WebVHCelManager.migrate() produces a did:webvh-labeled identifier that is not ' +
         'conformant with the did:webvh method (no SCID, no genuine version history) and ' +
         'that an independent WebVH resolver may reject or misinterpret. This class is ' +
