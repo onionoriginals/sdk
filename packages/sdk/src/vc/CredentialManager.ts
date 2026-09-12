@@ -390,8 +390,17 @@ export class CredentialManager {
         return false;
       }
       const verifier = new Verifier(this.didManager, { statusListResolver: this.statusListResolver });
-      const statusResult = await verifier.checkCredentialStatus(credential);
-      return statusResult.verified;
+      try {
+        // checkCredentialStatus awaits statusListResolver directly with no
+        // internal try/catch (unlike Verifier.verifyCredential, which wraps
+        // its whole body); a rejecting resolver — a normal network failure,
+        // not a bug — must not escape this method's documented boolean
+        // contract and abort the caller's flow.
+        const statusResult = await verifier.checkCredentialStatus(credential);
+        return statusResult.verified;
+      } catch {
+        return false;
+      }
     });
   }
 
