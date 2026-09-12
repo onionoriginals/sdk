@@ -1445,6 +1445,13 @@ export function createBitcoinRoutes(deps: {
       if (!raw) return { ok: false, reason: 'funding_tx_unavailable' };
       const parsed = parseRawTx(raw);
       if (!parsed) return { ok: false, reason: 'funding_tx_unparseable' };
+      // The indexer answers a lookup keyed by txid; nothing else ties the
+      // returned bytes to that identity. Mismatched bytes with a smaller
+      // output at the same vout would understate totalSats below and make an
+      // excessive fee look acceptable — exactly the theft this envelope
+      // exists to catch. Require the parsed transaction to actually BE the
+      // one asked for before trusting its output amounts.
+      if (parsed.id.toLowerCase() !== key) return { ok: false, reason: 'funding_tx_mismatch' };
       byTxid.set(key, parsed);
     }
     let totalSats = 0;
@@ -1655,39 +1662,71 @@ export function createBitcoinRoutes(deps: {
     // Verify the ACTUAL fee — from independently-sourced input values and the
     // finalized transactions' own measured sizes, never the client's numbers —
     // against an envelope derived from the current fee policy.
-    const fundingValues = await resolveFundingValues(declaredUtxos.map((u) => ({ txid: u.txid, vout: u.vout })));
-    if (!fundingValues.ok) {
-      return refuse(
-        'funding_value_unavailable',
-        { error: 'funding_value_unavailable', message: 'Could not independently verify the funding inputs’ value.' },
-        503
-      );
-    }
-    const commitOutputSats = Number(commit.getOutput(0).amount ?? 0n);
-    const changeOutputSats = commit.outputsLength === 2 ? Number(commit.getOutput(1).amount ?? 0n) : 0;
-    const postageSats = Number(reveal.getOutput(0).amount ?? 0n);
-    const commitFeeSats = fundingValues.totalSats - commitOutputSats - changeOutputSats;
-    const revealFeeSats = commitOutputSats - postageSats;
-    if (commitFeeSats < 0 || revealFeeSats < 0) {
-      return refuse(
-        'commit_economics_invalid',
-        { error: 'commit_invariant_violation', message: 'The signed pair spends more than the declared funding set actually holds.' },
-        400
-      );
-    }
-    let feeRateNow: number;
+    //
+    // Skipped for a retry of an already-persisted commitTxId: those exact
+    // bytes were already vetted, including this envelope, the first time they
+    // were accepted. Re-checking them against a moving fee-rate ceiling and a
+    // live indexer read would make an idempotent resubmission newly fail on
+    // ordinary fee-rate drift or a transient indexer/estimator outage —
+    // precisely the fragility persist-before-broadcast exists to avoid. A
+    // store read that cannot be answered is treated as "not yet vetted": the
+    // safe direction is to re-verify, not to skip verification.
+    let alreadyVetted: boolean;
     try {
-      feeRateNow = await currentFeeRate(1);
-    } catch (e) {
-      return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+      alreadyVetted = !!store.get(sub, commitTxId);
+    } catch {
+      alreadyVetted = false;
     }
-    const feeCeilingSats = Math.ceil(feeRateNow * INSCRIBE_FEE_CEILING_MULTIPLIER * (commit.vsize + reveal.vsize));
-    if (commitFeeSats + revealFeeSats > feeCeilingSats) {
-      return refuse(
-        'fee_ceiling_exceeded',
-        { error: 'commit_invariant_violation', message: 'The signed pair pays far more in fees than the current fee policy allows; refusing to broadcast.' },
-        400
-      );
+    if (!alreadyVetted) {
+      const fundingValues = await resolveFundingValues(declaredUtxos.map((u) => ({ txid: u.txid, vout: u.vout })));
+      if (!fundingValues.ok) {
+        return refuse(
+          'funding_value_unavailable',
+          { error: 'funding_value_unavailable', message: 'Could not independently verify the funding inputs’ value.' },
+          503
+        );
+      }
+      const commitOutputSats = Number(commit.getOutput(0).amount ?? 0n);
+      const changeOutputSats = commit.outputsLength === 2 ? Number(commit.getOutput(1).amount ?? 0n) : 0;
+      const postageSats = Number(reveal.getOutput(0).amount ?? 0n);
+      const commitFeeSats = fundingValues.totalSats - commitOutputSats - changeOutputSats;
+      const revealFeeSats = commitOutputSats - postageSats;
+      if (commitFeeSats < 0 || revealFeeSats < 0) {
+        return refuse(
+          'commit_economics_invalid',
+          { error: 'commit_invariant_violation', message: 'The signed pair spends more than the declared funding set actually holds.' },
+          400
+        );
+      }
+      let feeRateNow: number;
+      try {
+        feeRateNow = await currentFeeRate(1);
+      } catch (e) {
+        return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+      }
+      // `.vsize` throws on a transaction whose inputs are not finalized. Every
+      // real submission's reveal is (validateInscriptionReveal above already
+      // required a valid witness), but a preview/dry-run tool can legitimately
+      // post a structurally-complete, deliberately UNSIGNED commit (no funding
+      // key available) to see how far validation gets. An unsigned commit can
+      // never broadcast regardless of this check's outcome, so degrading to a
+      // structural size estimate here is safe: it keeps that preview path
+      // working without weakening the envelope for any commit that could
+      // actually reach the network.
+      const commitVsize = (() => {
+        try { return commit.vsize; } catch {
+          return COMMIT_OVERHEAD_VB + P2TR_OUTPUT_VB + (commit.outputsLength === 2 ? P2WPKH_OUTPUT_VB : 0) + COMMIT_INPUT_VB * commit.inputsLength;
+        }
+      })();
+      const revealVsize = (() => { try { return reveal.vsize; } catch { return REVEAL_BASE_VB; } })();
+      const feeCeilingSats = Math.ceil(feeRateNow * INSCRIBE_FEE_CEILING_MULTIPLIER * (commitVsize + revealVsize));
+      if (commitFeeSats + revealFeeSats > feeCeilingSats) {
+        return refuse(
+          'fee_ceiling_exceeded',
+          { error: 'commit_invariant_violation', message: 'The signed pair pays far more in fees than the current fee policy allows; refusing to broadcast.' },
+          400
+        );
+      }
     }
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry

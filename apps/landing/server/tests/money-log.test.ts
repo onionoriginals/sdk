@@ -227,12 +227,14 @@ describe('inscribe-path transitions (R29)', () => {
   /**
    * Fake indexer backing store for the inscribe route's independent
    * input-value lookup (#493 M07): `GET /tx/<txid>/hex` answers from this
-   * map with a real, parseable transaction paying `value` sats to
-   * `scriptPubKey` at `vout`.
+   * map, keyed by each transaction's OWN computed id — the route rejects a
+   * fetched transaction whose id doesn't match the txid it was requested
+   * under.
    */
   const FUNDING_TX_HEX = new Map<string, string>();
   let fundingSeq = 0;
-  function registerFundingUtxo(txid: string, vout: number, value: number, scriptPubKey: string): void {
+  /** Builds, registers and returns the real txid of a funding transaction paying `value` sats at `vout` to `scriptPubKey`. */
+  function makeFundingUtxo(vout: number, value: number, scriptPubKey: string): string {
     fundingSeq++;
     const tx = new btc.Transaction({ allowUnknownOutputs: true });
     tx.addInput({
@@ -245,7 +247,9 @@ describe('inscribe-path transitions (R29)', () => {
     tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
     tx.sign(USER_PRIV);
     tx.finalize();
+    const txid = tx.id;
     FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+    return txid;
   }
   function fakeIndexerFetch(): typeof fetch {
     return (async (input: RequestInfo | URL) => {
@@ -256,8 +260,8 @@ describe('inscribe-path transitions (R29)', () => {
     }) as unknown as typeof fetch;
   }
 
-  function buildPair(fundingTxid = 'a'.repeat(64)) {
-    registerFundingUtxo(fundingTxid, 0, 50_000, USER_SCRIPT);
+  function buildPair() {
+    const fundingTxid = makeFundingUtxo(0, 50_000, USER_SCRIPT);
     const commit = new btc.Transaction();
     commit.addInput({
       txid: fundingTxid,

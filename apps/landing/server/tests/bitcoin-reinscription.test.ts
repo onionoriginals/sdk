@@ -18,14 +18,14 @@ const payment = btc.p2wpkh(secp256k1.getPublicKey(key), { ...btc.TEST_NETWORK, b
 
 /**
  * Fake indexer backing store for the inscribe route's independent input-value
- * lookup (#493 M07): `GET /tx/<txid>/hex` answers straight from this map with
- * a real, parseable transaction paying `value` sats to `scriptPubKey` at
- * `vout` — it need not hash to `txid` itself, mirroring how the route already
- * trusts the indexer's answer for a given txid without re-deriving the id.
+ * lookup (#493 M07): `GET /tx/<txid>/hex` answers straight from this map,
+ * keyed by each transaction's OWN computed id — the route rejects a fetched
+ * transaction whose id doesn't match the txid it was requested under.
  */
 const FUNDING_TX_HEX = new Map<string, string>();
 let fundingSeq = 0;
-function registerFundingUtxo(txid: string, vout: number, value: number, scriptPubKey: Uint8Array): void {
+/** Builds, registers and returns the real txid of a funding transaction paying `value` sats at `vout` to `scriptPubKey`. */
+function makeFundingUtxo(vout: number, value: number, scriptPubKey: Uint8Array): string {
   fundingSeq++;
   const tx = new btc.Transaction({ allowUnknownOutputs: true });
   tx.addInput({
@@ -40,7 +40,9 @@ function registerFundingUtxo(txid: string, vout: number, value: number, scriptPu
   tx.addOutput({ script: scriptPubKey, amount: BigInt(value) });
   tx.sign(key);
   tx.finalize();
+  const txid = tx.id;
   FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+  return txid;
 }
 function fakeIndexerFetch(): typeof fetch {
   return (async (input: RequestInfo | URL) => {
@@ -59,9 +61,9 @@ async function fixture() {
   const boundary = await signEvent({ previousEvent: eventDigest(web.event), operation: { type: 'migrate', data: { profile: 'originals/cel/3', from: webDid, to: 'did:btco:reg:5000000000', layer: 'btco', migratedAt: new Date().toISOString() } } }, signer);
   const history: CelDocument = { log: [genesis, web, boundary] };
   const delta: CelDocument = { log: [await signEvent({ previousEvent: eventDigest(boundary.event), operation: { type: 'update', data: { profile: 'originals/cel/3', name: 'authorized delta' } } }, signer)] };
-  const blockHash = '11'.repeat(32), previousTxid = '22'.repeat(32), feeTxid = '44'.repeat(32);
-  registerFundingUtxo(previousTxid, 0, 546, payment.script);
-  registerFundingUtxo(feeTxid, 0, 100_000, payment.script);
+  const blockHash = '11'.repeat(32);
+  const previousTxid = makeFundingUtxo(0, 546, payment.script);
+  const feeTxid = makeFundingUtxo(0, 100_000, payment.script);
   const snapshot: SatSnapshot = { network: 'regtest', sat: '5000000000', tipBefore: { height: 101, hash: blockHash }, tipAfter: { height: 101, hash: blockHash }, indexTip: { height: 101, hash: blockHash }, indexHealthy: true, enumerationComplete: true,
     blocks: [{ height: 101, hash: blockHash, txids: [previousTxid] }], ownership: { owner: payment.address!, satpoint: previousTxid + ':0:0' }, publications: [{ id: previousTxid + 'i0', revealTxid: previousTxid, network: 'regtest', sat: '5000000000', confirmed: true, creation: { height: 101, blockHash, transactionIndex: 0, inscriptionIndex: 0 }, body: { status: 'complete', mediaType: 'application/cel', bytes: encodeDocument(history, 'json'), metadata: null } }] };
   let broadcasts = 0, scans = 0, classifications = 0;
@@ -91,7 +93,7 @@ test('accepts current-controller CEL delta on the first inscribed input and pers
 test('rejects snapshots, unbound media, stale or incomplete identity evidence, and inscribed fee inputs', async () => {
   for (const failure of ['snapshot', 'media', 'offset', 'incomplete', 'fee', 'extra-sat'] as const) {
     const f = await fixture();
-    if (failure === 'offset') f.snapshot.ownership.satpoint = '22'.repeat(32) + ':0:1';
+    if (failure === 'offset') f.snapshot.ownership.satpoint = f.snapshot.ownership.satpoint.replace(/:0$/, ':1');
     if (failure === 'incomplete') f.snapshot.enumerationComplete = false;
     if (failure === 'fee') f.inscribeFee();
     if (failure === 'extra-sat') f.extraSat();
