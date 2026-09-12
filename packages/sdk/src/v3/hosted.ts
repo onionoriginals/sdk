@@ -48,6 +48,32 @@ export interface PublishedWebAsset {
   status: "published";
   did: string;
   asset: OriginalsAsset;
+  /**
+   * 'independently-verified' means a fresh, non-storage-adapter fetch of the
+   * advertised public URL returned exactly the bytes just written.
+   * 'adapter-asserted' means only the configured storage adapter's own
+   * read-back confirms the write; a private/in-memory adapter satisfies that
+   * check without the DID log ever being publicly reachable.
+   */
+  hostingEvidence: HostingEvidence;
+}
+export type HostingEvidence = "adapter-asserted" | "independently-verified";
+/**
+ * Independently fetches the bytes at a fully-qualified public URL (never the
+ * storage adapter used to write them). Returns null when unreachable/not
+ * found; throws for a transport error the caller should treat as failure.
+ */
+export type PublicReachabilityCheck = (url: string) => Promise<Uint8Array | null>;
+export interface HostedAssetsOptions {
+  /** An independent fetch of the advertised public did.jsonl URL, separate from `storage`. */
+  publicReachability?: PublicReachabilityCheck;
+  /**
+   * Fail closed unless `publicReachability` confirms the exact published
+   * did.jsonl bytes are fetchable from the public URL. Without this, a
+   * private/in-memory storage adapter can report 'published' status that is
+   * never actually reachable on the web (issue #601).
+   */
+  requirePublicReachability?: boolean;
 }
 export interface HostedEvidence {
   status: "verified" | "incomplete";
@@ -78,6 +104,7 @@ export class HostedAssets {
   constructor(
     private readonly storage: StorageAdapter,
     private readonly config: OriginalsConfig,
+    private readonly options: HostedAssetsOptions = {},
   ) {}
 
   async prepare(
@@ -260,6 +287,9 @@ export class HostedAssets {
         );
     };
     // Publish CEL last. An incomplete upload cannot advertise a complete asset document.
+    const methodLogBytes = new TextEncoder().encode(
+      prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    );
     try {
       for (const resource of asset.resources) {
         if (!resource.content)
@@ -273,14 +303,7 @@ export class HostedAssets {
           "application/octet-stream",
         );
       }
-      await write(
-        prefix + "did.jsonl",
-        new TextEncoder().encode(
-          prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") +
-            "\n",
-        ),
-        "application/jsonl",
-      );
+      await write(prefix + "did.jsonl", methodLogBytes, "application/jsonl");
       await write(
         prefix + "cel.json",
         encodeDocument(asset.celLog, "json"),
@@ -296,7 +319,54 @@ export class HostedAssets {
         },
       );
     }
-    return { status: "published", did: prepared.did, asset };
+    const hostingEvidence = await this.confirmPublicReachability(
+      `https://${domain}/${prefix}did.jsonl`,
+      methodLogBytes,
+      prepared,
+    );
+    return { status: "published", did: prepared.did, asset, hostingEvidence };
+  }
+
+  /**
+   * Independently confirms the just-published did.jsonl is fetchable from its
+   * advertised public URL with exactly the bytes written, never through
+   * `this.storage`. Adapter-local read-back (e.g. an in-memory/private
+   * adapter, or a proxy the same server controls) cannot demonstrate this;
+   * only a check the caller supplies out-of-band can (issue #601).
+   */
+  private async confirmPublicReachability(
+    url: string,
+    expected: Uint8Array,
+    prepared: PreparedWebPublication,
+  ): Promise<HostingEvidence> {
+    const check = this.options.publicReachability;
+    if (!check) {
+      if (this.options.requirePublicReachability)
+        throw new StructuredError(
+          "ASSET_WEB_REACHABILITY_CHECK_REQUIRED",
+          "Publication requires a configured publicReachability check; none was supplied",
+          { publication: prepared },
+        );
+      return "adapter-asserted";
+    }
+    let fetched: Uint8Array | null;
+    try {
+      fetched = await check(url);
+    } catch {
+      fetched = null;
+    }
+    const matches =
+      !!fetched &&
+      fetched.length === expected.length &&
+      fetched.every((byte, index) => byte === expected[index]);
+    if (matches) return "independently-verified";
+    if (this.options.requirePublicReachability)
+      throw new StructuredError(
+        "ASSET_WEB_PUBLIC_UNREACHABLE",
+        "The published DID log is not independently reachable at its public URL; retry this same prepared publication once it is",
+        { publication: prepared, url },
+      );
+    return "adapter-asserted";
   }
 
   async read(
@@ -386,3 +456,30 @@ export class HostedAssets {
     return { asset, verification: await asset.verification() };
   }
 }
+
+const MAX_REACHABILITY_CHECK_BYTES = 2 * 1024 * 1024;
+
+/**
+ * A real, independent HTTPS GET of the advertised public URL: it never goes
+ * through the storage adapter used to write the file, so it cannot be
+ * satisfied by a private/in-memory adapter or a same-server proxy. Bounds the
+ * response with a Content-Length precheck and a hard cap on the fetched
+ * bytes; a method-history did.jsonl is expected to be small.
+ */
+export const fetchPublicReachabilityCheck: PublicReachabilityCheck = async (
+  url,
+) => {
+  let res: Response;
+  try {
+    res = await fetch(url, { redirect: "error" });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const lengthHeader = res.headers.get("content-length");
+  if (lengthHeader && Number(lengthHeader) > MAX_REACHABILITY_CHECK_BYTES)
+    return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_REACHABILITY_CHECK_BYTES) return null;
+  return bytes;
+};

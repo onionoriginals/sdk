@@ -155,3 +155,83 @@ test('a terminal hosted history can be published and remains deactivated for fre
   expect(loaded.asset.state.active).toBe(false);
   expect(loaded.verification.verified).toBe(true);
 });
+
+// #601: a private/in-memory storage adapter can satisfy the same-adapter
+// read-back without the advertised DID log ever being reachable on the
+// public web. hostingEvidence and requirePublicReachability make that
+// distinction explicit instead of reporting an unqualified 'published'.
+test('publication defaults to adapter-asserted evidence with no reachability check configured', async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+  expect(published.hostingEvidence).toBe('adapter-asserted');
+});
+
+test('a configured reachability check that matches the published bytes upgrades evidence to independently-verified', async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    publicReachability: async (url) => {
+      const [domain, ...rest] = url.replace('https://', '').split('/');
+      const object = await store.getObject(domain, rest.join('/'));
+      return object?.content ?? null;
+    },
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+  expect(published.hostingEvidence).toBe('independently-verified');
+});
+
+test('requirePublicReachability fails closed, preserving the prepared publication for retry, when no checker is configured', async () => {
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: storage(),
+    requirePublicReachability: true,
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, { domain: 'example.com' });
+  await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
+    'publicReachability',
+  );
+});
+
+test('requirePublicReachability fails closed when the public URL is unreachable, and succeeds once it is', async () => {
+  const store = storage();
+  let reachable = false;
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+    publicReachability: async (url) => {
+      if (!reachable) return null;
+      const [domain, ...rest] = url.replace('https://', '').split('/');
+      const object = await store.getObject(domain, rest.join('/'));
+      return object?.content ?? null;
+    },
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, { domain: 'example.com' });
+  await expect(
+    sdk.lifecycle.publishPreparedToWeb(JSON.parse(JSON.stringify(prepared))),
+  ).rejects.toThrow('not independently reachable');
+  expect(asset.state.layer).toBe('cel');
+  reachable = true;
+  const published = await sdk.lifecycle.publishPreparedToWeb(
+    JSON.parse(JSON.stringify(prepared)),
+  );
+  expect(published.hostingEvidence).toBe('independently-verified');
+});
+
+test('requirePublicReachability rejects bytes at the public URL that do not match what was just published', async () => {
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: storage(),
+    requirePublicReachability: true,
+    publicReachability: async () => new TextEncoder().encode('not the real did log'),
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  await expect(
+    sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' }),
+  ).rejects.toThrow('not independently reachable');
+});

@@ -15,6 +15,7 @@ export { short };
 import {
   OriginalsSDK,
   createLocalSigner,
+  fetchPublicReachabilityCheck,
   type CelSigner,
   type AssetEnvelope,
   type OriginalsAsset,
@@ -169,6 +170,11 @@ export class DemoEngine {
       storageAdapter: this.authed
         ? new DurableHostingStorageAdapter()
         : new HttpHostingStorageAdapter(),
+      // #601: a same-server adapter read-back cannot prove the advertised
+      // did.jsonl is actually reachable on the public web. Require a real,
+      // independent HTTPS fetch of it before reporting a publish as done.
+      publicReachability: fetchPublicReachabilityCheck,
+      requirePublicReachability: true,
       enableLogging: false,
     });
   }

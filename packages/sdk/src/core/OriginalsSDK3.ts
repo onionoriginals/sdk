@@ -1,5 +1,6 @@
 import { BitcoinPublications } from "../v3/bitcoin.js";
 import { HostedAssets } from "../v3/hosted.js";
+import type { PublicReachabilityCheck } from "../v3/hosted.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
@@ -30,6 +31,14 @@ export interface OriginalsSDKOptions
     LocalConfig {
   satProvider?: SatProvider;
   storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
+  /** An independent fetch of a hosted asset's advertised public URL, separate from storageAdapter. */
+  publicReachability?: PublicReachabilityCheck;
+  /**
+   * Fail closed on hosted publication unless publicReachability confirms the
+   * DID log is fetchable from its public URL (issue #601). Off by default so
+   * private/in-memory adapters keep working for tests without this option.
+   */
+  requirePublicReachability?: boolean;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -67,6 +76,8 @@ export class OriginalsSDK {
         "logging",
         "metrics",
         "enableLogging",
+        "publicReachability",
+        "requirePublicReachability",
       ],
     );
     const {
@@ -74,6 +85,8 @@ export class OriginalsSDK {
       onAppendFailure,
       satProvider,
       storageAdapter,
+      publicReachability,
+      requirePublicReachability,
       ...utilities
     } = options;
     const local = mutationOptions({ signer, onAppendFailure });
@@ -131,7 +144,10 @@ export class OriginalsSDK {
     this.metrics = new MetricsCollector();
     this.logger = new Logger("SDK", this.config);
     const hosted = hostedStorage
-      ? new HostedAssets(hostedStorage, local)
+      ? new HostedAssets(hostedStorage, local, {
+          publicReachability,
+          requirePublicReachability,
+        })
       : undefined;
     const resolver = new AssetResolver(
       network,
