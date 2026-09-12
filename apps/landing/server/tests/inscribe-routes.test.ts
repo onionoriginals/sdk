@@ -1944,11 +1944,12 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
    * The commit's taproot output commits to a SCRIPT/pubkey, not to one
    * specific spend of it — whoever holds the reveal's ephemeral key (minted
    * for this same submission) can sign more than one valid reveal against
-   * the same commit. `economicsVerified` must not let an already-verified
-   * commit vouch for a DIFFERENT reveal whose own amount/fee was never
-   * checked.
+   * the same commit. No supported flow ever re-signs just the reveal for an
+   * already-recorded commit, so ANY different reveal for it is refused
+   * outright — before economics even runs — rather than silently accepted
+   * and broadcast while the stored record keeps pointing at the original.
    */
-  test('a verified commit paired with a DIFFERENT reveal re-verifies that reveal, not just the commit', async () => {
+  test('a verified commit paired with a DIFFERENT (economically bad) reveal is refused, not re-verified through', async () => {
     const pair = buildPair(); // honest: commit output0 20_000n, funds reveal1
     const { routes, broadcasts } = harness();
     const first = await post(routes, pair);
@@ -1967,10 +1968,42 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
     INSCRIPTION.finalize(evilReveal, btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true }));
 
     const res = await post(routes, { ...pair, revealTxHex: hex.encode(evilReveal.extract()) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
     // Only the first, honest pair ever broadcast.
     expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  /**
+   * Same refusal even when the replacement reveal is ITSELF economically
+   * honest: allowing it through would still leave the stored record (and its
+   * inscriptionId, and everything reconciliation/rebroadcast reads from it)
+   * describing the wrong reveal, since `store.create` is a no-op for an
+   * existing commitTxId and never updates it to whatever this request
+   * actually broadcasts.
+   */
+  test('a verified commit paired with a DIFFERENT but economically honest reveal is still refused', async () => {
+    const pair = buildPair(); // honest: commit output0 20_000n, funds reveal1
+    const { routes, store, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+
+    // A second, equally honest reveal spending the same commit output 0 —
+    // same destination and a normal fee, just a different transaction.
+    const honestReveal2 = new btc.Transaction();
+    honestReveal2.addInput({
+      txid: pair.commitTxId, index: 0, sequence: 0xfffffffe,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
+    });
+    honestReveal2.addOutputAddress(USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
+    INSCRIPTION.finalize(honestReveal2, btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true }));
+
+    const res = await post(routes, { ...pair, revealTxHex: hex.encode(honestReveal2.extract()) });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    // Nothing broadcast beyond the original, and the stored record is untouched.
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(store.get('sub-1', pair.commitTxId)!.revealTxId).toBe(pair.revealTxId);
   });
 
   /**

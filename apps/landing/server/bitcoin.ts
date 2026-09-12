@@ -1556,6 +1556,21 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
+    // No supported flow ever re-signs just the reveal for an already-recorded
+    // commit — a legitimate rebuild always produces a fresh commit too (a
+    // NEW commitTxId, handled below as a superseding pair on the outpoint).
+    // Allowing a different reveal here — even an economically honest one —
+    // would leave the stored record (and its inscriptionId, and everything
+    // reconciliation/rebroadcast reads from it) permanently describing the
+    // WRONG reveal, since `store.create` below is a no-op for an existing
+    // commitTxId and never updates it to the new one actually broadcast.
+    if (existingByCommitId && existingByCommitId.revealTxId !== revealTxId) {
+      return refuse(
+        'commit_reveal_mismatch',
+        { error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.' },
+        409
+      );
+    }
 
     // Where the money goes (#493): step 5b never looked at output 1, so a signer that
     // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
@@ -1642,15 +1657,13 @@ export function createBitcoinRoutes(deps: {
     // this check existed was never actually verified, so a resubmission of
     // ONE of those still re-verifies rather than silently trusting it through.
     //
-    // ALSO requires the incoming reveal to match the VERIFIED record's own
-    // revealTxId: the commit's taproot output only commits to a script/pubkey,
-    // not to one specific spend of it, so whoever holds the reveal's ephemeral
-    // key (generated for this same submission) can sign more than one valid
-    // reveal against the same commit. Trusting the flag for a DIFFERENT reveal
-    // would let an already-verified commit vouch for a reveal whose own
-    // amount/fee was never checked.
-    const verifiedForThisReveal = existingByCommitId?.economicsVerified && existingByCommitId.revealTxId === revealTxId;
-    if (!verifiedForThisReveal) {
+    // A mismatched reveal for this commitTxId was already refused above, so
+    // any `existingByCommitId` here is guaranteed to be for THIS revealTxId —
+    // the commit's taproot output only commits to a script/pubkey, not to one
+    // specific spend of it, so without that earlier check, whoever holds the
+    // reveal's ephemeral key could sign a different valid reveal and let an
+    // already-verified commit vouch for amounts/fees never actually checked.
+    if (!existingByCommitId?.economicsVerified) {
       if (!indexer) {
         return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
       }
@@ -1745,12 +1758,9 @@ export function createBitcoinRoutes(deps: {
       // would re-derive economics from chain state THIS attempt's own
       // broadcast may already have invalidated — refusing a pair that was
       // genuinely, if belatedly, verified.
-      //
-      // Only when the record's OWN revealTxId is what was just verified: a
-      // record whose stored reveal differs from this submission's must not
-      // come away marked verified — that flag would then vouch for the
-      // record's own (still-unchecked) reveal, not the one actually checked.
-      if (existingByCommitId && existingByCommitId.revealTxId === revealTxId) {
+      // (A mismatched reveal for this commitTxId was already refused above,
+      // so any `existingByCommitId` here is for the reveal just verified.)
+      if (existingByCommitId) {
         try {
           store.markEconomicsVerified(sub, commitTxId);
         } catch (e) {
