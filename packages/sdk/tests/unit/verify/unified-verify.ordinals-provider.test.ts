@@ -202,4 +202,21 @@ describe('UnifiedVerifier — ordinalsProvider option (spike)', () => {
     // failure here, so it must read 'unknown', never 'failed' (issue #600 review).
     expect(res.assurance.freshness).toBe('unknown');
   });
+
+  test('a malformed event log (missing/non-array proof) resolves to a failed result instead of throwing', async () => {
+    // Regression (review of PR #634): eventLogHasBitcoinWitness must not
+    // assume every event has an array-valued `proof` — classifyDocument only
+    // checks that `events` is an array, so a malformed/attacker-supplied log
+    // can reach here with a missing or non-array `proof` on some entry.
+    // verifyEventLog itself already turns that into a failed result; this
+    // helper must not throw and turn verify() into a rejected promise.
+    const malformed = {
+      events: [{ type: 'create', data: {}, proof: undefined }],
+    } as unknown as EventLog;
+
+    const res = await new UnifiedVerifier(didManager, { ordinalsProvider: new OrdMockProvider() }).verify(malformed);
+
+    expect(res.kind).toBe('eventLog');
+    expect(res.verified).toBe(false);
+  });
 });

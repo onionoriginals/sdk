@@ -73,9 +73,19 @@ export interface UnifiedVerificationResult {
  * in `@originals/cel`).
  */
 function eventLogHasBitcoinWitness(log: EventLog): boolean {
-  return log.events.some((event) =>
-    event.proof.some((p) => (p as { cryptosuite?: string }).cryptosuite === 'bitcoin-ordinals-2024')
-  );
+  // `document` reaches verify() as `unknown` and classifyDocument only checks
+  // that `events` is an array — a malformed/attacker-supplied log can have a
+  // missing or non-array `proof` (or a non-object event) on some entry.
+  // verifyEventLog itself handles that by returning a failed result; this
+  // helper must not throw on the same input and turn verify() into a
+  // rejected promise instead of the `verified: false` result it should be.
+  return log.events.some((event) => {
+    const proof = (event as { proof?: unknown } | null)?.proof;
+    return (
+      Array.isArray(proof) &&
+      proof.some((p) => (p as { cryptosuite?: string } | null)?.cryptosuite === 'bitcoin-ordinals-2024')
+    );
+  });
 }
 
 /** Heuristic discriminator. Returns the kind a document should route to. */
