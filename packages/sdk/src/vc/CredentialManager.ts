@@ -663,7 +663,12 @@ export class CredentialManager {
       if (!did) {
         return null;
       }
-      const didDoc = await this.didManager.resolveDID(did);
+      // This fallback runs when the document loader failed for a non-security
+      // reason (e.g. a transient live did:webvh resolution error) and still
+      // decides whether a key is presently authorized — the same
+      // current-authority decision as the loader itself, so it must not
+      // accept a stale/pinned cached document either (issue #602).
+      const didDoc = await this.didManager.resolveDID(did, { mode: 'current' });
       interface DIDDocWithVMs {
         verificationMethod?: Array<{
           id?: string;
