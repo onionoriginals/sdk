@@ -474,8 +474,10 @@ const log = await peer.create('Asset', resources);
 const webvh = new WebVHCelManager(signer, 'example.com', [httpWitness]);
 const migratedLog = await webvh.migrate(log);
 
-// BTCO layer
-const btco = new BtcoCelManager(signer, bitcoinManager);
+// BTCO layer. migrate() only inscribes a head-digest anchor, insufficient on
+// its own for a fresh process to reconstruct pre-inscription history (#597) —
+// acknowledge that explicitly, or use the CEL 3 Bitcoin publication path.
+const btco = new BtcoCelManager(signer, bitcoinManager, { acknowledgeIncompleteHistory: true });
 const btcoLog = await btco.migrate(migratedLog);
 ```
 

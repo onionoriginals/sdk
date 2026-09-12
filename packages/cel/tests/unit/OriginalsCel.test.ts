@@ -606,6 +606,7 @@ describe('OriginalsCel', () => {
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
+            acknowledgeIncompleteHistory: true,
           },
         },
       });
@@ -636,7 +637,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
         config: {
           webvh: { domain: 'example.com' },
-          btco: { bitcoinManager: createMockBitcoinManager() },
+          btco: { bitcoinManager: createMockBitcoinManager(), acknowledgeIncompleteHistory: true },
         },
       });
 
@@ -660,7 +661,7 @@ describe('OriginalsCel', () => {
         signer: mockSigner,
         config: {
           webvh: { domain: 'example.com' },
-          btco: { bitcoinManager: createMockBitcoinManager() },
+          btco: { bitcoinManager: createMockBitcoinManager(), acknowledgeIncompleteHistory: true },
         },
       });
 
@@ -805,6 +806,7 @@ describe('OriginalsCel', () => {
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
+            acknowledgeIncompleteHistory: true,
           },
         },
       });

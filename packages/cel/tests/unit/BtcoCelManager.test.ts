@@ -73,7 +73,7 @@ function bitcoinProofOf(event: any): Record<string, unknown> | undefined {
 describe('BtcoCelManager', () => {
   describe('constructor', () => {
     it('should create instance with valid signer and BitcoinManager', () => {
-      const manager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const manager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       expect(manager).toBeDefined();
       expect(manager.bitcoin).toBeDefined();
     });
@@ -116,7 +116,7 @@ describe('BtcoCelManager', () => {
 
     beforeEach(() => {
       bitcoinManager = createMockBitcoinManager();
-      manager = new BtcoCelManager(createMockSigner(), bitcoinManager);
+      manager = new BtcoCelManager(createMockSigner(), bitcoinManager, { acknowledgeIncompleteHistory: true });
     });
 
     it('should migrate a webvh log to btco layer', async () => {
@@ -235,7 +235,7 @@ describe('BtcoCelManager', () => {
         }),
         network: 'regtest',
       } as unknown as CelBitcoinManager;
-      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin, { acknowledgeIncompleteHistory: true });
 
       const webvhLog = await createWebvhLog();
       const btcoLog = await regtestManager.migrate(webvhLog);
@@ -262,7 +262,7 @@ describe('BtcoCelManager', () => {
         }),
         network: 'regtest',
       } as unknown as CelBitcoinManager;
-      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin);
+      const regtestManager = new BtcoCelManager(createMockSigner(), regtestBitcoin, { acknowledgeIncompleteHistory: true });
       const webvhLog = await createWebvhLog();
       const btcoLog = await regtestManager.migrate(webvhLog);
 
@@ -271,7 +271,7 @@ describe('BtcoCelManager', () => {
         inscribeData: vi.fn(),
         network: 'mainnet',
       } as unknown as CelBitcoinManager;
-      const mainnetManager = new BtcoCelManager(createMockSigner(), mainnetBitcoin);
+      const mainnetManager = new BtcoCelManager(createMockSigner(), mainnetBitcoin, { acknowledgeIncompleteHistory: true });
 
       const state = mainnetManager.getCurrentState(btcoLog);
       expect(state.did).toBe('did:btco:reg:1234567890');
@@ -437,7 +437,8 @@ describe('BtcoCelManager', () => {
     it('should propagate Bitcoin service errors', async () => {
       const failingManager = new BtcoCelManager(
         createMockSigner(),
-        createFailingBitcoinManager()
+        createFailingBitcoinManager(),
+        { acknowledgeIncompleteHistory: true }
       );
       
       const webvhLog = await createWebvhLog();
@@ -445,11 +446,77 @@ describe('BtcoCelManager', () => {
     });
   });
 
+  describe('migrate() fails closed on incomplete history by default (#597)', () => {
+    it('throws by default instead of inscribing a head-digest-only did:btco document', async () => {
+      const unacknowledgedManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const webvhLog = await createWebvhLog();
+
+      await expect(unacknowledgedManager.migrate(webvhLog)).rejects.toThrow(
+        /full CEL boundary history|acknowledgeIncompleteHistory/
+      );
+    });
+
+    it('throws when acknowledgeIncompleteHistory is explicitly false', async () => {
+      const explicitlyDeclinedManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {
+        acknowledgeIncompleteHistory: false,
+      });
+      const webvhLog = await createWebvhLog();
+
+      await expect(explicitlyDeclinedManager.migrate(webvhLog)).rejects.toThrow(
+        /acknowledgeIncompleteHistory/
+      );
+    });
+
+    it('does not inscribe anything before the guard fires', async () => {
+      const bitcoinManager = createMockBitcoinManager();
+      const unacknowledgedManager = new BtcoCelManager(createMockSigner(), bitcoinManager);
+      const webvhLog = await createWebvhLog();
+
+      await expect(unacknowledgedManager.migrate(webvhLog)).rejects.toThrow();
+      expect(bitcoinManager.inscribeData).not.toHaveBeenCalled();
+    });
+
+    it('succeeds once acknowledgeIncompleteHistory is true', async () => {
+      const acknowledgedManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {
+        acknowledgeIncompleteHistory: true,
+      });
+      const webvhLog = await createWebvhLog();
+
+      const btcoLog = await acknowledgedManager.migrate(webvhLog);
+      expect(btcoLog.events.length).toBe(3);
+    });
+
+    it('still runs existing input validation before the new guard', async () => {
+      // Structural validation errors (empty log) must fire regardless of the
+      // acknowledgement flag — the guard only gates the success path.
+      const unacknowledgedManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const emptyLog: EventLog = { events: [] };
+
+      await expect(unacknowledgedManager.migrate(emptyLog)).rejects.toThrow(
+        'Cannot migrate an empty event log'
+      );
+    });
+
+    it('rejects a truthy non-boolean value — only the literal `true` acknowledges', async () => {
+      // Defense in depth: an untyped caller (deserialized config, `as any`) could
+      // pass a truthy non-boolean; the guard must require strict `=== true`, not
+      // merely truthiness, or the explicit-acknowledgement contract is bypassable.
+      const looselyConfiguredManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {
+        acknowledgeIncompleteHistory: 'true' as unknown as boolean,
+      });
+      const webvhLog = await createWebvhLog();
+
+      await expect(looselyConfiguredManager.migrate(webvhLog)).rejects.toThrow(
+        /acknowledgeIncompleteHistory/
+      );
+    });
+  });
+
   describe('getCurrentState', () => {
     let manager: BtcoCelManager;
 
     beforeEach(() => {
-      manager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      manager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
     });
 
     it('should return state after migration', async () => {
@@ -690,7 +757,7 @@ describe('BtcoCelManager', () => {
       expect(webvhState.name).toBe('My Artwork');
 
       // Migrate to btco
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       // Verify btco state
@@ -713,7 +780,7 @@ describe('BtcoCelManager', () => {
       const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
       const webvhLog = await webvhManager.migrate(peerLog);
 
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       const state = btcoManager.getCurrentState(btcoLog);
@@ -722,7 +789,7 @@ describe('BtcoCelManager', () => {
 
     it('should verify migrated log has correct event chain', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       // First event: create
@@ -740,7 +807,7 @@ describe('BtcoCelManager', () => {
 
     it('should have three events after full migration', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       expect(btcoLog.events.length).toBe(3);
@@ -750,7 +817,7 @@ describe('BtcoCelManager', () => {
   describe('DID generation', () => {
     it('should generate DID from inscription ID', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       // The resolvable did:btco identifier is the numeric satoshi from the
@@ -763,8 +830,8 @@ describe('BtcoCelManager', () => {
 
     it('should generate consistent DIDs for same inscription', async () => {
       const mockBitcoin = createMockBitcoinManager();
-      const manager1 = new BtcoCelManager(createMockSigner(), mockBitcoin);
-      const manager2 = new BtcoCelManager(createMockSigner(), mockBitcoin);
+      const manager1 = new BtcoCelManager(createMockSigner(), mockBitcoin, { acknowledgeIncompleteHistory: true });
+      const manager2 = new BtcoCelManager(createMockSigner(), mockBitcoin, { acknowledgeIncompleteHistory: true });
       
       const webvhLog = await createWebvhLog();
       
@@ -782,7 +849,7 @@ describe('BtcoCelManager', () => {
   describe('Bitcoin witness integration', () => {
     it('should automatically add Bitcoin witness', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       const migrationEvent = btcoLog.events[2];
@@ -803,7 +870,7 @@ describe('BtcoCelManager', () => {
 
     it('should include satoshi in Bitcoin witness proof', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       const migrationEvent = btcoLog.events[2];
@@ -816,7 +883,7 @@ describe('BtcoCelManager', () => {
 
     it('should include blockHeight in Bitcoin witness proof', async () => {
       const webvhLog = await createWebvhLog();
-      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+      const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
       const btcoLog = await btcoManager.migrate(webvhLog);
 
       const migrationEvent = btcoLog.events[2];

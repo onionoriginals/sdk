@@ -91,7 +91,7 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
 
   beforeAll(async () => {
     const webvhLog = await buildWebvhLog();
-    const btcoMgr = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+    const btcoMgr = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), { acknowledgeIncompleteHistory: true });
     btcoLog = await btcoMgr.migrate(webvhLog);
   });
 

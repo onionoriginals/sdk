@@ -39,6 +39,19 @@ export interface BtcoCelConfig {
    * network in the signed data, so this is never consulted for them.
    */
   network?: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  /**
+   * `migrate()` inscribes a did:btco document carrying only a head digest of
+   * the migrate event (`OriginalsCelAnchor.serviceEndpoint.headDigestMultibase`),
+   * not the full CEL boundary history the CEL 3 recovery model needs. A
+   * recipient holding only the inscribed document and the bare sat cannot
+   * reconstruct pre-inscription history from this writer alone (#597). Set
+   * `true` to acknowledge this and proceed with the legacy behavior anyway —
+   * required for the previous-format lifecycle and its regression tests. New
+   * integrations should use the CEL 3 Bitcoin publication path instead
+   * (`packages/sdk/src/v3/bitcoin.ts` / `hosted.ts`, or `@originals/cel/v3`),
+   * which carries the full signed history through migration.
+   */
+  acknowledgeIncompleteHistory?: boolean;
 }
 
 /**
@@ -97,9 +110,13 @@ export interface BtcoMigrationData {
  * const bitcoinManager = new BitcoinManager(config);
  * const manager = new BtcoCelManager(
  *   async (data) => createEdDsaProof(data, privateKey),
- *   bitcoinManager
+ *   bitcoinManager,
+ *   // migrate() only inscribes a head-digest anchor, insufficient on its own
+ *   // for a fresh process to reconstruct pre-inscription history (#597) —
+ *   // acknowledge that explicitly, or use the CEL 3 Bitcoin publication path.
+ *   { acknowledgeIncompleteHistory: true }
  * );
- * 
+ *
  * const btcoLog = await manager.migrate(webvhLog);
  * console.log(btcoLog.events[btcoLog.events.length - 1].data.txid);
  * ```
@@ -176,6 +193,9 @@ export class BtcoCelManager {
    * @throws Error if the log is empty, deactivated, or not from webvh layer
    * @throws Error if signer produces invalid proof
    * @throws Error if Bitcoin inscription fails
+   * @throws Error if `config.acknowledgeIncompleteHistory` is not `true` (#597) —
+   *   this writer only inscribes a head-digest anchor, insufficient on its own
+   *   for a fresh process to reconstruct pre-inscription history
    */
   async migrate(webvhLog: EventLog): Promise<EventLog> {
     // Migration inscribes on Bitcoin — it is the write path that genuinely
@@ -238,6 +258,24 @@ export class BtcoCelManager {
     const lastEvent = webvhLog.events[webvhLog.events.length - 1];
     if (lastEvent.type === 'deactivate') {
       throw new Error('Cannot migrate a deactivated event log');
+    }
+
+    // Fail closed on the write path (#597): this legacy layer manager
+    // inscribes a did:btco document carrying only a head digest, not the full
+    // CEL boundary history a fresh process needs to reconstruct pre-inscription
+    // history from the inscribed artifact alone. Runs after all structural
+    // validation above so those error paths are unaffected — only the success
+    // path requires acknowledgement.
+    if (this.config.acknowledgeIncompleteHistory !== true) {
+      throw new Error(
+        'BtcoCelManager.migrate() inscribes a did:btco document that commits only to a head ' +
+        "digest of the migrate event, not the asset's full CEL boundary history. A recipient " +
+        'holding just the inscribed document and the bare sat cannot reconstruct pre-inscription ' +
+        'history from this writer alone. Use the CEL 3 Bitcoin publication path instead ' +
+        "(packages/sdk/src/v3/bitcoin.ts / hosted.ts, or @originals/cel/v3), which carries the " +
+        'full signed history through migration. If you intentionally need this legacy behavior ' +
+        '(e.g. the previous-format lifecycle), set BtcoCelConfig.acknowledgeIncompleteHistory: true.'
+      );
     }
 
     const network = bitcoinManager.network;
