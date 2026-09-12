@@ -2052,7 +2052,18 @@ export function createBitcoinRoutes(deps: {
     }
     if (!rec) return json({ error: 'not_found' }, 404);
     if (rec.status === 'confirmed' && rec.retired) {
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      // Settled: confirmations/confirmedBlockHeight are the frozen values from
+      // whichever poll crossed the threshold — a retired record is never
+      // rechecked, so there is nothing fresher to report.
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled: true,
+        confirmations: rec.confirmations,
+        ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+      });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
     // confirmed), so the recovery artifacts were dropped. Nothing to push.
@@ -2084,8 +2095,17 @@ export function createBitcoinRoutes(deps: {
     if (revealStatus?.confirmed) {
       reclaimIfSuperseded();
       store.setStatus(sub, commitTxId, 'confirmed', { confirmations: revealStatus.confirmations, blockHeight: revealStatus.blockHeight });
-      if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      const settled = (revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS;
+      if (settled) store.retire(sub, commitTxId);
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled,
+        confirmations: revealStatus.confirmations,
+        ...(revealStatus.blockHeight !== undefined ? { confirmedBlockHeight: revealStatus.blockHeight } : {}),
+      });
     }
     try {
       if (revealStatus && rec.status === 'confirmed') {

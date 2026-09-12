@@ -843,15 +843,45 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
         if (failReveal && txHex === pair.revealTxHex) throw new Error('down');
         return 'f'.repeat(64);
       },
-      txStatus: { confirmed: true },
+      txStatus: { confirmed: true, confirmations: 1, blockHeight: 300 },
     });
     await post(h.routes, pair); // leaves status commit_broadcast
     const before = h.broadcasts.length;
     const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
     const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { status: string }).status).toBe('confirmed');
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.status).toBe('confirmed');
+    // #567: the manual route reports the same settlement contract as the list
+    // poll — a caller cannot otherwise tell "confirmed" from "confirmed AND
+    // recovery artifacts retired" apart.
+    expect(body.settled).toBe(false); // 1 confirmation, below the default six
+    expect(body.confirmations).toBe(1);
+    expect(body.confirmedBlockHeight).toBe(300);
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
+  });
+
+  test('#567: a manual rebroadcast that crosses the settlement threshold reports settled and retires', async () => {
+    const pair = buildPair();
+    const h = harness({ txStatus: { confirmed: true, confirmations: 6, blockHeight: 400 } });
+    await post(h.routes, pair);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.settled).toBe(true);
+    expect(body.confirmations).toBe(6);
+    expect(body.confirmedBlockHeight).toBe(400);
+    expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+
+    // A second manual call hits the already-retired short-circuit, which must
+    // report the same terminal settlement state from the frozen evidence.
+    const req2 = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req2, new URL(req2.url));
+    const body2 = (await res2.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body2.settled).toBe(true);
+    expect(body2.confirmations).toBe(6);
+    expect(body2.confirmedBlockHeight).toBe(400);
   });
 
   /**
