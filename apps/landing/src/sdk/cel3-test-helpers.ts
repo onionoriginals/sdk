@@ -11,11 +11,27 @@ import { join } from "node:path";
 
 export const HOST = "demo.test";
 export const SECRET = "landing-test-secret-at-least-32-chars";
-export function installCel3Host(account?: string) {
-  const real = globalThis.fetch;
+
+/**
+ * Bun's test runtime has no `localStorage`/`indexedDB` globals (a real
+ * browser always has both), so anonymous flows that back up their authoring
+ * key there (#598) need them polyfilled explicitly. The fake IndexedDB only
+ * implements the single-object-store open/get/put shape `keystore.ts`
+ * actually uses — enough to exercise the same non-extractable-key code path
+ * a real browser runs, not a general IndexedDB reimplementation. Call the
+ * returned `restore()` in `afterEach`.
+ */
+export function installLocalStorage(): {
+  storage: Storage;
+  restore: () => void;
+} {
   const oldStorage = Object.getOwnPropertyDescriptor(
     globalThis,
     "localStorage",
+  );
+  const oldIndexedDB = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "indexedDB",
   );
   const values = new Map<string, string>();
   const storage: Storage = {
@@ -36,6 +52,85 @@ export function installCel3Host(account?: string) {
     configurable: true,
     value: storage,
   });
+
+  const databases = new Map<string, Map<string, Map<string, unknown>>>();
+  function makeRequest<T>(run: () => T): IDBRequest<T> {
+    const request = {} as IDBRequest<T>;
+    queueMicrotask(() => {
+      try {
+        (request as { result: T }).result = run();
+        request.onsuccess?.(new Event("success"));
+      } catch (error) {
+        (request as { error: unknown }).error = error;
+        request.onerror?.(new Event("error"));
+      }
+    });
+    return request;
+  }
+  const fakeIndexedDB = {
+    open(name: string) {
+      let stores = databases.get(name);
+      const isNew = !stores;
+      if (!stores) {
+        stores = new Map();
+        databases.set(name, stores);
+      }
+      const capturedStores = stores;
+      const request = {} as IDBOpenDBRequest;
+      const db = {
+        createObjectStore(storeName: string) {
+          if (!capturedStores.has(storeName))
+            capturedStores.set(storeName, new Map());
+          return {} as IDBObjectStore;
+        },
+        transaction(storeName: string) {
+          const store =
+            capturedStores.get(storeName) ??
+            capturedStores.set(storeName, new Map()).get(storeName)!;
+          return {
+            objectStore: () =>
+              ({
+                get: (key: string) => makeRequest(() => store.get(key)),
+                put: (value: unknown, key: string) =>
+                  makeRequest(() => {
+                    store.set(key, value);
+                    return key;
+                  }),
+              }) as unknown as IDBObjectStore,
+          } as unknown as IDBTransaction;
+        },
+        close() {},
+      } as unknown as IDBDatabase;
+      (request as { result: IDBDatabase }).result = db;
+      queueMicrotask(() => {
+        if (isNew)
+          request.onupgradeneeded?.(new Event("upgradeneeded") as never);
+        request.onsuccess?.(new Event("success"));
+      });
+      return request;
+    },
+  } as unknown as IDBFactory;
+  Object.defineProperty(globalThis, "indexedDB", {
+    configurable: true,
+    value: fakeIndexedDB,
+  });
+
+  return {
+    storage,
+    restore() {
+      if (oldStorage)
+        Object.defineProperty(globalThis, "localStorage", oldStorage);
+      else delete (globalThis as { localStorage?: Storage }).localStorage;
+      if (oldIndexedDB)
+        Object.defineProperty(globalThis, "indexedDB", oldIndexedDB);
+      else delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    },
+  };
+}
+
+export function installCel3Host(account?: string) {
+  const real = globalThis.fetch;
+  const { storage, restore: restoreStorage } = installLocalStorage();
   const dir = mkdtempSync(join(tmpdir(), "landing-cel3-"));
   const store = createOriginalsStore({ dataDir: dir });
   const originals = createOriginalsRoutes({ jwtSecret: SECRET, store });
@@ -83,9 +178,7 @@ export function installCel3Host(account?: string) {
     fetch: fetchImpl,
     restore() {
       globalThis.fetch = real;
-      if (oldStorage)
-        Object.defineProperty(globalThis, "localStorage", oldStorage);
-      else delete (globalThis as { localStorage?: Storage }).localStorage;
+      restoreStorage();
       rmSync(dir, { recursive: true, force: true });
     },
   };
