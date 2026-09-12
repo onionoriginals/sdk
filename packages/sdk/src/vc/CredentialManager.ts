@@ -24,7 +24,7 @@ import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager } from './cryptosuites/eddsa.js';
-import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
+import { Verifier, checkCredentialValidityPeriod, type StatusListResolver } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
@@ -141,6 +141,16 @@ export interface CredentialChainOptions {
 export class CredentialManager {
   private readonly metrics?: MetricsCollector;
   public readonly statusList: StatusListManager;
+  /**
+   * Optional resolver used by the ordinary `verifyCredential` entry point to
+   * check a declared `credentialStatus` (issue #600). Unset by default:
+   * `verifyCredential` still fails closed on a credential that declares a
+   * status entry it cannot check — set this when the caller can supply one,
+   * so ordinary verification is both safe (fails closed without it) and
+   * capable (actually checks status with it) rather than silently skipping
+   * status the way it used to.
+   */
+  public statusListResolver?: StatusListResolver;
 
   constructor(private config: OriginalsConfig, private didManager: DIDManager, metrics?: MetricsCollector) {
     // Required since plan 037. Without a resolver, Data Integrity proofs fell
@@ -359,8 +369,57 @@ export class CredentialManager {
     }); // end tracked
   }
 
+  /**
+   * Verify a credential's signature and, when it declares one, its
+   * revocation/suspension status.
+   *
+   * Safe by default (issue #600): a credential that declares a
+   * `credentialStatus` is no longer accepted on signature alone. Set
+   * {@link statusListResolver} so this can actually check it; without one, a
+   * credential declaring a status entry fails closed here — its revocation
+   * state is unknown, not verified, so a caller gating on this method alone
+   * cannot be shown a revoked credential as good. For a caller-supplied
+   * status list (rather than a resolver) with a verified/revoked/suspended
+   * breakdown, use `verifyCredentialWithStatus`. For deliberate signature-only
+   * verification — explicitly named, per issue #600, rather than the silent
+   * default this used to be — use `verifyCredentialSignature`.
+   */
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
     return this.tracked('credential.verify', async () => {
+      if (!(await this.verifyCredentialSignature(credential))) {
+        return false;
+      }
+      const verifier = new Verifier(this.didManager, { statusListResolver: this.statusListResolver });
+      try {
+        // checkCredentialStatus awaits statusListResolver directly with no
+        // internal try/catch (unlike Verifier.verifyCredential, which wraps
+        // its whole body); a rejecting resolver — a normal network failure,
+        // not a bug — must not escape this method's documented boolean
+        // contract and abort the caller's flow.
+        const statusResult = await verifier.checkCredentialStatus(credential);
+        return statusResult.verified;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
+   * Signature/proof verification only — deliberately does not check
+   * `credentialStatus`. This is the explicitly-named signature-only entry
+   * point (issue #600): ordinary callers should use `verifyCredential`, which
+   * also enforces status when `statusListResolver` is configured (and fails
+   * closed, rather than silently passing, when the credential declares a
+   * status entry and none is configured).
+   *
+   * Used internally to check the signature of a status list credential
+   * itself (which does not carry its own `credentialStatus`, so recursing
+   * into status checking there would be redundant) and inside
+   * `verifyCredentialWithStatus`, which evaluates status separately against
+   * its caller-supplied list.
+   */
+  async verifyCredentialSignature(credential: VerifiableCredential): Promise<boolean> {
+    return this.tracked('credential.verifySignature', async () => {
     interface ProofWithCryptosuite {
       cryptosuite?: string;
     }
@@ -378,15 +437,13 @@ export class CredentialManager {
       //
       // The DIDManager is now required (plan 037): a DI proof used to fall
       // through to the legacy digest path when none was supplied, which NO DI
-      // proof can satisfy — so `verifyCredential` returned a silent `false`
-      // that read as "invalid signature" rather than "no resolver".
+      // proof can satisfy — so `verifyCredentialSignature` returned a silent
+      // `false` that read as "invalid signature" rather than "no resolver".
       if (hasCryptosuite) {
         const verifier = new Verifier(this.didManager);
-        // Proof-only entry point: revocation/suspension is checked by the
-        // dedicated verifyCredentialWithStatus (which supplies the status
-        // list). Pass checkStatus:false so a valid, non-revoked credential
-        // that merely declares a credentialStatus is not rejected here for
-        // lack of a resolver.
+        // Proof-only: this method deliberately never checks status (see
+        // above); checkStatus:false keeps that true regardless of whether a
+        // resolver happens to be configured on the manager.
         const res = await verifier.verifyCredential(credential, { checkStatus: false });
         return res.verified;
       }
@@ -465,9 +522,11 @@ export class CredentialManager {
     let revoked = false;
     let suspended = false;
 
-    // Verify signature
+    // Verify signature. Deliberately signature-only: status is evaluated
+    // explicitly below against the caller-supplied `statusListCredential`,
+    // not via `verifyCredential`'s own (resolver-based) status check.
     try {
-      verified = await this.verifyCredential(credential);
+      verified = await this.verifyCredentialSignature(credential);
       if (!verified) {
         errors.push('Credential signature verification failed');
       }
@@ -501,7 +560,11 @@ export class CredentialManager {
             status,
             statusListCredential,
             async (listVC) => {
-              const ok = await this.verifyCredential(listVC);
+              // Signature-only: the status list credential does not carry its
+              // own credentialStatus, so there is nothing recursive to check,
+              // and using verifyCredential's resolver-based status check here
+              // would be redundant.
+              const ok = await this.verifyCredentialSignature(listVC);
               return { verified: ok, errors: [] };
             }
           );
