@@ -133,11 +133,15 @@ function harness(opts?: {
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
-  txStatus?: { confirmed: boolean; confirmations?: number } | ((txid: string) => { confirmed: boolean; confirmations?: number });
+  txStatus?:
+    | { confirmed: boolean; confirmations?: number; blockHeight?: number }
+    | ((txid: string) => { confirmed: boolean; confirmations?: number; blockHeight?: number });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
   txStatusDelayMs?: number;
   /** The ordinal lookup the route classifies with; `null` = none configured. */
   ordinals?: OrdinalLookup | null;
+  /** The explicit settlement policy (#567); defaults to the route's own default (6). */
+  recoveryConfirmations?: number;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -173,6 +177,7 @@ function harness(opts?: {
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
     ordinals: opts?.ordinals === null ? undefined : (opts?.ordinals ?? CLEAN_ORDINALS),
+    recoveryConfirmations: opts?.recoveryConfirmations,
   });
   return { routes, store, broadcasts, dataDir };
 }
@@ -1651,6 +1656,36 @@ test('one confirmation survives a restart, demotes on reorg, and retires only at
   confirmations = 6;
   expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: the settlement threshold is configurable and drives the exposed settled flag', async () => {
+  let confirmations = 1;
+  let blockHeight = 200;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight }),
+    recoveryConfirmations: 2, // NOT the default six
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number }>;
+    }).inscriptions[0];
+  };
+
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false); // 1 < 2
+  expect(row.confirmations).toBe(1);
+  expect(row.confirmedBlockHeight).toBe(200);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 2;
+  row = await poll();
+  expect(row.settled).toBe(true); // meets the CONFIGURED threshold, not the default
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
 });
 
 test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(

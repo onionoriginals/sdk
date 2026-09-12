@@ -85,6 +85,28 @@ export interface InscriptionRecord {
   updatedAt: string;
   /** When the reveal was last re-pushed; the throttle clock, separate from `updatedAt`. */
   rebroadcastAt?: string;
+  /**
+   * Confirmation depth last observed while `status` was `confirmed` — the
+   * "confirmed-but-unsettled vs settled" distinction a caller needs before
+   * treating an inscription as final. ABSENT whenever `status` is anything
+   * else: depth is only meaningful while actually confirmed, so a reorg that
+   * un-confirms the reveal clears it rather than leaving a stale number a
+   * caller could mistake for current truth. Frozen at whatever value
+   * triggered `retired`, since a retired record is never rechecked again.
+   */
+  confirmations?: number;
+  /**
+   * Block height of the MOST RECENT observed confirmation — block identity,
+   * not a live reading. Unlike `confirmations`, this is NOT cleared when a
+   * reorg demotes the record off `confirmed`: it is deliberately sticky, so
+   * that when the reveal reconfirms — in the same block height (the report
+   * was transient) or a different one (a real reorg) — the reconciler can
+   * tell which happened instead of treating every reconfirmation as
+   * continuous with the one before the reorg. Only ever overwritten by a
+   * fresh confirmed observation; never read as "currently confirmed" without
+   * also checking `status`.
+   */
+  confirmedBlockHeight?: number;
 }
 
 /** A deposit read the server was able to trust, as persisted. */
@@ -116,7 +138,22 @@ export interface InscriptionsStore {
    */
   retire(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
-  setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
+  /**
+   * `evidence` is the block height/confirmation depth a fresh provider read
+   * just reported, recorded only when `status` is `confirmed`. `confirmations`
+   * (a live depth) is cleared for every other status. `evidence.blockHeight`
+   * is instead STICKY across a demotion — see `InscriptionRecord.
+   * confirmedBlockHeight` — so a later reconfirmation can be compared against
+   * the pre-reorg block height rather than read as a continuation of it. Omit
+   * `evidence` (or leave a field off it) when the caller does not have a
+   * fresh read.
+   */
+  setStatus(
+    subOrgId: string,
+    commitTxId: string,
+    status: InscriptionStatus,
+    evidence?: { confirmations?: number; blockHeight?: number }
+  ): void;
   /**
    * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
    * Touches ONLY
@@ -487,7 +524,7 @@ export function createInscriptionsStore(opts: {
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;
     },
-    setStatus(subOrgId, commitTxId, status) {
+    setStatus(subOrgId, commitTxId, status, evidence) {
       const recs = readAll(subOrgId);
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
@@ -495,6 +532,15 @@ export function createInscriptionsStore(opts: {
       rec.updatedAt = new Date(now()).toISOString();
       // Confirmation is reversible. The reconciler explicitly retires the
       // pair only after its configured recovery horizon has elapsed.
+      // Depth is current-truth-while-confirmed only: any OTHER status
+      // (including the reorg demotion back to reveal_broadcast) clears it
+      // rather than carrying a stale reading forward. Block height is
+      // deliberately NOT cleared on demotion — see `confirmedBlockHeight` —
+      // so a later reconfirmation can still be compared against it.
+      rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
+      if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
+        rec.confirmedBlockHeight = evidence.blockHeight;
+      }
       writeAll(subOrgId, recs);
     },
     markRebroadcast(subOrgId, commitTxId) {

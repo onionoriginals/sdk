@@ -974,6 +974,7 @@ export const legal = {
           'inscribe_attempted — a signed pair passed validation and is about to broadcast',
           'inscribe_failed — a pair was refused or failed to broadcast',
           'inscribe_broadcast — a pair reached the network',
+          'inscribe_reorg_reconfirmed — a confirmed reveal reconfirmed in a different block than before, which is what a Bitcoin reorg looks like',
           'deposit_balance_held — the hourly sweep found a bound address still holding confirmed sats',
           'deposit_balance_sweep — the roll-up of that sweep, including how many addresses hold a balance',
           'inscription_sweep_completed — we finished your inscription for you: your commit had confirmed, so we broadcast the reveal we already held, with nobody watching',

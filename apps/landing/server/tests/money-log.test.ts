@@ -255,9 +255,15 @@ describe('inscribe-path transitions (R29)', () => {
     };
   }
 
-  function inscribeHarness(broadcast?: (txHex: string) => Promise<string>) {
+  function inscribeHarness(
+    broadcast?: (txHex: string) => Promise<string>,
+    opts?: {
+      getTransactionStatus?: (txid: string) => Promise<{ confirmed: boolean; confirmations?: number; blockHeight?: number }>;
+      dataDir?: string;
+    }
+  ) {
     const cap = capture();
-    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'money-insc-')) });
+    const store = createInscriptionsStore({ dataDir: opts?.dataDir ?? mkdtempSync(join(tmpdir(), 'money-insc-')) });
     // #493: an unbound account may not name its own change address, so bind it
     // as the real flow does when a creator reads their deposit address.
     store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
@@ -267,7 +273,9 @@ describe('inscribe-path transitions (R29)', () => {
         async broadcastTransaction(txHex: string) {
           return broadcast ? broadcast(txHex) : 'f'.repeat(64);
         },
-        async getTransactionStatus() { return { confirmed: false }; },
+        async getTransactionStatus(txid: string) {
+          return opts?.getTransactionStatus ? opts.getTransactionStatus(txid) : { confirmed: false };
+        },
         async estimateFee() { return 3; },
       } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'],
       inscriptions: store,
@@ -275,7 +283,7 @@ describe('inscribe-path transitions (R29)', () => {
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
     });
-    return { routes, cap };
+    return { routes, cap, store };
   }
 
   async function submit(routes: ReturnType<typeof inscribeHarness>['routes'], body: unknown) {
@@ -326,6 +334,74 @@ describe('inscribe-path transitions (R29)', () => {
     expect((await res.json() as { status: string }).status).toBe('commit_broadcast');
     expect(cap.of('inscribe_failed')[0].reason).toBe('reveal_broadcast_failed');
     expect(cap.of('inscribe_broadcast')[0].status).toBe('commit_broadcast');
+  });
+
+  async function poll(routes: ReturnType<typeof inscribeHarness>['routes']) {
+    const token = signToken('sub-1', EMAIL, undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    const req = new Request('http://host/api/btc/inscribe', { headers: { cookie } });
+    const res = await routes.inscribeList(req, new URL(req.url));
+    return ((await res.json()) as {
+      inscriptions: Array<{
+        status: string;
+        settled?: boolean;
+        confirmations?: number;
+        confirmedBlockHeight?: number;
+      }>;
+    }).inscriptions[0];
+  }
+
+  test('#567: confirmed-but-unsettled vs settled, block identity survives a reorg-reconfirm, retirement only at the settlement threshold', async () => {
+    const pair = buildPair();
+    const chain = { confirmed: true, confirmations: 1, blockHeight: 100 };
+    const { routes, cap, store } = inscribeHarness(undefined, {
+      getTransactionStatus: async () => ({ ...chain }),
+    });
+    await submit(routes, pair);
+
+    // Confirmed, but well below the settlement threshold: both transactions
+    // retained, block identity persisted, NOT settled.
+    let row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(false);
+    expect(row.confirmations).toBe(1);
+    expect(row.confirmedBlockHeight).toBe(100);
+    expect(store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+    // A reorg un-confirms the reveal: demotes back to reveal_broadcast, and
+    // the now-stale confirmed-block evidence is cleared, not carried forward.
+    chain.confirmed = false;
+    row = await poll(routes);
+    expect(row.status).toBe('reveal_broadcast');
+    expect(row.settled).toBeUndefined();
+    expect(row.confirmations).toBeUndefined();
+    expect(row.confirmedBlockHeight).toBeUndefined();
+
+    // It reconfirms — but in a DIFFERENT block than before the reorg. That is
+    // recorded as its own event, distinct from an ordinary depth increase.
+    chain.confirmed = true;
+    chain.confirmations = 1;
+    chain.blockHeight = 101;
+    row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(false);
+    expect(row.confirmedBlockHeight).toBe(101);
+    const reorgs = cap.of('inscribe_reorg_reconfirmed');
+    expect(reorgs).toHaveLength(1);
+    expect(reorgs[0].previousBlockHeight).toBe(100);
+    expect(reorgs[0].blockHeight).toBe(101);
+
+    // Depth alone crossing the settlement policy — same block, more
+    // confirmations — is what finally retires the recovery artifacts.
+    chain.confirmations = 6;
+    row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(true);
+    expect(row.confirmedBlockHeight).toBe(101);
+    expect(store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+    // A retired record is never rechecked again, so a later reorg at this
+    // depth cannot un-settle it — only a fresh (unretired) confirmation can.
+    expect(cap.of('inscribe_reorg_reconfirmed')).toHaveLength(1);
   });
 });
 

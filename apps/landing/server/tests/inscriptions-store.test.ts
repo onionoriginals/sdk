@@ -29,6 +29,34 @@ describe('inscriptions-store', () => {
     expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('c'.repeat(64));
   });
 
+  test('#567: setStatus persists confirmation evidence, clears depth (not block height) on demotion', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    const commitTxId = 'c'.repeat(64);
+
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100 });
+    let r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(100);
+
+    // A reorg demotes it: depth is stale-while-unconfirmed and is cleared,
+    // but the block height it was LAST confirmed at survives the demotion —
+    // it is the only way a later reconfirmation can tell whether it landed
+    // back in the same block or a different one.
+    store.setStatus('sub-1', commitTxId, 'reveal_broadcast');
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.status).toBe('reveal_broadcast');
+    expect(r.confirmations).toBeUndefined();
+    expect(r.confirmedBlockHeight).toBe(100);
+
+    // Reconfirms in a DIFFERENT block: the caller (bitcoin.ts) compares this
+    // against the surviving 100 to detect the reorg, then overwrites it.
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 101 });
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(101);
+  });
+
   test('supersede preserves the record (and its reveal hex) while freeing the outpoint', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
