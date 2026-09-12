@@ -98,7 +98,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const { manager, ordinalsProvider } = mockBitcoin();
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, { acknowledgeIncompleteHistory: true }).migrate(log);
 
     // btco anchoring is gating: without an ordinalsProvider the log must NOT verify.
     const unanchored = await verifyEventLog(btcoLog);
@@ -128,7 +128,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const { manager } = mockBitcoin(); // network 'mainnet', satoshi '1234567890'
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, { acknowledgeIncompleteHistory: true }).migrate(log);
 
     const last = btcoLog.events[btcoLog.events.length - 1];
     expect(last.type).toBe('migrate');
@@ -162,7 +162,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
         return { txid: 'tx', inscriptionId: 'txi0', satoshi: '9999999999', blockHeight: 1 };
       },
     } as unknown as CelBitcoinManager;
-    await expect(new BtcoCelManager(signer as any, treacherous).migrate(log)).rejects.toThrow(/Anchoring sat mismatch/);
+    await expect(new BtcoCelManager(signer as any, treacherous, { acknowledgeIncompleteHistory: true }).migrate(log)).rejects.toThrow(/Anchoring sat mismatch/);
   });
 
   it('reports a clear "content is missing" diagnostic when the witness inscription has no content', async () => {
@@ -171,7 +171,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
     const { manager } = mockBitcoin();
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, { acknowledgeIncompleteHistory: true }).migrate(log);
 
     // Provider finds the inscription but it carries no `content` field: this must
     // NOT be misreported as "content is not valid JSON" (which implies tampering).
@@ -269,7 +269,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const signer = makeSigner();
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
     log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
-    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager, { acknowledgeIncompleteHistory: true }).migrate(log);
 
     // Replaying a persisted log in a fresh SDK without Bitcoin access is a
     // pure read and must work — the network lives in the signed migration data.

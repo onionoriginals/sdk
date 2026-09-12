@@ -454,7 +454,17 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
     } else if (targetLayer === 'btco') {
       // Migrate to btco layer
       const bitcoinManager = createMockBitcoinManager();
-      const manager = new BtcoCelManager(signer, bitcoinManager);
+      // This legacy layer manager inscribes a did:btco document carrying only a
+      // head digest, not the full CEL boundary history (#597) — acknowledge that
+      // explicitly and warn the operator, mirroring the webvh migration path.
+      console.error(
+        '\n⚠️  Note: this command inscribes a did:btco document that commits only to a head ' +
+        "digest of the migrate event, not the asset's full CEL boundary history. A recipient " +
+        'holding just the inscribed document and the bare sat cannot reconstruct pre-inscription ' +
+        'history from this writer alone. Use the SDK\'s CEL 3 Bitcoin publication path for a ' +
+        'fully recoverable migration.\n'
+      );
+      const manager = new BtcoCelManager(signer, bitcoinManager, { acknowledgeIncompleteHistory: true });
       migratedLog = await manager.migrate(eventLog);
 
       // The resolvable did:btco:<satoshi> is derived from the bitcoin witness
