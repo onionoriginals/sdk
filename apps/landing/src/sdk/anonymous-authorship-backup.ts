@@ -32,6 +32,20 @@ function asBufferSource(bytes: Uint8Array): BufferSource {
   return bytes as unknown as BufferSource;
 }
 
+/**
+ * Binds a record to the asset id and controller it was written for, as
+ * AES-GCM additional authenticated data. Without this, AES-GCM only
+ * authenticates the ciphertext bytes themselves — a record copied wholesale
+ * into a different asset's storage slot (or with its `controller` field
+ * edited) would still decrypt cleanly, since every asset's backup shares
+ * this browser's one wrapping key. Binding both as AAD makes such
+ * cut-and-paste tampering fail decryption outright, rather than relying
+ * only on the caller comparing fields after the fact.
+ */
+function bindingContext(assetId: string, controller: string): BufferSource {
+  return new TextEncoder().encode(`${assetId} ${controller}`);
+}
+
 /** True when this browser can hold a transparent local backup at all (#598). */
 export function canPersistAnonymousAuthorshipKey(): boolean {
   return typeof localStorage !== "undefined" && hasDurableKeyStore();
@@ -58,7 +72,11 @@ export async function persistAnonymousAuthorshipKey(
   const wrappingKey = await getOrCreateWrappingKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: asBufferSource(iv) },
+    {
+      name: "AES-GCM",
+      iv: asBufferSource(iv),
+      additionalData: bindingContext(assetId, controller),
+    },
     wrappingKey,
     asBufferSource(secretKey),
   );
@@ -90,7 +108,11 @@ export async function restoreAnonymousAuthorshipKey(
       return null;
     const wrappingKey = await getOrCreateWrappingKey();
     const plaintext = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: asBufferSource(fromBase64(backup.ivBase64)) },
+      {
+        name: "AES-GCM",
+        iv: asBufferSource(fromBase64(backup.ivBase64)),
+        additionalData: bindingContext(assetId, backup.controller),
+      },
       wrappingKey,
       asBufferSource(fromBase64(backup.ciphertextBase64)),
     );

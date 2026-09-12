@@ -364,14 +364,23 @@ export class DemoEngine {
     const restored = await restoreAnonymousAuthorshipKey(assetId);
     if (!restored) return;
     const signer = createLocalSigner("Ed25519", restored.secretKey);
-    if (signer.controller !== restored.controller) {
-      // The decrypted key doesn't match the controller recorded alongside
-      // it — treat the backup as unusable rather than sign with it. The
-      // next resolveAuthorshipSigner() falls back to a fresh key, which the
-      // SDK's own controller check then safely refuses to use for edits.
+    const liveController = this.asset?.state.controller;
+    if (
+      signer.controller !== restored.controller ||
+      (liveController && signer.controller !== liveController)
+    ) {
+      // Either the decrypted key doesn't match the controller recorded
+      // alongside it, or it does but that recorded controller isn't the
+      // asset's actual current controller (e.g. a stale/foreign record) —
+      // either way, treat the backup as unusable rather than sign with it.
+      // The next resolveAuthorshipSigner() falls back to a fresh key, which
+      // the SDK's own controller check then safely refuses to use for
+      // edits, but checking here surfaces the mismatch immediately instead
+      // of only on the next failed update.
       log("authorship:restore-mismatch", {
         assetId,
         expected: restored.controller,
+        liveController,
         got: signer.controller,
       });
       return;

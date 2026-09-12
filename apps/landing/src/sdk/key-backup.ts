@@ -101,10 +101,10 @@ export async function decryptAuthorshipKey(
 ): Promise<Uint8Array> {
   if (backup?.format !== BACKUP_FORMAT || backup?.version !== BACKUP_VERSION)
     throw new Error("Unrecognized authorship key backup format.");
-  const salt = fromBase64(backup.saltBase64);
-  const iv = fromBase64(backup.ivBase64);
-  const key = await deriveAesKey(passphrase, salt);
   try {
+    const salt = fromBase64(backup.saltBase64);
+    const iv = fromBase64(backup.ivBase64);
+    const key = await deriveAesKey(passphrase, salt);
     const plaintext = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: asBufferSource(iv) },
       key,
