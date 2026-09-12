@@ -1632,13 +1632,16 @@ export function createBitcoinRoutes(deps: {
     // attacker-influenced input, and trusting it would make this whole check
     // circular.
     //
-    // Skipped entirely for a resubmission of an already-persisted commitTxId
-    // (see `existingByCommitId` above): a hash-identical retry was already
-    // verified on its first pass, and by retry time its funding UTXO is
-    // typically already spent and would otherwise fail `funding_value_unverifiable`
-    // for no reason but timing — breaking exactly the recovery path this
-    // route exists to support.
-    if (!existingByCommitId) {
+    // Skipped for a resubmission of an already-persisted, ALREADY-VERIFIED
+    // commitTxId (see `existingByCommitId` above): a hash-identical retry was
+    // already checked on its first pass, and by retry time its funding UTXO
+    // is typically already spent and would otherwise fail
+    // `funding_value_unverifiable` for no reason but timing — breaking
+    // exactly the recovery path this route exists to support. Gated on the
+    // `economicsVerified` flag, not mere existence: a record written before
+    // this check existed was never actually verified, so a resubmission of
+    // ONE of those still re-verifies rather than silently trusting it through.
+    if (!existingByCommitId?.economicsVerified) {
       if (!indexer) {
         return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
       }
@@ -1775,6 +1778,12 @@ export function createBitcoinRoutes(deps: {
       fundingOutpoints: outpoints,
       changeAddress,
       status: 'signed',
+      // By this point either the economics check above just ran fresh for
+      // this commitTxId, or it was skipped because an existing record already
+      // carried this flag — `store.create` is a no-op against that existing
+      // record either way, so setting it here only ever takes effect for a
+      // genuinely new, freshly-verified record.
+      economicsVerified: true,
       createdAt: at,
       updatedAt: at,
     };

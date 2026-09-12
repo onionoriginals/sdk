@@ -1877,6 +1877,35 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
   });
 
   /**
+   * The retry skip above is gated on `economicsVerified`, not mere record
+   * existence — a record written before this check existed (or by any other
+   * path that never actually ran it) must not get a free pass just because a
+   * row with its commitTxId happens to already be in the store.
+   */
+  test('a legacy record with no economicsVerified flag does NOT bypass re-verification', async () => {
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 1_000 });
+    const { routes, store, broadcasts } = harness();
+    // Simulate a record persisted by code that predates this check: same
+    // commitTxId, no `economicsVerified` flag.
+    store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:${pair.fundingUtxo.vout}`],
+      changeAddress: pair.changeAddress,
+      status: 'signed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  /**
    * The indexer/fee-estimate lookups are provider-backed work, same as the
    * ordinal check they sit beside — an authenticated caller who has spent
    * their per-user attempt budget must not be able to keep triggering them.

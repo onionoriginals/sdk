@@ -57,6 +57,17 @@ export interface InscriptionRecord {
   changeAddress: string;
   status: InscriptionStatus;
   /**
+   * Set once the independent economics check (#493/M07) has verified this
+   * exact commit/reveal pair's amounts against the indexer. `commitTxId`
+   * hashes the exact signed bytes, so a resubmission matching an EXISTING
+   * record is proof the pair is unchanged — but only a record carrying this
+   * flag was ever actually checked. ABSENT on records written before that
+   * check existed: a resubmission of one of those still re-verifies, rather
+   * than silently trusting a pair the server never actually confirmed the
+   * economics of.
+   */
+  economicsVerified?: boolean;
+  /**
    * Set when a rebuilt pair took over this record's funding outpoint after
    * its own commit broadcast failed. The record (and its reveal hex) is kept,
    * never deleted: the failed broadcast may have been ambiguous — the commit
