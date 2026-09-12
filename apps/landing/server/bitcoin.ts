@@ -511,6 +511,23 @@ export const REVEAL_BASE_VB = 111;
 export const POSTAGE_SATS = 546;
 
 /**
+ * How far the ACTUAL fee (commit + reveal, both measured from the finalized,
+ * signed transactions the client posts) may exceed the currently observed
+ * network rate before POST /api/btc/inscribe refuses to broadcast (#493 M07).
+ *
+ * Every structural check above this in the route stops a signer from
+ * redirecting WHERE the money in a signed pair goes; none of them bound HOW
+ * MUCH stays with the creator. A signer that preserves every script/outpoint
+ * invariant can still omit or shrink the change output and let the
+ * difference land in the miner fee — this is the backstop for that.
+ *
+ * Generous by design: a wallet may sign against a fee quote fetched minutes
+ * earlier, and the network rate moves in between. A theft big enough to
+ * matter clears this by a wide margin; ordinary fee-rate drift never does.
+ */
+export const INSCRIBE_FEE_CEILING_MULTIPLIER = 5;
+
+/**
  * What a creator must have at their deposit address to complete an
  * inscription. `commitOutputsVB` is a LIST, not a count: the commit output and
  * the creator's change are two entries today, and a platform fee output would
@@ -1405,6 +1422,42 @@ export function createBitcoinRoutes(deps: {
     );
   }
 
+  /**
+   * The real, on-chain-or-mempool value of every declared funding outpoint,
+   * read from the SAME indexer seam the deposit/prevtx routes already trust —
+   * never the client-declared `value` field (#493 M07). A hostile or merely
+   * buggy client can name anything there; only an independent read tells the
+   * fee/change envelope check below what an input is actually worth.
+   *
+   * Fails closed: an indexer that is not configured, or that cannot answer
+   * for every declared outpoint, means the envelope cannot be established, so
+   * the caller must not be trusted on economics either.
+   */
+  async function resolveFundingValues(
+    declared: Array<{ txid: string; vout: number }>
+  ): Promise<{ ok: true; totalSats: number } | { ok: false; reason: string }> {
+    if (!indexer) return { ok: false, reason: 'indexer_unavailable' };
+    const byTxid = new Map<string, btc.Transaction>();
+    for (const { txid } of declared) {
+      const key = txid.toLowerCase();
+      if (byTxid.has(key)) continue;
+      const raw = await fetchRawTxHex({ ...indexer, txid: key, fetchImpl: deps.fetchImpl });
+      if (!raw) return { ok: false, reason: 'funding_tx_unavailable' };
+      const parsed = parseRawTx(raw);
+      if (!parsed) return { ok: false, reason: 'funding_tx_unparseable' };
+      byTxid.set(key, parsed);
+    }
+    let totalSats = 0;
+    for (const { txid, vout } of declared) {
+      const tx = byTxid.get(txid.toLowerCase())!;
+      if (vout < 0 || vout >= tx.outputsLength) return { ok: false, reason: 'funding_output_missing' };
+      const amount = tx.getOutput(vout).amount;
+      if (typeof amount !== 'bigint') return { ok: false, reason: 'funding_output_unreadable' };
+      totalSats += Number(amount);
+    }
+    return { ok: true, totalSats };
+  }
+
   function reclaimOutpoint(store: InscriptionsStore, sub: string, rec: InscriptionRecord): void {
     // Every outpoint this pair spends, not just the identity one: a rival that
     // overlaps on ANY input conflicts with it on the network.
@@ -1593,6 +1646,48 @@ export function createBitcoinRoutes(deps: {
         inscriptionIds: () => deps.ordinals!.outpointInscriptions(declaredUtxos[0]),
       });
       if (!authorized) return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'An inscribed input requires an authorized CEL continuation on the identity sat; fee inputs must carry no inscriptions.' }, 400);
+    }
+
+    // Economic envelope (#493 M07): the structural checks above stop a signer
+    // from redirecting WHERE the money goes; they never looked at HOW MUCH.
+    // A signer that preserves every script/outpoint invariant can still omit
+    // or shrink the change output and let the difference land in the fee.
+    // Verify the ACTUAL fee — from independently-sourced input values and the
+    // finalized transactions' own measured sizes, never the client's numbers —
+    // against an envelope derived from the current fee policy.
+    const fundingValues = await resolveFundingValues(declaredUtxos.map((u) => ({ txid: u.txid, vout: u.vout })));
+    if (!fundingValues.ok) {
+      return refuse(
+        'funding_value_unavailable',
+        { error: 'funding_value_unavailable', message: 'Could not independently verify the funding inputs’ value.' },
+        503
+      );
+    }
+    const commitOutputSats = Number(commit.getOutput(0).amount ?? 0n);
+    const changeOutputSats = commit.outputsLength === 2 ? Number(commit.getOutput(1).amount ?? 0n) : 0;
+    const postageSats = Number(reveal.getOutput(0).amount ?? 0n);
+    const commitFeeSats = fundingValues.totalSats - commitOutputSats - changeOutputSats;
+    const revealFeeSats = commitOutputSats - postageSats;
+    if (commitFeeSats < 0 || revealFeeSats < 0) {
+      return refuse(
+        'commit_economics_invalid',
+        { error: 'commit_invariant_violation', message: 'The signed pair spends more than the declared funding set actually holds.' },
+        400
+      );
+    }
+    let feeRateNow: number;
+    try {
+      feeRateNow = await currentFeeRate(1);
+    } catch (e) {
+      return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+    }
+    const feeCeilingSats = Math.ceil(feeRateNow * INSCRIBE_FEE_CEILING_MULTIPLIER * (commit.vsize + reveal.vsize));
+    if (commitFeeSats + revealFeeSats > feeCeilingSats) {
+      return refuse(
+        'fee_ceiling_exceeded',
+        { error: 'commit_invariant_violation', message: 'The signed pair pays far more in fees than the current fee policy allows; refusing to broadcast.' },
+        400
+      );
     }
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry

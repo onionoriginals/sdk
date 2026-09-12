@@ -224,7 +224,40 @@ describe('inscribe-path transitions (R29)', () => {
   const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
   const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
+  /**
+   * Fake indexer backing store for the inscribe route's independent
+   * input-value lookup (#493 M07): `GET /tx/<txid>/hex` answers from this
+   * map with a real, parseable transaction paying `value` sats to
+   * `scriptPubKey` at `vout`.
+   */
+  const FUNDING_TX_HEX = new Map<string, string>();
+  let fundingSeq = 0;
+  function registerFundingUtxo(txid: string, vout: number, value: number, scriptPubKey: string): void {
+    fundingSeq++;
+    const tx = new btc.Transaction({ allowUnknownOutputs: true });
+    tx.addInput({
+      txid: fundingSeq.toString(16).padStart(64, '0'),
+      index: 0,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(value) + 10_000n },
+    });
+    for (let i = 0; i < vout; i++) tx.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
+    tx.sign(USER_PRIV);
+    tx.finalize();
+    FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+  }
+  function fakeIndexerFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const m = url.match(/\/tx\/([0-9a-fA-F]+)\/hex$/);
+      const raw = m ? FUNDING_TX_HEX.get(m[1].toLowerCase()) : undefined;
+      return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
   function buildPair(fundingTxid = 'a'.repeat(64)) {
+    registerFundingUtxo(fundingTxid, 0, 50_000, USER_SCRIPT);
     const commit = new btc.Transaction();
     commit.addInput({
       txid: fundingTxid,
@@ -274,6 +307,8 @@ describe('inscribe-path transitions (R29)', () => {
       // Clean coins: the route now classifies the declared outpoints itself (#493).
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
     return { routes, cap };
   }
