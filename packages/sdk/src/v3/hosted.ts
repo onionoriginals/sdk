@@ -6,7 +6,7 @@ import {
   decodeValue,
   decodeUtf8,
   encodeDocument,
-  parseAssetDid,
+  parseAssetAlias,
   assetDigest,
   sameAssetIdentity,
   parseDocument,
@@ -56,8 +56,8 @@ export interface HostedEvidence {
   reason?: string;
 }
 function location(did: string) {
-  const parsed = parseAssetDid(did);
-  if (parsed.method !== "webvh")
+  const parsed = parseAssetAlias(did);
+  if (parsed.layer !== "webvh")
     throw new CelError(
       "invalid",
       "ASSET_WEBVH",
@@ -183,7 +183,7 @@ export class HostedAssets {
     const document = validateDocument({
       log: [...envelope.eventLog.log, migrated],
     });
-    verifyHistory(document, { expectedDid: asset.id });
+    verifyHistory(document, { expectedAssetId: asset.id });
     return {
       format: "originals/web-publication",
       version: 3,
@@ -196,7 +196,7 @@ export class HostedAssets {
   private async method(
     did: string,
     log: unknown[],
-    expectedDid: string,
+    expectedAssetId: string,
   ): Promise<DIDDocument> {
     const { resolveDIDFromLog } = await import("didwebvh-ts");
     const resolved = await resolveDIDFromLog(
@@ -207,7 +207,7 @@ export class HostedAssets {
     if (
       resolved.did !== did ||
       doc?.id !== did ||
-      !doc.alsoKnownAs?.some((alias) => sameAssetIdentity(alias, expectedDid)) ||
+      !doc.alsoKnownAs?.some((alias) => sameAssetIdentity(alias, expectedAssetId)) ||
       resolved.meta.deactivated
     )
       return error(
@@ -357,11 +357,11 @@ export class HostedAssets {
     return { document, envelope, didDocument };
   }
 
-  async check(did: string, expectedDid: string): Promise<HostedEvidence> {
+  async check(did: string, expectedAssetId: string): Promise<HostedEvidence> {
     try {
       const read = await this.read(did);
       const state = verifyHistory(read.document).state;
-      return sameAssetIdentity(state.assetId, expectedDid)
+      return sameAssetIdentity(state.assetId, expectedAssetId)
         ? { status: "verified", did, head: state.head }
         : { status: "incomplete", did, reason: "Genesis mismatch" };
     } catch {

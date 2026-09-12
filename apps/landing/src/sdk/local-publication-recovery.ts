@@ -1,9 +1,17 @@
 import { inspectAssetEnvelope } from "@originals/sdk/asset-envelope";
+import { assetDigest } from "@originals/sdk/cel";
 import type {
   PreparedBitcoinPublication,
   PreparedWebPublication,
 } from "@originals/sdk";
 import { digestMultibaseSha256Hex } from "../pages/original-detail-data";
+
+/** Reconstructs the Originals 3.0 alias for a genesis-layer asset, to find storage
+ * keys recorded before the SDK 4 identity correction. Read-only compatibility;
+ * never offered as a first-class identifier for new assets. */
+function legacyGenesisAlias(assetId: string): string {
+  return "did:cel:" + assetDigest(assetId);
+}
 
 export interface LocalPublicationRecovery {
   key: string;
@@ -45,7 +53,7 @@ export function localPublicationRecoveries(
       const { history } = inspectAssetEnvelope(prepared.asset);
       const state = history.state;
       // Match only this account and the exact verified genesis, including old saved keys.
-      if (![state.assetId, state.didCel].some((id) => key === recoveryStorageKey(kind, account, id))) continue;
+      if (![state.assetId, legacyGenesisAlias(state.assetId)].some((id) => key === recoveryStorageKey(kind, account, id))) continue;
       results.push({
         key,
         kind,

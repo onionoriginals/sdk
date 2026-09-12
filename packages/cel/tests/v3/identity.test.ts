@@ -29,7 +29,11 @@ test("old signed migrations verify unchanged under the corrected identity", () =
   expect(history.state.assetId).toBe(expected);
   expect(history.state.alias).toBe("did:btco:reg:5000000000");
   expect(JSON.stringify(document)).toBe(before);
-  expect(normalizeAssetId(history.state.didCel)).toBe(expected);
+  // The historical did:cel spelling signed into real migration history remains
+  // readable through the retained aliases list; it is not a separate typed field.
+  const legacyAlias = history.state.aliases.find((alias) => alias.startsWith("did:cel:"));
+  expect(legacyAlias).toBeDefined();
+  expect(normalizeAssetId(legacyAlias!)).toBe(expected);
   expect(() => verifyHistory(document, { expectedAssetId: id })).toThrow();
 });
 
@@ -39,7 +43,4 @@ test("identity parser refuses alternate forms and does not accept other did:cel 
     id.replace("sha-256", "sha-512"), id.slice(0, -1), "did:cel:zQmTest", hash,
   ]) expect(() => normalizeAssetId(value)).toThrow();
   expect(normalizeAssetId("did:cel:" + eventDigest(genesis.event))).toBe(id);
-  expect(() => verifyHistory({ log: [genesis] }, {
-    expectedAssetId: id, expectedDid: "did:cel:" + eventDigest(authority.entries.G.event),
-  })).toThrow();
 });

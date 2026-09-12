@@ -4,15 +4,13 @@ import { CelError, requireThat } from "./errors.js";
 import { validateDocument } from "./profile.js";
 import { verifyEntry } from "./proofs.js";
 import { copyValue, type JsonObject } from "./values.js";
-import { parseAssetDid } from "./dids.js";
+import { parseAssetAlias } from "./dids.js";
 import type { CelDocument, Resource } from "./types.js";
 
 export type { DeepReadonly } from "./immutable.js";
 export interface AssetState {
   /** Stable RFC 6920 name of the genesis event; not a DID. */
   assetId: string;
-  /** @deprecated Read compatibility for the Originals 3.0 alias, not DID-method identity. */
-  didCel: string;
   alias: string;
   aliases: string[];
   layer: "cel" | "webvh" | "btco";
@@ -75,12 +73,10 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
         "CEL_GENESIS",
         "History must start with create",
       );
-      const didCel = "did:cel:" + proof.digest,
-        data = operation.data;
+      const data = operation.data;
       const assetId = assetIdFromDigest(proof.digest);
       state = {
         assetId,
-        didCel,
         alias: assetId,
         aliases: [assetId],
         layer: "cel",
@@ -151,12 +147,12 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
         break;
       case "migrate": {
         const data = operation.data,
-          destination = parseAssetDid(data.to);
-        parseAssetDid(data.from);
+          destination = parseAssetAlias(data.to);
+        parseAssetAlias(data.from);
         requireThat(
           (data.from === state.alias ||
             (state.layer === "cel" && sameAssetIdentity(data.from, state.assetId))) &&
-            data.layer === destination.method &&
+            data.layer === destination.layer &&
             data.layer ===
               (state.layer === "cel"
                 ? "webvh"
@@ -187,7 +183,7 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
  */
 export function verifyHistory(
   input: unknown,
-  options: { prefix?: VerifiedHistory; expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
+  options: { prefix?: VerifiedHistory; expectedAssetId?: string } = {},
 ): VerifiedHistory {
   const document = validateDocument(input),
     prefix = options.prefix;
@@ -216,11 +212,9 @@ export function verifyHistory(
     );
   }
   const state = apply(document, prefix);
-  for (const expected of [options.expectedAssetId, options.expectedDid]) {
-    if (expected === undefined) continue;
-    requireThat(normalizeAssetId(expected) === state.assetId,
+  if (options.expectedAssetId !== undefined)
+    requireThat(normalizeAssetId(options.expectedAssetId) === state.assetId,
       "CEL_IDENTITY", "Requested identity differs from derived genesis");
-  }
   const result: VerifiedHistory = {
     status: "authenticated",
     scope: "controller-history",
