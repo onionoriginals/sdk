@@ -1,5 +1,14 @@
 # @originals/landing
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [5ca171e]
+- Updated dependencies [077de93]
+  - @originals/sdk@4.0.0
+  - @originals/auth@3.0.1
+
 ## 0.2.0
 
 ### Minor Changes
