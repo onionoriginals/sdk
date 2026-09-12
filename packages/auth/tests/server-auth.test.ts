@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { sendOtp, verifyOtp } from '../src/client/server-auth';
+import { sendOtp, verifyOtp, AuthApiError } from '../src/client/server-auth';
 
 describe('server-auth', () => {
   describe('sendOtp', () => {
@@ -77,6 +77,38 @@ describe('server-auth', () => {
       );
       await sendOtp('test@example.com', undefined, { fetch: mockFetch as unknown as typeof fetch });
       expect(mockFetch).toHaveBeenCalledWith('/api/auth/send-otp', expect.anything());
+    });
+
+    test('throws an AuthApiError carrying the server error code and status', async () => {
+      const mockFetch = mock(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({ error: 'invalid_email', message: 'Invalid email format' }),
+        })
+      );
+      const err = await sendOtp('bad', '/api/auth/send-otp', {
+        fetch: mockFetch as unknown as typeof fetch,
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(AuthApiError);
+      expect((err as AuthApiError).code).toBe('invalid_email');
+      expect((err as AuthApiError).status).toBe(400);
+      expect((err as AuthApiError).message).toBe('Invalid email format');
+    });
+
+    test('code is undefined when the server response has none', async () => {
+      const mockFetch = mock(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({}),
+        })
+      );
+      const err = await sendOtp('test@example.com', '/api/auth/send-otp', {
+        fetch: mockFetch as unknown as typeof fetch,
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(AuthApiError);
+      expect((err as AuthApiError).code).toBeUndefined();
     });
   });
 
@@ -183,6 +215,22 @@ describe('server-auth', () => {
         fetch: mockFetch as unknown as typeof fetch,
       });
       expect(mockFetch).toHaveBeenCalledWith('/api/auth/verify-otp', expect.anything());
+    });
+
+    test('throws an AuthApiError carrying the server error code and status', async () => {
+      const mockFetch = mock(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({ error: 'verification_failed', message: 'Invalid code' }),
+        })
+      );
+      const err = await verifyOtp('s1', 'wrong', '/api/auth/verify-otp', {
+        fetch: mockFetch as unknown as typeof fetch,
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(AuthApiError);
+      expect((err as AuthApiError).code).toBe('verification_failed');
+      expect((err as AuthApiError).status).toBe(400);
     });
   });
 });

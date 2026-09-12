@@ -25,6 +25,25 @@ export interface ServerAuthOptions {
 }
 
 /**
+ * Thrown by {@link sendOtp} / {@link verifyOtp} on a non-ok response. `code`
+ * carries the server's machine-readable `error` field (see
+ * `createAuthRoutes` in the landing app's `auth-routes.ts`) so a caller can
+ * branch on the failure kind instead of pattern-matching `message` text;
+ * `message` stays the human-readable string for display, unchanged from
+ * before this type existed.
+ */
+export class AuthApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string
+  ) {
+    super(message);
+    this.name = 'AuthApiError';
+  }
+}
+
+/**
  * Options for {@link verifyOtp}
  */
 export interface VerifyOtpClientOptions extends ServerAuthOptions {
@@ -68,8 +87,11 @@ export async function sendOtp(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Failed to send OTP' })) as { message?: string };
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    const body = await response.json().catch(() => ({ message: 'Failed to send OTP' })) as {
+      message?: string;
+      error?: string;
+    };
+    throw new AuthApiError(body.message ?? `HTTP ${response.status}`, response.status, body.error);
   }
 
   return response.json() as Promise<InitiateAuthResult>;
@@ -121,8 +143,11 @@ export async function verifyOtp(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Verification failed' })) as { message?: string };
-    throw new Error(error.message ?? `HTTP ${response.status}`);
+    const body = await response.json().catch(() => ({ message: 'Verification failed' })) as {
+      message?: string;
+      error?: string;
+    };
+    throw new AuthApiError(body.message ?? `HTTP ${response.status}`, response.status, body.error);
   }
 
   return response.json() as Promise<VerifyAuthResult>;
