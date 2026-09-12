@@ -27,11 +27,23 @@ async function fixture() {
   const snapshot: SatSnapshot = { network: 'regtest', sat: '5000000000', tipBefore: { height: 101, hash: blockHash }, tipAfter: { height: 101, hash: blockHash }, indexTip: { height: 101, hash: blockHash }, indexHealthy: true, enumerationComplete: true,
     blocks: [{ height: 101, hash: blockHash, txids: [previousTxid] }], ownership: { owner: payment.address!, satpoint: previousTxid + ':0:0' }, publications: [{ id: previousTxid + 'i0', revealTxid: previousTxid, network: 'regtest', sat: '5000000000', confirmed: true, creation: { height: 101, blockHash, transactionIndex: 0, inscriptionIndex: 0 }, body: { status: 'complete', mediaType: 'application/cel', bytes: encodeDocument(history, 'json'), metadata: null } }] };
   let broadcasts = 0, scans = 0, classifications = 0;
-  const provider = { getFirstSatOfOutput: async () => snapshot.sat, getSatSnapshot: async () => { scans++; return snapshot; }, broadcastTransaction: async (raw: unknown) => { broadcasts++; return btc.Transaction.fromRaw(Buffer.from(raw as string, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true }).id; }, getTransactionStatus: async () => ({ confirmed: false }) } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+  const provider = { getFirstSatOfOutput: async () => snapshot.sat, getSatSnapshot: async () => { scans++; return snapshot; }, broadcastTransaction: async (raw: unknown) => { broadcasts++; return btc.Transaction.fromRaw(Buffer.from(raw as string, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true }).id; }, getTransactionStatus: async () => ({ confirmed: false }), estimateFee: async () => 2 } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
   const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'cel3-reinscription-')) });
   store.bindDepositAddress('creator', 'regtest', payment.address!);
   let feeInscribed = false, extraIdentitySat = false;
-  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, ordinals: { outpointInscriptions: async outpoint => { classifications++; return outpoint.txid === previousTxid || feeInscribed ? [outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])] : []; } } });
+  // The independent economics check (#493/M07) re-derives funding values from
+  // the indexer rather than trusting the request; mock it with the same two
+  // funding UTXOs `invoke` actually spends below.
+  const chainUtxos = [
+    { txid: previousTxid, vout: 0, value: 546 },
+    { txid: feeTxid, vout: 0, value: 100000 },
+  ];
+  const fetchImpl = (async () =>
+    new Response(
+      JSON.stringify(chainUtxos.map((u) => ({ ...u, status: { confirmed: true } }))),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    )) as unknown as typeof fetch;
+  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, indexer: { api: 'http://mock-indexer.test' }, fetchImpl, ordinals: { outpointInscriptions: async outpoint => { classifications++; return outpoint.txid === previousTxid || feeInscribed ? [outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])] : []; } } });
   const invoke = async (document = delta, metadata = false, alter?: (raw: string) => string) => {
     const prepared = await prepareInscriptionOnSat({ provider, network: 'regtest', fundingUtxos: [{ txid: previousTxid, vout: 0, value: 546, scriptPubKey: Buffer.from(payment.script).toString('hex') }, { txid: feeTxid, vout: 0, value: 100000, scriptPubKey: Buffer.from(payment.script).toString('hex') }], changeAddress: payment.address!, feeRate: 2,
       satSigner: { signAndFinalizeCommitPsbt: async psbt => { const tx = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), { allowUnknownOutputs: true }); tx.sign(key); tx.finalize(); return tx.hex; } },

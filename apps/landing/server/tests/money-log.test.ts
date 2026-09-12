@@ -217,6 +217,7 @@ describe('deposit-path transitions (R29)', () => {
 });
 
 describe('inscribe-path transitions (R29)', () => {
+  const moneyLogChainRegistry = new WeakMap<object, Map<string, { txid: string; vout: number; value: number }>>();
   const USER_PRIV = hex.decode('4'.repeat(64));
   const USER_PUB = secp256k1.getPublicKey(USER_PRIV, true);
   const USER_P2WPKH = btc.p2wpkh(USER_PUB, btc.TEST_NETWORK);
@@ -261,6 +262,9 @@ describe('inscribe-path transitions (R29)', () => {
     // #493: an unbound account may not name its own change address, so bind it
     // as the real flow does when a creator reads their deposit address.
     store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
+    // The independent economics check (#493/M07) re-derives funding values
+    // from the indexer; mock it to confirm exactly the UTXO buildPair() signs.
+    const chainRegistry = new Map<string, { txid: string; vout: number; value: number }>();
     const routes = createBitcoinRoutes({
       jwtSecret: JWT,
       provider: {
@@ -274,11 +278,26 @@ describe('inscribe-path transitions (R29)', () => {
       // Clean coins: the route now classifies the declared outpoints itself (#493).
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
+      indexer: { api: 'http://mock-indexer.test' },
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify([...chainRegistry.values()].map((u) => ({ ...u, status: { confirmed: true } }))),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch,
     });
+    moneyLogChainRegistry.set(routes, chainRegistry);
     return { routes, cap };
   }
 
   async function submit(routes: ReturnType<typeof inscribeHarness>['routes'], body: unknown) {
+    const registry = moneyLogChainRegistry.get(routes);
+    if (registry) {
+      const b = body as { fundingUtxos?: Array<{ txid?: string; vout?: number; value?: number }> } | null | undefined;
+      for (const u of b?.fundingUtxos ?? []) {
+        if (!u || typeof u.txid !== 'string' || typeof u.vout !== 'number') continue;
+        registry.set(`${u.txid.toLowerCase()}:${u.vout}`, { txid: u.txid, vout: u.vout, value: typeof u.value === 'number' ? u.value : 0 });
+      }
+    }
     const token = signToken('sub-1', EMAIL, undefined, { secret: JWT });
     const cookie = serializeCookie(getAuthCookieConfig(token));
     const req = new Request('http://host/api/btc/inscribe', {
