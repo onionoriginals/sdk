@@ -290,6 +290,173 @@ async function buildFixtureWithLaterInlineDelta(): Promise<{
   return { receipt, provider };
 }
 
+/**
+ * Builds a sat whose FIRST accepted publication (the boundary) genuinely
+ * inlines the resource's ORIGINAL version, then a SECOND accepted publication
+ * (a delta) inlines a REVISED version of the same resource id. The returned
+ * receipt names the boundary and the ORIGINAL version's bytes/digest — this
+ * must still verify, unaffected by the later publication attaching different
+ * bytes to the same resource id.
+ */
+async function buildFixtureWithHistoricalInlineVersion(): Promise<{
+  receipt: MainnetReceipt;
+  provider: OrdinalsProvider;
+}> {
+  const fundingUtxos = [
+    {
+      txid: '9a'.repeat(32),
+      vout: 0,
+      value: 100_000,
+      scriptPubKey: Buffer.from(payment.script).toString('hex'),
+    },
+  ];
+  const sat = '700000000000000';
+  const stored = new Map<string, { content: Uint8Array; contentType?: string }>();
+  const snapshot: SatSnapshot = {
+    network: 'mainnet',
+    sat,
+    tipBefore: { height: 900_000, hash: blockHash },
+    tipAfter: { height: 900_000, hash: blockHash },
+    indexTip: { height: 900_000, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [],
+    ownership: { owner: payment.address!, satpoint: fundingUtxos[0].txid + ':0:0' },
+    publications: [],
+  };
+  const provider: OrdinalsProvider = {
+    getFirstSatOfOutput: async () => sat,
+    getSatSnapshot: async () => snapshot,
+    getInscriptionById: async () => null,
+    getInscriptionsBySatoshi: async () => [],
+    broadcastTransaction: async () => {
+      throw new Error('not used by this fixture');
+    },
+    getTransactionStatus: async () => {
+      throw new Error('not used by this fixture');
+    },
+  };
+  const sdk = OriginalsSDK.create({
+    network: 'mainnet',
+    signer,
+    ordinalsProvider: provider,
+    storageAdapter: {
+      putObject: async (domain, path, content, options) => {
+        stored.set(domain + '/' + path, { content: content.slice(), contentType: options?.contentType });
+        return 'https://' + domain + '/' + path;
+      },
+      getObject: async (domain, path) => stored.get(domain + '/' + path) ?? null,
+      exists: async (domain, path) => stored.has(domain + '/' + path),
+    },
+  });
+  const local = await sdk.lifecycle.createAsset([
+    { id: 'tla-logo.png', mediaType: 'image/png', content: png },
+  ]);
+  const { asset } = await sdk.lifecycle.publishToWeb(local, { domain: 'example.com' });
+  const satSigner = {
+    signAndFinalizeCommitPsbt: async (psbt: string) => {
+      const transaction = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), {
+        allowUnknownOutputs: true,
+      });
+      transaction.sign(key);
+      transaction.finalize();
+      return transaction.hex;
+    },
+  };
+  const tx = (hex_: string) =>
+    btc.Transaction.fromRaw(Buffer.from(hex_, 'hex'), {
+      allowUnknownInputs: true,
+      allowUnknownOutputs: true,
+    });
+
+  // Boundary: genuinely inlines the ORIGINAL version of the resource.
+  const boundary = await sdk.lifecycle.prepareBitcoinPublication(asset, {
+    fundingUtxos,
+    satSigner,
+    changeAddress: payment.address!,
+    feeRate: 2,
+  });
+  const boundaryRevealTxId = boundary.transactions.revealTxId;
+  const boundaryInscriptionId = `${boundaryRevealTxId}i0`;
+  snapshot.blocks.push({ height: 900_000, hash: blockHash, txids: [boundaryRevealTxId] });
+  snapshot.publications.push({
+    id: boundaryInscriptionId,
+    revealTxid: boundaryRevealTxId,
+    network: 'mainnet',
+    sat,
+    confirmed: true,
+    creation: { height: 900_000, blockHash, transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: 'complete',
+      mediaType: 'image/png',
+      bytes: png,
+      metadata: encodeDocument(boundary.document, 'cbor'),
+    },
+  });
+  snapshot.ownership.satpoint = `${boundaryRevealTxId}:0:0`;
+
+  // Delta: the creator later revises the artwork and inlines the NEW version,
+  // reusing the SAME resource id — the boundary's own inscribed bytes (and
+  // the receipt naming it) must stay bound to the ORIGINAL version.
+  const loaded = await sdk.lifecycle.resolveAssetFromSat(sat);
+  if (loaded.status !== 'accepted') throw new Error(`fixture: boundary not accepted (${loaded.status})`);
+  const png2 = Uint8Array.from([...png, 1]);
+  await loaded.asset.addResourceVersion('tla-logo.png', png2, 'image/png');
+  const delta = await sdk.lifecycle.prepareBitcoinPublication(loaded.asset, {
+    fundingUtxos: [
+      {
+        txid: boundaryRevealTxId,
+        vout: 0,
+        value: Number(tx(boundary.transactions.revealTxHex).getOutput(0).amount),
+        scriptPubKey: Buffer.from(payment.script).toString('hex'),
+      },
+      { ...fundingUtxos[0], txid: 'bc'.repeat(32) },
+    ],
+    satSigner,
+    changeAddress: payment.address!,
+    feeRate: 2,
+    inlineResourceId: 'tla-logo.png',
+  });
+  const deltaRevealTxId = delta.transactions.revealTxId;
+  const deltaInscriptionId = `${deltaRevealTxId}i0`;
+  snapshot.blocks.push({ height: 900_001, hash: 'd'.repeat(64), txids: [deltaRevealTxId] });
+  snapshot.tipBefore = snapshot.tipAfter = snapshot.indexTip = { height: 900_001, hash: 'd'.repeat(64) };
+  snapshot.publications.push({
+    id: deltaInscriptionId,
+    revealTxid: deltaRevealTxId,
+    network: 'mainnet',
+    sat,
+    confirmed: true,
+    creation: { height: 900_001, blockHash: 'd'.repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: 'complete',
+      mediaType: 'image/png',
+      bytes: png2,
+      metadata: encodeDocument(delta.document, 'cbor'),
+    },
+  });
+  snapshot.ownership.satpoint = `${deltaRevealTxId}:0:0`;
+
+  const receipt: MainnetReceipt = {
+    assetDid: asset.id,
+    didBtco: `did:btco:${sat}`,
+    sat,
+    // Names the boundary and its ORIGINAL version's bytes, even though a
+    // later delta attached different bytes to the same resource id.
+    inscriptionId: boundaryInscriptionId,
+    revealTxId: boundaryRevealTxId,
+    resource: {
+      id: 'tla-logo.png',
+      mediaType: 'image/png',
+      byteLength: png.length,
+      sha256: hex.encode(sha256(png)),
+    },
+    observedAt: new Date(0).toISOString(),
+    sourceHref: 'https://example.com/evidence.json',
+  };
+  return { receipt, provider };
+}
+
 const arbitraryReceipt: MainnetReceipt = {
   assetDid: 'did:cel:uEiArbitraryArbitraryArbitraryArbitraryArbitraryArbi',
   didBtco: 'did:btco:123456789012345',
@@ -361,6 +528,16 @@ describe('verifyMainnetExample', () => {
     // ...but the resource must not be reported on-chain: a LATER publication
     // (not this one) is what actually inlined it.
     expect(result.resourceOnChain).toBe(false);
+  });
+
+  test('credits a resource to the receipt inscription that genuinely inlined its ORIGINAL version, even after a later publication attaches a different version to the same id', async () => {
+    const { receipt, provider } = await buildFixtureWithHistoricalInlineVersion();
+    const result = await verifyMainnetExample({ receipt, provider });
+    expect(result.live).toBe(true);
+    expect(result.inscriptionId).toBe(receipt.inscriptionId);
+    // Bound to the boundary's own inscribed bytes, not confused by the later
+    // delta's different bytes for the same resource id.
+    expect(result.resourceOnChain).toBe(true);
   });
 
   test('never throws even when the provider itself is unreachable', async () => {

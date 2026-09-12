@@ -10,7 +10,8 @@
  */
 import "../shims/buffer-global";
 import { OriginalsSDK } from "@originals/sdk";
-import type { OrdinalsProvider, OriginalsAsset } from "@originals/sdk";
+import type { OrdinalsProvider } from "@originals/sdk";
+import type { SatSnapshot } from "@originals/sdk/cel";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
@@ -64,6 +65,7 @@ async function checkLive(
   receipt: MainnetReceipt,
   provider: OrdinalsProvider,
 ): Promise<MainnetExampleResult | null> {
+  if (!provider.getSatSnapshot) return null;
   const sdk = OriginalsSDK.create({ network: "mainnet", ordinalsProvider: provider });
   const result = await sdk.lifecycle.resolveAssetFromSat(receipt.sat, {
     expectedAssetId: receipt.assetDid,
@@ -71,16 +73,20 @@ async function checkLive(
   if (result.status !== "accepted") return null;
   if (result.asset.id !== receipt.assetDid) return null;
   if (result.didDocument?.id !== receipt.didBtco) return null;
-  // Bind the resource-availability claim to the SAME accepted publication the
-  // receipt names, not to the asset's current aggregate state: the sat's
-  // history can carry other, later publications by the time this runs, and
-  // `inscriptionId` alone is not proof that publication is what carried this
-  // resource inline (it might be a log-only delta, or predate the resource).
-  const publication = result.resolution.publications.find(
-    (p) => p.inscriptionId === receipt.inscriptionId,
-  );
-  if (!publication) return null;
-  const resourceOnChain = resourceMatchesReceipt(result.asset, publication, receipt.resource);
+  // The receipt's inscription must itself be part of the chain-accepted
+  // history (not merely some inscription that happens to sit on this sat).
+  if (!result.resolution.publications.some((p) => p.inscriptionId === receipt.inscriptionId))
+    return null;
+  // Bind the resource-availability claim to the SPECIFIC bytes THAT
+  // publication inscribed, read straight from the snapshot, rather than the
+  // asset's resource catalog: a resource id can carry more than one
+  // authenticated version, and later publications on this same sat can
+  // attach content to a *different* version, so "some version of this id
+  // has attached bytes" is not proof this particular inscription carried
+  // the receipt's declared bytes.
+  const snapshot = await provider.getSatSnapshot(receipt.sat);
+  const observed = snapshot.publications.find((p) => p.id === receipt.inscriptionId);
+  const resourceOnChain = resourceMatchesReceipt(observed, receipt.resource);
   return {
     live: true,
     network: "mainnet",
@@ -96,20 +102,20 @@ async function checkLive(
 }
 
 /**
- * True only when the named publication itself inlined this exact resource id
- * AND the asset's attached bytes for that resource independently hash to the
- * receipt's declared sha256 — never trusting the receipt's own digest field,
- * or a resource made available by a *different* publication, on its say-so.
+ * True only when the named publication's own inscribed bytes independently
+ * hash to the receipt's declared sha256 — never trusting the receipt's own
+ * digest field, or bytes attached to this resource id by a *different*
+ * publication, on their say-so.
  */
 function resourceMatchesReceipt(
-  asset: OriginalsAsset,
-  publication: { inlineResourceIds: readonly string[] },
+  publication: SatSnapshot["publications"][number] | undefined,
   resource: MainnetReceipt["resource"],
 ): boolean {
-  if (!publication.inlineResourceIds.includes(resource.id)) return false;
-  const attached = asset.resources.find((r) => r.id === resource.id && r.content);
-  if (!attached?.content) return false;
-  return hex.encode(sha256(attached.content)) === resource.sha256;
+  if (!publication || publication.body.status !== "complete") return false;
+  const { body } = publication;
+  if (body.mediaType !== resource.mediaType) return false;
+  if (body.bytes.length !== resource.byteLength) return false;
+  return hex.encode(sha256(body.bytes)) === resource.sha256;
 }
 
 /** Never throws: any live-check failure (auth, network, chain mismatch) yields the retained receipt. */
