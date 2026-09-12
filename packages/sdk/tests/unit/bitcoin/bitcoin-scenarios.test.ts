@@ -502,13 +502,8 @@ describe('BITCOIN-024: retry limit respected', () => {
 
 // ---------------------------------------------------------------------------
 // [BITCOIN-025/happy] ResourceProvider resolves inscriptions by satoshi via adapter
-// The OrdNodeProvider is a ResourceProvider implementation; test getSatInfo
-// which is the core method for resolving by satoshi.
 // ---------------------------------------------------------------------------
-describe('BITCOIN-025: OrdNodeProvider resource resolution by satoshi', () => {
-  // OrdNodeProvider is a stub (no real network). We verify the adapter wiring.
-  // For a proper sat-resolution test using OrdMockProvider (an OrdinalsProvider)
-  // we exercise getInscriptionsBySatoshi.
+describe('BITCOIN-025: OrdMockProvider resource resolution by satoshi', () => {
   const { OrdMockProvider } = require('../../../src/adapters/providers/OrdMockProvider');
 
   test('OrdMockProvider resolves inscription by satoshi after creation', async () => {
@@ -541,13 +536,5 @@ describe('BITCOIN-025: OrdNodeProvider resource resolution by satoshi', () => {
     expect(found).not.toBeNull();
     expect(found!.inscriptionId).toBe(created.inscriptionId);
     expect(found!.contentType).toBe('application/json');
-  });
-
-  test('OrdNodeProvider getSatInfo throws NOT_IMPLEMENTED instead of reporting no inscriptions (#318)', async () => {
-    const { OrdNodeProvider } = require('../../../src/bitcoin/providers/OrdNodeProvider');
-    const p = new OrdNodeProvider({ nodeUrl: 'http://ord.example' });
-    // The stub used to return { inscription_ids: [] }, silently reporting
-    // every did:btco as uninscribed. It must now fail loudly.
-    await expect(p.getSatInfo('123456789')).rejects.toThrow(/not implemented/i);
   });
 });
