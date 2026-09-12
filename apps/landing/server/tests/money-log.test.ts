@@ -439,6 +439,33 @@ describe('the periodic balance sweep (R29)', () => {
     expect(cap.of('deposit_balance_held').every((e) => e.address === ADDRESS)).toBe(true);
   });
 
+  // #496 item 4: `recordDepositRead` used to skip its write whenever the
+  // reported balance was unchanged, with no ceiling on how long that could
+  // go on. That froze `lastRead.at` at the last actual balance CHANGE, not
+  // the last time anyone checked — so the drop-out clock above kept ticking
+  // even while the sweep itself kept re-reading the address every pass. An
+  // address that never once went unwatched still silently timed out.
+  test('an idle address the sweep keeps re-checking every hour never drops out', async () => {
+    const hour = 60 * 60_000;
+    let clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const { sweep, store } = sweepHarness({
+      balances: { [OTHER_ADDRESS]: 0 },
+      now: () => clock,
+    });
+    store.bindDepositAddress('sub-2', 'mainnet', OTHER_ADDRESS);
+
+    let last: Awaited<ReturnType<typeof sweep>> | undefined;
+    for (let i = 0; i < 30; i++) {
+      clock += hour;
+      last = await sweep();
+    }
+    // 30 hourly passes, every one of them reading this address: it was never
+    // left unchecked for anywhere near the 24h drop-out horizon, so it must
+    // still be in scope.
+    expect(last!.candidates).toBe(1);
+    expect(last!.scanned).toBe(1);
+  });
+
   test('an unreadable address is counted, not swallowed, and does not stop the pass', async () => {
     const cap = capture();
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'sweep-')) });

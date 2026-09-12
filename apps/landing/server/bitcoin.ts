@@ -717,12 +717,20 @@ export function createBitcoinRoutes(deps: {
   // QuickNode quota once a minute, not once a tick, with an in-flight promise
   // per target so a cold cache under concurrent polls refreshes ONCE.
   const FEE_CACHE_MS = 60_000;
+  // A short negative TTL for a FAILED estimate (#496 item 2). Without it, an
+  // estimator outage gets no backoff at all: the in-flight slot below clears
+  // on rejection same as on success, so every one of N creators' 4/min polls
+  // issues a fresh RPC against a dependency that is already down. This does
+  // not floor or fabricate a rate — a poll inside the window still fails
+  // closed with the same error, just without re-asking the estimator.
+  const FEE_FAILURE_CACHE_MS = 10_000;
   // Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
   // compromised estimator must not be able to quote an arbitrary number at a
   // creator. Kept local — the SDK does not export it.
   const MAX_FEE_RATE_SAT_VB = 10_000;
   const feeCache = new Map<number, { at: number; rate: number }>();
   const feeInFlight = new Map<number, Promise<number>>();
+  const feeFailureCache = new Map<number, { at: number; message: string }>();
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
@@ -730,17 +738,27 @@ export function createBitcoinRoutes(deps: {
     if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
     const pending = feeInFlight.get(blocks);
     if (pending) return pending;
+    const failed = feeFailureCache.get(blocks);
+    if (failed && now() - failed.at < FEE_FAILURE_CACHE_MS) {
+      throw new Error(failed.message);
+    }
     const run = (async () => {
-      const estimated = await provider.estimateFee(blocks);
-      if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
-        throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+      try {
+        const estimated = await provider.estimateFee(blocks);
+        if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+          throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+        }
+        const rate = Math.ceil(estimated);
+        if (rate > MAX_FEE_RATE_SAT_VB) {
+          throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
+        }
+        feeCache.set(blocks, { at: now(), rate });
+        feeFailureCache.delete(blocks);
+        return rate;
+      } catch (e) {
+        feeFailureCache.set(blocks, { at: now(), message: (e as Error).message });
+        throw e;
       }
-      const rate = Math.ceil(estimated);
-      if (rate > MAX_FEE_RATE_SAT_VB) {
-        throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
-      }
-      feeCache.set(blocks, { at: now(), rate });
-      return rate;
     })();
     feeInFlight.set(blocks, run);
     // Clear the slot AFTER it is set — an estimator that throws synchronously

@@ -256,6 +256,15 @@ export interface BoundDeposit {
   hasPendingInscription: boolean;
 }
 
+/**
+ * Ceiling on how stale a persisted `lastRead.at` may go while a poller keeps
+ * reporting the same unchanged balance (#496 item 4). Bounded well under the
+ * balance sweep's 24h drop-out horizon, and aligned with its ~hourly cadence,
+ * so an address that is genuinely still being checked never freezes into a
+ * false "nobody has looked in 24h" reading.
+ */
+const DEPOSIT_READ_HEARTBEAT_MS = 60 * 60_000;
+
 export type DepositAlertKind = 'indexer_unavailable' | 'indexer_rate_limited';
 
 /** A persisted "your deposit read cannot be trusted" state (R28/R31). */
@@ -649,15 +658,24 @@ export function createInscriptionsStore(opts: {
       const state = readDepositState(subOrgId);
       const previous = state.lastRead ?? null;
       // A trusted read ENDS the outage — the alert is dropped, not merged.
-      // Skip the write when nothing changed: this is the 15s-poll path, and
-      // an fsync per poll per creator is real cost for no information.
+      // Skip the write when nothing changed AND the last write is still fresh
+      // (this is the 15s-poll path, and an fsync per poll per creator is real
+      // cost for no information) — but a write still lands at least once per
+      // DEPOSIT_READ_HEARTBEAT_MS even when unchanged (#496 item 4). Without
+      // that floor, `lastRead.at` freezes at whatever it was when the balance
+      // last actually changed, and the balance sweep's drop-out rule reads
+      // exactly that timestamp: an idle, actively-rechecked, zero-balance
+      // address would silently age out of the sweep after 24h even though the
+      // sweep kept re-reading it every pass — the opposite of what "every
+      // pass re-reads it, which is what keeps it in scope" is supposed to mean.
       const last = state.lastRead;
       if (
         !state.alert &&
         last &&
         last.confirmedSats === read.confirmedSats &&
         last.address === read.address &&
-        last.network === read.network
+        last.network === read.network &&
+        now() - Date.parse(last.at) < DEPOSIT_READ_HEARTBEAT_MS
       ) {
         return previous;
       }

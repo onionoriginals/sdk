@@ -839,6 +839,7 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
     // every later poll re-serves the same failure and the creator can never
     // recover without a server restart.
     let first = true;
+    let clock = 1_000_000;
     const calls = { n: 0 };
     const provider = {
       estimateFee() {
@@ -850,11 +851,59 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
       async broadcastTransaction() { return 'f'.repeat(64); },
       async getSpendableUtxos() { return []; },
     } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-    const r = routesFor(provider);
+    const r = routesFor(provider, { now: () => clock });
 
     const a = depositReq();
     expect((await r.deposit(a, new URL(a.url))).status).toBe(502);
-    // The estimator is healthy now — the retry must actually reach it.
+    // Past the short negative-cache TTL, so this is a genuine retry reaching
+    // the estimator again — not a poll suppressed by the outage cache below.
+    clock += 11_000;
+    const b = depositReq();
+    expect((await r.deposit(b, new URL(b.url))).status).toBe(200);
+    expect(calls.n).toBe(2);
+  });
+
+  test('an estimator outage is cached briefly so a burst of polls does not amplify it', async () => {
+    // During a real outage, N creators' 15s polls must not each issue a fresh
+    // RPC against a dependency that is already down (#496 item 2).
+    const { provider, calls } = feeProvider(() => { throw new Error('quicknode down'); });
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    const first = depositReq();
+    expect((await r.deposit(first, new URL(first.url))).status).toBe(502);
+    // Three more polls inside the negative-cache window: same fail-closed
+    // 502, but the estimator is not asked again.
+    for (let i = 0; i < 3; i++) {
+      clock += 2_000;
+      const req = depositReq();
+      expect((await r.deposit(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(1);
+
+    // Past the negative-cache window: the next poll is a fresh attempt.
+    clock += 10_000;
+    const later = depositReq();
+    expect((await r.deposit(later, new URL(later.url))).status).toBe(502);
+    expect(calls.n).toBe(2);
+  });
+
+  test('an estimator that recovers is reached immediately once the negative cache lets it', async () => {
+    let down = true;
+    const calls = { n: 0 };
+    const provider = {
+      estimateFee() { calls.n++; if (down) throw new Error('down'); return 5; },
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() { return []; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    const a = depositReq();
+    expect((await r.deposit(a, new URL(a.url))).status).toBe(502);
+    down = false;
+    clock += 10_000; // past FEE_FAILURE_CACHE_MS
     const b = depositReq();
     expect((await r.deposit(b, new URL(b.url))).status).toBe(200);
     expect(calls.n).toBe(2);
