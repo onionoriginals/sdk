@@ -4,7 +4,8 @@ The release workflow now publishes via npm **OIDC trusted publishing**: the
 `publish` job's `id-token: write` permission plus `actions/setup-node`'s
 `registry-url` let npm authenticate the run without any token in the workflow.
 Changesets CLI v3 and action v2 are configured with Node 24 for publishing
-(required by trusted publishing: npm >= 11.5.1 / Node >= 22.9); the Node 20.10
+(npm's documented requirement for trusted publishing is npm CLI >= 11.5.1 and
+Node >= 22.14.0); the Node 20.10
 consumer checks run before that runtime switch. Merging the stable Version
 Packages PR is the publication gate. Do not run a real publish to test a
 credential.

@@ -199,7 +199,7 @@ jobs:
 
       # Keep the Node 20 consumer gates above, then use the runtime required by
       # Changesets CLI v3 and by npm's OIDC trusted publishing (npm >= 11.5.1,
-      # bundled with Node >= 22.9; we use 24).
+      # per npm's documented minimum of Node 22.14.0; we use 24).
       - name: Setup release tooling Node.js
         uses: actions/setup-node@v7
         with:
