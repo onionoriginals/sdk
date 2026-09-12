@@ -496,6 +496,20 @@ describe('BtcoCelManager', () => {
         'Cannot migrate an empty event log'
       );
     });
+
+    it('rejects a truthy non-boolean value — only the literal `true` acknowledges', async () => {
+      // Defense in depth: an untyped caller (deserialized config, `as any`) could
+      // pass a truthy non-boolean; the guard must require strict `=== true`, not
+      // merely truthiness, or the explicit-acknowledgement contract is bypassable.
+      const looselyConfiguredManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {
+        acknowledgeIncompleteHistory: 'true' as unknown as boolean,
+      });
+      const webvhLog = await createWebvhLog();
+
+      await expect(looselyConfiguredManager.migrate(webvhLog)).rejects.toThrow(
+        /acknowledgeIncompleteHistory/
+      );
+    });
   });
 
   describe('getCurrentState', () => {

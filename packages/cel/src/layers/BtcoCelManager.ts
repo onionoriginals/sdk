@@ -266,7 +266,7 @@ export class BtcoCelManager {
     // history from the inscribed artifact alone. Runs after all structural
     // validation above so those error paths are unaffected — only the success
     // path requires acknowledgement.
-    if (!this.config.acknowledgeIncompleteHistory) {
+    if (this.config.acknowledgeIncompleteHistory !== true) {
       throw new Error(
         'BtcoCelManager.migrate() inscribes a did:btco document that commits only to a head ' +
         "digest of the migrate event, not the asset's full CEL boundary history. A recipient " +
