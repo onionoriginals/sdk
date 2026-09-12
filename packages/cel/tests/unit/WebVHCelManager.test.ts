@@ -41,10 +41,25 @@ const createPeerLog = async (): Promise<EventLog> => {
   ])).log;
 };
 
+// migrate() fails closed unless the caller acknowledges its did:webvh
+// identifier is not spec-conformant (see WebVHCelConfig). This suite exercises
+// the retained legacy migration behavior itself, so acknowledge it by default;
+// a test can still override the field to exercise the fail-closed default.
+const createManager = (
+  signer: any,
+  domain: string,
+  witnesses: WitnessService[] = [],
+  config: Record<string, unknown> = {}
+): WebVHCelManager =>
+  new WebVHCelManager(signer, domain, witnesses, {
+    acknowledgeNonConformantIdentifier: true,
+    ...config,
+  });
+
 describe('WebVHCelManager', () => {
   describe('constructor', () => {
     it('should create instance with valid signer and domain', () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       expect(manager).toBeDefined();
       expect(manager.domainName).toBe('example.com');
       expect(manager.witnessCount).toBe(0);
@@ -52,53 +67,53 @@ describe('WebVHCelManager', () => {
 
     it('should create instance with witnesses', () => {
       const witness = createMockWitness();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness]);
+      const manager = createManager(createMockSigner(), 'example.com', [witness]);
       expect(manager.witnessCount).toBe(1);
     });
 
     it('should create instance with multiple witnesses', () => {
       const witnesses = [createMockWitness(), createMockWitness()];
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', witnesses);
+      const manager = createManager(createMockSigner(), 'example.com', witnesses);
       expect(manager.witnessCount).toBe(2);
     });
 
     it('should throw error for non-function signer', () => {
-      expect(() => new WebVHCelManager(null as any, 'example.com')).toThrow(
+      expect(() => createManager(null as any, 'example.com')).toThrow(
         'WebVHCelManager requires a signer function'
       );
     });
 
     it('should throw error for missing domain', () => {
-      expect(() => new WebVHCelManager(createMockSigner(), '')).toThrow(
+      expect(() => createManager(createMockSigner(), '')).toThrow(
         'WebVHCelManager requires a valid domain string'
       );
     });
 
     it('should throw error for invalid domain format', () => {
-      expect(() => new WebVHCelManager(createMockSigner(), '-invalid')).toThrow(
+      expect(() => createManager(createMockSigner(), '-invalid')).toThrow(
         'Invalid domain format'
       );
     });
 
     it('should accept valid domain formats', () => {
       // Simple domain
-      expect(new WebVHCelManager(createMockSigner(), 'example.com')).toBeDefined();
+      expect(createManager(createMockSigner(), 'example.com')).toBeDefined();
       // Subdomain
-      expect(new WebVHCelManager(createMockSigner(), 'sub.example.com')).toBeDefined();
+      expect(createManager(createMockSigner(), 'sub.example.com')).toBeDefined();
       // Single char domain
-      expect(new WebVHCelManager(createMockSigner(), 'a')).toBeDefined();
+      expect(createManager(createMockSigner(), 'a')).toBeDefined();
       // With numbers
-      expect(new WebVHCelManager(createMockSigner(), 'example123.com')).toBeDefined();
+      expect(createManager(createMockSigner(), 'example123.com')).toBeDefined();
     });
 
     it('should throw error for non-array witnesses', () => {
       expect(
-        () => new WebVHCelManager(createMockSigner(), 'example.com', 'not-an-array' as any)
+        () => createManager(createMockSigner(), 'example.com', 'not-an-array' as any)
       ).toThrow('witnesses must be an array');
     });
 
     it('should accept custom config', () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+      const manager = createManager(createMockSigner(), 'example.com', [], {
         verificationMethod: 'did:key:z6MkCustom#key-0',
         proofPurpose: 'authentication',
       });
@@ -106,11 +121,47 @@ describe('WebVHCelManager', () => {
     });
   });
 
+  describe('migrate() non-conformant identifier gate', () => {
+    it('fails closed by default instead of emitting an unresolvable did:webvh', async () => {
+      const peerLog = await createPeerLog();
+      // Bypass the suite-wide createManager() helper: this constructs the
+      // manager the same way an unaware caller would, with no acknowledgment.
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+
+      await expect(manager.migrate(peerLog)).rejects.toThrow(
+        /did:webvh identifier that a conforming WebVH resolver can resolve/
+      );
+    });
+
+    it('fails closed for a truthy non-boolean acknowledgment (untyped JS caller footgun)', async () => {
+      const peerLog = await createPeerLog();
+      // An untyped caller might pass a string thinking it disables the flag;
+      // the gate must require strict `true`, not merely a truthy value.
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+        acknowledgeNonConformantIdentifier: 'false' as unknown as boolean,
+      });
+
+      await expect(manager.migrate(peerLog)).rejects.toThrow(
+        /did:webvh identifier that a conforming WebVH resolver can resolve/
+      );
+    });
+
+    it('proceeds once the caller sets acknowledgeNonConformantIdentifier', async () => {
+      const peerLog = await createPeerLog();
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+        acknowledgeNonConformantIdentifier: true,
+      });
+
+      const webvhLog = await manager.migrate(peerLog);
+      expect(webvhLog.events.length).toBe(2);
+    });
+  });
+
   describe('migrate', () => {
     let manager: WebVHCelManager;
 
     beforeEach(() => {
-      manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      manager = createManager(createMockSigner(), 'example.com');
     });
 
     it('should migrate a peer log to webvh layer', async () => {
@@ -356,7 +407,7 @@ describe('WebVHCelManager', () => {
   describe('migrate with witnesses', () => {
     it('should add witness proof when witness is configured', async () => {
       const witness = createMockWitness();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness]);
+      const manager = createManager(createMockSigner(), 'example.com', [witness]);
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -367,7 +418,7 @@ describe('WebVHCelManager', () => {
 
     it('should add multiple witness proofs', async () => {
       const witnesses = [createMockWitness(), createMockWitness()];
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', witnesses);
+      const manager = createManager(createMockSigner(), 'example.com', witnesses);
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -378,7 +429,7 @@ describe('WebVHCelManager', () => {
 
     it('should have witnessedAt on witness proofs', async () => {
       const witness = createMockWitness();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness]);
+      const manager = createManager(createMockSigner(), 'example.com', [witness]);
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -394,7 +445,7 @@ describe('WebVHCelManager', () => {
           throw new Error('Witness unavailable');
         },
       };
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [failingWitness]);
+      const manager = createManager(createMockSigner(), 'example.com', [failingWitness]);
       
       const peerLog = await createPeerLog();
       await expect(manager.migrate(peerLog)).rejects.toThrow('Witness unavailable');
@@ -403,7 +454,7 @@ describe('WebVHCelManager', () => {
 
   describe('getCurrentState', () => {
     it('should return state after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -414,7 +465,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should preserve original name after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -424,7 +475,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should include migration metadata', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -435,7 +486,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should have migratedAt as updatedAt', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -445,7 +496,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should not be deactivated after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -457,7 +508,7 @@ describe('WebVHCelManager', () => {
     it('replays a legacy update-sniffed migration (old fixture logs)', () => {
       // Legacy logs record migrations as 'update' events sniffed by
       // sourceDid+layer+migratedAt — they must keep replaying.
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const mockProof = {
         type: 'DataIntegrityProof',
         cryptosuite: 'eddsa-jcs-2022',
@@ -503,7 +554,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('surfaces the controller and applies rotateKey hand-off in replay', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -526,7 +577,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('replays first-class transfer events into owner metadata', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -554,14 +605,14 @@ describe('WebVHCelManager', () => {
     });
 
     it('should throw for empty log', () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       expect(() => manager.getCurrentState({ events: [] })).toThrow(
         'Cannot get state from an empty event log'
       );
     });
 
     it('should throw if first event is not create', () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const badLog: EventLog = {
         events: [
           {
@@ -577,7 +628,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('throws for a shapeless genesis (neither controller nor did) instead of minting an unbacked did:cel', () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const shapelessLog: EventLog = {
         events: [
           {
@@ -618,7 +669,7 @@ describe('WebVHCelManager', () => {
 
       // Migrate to webvh
       const witness = createMockWitness();
-      const webvhManager = new WebVHCelManager(
+      const webvhManager = createManager(
         createMockSigner(),
         'gallery.example.com',
         [witness]
@@ -641,7 +692,7 @@ describe('WebVHCelManager', () => {
       ];
       const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
-      const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const webvhManager = createManager(createMockSigner(), 'example.com');
       const webvhLog = await webvhManager.migrate(peerLog);
 
       const state = webvhManager.getCurrentState(webvhLog);
@@ -650,7 +701,7 @@ describe('WebVHCelManager', () => {
 
     it('should verify migrated log has correct event chain', async () => {
       const peerLog = await createPeerLog();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = createManager(createMockSigner(), 'example.com');
       const webvhLog = await manager.migrate(peerLog);
 
       // First event: create
@@ -668,8 +719,8 @@ describe('WebVHCelManager', () => {
       const peerLog = await createPeerLog();
       const sourceDid = (peerLog.events[0].data as Record<string, unknown>).did as string;
       
-      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com');
-      const manager2 = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager1 = createManager(createMockSigner(), 'example.com');
+      const manager2 = createManager(createMockSigner(), 'example.com');
       
       const log1 = await manager1.migrate(peerLog);
       const log2 = await manager2.migrate(peerLog);
@@ -684,8 +735,8 @@ describe('WebVHCelManager', () => {
     it('should use different domains in DID', async () => {
       const peerLog = await createPeerLog();
       
-      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com');
-      const manager2 = new WebVHCelManager(createMockSigner(), 'other.com');
+      const manager1 = createManager(createMockSigner(), 'example.com');
+      const manager2 = createManager(createMockSigner(), 'other.com');
       
       const log1 = await manager1.migrate(peerLog);
       const log2 = await manager2.migrate(peerLog);

@@ -442,8 +442,20 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
   
   try {
     if (targetLayer === 'webvh') {
-      // Migrate to webvh layer
-      const manager = new WebVHCelManager(signer, flags.domain!, []);
+      // Migrate to webvh layer. This legacy manager cannot produce a
+      // spec-conformant did:webvh identifier (no SCID, no genuine version
+      // history) — retained here only for previous-format compatibility, so
+      // acknowledge that explicitly and warn the operator loudly rather than
+      // letting the resulting identifier pass as independently resolvable.
+      console.error(
+        '\n⚠️  This CLI does not produce a spec-conformant did:webvh identifier ' +
+        '(no SCID, no genuine WebVH version history). No conforming WebVH resolver ' +
+        'can resolve the resulting DID. For real WebVH publication, use the SDK ' +
+        'programmatically instead of this legacy migration command.\n'
+      );
+      const manager = new WebVHCelManager(signer, flags.domain!, [], {
+        acknowledgeNonConformantIdentifier: true,
+      });
       migratedLog = await manager.migrate(eventLog);
       
       // Extract target DID from migration event

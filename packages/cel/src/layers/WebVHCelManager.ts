@@ -26,6 +26,18 @@ export interface WebVHCelConfig {
   verificationMethod?: string;
   /** The purpose of proofs (defaults to 'assertionMethod') */
   proofPurpose?: string;
+  /**
+   * `migrate()` mints its `did:webvh:{domain}:{id}` string locally: no SCID,
+   * no genuine WebVH version history, and (for non-`did:key`/`did:cel`
+   * sources) a non-cryptographic fallback hash. No conforming did:webvh
+   * resolver can resolve the result, so `migrate()` fails closed unless the
+   * caller sets this to `true`, acknowledging the identifier is not spec
+   * conformant. Real WebVH publication should go through the SDK's actual
+   * WebVH creation/hosting path (`packages/sdk/src/did/WebVHManager.ts`,
+   * `packages/sdk/src/did/identity-operations.ts`, or the CEL 3 `hosted.ts`
+   * publication flow) — not this legacy CEL 1 layer manager.
+   */
+  acknowledgeNonConformantIdentifier?: boolean;
 }
 
 /**
@@ -46,21 +58,27 @@ export interface WebVHMigrationData {
 
 /**
  * WebVHCelManager - Manages CEL-based asset migration to did:webvh layer
- * 
+ *
  * The webvh layer is the first publication layer for Originals assets.
  * Assets at this layer:
  * - Have a did:webvh identifier based on a domain
  * - Can have HTTP-based witness attestations
  * - Are discoverable via web-based DID resolution
  * - Can be further migrated to did:btco layer
- * 
+ *
+ * `migrate()` does NOT produce a spec-conformant did:webvh identifier (see
+ * {@link WebVHCelConfig.acknowledgeNonConformantIdentifier}) — it is retained
+ * only for previous-format compatibility. New code should publish through the
+ * SDK's actual WebVH creation/hosting path instead.
+ *
  * @example
  * ```typescript
  * const httpWitness = new HttpWitness('https://witness.example.com/api/attest');
  * const manager = new WebVHCelManager(
  *   async (data) => createEdDsaProof(data, privateKey),
  *   'example.com',
- *   [httpWitness]
+ *   [httpWitness],
+ *   { acknowledgeNonConformantIdentifier: true }
  * );
  * 
  * const webvhLog = await manager.migrate(peerLog);
@@ -123,6 +141,7 @@ export class WebVHCelManager {
    * @returns Promise resolving to an EventLog with the migration event appended
    * 
    * @throws Error if the log is empty, deactivated, or not from peer layer
+   * @throws Error if `acknowledgeNonConformantIdentifier` is not set (see {@link WebVHCelConfig})
    * @throws Error if signer produces invalid proof
    * @throws Error if witness service fails (if witnesses configured)
    */
@@ -160,6 +179,23 @@ export class WebVHCelManager {
     const lastEvent = peerLog.events[peerLog.events.length - 1];
     if (lastEvent.type === 'deactivate') {
       throw new Error('Cannot migrate a deactivated event log');
+    }
+
+    // This manager cannot produce a spec-conformant did:webvh identifier (see
+    // WebVHCelConfig.acknowledgeNonConformantIdentifier) — fail closed unless
+    // the caller has explicitly acknowledged that limitation. Strict equality
+    // (not a truthy check) so an untyped JS caller passing a non-boolean
+    // truthy value (e.g. the string "false") can't silently bypass the gate.
+    if (this.config.acknowledgeNonConformantIdentifier !== true) {
+      throw new Error(
+        'WebVHCelManager.migrate() cannot produce a did:webvh identifier that a conforming ' +
+        'WebVH resolver can resolve: it mints "did:webvh:{domain}:{id}" locally with no SCID ' +
+        'and no genuine version history. Use the SDK\'s actual WebVH creation/hosting path ' +
+        '(packages/sdk/src/did/WebVHManager.ts, identity-operations.ts, or the CEL 3 hosted.ts ' +
+        'publication flow) instead. If you specifically need this legacy CEL 1 layer manager for ' +
+        'previous-format compatibility, set `acknowledgeNonConformantIdentifier: true` in its ' +
+        'config to proceed anyway.'
+      );
     }
 
     // Generate did:webvh DID
