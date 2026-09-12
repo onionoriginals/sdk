@@ -41,13 +41,41 @@ export interface UnifiedVerificationResult {
    * Per-check breakdown of what actually ran, keyed by the properties
    * relevant to this document's kind. `verified: true` means every listed
    * check is `checked`; it never means an `unknown` entry can be read as a
-   * pass. A credential result reports `signature`/`status`; an event-log
-   * result reports `signature`/`freshness` (chain-proof validity and
-   * btco-anchoring/head-freshness respectively).
+   * pass. A credential result reports `signature`/`status`, each
+   * independently attributable.
+   *
+   * An event-log result also reports `signature`/`freshness`, but
+   * `verifyEventLog` returns one aggregate verdict bundling proof validity,
+   * chain/authority checks, uniqueness and (when requested) head-freshness —
+   * it does not expose which sub-check failed. So for an event log:
+   *  - `signature` reflects that WHOLE bundled verdict (`checked`/`failed`),
+   *    not narrowly cryptographic proof validity — a `failed` here may be a
+   *    stale head or a uniqueness conflict, not necessarily a bad signature;
+   *  - `freshness` is populated only as an affirmative, provable signal:
+   *    `checked` when the log is actually btco-anchored, a provider was
+   *    consulted, and the log verified (head-freshness gates `verified`, so a
+   *    true verdict proves it passed); `unknown` in every other case,
+   *    INCLUDING when the bundled verdict failed — a false verdict is never
+   *    attributed to freshness specifically, since it cannot be
+   *    distinguished from a proof, chain, or uniqueness failure without
+   *    deeper support from `verifyEventLog` itself.
    */
   assurance: Partial<Record<'signature' | 'status' | 'freshness', CheckState>>;
   /** The raw result from the underlying verifier, for callers that need detail. */
   details?: unknown;
+}
+
+/**
+ * Whether any event in the log carries a `bitcoin-ordinals-2024` witness
+ * proof — i.e. the log is anchored to a satoshi, so head-freshness is
+ * something to actually check rather than the documented no-op
+ * `checkHeadFreshness` is for an unanchored log (see `VerifyOptions.checkHeadFreshness`
+ * in `@originals/cel`).
+ */
+function eventLogHasBitcoinWitness(log: EventLog): boolean {
+  return log.events.some((event) =>
+    event.proof.some((p) => (p as { cryptosuite?: string }).cryptosuite === 'bitcoin-ordinals-2024')
+  );
 }
 
 /** Heuristic discriminator. Returns the kind a document should route to. */
@@ -140,11 +168,21 @@ export class UnifiedVerifier {
             'Credential declares credentialStatus but no statusListResolver is configured; status is unknown, not verified.'
           );
         } else {
-          const statusRes = await verifier.checkCredentialStatus(credential);
-          statusState = statusRes.verified ? 'checked' : 'failed';
-          if (!statusRes.verified) {
+          try {
+            // checkCredentialStatus awaits statusListResolver directly with
+            // no internal try/catch; a rejecting resolver (a network
+            // failure, not a bug) must not escape this method as a thrown
+            // exception — verify() always returns a result, never rejects.
+            const statusRes = await verifier.checkCredentialStatus(credential);
+            statusState = statusRes.verified ? 'checked' : 'failed';
+            if (!statusRes.verified) {
+              verified = false;
+              errors.push(...statusRes.errors);
+            }
+          } catch (err) {
+            statusState = 'unknown';
             verified = false;
-            errors.push(...statusRes.errors);
+            errors.push(`statusListResolver failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
 
@@ -157,18 +195,21 @@ export class UnifiedVerifier {
         };
       }
       case 'eventLog': {
+        const log = document as EventLog;
         const provider = signatureOnly ? undefined : this.options?.ordinalsProvider;
-        const res = await verifyEventLog(document as EventLog, {
+        const res = await verifyEventLog(log, {
           resolveKey: createDidManagerKeyResolver(this.didManager),
           ordinalsProvider: provider,
           checkHeadFreshness: provider !== undefined,
         });
-        // Whether a witness/head-freshness check was actually needed and run
-        // is internal to verifyEventLog; conservatively report `unknown`
-        // whenever no provider was consulted, rather than guessing it was
-        // vacuous. `verified` itself already fails closed when a provider was
-        // genuinely required (see verifyEventLog's own witness handling).
-        const freshness: CheckState = signatureOnly || provider === undefined ? 'unknown' : (res.verified ? 'checked' : 'failed');
+        // Only claim freshness was actually exercised when the log is
+        // genuinely anchored (checkHeadFreshness is a documented no-op
+        // otherwise) AND a provider was consulted. Even then, only ever
+        // report the affirmative `checked` case: a false `verified` cannot be
+        // attributed to freshness specifically over proof/chain/uniqueness
+        // (see the field's doc on UnifiedVerificationResult.assurance).
+        const freshnessExercised = !signatureOnly && provider !== undefined && eventLogHasBitcoinWitness(log);
+        const freshness: CheckState = freshnessExercised && res.verified ? 'checked' : 'unknown';
         return {
           kind,
           verified: res.verified,

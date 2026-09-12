@@ -151,6 +151,27 @@ describe('UnifiedVerifier — ordinalsProvider option (spike)', () => {
     expect(res.errors).toEqual([]);
     // The option is genuinely threaded through, not merely accepted and dropped.
     expect(calls.length).toBeGreaterThan(0);
+    // The log IS btco-anchored, a provider was consulted, and it verified:
+    // freshness was actually exercised and provably passed (issue #600 review).
+    expect(res.assurance).toEqual({ signature: 'checked', freshness: 'checked' });
+  });
+
+  test('assurance.freshness is "unknown", not "checked", for an unanchored log even with a provider configured', async () => {
+    // Regression (review of PR #634): checkHeadFreshness is a documented
+    // no-op for a log that never anchored to a satoshi. Reporting
+    // freshness:'checked' here would overclaim a check that had nothing to
+    // verify against.
+    const a = await makeKey();
+    const log = await createEventLog(
+      { name: 'Asset', controller: a.didKey, resources: [], createdAt: '2026-08-15T00:00:00Z', nonce: 'uv-unanchored' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+
+    const res = await new UnifiedVerifier(didManager, { ordinalsProvider: new OrdMockProvider() }).verify(log);
+
+    expect(res.kind).toBe('eventLog');
+    expect(res.verified).toBe(true);
+    expect(res.assurance.freshness).toBe('unknown');
   });
 
   test('the same log FAILS CLOSED when no provider is supplied', async () => {
@@ -176,5 +197,9 @@ describe('UnifiedVerifier — ordinalsProvider option (spike)', () => {
 
     expect(res.verified).toBe(false);
     expect(res.errors.join(' ')).toMatch(/inscription .* not found on chain/i);
+    // The log IS anchored and a provider WAS consulted, but verification
+    // failed — freshness cannot be distinguished from a uniqueness/anchoring
+    // failure here, so it must read 'unknown', never 'failed' (issue #600 review).
+    expect(res.assurance.freshness).toBe('unknown');
   });
 });

@@ -133,6 +133,21 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
     expect(await sdk.credentials.verifyCredential(signed)).toBe(false);
   });
 
+  test('a rejecting statusListResolver fails closed instead of rejecting the boolean API', async () => {
+    // Regression (review of PR #634): checkCredentialStatus awaits
+    // statusListResolver with no internal try/catch, unlike
+    // Verifier.verifyCredential's whole-body try/catch. A resolver network
+    // failure — not a bug — must resolve to `false`, not reject the promise
+    // and abort the caller's flow.
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/9', 0);
+    sdk.credentials.statusListResolver = async () => {
+      throw new Error('network unreachable');
+    };
+
+    await expect(sdk.credentials.verifyCredential(signed)).resolves.toBe(false);
+  });
+
   test('verifyCredentialSignature is explicitly signature-only: it ignores a declared credentialStatus', async () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const listId = 'https://example.com/status/600/4';
@@ -241,6 +256,23 @@ describe('UnifiedVerifier reports what it actually checked (issue #600)', () => 
     const res = await unified.verify(signed);
     expect(res.assurance).toEqual({ signature: 'checked', status: 'failed' });
     expect(res.verified).toBe(false);
+  });
+
+  test('a rejecting statusListResolver produces a failed-closed result rather than a rejected promise', async () => {
+    // Regression (review of PR #634): a resolver network failure must never
+    // escape verify() as a thrown exception — it always returns a result.
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/10', 0);
+
+    const unified = new UnifiedVerifier(didManager, {
+      statusListResolver: async () => {
+        throw new Error('network unreachable');
+      },
+    });
+    const res = await unified.verify(signed);
+    expect(res.verified).toBe(false);
+    expect(res.assurance.status).toBe('unknown');
+    expect(res.errors.join(' ')).toMatch(/network unreachable/);
   });
 
   test('an event log with no ordinalsProvider reports freshness as unknown, not silently checked', async () => {
