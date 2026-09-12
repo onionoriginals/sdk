@@ -57,7 +57,7 @@ export async function isAuthorizedReinscription(input: {
     const sameSatIds = new Set([...accepted.resolution.publications.map(publication => publication.inscriptionId), ...accepted.resolution.diagnostics.map(diagnostic => diagnostic.inscriptionId)]);
     const inputIds = await input.inscriptionIds();
     if (!inputIds.length || inputIds.some(id => !sameSatIds.has(id))) return false;
-    const verified = verifyHistory({ log: [...accepted.asset.celLog.log, ...publication.document.log] }, { expectedDid: accepted.asset.id });
+    const verified = verifyHistory({ log: [...accepted.asset.celLog.log, ...publication.document.log] }, { expectedAssetId: accepted.asset.id });
     if (verified.state.alias !== accepted.asset.state.alias || verified.state.entryCount <= accepted.asset.state.entryCount) return false;
     if (publication.media && !verified.state.resources.some(resource => resource.mediaType === publication.contentType && resource.digestMultibase === digestBytes(publication.content))) return false;
     return true;
