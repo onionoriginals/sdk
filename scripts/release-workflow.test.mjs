@@ -39,11 +39,33 @@ test('Changesets CLI runs on supported Node while consumer imports still exercis
   }
 });
 
-test('token preflight precedes publishing and uses setup-node registry authentication', () => {
+test('publish authenticates to npm via OIDC trusted publishing, not a long-lived token', () => {
+  // id-token: write is what makes the OIDC exchange possible; it must stay set
+  // at the workflow level for the publish job to authenticate at all.
+  assert.match(workflow, /^permissions:\n(?:.*\n)*?\s*id-token: write/m);
+
   const publishSteps = steps(jobs.publish);
-  const preflight = publishSteps.findIndex(step => step.includes('npm whoami --registry='));
   const publish = publishSteps.findIndex(step => step.includes('uses: changesets/action@v2'));
-  assert.ok(preflight >= 0 && preflight < publish);
-  assert.match(publishSteps.slice(0, preflight).join('\n'), /registry-url: "https:\/\/registry.npmjs.org"/);
-  assert.match(publishSteps[publish], /NODE_AUTH_TOKEN: \$\{\{ secrets.NPM_TOKEN \}\}/);
+  assert.ok(publish >= 0, 'publish job must run changesets/action@v2 to publish');
+  assert.match(publishSteps.slice(0, publish + 1).join('\n'), /registry-url: "https:\/\/registry.npmjs.org"/);
+
+  // NODE_AUTH_TOKEN on the publish step would make npm silently prefer token
+  // auth over OIDC, defeating the trusted-publishing migration without any
+  // visible failure. It must never reappear on the publish step.
+  assert.doesNotMatch(publishSteps[publish], /NODE_AUTH_TOKEN/);
+  assert.doesNotMatch(publishSteps[publish], /NPM_CONFIG_PROVENANCE/);
+  // `npm whoami` only validates the old token path and cannot validate OIDC
+  // trusted publishing, so there must be no preflight relying on it.
+  assert.ok(!publishSteps.some(step => step.includes('npm whoami --registry=')));
+});
+
+test('publish refuses to run before a human confirms npm trusted publishing is registered', () => {
+  const publishSteps = steps(jobs.publish);
+  const gate = publishSteps.findIndex(step => step.includes("vars.NPM_TRUSTED_PUBLISHING_READY"));
+  const publish = publishSteps.findIndex(step => step.includes('uses: changesets/action@v2'));
+  assert.ok(gate >= 0, 'publish job must gate on the NPM_TRUSTED_PUBLISHING_READY repo variable');
+  assert.equal(gate, 0, 'the readiness gate must be the first step, before any build work');
+  assert.ok(gate < publish);
+  assert.match(publishSteps[gate], /if: vars\.NPM_TRUSTED_PUBLISHING_READY != 'true'/);
+  assert.match(publishSteps[gate], /exit 1/);
 });

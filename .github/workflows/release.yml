@@ -143,6 +143,23 @@ jobs:
     if: needs.check-publish.outputs.shouldPublish == 'true'
     runs-on: ubuntu-latest
     steps:
+      # This publish job has no token fallback (see the OIDC step below) — it
+      # authenticates purely via npm trusted publishing, which requires a
+      # trusted publisher registered on npmjs.com for EACH of @originals/cel,
+      # @originals/sdk, and @originals/auth. There is no read-only API to
+      # confirm that registration from CI (npm whoami cannot validate OIDC
+      # trust; the exchange only happens during an actual publish attempt),
+      # so this is a human-affirmed gate instead: a repo variable that stays
+      # unset until someone has completed and verified all three
+      # registrations, so a Version PR merge before that's done fails loudly
+      # here instead of reaching npm partially unauthenticated. See
+      # "Trusted publisher setup" in docs/RELEASE_TOKEN_ROTATION.md.
+      - name: Confirm npm trusted publishing is registered for all packages
+        if: vars.NPM_TRUSTED_PUBLISHING_READY != 'true'
+        run: |
+          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/cel, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/RELEASE_TOKEN_ROTATION.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -181,44 +198,13 @@ jobs:
         run: node scripts/check-browser-safety.mjs
 
       # Keep the Node 20 consumer gates above, then use the runtime required by
-      # Changesets CLI v3. setup-node also configures NODE_AUTH_TOKEN for npm.
+      # Changesets CLI v3 and by npm's OIDC trusted publishing (npm >= 11.5.1,
+      # per npm's documented minimum of Node 22.14.0; we use 24).
       - name: Setup release tooling Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-
-      # Preflight the npm token BEFORE anything irreversible. An expired or
-      # invalid NPM_TOKEN does not fail cleanly at publish: npm returns a
-      # misleading `E404 Not Found - PUT https://registry.npmjs.org/@originals%2fsdk`
-      # on the unauthorized write (npm hides package existence rather than
-      # returning 401/403), and provenance signing succeeds first, so a dead
-      # credential reads as a registry outage, not an auth failure. That exact
-      # confusion cost real debugging time during the 2.0.0 release. `npm whoami`
-      # authenticates through the same .npmrc setup-node wrote above
-      # (//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}) and prints only the
-      # account name, never the token, so this cannot leak the secret into logs.
-      - name: Preflight NPM_TOKEN is alive before publishing
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if who=$(npm whoami --registry=https://registry.npmjs.org/ 2>/tmp/npm-whoami-err); then
-            echo "npm whoami: authenticated as ${who}; token is alive, continuing to publish."
-          else
-            echo "::error title=NPM_TOKEN preflight failed::NPM_TOKEN is expired or invalid; npm whoami could not authenticate. Rotate it per docs/RELEASE_TOKEN_ROTATION.md."
-            echo "Stopping the release BEFORE publish and BEFORE provenance signing."
-            echo "Had this continued with a dead token, npm would have returned a misleading"
-            echo "'E404 Not Found - PUT https://registry.npmjs.org/@originals%2fsdk' on the"
-            echo "unauthorized write (npm hides package existence instead of returning 401/403),"
-            echo "and provenance signing would have succeeded first, so it would have read as a"
-            echo "registry outage rather than a dead credential, exactly as it did during 2.0.0."
-            echo "Fix: rotate the token following docs/RELEASE_TOKEN_ROTATION.md, then re-run this job."
-            # npm whoami never echoes the token; redact defensively in case a
-            # future npm prints the resolved .npmrc line in its error output.
-            sed -e 's/_authToken=[^[:space:]]*/_authToken=***/g' /tmp/npm-whoami-err >&2 || true
-            exit 1
-          fi
 
       # Publish via changesets/action so npm publish, git tag creation/push, and
       # GitHub Release creation happen as one managed step — avoiding the
@@ -226,13 +212,26 @@ jobs:
       # permanently (check-publish would then see the version on npm and never
       # re-enter this job). `changeset publish` is idempotent: already-published
       # versions are skipped.
+      #
+      # No NODE_AUTH_TOKEN here: npm authenticates this publish via OIDC trusted
+      # publishing, using the workflow's `id-token: write` permission and the
+      # `registry-url` setup-node wrote above. This requires a trusted publisher
+      # registered on npmjs.com for each package (org onionoriginals, repo sdk,
+      # workflow release.yml, no Environment) — see docs/RELEASE_TOKEN_ROTATION.md.
+      # `npm whoami` cannot preflight this: it only exercises the long-lived
+      # token path, and the OIDC exchange happens only during publish/stage, so
+      # there is deliberately no separate preflight step. Provenance is
+      # generated automatically for a public repo under trusted publishing —
+      # `NPM_CONFIG_PROVENANCE` is not needed and would be redundant.
+      #
+      # All three packages (cel, sdk, auth) need their own trusted publisher
+      # registered before this can succeed; if only some are registered,
+      # `changeset publish` can publish those and fail on the rest. That is
+      # recoverable, not corrupting: finish registering the remaining
+      # package(s) and re-run this job — idempotency (above) means it
+      # publishes only what is still missing. See docs/RELEASE_TOKEN_ROTATION.md.
       - name: Publish to npm, push tags, and create GitHub releases
         uses: changesets/action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           publish-script: bun run release
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # `--provenance` is not a valid `changeset publish` flag; npm provenance
-          # is enabled via this env var instead (id-token: write is already set).
-          NPM_CONFIG_PROVENANCE: "true"
