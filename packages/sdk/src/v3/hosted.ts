@@ -458,28 +458,67 @@ export class HostedAssets {
 }
 
 const MAX_REACHABILITY_CHECK_BYTES = 2 * 1024 * 1024;
+const REACHABILITY_CHECK_TIMEOUT_MS = 10_000;
 
 /**
  * A real, independent HTTPS GET of the advertised public URL: it never goes
  * through the storage adapter used to write the file, so it cannot be
- * satisfied by a private/in-memory adapter or a same-server proxy. Bounds the
- * response with a Content-Length precheck and a hard cap on the fetched
- * bytes; a method-history did.jsonl is expected to be small.
+ * satisfied by a private/in-memory adapter or a same-server proxy. Bounds
+ * total wait time and reads the body incrementally, aborting as soon as the
+ * cap is exceeded rather than buffering an unbounded/lying-Content-Length
+ * response in full before checking its size; a method-history did.jsonl is
+ * expected to be small.
  */
 export const fetchPublicReachabilityCheck: PublicReachabilityCheck = async (
   url,
 ) => {
-  let res: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    REACHABILITY_CHECK_TIMEOUT_MS,
+  );
   try {
-    res = await fetch(url, { redirect: "error" });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        redirect: "error",
+        signal: controller.signal,
+      });
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    const lengthHeader = res.headers.get("content-length");
+    if (lengthHeader && Number(lengthHeader) > MAX_REACHABILITY_CHECK_BYTES)
+      return null;
+    if (!res.body) {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return bytes.byteLength > MAX_REACHABILITY_CHECK_BYTES ? null : bytes;
+    }
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_REACHABILITY_CHECK_BYTES) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!res.ok) return null;
-  const lengthHeader = res.headers.get("content-length");
-  if (lengthHeader && Number(lengthHeader) > MAX_REACHABILITY_CHECK_BYTES)
-    return null;
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.byteLength > MAX_REACHABILITY_CHECK_BYTES) return null;
-  return bytes;
 };

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
+import { fetchPublicReachabilityCheck } from "../../../src/v3/hosted.js";
 import { createLocalSigner, assetDigest } from "@originals/cel/v3";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
@@ -234,4 +235,63 @@ test('requirePublicReachability rejects bytes at the public URL that do not matc
   await expect(
     sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' }),
   ).rejects.toThrow('not independently reachable');
+});
+
+// fetchPublicReachabilityCheck itself: a real HTTPS GET, never through the
+// storage adapter. It must reject an oversized response by streaming and
+// capping bytes as they arrive rather than buffering an unbounded body in
+// full first (the same stream-before-allocation class of bug as #606).
+test('fetchPublicReachabilityCheck returns the exact bytes for a small reachable response', async () => {
+  const realFetch = globalThis.fetch;
+  const body = new TextEncoder().encode('hello did log');
+  globalThis.fetch = (async () =>
+    new Response(body, { status: 200 })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toEqual(body);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck returns null without buffering a body that streams past the cap', async () => {
+  const realFetch = globalThis.fetch;
+  let cancelled = false;
+  let enqueuedChunks = 0;
+  const CHUNK = new Uint8Array(1024 * 1024).fill(1); // 1 MiB per chunk, cap is 2 MiB
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      enqueuedChunks++;
+      controller.enqueue(CHUNK); // never signals done — an unbounded/hostile body
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  globalThis.fetch = (async () =>
+    new Response(stream, { status: 200 })) as typeof fetch; // no Content-Length header
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+    // Cancelled after only a few MiB, not read until Bun's own test timeout.
+    expect(cancelled).toBe(true);
+    expect(enqueuedChunks).toBeLessThan(10);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck rejects a Content-Length that already exceeds the cap', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(new Uint8Array([1]), {
+      status: 200,
+      headers: { "content-length": String(100 * 1024 * 1024) },
+    })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
