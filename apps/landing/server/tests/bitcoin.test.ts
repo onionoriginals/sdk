@@ -8,6 +8,7 @@ import { serializeCookie } from '../cookies';
 import {
   classifySpendableUtxos,
   createBitcoinRoutes,
+  createExpiringCache,
   rawKeyFaucetSigner,
   fetchFaucetUtxos,
   fetchAddressUtxos,
@@ -839,6 +840,7 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
     // every later poll re-serves the same failure and the creator can never
     // recover without a server restart.
     let first = true;
+    let clock = 1_000_000;
     const calls = { n: 0 };
     const provider = {
       estimateFee() {
@@ -850,14 +852,109 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
       async broadcastTransaction() { return 'f'.repeat(64); },
       async getSpendableUtxos() { return []; },
     } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
-    const r = routesFor(provider);
+    const r = routesFor(provider, { now: () => clock });
 
     const a = depositReq();
     expect((await r.deposit(a, new URL(a.url))).status).toBe(502);
-    // The estimator is healthy now — the retry must actually reach it.
+    // Past the short negative-cache TTL, so this is a genuine retry reaching
+    // the estimator again — not a poll suppressed by the outage cache below.
+    clock += 11_000;
     const b = depositReq();
     expect((await r.deposit(b, new URL(b.url))).status).toBe(200);
     expect(calls.n).toBe(2);
+  });
+
+  test('an estimator outage is cached briefly so a burst of polls does not amplify it', async () => {
+    // During a real outage, N creators' 15s polls must not each issue a fresh
+    // RPC against a dependency that is already down (#496 item 2).
+    const { provider, calls } = feeProvider(() => { throw new Error('quicknode down'); });
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    const first = depositReq();
+    expect((await r.deposit(first, new URL(first.url))).status).toBe(502);
+    // Three more polls inside the negative-cache window: same fail-closed
+    // 502, but the estimator is not asked again.
+    for (let i = 0; i < 3; i++) {
+      clock += 2_000;
+      const req = depositReq();
+      expect((await r.deposit(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(1);
+
+    // Past the negative-cache window: the next poll is a fresh attempt.
+    clock += 10_000;
+    const later = depositReq();
+    expect((await r.deposit(later, new URL(later.url))).status).toBe(502);
+    expect(calls.n).toBe(2);
+  });
+
+  test('an estimator that recovers is reached immediately once the negative cache lets it', async () => {
+    let down = true;
+    const calls = { n: 0 };
+    const provider = {
+      estimateFee() { calls.n++; if (down) throw new Error('down'); return 5; },
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() { return []; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    const a = depositReq();
+    expect((await r.deposit(a, new URL(a.url))).status).toBe(502);
+    down = false;
+    clock += 10_000; // past FEE_FAILURE_CACHE_MS
+    const b = depositReq();
+    expect((await r.deposit(b, new URL(b.url))).status).toBe(200);
+    expect(calls.n).toBe(2);
+  });
+
+  test('failed estimates for many distinct confirmation targets do not interfere, and all age out', async () => {
+    // `blocks` comes straight from the request body with no allowlist, so the
+    // failure cache is keyed by an effectively client-chosen number. A prune
+    // that mishandled multiple keys could either leak (never forget an
+    // invalid target) or misfire (clear a DIFFERENT target's still-live
+    // failure). Five independent targets, all recovering together past the
+    // TTL, rules out both.
+    const down = new Set([1, 2, 3, 4, 5]);
+    const calls = { n: 0 };
+    const provider = {
+      async estimateFee(blocks: number) {
+        calls.n++;
+        if (down.has(blocks)) throw new Error(`no route to target ${blocks}`);
+        return 5;
+      },
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() { return []; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    for (const blocks of down) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(5);
+
+    // Still inside the TTL: none of the five re-asks the estimator.
+    for (const blocks of down) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(5);
+
+    // Past the TTL, with the estimator healthy again: every one of the five
+    // is a genuine retry that succeeds — none is stuck, and pruning one did
+    // not silently drop or resurrect another.
+    clock += 11_000;
+    down.clear();
+    for (const blocks of [1, 2, 3, 4, 5]) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(200);
+    }
+    expect(calls.n).toBe(10);
   });
 
   test('an expired cache triggers exactly one refresh across concurrent requests', async () => {
@@ -879,6 +976,47 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
 
     expect(calls.n).toBe(1);
     for (const res of results) expect(res.status).toBe(200);
+  });
+});
+
+// Direct unit coverage for the map `currentFeeRate` uses to bound the
+// fee-failure cache (#496 item 2 follow-up): a test driven only through the
+// HTTP routes can't distinguish "expired entries get pruned" from "every key
+// happens to be re-askable anyway," since a plain retry looks the same
+// either way. This asserts eviction on the map itself.
+describe('createExpiringCache', () => {
+  test('sweeps expired entries on write, leaving live ones and the new one intact', () => {
+    let clock = 0;
+    const cache = createExpiringCache<number, string>(10_000, () => clock);
+
+    cache.set(1, 'a');
+    clock += 6_000;
+    cache.set(2, 'b'); // key 1 is 6s old here — still inside the TTL, not pruned
+    expect(cache.size).toBe(2);
+
+    clock += 5_000; // key 1 is now 11s old (expired); key 2 is 5s old (live)
+    cache.set(3, 'c'); // this write's sweep should evict exactly key 1
+    expect(cache.size).toBe(2);
+    expect(cache.get(1)).toBeUndefined();
+    expect(cache.get(2)).toBe('b');
+    expect(cache.get(3)).toBe('c');
+  });
+
+  test('get treats an expired entry as absent without needing a write to remove it', () => {
+    let clock = 0;
+    const cache = createExpiringCache<string, number>(1_000, () => clock);
+    cache.set('k', 1);
+    clock += 1_000;
+    expect(cache.get('k')).toBeUndefined();
+  });
+
+  test('delete removes a key immediately, independent of its TTL', () => {
+    let clock = 0;
+    const cache = createExpiringCache<string, number>(10_000, () => clock);
+    cache.set('k', 1);
+    cache.delete('k');
+    expect(cache.get('k')).toBeUndefined();
+    expect(cache.size).toBe(0);
   });
 });
 
