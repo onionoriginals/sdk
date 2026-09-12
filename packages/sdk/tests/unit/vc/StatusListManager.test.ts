@@ -716,7 +716,10 @@ describe('StatusListManager', () => {
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification so the test focuses on
       // bit-level status detection (trust checks have dedicated tests).
-      (sdk.credentials as any).verifyCredential = async () => true;
+      // verifyCredentialWithStatus checks signature via verifyCredentialSignature
+      // (the explicitly-named signature-only entry point, issue #600), not the
+      // now status-checking-by-default verifyCredential.
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       // Create a status list
       const statusListVC = sdk.statusList.createStatusListCredential({
@@ -764,7 +767,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification (see note above).
-      (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const statusListVC = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/suspension/1',
@@ -855,9 +858,11 @@ describe('StatusListManager', () => {
       // Status list credentials must now carry a valid proof (issue #238).
       // The fixtures here are unsigned, so stub proof verification for
       // status list credentials ONLY — the credential under test still goes
-      // through real signature verification.
-      const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
-      (sdk.credentials as any).verifyCredential = async (c: any) =>
+      // through real signature verification. The status list credential's own
+      // signature is checked internally via verifyCredentialSignature (the
+      // explicitly-named signature-only entry point, issue #600).
+      const realVerify = sdk.credentials.verifyCredentialSignature.bind(sdk.credentials);
+      (sdk.credentials as any).verifyCredentialSignature = async (c: any) =>
         Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? true : realVerify(c);
       const entry = sdk.statusList.allocateStatusEntry(
         'https://example.com/status/failclosed/1',
@@ -917,9 +922,12 @@ describe('status list credential trust checks (issue #238)', () => {
   test('verifyCredentialWithStatus rejects a fabricated status list (revocation bypass attempt)', async () => {
     const { OriginalsSDK } = await import('../../../src');
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
-    // Main credential signature is treated as valid so the status-path checks are isolated
-    const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
-    (sdk.credentials as any).verifyCredential = async (c: any) =>
+    // Main credential signature is treated as valid so the status-path checks
+    // are isolated. verifyCredentialWithStatus checks signature via
+    // verifyCredentialSignature, the explicitly-named signature-only entry
+    // point (issue #600).
+    const realVerify = sdk.credentials.verifyCredentialSignature.bind(sdk.credentials);
+    (sdk.credentials as any).verifyCredentialSignature = async (c: any) =>
       Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? realVerify(c) : true;
 
     const entry = sdk.statusList.allocateStatusEntry('https://issuer.example/status/1', 3, 'revocation');
@@ -953,7 +961,7 @@ describe('status list credential trust checks (issue #238)', () => {
     expect(r2.errors.some(e => e.includes('proof verification failed'))).toBe(true);
 
     // Attack 3: correct id, "valid" proof, but issued by a DIFFERENT issuer
-    (sdk.credentials as any).verifyCredential = async () => true; // all proofs "valid"
+    (sdk.credentials as any).verifyCredentialSignature = async () => true; // all proofs "valid"
     const foreignIssuerList = sdk.statusList.createStatusListCredential({
       id: 'https://issuer.example/status/1',
       issuer: 'did:example:attacker',
