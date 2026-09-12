@@ -44,6 +44,23 @@ export class AuthApiError extends Error {
 }
 
 /**
+ * Parse a non-ok response body into `{ message?, error? }`, tolerating
+ * anything a server could send: invalid JSON (`fallback`), and valid JSON
+ * that isn't a plain object — `null`, an array, a bare string/number — which
+ * `.json()` resolves successfully, so a naive `body.message` would throw a
+ * raw `TypeError` instead of producing an `AuthApiError`.
+ */
+async function parseErrorBody(
+  response: Response,
+  fallback: string
+): Promise<{ message?: string; error?: string }> {
+  const parsed = (await response.json().catch(() => null)) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as { message?: string; error?: string })
+    : { message: fallback };
+}
+
+/**
  * Options for {@link verifyOtp}
  */
 export interface VerifyOtpClientOptions extends ServerAuthOptions {
@@ -87,10 +104,7 @@ export async function sendOtp(
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ message: 'Failed to send OTP' })) as {
-      message?: string;
-      error?: string;
-    };
+    const body = await parseErrorBody(response, 'Failed to send OTP');
     throw new AuthApiError(body.message ?? `HTTP ${response.status}`, response.status, body.error);
   }
 
@@ -143,10 +157,7 @@ export async function verifyOtp(
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ message: 'Verification failed' })) as {
-      message?: string;
-      error?: string;
-    };
+    const body = await parseErrorBody(response, 'Verification failed');
     throw new AuthApiError(body.message ?? `HTTP ${response.status}`, response.status, body.error);
   }
 

@@ -110,6 +110,25 @@ describe('server-auth', () => {
       expect(err).toBeInstanceOf(AuthApiError);
       expect((err as AuthApiError).code).toBeUndefined();
     });
+
+    test('throws an AuthApiError (not a raw TypeError) when the body is valid JSON but not an object', async () => {
+      // `.json()` resolves successfully here — `null` is valid JSON — so a
+      // naive `body.message` read would throw before AuthApiError is built.
+      for (const body of [null, 'oops', 42, ['a']]) {
+        const mockFetch = mock(() =>
+          Promise.resolve({
+            ok: false,
+            status: 502,
+            json: () => Promise.resolve(body),
+          })
+        );
+        const err = await sendOtp('test@example.com', '/api/auth/send-otp', {
+          fetch: mockFetch as unknown as typeof fetch,
+        }).catch((e) => e);
+        expect(err).toBeInstanceOf(AuthApiError);
+        expect((err as AuthApiError).status).toBe(502);
+      }
+    });
   });
 
   describe('verifyOtp', () => {
