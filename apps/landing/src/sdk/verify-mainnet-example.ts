@@ -66,7 +66,13 @@ async function checkLive(
   provider: OrdinalsProvider,
 ): Promise<MainnetExampleResult | null> {
   if (!provider.getSatSnapshot) return null;
-  const sdk = OriginalsSDK.create({ network: "mainnet", ordinalsProvider: provider });
+  // Fetch exactly one snapshot and freeze it behind the provider the
+  // resolver is given, so the acceptance check below and the raw-byte read
+  // further down are the SAME complete, tip-consistent observation — never
+  // two independent fetches that could observe different chain states.
+  const snapshot = await provider.getSatSnapshot(receipt.sat);
+  const frozenProvider: OrdinalsProvider = { ...provider, getSatSnapshot: async () => snapshot };
+  const sdk = OriginalsSDK.create({ network: "mainnet", ordinalsProvider: frozenProvider });
   const result = await sdk.lifecycle.resolveAssetFromSat(receipt.sat, {
     expectedAssetId: receipt.assetDid,
   });
@@ -74,19 +80,26 @@ async function checkLive(
   if (result.asset.id !== receipt.assetDid) return null;
   if (result.didDocument?.id !== receipt.didBtco) return null;
   // The receipt's inscription must itself be part of the chain-accepted
-  // history (not merely some inscription that happens to sit on this sat).
-  if (!result.resolution.publications.some((p) => p.inscriptionId === receipt.inscriptionId))
-    return null;
-  // Bind the resource-availability claim to the SPECIFIC bytes THAT
-  // publication inscribed, read straight from the snapshot, rather than the
-  // asset's resource catalog: a resource id can carry more than one
-  // authenticated version, and later publications on this same sat can
-  // attach content to a *different* version, so "some version of this id
-  // has attached bytes" is not proof this particular inscription carried
-  // the receipt's declared bytes.
-  const snapshot = await provider.getSatSnapshot(receipt.sat);
+  // history — not merely some inscription that happens to sit on this sat.
+  // If it isn't, there's nothing honest left to report; fall back entirely.
+  const publication = result.resolution.publications.find(
+    (p) => p.inscriptionId === receipt.inscriptionId,
+  );
+  if (!publication) return null;
+  // The resource claim, by contrast, is allowed to legitimately come back
+  // false (this specific publication may be log-only, or inline a different
+  // resource) — that is exactly what `resourceOffChainNote` is for, distinct
+  // from a failed/unavailable check. It requires BOTH: the CEL document
+  // itself recognizing this inscription as carrying this exact resource id
+  // (not just bytes that happen to hash the same), AND that publication's
+  // own raw inscribed bytes (from the one frozen snapshot above) independently
+  // re-hashing to the receipt's declared sha256 — never trusting the
+  // receipt's own digest field, or bytes attached to this id by a *different*
+  // publication.
   const observed = snapshot.publications.find((p) => p.id === receipt.inscriptionId);
-  const resourceOnChain = resourceMatchesReceipt(observed, receipt.resource);
+  const resourceOnChain =
+    publication.inlineResourceIds.includes(receipt.resource.id) &&
+    resourceMatchesReceipt(observed, receipt.resource);
   return {
     live: true,
     network: "mainnet",
