@@ -115,6 +115,102 @@ function buildMultiPair(
   };
 }
 
+/**
+ * A structurally-valid, differently-split commit spending the SAME single
+ * funding outpoint as `base` (a different output split → a different commit
+ * txid) — used to exercise double-click / supersede paths, which need a
+ * rival pair, not a realistic one. Still pays honest change, so it survives
+ * the economics checks (#493/M07) it isn't the one testing.
+ */
+function buildRivalPair(
+  base: { fundingUtxo: { txid: string; vout: number; value: number } },
+  commitValue = 30_000
+) {
+  const commit = new btc.Transaction();
+  commit.addInput({
+    txid: base.fundingUtxo.txid,
+    index: base.fundingUtxo.vout,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(base.fundingUtxo.value) },
+  });
+  commit.addOutputAddress(INSCRIPTION.address, BigInt(commitValue), btc.TEST_NETWORK);
+  commit.addOutputAddress(USER_ADDRESS, BigInt(base.fundingUtxo.value - commitValue - 1_000), btc.TEST_NETWORK);
+  commit.sign(USER_PRIV);
+  commit.finalize();
+  const reveal = new btc.Transaction();
+  reveal.addInput({
+    txid: commit.id,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: INSCRIPTION.script, amount: BigInt(commitValue) },
+  });
+  reveal.addOutputAddress(USER_ADDRESS, BigInt(commitValue - 1_000), btc.TEST_NETWORK);
+  INSCRIPTION.finalize(reveal, commit);
+  return {
+    ...base,
+    signedCommitHex: hex.encode(commit.extract()),
+    commitTxId: commit.id,
+    revealTxHex: hex.encode(reveal.extract()),
+    revealTxId: reveal.id,
+  };
+}
+
+/**
+ * Full control over a commit/reveal pair's amounts, for the independent
+ * economics checks (#493/M07) — none of the other builders let a caller
+ * shrink, drop, or inflate a specific value while keeping everything else
+ * valid. `fundingValue` is what the commit is SIGNED against (so `.finalize()`
+ * accepts it); the caller registers whatever the mock indexer should report
+ * as the TRUE value separately, via `registerChainUtxo`, when the test wants
+ * them to disagree.
+ */
+function buildEconomicsPair(opts: {
+  fundingValue: number;
+  fundingTxid?: string;
+  commitOutput0: number;
+  /** Omit entirely to build a commit with NO change output. */
+  changeAmount?: number;
+  /** Extra outputs appended to the reveal, beyond its normal single output. */
+  extraRevealOutputs?: Array<{ address: string; amount: number }>;
+  revealOutput0?: number;
+}) {
+  const fundingTxid = opts.fundingTxid ?? 'a'.repeat(64);
+  const commit = new btc.Transaction();
+  commit.addInput({
+    txid: fundingTxid,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(opts.fundingValue) },
+  });
+  commit.addOutputAddress(INSCRIPTION.address, BigInt(opts.commitOutput0), btc.TEST_NETWORK);
+  if (opts.changeAmount !== undefined) {
+    commit.addOutputAddress(USER_ADDRESS, BigInt(opts.changeAmount), btc.TEST_NETWORK);
+  }
+  commit.sign(USER_PRIV);
+  commit.finalize();
+  const reveal = new btc.Transaction();
+  reveal.addInput({
+    txid: commit.id,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: INSCRIPTION.script, amount: BigInt(opts.commitOutput0) },
+  });
+  const revealOutput0 = opts.revealOutput0 ?? opts.commitOutput0 - 1_000;
+  reveal.addOutputAddress(USER_ADDRESS, BigInt(revealOutput0), btc.TEST_NETWORK);
+  for (const extra of opts.extraRevealOutputs ?? []) {
+    reveal.addOutputAddress(extra.address, BigInt(extra.amount), btc.TEST_NETWORK);
+  }
+  INSCRIPTION.finalize(reveal, commit);
+  return {
+    signedCommitHex: hex.encode(commit.extract()),
+    commitTxId: commit.id,
+    revealTxHex: hex.encode(reveal.extract()),
+    revealTxId: reveal.id,
+    fundingUtxo: { txid: fundingTxid, vout: 0, value: opts.fundingValue, scriptPubKey: USER_SCRIPT },
+    changeAddress: USER_ADDRESS,
+  };
+}
+
 function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1') {
   const token = signToken(sub, 'a@b.com', undefined, { secret: JWT });
   const cookie = serializeCookie(getAuthCookieConfig(token));
@@ -128,6 +224,25 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 /** Every outpoint is clean — what a well-behaved lookup says about ordinary coins. */
 const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
 
+/**
+ * The economics check (#493/M07) re-derives funding values from the indexer
+ * instead of trusting the request body, so every harness wires a mock one.
+ * Keyed by the `routes` instance so `post()` below can auto-register a
+ * request's OWN declared funding set as chain truth — matching how every
+ * pre-existing (honest-fixture) test already builds its signed transactions
+ * against the same numbers it declares. An adversarial test that needs the
+ * indexer to disagree with the request pre-registers the real value with
+ * `registerChainUtxo` BEFORE posting; `post()` never overwrites an entry that
+ * is already there.
+ */
+const chainRegistryByRoutes = new WeakMap<object, Map<string, { txid: string; vout: number; value: number }>>();
+
+function registerChainUtxo(routes: ReturnType<typeof harness>['routes'], utxo: { txid: string; vout: number; value: number }) {
+  const registry = chainRegistryByRoutes.get(routes);
+  if (!registry) throw new Error('registerChainUtxo: routes has no indexer registry (was noIndexer set?)');
+  registry.set(`${utxo.txid.toLowerCase()}:${utxo.vout}`, utxo);
+}
+
 function harness(opts?: {
   dataDir?: string;
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
@@ -138,6 +253,10 @@ function harness(opts?: {
   txStatusDelayMs?: number;
   /** The ordinal lookup the route classifies with; `null` = none configured. */
   ordinals?: OrdinalLookup | null;
+  /** Fee the mock provider reports, sat/vB. Defaults to 3, as before. */
+  feeRate?: number;
+  /** Omit the deposit-indexer seam entirely — exercises the "not configured" refusal. */
+  noIndexer?: boolean;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -158,7 +277,7 @@ function harness(opts?: {
       if (opts?.txStatus) return opts.txStatus;
       return { confirmed: false };
     },
-    async estimateFee() { return 3; },
+    async estimateFee() { return opts?.feeRate ?? 3; },
   } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
   const dataDir = opts?.dataDir ?? mkdtempSync(join(tmpdir(), 'insc-'));
   const store = createInscriptionsStore({ dataDir });
@@ -167,17 +286,41 @@ function harness(opts?: {
   // account may not name its own change address. Cases that need the UNBOUND
   // state assert it explicitly rather than relying on the harness.
   if (opts?.bind !== false) store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
+  const chainRegistry = new Map<string, { txid: string; vout: number; value: number }>();
+  const mockFetch = (async (input: unknown) => {
+    const url = typeof input === 'string' ? input : String(input);
+    if (!/\/address\/[^/]+\/utxo$/.test(url)) throw new Error(`harness: unexpected fetch ${url}`);
+    const body = JSON.stringify(
+      [...chainRegistry.values()].map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, status: { confirmed: true } }))
+    );
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as unknown as typeof fetch;
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
     ordinals: opts?.ordinals === null ? undefined : (opts?.ordinals ?? CLEAN_ORDINALS),
+    indexer: opts?.noIndexer ? undefined : { api: 'http://mock-indexer.test' },
+    fetchImpl: mockFetch,
   });
+  chainRegistryByRoutes.set(routes, chainRegistry);
   return { routes, store, broadcasts, dataDir };
 }
 
 async function post(routes: ReturnType<typeof harness>['routes'], body: unknown) {
+  const registry = chainRegistryByRoutes.get(routes);
+  if (registry) {
+    const b = body as { fundingUtxos?: Array<{ txid?: string; vout?: number; value?: number }>; fundingUtxo?: { txid?: string; vout?: number; value?: number } } | null | undefined;
+    const declared = Array.isArray(b?.fundingUtxos) ? b!.fundingUtxos! : b?.fundingUtxo ? [b.fundingUtxo] : [];
+    for (const u of declared) {
+      if (!u || typeof u.txid !== 'string' || typeof u.vout !== 'number') continue;
+      const key = `${u.txid.toLowerCase()}:${u.vout}`;
+      // A pre-registered truth (an adversarial test's real value) always wins
+      // over what THIS request declares — that is the entire point of the check.
+      if (!registry.has(key)) registry.set(key, { txid: u.txid, vout: u.vout, value: typeof u.value === 'number' ? u.value : 0 });
+    }
+  }
   const req = authedReq('/api/btc/inscribe', body);
   return routes.inscribe(req, new URL(req.url));
 }
@@ -273,18 +416,7 @@ describe('POST /api/btc/inscribe', () => {
     const pair = buildPair();
     expect((await post(routes, pair)).status).toBe(200);
     // Same outpoint, different commit (different output split → different txid).
-    const rival = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 25_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 25_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 24_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
-    })();
+    const rival = buildRivalPair(pair, 25_000);
     const res = await post(routes, rival);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
@@ -305,18 +437,7 @@ describe('POST /api/btc/inscribe', () => {
 
     // Rebuilt pair (fresh reveal keypair → different commit txid), same outpoint:
     // must replace the dead pair instead of 409ing forever.
-    const rebuilt = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const rebuilt = buildRivalPair(pair);
     const res = await post(routes, rebuilt);
     expect(res.status).toBe(200);
     // The dead pair is PRESERVED (its broadcast failure could have been
@@ -343,18 +464,7 @@ describe('POST /api/btc/inscribe', () => {
     expect((await post(routes, pair)).status).toBe(502);
     expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
 
-    const rebuilt = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
-    })();
+    const rebuilt = buildRivalPair(pair);
     const res = await post(routes, rebuilt);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
@@ -446,13 +556,21 @@ describe('GET /api/btc/inscribe', () => {
       async getTransactionStatus() { lookups++; return { confirmed: true, confirmations: 6 }; },
       async estimateFee() { return 3; },
     } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    const chainRegistry = new Map<string, { txid: string; vout: number; value: number }>();
     const routes = createBitcoinRoutes({
       jwtSecret: JWT,
       provider,
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: store,
       ordinals: CLEAN_ORDINALS,
+      indexer: { api: 'http://mock-indexer.test' },
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify([...chainRegistry.values()].map((u) => ({ ...u, status: { confirmed: true } }))),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch,
     });
+    chainRegistryByRoutes.set(routes, chainRegistry);
     await post(routes, pair); // broadcast both → reveal_broadcast
 
     const listReq = () => authedReq('/api/btc/inscribe', undefined, 'GET');
@@ -488,18 +606,7 @@ describe('GET /api/btc/inscribe', () => {
 
     // 2) Rebuilt pair B on the same outpoint supersedes A (A's commit not yet
     //    visible as confirmed) and broadcasts fully.
-    const pairB = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pairA.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pairA, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const pairB = buildRivalPair(pairA);
     expect((await post(h.routes, pairB)).status).toBe(200);
     expect(h.store.get('sub-1', pairA.commitTxId)!.superseded).toBe(true);
 
@@ -587,18 +694,7 @@ describe('GET /api/btc/inscribe', () => {
     });
     // Pair A fails ambiguously, rebuilt pair B supersedes it and completes.
     expect((await post(routes, pair)).status).toBe(502);
-    const pairB = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const pairB = buildRivalPair(pair);
     expect((await post(routes, pairB)).status).toBe(200);
     expect(store.get('sub-1', pair.commitTxId)!.superseded).toBe(true);
 
@@ -1015,6 +1111,7 @@ describe('persist-before-broadcast is load-bearing', () => {
       ...h.store,
       create() { throw new Error('EIO: directory fsync failed'); },
     };
+    const pair = buildPair();
     const routes = createBitcoinRoutes({
       jwtSecret: JWT,
       provider: {
@@ -1025,8 +1122,13 @@ describe('persist-before-broadcast is load-bearing', () => {
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: failing,
       ordinals: CLEAN_ORDINALS,
+      indexer: { api: 'http://mock-indexer.test' },
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify([{ ...pair.fundingUtxo, status: { confirmed: true } }]),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as unknown as typeof fetch,
     });
-    const pair = buildPair();
     const req = authedReq('/api/btc/inscribe', pair);
     const res = await routes.inscribe(req, new URL(req.url));
 
@@ -1619,6 +1721,122 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
     const pair = buildPair();
     const { routes, store, broadcasts } = harness();
     store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+});
+
+/**
+ * Independent economics check (hostile-audit M07): every check above the
+ * economics block validates SHAPE and DESTINATION, never how much value came
+ * IN. `post()` normally auto-registers a request's OWN declared funding value
+ * as the mock indexer's truth, so these tests pre-register the REAL value (or
+ * leave the commit's actual amounts inconsistent with an honest split) to put
+ * the check itself under test.
+ */
+describe('POST /api/btc/inscribe — independent economics check (#493/M07)', () => {
+  test('refuses a commit that reduces change and lets the difference become fee', async () => {
+    // 50,000 in, 20,000 to the inscription, only 1,000 back as change — an
+    // honest split would return ~29,000. The other 29,000 becomes "fee".
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 1_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a commit that drops its change output entirely, above dust', async () => {
+    // 21,200 in, 20,000 to the inscription, NO change output at all — a real
+    // signer could simply omit change and let the whole surplus become fee.
+    const pair = buildEconomicsPair({ fundingValue: 21_200, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(['commit_invariant_violation']).toContain(body.error);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('accepts a commit with no change output when the true surplus is legitimately below dust', async () => {
+    // 20,300 in, 20,000 to the inscription: a 300-sat surplus, below the
+    // 546-sat dust limit even before a fee is subtracted — omitting change
+    // here is exactly the correct construction, not an attack.
+    const pair = buildEconomicsPair({ fundingValue: 20_300, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  test('refuses a commit whose outputs exceed the independently verified funding value', async () => {
+    // Signed (and internally fee-balanced) against a claimed 50,000-sat input,
+    // but the indexer — the source of truth — has only ever seen 10,000 sats
+    // at this outpoint: the declared value cannot be trusted on its own.
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 29_000 });
+    const { routes, broadcasts } = harness();
+    registerChainUtxo(routes, { txid: pair.fundingUtxo.txid, vout: 0, value: 10_000 });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses an outright excessive absolute fee, regardless of shape', async () => {
+    // 1,000,000 in, 20,000 to the inscription, no change: an order of
+    // magnitude beyond any reasonable fee for the transaction's size.
+    const pair = buildEconomicsPair({ fundingValue: 1_000_000, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a reveal with an extra output alongside the honest one', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 20_000,
+      changeAmount: 29_000,
+      revealOutput0: 15_000,
+      extraRevealOutputs: [{ address: USER_ADDRESS, amount: 4_000 }],
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a reveal that pays an unreasonably high fee out of its own input', async () => {
+    // The commit side is honest (20,000 funds the reveal); the reveal keeps
+    // only 1,000 of it for the creator and lets 19,000 become "fee".
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 20_000,
+      changeAmount: 29_000,
+      revealOutput0: 1_000,
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses inscribe outright when the funding-value indexer is not configured', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ noIndexer: true });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('economics_check_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('an honest multi-input pair with realistic change still broadcasts', async () => {
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 29_000 });
+    const { routes, broadcasts } = harness();
     const res = await post(routes, pair);
     expect(res.status).toBe(200);
     expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
