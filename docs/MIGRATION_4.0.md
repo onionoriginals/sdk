@@ -16,11 +16,12 @@ genesis commitment from DID-method identity.
 | SDK 3 | SDK 4 |
 | --- | --- |
 | `asset.id` is `did:cel:<genesis-multihash>` | `asset.id` is `ni:///sha-256;<raw-genesis-hash>` |
-| `state.didCel` is the primary genesis identifier | Use `state.assetId`; `state.didCel` is deprecated compatibility data |
+| `state.didCel` is the primary genesis identifier | Use `state.assetId`; `state.didCel` is removed |
 | Initial `state.alias` is the Originals `did:cel` spelling | Initial `state.alias` is canonical `ni`; hosted/Bitcoin aliases continue to change on migration |
 | Envelope `version: 3`, `assetDid` | Envelope `version: 4`, `assetId` |
-| `deriveDid(genesisEvent)` | `deriveAssetId(genesisEvent)` |
-| `expectedDid` verification option | `expectedAssetId`; old option remains deprecated |
+| `deriveDid(genesisEvent)` | `deriveAssetId(genesisEvent)`; `deriveDid` is removed |
+| `expectedDid` verification option | `expectedAssetId`; `expectedDid` is removed |
+| `parseAssetDid(alias)` returning `{ method: 'cel' \| 'webvh' \| 'btco' }` | `parseAssetAlias(alias)` returning `{ layer: 'cel' \| 'webvh' \| 'btco' }` |
 
 The new URI is defined by [RFC 6920](https://www.rfc-editor.org/rfc/rfc6920).
 For Originals it carries the complete SHA-256 of the JCS genesis event as
@@ -72,21 +73,27 @@ re-signing or reinscription. A new genesis would create a different asset.
 
 `state.aliases` begins with canonical `ni` and can retain a historical Originals
 3 alias encountered in authenticated signed migration history. Do not assume
-the old spelling always occurs at a fixed array index. `state.didCel` and
-`deriveDid` expose it only as explicitly deprecated compatibility values.
+the old spelling always occurs at a fixed array index. There is no dedicated
+`state.didCel` field or `deriveDid` helper on this surface; when a fresh
+genesis's historical spelling is genuinely needed (for example, to look up
+storage recorded before this identity correction), reconstruct it explicitly
+as `"did:cel:" + assetDigest(state.assetId)`.
 
 ## Update identity expectations and labels
 
-Pass `expectedAssetId` to history/sat verification. `expectedDid` remains a
-compatibility option; supplying both requires both to bind the same genesis.
-One never overrides a conflicting other value. Sat resolution still chooses
+Pass `expectedAssetId` to history/sat verification. The deprecated `expectedDid`
+option is removed; a reader that authenticated old SDK 3 envelopes already
+normalizes their identity to `expectedAssetId` before verifying, so no caller
+needs to pass the historical spelling directly. Sat resolution still chooses
 the accepted history from publication ordering before comparing the requested
 identity.
 
-`parseAssetDid` retains its historical name and result shape. It accepts `ni`
-under `method: 'cel'`, preserving the existing local-layer discriminator. That
-label is not a claim that a `ni` URI is a DID or that Originals implements a
-DID method. Prefer “asset identity” or “Local CEL” in user interfaces.
+`parseAssetDid` is renamed `parseAssetAlias`. It accepts `ni` under
+`layer: 'cel'`, naming the Originals lifecycle stage rather than a DID method
+(the previous `method` discriminator implied one). It still accepts the
+historical `did:cel:` spelling when reading authenticated signed history; it
+is not offered as new migration/authoring input. Prefer “asset identity” or
+“Local CEL” in user interfaces.
 
 Originals uses the generic CCG CEL application profile and standard JCS proof
 suites. It does not implement the separate CCG `did:cel` DID method. This update
@@ -101,8 +108,9 @@ WebVH identity utilities and publication aliases retain their existing scope.
    labels and any string comparisons. Reject mismatched identities.
 3. Exercise fresh WebVH and Bitcoin recovery for historical publications, and
    new publication with the same explicit custody and durable retry contract.
-4. Retest callers of `deriveDid`, `state.didCel`, `parseAssetDid` and `expectedDid`
-   before replacing deprecated usage.
+4. Update any caller of the removed `deriveDid`, `state.didCel`, `expectedDid`
+   or `parseAssetDid` (now `parseAssetAlias`, with `layer` replacing `method`)
+   before adopting this surface.
 
 Controller rotation and deactivation, accepted Bitcoin ordering, complete
 provider observations and sat possession rules are unchanged. Holding the sat

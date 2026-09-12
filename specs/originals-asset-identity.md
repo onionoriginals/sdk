@@ -88,19 +88,22 @@ are unchanged; holding a sat grants no controller-write authority.
 | `assetDigest(identity)` | Recover the canonical event multihash from `ni` or the historical Originals 3 alias. |
 | `normalizeAssetId(identity)` | Validate either permitted identity spelling and return canonical `ni`. |
 | `sameAssetIdentity(left, right)` | Compare complete validated genesis commitments; return false for invalid identities. |
-| `deriveDid(genesisEvent)` | Deprecated compatibility API returning the Originals 3 spelling. |
-| `state.didCel` | Deprecated derived Originals 3 compatibility alias. |
-| `parseAssetDid(alias)` | Retained name and result shape for alias parsing; `ni` uses the existing `method: 'cel'` discriminator. That tag is an application layer, not DID-method conformance. |
+| `parseAssetAlias(alias)` | Alias/publication parser (renamed from `parseAssetDid`); `ni` uses the `layer: 'cel'` discriminator, naming the Originals lifecycle stage, not DID-method conformance. |
+
+`deriveDid(genesisEvent)` and `state.didCel`, once deprecated Originals 3
+compatibility surfaces, are removed from the CEL 2 / SDK 4 API. A fresh
+genesis's historical spelling, when genuinely needed, is reconstructed as
+`"did:cel:" + assetDigest(state.assetId)`; a spelling signed into real
+migration history remains readable through `state.aliases`.
 
 These helpers are available through `@originals/cel/v3` and
 `@originals/sdk/cel`. The `/v3` subpath and `originals/cel/3` profile identify
 the retained CEL representation, independently of the npm major versions.
 
-`verifyHistory` and `resolveSat` accept `expectedAssetId`; `expectedDid` remains
-deprecated. Each supplied expectation MUST bind to the same genesis. Supplying
-both never permits one value to override a conflicting other value. An expected
-identifier does not select a preferred Bitcoin fork; accepted publication
-ordering remains independently determined by the authority contract.
+`verifyHistory` and `resolveSat` accept only `expectedAssetId`; the deprecated
+`expectedDid` option is removed. An expected identifier does not select a
+preferred Bitcoin fork; accepted publication ordering remains independently
+determined by the authority contract.
 
 New SDK envelopes MUST use:
 

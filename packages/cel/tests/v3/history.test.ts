@@ -65,7 +65,7 @@ for (const id of [
     const vector = corpus.rejected.find((v) => v.id === id)!;
     expect(() =>
       verifyHistory(vector.document, {
-        expectedDid:
+        expectedAssetId:
           "expectedDid" in vector ? (vector.expectedDid as string) : undefined,
       }),
     ).toThrow();

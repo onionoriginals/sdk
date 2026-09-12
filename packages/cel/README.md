@@ -17,9 +17,9 @@ An Original records signed claims about files and their versions.
 `result.state.assetId` is the canonical `ni:///sha-256;…` URI of the JCS genesis
 event. `deriveAssetId`, `normalizeAssetId`, `assetDigest`, `sameAssetIdentity` and
 `assetIdFromDigest` support derivation and comparison with strict historical
-Originals 3 aliases. `state.didCel` and `deriveDid` are deprecated compatibility
-surfaces, not CCG DID-method identities. Originals uses generic CCG CEL and does
-not implement the separate CCG `did:cel` DID method.
+Originals 3 aliases. `state.didCel` and `deriveDid`, once deprecated compatibility
+surfaces, are removed from this SDK 4 / CEL 2 surface. Originals uses generic CCG
+CEL and does not implement the separate CCG `did:cel` DID method.
 
 History verification authenticates controllers and signed resource descriptors.
 It does not fetch resource bytes, establish WebVH hosting, or prove Bitcoin

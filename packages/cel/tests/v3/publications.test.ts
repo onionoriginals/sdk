@@ -117,7 +117,7 @@ for (const scenario of fixtures.cases)
       const result = resolveSat(
         { ...snapshot, publications },
         "expectedDid" in scenario.snapshot
-          ? { expectedDid: scenario.snapshot.expectedDid as string }
+          ? { expectedAssetId: scenario.snapshot.expectedDid as string }
           : {},
       );
       expect(result.status).toBe(expectedStatus);
