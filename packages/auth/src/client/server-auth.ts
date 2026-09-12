@@ -54,10 +54,8 @@ async function parseErrorBody(
   response: Response,
   fallback: string
 ): Promise<{ message?: string; error?: string }> {
-  const parsed = (await response.json().catch(() => null)) as unknown;
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? (parsed as { message?: string; error?: string })
-    : { message: fallback };
+  const parsed: unknown = await response.json().catch(() => null);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { message: fallback };
 }
 
 /**
