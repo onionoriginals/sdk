@@ -1888,6 +1888,19 @@ describe('POST /api/btc/inscribe — economic envelope (#493 M07)', () => {
     // The original, honest broadcast from the first submission is untouched.
     expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
   });
+
+  test('a retry whose reveal hex differs only by case still counts as the vetted pair', async () => {
+    // Hex casing carries no economic information — comparing it case-sensitively
+    // would force a harmless resubmission through the same fragility the retry
+    // skip exists to avoid (a live indexer/fee read that can fail on drift).
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    expect((await post(routes, pair)).status).toBe(200);
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid.toLowerCase());
+    const res = await post(routes, { ...pair, revealTxHex: pair.revealTxHex.toUpperCase() });
+    expect(res.status).toBe(200);
+    expect(broadcasts.filter((h) => h.toLowerCase() === pair.signedCommitHex.toLowerCase())).toHaveLength(2);
+  });
 });
 
 

@@ -1682,7 +1682,7 @@ export function createBitcoinRoutes(deps: {
     let alreadyVetted: boolean;
     try {
       const existing = store.get(sub, commitTxId);
-      alreadyVetted = !!existing && existing.revealTxHex === revealTxHex;
+      alreadyVetted = !!existing && existing.revealTxHex?.toLowerCase() === revealTxHex.toLowerCase();
     } catch {
       alreadyVetted = false;
     }
