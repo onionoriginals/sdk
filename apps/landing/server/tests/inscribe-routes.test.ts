@@ -1941,6 +1941,39 @@ describe('POST /api/btc/inscribe — independent economics check (#493/M07)', ()
   });
 
   /**
+   * The commit's taproot output commits to a SCRIPT/pubkey, not to one
+   * specific spend of it — whoever holds the reveal's ephemeral key (minted
+   * for this same submission) can sign more than one valid reveal against
+   * the same commit. `economicsVerified` must not let an already-verified
+   * commit vouch for a DIFFERENT reveal whose own amount/fee was never
+   * checked.
+   */
+  test('a verified commit paired with a DIFFERENT reveal re-verifies that reveal, not just the commit', async () => {
+    const pair = buildPair(); // honest: commit output0 20_000n, funds reveal1
+    const { routes, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+
+    // A second, DIFFERENT reveal spending the SAME commit output 0 — signed
+    // with the same ephemeral key, so it is genuinely valid — but paying only
+    // 1,000 of the 20,000 sats in and letting 19,000 become "reveal fee".
+    const evilReveal = new btc.Transaction();
+    evilReveal.addInput({
+      txid: pair.commitTxId, index: 0, sequence: 0xfffffffd,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
+    });
+    evilReveal.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    INSCRIPTION.finalize(evilReveal, btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true }));
+
+    const res = await post(routes, { ...pair, revealTxHex: hex.encode(evilReveal.extract()) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    // Only the first, honest pair ever broadcast.
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  /**
    * The indexer/fee-estimate lookups are provider-backed work, same as the
    * ordinal check they sit beside — an authenticated caller who has spent
    * their per-user attempt budget must not be able to keep triggering them.

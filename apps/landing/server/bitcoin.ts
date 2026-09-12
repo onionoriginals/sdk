@@ -1641,7 +1641,16 @@ export function createBitcoinRoutes(deps: {
     // `economicsVerified` flag, not mere existence: a record written before
     // this check existed was never actually verified, so a resubmission of
     // ONE of those still re-verifies rather than silently trusting it through.
-    if (!existingByCommitId?.economicsVerified) {
+    //
+    // ALSO requires the incoming reveal to match the VERIFIED record's own
+    // revealTxId: the commit's taproot output only commits to a script/pubkey,
+    // not to one specific spend of it, so whoever holds the reveal's ephemeral
+    // key (generated for this same submission) can sign more than one valid
+    // reveal against the same commit. Trusting the flag for a DIFFERENT reveal
+    // would let an already-verified commit vouch for a reveal whose own
+    // amount/fee was never checked.
+    const verifiedForThisReveal = existingByCommitId?.economicsVerified && existingByCommitId.revealTxId === revealTxId;
+    if (!verifiedForThisReveal) {
       if (!indexer) {
         return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
       }
@@ -1736,7 +1745,12 @@ export function createBitcoinRoutes(deps: {
       // would re-derive economics from chain state THIS attempt's own
       // broadcast may already have invalidated — refusing a pair that was
       // genuinely, if belatedly, verified.
-      if (existingByCommitId) {
+      //
+      // Only when the record's OWN revealTxId is what was just verified: a
+      // record whose stored reveal differs from this submission's must not
+      // come away marked verified — that flag would then vouch for the
+      // record's own (still-unchecked) reveal, not the one actually checked.
+      if (existingByCommitId && existingByCommitId.revealTxId === revealTxId) {
         try {
           store.markEconomicsVerified(sub, commitTxId);
         } catch (e) {
