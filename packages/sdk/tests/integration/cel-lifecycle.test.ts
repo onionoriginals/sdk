@@ -163,7 +163,7 @@ describe('Integration: CEL Lifecycle', () => {
       const { log: peerLog } = await peerManager.create('Migratable Asset', [createTestResource('migrate')]);
       
       // Create webvh manager and migrate
-      const webvhManager = new WebVHCelManager(signer, 'example.com');
+      const webvhManager = new WebVHCelManager(signer, 'example.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await webvhManager.migrate(peerLog);
       
       // Validate migration event was added
@@ -191,7 +191,7 @@ describe('Integration: CEL Lifecycle', () => {
       const resources = [createTestResource('preserved')];
       
       const { log: peerLog } = await peerManager.create(originalName, resources);
-      const webvhManager = new WebVHCelManager(signer, 'test.domain.com');
+      const webvhManager = new WebVHCelManager(signer, 'test.domain.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await webvhManager.migrate(peerLog);
       
       // Original create event should be unchanged
@@ -469,6 +469,7 @@ describe('Integration: CEL Lifecycle', () => {
         config: {
           webvh: {
             domain: 'unified-test.com',
+            acknowledgeNonConformantId: true,
           },
         },
       });

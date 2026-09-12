@@ -26,6 +26,21 @@ export interface WebVHCelConfig {
   verificationMethod?: string;
   /** The purpose of proofs (defaults to 'assertionMethod') */
   proofPurpose?: string;
+  /**
+   * `migrate()` fails closed by default (see issue #603): the identifier this
+   * class mints — `did:webvh:{domain}:{idPart}` — has no SCID and no genuine
+   * WebVH version history, so an independent did:webvh resolver can reject or
+   * misinterpret it. This class predates the did:webvh method's current
+   * specification and is retained only for the previous-format lifecycle and
+   * its regression tests (see docs/history/previous-sdk/CLAUDE.md); it is not
+   * a compatibility path for CEL 3 / SDK 3.0. Real did:webvh creation/hosting
+   * lives in the SDK's WebVHManager (`sdk.did.createDIDWebVH()`).
+   *
+   * Set this to `true` only to knowingly exercise that retained legacy path
+   * (e.g. previous-format regression tests or the legacy `originals-cel`
+   * CLI); production code that needs a real did:webvh should not set it.
+   */
+  acknowledgeNonConformantId?: boolean;
 }
 
 /**
@@ -54,15 +69,20 @@ export interface WebVHMigrationData {
  * - Are discoverable via web-based DID resolution
  * - Can be further migrated to did:btco layer
  * 
+ * `migrate()` fails closed unless `config.acknowledgeNonConformantId` is set:
+ * see that field's doc comment (issue #603) for why the minted identifier is
+ * not did:webvh-conformant and why this class is retained legacy-only code.
+ *
  * @example
  * ```typescript
  * const httpWitness = new HttpWitness('https://witness.example.com/api/attest');
  * const manager = new WebVHCelManager(
  *   async (data) => createEdDsaProof(data, privateKey),
  *   'example.com',
- *   [httpWitness]
+ *   [httpWitness],
+ *   { acknowledgeNonConformantId: true }
  * );
- * 
+ *
  * const webvhLog = await manager.migrate(peerLog);
  * ```
  */
@@ -160,6 +180,24 @@ export class WebVHCelManager {
     const lastEvent = peerLog.events[peerLog.events.length - 1];
     if (lastEvent.type === 'deactivate') {
       throw new Error('Cannot migrate a deactivated event log');
+    }
+
+    // Fail closed (issue #603): this class mints a did:webvh-labeled string
+    // with no SCID and no genuine WebVH version history (see WebVHCelConfig.
+    // acknowledgeNonConformantId), so a conforming resolver can reject or
+    // misinterpret it. Only proceed when the caller has explicitly
+    // acknowledged that non-conformance.
+    if (!this.config.acknowledgeNonConformantId) {
+      throw new Error(
+        'WebVHCelManager.migrate() produces a did:webvh-labeled identifier that is not ' +
+        'conformant with the did:webvh method (no SCID, no genuine version history) and ' +
+        'that an independent WebVH resolver may reject or misinterpret. This class is ' +
+        'retained only for the previous-format lifecycle and its regression tests, not as ' +
+        'a compatibility path for CEL 3 / SDK 3.0 (see docs/history/previous-sdk/CLAUDE.md). ' +
+        'For a real did:webvh identifier, use the SDK\'s WebVHManager ' +
+        '(sdk.did.createDIDWebVH()) instead. To knowingly exercise this retained legacy ' +
+        'path, pass { acknowledgeNonConformantId: true } in the WebVHCelManager config.'
+      );
     }
 
     // Generate did:webvh DID
