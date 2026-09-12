@@ -183,8 +183,10 @@ export class WebVHCelManager {
 
     // This manager cannot produce a spec-conformant did:webvh identifier (see
     // WebVHCelConfig.acknowledgeNonConformantIdentifier) — fail closed unless
-    // the caller has explicitly acknowledged that limitation.
-    if (!this.config.acknowledgeNonConformantIdentifier) {
+    // the caller has explicitly acknowledged that limitation. Strict equality
+    // (not a truthy check) so an untyped JS caller passing a non-boolean
+    // truthy value (e.g. the string "false") can't silently bypass the gate.
+    if (this.config.acknowledgeNonConformantIdentifier !== true) {
       throw new Error(
         'WebVHCelManager.migrate() cannot produce a did:webvh identifier that a conforming ' +
         'WebVH resolver can resolve: it mints "did:webvh:{domain}:{id}" locally with no SCID ' +

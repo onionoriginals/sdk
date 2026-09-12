@@ -133,6 +133,19 @@ describe('WebVHCelManager', () => {
       );
     });
 
+    it('fails closed for a truthy non-boolean acknowledgment (untyped JS caller footgun)', async () => {
+      const peerLog = await createPeerLog();
+      // An untyped caller might pass a string thinking it disables the flag;
+      // the gate must require strict `true`, not merely a truthy value.
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+        acknowledgeNonConformantIdentifier: 'false' as unknown as boolean,
+      });
+
+      await expect(manager.migrate(peerLog)).rejects.toThrow(
+        /did:webvh identifier that a conforming WebVH resolver can resolve/
+      );
+    });
+
     it('proceeds once the caller sets acknowledgeNonConformantIdentifier', async () => {
       const peerLog = await createPeerLog();
       const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
