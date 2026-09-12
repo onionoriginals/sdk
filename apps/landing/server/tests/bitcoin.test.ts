@@ -909,6 +909,53 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
     expect(calls.n).toBe(2);
   });
 
+  test('failed estimates for many distinct confirmation targets do not interfere, and all age out', async () => {
+    // `blocks` comes straight from the request body with no allowlist, so the
+    // failure cache is keyed by an effectively client-chosen number. A prune
+    // that mishandled multiple keys could either leak (never forget an
+    // invalid target) or misfire (clear a DIFFERENT target's still-live
+    // failure). Five independent targets, all recovering together past the
+    // TTL, rules out both.
+    const down = new Set([1, 2, 3, 4, 5]);
+    const calls = { n: 0 };
+    const provider = {
+      async estimateFee(blocks: number) {
+        calls.n++;
+        if (down.has(blocks)) throw new Error(`no route to target ${blocks}`);
+        return 5;
+      },
+      async getFirstSatOfOutput() { return '5000000000'; },
+      async broadcastTransaction() { return 'f'.repeat(64); },
+      async getSpendableUtxos() { return []; },
+    } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'];
+    let clock = 1_000_000;
+    const r = routesFor(provider, { now: () => clock });
+
+    for (const blocks of down) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(5);
+
+    // Still inside the TTL: none of the five re-asks the estimator.
+    for (const blocks of down) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(502);
+    }
+    expect(calls.n).toBe(5);
+
+    // Past the TTL, with the estimator healthy again: every one of the five
+    // is a genuine retry that succeeds — none is stuck, and pruning one did
+    // not silently drop or resurrect another.
+    clock += 11_000;
+    down.clear();
+    for (const blocks of [1, 2, 3, 4, 5]) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      expect((await r.fee(req, new URL(req.url))).status).toBe(200);
+    }
+    expect(calls.n).toBe(10);
+  });
+
   test('an expired cache triggers exactly one refresh across concurrent requests', async () => {
     let clock = 1_000_000;
     let release: (() => void) | null = null;

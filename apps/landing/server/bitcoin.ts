@@ -732,6 +732,18 @@ export function createBitcoinRoutes(deps: {
   const feeInFlight = new Map<number, Promise<number>>();
   const feeFailureCache = new Map<number, { at: number; message: string }>();
 
+  // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
+  // caller sending many distinct values could otherwise grow this map for the
+  // life of the process — an entry used to clear only when that exact target
+  // later succeeded, which an invalid target never does. Sweeping expired
+  // entries on every write keeps it bounded to whatever failed inside the
+  // last FEE_FAILURE_CACHE_MS, win or (mostly) lose.
+  function pruneFeeFailureCache(): void {
+    for (const [key, entry] of feeFailureCache) {
+      if (now() - entry.at >= FEE_FAILURE_CACHE_MS) feeFailureCache.delete(key);
+    }
+  }
+
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
     const cached = feeCache.get(blocks);
@@ -756,6 +768,7 @@ export function createBitcoinRoutes(deps: {
         feeFailureCache.delete(blocks);
         return rate;
       } catch (e) {
+        pruneFeeFailureCache();
         feeFailureCache.set(blocks, { at: now(), message: (e as Error).message });
         throw e;
       }
