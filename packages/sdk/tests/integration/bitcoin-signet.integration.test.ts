@@ -261,6 +261,37 @@ describeSignet('SignetProvider against signet', () => {
     ).rejects.toThrow(/requires a funded signet wallet/);
   });
 
+  test('createInscription rejects deferred content (buildContent) against a real ord node, wallet configured or not (#384)', async () => {
+    const buildContent = () => Buffer.from('test');
+    await expect(
+      provider.createInscription({ buildContent, contentType: 'text/plain' })
+    ).rejects.toThrow(/buildContent/);
+
+    const noWalletProvider = new SignetProvider({ ordUrl: ORD_SIGNET_URL! });
+    await expect(
+      noWalletProvider.createInscription({ buildContent, contentType: 'text/plain' })
+    ).rejects.toThrow(/buildContent/);
+  });
+
+  test('createInscription rejects reinscribing a pinned satoshi (targetSatoshi) against a real ord node, wallet configured or not (#384)', async () => {
+    await expect(
+      provider.createInscription({
+        data: Buffer.from('test'),
+        contentType: 'text/plain',
+        targetSatoshi: '999999999999999',
+      })
+    ).rejects.toThrow(/targetSatoshi/);
+
+    const noWalletProvider = new SignetProvider({ ordUrl: ORD_SIGNET_URL! });
+    await expect(
+      noWalletProvider.createInscription({
+        data: Buffer.from('test'),
+        contentType: 'text/plain',
+        targetSatoshi: '999999999999999',
+      })
+    ).rejects.toThrow(/targetSatoshi/);
+  });
+
   test('transferInscription throws without wallet configured', async () => {
     const noWalletProvider = new SignetProvider({ ordUrl: ORD_SIGNET_URL! });
     await expect(
