@@ -8,6 +8,7 @@ import { serializeCookie } from '../cookies';
 import {
   classifySpendableUtxos,
   createBitcoinRoutes,
+  createExpiringCache,
   rawKeyFaucetSigner,
   fetchFaucetUtxos,
   fetchAddressUtxos,
@@ -975,6 +976,47 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
 
     expect(calls.n).toBe(1);
     for (const res of results) expect(res.status).toBe(200);
+  });
+});
+
+// Direct unit coverage for the map `currentFeeRate` uses to bound the
+// fee-failure cache (#496 item 2 follow-up): a test driven only through the
+// HTTP routes can't distinguish "expired entries get pruned" from "every key
+// happens to be re-askable anyway," since a plain retry looks the same
+// either way. This asserts eviction on the map itself.
+describe('createExpiringCache', () => {
+  test('sweeps expired entries on write, leaving live ones and the new one intact', () => {
+    let clock = 0;
+    const cache = createExpiringCache<number, string>(10_000, () => clock);
+
+    cache.set(1, 'a');
+    clock += 6_000;
+    cache.set(2, 'b'); // key 1 is 6s old here — still inside the TTL, not pruned
+    expect(cache.size).toBe(2);
+
+    clock += 5_000; // key 1 is now 11s old (expired); key 2 is 5s old (live)
+    cache.set(3, 'c'); // this write's sweep should evict exactly key 1
+    expect(cache.size).toBe(2);
+    expect(cache.get(1)).toBeUndefined();
+    expect(cache.get(2)).toBe('b');
+    expect(cache.get(3)).toBe('c');
+  });
+
+  test('get treats an expired entry as absent without needing a write to remove it', () => {
+    let clock = 0;
+    const cache = createExpiringCache<string, number>(1_000, () => clock);
+    cache.set('k', 1);
+    clock += 1_000;
+    expect(cache.get('k')).toBeUndefined();
+  });
+
+  test('delete removes a key immediately, independent of its TTL', () => {
+    let clock = 0;
+    const cache = createExpiringCache<string, number>(10_000, () => clock);
+    cache.set('k', 1);
+    cache.delete('k');
+    expect(cache.get('k')).toBeUndefined();
+    expect(cache.size).toBe(0);
   });
 });
 

@@ -457,6 +457,37 @@ export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): O
 }
 
 /**
+ * A Map with a per-entry TTL that sweeps everything expired on every write —
+ * so a caller-chosen key space (e.g. the fee estimator's `blocks`, which
+ * `/api/btc/fee` accepts with no allowlist) cannot grow the map for the life
+ * of the process just by failing for a target nobody retries. `get` treats
+ * an expired entry as absent without removing it itself, so a read-only poll
+ * never pays the sweep; the next WRITE (an unrelated key's own entry) is what
+ * clears it.
+ */
+export function createExpiringCache<K, V>(ttlMs: number, now: () => number = () => Date.now()) {
+  const entries = new Map<K, { at: number; value: V }>();
+  return {
+    get(key: K): V | undefined {
+      const entry = entries.get(key);
+      return entry && now() - entry.at < ttlMs ? entry.value : undefined;
+    },
+    set(key: K, value: V): void {
+      for (const [k, entry] of entries) {
+        if (now() - entry.at >= ttlMs) entries.delete(k);
+      }
+      entries.set(key, { at: now(), value });
+    },
+    delete(key: K): void {
+      entries.delete(key);
+    },
+    get size(): number {
+      return entries.size;
+    },
+  };
+}
+
+/**
  * Split confirmed outputs into what may fund an inscription and what may not.
  * `ok: false` means the classification itself failed — the caller must refuse
  * to spend anything rather than fall back to "probably clean".
@@ -730,19 +761,12 @@ export function createBitcoinRoutes(deps: {
   const MAX_FEE_RATE_SAT_VB = 10_000;
   const feeCache = new Map<number, { at: number; rate: number }>();
   const feeInFlight = new Map<number, Promise<number>>();
-  const feeFailureCache = new Map<number, { at: number; message: string }>();
-
   // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
-  // caller sending many distinct values could otherwise grow this map for the
-  // life of the process — an entry used to clear only when that exact target
-  // later succeeded, which an invalid target never does. Sweeping expired
-  // entries on every write keeps it bounded to whatever failed inside the
-  // last FEE_FAILURE_CACHE_MS, win or (mostly) lose.
-  function pruneFeeFailureCache(): void {
-    for (const [key, entry] of feeFailureCache) {
-      if (now() - entry.at >= FEE_FAILURE_CACHE_MS) feeFailureCache.delete(key);
-    }
-  }
+  // caller sending many distinct values could otherwise grow a plain failure
+  // map for the life of the process — an entry used to clear only when that
+  // exact target later succeeded, which an invalid target never does.
+  // createExpiringCache sweeps expired entries on every write instead.
+  const feeFailureCache = createExpiringCache<number, string>(FEE_FAILURE_CACHE_MS, now);
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
@@ -750,9 +774,9 @@ export function createBitcoinRoutes(deps: {
     if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
     const pending = feeInFlight.get(blocks);
     if (pending) return pending;
-    const failed = feeFailureCache.get(blocks);
-    if (failed && now() - failed.at < FEE_FAILURE_CACHE_MS) {
-      throw new Error(failed.message);
+    const failedMessage = feeFailureCache.get(blocks);
+    if (failedMessage !== undefined) {
+      throw new Error(failedMessage);
     }
     const run = (async () => {
       try {
@@ -768,8 +792,7 @@ export function createBitcoinRoutes(deps: {
         feeFailureCache.delete(blocks);
         return rate;
       } catch (e) {
-        pruneFeeFailureCache();
-        feeFailureCache.set(blocks, { at: now(), message: (e as Error).message });
+        feeFailureCache.set(blocks, (e as Error).message);
         throw e;
       }
     })();
