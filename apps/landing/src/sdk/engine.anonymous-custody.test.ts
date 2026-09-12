@@ -232,4 +232,30 @@ describe('the transparent local backup this browser writes on publish', () => {
     expect(wrappingKey.extractable).toBe(false);
     await expect(crypto.subtle.exportKey('raw', wrappingKey)).rejects.toThrow();
   });
+
+  test('two concurrent first-use callers converge on the SAME wrapping key, not one each', async () => {
+    // Simulates two tabs racing to create the wrapping key before either has
+    // persisted anything: both must end up encrypting under the one key that
+    // actually made it into the durable store, or whichever backup was
+    // written under the losing, discarded key becomes permanently
+    // undecryptable after reload.
+    host = installCel3Host();
+    const { getOrCreateWrappingKey } = await import('./keystore');
+    const [a, b] = await Promise.all([
+      getOrCreateWrappingKey(),
+      getOrCreateWrappingKey(),
+    ]);
+    expect(a).toBe(b);
+
+    // And a backup encrypted under whichever key call "won" is still
+    // decryptable through a later, independent getOrCreateWrappingKey() call
+    // — exactly what a subsequent reload does.
+    const engine = new DemoEngine();
+    const state = await engine.create('Original', 'Upload', 'bytes');
+    await engine.publish();
+    const restored = await (
+      await import('./anonymous-authorship-backup')
+    ).restoreAnonymousAuthorshipKey(state.did);
+    expect(restored).not.toBeNull();
+  });
 });

@@ -22,24 +22,6 @@ const DB_NAME = "originals-authorship-keystore";
 const DB_VERSION = 1;
 const STORE_NAME = "wrapping-keys";
 const WRAPPING_KEY_NAME = "anonymous-backup-wrapping-key";
-const WRAPPING_KEY_LOCK_NAME = "originals:authorship-wrapping-key-init";
-
-/**
- * Serialize first-use key creation, including across this origin's other
- * tabs. Without this, two concurrent first callers (e.g. two tabs open on
- * the same anonymous session) could each read "missing", each generate
- * their own key, and each `put` it — the second `put` wins, silently
- * orphaning whichever backup the first caller already encrypted under its
- * own, now-overwritten key. The Web Locks API is the standard way to
- * coordinate that across tabs; where it isn't available, this falls back to
- * running unsynchronized, same as before — still safe for the common single
- * caller case this test environment and most real sessions exercise.
- */
-function withWrappingKeyLock<T>(fn: () => Promise<T>): Promise<T> {
-  if (typeof navigator !== "undefined" && navigator.locks)
-    return navigator.locks.request(WRAPPING_KEY_LOCK_NAME, fn);
-  return fn();
-}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -70,42 +52,65 @@ export function hasDurableKeyStore(): boolean {
   return typeof indexedDB !== "undefined";
 }
 
-/** This browser's wrapping key, generating and persisting one on first use. */
+/**
+ * This browser's wrapping key, generating and persisting one on first use.
+ *
+ * Two concurrent first callers (e.g. two tabs open on the same anonymous
+ * session) can each read "missing" before either has written anything. To
+ * stay correct in that case without depending on the Web Locks API (not
+ * available in every supported browser), the write is a compare-and-swap:
+ * `add()` only succeeds for whichever caller writes first, since IndexedDB
+ * itself rejects a second `add()` under the same key with a
+ * `ConstraintError`. The loser discards its own freshly generated candidate
+ * and re-reads the key the winner actually persisted, so every caller ends
+ * up encrypting under the one durable key regardless of who generated it.
+ */
 export async function getOrCreateWrappingKey(): Promise<CryptoKey> {
   if (!hasDurableKeyStore())
     throw new Error("This browser has no durable key store available.");
 
-  return withWrappingKeyLock(async () => {
-    const readDb = await openDb();
-    let existing: CryptoKey | undefined;
+  const readDb = await openDb();
+  let existing: CryptoKey | undefined;
+  try {
+    existing = await requestToPromise(
+      readDb
+        .transaction(STORE_NAME, "readonly")
+        .objectStore(STORE_NAME)
+        .get(WRAPPING_KEY_NAME) as IDBRequest<CryptoKey | undefined>,
+    );
+  } finally {
+    readDb.close();
+  }
+  if (existing) return existing;
+
+  const candidate = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+
+  const writeDb = await openDb();
+  try {
+    const store = writeDb.transaction(STORE_NAME, "readwrite").objectStore(
+      STORE_NAME,
+    );
     try {
-      existing = await requestToPromise(
-        readDb
+      await requestToPromise(store.add(candidate, WRAPPING_KEY_NAME));
+      return candidate;
+    } catch {
+      // Another caller's `add()` won the race in the meantime — use the key
+      // it actually persisted instead of our own, now-discarded candidate.
+      const winner = await requestToPromise(
+        writeDb
           .transaction(STORE_NAME, "readonly")
           .objectStore(STORE_NAME)
           .get(WRAPPING_KEY_NAME) as IDBRequest<CryptoKey | undefined>,
       );
-    } finally {
-      readDb.close();
+      if (!winner)
+        throw new Error("Could not read or create the browser wrapping key.");
+      return winner;
     }
-    if (existing) return existing;
-
-    const key = await crypto.subtle.generateKey(
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"],
-    );
-    const writeDb = await openDb();
-    try {
-      await requestToPromise(
-        writeDb
-          .transaction(STORE_NAME, "readwrite")
-          .objectStore(STORE_NAME)
-          .put(key, WRAPPING_KEY_NAME),
-      );
-    } finally {
-      writeDb.close();
-    }
-    return key;
-  });
+  } finally {
+    writeDb.close();
+  }
 }

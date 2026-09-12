@@ -96,6 +96,22 @@ export function installLocalStorage(): {
                     store.set(key, value);
                     return key;
                   }),
+                // Mirrors IDBObjectStore.add(): rejects with a
+                // ConstraintError-shaped failure instead of overwriting when
+                // the key is already present — what `keystore.ts` relies on
+                // to make first-use wrapping-key creation a compare-and-swap.
+                add: (value: unknown, key: string) =>
+                  makeRequest(() => {
+                    if (store.has(key)) {
+                      const err = new Error(
+                        `Key "${key}" already exists in the object store.`,
+                      );
+                      err.name = "ConstraintError";
+                      throw err;
+                    }
+                    store.set(key, value);
+                    return key;
+                  }),
               }) as unknown as IDBObjectStore,
           } as unknown as IDBTransaction;
         },
