@@ -219,7 +219,11 @@ function apply(
 /** Verify all signatures, links and authorized state transitions atomically.
  * A prefix must be an immutable result from this verifier, not a caller-supplied state.
  * Bitcoin acceptance and WebVH method binding always require separate observations.
- * A `checkpoint` is a portable freshness claim, independently confirmed here, never trusted.
+ * A `checkpoint` is a portable freshness claim, independently confirmed here, never
+ * trusted. Only positions this call itself authenticates are checkable: exactly the
+ * `prefix` boundary, or an entry in `document.log`. A checkpoint referring to a position
+ * further back than the supplied `prefix` throws `CEL_CHECKPOINT_UNVERIFIABLE`, not a
+ * false "fork" — re-verify from full history to confirm it instead.
  */
 export function verifyHistory(
   input: unknown,
@@ -273,6 +277,15 @@ export function verifyHistory(
   let freshness: VerifiedHistory["freshness"] = "unknown";
   if (checkpoint) {
     requireThat(
+      typeof checkpoint.assetId === "string" &&
+        typeof checkpoint.head === "string" &&
+        checkpoint.head.length > 0 &&
+        Number.isInteger(checkpoint.entryCount) &&
+        checkpoint.entryCount >= 1,
+      "CEL_CHECKPOINT_MALFORMED",
+      "Checkpoint must be a well-formed { assetId, head, entryCount }",
+    );
+    requireThat(
       sameAssetIdentity(checkpoint.assetId, state.assetId),
       "CEL_CHECKPOINT_ASSET",
       "Checkpoint asset identity differs from the presented history",
@@ -282,12 +295,22 @@ export function verifyHistory(
       "CEL_CHECKPOINT_ROLLBACK",
       "Presented history is behind the recipient's checkpoint",
     );
+    // Only entries this call itself authenticated are checkable: the exact prefix
+    // boundary, or a position within document.log. A checkpoint further back than
+    // the supplied prefix is genuinely unprovable here — never silently treated as
+    // a fork, which would misreport "diverges" for what is really "cannot confirm".
+    const prefixEntryCount = prefix?.state.entryCount ?? 0;
+    requireThat(
+      checkpoint.entryCount >= prefixEntryCount,
+      "CEL_CHECKPOINT_UNVERIFIABLE",
+      "Checkpoint predates this call's own prefix boundary; re-verify from full history to confirm it",
+    );
     const headAtCheckpoint =
-      checkpoint.entryCount === (prefix?.state.entryCount ?? 0)
+      checkpoint.entryCount === prefixEntryCount
         ? prefix?.state.head
         : observedHeads!.get(checkpoint.entryCount);
     requireThat(
-      headAtCheckpoint === checkpoint.head,
+      headAtCheckpoint !== undefined && headAtCheckpoint === checkpoint.head,
       "CEL_CHECKPOINT_FORK",
       "Presented history diverges from the recipient's checkpoint",
     );
