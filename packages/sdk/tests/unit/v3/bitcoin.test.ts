@@ -28,7 +28,11 @@ const inscription = (p: PreparedBitcoinPublication) =>
   parseWitness(
     tx(p.transactions.revealTxHex).getInput(0).finalScriptWitness!,
   )![0];
-async function fixture(media = true, content = png) {
+async function fixture(
+  media = true,
+  content = png,
+  extraResources: { id: string; mediaType: string; content: Uint8Array }[] = [],
+) {
   const fundingUtxos = [
     {
       txid: "12".repeat(32),
@@ -81,7 +85,9 @@ async function fixture(media = true, content = png) {
     },
   });
   const local = await sdk.lifecycle.createAsset(
-    media ? [{ id: "art", mediaType: "image/png", content }] : [],
+    media
+      ? [{ id: "art", mediaType: "image/png", content }, ...extraResources]
+      : extraResources,
   );
   const { asset } = await sdk.lifecycle.publishToWeb(local, {
     domain: "example.com",
@@ -102,10 +108,22 @@ async function fixture(media = true, content = png) {
     changeAddress: payment.address!,
     feeRate: 2,
   };
+  let acceptedHeight = 100;
   function accept(prepared: PreparedBitcoinPublication) {
     const body = inscription(prepared);
     const id = prepared.transactions.revealTxId;
-    snapshot.blocks.push({ height: 100, hash, txids: [id] });
+    const height = acceptedHeight;
+    // The fixture's initial tip is already height 100 / `hash`; a later call (e.g. a
+    // second, delta publication accepted after the boundary) advances to a fresh block.
+    const blockHash =
+      height === 100 ? hash : height.toString(16).padStart(2, "0").repeat(32).slice(0, 64);
+    if (height > 100)
+      snapshot.tipBefore = snapshot.tipAfter = snapshot.indexTip = {
+        height,
+        hash: blockHash,
+      };
+    acceptedHeight += 1;
+    snapshot.blocks.push({ height, hash: blockHash, txids: [id] });
     snapshot.publications.push({
       id: id + "i0",
       revealTxid: id,
@@ -113,8 +131,8 @@ async function fixture(media = true, content = png) {
       sat: snapshot.sat,
       confirmed: true,
       creation: {
-        height: 100,
-        blockHash: hash,
+        height,
+        blockHash,
         transactionIndex: 0,
         inscriptionIndex: 0,
       },
@@ -399,6 +417,62 @@ test("a competing accepted branch blocks the previously prepared local proposal"
   );
 });
 
+
+test("a two-resource boundary marks only the inlined resource as chain-recoverable; the other stays referenced", async () => {
+  const doc = new TextEncoder().encode("hello world");
+  const f = await fixture(true, png, [
+    { id: "doc", mediaType: "text/plain", content: doc },
+  ]);
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
+  // Default selection inlines the first current resource ("art"); "doc" is never inlined here.
+  expect(inscription(boundary).body).toEqual(png);
+  f.accept(boundary);
+  const resolved = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+  if (resolved.status !== "accepted") throw new Error(resolved.status);
+  expect(resolved.resourceAvailability).toEqual([
+    { id: "art", version: 1, availability: "bitcoin-inline" },
+    { id: "doc", version: 1, availability: "referenced" },
+  ]);
+  const byId = new Map(resolved.asset.resources.map((r) => [r.id, r]));
+  expect(byId.get("art")!.content).toEqual(png);
+  expect(byId.get("doc")!.content).toBeUndefined();
+  expect(resolved.verification.missingResources).toEqual([
+    { id: "doc", version: 1 },
+  ]);
+  expect(resolved.verification.resources).toBe("incomplete");
+});
+
+test("a two-resource delta only extends chain-recoverability for the selected resource; the unselected one stays referenced across versions", async () => {
+  const doc = new TextEncoder().encode("hello world");
+  const f = await fixture(true, png, [
+    { id: "doc", mediaType: "text/plain", content: doc },
+  ]);
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
+  f.accept(boundary);
+  const loaded = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+  if (loaded.status !== "accepted") throw new Error(loaded.status);
+  // Change both resources in the same delta; default selection still inlines only one.
+  await loaded.asset.addResourceVersion("art", new Uint8Array([1, 2, 3]), "image/png");
+  await loaded.asset.addResourceVersion("doc", new TextEncoder().encode("v2"), "text/plain");
+  const delta = await f.sdk.lifecycle.prepareBitcoinPublication(loaded.asset, f.options);
+  expect(inscription(delta).body).toEqual(new Uint8Array([1, 2, 3]));
+  f.accept(delta);
+  const resolved = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+  if (resolved.status !== "accepted") throw new Error(resolved.status);
+  expect(resolved.resourceAvailability).toEqual([
+    { id: "art", version: 1, availability: "bitcoin-inline" },
+    { id: "doc", version: 1, availability: "referenced" },
+    { id: "art", version: 2, availability: "bitcoin-inline" },
+    { id: "doc", version: 2, availability: "referenced" },
+  ]);
+  const byId = new Map(resolved.asset.resources.map((r) => [r.id, r]));
+  expect(byId.get("art")!.content).toEqual(new Uint8Array([1, 2, 3]));
+  expect(byId.get("doc")!.content).toBeUndefined();
+  expect(resolved.verification.missingResources).toEqual([
+    { id: "doc", version: 1 },
+    { id: "doc", version: 2 },
+  ]);
+});
 
 test("uninscribed common sat uses the output sat-range proof when ord has no owner location", async () => {
   const f = await fixture();
