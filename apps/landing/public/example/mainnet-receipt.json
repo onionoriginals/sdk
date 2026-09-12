@@ -1,0 +1,18 @@
+{
+  "network": "mainnet",
+  "assetDid": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+  "didBtco": "did:btco:321959825743820",
+  "sat": "321959825743820",
+  "inscriptionId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9i0",
+  "revealTxId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9",
+  "resource": {
+    "id": "tla-logo.png",
+    "mediaType": "image/png",
+    "byteLength": 3857,
+    "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33"
+  },
+  "confirmedBlockHeight": 965854,
+  "observedAtTip": 965862,
+  "observedAt": "2026-09-07T01:08:29.599Z",
+  "sourceHref": "https://github.com/onionoriginals/sdk/blob/349219265a890a75b3e088e5352856237b4caa7d/docs/release/evidence/owner-mainnet-chain-final.json"
+}

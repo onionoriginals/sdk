@@ -203,3 +203,23 @@
 .example-artifacts:hover {
   color: var(--text-primary);
 }
+
+/* The mainnet card has no artwork column — always one column, regardless of
+   the two-column layout .example-shell switches to at 860px for First Light. */
+.mainnet-shell {
+  margin-top: var(--sp-6);
+}
+
+.mainnet-shell.example-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mainnet-trust-note {
+  color: var(--text-tertiary);
+}
+
+.mainnet-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+}

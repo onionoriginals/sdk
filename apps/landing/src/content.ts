@@ -781,6 +781,33 @@ export const realExample = {
   }
 };
 
+// A second, separate Original: one the team actually funded and inscribed on
+// Bitcoin mainnet — not the mock provider "First Light" above uses for its
+// Bitcoin step. Its identifiers are public, so this checks them live against
+// this deploy's own indexer where possible, and otherwise shows the last
+// receipt the team independently verified themselves.
+export const mainnetExample = {
+  eyebrow: 'On Bitcoin',
+  headline: 'And one we actually inscribed.',
+  subhead:
+    'A separate Original the team funded and inscribed for real, on Bitcoin mainnet. Its did:btco identity, inscription and satoshi are public — anyone can look them up on a block explorer.',
+  pendingLabel: 'Checking the chain…',
+  liveBadge: 'Re-checked live, just now',
+  retainedBadge: 'Last independently verified',
+  trustNote:
+    "Checked live against this deploy's Bitcoin indexer — a provider-asserted read, the same trust boundary as any block-explorer lookup, not an independent multi-node consensus check. When a live check isn't available (for example, to a signed-out visitor), the receipt below is the last one the team verified themselves.",
+  fields: {
+    identity: 'did:btco',
+    inscription: 'Inscription',
+    sat: 'Satoshi',
+    resource: 'On-chain resource'
+  },
+  resourceOnChainNote: 'bytes found inline in the accepted inscription',
+  resourceOffChainNote: 'not found inline in this check',
+  explorerLabel: 'View reveal transaction on mempool.space',
+  receiptLabel: 'Underlying evidence'
+};
+
 export const protocol = {
   id: 'protocol',
   eyebrow: 'The protocol',
