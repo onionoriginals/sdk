@@ -470,8 +470,14 @@ import { PeerCelManager, WebVHCelManager, BtcoCelManager } from '@originals/sdk'
 const peer = new PeerCelManager(signer);
 const log = await peer.create('Asset', resources);
 
-// WebVH layer (for migration)
-const webvh = new WebVHCelManager(signer, 'example.com', [httpWitness]);
+// WebVH layer (for migration). This manager's did:webvh identifier is not
+// spec-conformant (no SCID, no genuine version history) — retained only for
+// previous-format compatibility, so migrate() requires explicit acknowledgment.
+// Real WebVH publication should go through the SDK's actual WebVH creation/
+// hosting path instead.
+const webvh = new WebVHCelManager(signer, 'example.com', [httpWitness], {
+  acknowledgeNonConformantIdentifier: true,
+});
 const migratedLog = await webvh.migrate(log);
 
 // BTCO layer

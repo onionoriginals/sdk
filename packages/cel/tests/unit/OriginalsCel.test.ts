@@ -428,6 +428,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
         },
       });
@@ -444,11 +445,29 @@ describe('OriginalsCel', () => {
       expect(data.domain).toBe('example.com');
     });
 
+    it('fails closed on migration to webvh without acknowledging the non-conformant identifier', async () => {
+      const cel = new OriginalsCel({
+        layer: 'peer',
+        signer: mockSigner,
+        config: {
+          webvh: {
+            domain: 'example.com',
+          },
+        },
+      });
+
+      const { log } = await cel.create('Test', []);
+
+      await expect(cel.migrate(log, 'webvh')).rejects.toThrow(
+        /did:webvh identifier that a conforming WebVH resolver can resolve/
+      );
+    });
+
     it('detects the layer from first-class migrate events', async () => {
       const cel = new OriginalsCel({
         layer: 'peer',
         signer: mockSigner,
-        config: { webvh: { domain: 'example.com' } },
+        config: { webvh: { domain: 'example.com', acknowledgeNonConformantIdentifier: true } },
       });
 
       const { log } = await cel.create('Test', []);
@@ -468,7 +487,7 @@ describe('OriginalsCel', () => {
       const cel = new OriginalsCel({
         layer: 'peer',
         signer: mockSigner,
-        config: { webvh: { domain: 'example.com' } },
+        config: { webvh: { domain: 'example.com', acknowledgeNonConformantIdentifier: true } },
       });
       const mockProof = {
         type: 'DataIntegrityProof',
@@ -535,6 +554,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
         },
       });
@@ -586,6 +606,7 @@ describe('OriginalsCel', () => {
       const cel = new OriginalsCel({
         layer: 'peer',
         signer: mockSigner,
+        config: { webvh: { acknowledgeNonConformantIdentifier: true } },
       });
 
       const { log } = await cel.create('Test', []);
@@ -603,6 +624,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
@@ -635,7 +657,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
         config: {
-          webvh: { domain: 'example.com' },
+          webvh: { domain: 'example.com', acknowledgeNonConformantIdentifier: true },
           btco: { bitcoinManager: createMockBitcoinManager() },
         },
       });
@@ -659,7 +681,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
         config: {
-          webvh: { domain: 'example.com' },
+          webvh: { domain: 'example.com', acknowledgeNonConformantIdentifier: true },
           btco: { bitcoinManager: createMockBitcoinManager() },
         },
       });
@@ -678,6 +700,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
         },
       });
@@ -733,6 +756,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
         },
       });
@@ -776,7 +800,7 @@ describe('OriginalsCel', () => {
       const webvhCel = new OriginalsCel({
         layer: 'webvh',
         signer: mockSigner,
-        config: { webvh: { domain: 'test.com' } },
+        config: { webvh: { domain: 'test.com', acknowledgeNonConformantIdentifier: true } },
       });
 
       const btcoCel = new OriginalsCel({
@@ -802,6 +826,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantIdentifier: true,
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
