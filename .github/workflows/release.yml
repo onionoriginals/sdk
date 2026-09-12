@@ -206,6 +206,13 @@ jobs:
       # there is deliberately no separate preflight step. Provenance is
       # generated automatically for a public repo under trusted publishing —
       # `NPM_CONFIG_PROVENANCE` is not needed and would be redundant.
+      #
+      # All three packages (cel, sdk, auth) need their own trusted publisher
+      # registered before this can succeed; if only some are registered,
+      # `changeset publish` can publish those and fail on the rest. That is
+      # recoverable, not corrupting: finish registering the remaining
+      # package(s) and re-run this job — idempotency (above) means it
+      # publishes only what is still missing. See docs/RELEASE_TOKEN_ROTATION.md.
       - name: Publish to npm, push tags, and create GitHub releases
         uses: changesets/action@v2
         with:

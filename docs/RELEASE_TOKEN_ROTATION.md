@@ -31,8 +31,18 @@ workflow change can do. For every package (`@originals/cel`, `@originals/sdk`,
    token.
 
 Until every package has a trusted publisher configured, the OIDC publish step
-in `release.yml` will fail on that package. Configure all three before relying
-on this workflow for a real release.
+in `release.yml` will fail on that package. **Configure all three before
+merging a Version Packages PR** — `changeset publish` publishes all pending
+packages in one run, and if only some are registered, it can publish those
+before failing on one that is not, leaving the release partially out.
+
+**Recovery if that happens:** finish registering the remaining package(s),
+then re-run the `publish` job (or push a no-op commit and let `check-publish`
+re-enter it — it re-evaluates per-package, not per-run). `changeset publish`
+is idempotent: it skips any package/version already on the registry and
+publishes only what is still missing, so a retry after completing
+registration cannot double-publish or corrupt the partially-released
+version set. Nothing needs to be rolled back.
 
 ## 2FA-bypass deprecation timeline (why this migration exists)
 
