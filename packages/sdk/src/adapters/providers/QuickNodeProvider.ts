@@ -6,6 +6,7 @@ import { StructuredError } from '@originals/cel';
 import { validateSatoshiNumber } from '@originals/cel';
 import { decode as decodeCbor } from '@originals/cel/cbor';
 import { hexToBytes } from '@originals/cel/encoding';
+import { readResponseBodyCapped, ResponseTooLargeError } from '../response-body-limit.js';
 
 export interface QuickNodeProviderOptions {
   /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
@@ -186,8 +187,9 @@ export class QuickNodeProvider implements OrdinalsProvider {
   /**
    * POST a JSON-RPC 2.0 request to the QuickNode endpoint, enforcing the
    * timeout and a hard byte cap on the response — first via Content-Length
-   * (cheap early reject) and again on the materialized bytes, so a lying or
-   * absent header can't smuggle an oversized body past the cap.
+   * (cheap early reject), then streamed incrementally so a chunked or
+   * lying-header body can't smuggle an oversized payload into memory before
+   * the cap is enforced (issue #606).
    *
    * QuickNode (like bitcoind) may report RPC-level errors with a non-2xx
    * status but still send a JSON body; parse the body when possible so the
@@ -202,19 +204,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
       redirect: 'error',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
     });
-    const lenHeader = res.headers?.get?.('content-length');
-    if (lenHeader && Number(lenHeader) > cap) {
-      throw new StructuredError(
-        'QUICKNODE_RESPONSE_TOO_LARGE',
-        `QuickNodeProvider: ${method} response exceeds ${cap} bytes (Content-Length ${lenHeader})`
-      );
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > cap) {
-      throw new StructuredError(
-        'QUICKNODE_RESPONSE_TOO_LARGE',
-        `QuickNodeProvider: ${method} response body exceeds ${cap} bytes`
-      );
+    let bytes: Uint8Array;
+    try {
+      bytes = await readResponseBodyCapped(res, cap);
+    } catch (err) {
+      if (err instanceof ResponseTooLargeError) {
+        throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', `QuickNodeProvider: ${method} ${err.message}`);
+      }
+      throw err;
     }
     let data: { result?: T; error?: JsonRpcError | null };
     try {
@@ -570,10 +567,14 @@ export class QuickNodeProvider implements OrdinalsProvider {
           });
           if (response.status === 404) return null;
           if (!response.ok) throw new StructuredError('QUICKNODE_CONTENT_UNAVAILABLE', 'Raw inscription content request failed');
-          if (Number(response.headers.get('content-length')) > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          if (bytes.length > this.maxContentBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
-          return bytes;
+          try {
+            return await readResponseBodyCapped(response, this.maxContentBytes);
+          } catch (err) {
+            if (err instanceof ResponseTooLargeError) {
+              throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
+            }
+            throw err;
+          }
         }
         let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024, signal);
         // The documented wrapper carries literal content; never re-serialize
@@ -588,9 +589,15 @@ export class QuickNodeProvider implements OrdinalsProvider {
         const response = await fetch(this.contentBaseUrl + '/r/metadata/' + id, {
           headers: { Accept: 'application/json' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
         });
-        if (Number(response.headers.get('content-length')) > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length > this.maxJsonBytes) throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+        let bytes: Uint8Array;
+        try {
+          bytes = await readResponseBodyCapped(response, this.maxJsonBytes);
+        } catch (err) {
+          if (err instanceof ResponseTooLargeError) {
+            throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
+          }
+          throw err;
+        }
         const text = new TextDecoder().decode(bytes);
         // A generic gateway 404 can mean the route is unavailable. Only ord's
         // matching inscription-specific marker attests absent metadata.
