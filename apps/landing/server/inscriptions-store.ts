@@ -557,8 +557,15 @@ export function createInscriptionsStore(opts: {
       if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
         rec.confirmedBlockHeight = evidence.blockHeight;
       }
-      if (status === 'confirmed' && evidence?.blockHash !== undefined) {
-        rec.confirmedBlockHash = evidence.blockHash;
+      // Hash is the trusted identity a caller compares for reorg detection —
+      // unlike height, a FRESH confirmed read that omits it must CLEAR the
+      // old value rather than leave it in place. Leaving it would pair a
+      // stale hash with this read's new confirmations/height, presenting an
+      // identity that was never actually observed together with them. This
+      // is independent of demotion: `status !== 'confirmed'` never reaches
+      // here at all, so the hash still survives a demotion untouched.
+      if (status === 'confirmed') {
+        rec.confirmedBlockHash = evidence?.blockHash;
       }
       writeAll(subOrgId, recs);
     },
