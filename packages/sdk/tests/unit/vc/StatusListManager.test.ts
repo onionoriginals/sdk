@@ -1049,8 +1049,12 @@ describe('StatusListManager', () => {
       // Status list credentials must now carry a valid proof (issue #238).
       // The fixtures here are unsigned, so stub proof verification for
       // status list credentials ONLY — the credential under test still goes
-      // through real signature verification.
-      const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
+      // through real signature verification. Bind to verifyCredentialSignature
+      // (signature-only), not verifyCredential — the latter is safe-by-default
+      // (issue #600) and would ALSO evaluate this credential's declared status
+      // via a resolver this test never configures, failing it for the wrong
+      // reason before verifyCredentialWithStatus's own status logic runs.
+      const realVerify = sdk.credentials.verifyCredentialSignature.bind(sdk.credentials);
       (sdk.credentials as any).verifyCredential = async (c: any) =>
         Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? true : realVerify(c);
       const entry = sdk.statusList.allocateStatusEntry(
@@ -1111,8 +1115,10 @@ describe('status list credential trust checks (issue #238)', () => {
   test('verifyCredentialWithStatus rejects a fabricated status list (revocation bypass attempt)', async () => {
     const { OriginalsSDK } = await import('../../../src');
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
-    // Main credential signature is treated as valid so the status-path checks are isolated
-    const realVerify = sdk.credentials.verifyCredential.bind(sdk.credentials);
+    // Main credential signature is treated as valid so the status-path checks
+    // are isolated. Bind to verifyCredentialSignature (signature-only) for the
+    // same reason as the fail-closed test above.
+    const realVerify = sdk.credentials.verifyCredentialSignature.bind(sdk.credentials);
     (sdk.credentials as any).verifyCredential = async (c: any) =>
       Array.isArray(c?.type) && c.type.includes('BitstringStatusListCredential') ? realVerify(c) : true;
 
