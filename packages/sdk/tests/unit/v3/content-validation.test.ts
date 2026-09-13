@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import * as btc from '@scure/btc-signer';
 import * as ordinals from 'micro-ordinals';
+import { CBOR } from 'micro-ordinals/lib/cbor.js';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { digestBytes, type SatSnapshot } from '@originals/cel/v3';
 import { prepareInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat.js';
@@ -17,9 +18,10 @@ const payment = btc.p2wpkh(secp256k1.getPublicKey(key), getScureNetwork('regtest
 async function preparedReveal(
   content: Uint8Array,
   contentType: string,
+  metadata?: Record<string, unknown>,
 ): Promise<PreparedInscriptionOnSat> {
   return prepareInscriptionOnSat({
-    buildContent: async () => ({ content, contentType }),
+    buildContent: async () => ({ content, contentType, metadata }),
     fundingUtxos: [
       {
         txid: '12'.repeat(32),
@@ -48,7 +50,7 @@ async function preparedReveal(
 
 function snapshotFor(
   prepared: PreparedInscriptionOnSat,
-  providerBody: { mediaType: string; bytes: Uint8Array },
+  providerBody: { mediaType: string; bytes: Uint8Array; metadata?: Uint8Array | null },
 ): SatSnapshot {
   const blockHash = 'b'.repeat(64);
   return {
@@ -78,7 +80,7 @@ function snapshotFor(
           status: 'complete',
           mediaType: providerBody.mediaType,
           bytes: providerBody.bytes,
-          metadata: null,
+          metadata: providerBody.metadata ?? null,
         },
       },
     ],
@@ -116,6 +118,7 @@ test('derives independent content from the reveal transaction witness, disagreei
       inscriptionId: prepared.inscriptionId,
       mediaType: 'text/plain',
       contentDigest: digestBytes(content),
+      metadataDigest: null,
     },
   ]);
   expect(evidence[0].contentDigest).not.toBe(digestBytes(forgedBody));
@@ -132,6 +135,39 @@ test('agrees when the provider honestly reports the same on-chain content', asyn
     fetchImpl: mock.fetchImpl,
   })(snapshot);
   expect(evidence[0].contentDigest).toBe(digestBytes(content));
+});
+
+test('derives the metadata tag digest from the actual on-chain envelope, independent of what the provider reports', async () => {
+  const content = new TextEncoder().encode('resource bytes');
+  const onChainMetadata = { profile: 'originals/cel/3', head: 'real-head' };
+  const prepared = await preparedReveal(content, 'image/png', onChainMetadata);
+  // A compromised indexer reports different metadata than what is actually
+  // encoded in the reveal transaction, while the main content still matches.
+  const forgedMetadata = { profile: 'originals/cel/3', head: 'forged-head' };
+  const snapshot = snapshotFor(prepared, {
+    mediaType: 'image/png',
+    bytes: content,
+    metadata: CBOR.encode(forgedMetadata),
+  });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot);
+  expect(evidence[0].metadataDigest).toBe(digestBytes(CBOR.encode(onChainMetadata)));
+  expect(evidence[0].metadataDigest).not.toBe(digestBytes(CBOR.encode(forgedMetadata)));
+});
+
+test('metadataDigest is null when the envelope carries no metadata tag', async () => {
+  const content = new TextEncoder().encode('log-only body');
+  const prepared = await preparedReveal(content, 'application/cel');
+  const snapshot = snapshotFor(prepared, { mediaType: 'application/cel', bytes: content });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot);
+  expect(evidence[0].metadataDigest).toBeNull();
 });
 
 test('caches raw transaction fetches per distinct reveal txid', async () => {
@@ -223,8 +259,8 @@ test('collects inscriptions across multiple script-path inputs of one batch reve
     fetchImpl: mock.fetchImpl,
   })(snapshot);
   expect(evidence).toEqual([
-    { inscriptionId: `${revealTxId}i0`, mediaType: 'text/plain', contentDigest: digestBytes(first.body) },
-    { inscriptionId: `${revealTxId}i1`, mediaType: 'text/plain', contentDigest: digestBytes(second.body) },
+    { inscriptionId: `${revealTxId}i0`, mediaType: 'text/plain', contentDigest: digestBytes(first.body), metadataDigest: null },
+    { inscriptionId: `${revealTxId}i1`, mediaType: 'text/plain', contentDigest: digestBytes(second.body), metadataDigest: null },
   ]);
 });
 

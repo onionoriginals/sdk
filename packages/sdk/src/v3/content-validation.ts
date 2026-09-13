@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 import { parseInscriptions } from 'micro-ordinals';
+import { CBOR } from 'micro-ordinals/lib/cbor.js';
 import { StructuredError } from '@originals/cel';
 import { digestBytes, type SatSnapshot, type IndependentContentEvidence } from '@originals/cel/v3';
 import { base64 } from '@scure/base';
@@ -38,7 +39,9 @@ const inscriptionId = /^([0-9a-f]{64})i(0|[1-9]\d*)$/;
  * Returns an empty array (never throws) when no such witness is found — this validator only
  * asserts what it could independently confirm; it never asserts absence.
  */
-function deriveFromRawTransaction(rawHex: string): { tags: { contentType?: string }; body: Uint8Array }[] {
+type DerivedInscription = { tags: { contentType?: string; metadata?: unknown }; body: Uint8Array };
+
+function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
   let tx: btc.Transaction;
   try {
     tx = btc.Transaction.fromRaw(Buffer.from(rawHex, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true });
@@ -48,7 +51,7 @@ function deriveFromRawTransaction(rawHex: string): { tags: { contentType?: strin
   // An inscription id's index is global across the whole reveal transaction, not
   // scoped to one input: a batch reveal can carry inscriptions across multiple
   // script-path inputs, each contributing its envelopes in input order.
-  const inscriptions: { tags: { contentType?: string }; body: Uint8Array }[] = [];
+  const inscriptions: DerivedInscription[] = [];
   for (let i = 0; i < tx.inputsLength; i++) {
     const witness = tx.getInput(i).finalScriptWitness;
     if (!witness || witness.length !== 3) continue;
@@ -61,6 +64,22 @@ function deriveFromRawTransaction(rawHex: string): { tags: { contentType?: strin
     }
   }
   return inscriptions;
+}
+
+/**
+ * micro-ordinals only exposes the metadata tag already CBOR-decoded, not its raw wire
+ * bytes, so exact-byte independent comparison isn't directly available. This re-encodes
+ * through the same canonical CBOR coder that decoded it (see `cbor.ts`: encoding always
+ * picks one deterministic minimal-length representation for a given decoded value), which
+ * round-trips byte-for-byte for metadata this SDK's own writer produced with that same
+ * coder. This is a deliberate, explicit comparison representation — not a silently
+ * weakened check — but it is a real limitation for interop: metadata written by a
+ * non-canonical CBOR encoder (different map key order, non-minimal integer widths) could
+ * legitimately fail this specific round-trip and be reported as a disagreement even though
+ * the decoded values are equal.
+ */
+function metadataDigest(metadata: unknown): string | null {
+  return metadata === undefined ? null : digestBytes(CBOR.encode(metadata));
 }
 
 /**
@@ -133,6 +152,7 @@ export function createBitcoinCoreContentValidator(
           inscriptionId: publication.id,
           mediaType: inscription.tags.contentType ?? '',
           contentDigest: digestBytes(inscription.body),
+          metadataDigest: metadataDigest(inscription.tags.metadata),
         });
       }
       return evidence;
