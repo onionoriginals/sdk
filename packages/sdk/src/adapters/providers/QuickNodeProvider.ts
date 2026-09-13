@@ -178,10 +178,17 @@ export class QuickNodeProvider implements OrdinalsProvider {
       if (independent.protocol !== 'https:' && independent.protocol !== 'http:') {
         throw new StructuredError('QUICKNODE_INDEPENDENT_CHAIN_ENDPOINT_INVALID', `independentChainEndpoint must be http(s), got ${independent.protocol}`);
       }
-      if (independent.href === parsed.href) {
-        // A "second" endpoint that is byte-identical to the primary one
-        // provides zero independent assurance; refuse to silently label
-        // results node-validated on the strength of asking the same server twice.
+      // Compare only what actually reaches the server: the fragment is never
+      // sent over HTTP, so "https://a/token" and "https://a/token#x" are the
+      // same request target even though `.href` differs. Comparing `.href`
+      // directly would let a fragment-only alias of `endpoint` pass this
+      // guard while both "sources" hit the identical untrusted service.
+      const requestTarget = (url: URL) => url.protocol + '//' + url.host + url.pathname + url.search;
+      if (requestTarget(independent) === requestTarget(parsed)) {
+        // A "second" endpoint that resolves to the same request target as the
+        // primary one provides zero independent assurance; refuse to silently
+        // label results node-validated on the strength of asking the same
+        // server twice.
         throw new StructuredError('QUICKNODE_INDEPENDENT_CHAIN_ENDPOINT_INVALID', 'independentChainEndpoint must differ from endpoint');
       }
       this.independentChainEndpoint = options.independentChainEndpoint;

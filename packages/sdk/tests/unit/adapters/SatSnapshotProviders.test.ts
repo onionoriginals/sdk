@@ -297,3 +297,13 @@ test('refuses to configure an independent chain endpoint identical to the primar
   expect(() => new QuickNodeProvider({ endpoint: 'https://a.example/token', contentEncoding: 'utf8', independentChainEndpoint: 'https://a.example/token' }))
     .toThrow(/independentChainEndpoint/);
 });
+
+test('refuses a fragment-only alias of the primary endpoint: the fragment never reaches the server', () => {
+  // The URL fragment is stripped before a request is ever sent, so
+  // "...token#a" and "...token#b" (or no fragment) hit the identical HTTP
+  // resource. Comparing raw `.href` would miss this and let a fragment-only
+  // alias pass as an "independent" source while both queries go to the same
+  // untrusted endpoint.
+  expect(() => new QuickNodeProvider({ endpoint: 'https://a.example/token', contentEncoding: 'utf8', independentChainEndpoint: 'https://a.example/token#independent' }))
+    .toThrow(/independentChainEndpoint/);
+});
