@@ -154,22 +154,33 @@ export class AssetResolver {
         chainEvidence = Object.freeze({ assurance: "node-validated",
           ...(validated?.source ? { source: validated.source } : {}) });
       }
-      let independentContent: Awaited<ReturnType<ContentValidator>> | undefined;
-      if (this.contentValidator) {
-        // A configured content validator that cannot be consulted fails closed,
-        // the same as a configured chain/enumeration validator: it must not be
-        // possible to silently fall back to an unqualified provider claim by
-        // making the independent source unreachable.
-        try {
-          independentContent = await this.contentValidator(snapshot);
-        } catch {
-          return {
-            resolution: failure(
+      // Validate the snapshot's own structure/chain-position claims locally
+      // before spending an external RPC round trip on it: a snapshot that
+      // resolveSat would reject anyway (bad block hash, wrong sat/network,
+      // inconsistent reveal position) should surface that deterministic
+      // reason rather than an unrelated content-validator failure, and never
+      // burns a request against the independently trusted node for data
+      // that was never going to be accepted regardless of its content.
+      const baseline = resolveSat(snapshot, options);
+      if (baseline.status !== "accepted" || !this.contentValidator)
+        return { snapshot, resolution: Object.freeze({ ...baseline, chainEvidence }) };
+      // A configured content validator that cannot be consulted fails closed,
+      // the same as a configured chain/enumeration validator: it must not be
+      // possible to silently fall back to an unqualified provider claim by
+      // making the independent source unreachable.
+      let independentContent: Awaited<ReturnType<ContentValidator>>;
+      try {
+        independentContent = await this.contentValidator(snapshot);
+      } catch {
+        return {
+          resolution: Object.freeze({
+            ...(failure(
               "incomplete",
               "Independent content validation is unavailable",
-            ) as SatResolution,
-          };
-        }
+            ) as SatResolution),
+            chainEvidence,
+          }),
+        };
       }
       return {
         snapshot,
