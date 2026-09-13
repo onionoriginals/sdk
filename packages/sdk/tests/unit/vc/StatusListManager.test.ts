@@ -772,6 +772,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const statusListVC = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/592/1',
@@ -810,6 +811,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const statusListVC = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/592/2',
@@ -848,6 +850,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const statusListVC = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/592/3',
@@ -880,6 +883,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const revocationList = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/592/4-revocation',
@@ -928,6 +932,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
+      (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
       const suppliedList = sdk.statusList.createStatusListCredential({
         id: 'https://example.com/status/592/5-supplied',
