@@ -1,7 +1,8 @@
+import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
-  parseAssetDid,
+  parseAssetAlias,
   parseDocument,
   resolveSat,
   validateDocument,
@@ -9,6 +10,7 @@ import {
   type SatSnapshot,
   type SatResolution,
   type BitcoinNetwork,
+  type ChainEvidence,
 } from "@originals/cel/v3";
 import type { DIDDocument } from "../types/did.js";
 import { summarizeVerification } from "./verification.js";
@@ -26,8 +28,6 @@ export interface SatProvider {
 }
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
-  /** @deprecated Use expectedAssetId. */
-  expectedDid?: string;
 }
 export type AssetResolution =
   | Exclude<SatResolution, { status: "accepted" }>
@@ -49,22 +49,25 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    chainEvidence: Readonly<ChainEvidence>;
   };
 }
 
 export function btcoDid(sat: string, network: BitcoinNetwork): string {
   const did = `did:btco:${network === "mainnet" ? "" : network === "regtest" ? "reg:" : network === "signet" ? "sig:" : "test:"}${sat}`;
-  parseAssetDid(did);
+  parseAssetAlias(did);
   return did;
 }
 const failure = (
   status: Exclude<SatResolution["status"], "accepted">,
   reason: string,
+  chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" },
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence,
 });
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
@@ -74,11 +77,12 @@ export class AssetResolver {
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
+    private readonly chainValidator?: ChainValidator,
   ) {}
 
-  async checkWeb(did: string, expectedDid: string): Promise<HostedEvidence> {
+  async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
     return this.hosted
-      ? this.hosted.check(did, expectedDid)
+      ? this.hosted.check(did, expectedAssetId)
       : { status: "incomplete", did, reason: "Configure hosted storage" };
   }
 
@@ -110,10 +114,13 @@ export class AssetResolver {
         resolution: failure(
           "unsupported-capability",
           "A complete sat snapshot provider is required",
+          { assurance: "unavailable" },
         ) as SatResolution,
       };
+    let obtainedSnapshot = false;
     try {
       const snapshot = structuredClone(await this.provider.getSatSnapshot(sat));
+      obtainedSnapshot = true;
       if (snapshot?.sat !== sat || snapshot.network !== this.network)
         return {
           resolution: failure(
@@ -121,7 +128,16 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
-      return { snapshot, resolution: resolveSat(snapshot, options) };
+      let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
+      if (this.chainValidator) {
+        // The validator is selected by application configuration, never by snapshot
+        // fields or an advertised provider method. A detached copy protects the
+        // exact view subsequently resolved from mutation during asynchronous checks.
+        const validated = await this.chainValidator(structuredClone(snapshot));
+        chainEvidence = Object.freeze({ assurance: "node-validated",
+          ...(validated?.source ? { source: validated.source } : {}) });
+      }
+      return { snapshot, resolution: Object.freeze({ ...resolveSat(snapshot, options), chainEvidence }) };
     } catch (error) {
       return {
         resolution: failure(
@@ -131,20 +147,22 @@ export class AssetResolver {
             error.code === "SAT_SNAPSHOT_CHAIN_CHANGED"
             ? "chain-changed"
             : "incomplete",
-          "The provider could not obtain a complete sat snapshot",
+          "The provider or configured validator could not establish a complete sat snapshot",
+          { assurance: obtainedSnapshot ? "provider-asserted" : "unavailable" },
         ) as SatResolution,
       };
     }
   }
 
-  async check(did: string, expectedDid: string): Promise<SatResolution> {
-    const parsed = parseAssetDid(did);
-    if (parsed.method !== "btco" || parsed.network !== this.network)
+  async check(did: string, expectedAssetId: string): Promise<SatResolution> {
+    const parsed = parseAssetAlias(did);
+    if (parsed.layer !== "btco" || parsed.network !== this.network)
       return failure(
         "identity-mismatch",
         "Asset network differs from configured provider",
+        { assurance: "unavailable" },
       ) as SatResolution;
-    return (await this.observe(parsed.sat, { expectedDid })).resolution;
+    return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
 
   async resolve(
@@ -238,8 +256,8 @@ export class AssetResolver {
   }
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {
-    const parsed = parseAssetDid(did);
-    if (parsed.method !== "btco" || parsed.network !== this.network)
+    const parsed = parseAssetAlias(did);
+    if (parsed.layer !== "btco" || parsed.network !== this.network)
       throw new CelError(
         "invalid",
         "ASSET_NETWORK",
@@ -250,7 +268,7 @@ export class AssetResolver {
       return {
         didDocument: null,
         didResolutionMetadata: { status: result.status, error: result.reason },
-        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown" },
+        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown", chainEvidence: result.chainEvidence },
       };
     return {
       didDocument: result.didDocument,
@@ -263,6 +281,7 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        chainEvidence: result.resolution.chainEvidence,
       },
     };
   }

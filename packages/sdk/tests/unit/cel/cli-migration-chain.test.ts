@@ -122,8 +122,7 @@ describe('CLI two-step migration chain (peer → webvh → btco)', () => {
 
   it('legacy update-sniffed migration chain still detects webvh (fallback kept)', async () => {
     // Legacy log: genesis embeds did/layer; migration recorded as an `update`.
-    const { createEventLog } = await import('@originals/cel');
-    const { updateEventLog } = await import('@originals/cel');
+    const { createEventLog, updateEventLog } = await import('@originals/cel/legacy');
     const { serializeEventLogJson } = await import('@originals/cel');
 
     const signer = async (data: unknown) => ({

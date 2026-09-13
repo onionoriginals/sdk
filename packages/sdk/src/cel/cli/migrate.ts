@@ -14,9 +14,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLog, DataIntegrityProof } from '@originals/cel';
-import { WebVHCelManager } from '@originals/cel';
-import { BtcoCelManager } from '@originals/cel';
-import type { CelSigner } from '@originals/cel';
+import { WebVHCelManager } from '@originals/cel/legacy';
+import { BtcoCelManager } from '@originals/cel/legacy';
+import type { CelSigner } from '@originals/cel/legacy';
 import { parseEventLogJson } from '@originals/cel';
 import { parseEventLogCbor } from '@originals/cel';
 import { serializeEventLogJson } from '@originals/cel';
@@ -442,8 +442,17 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
   
   try {
     if (targetLayer === 'webvh') {
-      // Migrate to webvh layer
-      const manager = new WebVHCelManager(signer, flags.domain!, []);
+      // Migrate to webvh layer. This legacy CLI command knowingly exercises
+      // WebVHCelManager's retained, non-did:webvh-conformant identifier path
+      // (issue #603) rather than the SDK's real WebVH creation/hosting;
+      // acknowledge that explicitly and tell the operator.
+      console.error(
+        '\n⚠️  Note: this command mints a did:webvh-labeled identifier without a real ' +
+        'SCID or WebVH version history. An independent did:webvh resolver may reject or ' +
+        'misinterpret it. Use the SDK\'s WebVHManager (sdk.did.createDIDWebVH()) for a ' +
+        'conformant identifier.\n'
+      );
+      const manager = new WebVHCelManager(signer, flags.domain!, [], { acknowledgeNonConformantId: true });
       migratedLog = await manager.migrate(eventLog);
       
       // Extract target DID from migration event
@@ -452,9 +461,20 @@ export async function migrateCommand(flags: MigrateFlags): Promise<MigrateResult
       targetDid = migrationData.targetDid as string;
       
     } else if (targetLayer === 'btco') {
-      // Migrate to btco layer
+      // Migrate to btco layer. This legacy CLI command knowingly exercises
+      // BtcoCelManager's retained path, which inscribes a did:btco document
+      // committing only to a head digest of the migrate event rather than the
+      // asset's full CEL boundary history (issue #597); acknowledge that
+      // explicitly and tell the operator.
+      console.error(
+        '\n⚠️  Note: this command inscribes a did:btco document that commits only to a head ' +
+        "digest of the migrate event, not the asset's full CEL boundary history. A recipient " +
+        'holding just the inscribed document and the bare sat cannot reconstruct pre-inscription ' +
+        "history from this writer alone. Use the SDK's CEL 3 Bitcoin publication path for a " +
+        'fully recoverable migration.\n'
+      );
       const bitcoinManager = createMockBitcoinManager();
-      const manager = new BtcoCelManager(signer, bitcoinManager);
+      const manager = new BtcoCelManager(signer, bitcoinManager, { acknowledgeIncompleteHistory: true });
       migratedLog = await manager.migrate(eventLog);
 
       // The resolvable did:btco:<satoshi> is derived from the bitcoin witness

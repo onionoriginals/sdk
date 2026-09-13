@@ -1,4 +1,4 @@
-import { parseAssetDid, type BitcoinNetwork, type ChainEvidence, type SatSnapshot } from '@originals/cel/v3';
+import { parseAssetAlias, type BitcoinNetwork, type SatSnapshot } from '@originals/cel/v3';
 import { StructuredError } from '@originals/cel';
 import { hexToBytes } from '@originals/cel/encoding';
 
@@ -11,19 +11,6 @@ export interface SatSnapshotReader {
   inscription(id: string, signal?: AbortSignal): Promise<unknown>;
   content(id: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   metadata(id: string, signal?: AbortSignal): Promise<unknown>;
-  /**
-   * Optional Bitcoin Core RPC reader from a separately configured/trusted node,
-   * used only to independently cross-check the chain tip, active block hashes,
-   * and reveal-transaction membership that `rpc` (the Ordinals provider's own
-   * chain view) asserts. Absent means those facts stay `provider-asserted`.
-   * A configured reader that disagrees fails the whole snapshot closed — it
-   * never silently downgrades back to `provider-asserted`.
-   */
-  independentChain?: {
-    rpc(method: string, params: unknown[], signal?: AbortSignal): Promise<unknown>;
-    /** Non-secret label identifying the source (e.g. a host name), for `chainEvidence.source`. Never a credential. */
-    source: string;
-  };
 }
 
 export interface SatSnapshotBudget {
@@ -68,7 +55,6 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
     } finally { controller.signal.removeEventListener('abort', onAbort); }
   };
   const signal = controller.signal;
-  const independentChain = reader.independentChain;
   try {
     return await collectSatSnapshot({
       rpc: (method, params) => call(() => reader.rpc(method, params, signal)),
@@ -78,54 +64,20 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
       inscription: id => call(() => reader.inscription(id, signal)),
       content: id => call(() => reader.content(id, signal)),
       metadata: id => call(() => reader.metadata(id, signal)),
-      ...(independentChain ? { independentChain: {
-        source: independentChain.source,
-        rpc: (method: string, params: unknown[]) => call(() => independentChain.rpc(method, params, signal)),
-      } } : {}),
     }, satoshi, expectedNetwork);
   } finally { clearTimeout(timer); }
 }
 
 async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
-  parseAssetDid('did:btco:' + satoshi);
-  const independentChain = reader.independentChain;
-  const readChainTip = async (rpc: SatSnapshotReader['rpc']) => {
-    const info = object(await rpc('getblockchaininfo', []));
+  parseAssetAlias('did:btco:' + satoshi);
+  const readTip = async () => {
+    const info = object(await reader.rpc('getblockchaininfo', []));
     const network = networkOf(info.chain);
     if (!network || (expectedNetwork && network !== expectedNetwork)) throw new Error('Snapshot Bitcoin network mismatch');
     if (!integer(info.blocks) || !hash(info.bestblockhash)) throw new Error('Core chain tip unavailable');
     return { network, height: info.blocks, hash: info.bestblockhash };
   };
-  const readTip = () => readChainTip((method, params, signal) => reader.rpc(method, params, signal));
-  const disagreement = () => new StructuredError('SAT_SNAPSHOT_CHAIN_DISAGREEMENT', 'Independent chain source disagrees with the primary provider’s chain evidence');
-  // Only ever proves it agrees or fails the whole snapshot closed; never demotes to provider-asserted mid-scan.
-  const verifyIndependentTip = async (tip: { network: BitcoinNetwork; height: number; hash: string }) => {
-    if (!independentChain) return;
-    let independent: { network: BitcoinNetwork; height: number; hash: string };
-    try {
-      independent = await readChainTip((method, params, signal) => independentChain.rpc(method, params, signal));
-    } catch {
-      throw disagreement();
-    }
-    if (independent.network !== tip.network || independent.height !== tip.height || independent.hash !== tip.hash) throw disagreement();
-  };
-  // Checked once per unique block, not per inscription: full hash + ordered
-  // reveal-tx-list agreement is strictly stronger than per-txid membership.
-  const verifyIndependentBlock = async (block: { height: number; hash: string; txids: string[] }) => {
-    if (!independentChain) return;
-    let independentHash: unknown, observed: Record<string, unknown>;
-    try {
-      independentHash = await independentChain.rpc('getblockhash', [block.height]);
-      observed = object(await independentChain.rpc('getblock', [independentHash, 1]));
-    } catch {
-      throw disagreement();
-    }
-    if (!hash(independentHash) || independentHash !== block.hash || observed.hash !== block.hash || observed.height !== block.height ||
-        !Array.isArray(observed.tx) || observed.tx.length !== block.txids.length || observed.tx.some((id, i) => id !== block.txids[i]))
-      throw disagreement();
-  };
   const before = await readTip();
-  await verifyIndependentTip(before);
   const readIndex = async () => {
     const status = object(await reader.status());
     // /sat derives ownership from the current output. The address index is
@@ -167,7 +119,6 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
           !Array.isArray(observed.tx) || !observed.tx.length || !observed.tx.every(hash) || new Set(observed.tx).size !== observed.tx.length)
         throw new Error('Active block observation unavailable');
       block = { height: info.height, hash: blockHash, txids: observed.tx };
-      await verifyIndependentBlock(block);
       blocks.set(info.height, block);
     }
     const transactionIndex = block.txids.indexOf(txid);
@@ -189,11 +140,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   await readIndex();
   const after = await readTip();
   if (after.network !== before.network || after.height !== before.height || after.hash !== before.hash) throw new StructuredError('SAT_SNAPSHOT_CHAIN_CHANGED', 'Core chain changed during sat observation');
-  await verifyIndependentTip(after);
-  const chainEvidence: ChainEvidence = independentChain
-    ? { assurance: 'node-validated', source: independentChain.source }
-    : { assurance: 'provider-asserted' };
   return { network: before.network, sat: satoshi, tipBefore: { height: before.height, hash: before.hash },
     tipAfter: { height: after.height, hash: after.hash }, indexTip, indexHealthy: true, enumerationComplete: true,
-    blocks: [...blocks.values()], publications, ownership: { owner: sat.address, satpoint: sat.satpoint }, chainEvidence };
+    blocks: [...blocks.values()], publications, ownership: { owner: sat.address, satpoint: sat.satpoint } };
 }

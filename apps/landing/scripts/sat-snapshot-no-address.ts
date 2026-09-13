@@ -5,6 +5,7 @@ import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { RegtestProvider } from '../../../packages/sdk/src/adapters/providers/RegtestProvider';
 import { createCommitTransaction, createRevealTransaction } from '../../../packages/sdk/src/bitcoin/transactions/commit';
+import { createBitcoinCoreChainValidator } from '../../../packages/sdk/src/v3/chain-validation';
 import { startRegtest } from '../../../scripts/regtest/environment';
 
 // Run from the repository root after installing workspace dependencies:
@@ -12,6 +13,7 @@ import { startRegtest } from '../../../scripts/regtest/environment';
 // Optional: REGTEST_RECEIPT=/absolute/path/receipt.json and REGTEST_LOGS_DIR=/absolute/path/logs.
 // A real ord/Core capability regression. Only disposable regtest coins are used.
 const env = await startRegtest({ indexAddresses: false });
+let independent: Awaited<ReturnType<typeof startRegtest>> | undefined;
 try {
   const provider = new RegtestProvider(env);
   const ord = async <T>(path: string): Promise<T> => {
@@ -81,14 +83,42 @@ try {
   assert.equal(after.enumerationComplete, true);
   assert.equal(after.indexHealthy, true);
   assert.ok(after.tipAfter.height > before.tipAfter.height);
+  // A genuinely separate Core process starts on its own fork, then imports the
+  // primary's blocks without trusting the indexer's JSON chain assertions.
+  independent = await startRegtest({ indexAddresses: false });
+  const validator = () => {
+    const separator = independent!.rpcAuth.indexOf(':');
+    return createBitcoinCoreChainValidator({ endpoint: independent!.rpcUrl,
+      rpcAuth: { username: independent!.rpcAuth.slice(0, separator), password: independent!.rpcAuth.slice(separator + 1) } });
+  };
+  await assert.rejects(validator()(after), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+  await independent.rpc('invalidateblock', [await independent.rpc('getblockhash', [1])]);
+  for (let height = 1; height <= after.tipAfter.height; height++) {
+    const hash = await env.rpc<string>('getblockhash', [height]);
+    const block = await env.rpc<string>('getblock', [hash, 0]);
+    assert.equal(await independent.rpc('submitblock', [block]), null);
+  }
+  await independent.sync();
+  await validator()(after);
+  const altered = structuredClone(after);
+  altered.blocks[0].txids = ['f'.repeat(64)];
+  await assert.rejects(validator()(altered), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+  await independent.rpc('invalidateblock', [after.tipAfter.hash]);
+  await assert.rejects(validator()(after), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+  await independent.rpc('reconsiderblock', [after.tipAfter.hash]);
+  await independent.sync();
+  await validator()(after);
+  await independent.restart();
+  await validator()(after); // Reload Core's rotated cookie after restart.
   const status = await assertCapabilities();
   const receipt = { checkedAt: new Date().toISOString(), versions: env.versions, network: 'regtest', addressIndex: status.address_index,
     satoshi, inscriptionId: reveal.inscriptionId, pngBytes: png.length, ownershipBefore: before.ownership, ownershipAfter: after.ownership,
     tipBefore: before.tipAfter, tipAfter: after.tipAfter,
     checks: ['real ord address index disabled', 'complete sat enumeration', 'exact PNG bytes', 'initial owner and satpoint',
-      'real confirmed sat transfer', 'fresh owner and satpoint', 'unchanged publication evidence'], success: true };
+      'real confirmed sat transfer', 'fresh owner and satpoint', 'unchanged publication evidence', 'separate Core rejects initial fork', 'independent Core validates real inscription blocks',
+      'fabricated block transactions rejected', 'independent reorg rejected', 'reconsider and authenticated restart validated'], success: true };
   if (process.env.REGTEST_RECEIPT) await writeFile(process.env.REGTEST_RECEIPT, JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify(receipt, null, 2));
 } finally {
-  await env.stop();
+  try { await independent?.stop(); } finally { await env.stop(); }
 }

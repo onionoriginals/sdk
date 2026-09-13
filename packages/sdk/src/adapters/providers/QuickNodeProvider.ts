@@ -46,22 +46,6 @@ export interface QuickNodeProviderOptions {
   contentEncoding?: 'base64' | 'utf8' | 'auto';
   /** Explicit ord-compatible base URL serving raw /content/:id and /r/metadata/:id. Used for CEL 3 snapshots instead of their JSON-RPC wrappers. */
   contentBaseUrl?: string;
-  /**
-   * A separately operated Bitcoin Core RPC endpoint (issue #594), used only to
-   * independently cross-check the chain tip, active block hashes, and reveal
-   * transaction membership that `endpoint` itself asserts for CEL 3 snapshots.
-   *
-   * Without this, `endpoint` supplies BOTH the Ordinals/indexer view and the
-   * Bitcoin chain view, so a compromised or lying `endpoint` can fabricate a
-   * self-consistent snapshot: cross-checking one dishonest source against
-   * itself proves nothing. Configuring a node you operate/trust independently
-   * of `endpoint` (a different operator or infrastructure) upgrades
-   * `getSatSnapshot()` results from `chainEvidence.assurance: 'provider-asserted'`
-   * to `'node-validated'`. It never validates Ordinals enumeration
-   * completeness — only an independent index could corroborate that a later
-   * publication was not omitted.
-   */
-  independentChainEndpoint?: string;
 }
 
 /** getblockchaininfo.chain values mapped to SDK network names. */
@@ -133,7 +117,6 @@ export class QuickNodeProvider implements OrdinalsProvider {
   private readonly expectedNetwork?: 'mainnet' | 'testnet' | 'signet' | 'regtest';
   private readonly contentEncoding: 'base64' | 'utf8' | 'auto';
   private readonly contentBaseUrl?: string;
-  private readonly independentChainEndpoint?: string;
   private networkCheck: Promise<void> | null = null;
 
   private readonly snapshotBudget: SatSnapshotBudget;
@@ -167,31 +150,6 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (!['http:', 'https:'].includes(content.protocol) || content.search || content.hash || content.username || content.password) throw new Error();
         this.contentBaseUrl = content.href.replace(/\/$/, '');
       } catch { throw new StructuredError('QUICKNODE_CONTENT_ENDPOINT_INVALID', 'contentBaseUrl must be an HTTP(S) base URL without query, fragment or userinfo'); }
-    }
-    if (options.independentChainEndpoint !== undefined) {
-      let independent: URL;
-      try {
-        independent = new URL(options.independentChainEndpoint);
-      } catch {
-        throw new StructuredError('QUICKNODE_INDEPENDENT_CHAIN_ENDPOINT_INVALID', 'independentChainEndpoint is not a valid URL');
-      }
-      if (independent.protocol !== 'https:' && independent.protocol !== 'http:') {
-        throw new StructuredError('QUICKNODE_INDEPENDENT_CHAIN_ENDPOINT_INVALID', `independentChainEndpoint must be http(s), got ${independent.protocol}`);
-      }
-      // Compare only what actually reaches the server: the fragment is never
-      // sent over HTTP, so "https://a/token" and "https://a/token#x" are the
-      // same request target even though `.href` differs. Comparing `.href`
-      // directly would let a fragment-only alias of `endpoint` pass this
-      // guard while both "sources" hit the identical untrusted service.
-      const requestTarget = (url: URL) => url.protocol + '//' + url.host + url.pathname + url.search;
-      if (requestTarget(independent) === requestTarget(parsed)) {
-        // A "second" endpoint that resolves to the same request target as the
-        // primary one provides zero independent assurance; refuse to silently
-        // label results node-validated on the strength of asking the same
-        // server twice.
-        throw new StructuredError('QUICKNODE_INDEPENDENT_CHAIN_ENDPOINT_INVALID', 'independentChainEndpoint must differ from endpoint');
-      }
-      this.independentChainEndpoint = options.independentChainEndpoint;
     }
   }
 
@@ -237,9 +195,9 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * status but still send a JSON body; parse the body when possible so the
    * RPC error surfaces instead of an opaque HTTP failure.
    */
-  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number, signal?: AbortSignal, endpoint?: string): Promise<T> {
+  private async rpcCall<T>(method: string, params: unknown[], maxBytes?: number, signal?: AbortSignal): Promise<T> {
     const cap = maxBytes ?? this.maxJsonBytes;
-    const res = await fetch(endpoint ?? this.endpoint, {
+    const res = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -649,10 +607,6 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (typeof metadata !== 'string') throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata must be a hex string');
         return metadata;
       },
-      ...(this.independentChainEndpoint ? { independentChain: {
-        source: new URL(this.independentChainEndpoint).host,
-        rpc: (method: string, params: unknown[], signal?: AbortSignal) => this.rpcCall(method, params, undefined, signal, this.independentChainEndpoint),
-      } } : {}),
     }, satoshi, this.expectedNetwork, this.snapshotBudget);
   }
 

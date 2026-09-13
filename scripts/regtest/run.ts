@@ -16,6 +16,9 @@ for (const cwd of ['packages/cel', 'packages/sdk', 'packages/auth']) {
   if (await build.exited) throw new Error(`Build failed: ${cwd}`);
 }
 
+const transport = Bun.spawn(['node', '--test', 'scripts/chain-validator-node.test.mjs'], { cwd: root, stdout: 'inherit', stderr: 'inherit' });
+if (await transport.exited) throw new Error('Node Core authentication check failed');
+
 const check = Bun.spawn([process.execPath, 'run', 'typecheck:regtest'], {
   cwd: root + 'apps/landing', stdout: 'inherit', stderr: 'inherit',
 });

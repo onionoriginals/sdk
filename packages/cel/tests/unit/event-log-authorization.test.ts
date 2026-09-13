@@ -96,9 +96,11 @@ describe('CEL event-log authorization and btco verifiability', () => {
     const signer = makeSigner();
     const peer = new PeerCelManager(signer as any);
     let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
-    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    log = await new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true }).migrate(log);
     const { manager, ordinalsProvider } = mockBitcoin();
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, {
+      acknowledgeIncompleteHistory: true,
+    }).migrate(log);
 
     // btco anchoring is gating: without an ordinalsProvider the log must NOT verify.
     const unanchored = await verifyEventLog(btcoLog);
@@ -126,9 +128,11 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // the anchored-sat binding the Part A verifier enforces.
     const signer = makeSigner();
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
-    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    log = await new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true }).migrate(log);
     const { manager } = mockBitcoin(); // network 'mainnet', satoshi '1234567890'
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, {
+      acknowledgeIncompleteHistory: true,
+    }).migrate(log);
 
     const last = btcoLog.events[btcoLog.events.length - 1];
     expect(last.type).toBe('migrate');
@@ -153,7 +157,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // data.to, the migrate must throw rather than emit a mis-anchored log.
     const signer = makeSigner();
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
-    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    log = await new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true }).migrate(log);
     // Manager whose buildContent pins one sat but whose reveal returns another.
     const treacherous = {
       network: 'mainnet',
@@ -162,16 +166,20 @@ describe('CEL event-log authorization and btco verifiability', () => {
         return { txid: 'tx', inscriptionId: 'txi0', satoshi: '9999999999', blockHeight: 1 };
       },
     } as unknown as CelBitcoinManager;
-    await expect(new BtcoCelManager(signer as any, treacherous).migrate(log)).rejects.toThrow(/Anchoring sat mismatch/);
+    await expect(
+      new BtcoCelManager(signer as any, treacherous, { acknowledgeIncompleteHistory: true }).migrate(log)
+    ).rejects.toThrow(/Anchoring sat mismatch/);
   });
 
   it('reports a clear "content is missing" diagnostic when the witness inscription has no content', async () => {
     const signer = makeSigner();
     const peer = new PeerCelManager(signer as any);
     let { log } = await peer.create('Asset', [{ digestMultibase: 'uHash', mediaType: 'image/png' }]);
-    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
+    log = await new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true }).migrate(log);
     const { manager } = mockBitcoin();
-    const btcoLog = await new BtcoCelManager(signer as any, manager).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, manager, {
+      acknowledgeIncompleteHistory: true,
+    }).migrate(log);
 
     // Provider finds the inscription but it carries no `content` field: this must
     // NOT be misreported as "content is not valid JSON" (which implies tampering).
@@ -268,8 +276,10 @@ describe('CEL event-log authorization and btco verifiability', () => {
   it('derives btco state without a BitcoinManager (network read from signed data)', async () => {
     const signer = makeSigner();
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
-    log = await new WebVHCelManager(signer as any, 'example.com').migrate(log);
-    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager).migrate(log);
+    log = await new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true }).migrate(log);
+    const btcoLog = await new BtcoCelManager(signer as any, mockBitcoin().manager, {
+      acknowledgeIncompleteHistory: true,
+    }).migrate(log);
 
     // Replaying a persisted log in a fresh SDK without Bitcoin access is a
     // pure read and must work — the network lives in the signed migration data.
@@ -286,7 +296,7 @@ describe('CEL event-log authorization and btco verifiability', () => {
     // update: the name change applies and the layer does not flip.
     const signer = makeSigner();
     let { log } = await new PeerCelManager(signer as any).create('Asset', []);
-    const webvhManager = new WebVHCelManager(signer as any, 'example.com');
+    const webvhManager = new WebVHCelManager(signer as any, 'example.com', [], { acknowledgeNonConformantId: true });
     log = await webvhManager.migrate(log);
     log = await updateEventLog(log, { sourceDid: 'did:example:app-field', layer: 'btco', name: 'renamed' }, {
       signer: signer as any,

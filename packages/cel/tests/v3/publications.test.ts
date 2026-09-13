@@ -117,7 +117,7 @@ for (const scenario of fixtures.cases)
       const result = resolveSat(
         { ...snapshot, publications },
         "expectedDid" in scenario.snapshot
-          ? { expectedDid: scenario.snapshot.expectedDid as string }
+          ? { expectedAssetId: scenario.snapshot.expectedDid as string }
           : {},
       );
       expect(result.status).toBe(expectedStatus);
@@ -156,13 +156,13 @@ test("chain evidence defaults to provider-asserted when the snapshot omits it", 
     expect(result.chainEvidence).toEqual({ assurance: "provider-asserted" });
 });
 
-test("chain evidence passes through an independently node-validated snapshot with its source label", () => {
+test("an ordinary snapshot cannot self-assert independent validation", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.chainEvidence = { assurance: "node-validated", source: "core.example" };
   const result = resolveSat(snapshot);
   expect(result.status).toBe("accepted");
   if (result.status === "accepted")
-    expect(result.chainEvidence).toEqual({ assurance: "node-validated", source: "core.example" });
+    expect(result.chainEvidence).toEqual({ assurance: "provider-asserted" });
 });
 
 test("chain evidence never upgrades an unrecognized assurance value to node-validated", () => {

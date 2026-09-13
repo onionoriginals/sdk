@@ -1,7 +1,7 @@
 import { normalizeAssetId } from "./identity.js";
 import { freeze } from "./immutable.js";
 import { CelError } from "./errors.js";
-import { parseAssetDid, type BitcoinNetwork } from "./dids.js";
+import { parseAssetAlias, type BitcoinNetwork } from "./dids.js";
 import { parseDocument, eventDigest } from "./profile.js";
 import {
   verifyHistory,
@@ -52,7 +52,7 @@ export interface ChainEvidence {
    * confirmed the chain tip, active block hashes, and reveal transaction
    * membership this snapshot relies on.
    */
-  assurance: "provider-asserted" | "node-validated";
+  assurance: "unavailable" | "provider-asserted" | "node-validated";
   /** Non-secret label identifying the independent source (e.g. a host name). Never a credential. */
   source?: string;
 }
@@ -70,8 +70,8 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
-  /** Omitted or absent means `{ assurance: 'provider-asserted' }`: no independent chain validation was performed. */
-  chainEvidence?: ChainEvidence;
+  /** Optional provider claim, never sufficient to upgrade core resolution above provider-asserted. */
+  chainEvidence?: { assurance: 'provider-asserted' | 'node-validated'; source?: string };
 }
 export type ResolutionFailure =
   | "invalid"
@@ -95,6 +95,7 @@ export type SatResolution = Readonly<
       reason: string;
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: Readonly<ChainEvidence>;
     }
   | {
       status: "accepted";
@@ -125,6 +126,7 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence: { assurance: "provider-asserted" },
 });
 
 /** Resolve a sat from complete observations using the same signature/authority fold as offline history.
@@ -133,7 +135,7 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
+  options: { expectedAssetId?: string } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -150,19 +152,9 @@ export function resolveSat(
   const queriedDid = "did:btco:" + prefix + snapshot.sat;
   let expectedAssetId: string | undefined;
   try {
-    for (const expected of [options.expectedAssetId, options.expectedDid]) {
-      if (expected === undefined) continue;
-      const normalized = normalizeAssetId(expected);
-      if (expectedAssetId !== undefined && expectedAssetId !== normalized)
-        return failure("invalid", "Conflicting requested asset identities");
-      expectedAssetId = normalized;
-    }
-    parseAssetDid(queriedDid);
-    if (
-      options.expectedDid !== undefined &&
-      parseAssetDid(options.expectedDid).method !== "cel"
-    )
-      return failure("invalid", "Expected a genesis asset identity");
+    if (options.expectedAssetId !== undefined)
+      expectedAssetId = normalizeAssetId(options.expectedAssetId);
+    parseAssetAlias(queriedDid);
   } catch (error) {
     if (!(error instanceof CelError)) throw error;
     return failure("invalid", error.code);
@@ -464,15 +456,9 @@ export function resolveSat(
       "not-found",
       "No valid boundary in the complete sat observations",
     );
-  const chainEvidence: ChainEvidence =
-    snapshot.chainEvidence?.assurance === "node-validated"
-      ? {
-          assurance: "node-validated",
-          ...(snapshot.chainEvidence.source !== undefined
-            ? { source: snapshot.chainEvidence.source }
-            : {}),
-        }
-      : { assurance: "provider-asserted" };
+  // Snapshot data cannot select its own trust level. Explicit application-side
+  // validation in the SDK may upgrade the resolved result after checking this view.
+  const chainEvidence: ChainEvidence = { assurance: "provider-asserted" };
   const result: SatResolution = {
     status: "accepted",
     scope: "sat",

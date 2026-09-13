@@ -224,7 +224,44 @@ describe('inscribe-path transitions (R29)', () => {
   const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
   const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
-  function buildPair(fundingTxid = 'a'.repeat(64)) {
+  /**
+   * Fake indexer backing store for the inscribe route's independent
+   * input-value lookup (#493 M07): `GET /tx/<txid>/hex` answers from this
+   * map, keyed by each transaction's OWN computed id — the route rejects a
+   * fetched transaction whose id doesn't match the txid it was requested
+   * under.
+   */
+  const FUNDING_TX_HEX = new Map<string, string>();
+  let fundingSeq = 0;
+  /** Builds, registers and returns the real txid of a funding transaction paying `value` sats at `vout` to `scriptPubKey`. */
+  function makeFundingUtxo(vout: number, value: number, scriptPubKey: string): string {
+    fundingSeq++;
+    const tx = new btc.Transaction({ allowUnknownOutputs: true });
+    tx.addInput({
+      txid: fundingSeq.toString(16).padStart(64, '0'),
+      index: 0,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(value) + 10_000n },
+    });
+    for (let i = 0; i < vout; i++) tx.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
+    tx.sign(USER_PRIV);
+    tx.finalize();
+    const txid = tx.id;
+    FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+    return txid;
+  }
+  function fakeIndexerFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const m = url.match(/\/tx\/([0-9a-fA-F]+)\/hex$/);
+      const raw = m ? FUNDING_TX_HEX.get(m[1].toLowerCase()) : undefined;
+      return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  function buildPair() {
+    const fundingTxid = makeFundingUtxo(0, 50_000, USER_SCRIPT);
     const commit = new btc.Transaction();
     commit.addInput({
       txid: fundingTxid,
@@ -274,6 +311,8 @@ describe('inscribe-path transitions (R29)', () => {
       // Clean coins: the route now classifies the declared outpoints itself (#493).
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
     return { routes, cap };
   }
@@ -437,6 +476,33 @@ describe('the periodic balance sweep (R29)', () => {
     expect(later.scanned).toBe(1);
     expect(later.withBalance).toBe(1);
     expect(cap.of('deposit_balance_held').every((e) => e.address === ADDRESS)).toBe(true);
+  });
+
+  // #496 item 4: `recordDepositRead` used to skip its write whenever the
+  // reported balance was unchanged, with no ceiling on how long that could
+  // go on. That froze `lastRead.at` at the last actual balance CHANGE, not
+  // the last time anyone checked — so the drop-out clock above kept ticking
+  // even while the sweep itself kept re-reading the address every pass. An
+  // address that never once went unwatched still silently timed out.
+  test('an idle address the sweep keeps re-checking every hour never drops out', async () => {
+    const hour = 60 * 60_000;
+    let clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const { sweep, store } = sweepHarness({
+      balances: { [OTHER_ADDRESS]: 0 },
+      now: () => clock,
+    });
+    store.bindDepositAddress('sub-2', 'mainnet', OTHER_ADDRESS);
+
+    let last: Awaited<ReturnType<typeof sweep>> | undefined;
+    for (let i = 0; i < 30; i++) {
+      clock += hour;
+      last = await sweep();
+    }
+    // 30 hourly passes, every one of them reading this address: it was never
+    // left unchecked for anywhere near the 24h drop-out horizon, so it must
+    // still be in scope.
+    expect(last!.candidates).toBe(1);
+    expect(last!.scanned).toBe(1);
   });
 
   test('an unreadable address is counted, not swallowed, and does not stop the pass', async () => {

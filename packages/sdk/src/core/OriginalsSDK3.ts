@@ -1,5 +1,9 @@
+import type { ChainValidator } from "../v3/chain-validation.js";
 import { BitcoinPublications } from "../v3/bitcoin.js";
-import { HostedAssets } from "../v3/hosted.js";
+import {
+  HostedAssets,
+  type PublicReachabilityCheck,
+} from "../v3/hosted.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
@@ -29,7 +33,13 @@ export interface OriginalsSDKOptions
     >,
     LocalConfig {
   satProvider?: SatProvider;
+  /** Explicit independent chain verifier. A configured verifier must succeed for resolution. */
+  chainValidator?: ChainValidator;
   storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
+  /** Independent confirmation that a hosted WebVH publication's advertised log is actually public. */
+  publicReachability?: PublicReachabilityCheck;
+  /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
+  requirePublicReachability?: boolean;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -51,6 +61,7 @@ export class OriginalsSDK {
       [],
       [
         "satProvider",
+        "chainValidator",
         "signer",
         "onAppendFailure",
         "keyStore",
@@ -67,15 +78,21 @@ export class OriginalsSDK {
         "logging",
         "metrics",
         "enableLogging",
+        "publicReachability",
+        "requirePublicReachability",
       ],
     );
     const {
       signer,
       onAppendFailure,
       satProvider,
+      chainValidator,
       storageAdapter,
+      publicReachability,
+      requirePublicReachability,
       ...utilities
     } = options;
+    requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -131,7 +148,10 @@ export class OriginalsSDK {
     this.metrics = new MetricsCollector();
     this.logger = new Logger("SDK", this.config);
     const hosted = hostedStorage
-      ? new HostedAssets(hostedStorage, local)
+      ? new HostedAssets(hostedStorage, local, {
+          publicReachability,
+          requirePublicReachability,
+        })
       : undefined;
     const resolver = new AssetResolver(
       network,
@@ -144,6 +164,7 @@ export class OriginalsSDK {
           : undefined),
       local,
       hosted,
+      chainValidator,
     );
     this.lifecycle = new LifecycleManager(
       local,

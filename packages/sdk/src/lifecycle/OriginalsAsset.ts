@@ -15,7 +15,7 @@ import { EventEmitter } from '../events/EventEmitter.js';
 import type { EventHandler, EventTypeMap } from '../events/types.js';
 import { ResourceVersionManager, ResourceHistory } from './ResourceVersioning.js';
 import type { EventLog, OrdinalsLookup } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 import { replayProvenance } from './replayProvenance.js';

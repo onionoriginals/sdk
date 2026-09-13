@@ -1,12 +1,19 @@
 ---
-"@originals/sdk": patch
-"@originals/cel": patch
+"@originals/sdk": major
+"@originals/cel": major
 ---
 
-**Bitcoin sat resolution now distinguishes independently node-validated chain facts from a single provider's own assertion (#594).**
+Expose required `chainEvidence: { assurance, source? }` metadata on sat results and
+DID/publication metadata. Core JSON input and ordinary providers stay
+`provider-asserted`; failures before a snapshot is obtained report `unavailable`.
 
-`QuickNodeProvider` (the real mainnet `OrdinalsProvider`) serves both the Ordinals/indexer view and the Bitcoin chain view (`getblockchaininfo`, `getblockhash`, `getblock`) from one endpoint. `readSatSnapshot` already cross-checked the ord index tip against the Core tip, but when both come from the same operator/infrastructure that cross-check only proves internal self-consistency: a compromised or dishonest endpoint could fabricate a fully self-consistent snapshot.
+The default SDK accepts an application-selected `chainValidator`. The exported
+`createBitcoinCoreChainValidator` checks chain tips, active block hashes, and
+ordered transactions against a separately trusted Core endpoint with explicit
+RPC credentials and bounded requests, bytes, and elapsed time. Successful checks
+earn `node-validated`; configured validation failures fail closed. Detached
+snapshots prevent asynchronous mutation from changing the view being resolved.
 
-- `SatSnapshot` (`@originals/cel/v3`) gains an optional `chainEvidence?: { assurance: 'provider-asserted' | 'node-validated'; source?: string }`. `resolveSat()` validates it and threads it into the accepted `SatResolution`, defaulting to `{ assurance: 'provider-asserted' }` when an adapter doesn't set it. Scoped strictly to chain facts (tip, active block hashes, reveal transaction membership) — it never certifies Ordinals enumeration completeness.
-- `QuickNodeProvider` gains an optional `independentChainEndpoint`: a separately operated Bitcoin Core RPC endpoint used only to independently re-derive and cross-check the chain tip and each active block's hash/reveal-transaction membership. Agreement throughout yields `chainEvidence.assurance: 'node-validated'`; any disagreement fails the whole snapshot closed with `SAT_SNAPSHOT_CHAIN_DISAGREEMENT` rather than silently falling back to `'provider-asserted'`. An `independentChainEndpoint` identical to `endpoint` is rejected at construction.
-- Existing snapshots/providers are unaffected: `chainEvidence` is optional and additive, and behavior is unchanged when `independentChainEndpoint` is not configured.
+These labels never establish complete Ordinals enumeration, sat trajectory,
+ownership or inscription content bindings. Issue #594 remains open. Required
+result fields are a breaking type change for callers constructing result literals.

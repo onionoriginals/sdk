@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLog, VerificationResult, DataIntegrityProof, WitnessProof } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import { parseEventLogJson } from '@originals/cel';
 import { parseEventLogCbor } from '@originals/cel';

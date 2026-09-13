@@ -11,7 +11,7 @@
  */
 import type { AssetResource } from '../types/index.js';
 import type { EventLog } from '@originals/cel';
-import { hexSha256ToDigestMultibase } from '@originals/cel';
+import { hexSha256ToDigestMultibase } from '@originals/cel/legacy';
 
 export function checkGenesisResourceBinding(log: EventLog, resources: AssetResource[]): boolean {
   const genesis = log.events[0]?.data as { resources?: unknown; did?: unknown } | undefined;
