@@ -1,6 +1,6 @@
 import * as btc from '@scure/btc-signer';
+import type { ScriptType } from '@scure/btc-signer';
 import { parseInscriptions } from 'micro-ordinals';
-import { CBOR } from 'micro-ordinals/lib/cbor.js';
 import { StructuredError } from '@originals/cel';
 import { digestBytes, type SatSnapshot, type IndependentContentEvidence } from '@originals/cel/v3';
 import { base64 } from '@scure/base';
@@ -39,8 +39,51 @@ const inscriptionId = /^([0-9a-f]{64})i(0|[1-9]\d*)$/;
  * Returns an empty array (never throws) when no such witness is found — this validator only
  * asserts what it could independently confirm; it never asserts absence.
  */
-type DerivedInscription = { tags: { contentType?: string; metadata?: unknown }; body: Uint8Array };
+type DerivedInscription = { contentType?: string; body: Uint8Array; rawMetadata?: Uint8Array };
 
+const METADATA_TAG = 5;
+
+/**
+ * Extract the raw (pre-CBOR-decode) bytes of the metadata tag for each sequential inscription
+ * envelope in a script, without invoking any CBOR decoding — so the result is byte-identical
+ * to what any raw Ordinals indexer would report for `/r/metadata/:id`, never subject to a
+ * canonical-re-encoding mismatch against semantically-equal but differently-encoded CBOR.
+ *
+ * Only valid once `parseInscriptions(script, true)` has already returned a defined result for
+ * this same script: strict mode guarantees every envelope is non-cursed, sequential, and starts
+ * immediately after the leading `<pubkey> CHECKSIG` prefix, so this can walk those same
+ * boundaries directly (envelope `n`'s payload starts right after envelope `n-1`'s `ENDIF`) without
+ * re-deriving cursed/stutter detection itself. Mirrors ord's stable, publicly documented envelope
+ * format (`OP_FALSE OP_IF "ord" [tag,data]* OP_0 [body-chunks]* OP_ENDIF`), not an internal
+ * micro-ordinals implementation detail, so it does not depend on that library's non-public API.
+ */
+function rawMetadataPerEnvelope(script: ScriptType, count: number): (Uint8Array | undefined)[] {
+  const results: (Uint8Array | undefined)[] = [];
+  let pos = 5; // script[0..4] = [pubkey, 'CHECKSIG', 0, 'IF', "ord"]; first envelope's payload starts here
+  for (let n = 0; n < count; n++) {
+    let end = pos;
+    while (script[end] !== 'ENDIF') end++;
+    const chunks: Uint8Array[] = [];
+    for (let i = pos; i < end && script[i] !== 0; i += 2) {
+      const tag = script[i];
+      const data = script[i + 1];
+      if (tag instanceof Uint8Array && tag.length === 1 && tag[0] === METADATA_TAG && data instanceof Uint8Array) {
+        chunks.push(data);
+      }
+    }
+    results.push(chunks.length ? btc.utils.concatBytes(...chunks) : undefined);
+    pos = end + 4; // ENDIF, then the next envelope's [0, 'IF', "ord"]
+  }
+  return results;
+}
+
+/**
+ * Parse a reveal transaction's taproot script-path witness to recover the exact media type
+ * and content bytes an Ordinals-compatible interpreter would assign each inscription index,
+ * independent of whatever an Ordinals indexer separately reports for the same transaction.
+ * Returns an empty array (never throws) when no such witness is found — this validator only
+ * asserts what it could independently confirm; it never asserts absence.
+ */
 function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
   let tx: btc.Transaction;
   try {
@@ -58,28 +101,20 @@ function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
     try {
       const decoded = btc.Script.decode(witness[1]);
       const parsed = parseInscriptions(decoded, true);
-      if (parsed?.length) inscriptions.push(...parsed);
+      if (!parsed?.length) continue;
+      const rawMetadata = rawMetadataPerEnvelope(decoded, parsed.length);
+      parsed.forEach((inscription, index) => {
+        inscriptions.push({
+          contentType: inscription.tags.contentType,
+          body: inscription.body,
+          rawMetadata: rawMetadata[index],
+        });
+      });
     } catch {
       continue;
     }
   }
   return inscriptions;
-}
-
-/**
- * micro-ordinals only exposes the metadata tag already CBOR-decoded, not its raw wire
- * bytes, so exact-byte independent comparison isn't directly available. This re-encodes
- * through the same canonical CBOR coder that decoded it (see `cbor.ts`: encoding always
- * picks one deterministic minimal-length representation for a given decoded value), which
- * round-trips byte-for-byte for metadata this SDK's own writer produced with that same
- * coder. This is a deliberate, explicit comparison representation — not a silently
- * weakened check — but it is a real limitation for interop: metadata written by a
- * non-canonical CBOR encoder (different map key order, non-minimal integer widths) could
- * legitimately fail this specific round-trip and be reported as a disagreement even though
- * the decoded values are equal.
- */
-function metadataDigest(metadata: unknown): string | null {
-  return metadata === undefined ? null : digestBytes(CBOR.encode(metadata));
 }
 
 /**
@@ -150,9 +185,9 @@ export function createBitcoinCoreContentValidator(
         if (!inscription) continue;
         evidence.push({
           inscriptionId: publication.id,
-          mediaType: inscription.tags.contentType ?? '',
+          mediaType: inscription.contentType ?? '',
           contentDigest: digestBytes(inscription.body),
-          metadataDigest: metadataDigest(inscription.tags.metadata),
+          metadataDigest: inscription.rawMetadata === undefined ? null : digestBytes(inscription.rawMetadata),
         });
       }
       return evidence;
