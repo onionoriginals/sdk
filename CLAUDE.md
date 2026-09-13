@@ -3,10 +3,13 @@
 For asset API changes, examples, or consumer integrations, read
 [packages/sdk/V3.md](packages/sdk/V3.md) before editing. It is the current CEL 3
 API contract. Read [CONTEXT.md](CONTEXT.md) for controller, holder, publication,
-and verified-head terminology. The selected
+and verified-head terminology. [`specs/README.md`](specs/README.md) is the
+versioned manifest naming every document that currently governs protocol
+behavior — [asset identity](specs/originals-asset-identity.md), the selected
 [wire profile](specs/originals-cel-v3-profile.md),
 [authority contract](specs/originals-cel-v3-authority.md), and
-[inscription shape](specs/btco-inscription-shape.md) govern protocol behavior.
+[inscription shape](specs/btco-inscription-shape.md) — and which specs are
+historical/non-normative.
 
 ## Implementation routes
 
