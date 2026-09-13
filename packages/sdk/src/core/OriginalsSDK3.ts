@@ -1,5 +1,8 @@
 import { BitcoinPublications } from "../v3/bitcoin.js";
-import { HostedAssets } from "../v3/hosted.js";
+import {
+  HostedAssets,
+  type PublicReachabilityCheck,
+} from "../v3/hosted.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
@@ -30,6 +33,10 @@ export interface OriginalsSDKOptions
     LocalConfig {
   satProvider?: SatProvider;
   storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
+  /** Independent confirmation that a hosted WebVH publication's advertised log is actually public. */
+  publicReachability?: PublicReachabilityCheck;
+  /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
+  requirePublicReachability?: boolean;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -67,6 +74,8 @@ export class OriginalsSDK {
         "logging",
         "metrics",
         "enableLogging",
+        "publicReachability",
+        "requirePublicReachability",
       ],
     );
     const {
@@ -74,6 +83,8 @@ export class OriginalsSDK {
       onAppendFailure,
       satProvider,
       storageAdapter,
+      publicReachability,
+      requirePublicReachability,
       ...utilities
     } = options;
     const local = mutationOptions({ signer, onAppendFailure });
@@ -131,7 +142,10 @@ export class OriginalsSDK {
     this.metrics = new MetricsCollector();
     this.logger = new Logger("SDK", this.config);
     const hosted = hostedStorage
-      ? new HostedAssets(hostedStorage, local)
+      ? new HostedAssets(hostedStorage, local, {
+          publicReachability,
+          requirePublicReachability,
+        })
       : undefined;
     const resolver = new AssetResolver(
       network,

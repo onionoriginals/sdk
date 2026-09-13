@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
+import { installLocalStorage } from './cel3-test-helpers';
 
 // publish() does real hosting over HTTP, which has no origin under `bun test`.
 // Route it through an in-process store, same approach as the publish→resolve
@@ -40,10 +41,15 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
  */
 describe('CEL exposed to the demo', () => {
   let restore: () => void;
+  let restoreStorage: () => void;
   beforeEach(() => {
     restore = installHostFetch('demo.test');
+    restoreStorage = installLocalStorage().restore;
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
 
   test('create yields a genesis entry: signed, and with no parent', async () => {
     const engine = new DemoEngine();

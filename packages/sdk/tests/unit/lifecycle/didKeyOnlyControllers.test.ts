@@ -18,17 +18,8 @@ import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { KeyManager } from '../../../src/did/KeyManager';
-import {
-  createEventLog,
-  appendEvent,
-  celSignerFromKeyPair,
-  currentControllerVm,
-  deriveDidCel,
-  hexSha256ToDigestMultibase,
-  computeDigestMultibase,
-  canonicalizeEntryForChain,
-  verifyEventLog,
-} from '@originals/cel';
+import { deriveDidCel, computeDigestMultibase } from '@originals/cel';
+import { createEventLog, appendEvent, celSignerFromKeyPair, currentControllerVm, hexSha256ToDigestMultibase, canonicalizeEntryForChain, verifyEventLog } from '@originals/cel/legacy';
 import type { EventLog, LogEntry, DataIntegrityProof, DIDDocument } from '@originals/cel';
 import { hashResource } from '../../../src/utils/validation';
 

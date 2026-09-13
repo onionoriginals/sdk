@@ -1,3 +1,4 @@
+import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
 import { createLocalSigner, assetDigest } from "@originals/cel/v3";
@@ -154,4 +155,212 @@ test('a terminal hosted history can be published and remains deactivated for fre
   const loaded = await sdk.lifecycle.resolveAssetFromWeb(initial.did);
   expect(loaded.asset.state.active).toBe(false);
   expect(loaded.verification.verified).toBe(true);
+});
+
+// #601: a private/in-memory adapter can satisfy the storage interface without the
+// advertised HTTPS URL being reachable from anywhere else. Without an independent
+// check, publication must say so honestly rather than implying public reachability.
+test('publication is labeled adapter-asserted by default; an independent publicReachability check upgrades the label', async () => {
+  const store = storage();
+  const unchecked = OriginalsSDK.create({ signer, storageAdapter: store });
+  const bareResult = await unchecked.lifecycle.publishToWeb(
+    await unchecked.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  expect(bareResult.hostingEvidence).toBe('adapter-asserted');
+
+  const checked = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    // A real deployment would fetch this over the network, independent of `store`.
+    // This test only exercises the resulting content-matching/labeling logic.
+    publicReachability: async (url) => {
+      const path = new URL(url).pathname.slice(1);
+      const file = await store.getObject('example.com', path);
+      return file?.content ?? null;
+    },
+  });
+  const verifiedResult = await checked.lifecycle.publishToWeb(
+    await checked.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  expect(verifiedResult.hostingEvidence).toBe('independently-verified');
+});
+
+test('requirePublicReachability without a configured check refuses before any writes', async () => {
+  const store = storage();
+  let writes = 0;
+  const put = store.putObject.bind(store);
+  store.putObject = async (...args) => { writes++; return put(...args); };
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+  });
+  await expect(
+    sdk.lifecycle.publishToWeb(await sdk.lifecycle.createAsset([]), {
+      domain: 'example.com',
+    }),
+  ).rejects.toThrow(/publicReachability check/);
+  expect(writes).toBe(0);
+});
+
+test('requirePublicReachability fails closed while hosting is unreachable, and the identical prepared publication succeeds once it is not', async () => {
+  const store = storage();
+  let publiclyReachable = false;
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+    publicReachability: async (url) => {
+      if (!publiclyReachable) return null;
+      const path = new URL(url).pathname.slice(1);
+      const file = await store.getObject('example.com', path);
+      return file?.content ?? null;
+    },
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: 'example.com',
+  });
+  await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
+    'not independently reachable',
+  );
+  // No public evidence was ever obtained; the asset must stay unpublished locally.
+  expect(asset.state.layer).toBe('cel');
+  publiclyReachable = true;
+  const published = await sdk.lifecycle.publishPreparedToWeb(
+    JSON.parse(JSON.stringify(prepared)),
+  );
+  expect(published.hostingEvidence).toBe('independently-verified');
+});
+
+test('a well-formed but mismatched public log fails closed under requirePublicReachability rather than passing on shape alone', async () => {
+  const decoyStore = storage();
+  const decoySdk = OriginalsSDK.create({ signer, storageAdapter: decoyStore });
+  const decoy = await decoySdk.lifecycle.prepareWebPublication(
+    await decoySdk.lifecycle.createAsset([]),
+    { domain: 'example.com' },
+  );
+  const decoyLog = new TextEncoder().encode(
+    decoy.didLog.map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+  );
+
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: storage(),
+    requirePublicReachability: true,
+    // Reachable, well-formed WebVH log — just not the one that was just published.
+    publicReachability: async () => decoyLog,
+  });
+  await expect(
+    sdk.lifecycle.publishToWeb(await sdk.lifecycle.createAsset([]), {
+      domain: 'example.com',
+    }),
+  ).rejects.toThrow('not independently reachable');
+});
+
+// A log that still resolves to the SAME DID and asset binding is not
+// necessarily *this* publication — a stale cached copy would resolve just
+// as validly. The check must compare exact published bytes, not merely
+// "does this independently resolve to the right DID", or a stale-but-genuine
+// public copy would be labeled independently-verified.
+test('a byte-different copy of this exact DID and asset fails closed even though it independently resolves fine', async () => {
+  const store = storage();
+  let publicBytes: Uint8Array | null = null;
+  const sdk = OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+    requirePublicReachability: true,
+    publicReachability: async () => publicBytes,
+  });
+  const asset = await sdk.lifecycle.createAsset([]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: 'example.com',
+  });
+  // Stale by exactly one trailing byte: still the same DID, still a
+  // validly resolving log, still bound to the same asset genesis.
+  publicBytes = new TextEncoder().encode(
+    prepared.didLog.map((entry) => JSON.stringify(entry)).join('\n') + '\n\n',
+  );
+  await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
+    'not independently reachable',
+  );
+});
+
+// fetchPublicReachabilityCheck itself: a real HTTPS GET, never through the
+// storage adapter. It must reject an oversized response by streaming and
+// capping bytes as they arrive rather than buffering an unbounded body in
+// full first (the same stream-before-allocation class of bug as #606).
+test('fetchPublicReachabilityCheck returns the exact bytes for a small reachable response', async () => {
+  const realFetch = globalThis.fetch;
+  const body = new TextEncoder().encode('hello did log');
+  globalThis.fetch = (async () =>
+    new Response(body, { status: 200 })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toEqual(body);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck returns null without buffering a body that streams past the cap', async () => {
+  const realFetch = globalThis.fetch;
+  let cancelled = false;
+  let enqueuedChunks = 0;
+  const CHUNK = new Uint8Array(1024 * 1024).fill(1); // 1 MiB per chunk, cap is 2 MiB
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      enqueuedChunks++;
+      controller.enqueue(CHUNK); // never signals done — an unbounded/hostile body
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  globalThis.fetch = (async () =>
+    new Response(stream, { status: 200 })) as typeof fetch; // no Content-Length header
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+    // Cancelled after only a few MiB, not read until Bun's own test timeout.
+    expect(cancelled).toBe(true);
+    expect(enqueuedChunks).toBeLessThan(10);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck rejects a Content-Length that already exceeds the cap', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(new Uint8Array([1]), {
+      status: 200,
+      headers: { "content-length": String(100 * 1024 * 1024) },
+    })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+
+test('the public checker omits credentials and cached responses and refuses redirects', async () => {
+  const realFetch = globalThis.fetch;
+  let requested: RequestInit | undefined;
+  globalThis.fetch = (async (_url, init) => {
+    requested = init;
+    return new Response('public log');
+  }) as typeof fetch;
+  try {
+    await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(requested?.credentials).toBe('omit');
+    expect(requested?.cache).toBe('no-store');
+    expect(requested?.redirect).toBe('error');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

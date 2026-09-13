@@ -11,6 +11,32 @@ import {
 let host: ReturnType<typeof installCel3Host>;
 afterEach(() => host?.restore());
 
+test('cold recovery requires public reachability before recording success or deleting its wrapper', async () => {
+  host = installCel3Host('sub-1');
+  let reachable = false;
+  let records = 0;
+  globalThis.fetch = (async (input, init) => {
+    if (String(input).startsWith('https://') && String(input).endsWith('/did.jsonl')) {
+      expect(init?.credentials).toBe('omit');
+      if (!reachable) return new Response('private', { status: 401 });
+    }
+    if (String(input) === '/api/originals' && init?.method === 'POST') records++;
+    return host.fetch(input, init);
+  }) as typeof fetch;
+  const { engine } = engineWithSigner('sub-1');
+  await engine.create('Retained public check', 'Text', 'exact bytes');
+  await expect(engine.publish()).rejects.toThrow('not independently reachable');
+  const [item] = localPublicationRecoveries('sub-1');
+  const retained = localStorage.getItem(item.key);
+  await expect(recoverLocalPublication('sub-1', item.key)).rejects.toThrow('not independently reachable');
+  expect(records).toBe(0);
+  expect(localStorage.getItem(item.key)).toBe(retained);
+  reachable = true;
+  expect(await recoverLocalPublication('sub-1', item.key)).toContain('recovered');
+  expect(records).toBe(1);
+  expect(localStorage.getItem(item.key)).toBeNull();
+});
+
 for (const switchAt of ["before-publication", "during-publication", "during-account-record"] as const) {
   test(`account change ${switchAt} stops recovery side effects and retains the signed wrapper`, async () => {
     host = installCel3Host("sub-1");

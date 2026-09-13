@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { DataIntegrityProof } from '@originals/cel';
-import { PeerCelManager, CelSigner } from '@originals/cel';
+import { PeerCelManager, CelSigner } from '@originals/cel/legacy';
 import { createExternalReference } from '@originals/cel';
 import { serializeEventLogJson } from '@originals/cel';
 import { serializeEventLogCbor } from '@originals/cel';

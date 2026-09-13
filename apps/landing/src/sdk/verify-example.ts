@@ -25,7 +25,7 @@ export interface VerifiedExample {
 export async function verifyExample(): Promise<VerifiedExample> {
   const document = validateDocument(celLogJson);
   const history = verifyHistory(document, {
-    expectedDid: manifest.dids["did:cel"],
+    expectedAssetId: manifest.dids["did:cel"],
   });
   const checks = await verifyOriginal({
     did: manifest.dids["did:webvh"],

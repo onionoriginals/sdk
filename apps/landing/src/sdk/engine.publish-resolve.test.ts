@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { verifyHistory } from '@originals/sdk/cel';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
+import { installLocalStorage } from './cel3-test-helpers';
 
 // Route the browser adapter's PUT /api/host/* AND the resolver's https GETs
 // through one in-process host store, so publish → resolve is deterministic
@@ -35,13 +36,51 @@ function installHostFetch(host: string) {
 describe('publish → resolve roundtrip', () => {
   const host = 'demo.test';
   let restore: () => void;
+  let restoreStorage: () => void;
 
   beforeEach(() => {
     (import.meta as unknown as { env: Record<string, string> }).env ??= {};
     (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = host;
     restore = installHostFetch(host);
+    restoreStorage = installLocalStorage().restore;
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
+
+  test('public reachability failure preserves the publication for an exact retry', async () => {
+    const hostFetch = globalThis.fetch;
+    let reachable = false;
+    const publicUrls: string[] = [];
+    const methodLogs: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'PUT' && url.includes('did.jsonl')) {
+        methodLogs.push(typeof init.body === 'string'
+          ? init.body
+          : new TextDecoder().decode(init.body as Uint8Array));
+      }
+      if (url.startsWith('https://') && url.endsWith('/did.jsonl')) {
+        publicUrls.push(url);
+        expect(init?.credentials).toBe('omit');
+        if (!reachable) return new Response('private', { status: 401 });
+      }
+      return hostFetch(input, init);
+    }) as typeof fetch;
+
+    const engine = new DemoEngine();
+    await engine.create('Public check', 'Artwork', '<svg/>');
+    await expect(engine.publish()).rejects.toThrow('not independently reachable');
+    expect(engine.asset!.state.layer).toBe('cel');
+    reachable = true;
+    const published = await engine.publish();
+    expect(published.layer).toBe('did:webvh');
+    expect(publicUrls.length).toBe(2);
+    expect(new Set(publicUrls).size).toBe(1);
+    expect(methodLogs.length).toBe(2);
+    expect(new Set(methodLogs).size).toBe(1);
+  });
 
   test('publishes the DID log and resolves it back over (mocked) HTTPS', async () => {
     const engine = new DemoEngine();

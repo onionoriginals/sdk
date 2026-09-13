@@ -91,6 +91,38 @@ export class DIDCache {
    * Returns null if not cached or expired.
    */
   async get(did: string): Promise<DIDDocument | null> {
+    const entry = await this.getEntry(did);
+    // Return a copy: handing out the cached object by reference would let a
+    // caller that annotates/mutates the resolved document silently poison the
+    // cache for every later resolution of this DID (issue #291).
+    return entry ? structuredClone(entry.document) : null;
+  }
+
+  /**
+   * Get a cached DID document together with freshness metadata: when it was
+   * resolved and whether it is pinned. Callers making a current-authority
+   * decision (is this key presently authorized?) should treat a pinned or
+   * merely-cached entry as an offline snapshot, not as evidence the document
+   * is still current (issue #602) — `DIDManager.resolveDID(did, { mode:
+   * 'current' })` bypasses this cache entirely for that reason.
+   */
+  async getWithMetadata(did: string): Promise<{
+    document: DIDDocument;
+    resolvedAt: number;
+    pinned: boolean;
+    ttlMs: number;
+  } | null> {
+    const entry = await this.getEntry(did);
+    if (!entry) return null;
+    return {
+      document: structuredClone(entry.document),
+      resolvedAt: entry.resolvedAt,
+      pinned: entry.pinned,
+      ttlMs: entry.ttlMs,
+    };
+  }
+
+  private async getEntry(did: string): Promise<DIDCacheEntry | null> {
     let entry = this.cache.get(did) ?? null;
 
     // Try persistent storage fallback. Hydrated entries go through the same
@@ -121,10 +153,7 @@ export class DIDCache {
 
     this.touchAccessOrder(did);
     this.metrics?.recordCacheHit();
-    // Return a copy: handing out the cached object by reference would let a
-    // caller that annotates/mutates the resolved document silently poison the
-    // cache for every later resolution of this DID (issue #291).
-    return structuredClone(entry.document);
+    return entry;
   }
 
   /**

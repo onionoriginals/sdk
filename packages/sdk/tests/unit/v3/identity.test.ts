@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner, deriveAssetId } from "@originals/cel/v3";
+import { createLocalSigner, deriveAssetId, assetDigest } from "@originals/cel/v3";
 
 test("new exports name the asset honestly and old signed v3 envelopes still recover", async () => {
   const sdk = OriginalsSDK.create({ signer: createLocalSigner("Ed25519", new Uint8Array(32).fill(12)) });
@@ -9,7 +9,11 @@ test("new exports name the asset honestly and old signed v3 envelopes still reco
   expect(asset.id).toBe(expected);
   expect(asset.serialize()).toMatchObject({ version: 4, assetId: expected });
   expect("assetDid" in asset.serialize()).toBe(false);
-  const old = { format: "originals/asset", version: 3, assetDid: asset.state.didCel,
+  expect("didCel" in asset.state).toBe(false);
+  // The historical alias is reconstructible from the still-public digest helper,
+  // without exposing a dedicated compatibility field on AssetState.
+  const legacyAlias = "did:cel:" + assetDigest(asset.state.assetId);
+  const old = { format: "originals/asset", version: 3, assetDid: legacyAlias,
     eventLog: asset.celLog, resources: asset.serialize().resources };
   const before = JSON.stringify(old.eventLog);
   const restored = await OriginalsSDK.create().lifecycle.loadAsset(old);

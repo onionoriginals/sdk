@@ -4,6 +4,7 @@ import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enu
 import { StructuredError } from '@originals/cel';
 import { decode as decodeCbor } from '@originals/cel/cbor';
 import { hexToBytes } from '@originals/cel/encoding';
+import { readResponseBodyCapped, ResponseTooLargeError } from '../response-body-limit.js';
 
 interface HttpProviderOptions {
   baseUrl: string;
@@ -56,8 +57,9 @@ function assertSameOrigin(candidate: string, baseUrl: string): void {
 
 /**
  * Fetch a body while enforcing a hard byte cap — first via the Content-Length
- * header (cheap early reject) and again on the materialized bytes (a lying or
- * absent header can't smuggle an oversized/streamed body past the cap).
+ * header (cheap early reject), then streamed incrementally so a chunked or
+ * lying-header body can't smuggle an oversized payload into memory before
+ * the cap is enforced (issue #606).
  */
 async function fetchBytesWithLimit(url: string, maxBytes: number, init?: Record<string, unknown>): Promise<{ ok: boolean; bytes: Uint8Array } | null> {
   // redirect: 'error' closes the redirect-bypass hole in the origin pin: without
@@ -65,15 +67,15 @@ async function fetchBytesWithLimit(url: string, maxBytes: number, init?: Record<
   // be followed past assertSameOrigin (which only checks the first hop).
   const res = await (globalThis as any).fetch(url, { redirect: 'error', ...(init ?? {}) });
   if (!res.ok) return null;
-  const lenHeader = res.headers?.get?.('content-length');
-  if (lenHeader && Number(lenHeader) > maxBytes) {
-    throw new Error(`OrdHttpProvider: response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
+  try {
+    const bytes = await readResponseBodyCapped(res, maxBytes);
+    return { ok: res.ok, bytes };
+  } catch (err) {
+    if (err instanceof ResponseTooLargeError) {
+      throw new Error(`OrdHttpProvider: ${err.message}`);
+    }
+    throw err;
   }
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.byteLength > maxBytes) {
-    throw new Error(`OrdHttpProvider: response body exceeds ${maxBytes} bytes`);
-  }
-  return { ok: res.ok, bytes };
 }
 
 async function fetchJson<T>(url: string, maxBytes: number = DEFAULT_MAX_JSON_BYTES): Promise<T | null> {
@@ -193,13 +195,14 @@ export class OrdHttpProvider implements OrdinalsProvider {
         { inscriptionId: id }
       );
     }
-    const lenHeader = res.headers?.get?.('content-length');
-    if (lenHeader && Number(lenHeader) > this.maxJsonBytes) {
-      throw new Error(`OrdHttpProvider: /r/metadata response exceeds ${this.maxJsonBytes} bytes (Content-Length ${lenHeader})`);
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > this.maxJsonBytes) {
-      throw new Error(`OrdHttpProvider: /r/metadata response body exceeds ${this.maxJsonBytes} bytes`);
+    let bytes: Uint8Array;
+    try {
+      bytes = await readResponseBodyCapped(res, this.maxJsonBytes);
+    } catch (err) {
+      if (err instanceof ResponseTooLargeError) {
+        throw new Error(`OrdHttpProvider: /r/metadata ${err.message}`);
+      }
+      throw err;
     }
     let text = new TextDecoder().decode(bytes).trim();
     if (text.length === 0) return undefined;

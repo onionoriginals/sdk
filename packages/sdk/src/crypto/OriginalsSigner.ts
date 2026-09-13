@@ -14,7 +14,7 @@ import { StructuredError } from '@originals/cel';
 import type { KeyStore, ExternalSigner } from '../types/common.js';
 import type { KeyPair } from '../types/bitcoin.js';
 import type { DataIntegrityProof } from '@originals/cel';
-import type { CelSigner } from '@originals/cel';
+import type { CelSigner } from '@originals/cel/legacy';
 
 export interface OriginalsSigner {
   /** Absolute verification method id, e.g. "did:key:z6Mk…#z6Mk…". */

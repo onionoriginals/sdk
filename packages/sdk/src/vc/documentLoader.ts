@@ -26,7 +26,11 @@ export class DocumentLoader {
 
   private async resolveDID(didUrl: string): Promise<LoadedDocument> {
     const [did, fragment] = didUrl.split('#');
-    const didDoc = await this.didManager.resolveDID(did);
+    // Loading a verification method for signing/verification is a
+    // current-authority decision: a cached (even pinned) pre-rotation
+    // document must not keep an externally-retired key resolvable
+    // (issue #602).
+    const didDoc = await this.didManager.resolveDID(did, { mode: 'current' });
     if (!didDoc) {
       // The DID itself did not resolve. For fragment (verification method)
       // lookups, fall back to keys explicitly registered out-of-band via

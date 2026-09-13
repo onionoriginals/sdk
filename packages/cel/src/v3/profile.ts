@@ -405,17 +405,6 @@ export function encodeDocument(
 export function eventDigest(input: unknown): string {
   return hashJson(validateEvent(input));
 }
-/** @deprecated Originals 3.0 compatibility alias, not the CCG did:cel method. Use deriveAssetId. */
-export function deriveDid(input: unknown): string {
-  const event = validateEvent(input);
-  requireThat(
-    event.operation.type === "create",
-    "CEL_GENESIS",
-    "Genesis must be create",
-  );
-  return "did:cel:" + hashJson(event);
-}
-
 /** Derive the RFC 6920 identity of a validated genesis event. */
 export function deriveAssetId(input: unknown): string {
   const event = validateEvent(input);
