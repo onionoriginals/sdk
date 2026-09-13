@@ -37,6 +37,30 @@ test.each(['fetch', 'stream'])('whole deadline bounds a stuck %s even if transpo
   const fetchImpl = (async () => phase === 'fetch' ? new Promise<Response>(() => {}) : new Response(new ReadableStream({ start() {} }))) as typeof fetch;
   await expect(createBitcoinCoreChainValidator({ ...options, fetchImpl, timeoutMs: 20 })(snapshot)).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
 }, 1000);
+test('default budget accommodates a legitimate snapshot with many distinct publication blocks', async () => {
+  // 2 tip checks + 2 RPCs/block: 50 distinct blocks cost 102 requests, which
+  // exceeded the old default of 100 with no actual disagreement (issue found
+  // by review on #652) purely because the asset accumulated enough history.
+  const blockHash = (height: number) => height.toString(16).padStart(64, '0');
+  const blocks = Array.from({ length: 50 }, (_, i) => ({ height: i + 1, hash: blockHash(i + 1), txids: [tx] }));
+  const busySnapshot = { network: 'regtest', tipBefore: { height: 50, hash: blockHash(50) },
+    tipAfter: { height: 50, hash: blockHash(50) }, blocks } as SatSnapshot;
+  const calls: string[] = [];
+  const fetchImpl = (async (_url, init) => {
+    const { method, params } = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+    calls.push(method);
+    if (method === 'getblockchaininfo') return Response.json({ result: { chain: 'regtest', blocks: 50, bestblockhash: blockHash(50) } });
+    if (method === 'getblockhash') return Response.json({ result: blockHash(params[0] as number) });
+    if (method === 'getblock') {
+      const block = blocks.find(b => b.hash === params[0]);
+      return Response.json({ result: { height: block!.height, hash: block!.hash, tx: block!.txids } });
+    }
+    throw new Error('unexpected method');
+  }) as typeof fetch;
+  const result = await createBitcoinCoreChainValidator({ ...options, fetchImpl })(busySnapshot);
+  expect(result).toEqual({ source: 'http://localhost:18443' });
+  expect(calls).toHaveLength(102);
+});
 test('rejects URL credentials and sanitizes transport errors', async () => {
   expect(() => createBitcoinCoreChainValidator({ endpoint: 'http://user:secret@localhost' })).toThrow();
   const fetchImpl = (async () => { throw new Error('user:secret'); }) as typeof fetch;

@@ -13,7 +13,17 @@ export interface BitcoinCoreChainValidatorOptions {
   fetchImpl?: typeof fetch;
   /** Whole validation deadline, including streamed response bodies. Default 15 seconds. */
   timeoutMs?: number;
-  /** Maximum total RPC calls per validation. Default 100. */
+  /**
+   * Maximum total RPC calls per validation. Default 512, matching the
+   * primary snapshot reader's own default request budget
+   * (`SatSnapshotBudget.maxRequests` in `adapters/providers/sat-snapshot.ts`).
+   * Validation costs exactly `2 * snapshot.blocks.length + 2` requests (one
+   * tip check before and after, plus `getblockhash` + `getblock` per distinct
+   * active block) — a legitimate snapshot with more distinct blocks than
+   * `(maxRequests - 2) / 2` fails closed with `SAT_SNAPSHOT_BUDGET_EXCEEDED`
+   * even with no disagreement, so raise this alongside a larger configured
+   * `SatSnapshotBudget` rather than assuming the default covers it.
+   */
   maxRequests?: number;
   /** Streaming limit for each RPC response. Default 8 MiB. */
   maxResponseBytes?: number;
@@ -42,7 +52,7 @@ export function createBitcoinCoreChainValidator(options: BitcoinCoreChainValidat
     new TextEncoder().encode(`${options.rpcAuth.username}:${options.rpcAuth.password}`)));
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = positive(options.timeoutMs, 15_000);
-  const maxRequests = positive(options.maxRequests, 100);
+  const maxRequests = positive(options.maxRequests, 512);
   const maxBytes = positive(options.maxResponseBytes, 8 * 1024 * 1024);
   const unavailable = () => new StructuredError('SAT_SNAPSHOT_CHAIN_UNAVAILABLE', 'Independent Bitcoin Core validation is unavailable');
   const disagreement = () => new StructuredError('SAT_SNAPSHOT_CHAIN_DISAGREEMENT', 'Independent Bitcoin Core disagrees with the snapshot chain evidence');
