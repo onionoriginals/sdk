@@ -257,7 +257,7 @@ export class OrdHttpProvider implements OrdinalsProvider {
     ));
   }
 
-  getTransactionStatus(_txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }> {
+  getTransactionStatus(_txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }> {
     return Promise.reject(new StructuredError(
       'ORD_TX_STATUS_NOT_IMPLEMENTED',
       'OrdHttpProvider.getTransactionStatus is not implemented: transaction status cannot be determined. Configure an OrdinalsProvider with real status support.'

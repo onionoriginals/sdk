@@ -134,8 +134,8 @@ function harness(opts?: {
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
   txStatus?:
-    | { confirmed: boolean; confirmations?: number; blockHeight?: number }
-    | ((txid: string) => { confirmed: boolean; confirmations?: number; blockHeight?: number });
+    | { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }
+    | ((txid: string) => { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
   txStatusDelayMs?: number;
   /** The ordinal lookup the route classifies with; `null` = none configured. */
@@ -1751,6 +1751,38 @@ test('#567: recoveryConfirmations cannot lower the settlement threshold below si
   row = await poll();
   expect(row.settled).toBe(true);
   expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: a same-height reorg (block A replaced by block B) is detected via block hash, not just height', async () => {
+  // The scenario the height-only check could not see: the reveal reconfirms
+  // at the SAME height after a reorg, in a DIFFERENT block — no intervening
+  // unconfirmed poll required for this to matter, since a poll landing
+  // exactly on the replacement would otherwise read "still confirmed, same
+  // height" and conclude nothing happened.
+  let blockHash = 'a'.repeat(64);
+  const h = harness({
+    txStatus: () => ({ confirmed: true, confirmations: 1, blockHeight: 500, blockHash }),
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; confirmedBlockHeight?: number; confirmedBlockHash?: string }>;
+    }).inscriptions[0];
+  };
+
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.confirmedBlockHeight).toBe(500);
+  expect(row.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same height, different block: an ordinary one-block reorg, not a demotion.
+  blockHash = 'b'.repeat(64);
+  row = await poll();
+  expect(row.confirmedBlockHeight).toBe(500); // height alone looks unchanged…
+  expect(row.confirmedBlockHash).toBe('b'.repeat(64)); // …but the identity moved
 });
 
 test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(

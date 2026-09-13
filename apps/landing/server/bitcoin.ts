@@ -1917,35 +1917,48 @@ export function createBitcoinRoutes(deps: {
       const st = await readStatus(r.revealTxId);
       if (!st) continue;
       if (st.confirmed) {
-        // A reconfirmation at a DIFFERENT block height than last observed
-        // means a reorg happened — whether or not this poll (or an earlier
-        // one) ever saw the intervening unconfirmed state to demote through:
-        // `confirmedBlockHeight` deliberately survives that demotion (see
-        // InscriptionRecord) so this comparison still catches it. Depth
-        // itself is always freshly computed from the current chain view
-        // below, so this is a signal worth logging, not a correctness gate.
-        if (
-          current.confirmedBlockHeight !== undefined &&
-          st.blockHeight !== undefined &&
-          st.blockHeight !== current.confirmedBlockHeight
-        ) {
+        // A reconfirmation whose block IDENTITY differs from the one last
+        // observed means a reorg happened — whether or not this poll (or an
+        // earlier one) ever saw the intervening unconfirmed state to demote
+        // through: `confirmedBlockHash`/`confirmedBlockHeight` deliberately
+        // survive that demotion (see InscriptionRecord) so this comparison
+        // still catches it. Compare HASH when both sides have one — the
+        // actual block identity, which catches an ordinary one-block reorg
+        // that replaces the block at the SAME height with a different one,
+        // something a height-only comparison cannot see. Fall back to height
+        // only when a hash is unavailable on either side (an older record
+        // written before this field existed, or a provider that cannot
+        // supply one). Depth itself is always freshly computed from the
+        // current chain view below, so this is a signal worth logging, not a
+        // correctness gate.
+        const reorgedBlock =
+          current.confirmedBlockHash !== undefined && st.blockHash !== undefined
+            ? st.blockHash !== current.confirmedBlockHash
+            : current.confirmedBlockHeight !== undefined &&
+              st.blockHeight !== undefined &&
+              st.blockHeight !== current.confirmedBlockHeight;
+        if (reorgedBlock) {
           money('inscribe_reorg_reconfirmed', {
             sub,
             commitTxId: r.commitTxId,
             revealTxId: r.revealTxId,
             previousBlockHeight: current.confirmedBlockHeight,
             blockHeight: st.blockHeight,
+            ...(current.confirmedBlockHash !== undefined ? { previousBlockHash: current.confirmedBlockHash } : {}),
+            ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
           });
         }
-        // Skip the write once depth/height/status all already match: this is
-        // the steady state for a record sitting well below the settlement
-        // threshold that keeps being re-polled while other work is pending.
+        // Skip the write once depth/height/hash/status all already match:
+        // this is the steady state for a record sitting well below the
+        // settlement threshold that keeps being re-polled while other work
+        // is pending.
         if (
           current.status !== 'confirmed' ||
           current.confirmations !== st.confirmations ||
-          current.confirmedBlockHeight !== st.blockHeight
+          current.confirmedBlockHeight !== st.blockHeight ||
+          current.confirmedBlockHash !== st.blockHash
         ) {
-          store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight });
+          store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash });
           changed = true;
         }
         if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
@@ -2001,6 +2014,7 @@ export function createBitcoinRoutes(deps: {
             confirmations: r.confirmations,
             settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
             ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
+            ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
           }
         : {}),
       createdAt: r.createdAt,
@@ -2060,9 +2074,10 @@ export function createBitcoinRoutes(deps: {
     }
     if (!rec) return json({ error: 'not_found' }, 404);
     if (rec.status === 'confirmed' && rec.retired) {
-      // Settled: confirmations/confirmedBlockHeight are the frozen values from
-      // whichever poll crossed the threshold — a retired record is never
-      // rechecked, so there is nothing fresher to report.
+      // Settled: confirmations/confirmedBlockHeight/confirmedBlockHash are
+      // the frozen values from whichever poll crossed the threshold — a
+      // retired record is never rechecked, so there is nothing fresher to
+      // report.
       return json({
         commitTxId,
         revealTxId: rec.revealTxId,
@@ -2071,6 +2086,7 @@ export function createBitcoinRoutes(deps: {
         settled: true,
         confirmations: rec.confirmations,
         ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+        ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
       });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
@@ -2102,7 +2118,11 @@ export function createBitcoinRoutes(deps: {
     }
     if (revealStatus?.confirmed) {
       reclaimIfSuperseded();
-      store.setStatus(sub, commitTxId, 'confirmed', { confirmations: revealStatus.confirmations, blockHeight: revealStatus.blockHeight });
+      store.setStatus(sub, commitTxId, 'confirmed', {
+        confirmations: revealStatus.confirmations,
+        blockHeight: revealStatus.blockHeight,
+        blockHash: revealStatus.blockHash,
+      });
       const settled = (revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS;
       if (settled) store.retire(sub, commitTxId);
       return json({
@@ -2113,6 +2133,7 @@ export function createBitcoinRoutes(deps: {
         settled,
         confirmations: revealStatus.confirmations,
         ...(revealStatus.blockHeight !== undefined ? { confirmedBlockHeight: revealStatus.blockHeight } : {}),
+        ...(revealStatus.blockHash !== undefined ? { confirmedBlockHash: revealStatus.blockHash } : {}),
       });
     }
     try {

@@ -135,6 +135,7 @@ export class SignetProvider implements OrdinalsProvider {
     return {
       confirmed: Boolean(data.confirmed ?? data.block_height),
       blockHeight: typeof data.block_height === 'number' ? data.block_height : undefined,
+      blockHash: typeof data.block_hash === 'string' ? data.block_hash : undefined,
       confirmations: typeof data.confirmations === 'number' ? data.confirmations : undefined,
     };
   }

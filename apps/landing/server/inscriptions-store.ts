@@ -96,17 +96,31 @@ export interface InscriptionRecord {
    */
   confirmations?: number;
   /**
-   * Block height of the MOST RECENT observed confirmation — block identity,
-   * not a live reading. Unlike `confirmations`, this is NOT cleared when a
-   * reorg demotes the record off `confirmed`: it is deliberately sticky, so
-   * that when the reveal reconfirms — in the same block height (the report
-   * was transient) or a different one (a real reorg) — the reconciler can
-   * tell which happened instead of treating every reconfirmation as
-   * continuous with the one before the reorg. Only ever overwritten by a
-   * fresh confirmed observation; never read as "currently confirmed" without
-   * also checking `status`.
+   * Block height of the MOST RECENT observed confirmation. Unlike
+   * `confirmations`, this is NOT cleared when a reorg demotes the record off
+   * `confirmed`: it is deliberately sticky, so a later reconfirmation can be
+   * compared against it. Only ever overwritten by a fresh confirmed
+   * observation; never read as "currently confirmed" without also checking
+   * `status`.
+   *
+   * Height alone is NOT block identity: an ordinary one-block reorg can
+   * replace the block at a given height with a different one, so a height
+   * match does not prove the reveal reconfirmed in the SAME block. See
+   * `confirmedBlockHash`, which is the actual identity check; height is kept
+   * alongside it as a human-readable depth/position hint and as a fallback
+   * for providers that cannot supply a hash.
    */
   confirmedBlockHeight?: number;
+  /**
+   * Block hash of the MOST RECENT observed confirmation — the real block
+   * IDENTITY, sticky across a demotion for the same reason as
+   * `confirmedBlockHeight`. A same-height reorg (block A replaced by block B
+   * at height H) changes this even though `confirmedBlockHeight` alone would
+   * not notice. ABSENT when the provider did not supply one; a caller must
+   * not treat a missing hash as "unchanged" — fall back to comparing
+   * `confirmedBlockHeight` in that case.
+   */
+  confirmedBlockHash?: string;
 }
 
 /** A deposit read the server was able to trust, as persisted. */
@@ -139,20 +153,21 @@ export interface InscriptionsStore {
   retire(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
   /**
-   * `evidence` is the block height/confirmation depth a fresh provider read
-   * just reported, recorded only when `status` is `confirmed`. `confirmations`
-   * (a live depth) is cleared for every other status. `evidence.blockHeight`
-   * is instead STICKY across a demotion — see `InscriptionRecord.
-   * confirmedBlockHeight` — so a later reconfirmation can be compared against
-   * the pre-reorg block height rather than read as a continuation of it. Omit
-   * `evidence` (or leave a field off it) when the caller does not have a
+   * `evidence` is the block height/hash/confirmation depth a fresh provider
+   * read just reported, recorded only when `status` is `confirmed`.
+   * `confirmations` (a live depth) is cleared for every other status.
+   * `evidence.blockHeight`/`evidence.blockHash` are instead STICKY across a
+   * demotion — see `InscriptionRecord.confirmedBlockHeight` /
+   * `confirmedBlockHash` — so a later reconfirmation can be compared against
+   * the pre-reorg block identity rather than read as a continuation of it.
+   * Omit `evidence` (or leave a field off it) when the caller does not have a
    * fresh read.
    */
   setStatus(
     subOrgId: string,
     commitTxId: string,
     status: InscriptionStatus,
-    evidence?: { confirmations?: number; blockHeight?: number }
+    evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
   ): void;
   /**
    * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
@@ -534,12 +549,16 @@ export function createInscriptionsStore(opts: {
       // pair only after its configured recovery horizon has elapsed.
       // Depth is current-truth-while-confirmed only: any OTHER status
       // (including the reorg demotion back to reveal_broadcast) clears it
-      // rather than carrying a stale reading forward. Block height is
-      // deliberately NOT cleared on demotion — see `confirmedBlockHeight` —
-      // so a later reconfirmation can still be compared against it.
+      // rather than carrying a stale reading forward. Block height/hash are
+      // deliberately NOT cleared on demotion — see `confirmedBlockHeight` /
+      // `confirmedBlockHash` — so a later reconfirmation can still be
+      // compared against them.
       rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
       if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
         rec.confirmedBlockHeight = evidence.blockHeight;
+      }
+      if (status === 'confirmed' && evidence?.blockHash !== undefined) {
+        rec.confirmedBlockHash = evidence.blockHash;
       }
       writeAll(subOrgId, recs);
     },

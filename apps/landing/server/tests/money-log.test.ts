@@ -258,7 +258,7 @@ describe('inscribe-path transitions (R29)', () => {
   function inscribeHarness(
     broadcast?: (txHex: string) => Promise<string>,
     opts?: {
-      getTransactionStatus?: (txid: string) => Promise<{ confirmed: boolean; confirmations?: number; blockHeight?: number }>;
+      getTransactionStatus?: (txid: string) => Promise<{ confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }>;
       dataDir?: string;
     }
   ) {
@@ -347,6 +347,7 @@ describe('inscribe-path transitions (R29)', () => {
         settled?: boolean;
         confirmations?: number;
         confirmedBlockHeight?: number;
+        confirmedBlockHash?: string;
       }>;
     }).inscriptions[0];
   }
@@ -402,6 +403,36 @@ describe('inscribe-path transitions (R29)', () => {
     // A retired record is never rechecked again, so a later reorg at this
     // depth cannot un-settle it — only a fresh (unretired) confirmation can.
     expect(cap.of('inscribe_reorg_reconfirmed')).toHaveLength(1);
+  });
+
+  test('#567: a same-height reorg (block A replaced by block B) is caught by hash even though height never changes', async () => {
+    const pair = buildPair();
+    const chain = { confirmed: true, confirmations: 1, blockHeight: 500, blockHash: 'a'.repeat(64) };
+    const { routes, cap, store } = inscribeHarness(undefined, {
+      getTransactionStatus: async () => ({ ...chain }),
+    });
+    await submit(routes, pair);
+
+    let row = await poll(routes);
+    expect(row.confirmedBlockHeight).toBe(500);
+    expect(row.confirmedBlockHash).toBe('a'.repeat(64));
+    expect(cap.of('inscribe_reorg_reconfirmed')).toHaveLength(0);
+
+    // An ordinary one-block reorg: the tx reconfirms in a DIFFERENT block at
+    // the exact SAME height. A poll that only compared height — or one that
+    // missed the transient unconfirmed gap entirely, which this scenario
+    // does not even require — would see nothing worth reporting.
+    chain.blockHash = 'b'.repeat(64);
+    row = await poll(routes);
+    expect(row.confirmedBlockHeight).toBe(500);
+    expect(row.confirmedBlockHash).toBe('b'.repeat(64));
+    const reorgs = cap.of('inscribe_reorg_reconfirmed');
+    expect(reorgs).toHaveLength(1);
+    expect(reorgs[0].previousBlockHeight).toBe(500);
+    expect(reorgs[0].blockHeight).toBe(500);
+    expect(reorgs[0].previousBlockHash).toBe('a'.repeat(64));
+    expect(reorgs[0].blockHash).toBe('b'.repeat(64));
+    expect(store.get('sub-1', pair.commitTxId)?.confirmedBlockHash).toBe('b'.repeat(64));
   });
 });
 
