@@ -705,6 +705,20 @@ export function createBitcoinRoutes(deps: {
   moneyLog?: MoneyLogger;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /**
+   * The explicit settlement policy (#567): confirmation depth at which a
+   * confirmed reveal is treated as settled and its recovery artifacts are
+   * retired. An application recovery horizon, not a Bitcoin finality
+   * guarantee — deeper reorgs than this remain possible. Anything that is
+   * not a positive integer falls back to the default (`positiveInt`).
+   *
+   * Floored at six (CLAUDE.md's "six-confirmation retention rule"): this
+   * knob exists to let a deployment retain recovery artifacts LONGER than
+   * the default, never shorter — a lower value would silently shrink the
+   * window past a reorg could invalidate a discarded signed pair with
+   * nothing left to recover from.
+   */
+  recoveryConfirmations?: number;
 }): {
   funding: Handler;
   sat: Handler;
@@ -755,8 +769,14 @@ export function createBitcoinRoutes(deps: {
   // within the hour.
   const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
   // Application recovery horizon, not a Bitcoin finality guarantee. Retain
-  // both signed transactions and recheck the chain until six confirmations.
-  const RECOVERY_CONFIRMATIONS = 6;
+  // both signed transactions and recheck the chain until this many
+  // confirmations — the explicit settlement policy behind the `settled` flag
+  // in the /api/btc/inscribe response (#567). Configurable UPWARD only: a
+  // deployment may extend this past the default for extra margin, but never
+  // shrink it below six, the repository's documented retention floor
+  // (CLAUDE.md's "six-confirmation retention rule") — going lower would
+  // retire a signed pair's recovery artifacts before that window closes.
+  const RECOVERY_CONFIRMATIONS = Math.max(6, positiveInt(deps.recoveryConfirmations, 6));
 
   // ONE fee source for the money path (R3/KTD3). The deposit quote, the
   // /api/btc/fee estimate the browser builds the inscription against, and the
@@ -1965,12 +1985,18 @@ export function createBitcoinRoutes(deps: {
    * 2. LIVE pairs stuck at commit_broadcast (reveal broadcast failed at some
    *    point) get their reveal completed from the persisted copy once their
    *    commit confirms.
-   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS. An earlier confirmation
-   *    remains reversible: retain both transactions, demote after a reorg, and
-   *    rebroadcast. Retire the artifacts only at the retention horizon.
-   *    One that is STILL unconfirmed
-   *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
-   *    pair, commit first — either or both may have left the mempool.
+   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS: the explicit
+   *    settlement policy (#567). A `confirmed` record below that depth is
+   *    reported `settled: false` — confirmed-but-unsettled, both transactions
+   *    retained, confirmation depth and block height persisted on every
+   *    change — because it remains reversible: a reorg demotes it back to
+   *    `reveal_broadcast` (clearing that depth/height) and it is rebroadcast.
+   *    A reconfirmation is recorded even when it lands at a DIFFERENT block
+   *    height than last observed. Only at the retention horizon are the
+   *    recovery artifacts retired and the record reported `settled: true`.
+   *    One that is STILL unconfirmed after REVEAL_REBROADCAST_AFTER_MS is
+   *    re-pushed from the persisted pair, commit first — either or both may
+   *    have left the mempool.
    */
   const inscribeList: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
@@ -2118,7 +2144,62 @@ export function createBitcoinRoutes(deps: {
       const st = await readStatus(r.revealTxId);
       if (!st) continue;
       if (st.confirmed) {
-        if (r.status !== 'confirmed') { store.setStatus(sub, r.commitTxId, 'confirmed'); changed = true; }
+        // A reconfirmation whose block IDENTITY differs from the one last
+        // observed means a reorg happened — whether or not this poll (or an
+        // earlier one) ever saw the intervening unconfirmed state to demote
+        // through: `confirmedBlockHash`/`confirmedBlockHeight` deliberately
+        // survive that demotion (see InscriptionRecord) so this comparison
+        // still catches it. Compare HASH when both sides have one — the
+        // actual block identity, which catches an ordinary one-block reorg
+        // that replaces the block at the SAME height with a different one,
+        // something a height-only comparison cannot see. Fall back to height
+        // only when a hash is unavailable on either side (an older record
+        // written before this field existed, or a provider that cannot
+        // supply one). Depth itself is always freshly computed from the
+        // current chain view below, so this is a signal worth logging, not a
+        // correctness gate.
+        const reorgedBlock =
+          current.confirmedBlockHash !== undefined && st.blockHash !== undefined
+            ? st.blockHash !== current.confirmedBlockHash
+            : current.confirmedBlockHeight !== undefined &&
+              st.blockHeight !== undefined &&
+              st.blockHeight !== current.confirmedBlockHeight;
+        if (reorgedBlock) {
+          money('inscribe_reorg_reconfirmed', {
+            sub,
+            commitTxId: r.commitTxId,
+            revealTxId: r.revealTxId,
+            previousBlockHeight: current.confirmedBlockHeight,
+            blockHeight: st.blockHeight,
+            ...(current.confirmedBlockHash !== undefined ? { previousBlockHash: current.confirmedBlockHash } : {}),
+            ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
+          });
+        }
+        // Skip the write once depth/height/hash/status all already match —
+        // the steady state for a record sitting well below the settlement
+        // threshold that keeps being re-polled while other work is pending.
+        // Mirror setStatus's own semantics rather than comparing raw fields:
+        // an OMITTED height/hash never counts as a change on its own (it
+        // leaves the stored value as-is, or store.setStatus clears height
+        // only when hashChanged proves the identity actually moved) — a
+        // literal-field comparison would otherwise treat "still confirmed,
+        // provider's best-effort height lookup failed again" as a change on
+        // every single poll, writing to disk and bumping `updatedAt` for a
+        // read that changed nothing.
+        const hashChanged = st.blockHash !== undefined && st.blockHash !== current.confirmedBlockHash;
+        const heightChanged =
+          st.blockHeight !== undefined
+            ? st.blockHeight !== current.confirmedBlockHeight
+            : hashChanged && current.confirmedBlockHeight !== undefined;
+        if (
+          current.status !== 'confirmed' ||
+          current.confirmations !== st.confirmations ||
+          heightChanged ||
+          hashChanged
+        ) {
+          store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash });
+          changed = true;
+        }
         if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
         continue;
       }
@@ -2162,6 +2243,19 @@ export function createBitcoinRoutes(deps: {
       fundingOutpoints: outpoints,
       status: r.status,
       ...(r.superseded ? { superseded: true } : {}),
+      // The settlement contract (#567): a `confirmed` record is either
+      // confirmed-but-unsettled (still within the recovery window, both
+      // transactions retained) or settled (recovery artifacts retired once
+      // `confirmations` reaches the configured threshold). Absent for every
+      // other status — depth/height are current-truth-while-confirmed only.
+      ...(r.status === 'confirmed'
+        ? {
+            confirmations: r.confirmations,
+            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
+            ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
+          }
+        : {}),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
       };
@@ -2219,7 +2313,20 @@ export function createBitcoinRoutes(deps: {
     }
     if (!rec) return json({ error: 'not_found' }, 404);
     if (rec.status === 'confirmed' && rec.retired) {
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      // Settled: confirmations/confirmedBlockHeight/confirmedBlockHash are
+      // the frozen values from whichever poll crossed the threshold — a
+      // retired record is never rechecked, so there is nothing fresher to
+      // report.
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled: true,
+        confirmations: rec.confirmations,
+        ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+        ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
+      });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
     // confirmed), so the recovery artifacts were dropped. Nothing to push.
@@ -2250,9 +2357,23 @@ export function createBitcoinRoutes(deps: {
     }
     if (revealStatus?.confirmed) {
       reclaimIfSuperseded();
-      store.setStatus(sub, commitTxId, 'confirmed');
-      if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      store.setStatus(sub, commitTxId, 'confirmed', {
+        confirmations: revealStatus.confirmations,
+        blockHeight: revealStatus.blockHeight,
+        blockHash: revealStatus.blockHash,
+      });
+      const settled = (revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS;
+      if (settled) store.retire(sub, commitTxId);
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled,
+        confirmations: revealStatus.confirmations,
+        ...(revealStatus.blockHeight !== undefined ? { confirmedBlockHeight: revealStatus.blockHeight } : {}),
+        ...(revealStatus.blockHash !== undefined ? { confirmedBlockHash: revealStatus.blockHash } : {}),
+      });
     }
     try {
       if (revealStatus && rec.status === 'confirmed') {
