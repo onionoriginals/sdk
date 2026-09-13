@@ -105,6 +105,19 @@ test("accepts the complete boundary at a stable declared snapshot, with possessi
   expect(result.scope).toBe("sat");
   expect(result.crossSatCanonicality).toBe("unknown");
   expect(result.ownership.owner).toBe("A");
+  expect(result.trajectoryAssurance).toBe("not-independently-derived");
+});
+
+// #594: `ownership` is a single point-in-time observation. This resolver never
+// walks the UTXO/transfer graph, so it cannot independently derive how the sat
+// arrived at that owner/satpoint — every accepted result must say so honestly,
+// unconditionally, regardless of how many publications or observations agree.
+test("every accepted resolution reports sat trajectory as not independently derived", () => {
+  for (const scenario of fixtures.cases) {
+    const result = resolveSat(observations(scenario));
+    if (result.status === "accepted")
+      expect(result.trajectoryAssurance).toBe("not-independently-derived");
+  }
 });
 
 for (const scenario of fixtures.cases)

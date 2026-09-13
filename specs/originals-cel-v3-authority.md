@@ -57,6 +57,17 @@ from controller history and is never written into a CEL operation. Proof-created
 times do not decide event order or manufacture a unique `updatedAt` value:
 proofs are outside event identity and may differ without changing the event.
 
+Live ownership is also a single point-in-time observation, never an
+independently derived transfer path. Resolution reports the sat's current
+holder/satpoint as asserted by the configured index (or, where a second
+independent index is configured to cross-check that assertion, as corroborated
+between the two), never as a reconstruction of the sat's history from raw
+UTXO/consensus data. Two indexes agreeing on the current holder is corroboration
+of that one snapshot, not independent derivation of how the sat got there. A
+resolution result must say so explicitly (`trajectoryAssurance:
+'not-independently-derived'`) rather than let a stronger enumeration/ownership
+cross-check on the current snapshot read as proof of the historical trajectory.
+
 Apply an operation to a temporary copy only after its schema, signature,
 controller and previousEvent checks pass:
 

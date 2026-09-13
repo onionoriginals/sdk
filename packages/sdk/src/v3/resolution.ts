@@ -59,6 +59,8 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    /** See `SatResolution.trajectoryAssurance`: ownership is a snapshot fact, never an independently derived transfer path. */
+    trajectoryAssurance?: "not-independently-derived";
   };
 }
 
@@ -285,6 +287,7 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        trajectoryAssurance: result.resolution.trajectoryAssurance,
       },
     };
   }
