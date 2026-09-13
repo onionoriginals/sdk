@@ -38,6 +38,24 @@ export interface PublicationObservation {
         metadata: Uint8Array | null;
       };
 }
+/**
+ * How the snapshot's chain facts (tip, active block hashes, reveal transaction
+ * membership) were established, distinct from indexer enumeration completeness.
+ * `node-validated` never certifies that no later/omitted publication exists —
+ * only an independent index can corroborate enumeration completeness.
+ */
+export interface ChainEvidence {
+  /**
+   * `provider-asserted`: the same provider that supplied Ordinals data also
+   * asserted these chain facts, with no independent cross-check.
+   * `node-validated`: a separately configured Bitcoin node independently
+   * confirmed the chain tip, active block hashes, and reveal transaction
+   * membership this snapshot relies on.
+   */
+  assurance: "provider-asserted" | "node-validated";
+  /** Non-secret label identifying the independent source (e.g. a host name). Never a credential. */
+  source?: string;
+}
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;
@@ -52,6 +70,8 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /** Omitted or absent means `{ assurance: 'provider-asserted' }`: no independent chain validation was performed. */
+  chainEvidence?: ChainEvidence;
 }
 export type ResolutionFailure =
   | "invalid"
@@ -88,6 +108,8 @@ export type SatResolution = Readonly<
       pending: readonly string[];
       diagnostics: readonly Readonly<{ inscriptionId: string; code: string }>[];
       webvhBinding: "unverified";
+      /** Scoped to chain facts only; never implies verified enumeration completeness. */
+      chainEvidence: Readonly<ChainEvidence>;
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -149,6 +171,17 @@ export function resolveSat(
     ![snapshot.tipBefore, snapshot.tipAfter, snapshot.indexTip].every(validTip)
   )
     return failure("incomplete", "Missing chain/index tip");
+  if (
+    snapshot.chainEvidence !== undefined &&
+    (typeof snapshot.chainEvidence !== "object" ||
+      snapshot.chainEvidence === null ||
+      !["provider-asserted", "node-validated"].includes(
+        snapshot.chainEvidence.assurance,
+      ) ||
+      (snapshot.chainEvidence.source !== undefined &&
+        typeof snapshot.chainEvidence.source !== "string"))
+  )
+    return failure("invalid", "Malformed chain evidence assurance");
   if (!sameTip(snapshot.tipBefore, snapshot.tipAfter))
     return failure("chain-changed", "Chain changed during observation");
   if (!snapshot.indexHealthy || !sameTip(snapshot.tipBefore, snapshot.indexTip))
@@ -431,6 +464,15 @@ export function resolveSat(
       "not-found",
       "No valid boundary in the complete sat observations",
     );
+  const chainEvidence: ChainEvidence =
+    snapshot.chainEvidence?.assurance === "node-validated"
+      ? {
+          assurance: "node-validated",
+          ...(snapshot.chainEvidence.source !== undefined
+            ? { source: snapshot.chainEvidence.source }
+            : {}),
+        }
+      : { assurance: "provider-asserted" };
   const result: SatResolution = {
     status: "accepted",
     scope: "sat",
@@ -443,6 +485,7 @@ export function resolveSat(
     pending,
     diagnostics,
     webvhBinding: "unverified",
+    chainEvidence,
   };
   freeze<unknown>(result);
   return result;

@@ -4,7 +4,8 @@ import { RegtestProvider } from '../../../src/adapters/providers/RegtestProvider
 
 const nativeFetch = globalThis.fetch;
 let server: ReturnType<typeof Bun.serve> | undefined;
-afterEach(() => { server?.stop(true); globalThis.fetch = nativeFetch; });
+let independentServer: ReturnType<typeof Bun.serve> | undefined;
+afterEach(() => { server?.stop(true); independentServer?.stop(true); globalThis.fetch = nativeFetch; });
 const txid = 'a'.repeat(64), hash = 'b'.repeat(64), id = txid + 'i0';
 
 function fixture(kind: 'quicknode' | 'regtest', options: {
@@ -13,6 +14,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
   snapshotBudget?: { timeoutMs?: number; maxRequests?: number }; delayStatusMs?: number;
   metadataHttpStatus?: number; metadataHttpBody?: string; delayMetadataMs?: number; maxJsonBytes?: number;
+  independentChainEndpoint?: string;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   let statuses = 0, tips = 0, indexHashes = 0;
@@ -69,7 +71,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   }) as typeof fetch;
   const provider = kind === 'regtest'
     ? new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only', snapshotBudget: options.snapshotBudget })
-    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}), snapshotBudget: options.snapshotBudget, maxJsonBytes: options.maxJsonBytes });
+    : new QuickNodeProvider({ endpoint: server.url.href, contentEncoding: options.encoding ?? 'base64', ...(options.rawContent ? { contentBaseUrl: server.url.href } : {}), snapshotBudget: options.snapshotBudget, maxJsonBytes: options.maxJsonBytes, ...(options.independentChainEndpoint ? { independentChainEndpoint: options.independentChainEndpoint } : {}) });
   return { provider, calls };
 }
 
@@ -234,4 +236,64 @@ test('QuickNode raw metadata remains inside the total snapshot deadline', async 
 test('QuickNode raw metadata enforces its configured response size cap', async () => {
   const { provider } = fixture('quicknode', { rawContent: true, maxJsonBytes: 1024, metadata: 'ab'.repeat(1024) });
   await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'QUICKNODE_RESPONSE_TOO_LARGE' });
+});
+
+// Issue #594: a single QuickNode endpoint supplies BOTH the Ordinals view and
+// the Bitcoin chain view, so cross-checking one dishonest source against
+// itself proves nothing. These tests exercise a second, independently
+// configured Bitcoin Core RPC endpoint used only to validate chain facts.
+function independentChainFixture(options: {
+  bestblockhash?: string; blockHash?: string; blockTxs?: string[];
+} = {}) {
+  const bestblockhash = options.bestblockhash ?? hash;
+  const blockHash = options.blockHash ?? hash;
+  const blockTxs = options.blockTxs ?? ['c'.repeat(64), txid];
+  independentServer = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
+    const { method } = await req.json() as { method: string; params: unknown[] };
+    let result: unknown;
+    switch (method) {
+      case 'getblockchaininfo': result = { chain: 'main', blocks: 100, bestblockhash }; break;
+      case 'getblockhash': result = blockHash; break;
+      case 'getblock': result = { hash: blockHash, height: 100, confirmations: 1, tx: blockTxs }; break;
+      default: return Response.json({ error: { code: -32601, message: 'Method not found' } });
+    }
+    return Response.json({ result });
+  } });
+  return independentServer.url.href;
+}
+
+test('labels chain evidence node-validated when an independent Bitcoin node agrees', async () => {
+  const independentChainEndpoint = independentChainFixture();
+  const { provider } = fixture('quicknode', { independentChainEndpoint });
+  const snapshot = await provider.getSatSnapshot('123');
+  expect(snapshot.chainEvidence).toEqual({ assurance: 'node-validated', source: new URL(independentChainEndpoint).host });
+});
+
+test('defaults to provider-asserted chain evidence with no independent source configured', async () => {
+  const { provider } = fixture('quicknode');
+  const snapshot = await provider.getSatSnapshot('123');
+  expect(snapshot.chainEvidence).toEqual({ assurance: 'provider-asserted' });
+});
+
+test('fails closed instead of downgrading when an independent source reports a fabricated chain tip', async () => {
+  const independentChainEndpoint = independentChainFixture({ bestblockhash: 'd'.repeat(64) });
+  const { provider } = fixture('quicknode', { independentChainEndpoint });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+});
+
+test('fails closed when an independent source reports a different active block hash', async () => {
+  const independentChainEndpoint = independentChainFixture({ blockHash: 'e'.repeat(64) });
+  const { provider } = fixture('quicknode', { independentChainEndpoint });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+});
+
+test('fails closed when an independent source omits the reveal transaction from its active block', async () => {
+  const independentChainEndpoint = independentChainFixture({ blockTxs: ['c'.repeat(64)] });
+  const { provider } = fixture('quicknode', { independentChainEndpoint });
+  await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+});
+
+test('refuses to configure an independent chain endpoint identical to the primary endpoint', () => {
+  expect(() => new QuickNodeProvider({ endpoint: 'https://a.example/token', contentEncoding: 'utf8', independentChainEndpoint: 'https://a.example/token' }))
+    .toThrow(/independentChainEndpoint/);
 });

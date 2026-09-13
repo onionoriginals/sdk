@@ -149,6 +149,29 @@ test("does not accept conflicting confirmed and pending records for one inscript
   expect(resolveSat(snapshot).status).toBe("inconsistent-evidence");
 });
 
+test("chain evidence defaults to provider-asserted when the snapshot omits it", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.chainEvidence).toEqual({ assurance: "provider-asserted" });
+});
+
+test("chain evidence passes through an independently node-validated snapshot with its source label", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  snapshot.chainEvidence = { assurance: "node-validated", source: "core.example" };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.chainEvidence).toEqual({ assurance: "node-validated", source: "core.example" });
+});
+
+test("chain evidence never upgrades an unrecognized assurance value to node-validated", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  // @ts-expect-error deliberately malformed provider input
+  snapshot.chainEvidence = { assurance: "fabricated" };
+  expect(resolveSat(snapshot).status).toBe("invalid");
+});
+
 test("accepts raw resource bytes with full CEL metadata and binds the exact byte digest", () => {
   const snapshot = observations(fixtures.cases[0]),
     publication = snapshot.publications[0];
