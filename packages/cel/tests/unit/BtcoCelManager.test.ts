@@ -54,7 +54,7 @@ const createWebvhLog = async (): Promise<EventLog> => {
     { digestMultibase: 'uTestHash123', mediaType: 'image/png' },
   ]);
   
-  const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
+  const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
   return webvhManager.migrate(peerLog);
 };
 
@@ -693,7 +693,7 @@ describe('BtcoCelManager', () => {
       expect(peerState.name).toBe('My Artwork');
 
       // Migrate to webvh
-      const webvhManager = new WebVHCelManager(createMockSigner(), 'gallery.example.com');
+      const webvhManager = new WebVHCelManager(createMockSigner(), 'gallery.example.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await webvhManager.migrate(peerLog);
 
       // Verify webvh state
@@ -724,7 +724,7 @@ describe('BtcoCelManager', () => {
       ];
       const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
-      const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await webvhManager.migrate(peerLog);
 
       const btcoManager = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {

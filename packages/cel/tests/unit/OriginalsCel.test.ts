@@ -428,6 +428,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
         },
       });
@@ -448,7 +449,7 @@ describe('OriginalsCel', () => {
       const cel = new OriginalsCel({
         layer: 'peer',
         signer: mockSigner,
-        config: { webvh: { domain: 'example.com' } },
+        config: { webvh: { domain: 'example.com', acknowledgeNonConformantId: true } },
       });
 
       const { log } = await cel.create('Test', []);
@@ -535,6 +536,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
         },
       });
@@ -589,7 +591,10 @@ describe('OriginalsCel', () => {
       });
 
       const { log } = await cel.create('Test', []);
-      const migrated = await cel.migrate(log, 'webvh', { domain: 'test.com' });
+      const migrated = await cel.migrate(log, 'webvh', {
+        domain: 'test.com',
+        acknowledgeNonConformantId: true,
+      });
 
       const data = migrated.events[1].data as any;
       expect(data.domain).toBe('test.com');
@@ -603,6 +608,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
@@ -636,7 +642,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
         config: {
-          webvh: { domain: 'example.com' },
+          webvh: { domain: 'example.com', acknowledgeNonConformantId: true },
           btco: { bitcoinManager: createMockBitcoinManager(), acknowledgeIncompleteHistory: true },
         },
       });
@@ -660,7 +666,7 @@ describe('OriginalsCel', () => {
         layer: 'peer',
         signer: mockSigner,
         config: {
-          webvh: { domain: 'example.com' },
+          webvh: { domain: 'example.com', acknowledgeNonConformantId: true },
           btco: { bitcoinManager: createMockBitcoinManager(), acknowledgeIncompleteHistory: true },
         },
       });
@@ -679,6 +685,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
         },
       });
@@ -734,6 +741,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
         },
       });
@@ -803,6 +811,7 @@ describe('OriginalsCel', () => {
         config: {
           webvh: {
             domain: 'example.com',
+            acknowledgeNonConformantId: true,
           },
           btco: {
             bitcoinManager: mockBitcoinManager,
