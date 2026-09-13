@@ -141,6 +141,52 @@ describe('UnifiedVerifier — ordinalsProvider option (spike)', () => {
     expect(res.errors).toEqual([]);
     // The option is genuinely threaded through, not merely accepted and dropped.
     expect(calls.length).toBeGreaterThan(0);
+    // The log IS btco-anchored, a provider was consulted, and it verified:
+    // freshness was actually exercised and provably passed (issue #600 review).
+    expect(res.assurance).toEqual({ signature: 'checked', freshness: 'checked' });
+  });
+
+  test('signatureOnly still verifies a btco-anchored log (witness/uniqueness are part of "signature", not freshness)', async () => {
+    // Regression (Greptile review of PR #653): signatureOnly used to
+    // withhold the configured ordinalsProvider entirely, which doesn't just
+    // skip head-freshness — it also disables witness-proof verification,
+    // which is GATING for a btco-anchored log. That turned signatureOnly
+    // into "fail every anchored log" rather than "skip freshness only".
+    const mock = new OrdMockProvider();
+    const log = await makeAnchoredLog(mock);
+    const { provider, calls } = countingProvider(mock);
+
+    const res = await new UnifiedVerifier(didManager, {
+      ordinalsProvider: provider,
+      signatureOnly: true,
+    }).verify(log);
+
+    expect(res.kind).toBe('eventLog');
+    expect(res.verified).toBe(true);
+    // The provider was still consulted for witness verification.
+    expect(calls.length).toBeGreaterThan(0);
+    // Freshness was explicitly not requested under signatureOnly, so it must
+    // read 'unknown', never 'checked' — but the bundled signature/witness
+    // verdict still ran and passed.
+    expect(res.assurance).toEqual({ signature: 'checked', freshness: 'unknown' });
+  });
+
+  test('assurance.freshness is "unknown", not "checked", for an unanchored log even with a provider configured', async () => {
+    // Regression (review of PR #634): checkHeadFreshness is a documented
+    // no-op for a log that never anchored to a satoshi. Reporting
+    // freshness:'checked' here would overclaim a check that had nothing to
+    // verify against.
+    const a = await makeKey();
+    const log = await createEventLog(
+      { name: 'Asset', controller: a.didKey, resources: [], createdAt: '2026-08-15T00:00:00Z', nonce: 'uv-unanchored' },
+      { signer: a.signer, verificationMethod: a.vm }
+    );
+
+    const res = await new UnifiedVerifier(didManager, { ordinalsProvider: new OrdMockProvider() }).verify(log);
+
+    expect(res.kind).toBe('eventLog');
+    expect(res.verified).toBe(true);
+    expect(res.assurance.freshness).toBe('unknown');
   });
 
   test('the same log FAILS CLOSED when no provider is supplied', async () => {
@@ -166,5 +212,26 @@ describe('UnifiedVerifier — ordinalsProvider option (spike)', () => {
 
     expect(res.verified).toBe(false);
     expect(res.errors.join(' ')).toMatch(/inscription .* not found on chain/i);
+    // The log IS anchored and a provider WAS consulted, but verification
+    // failed — freshness cannot be distinguished from a uniqueness/anchoring
+    // failure here, so it must read 'unknown', never 'failed' (issue #600 review).
+    expect(res.assurance.freshness).toBe('unknown');
+  });
+
+  test('a malformed event log (missing/non-array proof) resolves to a failed result instead of throwing', async () => {
+    // Regression (review of PR #634): classifyDocument only checks that
+    // `events` is an array, so a malformed/attacker-supplied log can reach
+    // verify() with a missing or non-array `proof` on some entry.
+    // verifyEventLog itself already turns that into a failed result rather
+    // than throwing; this asserts verify() surfaces that as `verified: false`
+    // instead of a rejected promise.
+    const malformed = {
+      events: [{ type: 'create', data: {}, proof: undefined }],
+    } as unknown as EventLog;
+
+    const res = await new UnifiedVerifier(didManager, { ordinalsProvider: new OrdMockProvider() }).verify(malformed);
+
+    expect(res.kind).toBe('eventLog');
+    expect(res.verified).toBe(false);
   });
 });

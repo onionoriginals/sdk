@@ -78,7 +78,7 @@ const buildWebvhLog = async (): Promise<EventLog> => {
   const { log: peerLog } = await peerMgr.create('Coverage Asset', [
     { digestMultibase: 'uCoverageHash', mediaType: 'image/png' },
   ]);
-  const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com');
+  const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com', [], { acknowledgeNonConformantId: true });
   return webvhMgr.migrate(peerLog);
 };
 

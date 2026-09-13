@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { sha256HexToResourceMultibase } from '../pages/original-detail-data';
 import { signEvent } from '@originals/sdk/cel';
 import { OriginalsAsset } from '@originals/sdk';
-import { engineWithSigner } from './cel3-test-helpers';
+import { engineWithSigner, installLocalStorage } from './cel3-test-helpers';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
 import { summarize } from '../components/CelChain';
@@ -52,12 +52,17 @@ function resourceUrl(webvhDid: string, hashHex: string): string {
  */
 describe('revise a created asset', () => {
   let restore: () => void;
+  let restoreStorage: () => void;
   beforeEach(() => {
     (import.meta as unknown as { env: Record<string, string> }).env ??= {};
     (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = 'demo.test';
     restore = installHostFetch('demo.test');
+    restoreStorage = installLocalStorage().restore;
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
 
   test('a title edit revises BOTH the artwork and the metadata that describes it', async () => {
     const engine = new DemoEngine();
