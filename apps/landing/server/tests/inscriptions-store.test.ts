@@ -433,7 +433,7 @@ describe('pendingRevealBroadcasts', () => {
   });
 });
 
-test('a fresh confirmed observation without height keeps the prior block height (only a fresh value overwrites it)', () => {
+test('a NEW hash with no height CLEARS the stale height rather than pairing it with the wrong block', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
   const store = createInscriptionsStore({ dataDir });
   const record = rec({});
@@ -441,13 +441,38 @@ test('a fresh confirmed observation without height keeps the prior block height 
   store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
   store.setStatus('sub-1', record.commitTxId, 'reveal_broadcast');
   expect(store.get('sub-1', record.commitTxId)?.confirmedBlockHeight).toBe(100);
-  // This read's evidence omits height (e.g. a provider's best-effort height
-  // lookup failed) but still updates the hash. Height must NOT be cleared:
-  // losing it here would leave the reorg comparison with no depth/position
-  // fallback at all if a later read ever omits hash too.
+  // Height and hash describe ONE block. This read's hash PROVES the identity
+  // changed (e.g. a reconfirmation at a new height, with QuickNode's
+  // best-effort height lookup failing independently of the hash it already
+  // had from the same getrawtransaction call). Keeping the OLD height would
+  // pair it with a hash that was never actually observed at that height —
+  // worse than reporting height as unknown.
   store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHash: 'b'.repeat(64) });
   const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
   expect(reloaded.confirmations).toBe(2);
   expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
-  expect(reloaded.confirmedBlockHeight).toBe(100);
+  expect(reloaded.confirmedBlockHeight).toBeUndefined();
+});
+
+test('an evidence-less read (same or absent hash) keeps the prior height — nothing proves the identity changed', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-height2-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+
+  // No hash opinion at all this read (still confirmed, height also absent):
+  // nothing suggests the block changed, so both stay exactly as they were —
+  // the only way a LATER same-height reorg can still be detected against them.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2 });
+  let r = store.get('sub-1', record.commitTxId)!;
+  expect(r.confirmedBlockHeight).toBe(100);
+  expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same hash again, still no height: confirms it's the same block, so the
+  // previously known height for it remains valid too.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 3, blockHash: 'a'.repeat(64) });
+  r = store.get('sub-1', record.commitTxId)!;
+  expect(r.confirmedBlockHeight).toBe(100);
+  expect(r.confirmedBlockHash).toBe('a'.repeat(64));
 });
