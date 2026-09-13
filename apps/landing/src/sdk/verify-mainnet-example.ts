@@ -11,7 +11,7 @@
 import "../shims/buffer-global";
 import { OriginalsSDK } from "@originals/sdk";
 import type { OrdinalsProvider } from "@originals/sdk";
-import type { SatSnapshot } from "@originals/sdk/cel";
+import { sameAssetIdentity, type SatSnapshot } from "@originals/sdk/cel";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
@@ -77,7 +77,7 @@ async function checkLive(
     expectedAssetId: receipt.assetDid,
   });
   if (result.status !== "accepted") return null;
-  if (result.asset.id !== receipt.assetDid) return null;
+  if (!sameAssetIdentity(result.asset.id, receipt.assetDid)) return null;
   if (result.didDocument?.id !== receipt.didBtco) return null;
   // The receipt's inscription must itself be part of the chain-accepted
   // history — not merely some inscription that happens to sit on this sat.

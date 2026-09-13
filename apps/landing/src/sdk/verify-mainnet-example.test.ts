@@ -3,7 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex } from '@scure/base';
-import { createLocalSigner, encodeDocument, type SatSnapshot } from '@originals/sdk/cel';
+import { assetDigest, createLocalSigner, encodeDocument, type SatSnapshot } from '@originals/sdk/cel';
 import { OriginalsSDK } from '@originals/sdk';
 import type { OrdinalsProvider } from '@originals/sdk';
 import { verifyMainnetExample, type MainnetReceipt } from './verify-mainnet-example';
@@ -469,6 +469,15 @@ const arbitraryReceipt: MainnetReceipt = {
 };
 
 describe('verifyMainnetExample', () => {
+  test('checks a retained legacy receipt against the same canonical asset identity', async () => {
+    const { receipt, provider } = await buildFixture();
+    const legacyReceipt = { ...receipt, assetDid: `did:cel:${assetDigest(receipt.assetDid)}` };
+    const result = await verifyMainnetExample({ receipt: legacyReceipt, provider });
+    expect(result.live).toBe(true);
+    expect(result.resourceOnChain).toBe(true);
+    expect(result.inscriptionId).toBe(receipt.inscriptionId);
+  });
+
   test('a real accepted boundary publication is checked live and matches the receipt', async () => {
     const { receipt, provider } = await buildFixture();
     const result = await verifyMainnetExample({ receipt, provider });
