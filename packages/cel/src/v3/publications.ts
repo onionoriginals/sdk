@@ -75,10 +75,17 @@ export interface PublicationEvidence {
  * that source (never credentials or a full URL), carried into diagnostics.
  * This corroborates enumeration completeness; it is a separate dimension
  * from chain/index consistency and does not itself validate Bitcoin facts.
+ *
+ * `ownership`, when supplied, is that same independent index's own current
+ * owner/satpoint observation for the sat. It corroborates sat trajectory —
+ * a distinct dimension from enumeration completeness, since a compromised
+ * or buggy primary provider could otherwise misreport who currently holds
+ * the sat while still enumerating every inscription on it correctly.
  */
 export interface IndependentEnumeration {
   source: string;
   inscriptionIds: readonly string[];
+  ownership?: SatSnapshot["ownership"];
 }
 export type SatResolution = Readonly<
   | {
@@ -107,6 +114,13 @@ export type SatResolution = Readonly<
        * provider can still omit history no independent source observed.
        */
       enumerationAssurance: "provider-asserted" | "cross-checked";
+      /**
+       * "cross-checked" only when a caller-supplied independent source's own
+       * owner/satpoint observation was consulted and agreed with this
+       * snapshot's `ownership`; otherwise the reported sat trajectory is an
+       * unauthenticated provider assertion, the same as `ownership` itself.
+       */
+      ownershipAssurance: "provider-asserted" | "cross-checked";
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -209,6 +223,37 @@ export function resolveSat(
     )
   )
     return failure("incomplete", "Missing live ownership observation");
+  let ownershipAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  if (options.independentEnumeration?.ownership !== undefined) {
+    const independentOwnership = options.independentEnumeration.ownership;
+    if (
+      !independentOwnership ||
+      !Object.prototype.hasOwnProperty.call(independentOwnership, "owner") ||
+      !Object.prototype.hasOwnProperty.call(
+        independentOwnership,
+        "satpoint",
+      ) ||
+      !(
+        independentOwnership.owner === null ||
+        typeof independentOwnership.owner === "string"
+      ) ||
+      !(
+        independentOwnership.satpoint === null ||
+        typeof independentOwnership.satpoint === "string"
+      )
+    )
+      return failure("incomplete", "Invalid independent ownership evidence");
+    if (
+      independentOwnership.owner !== snapshot.ownership.owner ||
+      independentOwnership.satpoint !== snapshot.ownership.satpoint
+    )
+      return failure(
+        "inconsistent-evidence",
+        "Independent source reports different sat ownership than the primary snapshot",
+      );
+    ownershipAssurance = "cross-checked";
+  }
   const blocks = new Map<number, SatSnapshot["blocks"][number]>();
   const blockHashes = new Set<string>();
   for (const block of snapshot.blocks) {
@@ -480,6 +525,7 @@ export function resolveSat(
     diagnostics,
     webvhBinding: "unverified",
     enumerationAssurance,
+    ownershipAssurance,
   };
   freeze<unknown>(result);
   return result;

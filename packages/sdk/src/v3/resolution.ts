@@ -25,11 +25,12 @@ export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
 /**
- * A second, independently configured Ordinals index consulted only for its
- * inscription enumeration on the queried sat, to corroborate that the
- * primary provider did not omit a publication. `label` is a non-secret
- * description of the source (never credentials or a full URL) carried into
- * resolution metadata.
+ * A second, independently configured Ordinals index consulted to corroborate
+ * two dimensions of the primary provider's assertions: that it did not omit
+ * an inscription on the queried sat (enumeration), and that it reports the
+ * same current owner/satpoint for that sat (ownership/trajectory). `label`
+ * is a non-secret description of the source (never credentials or a full
+ * URL) carried into resolution metadata.
  */
 export interface IndependentEnumerationSource {
   label: string;
@@ -59,6 +60,7 @@ export interface AssetDIDResolution {
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
     enumerationAssurance?: "provider-asserted" | "cross-checked";
+    ownershipAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -162,7 +164,11 @@ export class AssetResolver {
           ) as SatResolution,
         };
       let independentEnumeration:
-        | { source: string; inscriptionIds: string[] }
+        | {
+            source: string;
+            inscriptionIds: string[];
+            ownership: SatSnapshot["ownership"];
+          }
         | undefined;
       if (this.independentEnumeration) {
         // A configured independent source that cannot be consulted fails
@@ -207,6 +213,7 @@ export class AssetResolver {
         independentEnumeration = {
           source: this.independentEnumeration.label,
           inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+          ownership: independentSnapshot.ownership,
         };
       }
       return {
@@ -355,6 +362,7 @@ export class AssetResolver {
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
         enumerationAssurance: result.resolution.enumerationAssurance,
+        ownershipAssurance: result.resolution.ownershipAssurance,
       },
     };
   }

@@ -199,6 +199,82 @@ test("rejects malformed independent enumeration evidence rather than ignoring it
   expect(result.status).toBe("incomplete");
 });
 
+test("ownership assurance defaults to provider-asserted with no independent source configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("ownership assurance stays provider-asserted when an independent source is configured without ownership evidence", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks ownership when an independent source reports the same owner and satpoint", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership },
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("cross-checked");
+});
+
+test("fails closed when an independent source reports a different current owner", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership, owner: "someone-else" },
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("fails closed when an independent source reports a different satpoint", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: {
+        ...snapshot.ownership,
+        satpoint: "f".repeat(64) + ":0:0",
+      },
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("rejects malformed independent ownership evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      // @ts-expect-error deliberately malformed for the test
+      ownership: { owner: 42, satpoint: null },
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.publications.push({ ...snapshot.publications[0], confirmed: false });

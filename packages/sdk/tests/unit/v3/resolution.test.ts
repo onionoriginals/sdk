@@ -349,8 +349,12 @@ test("cross-checks enumeration against an independently configured second index 
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
   expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
   const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
   expect(metadata.didDocumentMetadata.enumerationAssurance).toBe(
+    "cross-checked",
+  );
+  expect(metadata.didDocumentMetadata.ownershipAssurance).toBe(
     "cross-checked",
   );
 });
@@ -364,6 +368,7 @@ test("without an independent source configured, resolution still accepts but onl
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
   expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
 });
 
 test("fails closed when the independent enumeration source sees a publication the primary provider omitted", async () => {
@@ -440,4 +445,39 @@ test("fails closed when a configured independent enumeration source cannot be re
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   expect(result.status).toBe("incomplete");
+});
+
+test("fails closed when the independent source reports a different current sat owner", async () => {
+  const { snapshot } = await boundary();
+  const independent = structuredClone(snapshot);
+  independent.ownership = { owner: "someone-else", satpoint: independent.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => independent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when the independent source reports a different sat satpoint", async () => {
+  const { snapshot } = await boundary();
+  const independent = structuredClone(snapshot);
+  independent.ownership = {
+    owner: independent.ownership.owner,
+    satpoint: "f".repeat(64) + ":0:0",
+  };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => independent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
 });
