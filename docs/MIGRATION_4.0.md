@@ -118,3 +118,38 @@ never grants authority to write creator claims. Pre-CEL-3 logs and earlier
 custom proofs remain unsupported; see the historical
 [SDK 3 migration guide](MIGRATION_3.0.md) for that earlier format boundary.
 The exact contract is [Originals asset identity](../specs/originals-asset-identity.md).
+
+## Previous-format CEL writers move to `@originals/cel/legacy`
+
+`@originals/cel`'s root no longer exports the previous-format (pre-CEL-3)
+writer surface: `OriginalsCel`, the three per-layer managers
+(`PeerCelManager`/`WebVHCelManager`/`BtcoCelManager`), the event-log
+algorithms they call (`createEventLog`, `appendEvent`, `updateEventLog`,
+`deactivateEventLog`, `verifyEventLog`, `witnessEvent`, the custody-fold
+helpers), the previous-format canonicalizer (`canonicalizeEvent` and
+derivatives — not RFC 8785; this also closes the root-export half of the
+canonicalizer's own JCS finding), and the previous-format signer helpers
+(`celSignerFromKeyPair`, `createKeyStoreCelSigner`, `currentControllerVm`,
+`hexSha256ToDigestMultibase`). None of this is used by CEL 3 or the SDK's
+`/v3` lifecycle. If your integration still genuinely needs previous-format
+writing or verification, import it explicitly from `@originals/cel/legacy`
+instead of the package root; do not construct the same surface out of
+lower-level root exports.
+
+## Credential verification is safe-by-default for declared status
+
+`CredentialManager.verifyCredential` and `UnifiedVerifier.verify()`'s
+credential branch used to verify a credential on signature alone, even when
+it declared `credentialStatus`. They now check that declared status by
+default: configure a `statusListResolver` to have it actually evaluated
+(every entry, singleton or array), or expect a credential that declares a
+status you cannot evaluate to **fail closed** rather than silently pass.
+Callers that intentionally want the old signature-only behavior — for
+example, checking a status list credential's own signature before reading
+it — call the newly, explicitly named `verifyCredentialSignature` instead.
+`UnifiedVerifier.verify()` also now returns an `assurance: { signature,
+status, freshness }` breakdown (each `'checked' | 'failed' | 'unknown'`), so
+a caller can tell "checked and passed" apart from "never checked." Pass
+`signatureOnly: true` to `UnifiedVerifier.verify()` to keep the old
+signature-only behavior explicitly (reported as `unknown` status, never
+silently `checked`).
