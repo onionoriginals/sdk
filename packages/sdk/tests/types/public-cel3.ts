@@ -4,6 +4,7 @@ import SDK, {
   OriginalsAsset,
   LifecycleManager,
   createLocalSigner,
+  fetchPublicReachabilityCheck,
   type OriginalsSDKOptions,
   type AssetEnvelope,
   type AssetResource,
@@ -14,6 +15,9 @@ import type {
   AssetResourceInput,
   CelSigner,
   HostedEvidence,
+  HostingEvidence,
+  PublicReachabilityCheck,
+  HostedAssetsOptions,
   AssetVerification,
 } from "@originals/sdk/types";
 import {
@@ -31,6 +35,11 @@ const signer: CelSigner = createLocalSigner(
 );
 const config: OriginalsConfig = { signer, network: "regtest" };
 const options: OriginalsSDKOptions = config;
+const publicCheck: PublicReachabilityCheck = fetchPublicReachabilityCheck;
+const hostingOptions: HostedAssetsOptions = { publicReachability: publicCheck, requirePublicReachability: true };
+const publicOptions: OriginalsSDKOptions = { ...config, ...hostingOptions };
+const publicationEvidence: HostingEvidence = 'independently-verified';
+void publicOptions; void publicationEvidence;
 const input: AssetResourceInput = {
   id: "bytes",
   mediaType: "image/png",

@@ -24,6 +24,7 @@ import { short } from "./format";
 export { short };
 import {
   OriginalsSDK,
+  fetchPublicReachabilityCheck,
   createLocalSigner,
   type CelSigner,
   type AssetEnvelope,
@@ -192,6 +193,8 @@ export class DemoEngine {
       storageAdapter: this.authed
         ? new DurableHostingStorageAdapter()
         : new HttpHostingStorageAdapter(),
+      publicReachability: fetchPublicReachabilityCheck,
+      requirePublicReachability: publicReachabilityRequired(),
       enableLogging: false,
     });
   }
@@ -850,6 +853,25 @@ function demoHost(): string {
   if (typeof window !== "undefined" && window.location?.host)
     return window.location.host;
   return "localhost";
+}
+/**
+ * `fetchPublicReachabilityCheck` refuses non-HTTPS URLs outright, and a bare
+ * `vite dev` origin has no route serving raw did.jsonl content even when it
+ * happens to be HTTPS. VITE_WEBVH_HOST names a deliberately configured public
+ * host (production, staging, and the regtest-browser HTTPS harness all set
+ * it); short of that, only the page's own HTTPS origin can plausibly be
+ * public. Requiring the check against the plain-HTTP default `vite dev`
+ * origin would make every local publication fail.
+ */
+export function publicReachabilityRequired(): boolean {
+  if (
+    (import.meta as unknown as { env?: Record<string, string> }).env
+      ?.VITE_WEBVH_HOST
+  )
+    return true;
+  return (
+    typeof window !== "undefined" && window.location?.protocol === "https:"
+  );
 }
 function webvhLogUrl(did: string): string {
   const parts = did.split(":"); // did:webvh:<SCID>:<domain>[:<seg>…]
