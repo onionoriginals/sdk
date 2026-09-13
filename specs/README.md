@@ -4,35 +4,39 @@ This is the normative index for the Originals asset protocol. It answers a
 single question: for a given SDK/CEL major version, which documents together
 form the supported profile, and which documents are historical context only.
 
-## Currently published contract — SDK 3.0.0
+## Next major contract — SDK 4 / CEL 2
 
-These three documents, taken together, are the complete normative contract
-for the `@originals/sdk` 3.0.0 / `@originals/cel` 1.x line already published
-to npm. None of them alone is sufficient; each defines a different layer.
-
-| Layer | Document | Defines |
-| --- | --- | --- |
-| CEL wire/proof | [`originals-cel-v3-profile.md`](originals-cel-v3-profile.md) + [`originals-cel-v3.schema.json`](originals-cel-v3.schema.json) | The `originals/cel/3` representation: canonicalization (RFC 8785 JCS), proof configuration/algorithms, and the JSON Schema for accepted documents. |
-| Controller authority / publication fold | [`originals-cel-v3-authority.md`](originals-cel-v3-authority.md) | When signed values change the accepted asset state: controller authority, key rotation retirement, and inscription/publication ordering. |
-| Bitcoin inscription shape | [`btco-inscription-shape.md`](btco-inscription-shape.md) | What is inscribed on Bitcoin, the boundary-history vs. delta-publication split, and reader-derived chain evidence. |
-
-Published SDK 3.0.0 asset identity is the legacy `did:cel:` + digest spelling
-(see the deprecated `deriveDid` in `packages/cel/src/v3/profile.ts`), not the
-canonical `ni` identifier below; that change is scoped to the next major
-version.
-
-## Next major identity contract — SDK 4 / CEL 2
+These four contracts, taken together, define the supported profile on `main`
+for the upcoming `@originals/sdk` 4 / `@originals/cel` 2 release. None is
+sufficient alone; each defines a different layer. The CEL wire format remains
+`originals/cel/3` despite the package major-version changes.
 
 | Layer | Document | Defines |
 | --- | --- | --- |
 | Asset identity | [`originals-asset-identity.md`](originals-asset-identity.md) | The canonical RFC 6920 `ni:///sha-256;…` asset identifier derived from the genesis event, replacing the `did:cel:` spelling, and its relationship to did:webvh/did:btco. |
+| CEL wire/proof | [`originals-cel-v3-profile.md`](originals-cel-v3-profile.md) + [`originals-cel-v3.schema.json`](originals-cel-v3.schema.json) | The `originals/cel/3` representation: canonicalization (RFC 8785 JCS), proof configuration/algorithms, and the JSON Schema for accepted documents. |
+| Controller authority / publication fold | [`originals-cel-v3-authority.md`](originals-cel-v3-authority.md) | When signed values change the accepted asset state: controller authority, key rotation retirement, and inscription/publication ordering. |
+| Bitcoin inscription shape | [`btco-inscription-shape.md`](btco-inscription-shape.md) | What is inscribed on Bitcoin, the boundary-history vs. delta-publication split, and reader-derived chain evidence. |
 
-This is a major-version public API change selected after SDK 3.0.0 published;
-its own **Status** header scopes it to SDK 4 / CEL 2, not the published 3.0.0
-contract above. Its implementation already lives on `main` ahead of that
-version bump — `assetIdFromDigest` in `packages/cel/src/v3/identity.ts` is the
-current default, with `did:cel:` retained only as a deprecated compatibility
-alias — but it is not yet part of a released npm major version.
+Canonical `ni` identity is a major-version public API change selected after
+SDK 3.0.0 published. Its implementation already lives on `main` ahead of the
+version bump: `assetIdFromDigest` in `packages/cel/src/v3/identity.ts` is the
+current default, with the former `did:cel:` spelling retained only as a
+compatibility alias. This does not change signed histories or imply that the
+next major has been published to npm.
+
+## Released contract — SDK 3.0.0 / CEL 1.x
+
+SDK 3.0.0 used the legacy `did:cel:` + genesis digest spelling. The current
+working-tree documents above include later SDK 4 / CEL 2 decisions and must
+not be read as an exact snapshot of that released contract. The following
+links pin the documents to the `@originals/sdk@3.0.0` release commit,
+`b53b3b1cf5a7067fbd1a5ddaa663012a83274c76`:
+
+- [CEL wire/proof profile](https://github.com/onionoriginals/sdk/blob/b53b3b1cf5a7067fbd1a5ddaa663012a83274c76/specs/originals-cel-v3-profile.md)
+  and [schema](https://github.com/onionoriginals/sdk/blob/b53b3b1cf5a7067fbd1a5ddaa663012a83274c76/specs/originals-cel-v3.schema.json).
+- [Controller authority / publication fold](https://github.com/onionoriginals/sdk/blob/b53b3b1cf5a7067fbd1a5ddaa663012a83274c76/specs/originals-cel-v3-authority.md).
+- [Bitcoin inscription shape and legacy asset identity](https://github.com/onionoriginals/sdk/blob/b53b3b1cf5a7067fbd1a5ddaa663012a83274c76/specs/btco-inscription-shape.md).
 
 Each document's own **Status** header is the source of truth for exactly what
 it covers and which prior decisions it supersedes; this manifest only records
