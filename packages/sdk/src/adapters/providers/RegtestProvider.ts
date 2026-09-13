@@ -172,7 +172,7 @@ export class RegtestProvider implements OrdinalsProvider {
       inscription: (id, signal) => this.ord(`/inscription/${id}`, signal),
       content: (id, signal) => this.bytes(`${this.ordUrl}/content/${id}`, { signal }),
       metadata: (id, signal) => this.ord(`/r/metadata/${id}`, signal),
-    }, satoshi, 'regtest', this.snapshotBudget);
+    }, satoshi, 'regtest', this.snapshotBudget, 'regtest');
   }
 
   async getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>> {
