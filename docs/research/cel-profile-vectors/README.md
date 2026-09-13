@@ -99,5 +99,9 @@ Confirmed current consumers: `packages/cel/tests/v3/profile.test.ts`,
 `identity.test.ts`, and `signing.test.ts` load `profile-documents.json`;
 `history.test.ts` loads it for fold/publication behavior; `values.test.ts`
 loads `transport-inputs.json`; `known-answers.test.ts` loads `canonical-json.json`
-and the `published-w3c/` vectors — each against the corresponding public
-`@originals/cel/v3` entry point, not a reimplementation.
+and the `published-w3c/` vectors — each against the `packages/cel/src/v3`
+TypeScript source, not a reimplementation. This validates the source that
+ships as the `@originals/cel/v3` package export, but runs pre-build against
+source directly; the separate "ESM importable (Node)" CI job builds `dist/`
+and smoke-imports it under Node, without replaying this vector corpus against
+the built output.
