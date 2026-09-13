@@ -1,5 +1,6 @@
 import type { OrdinalsProvider } from '../../adapters/types.js';
 import { OrdinalsClient } from '../OrdinalsClient.js';
+import { StructuredError } from '@originals/cel';
 
 export interface SignetProviderOptions {
   /** URL of the ord node (e.g. http://localhost:80 or https://signet.ordinals.com) */
@@ -175,11 +176,20 @@ export class SignetProvider implements OrdinalsProvider {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  async createInscription(_params: {
-    data: Uint8Array;
-    contentType: string;
-    feeRate?: number;
-  }): Promise<never> {
+  async createInscription(
+    params: Parameters<OrdinalsProvider['createInscription']>[0]
+  ): Promise<never> {
+    // Deferred content (buildContent) and reinscribing a pinned sat (targetSatoshi)
+    // are capabilities this provider does not have at all — reject them explicitly
+    // before assuming a wallet/RPC problem is the reason nothing happened (issue #384).
+    if (params.buildContent || params.targetSatoshi !== undefined) {
+      throw new StructuredError(
+        'ORD_PROVIDER_UNSUPPORTED',
+        'SignetProvider.createInscription does not support deferred content (buildContent) or ' +
+        'reinscribing a pinned satoshi (targetSatoshi). Only static `data` inscription is ' +
+        '(partially, via the `ord wallet inscribe` CLI) supported.'
+      );
+    }
     if (!this.bitcoinRpcUrl) {
       throw new Error(
         'createInscription requires a funded signet wallet. ' +

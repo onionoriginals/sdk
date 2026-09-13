@@ -8,6 +8,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
 import { createWebvhHostStore } from '../../server/webvh-host';
+import { installLocalStorage } from './cel3-test-helpers';
 
 function installHostFetch(host: string) {
   const store = createWebvhHostStore();
@@ -32,8 +33,15 @@ const art = (title: string, style = 'Orbits') => generateArtwork(title, style, N
 
 describe('editing an Original by its title', () => {
   let restore: () => void;
-  beforeEach(() => { restore = installHostFetch('demo.test'); });
-  afterEach(() => restore());
+  let restoreStorage: () => void;
+  beforeEach(() => {
+    restore = installHostFetch('demo.test');
+    restoreStorage = installLocalStorage().restore;
+  });
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
 
   test('the title is what makes the artwork — different text, different bytes', () => {
     expect(art('Sunrise')).not.toBe(art('Sunset'));

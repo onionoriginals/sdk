@@ -285,6 +285,32 @@ describe('deposit bindings and the cross-user reader', () => {
     expect(all.filter((d) => d.network === 'mainnet')).toHaveLength(2);
   });
 
+  test('recordDepositRead skips the write for an unchanged read inside the heartbeat, but not past it', () => {
+    // #496 item 4: skipping every unchanged write is what let `lastRead.at`
+    // freeze indefinitely while a poller kept reporting the same balance —
+    // the balance sweep's drop-out rule reads exactly that timestamp. A
+    // floor on how stale it may go keeps a still-being-checked address from
+    // silently aging out.
+    let clock = 1_000_000;
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')), now: () => clock });
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
+
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const firstAt = store.listBoundDeposits().deposits[0].lastReadAt;
+
+    // Same unchanged read, well inside the heartbeat: no write, timestamp holds.
+    clock += 5 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    expect(store.listBoundDeposits().deposits[0].lastReadAt).toBe(firstAt);
+
+    // Same unchanged read, past the heartbeat: a write still lands.
+    clock += 61 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const laterAt = store.listBoundDeposits().deposits[0].lastReadAt;
+    expect(laterAt).not.toBe(firstAt);
+    expect(Date.parse(laterAt!)).toBe(clock);
+  });
+
   test('one unreadable user does not blind the sweep to every other stranger', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
     const store = createInscriptionsStore({ dataDir });

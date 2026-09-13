@@ -1,4 +1,5 @@
 import { StructuredError } from "@originals/cel";
+import { readResponseBodyCapped } from "../adapters/response-body-limit.js";
 import { base58 } from "@scure/base";
 import {
   CelError,
@@ -78,37 +79,31 @@ export interface HostedAssetsOptions {
   requirePublicReachability?: boolean;
 }
 /**
- * A ready-made `publicReachability` check: a real HTTPS GET, bypassing any
- * configured storage adapter entirely. Bounded so a slow or oversized
- * response (a hung connection, or a host that streams far more than a DID
- * log could ever legitimately be) cannot block or exhaust publication.
+ * Fetch the advertised HTTPS URL without adapter access, credentials, cached
+ * responses, or redirects. Limit the response to 2 MiB and the complete request
+ * to ten seconds, including body reads. Failure supplies no public evidence.
  */
 export async function fetchPublicReachabilityCheck(
   url: string,
 ): Promise<Uint8Array | null> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  if (!response.ok || !response.body) return null;
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      byteBudget(total);
-      chunks.push(value);
-    }
+    if (new URL(url).protocol !== "https:") return null;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: "error",
+      credentials: "omit",
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return await readResponseBodyCapped(response, 2 * 1024 * 1024);
+  } catch {
+    return null;
   } finally {
-    reader.releaseLock();
+    controller.abort();
+    clearTimeout(timer);
   }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return merged;
 }
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;

@@ -1,5 +1,6 @@
 ---
 "@originals/sdk": minor
+"@originals/landing": patch
 ---
 
 **Hosted WebVH publication now distinguishes an adapter-asserted read-back from an independently confirmed one** (#601).
@@ -10,4 +11,4 @@
 - New SDK options `publicReachability` (a check that fetches the advertised URL through a path other than the configured storage adapter) and `requirePublicReachability` (fail the publish, with the prepared publication preserved for retry, when that independent check cannot confirm the exact log that was just written).
 - New export `fetchPublicReachabilityCheck`, a ready-made `publicReachability` implementation using a real HTTPS GET.
 
-Both options default to off, so existing callers and every private/in-memory adapter used in tests keep working unchanged. Separating the publication-host capability from the general `storageAdapter` contract, and wiring a production deployment to require the independent check by default, remain open follow-on work.
+Both options remain opt-in for SDK callers. The landing app requires independent reachability for anonymous and signed-in publication, including cold recovery before saving an account record or deleting its retry wrapper. The default checker omits credentials and cached responses, refuses redirects, and caps streamed responses at 2 MiB with a ten-second deadline. Missing required checker configuration is rejected before any writes; a failed check after upload preserves the exact prepared publication for retry. Separating the publication-host capability from the general `storageAdapter` contract remains follow-on work.

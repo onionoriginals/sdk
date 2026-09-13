@@ -82,13 +82,15 @@ export async function recoverLocalPublication(
       "The retained publication could not be authenticated for this account.",
     );
   const prepared = JSON.parse(storage.getItem(key)!);
-  const { OriginalsSDK } = await import("@originals/sdk");
+  const { OriginalsSDK, fetchPublicReachabilityCheck } = await import("@originals/sdk");
   const { DurableHostingStorageAdapter } =
     await import("./durable-hosting-adapter");
   const { HttpOrdinalsProvider } = await import("./http-ordinals-provider");
   assertCurrentAccount();
   const sdk = OriginalsSDK.create({
     storageAdapter: new DurableHostingStorageAdapter(),
+    publicReachability: fetchPublicReachabilityCheck,
+    requirePublicReachability: true,
     ...(item.kind === "bitcoin"
       ? {
           network: (prepared as PreparedBitcoinPublication).transactions

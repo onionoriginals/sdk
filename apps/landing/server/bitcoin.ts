@@ -457,6 +457,37 @@ export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): O
 }
 
 /**
+ * A Map with a per-entry TTL that sweeps everything expired on every write —
+ * so a caller-chosen key space (e.g. the fee estimator's `blocks`, which
+ * `/api/btc/fee` accepts with no allowlist) cannot grow the map for the life
+ * of the process just by failing for a target nobody retries. `get` treats
+ * an expired entry as absent without removing it itself, so a read-only poll
+ * never pays the sweep; the next WRITE (an unrelated key's own entry) is what
+ * clears it.
+ */
+export function createExpiringCache<K, V>(ttlMs: number, now: () => number = () => Date.now()) {
+  const entries = new Map<K, { at: number; value: V }>();
+  return {
+    get(key: K): V | undefined {
+      const entry = entries.get(key);
+      return entry && now() - entry.at < ttlMs ? entry.value : undefined;
+    },
+    set(key: K, value: V): void {
+      for (const [k, entry] of entries) {
+        if (now() - entry.at >= ttlMs) entries.delete(k);
+      }
+      entries.set(key, { at: now(), value });
+    },
+    delete(key: K): void {
+      entries.delete(key);
+    },
+    get size(): number {
+      return entries.size;
+    },
+  };
+}
+
+/**
  * Split confirmed outputs into what may fund an inscription and what may not.
  * `ok: false` means the classification itself failed — the caller must refuse
  * to spend anything rather than fall back to "probably clean".
@@ -717,12 +748,25 @@ export function createBitcoinRoutes(deps: {
   // QuickNode quota once a minute, not once a tick, with an in-flight promise
   // per target so a cold cache under concurrent polls refreshes ONCE.
   const FEE_CACHE_MS = 60_000;
+  // A short negative TTL for a FAILED estimate (#496 item 2). Without it, an
+  // estimator outage gets no backoff at all: the in-flight slot below clears
+  // on rejection same as on success, so every one of N creators' 4/min polls
+  // issues a fresh RPC against a dependency that is already down. This does
+  // not floor or fabricate a rate — a poll inside the window still fails
+  // closed with the same error, just without re-asking the estimator.
+  const FEE_FAILURE_CACHE_MS = 10_000;
   // Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
   // compromised estimator must not be able to quote an arbitrary number at a
   // creator. Kept local — the SDK does not export it.
   const MAX_FEE_RATE_SAT_VB = 10_000;
   const feeCache = new Map<number, { at: number; rate: number }>();
   const feeInFlight = new Map<number, Promise<number>>();
+  // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
+  // caller sending many distinct values could otherwise grow a plain failure
+  // map for the life of the process — an entry used to clear only when that
+  // exact target later succeeded, which an invalid target never does.
+  // createExpiringCache sweeps expired entries on every write instead.
+  const feeFailureCache = createExpiringCache<number, string>(FEE_FAILURE_CACHE_MS, now);
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
@@ -730,17 +774,27 @@ export function createBitcoinRoutes(deps: {
     if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
     const pending = feeInFlight.get(blocks);
     if (pending) return pending;
+    const failedMessage = feeFailureCache.get(blocks);
+    if (failedMessage !== undefined) {
+      throw new Error(failedMessage);
+    }
     const run = (async () => {
-      const estimated = await provider.estimateFee(blocks);
-      if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
-        throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+      try {
+        const estimated = await provider.estimateFee(blocks);
+        if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+          throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+        }
+        const rate = Math.ceil(estimated);
+        if (rate > MAX_FEE_RATE_SAT_VB) {
+          throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
+        }
+        feeCache.set(blocks, { at: now(), rate });
+        feeFailureCache.delete(blocks);
+        return rate;
+      } catch (e) {
+        feeFailureCache.set(blocks, (e as Error).message);
+        throw e;
       }
-      const rate = Math.ceil(estimated);
-      if (rate > MAX_FEE_RATE_SAT_VB) {
-        throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
-      }
-      feeCache.set(blocks, { at: now(), rate });
-      return rate;
     })();
     feeInFlight.set(blocks, run);
     // Clear the slot AFTER it is set — an estimator that throws synchronously

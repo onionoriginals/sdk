@@ -150,9 +150,9 @@ async function dispatchVerify(
  *   empty set for did:peer (refused outright);
  * - null when the DID is not self-certifying / not checkable offline (other
  *   DID methods). Caller semantics on null differ: the legacy `data.did`
- *   path keeps trust-on-first-use, the did:cel genesis path falls back to
- *   VM-DID equality + resolver vouching, and the rotateKey path fails closed
- *   (no proof-of-possession design yet).
+ *   path and the did:cel genesis path both fall back to VM-DID equality +
+ *   resolver vouching (#590 — no trust-on-first-use for either), while the
+ *   rotateKey path fails closed (no proof-of-possession design yet).
  */
 function selfCertifyingKeyHexes(did: unknown): Set<string> | null {
   if (typeof did !== 'string') return null;
@@ -1346,6 +1346,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: missing events array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1354,6 +1355,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: events is not an array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1362,6 +1364,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: empty events array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1374,6 +1377,7 @@ export async function verifyEventLog(
       verified: false,
       errors: [`Invalid event log: first event must be a 'create' event (found '${String(log.events[0].type)}')`],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1430,6 +1434,11 @@ export async function verifyEventLog(
   // `data.did` is malformed and treated as absent.
   const genesisData = createEvent.data as { did?: unknown; controller?: unknown } | null | undefined;
   const legacyDid = typeof genesisData?.did === 'string' ? genesisData.did : undefined;
+  // A genesis carrying BOTH a legacy `data.did` and a `data.controller` is a
+  // mixed/ambiguous shape (#590): which one names the authority is not
+  // defined, so it must not silently resolve to "legacy wins" the way plain
+  // precedence would. Reject rather than guess.
+  const mixedGenesisShape = legacyDid !== undefined && typeof genesisData?.controller === 'string';
   const celController = legacyDid === undefined && typeof genesisData?.controller === 'string'
     ? genesisData.controller
     : undefined;
@@ -1468,12 +1477,20 @@ export async function verifyEventLog(
   const allAuthorizedKeyHexes = new Set<string>();
   let authorityError: string | undefined;
   if (!options?.verifier) {
+    if (mixedGenesisShape) {
+      authorityError =
+        `Create event data carries both a legacy \`did\` and a \`controller\`; which one names the ` +
+        `genesis authority is ambiguous, so the log is rejected rather than guessed.`;
+    }
     // A non-array proof (missing, object, string, …) yields zero controller
     // proofs → authorityError below, rather than throwing on .filter.
     const createControllerProofs = Array.isArray(createEvent.proof)
       ? createEvent.proof.filter(p => !isWitnessProof(p))
       : [];
-    if (createControllerProofs.length !== 1) {
+    if (authorityError) {
+      // Mixed shape already fails closed above; skip the rest of authority
+      // derivation (createControllerProofs[0] is used unconditionally below).
+    } else if (createControllerProofs.length !== 1) {
       authorityError =
         `Create event must have exactly one controller proof to establish authority (found ` +
         `${createControllerProofs.length}); the create event's proof array is not signed, so ` +
@@ -1512,33 +1529,46 @@ export async function verifyEventLog(
           } else {
             authorizedKeyIds.add(rootKeyHex);
           }
-        } else {
-          // Legacy / shapeless self-certifying binding (unchanged): when the
-          // create event's `data.did` is a did:key, the identifier itself
-          // embeds the controller's key material, so the create-event signing
-          // key can be checked against it offline. Without
-          // this, an attacker can copy a victim's create event `data` verbatim,
-          // re-sign event 0 with their own did:key, and produce a "valid"
-          // provenance log for the victim's DID under the attacker's key.
+        } else if (legacyDid !== undefined) {
+          // Legacy `data.did` binding (#590): the create event's signing key
+          // MUST be authorized by legacyDid, mirroring the did:cel
+          // resolver-backed binding above. Without this, `expectedDid ===
+          // legacyDid` below is pure string equality with no authority
+          // behind it — a forger can copy any victim's `data.did`
+          // (did:web, did:webvh, an old-scheme did:cel string, …) into a
+          // fresh genesis, self-sign with an unrelated key, and the log
+          // would "back" the victim's identifier under the attacker's key.
           //
-          // The check applies only when the create proof's verificationMethod
-          // is itself a did:key: that is the offline-checkable pattern the SDK
-          // emits. Resolver-backed verification methods (did:webvh, …)
-          // cannot embed their key in the asset DID at create time, so they
-          // keep trust-on-first-use — their authority is whatever the
-          // verifier's resolveKey vouches for. Non-self-certifying `data.did`
-          // methods and shapeless logs also keep trust-on-first-use — except
-          // did:peer, which is refused outright (empty key set → error).
-          const embeddedKeys = createControllerProofs[0].verificationMethod.startsWith('did:key:')
-            ? selfCertifyingKeyHexes(legacyDid)
-            : null;
-          if (embeddedKeys !== null && !embeddedKeys.has(rootKeyHex)) {
+          // Two ways to bind, both fail-closed, exactly as for `controller`:
+          //  - self-certifying legacyDid (did:key): its key material is
+          //    embedded, so the root key MUST be one of those keys — checked
+          //    offline. (did:peer is refused: its key set comes back empty,
+          //    so a peer legacyDid fails here too.)
+          //  - non-self-certifying legacyDid (did:webvh, did:web, …): the
+          //    root proof's verificationMethod MUST belong to legacyDid
+          //    (proof VM DID === legacyDid). The resolver then vouches for
+          //    that key and the signature is checked downstream. An
+          //    unrelated did:key — or any VM not naming legacyDid — is not
+          //    that DID's controller and fails closed; there is no
+          //    trust-on-first-use fallback.
+          const legacyKeys = selfCertifyingKeyHexes(legacyDid);
+          const rootProofVm = createControllerProofs[0].verificationMethod;
+          const bound = legacyKeys !== null
+            ? legacyKeys.has(rootKeyHex)
+            : rootProofVm.split('#')[0] === legacyDid;
+          if (!bound) {
             authorityError =
-              `Create event controller key (${createControllerProofs[0].verificationMethod}) is not a key ` +
-              `embedded in the self-certifying DID ${String(legacyDid)}; the log was not created by that DID's controller.`;
+              `Create event proof key (${rootProofVm}) is not a key of ` +
+              `the genesis DID ${legacyDid}; the log was not created by that DID's controller.`;
           } else {
             authorizedKeyIds.add(rootKeyHex);
           }
+        } else {
+          // Shapeless genesis: no `data.did` and no `data.controller`, so
+          // there is no identity claim to bind to (and no `expectedDid` can
+          // ever match one, per assetDid below). The create-event signer is
+          // trusted on first use — unchanged prior behavior.
+          authorizedKeyIds.add(rootKeyHex);
         }
       } else {
         // The create event's key could not be resolved (e.g. a transient
@@ -1836,6 +1866,7 @@ export async function verifyEventLog(
   // requesting the check there is a configuration error (it would silently pass)
   // and instead fails closed.
   let staleLogError: string | undefined;
+  let headFreshnessChecked = false;
   if (options?.checkHeadFreshness) {
     if (options?.verifier) {
       staleLogError =
@@ -1843,6 +1874,7 @@ export async function verifyEventLog(
         `on-chain authority walk that head freshness is validated against`;
     } else if (anchoredSat) {
       staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
+      headFreshnessChecked = true;
     }
     // No anchoredSat ⇒ the log was never btco-anchored (a signed btco migrate
     // that failed the anchor checks failed the whole log above), so there is
@@ -1884,7 +1916,10 @@ export async function verifyEventLog(
   // expectedDid: reject a log that does not back the caller's expected DID.
   // Scoped to the non-custom-verifier path — that path owns proof semantics and
   // the authority binding above is skipped there. did:cel is matched by suffix
-  // derivation; legacy by string equality; a shapeless log backs no DID.
+  // derivation; legacy by string equality against legacyDid — which, per the
+  // authority binding above, is now itself proven to name the create event's
+  // actual signer (#590), so this is no longer a bare unauthenticated string
+  // compare; a shapeless log backs no DID.
   let expectedDidError: string | undefined;
   if (options?.expectedDid !== undefined && !options?.verifier) {
     const matches = celController !== undefined
@@ -1920,6 +1955,7 @@ export async function verifyEventLog(
     verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !midLogCreateViolated && !expectedDidError && !staleLogError && !uniquenessError && !contentMismatchError,
     errors,
     events: eventVerifications,
+    headFreshnessChecked,
     ...(assetDid !== undefined ? { assetDid } : {}),
     // Class machinery is default-path only; never synthesized under a custom
     // verifier.

@@ -203,8 +203,8 @@ export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
 // One public CEL 3 parser, proof verifier and state fold.
-export { verifyHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
-export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
+export { verifyHistory, checkpointFromHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
+export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, HistoryCheckpoint, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
 
 // Default export
 export default OriginalsSDK;

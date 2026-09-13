@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { RegtestProvider, OriginalsSDK, createLocalSigner, parseDocument, type OriginalsAsset, type PreparedBitcoinPublication } from '@originals/sdk';
+import { RegtestProvider, OriginalsSDK, createLocalSigner, fetchPublicReachabilityCheck, parseDocument, type OriginalsAsset, type PreparedBitcoinPublication } from '@originals/sdk';
 import type { TurnkeyBitcoinClient } from '../src/auth/turnkey-session';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../server/cookies';
@@ -88,6 +88,7 @@ try {
   const nextController = createLocalSigner('Ed25519', new Uint8Array(32).fill(8));
   const storageAdapter = new HttpHostingStorageAdapter({ baseUrl: origin, fetchImpl: browserFetch });
   const sdk = OriginalsSDK.create({ network: 'regtest', signer: controller, ordinalsProvider: httpProvider,
+    publicReachability: fetchPublicReachabilityCheck, requirePublicReachability: true,
     storageAdapter, enableLogging: false, logging: { level: 'error' } });
   const cold = () => OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider,
     storageAdapter: new HttpHostingStorageAdapter({ baseUrl: origin }), enableLogging: false, logging: { level: 'error' } });
@@ -97,6 +98,7 @@ try {
   const local = await sdk.lifecycle.createAsset([{ id: 'art.png', mediaType: 'image/png', content: png }]);
   checkpoint('publish-hosted');
   const published = await sdk.lifecycle.publishToWeb(local, { domain: new URL(origin).host });
+  assert.equal(published.hostingEvidence, 'independently-verified', 'unauthenticated HTTPS method log is publicly reachable');
   const webDid = published.did;
   assert.equal(local.state.layer, 'cel', 'publication returns a new asset without changing local identity');
   const freshWeb = await cold().lifecycle.resolveAssetFromWeb(webDid);

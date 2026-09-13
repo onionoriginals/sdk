@@ -12,10 +12,18 @@ export const site = {
    * assets … local CEL → did:webvh → did:btco') named the library and three DID
    * methods before it named anything a creator wants. Title stays under 60
    * characters and description under 155 so neither is truncated in search.
+   *
+   * Neither claims "first" or an instant Bitcoin timestamp (#605): Bitcoin
+   * resolution is sat-scoped (`crossSatCanonicality: 'unknown'`), so the
+   * protocol cannot rule out a competing creation on another sat, and
+   * publishing to the web and inscribing on Bitcoin are separate, sequential
+   * steps — never "the moment you publish". What it can prove is a signed,
+   * byte-exact history that anyone can re-check, later anchored and ordered
+   * on Bitcoin.
    */
-  title: 'Originals — Proof you published it first, on Bitcoin',
+  title: 'Originals — A signed history, anchored on Bitcoin',
   description:
-    'Screenshots are free. Provenance is not. Timestamp your work on Bitcoin the moment you publish it, so you can show you were first — and who owns it now.',
+    'Screenshots are free. Provenance is not. Sign a byte-exact history of your work, publish it for anyone to verify, and anchor ownership on Bitcoin.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -115,8 +123,8 @@ export const identityPanel = {
 };
 
 export const hero = {
-  eyebrow: 'Anchored on Bitcoin · Timestamped the moment you publish',
-  headline: 'Proof you published it first. Carved into Bitcoin.',
+  eyebrow: 'Signed history · Anchored on Bitcoin',
+  headline: 'A signed provenance trail. Anchored on Bitcoin.',
   subhead:
     'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed history of when it was published, where it lives, and who owns it now — from private draft to Bitcoin-anchored original.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
@@ -156,7 +164,7 @@ export const layers = [
 export const why = {
   id: 'why',
   eyebrow: 'Why it matters',
-  headline: 'The internet copies. Originals prove who was first.',
+  headline: 'The internet copies. Originals keeps the signed record.',
   subhead:
     'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail, timestamped on Bitcoin.',
   cards: [
@@ -223,7 +231,7 @@ export const demo = {
       title: 'Create',
       layer: 'did:cel',
       description:
-        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log, entirely in this tab, no server involved.'
+        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log that stays private, never uploaded or hosted anywhere until you publish. Signed in, it’s signed by your Turnkey-held key; otherwise it’s signed and kept entirely in this tab.'
     },
     {
       id: 'publish',
@@ -688,7 +696,7 @@ export const originalDetail = {
       create: {
         title: 'Created',
         blurb:
-          'Born as a signed genesis — a signed event log minted in the browser, no server involved. The resource bytes were hashed and sealed into the very first event.'
+          'Born as a signed genesis — a signed event log kept private, never hosted anywhere until published. The resource bytes were hashed and sealed into the very first event.'
       },
       publish: {
         title: 'Published',
@@ -779,6 +787,33 @@ export const realExample = {
     profile: 'CEL profile',
     issued: 'Issued'
   }
+};
+
+// A second, separate Original: one the team actually funded and inscribed on
+// Bitcoin mainnet — not the mock provider "First Light" above uses for its
+// Bitcoin step. Its identifiers are public, so this checks them live against
+// this deploy's own indexer where possible, and otherwise shows the last
+// receipt the team independently verified themselves.
+export const mainnetExample = {
+  eyebrow: 'On Bitcoin',
+  headline: 'And one we actually inscribed.',
+  subhead:
+    'A separate Original the team funded and inscribed for real, on Bitcoin mainnet. Its did:btco identity, inscription and satoshi are public — anyone can look them up on a block explorer.',
+  pendingLabel: 'Checking the chain…',
+  liveBadge: 'Re-checked live, just now',
+  retainedBadge: 'Last independently verified',
+  trustNote:
+    "Checked live against this deploy's Bitcoin indexer — a provider-asserted read, the same trust boundary as any block-explorer lookup, not an independent multi-node consensus check. When a live check isn't available (for example, to a signed-out visitor), the receipt below is the last one the team verified themselves.",
+  fields: {
+    identity: 'did:btco',
+    inscription: 'Inscription',
+    sat: 'Satoshi',
+    resource: 'On-chain resource'
+  },
+  resourceOnChainNote: 'bytes found inline in the accepted inscription',
+  resourceOffChainNote: 'not found inline in this check',
+  explorerLabel: 'View reveal transaction on mempool.space',
+  receiptLabel: 'Underlying evidence'
 };
 
 export const protocol = {
@@ -873,7 +908,7 @@ export const footer = {
         { label: 'Explore Originals', href: '/explore' },
         { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' },
         { label: 'npm — @originals/sdk', href: 'https://www.npmjs.com/package/@originals/sdk' },
-        { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/ORIGINALS_PROTOCOL_SPECIFICATION.md' }
+        { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/specs/README.md' }
       ]
     },
     {

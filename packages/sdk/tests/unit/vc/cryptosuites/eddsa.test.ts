@@ -40,6 +40,38 @@ describe('EdDSA additional branches', () => {
     expect(Buffer.from(sig).toString('hex')).toBe(Buffer.from(sig32).toString('hex'));
   });
 
+  // #604 follow-up: EdDSACryptosuiteManager is itself exported from the
+  // package root, so a caller can reach it directly and bypass the guard in
+  // the internal, unexported DataIntegrityProofManager wrapper. The reject
+  // must live at this class's own choke point (createProofConfiguration) so
+  // it applies regardless of entry point.
+  test('createProof rejects previousProof even called directly (bypassing DataIntegrityProofManager)', async () => {
+    await expect(EdDSACryptosuiteManager.createProof(
+      { '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' },
+      {
+        verificationMethod: 'did:ex#k',
+        proofPurpose: 'assertionMethod',
+        cryptosuite: 'eddsa-rdfc-2022',
+        previousProof: 'urn:uuid:prior-proof',
+        privateKey: new Uint8Array(32),
+        documentLoader: async (iri: string) => contextDocument(iri)
+      } as any
+    )).rejects.toThrow('ProofOptions.previousProof is not supported');
+  });
+
+  test('computeSigningInput (the external-signer path) also rejects previousProof', async () => {
+    await expect(EdDSACryptosuiteManager.computeSigningInput(
+      { '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' },
+      {
+        verificationMethod: 'did:ex#k',
+        proofPurpose: 'assertionMethod',
+        cryptosuite: 'eddsa-rdfc-2022',
+        previousProof: 'urn:uuid:prior-proof',
+        documentLoader: async (iri: string) => contextDocument(iri)
+      } as any
+    )).rejects.toThrow('ProofOptions.previousProof is not supported');
+  });
+
   test('verifyProof returns error for non-Ed25519 VM', async () => {
     const pkMb = multikey.encodePublicKey(new Uint8Array(33).fill(1), 'Secp256k1');
     const res = await EdDSACryptosuiteManager.verifyProof({ '@context': ['https://www.w3.org/ns/credentials/v2'], id: 'urn:x', name: 'test' }, {

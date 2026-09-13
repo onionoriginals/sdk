@@ -1,6 +1,7 @@
+import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner, assetDigest, parseAssetDid } from "@originals/cel/v3";
+import { createLocalSigner, assetDigest } from "@originals/cel/v3";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
@@ -186,10 +187,14 @@ test('publication is labeled adapter-asserted by default; an independent publicR
   expect(verifiedResult.hostingEvidence).toBe('independently-verified');
 });
 
-test('requirePublicReachability without a configured check fails closed instead of silently skipping it', async () => {
+test('requirePublicReachability without a configured check refuses before any writes', async () => {
+  const store = storage();
+  let writes = 0;
+  const put = store.putObject.bind(store);
+  store.putObject = async (...args) => { writes++; return put(...args); };
   const sdk = OriginalsSDK.create({
     signer,
-    storageAdapter: storage(),
+    storageAdapter: store,
     requirePublicReachability: true,
   });
   await expect(
@@ -197,6 +202,7 @@ test('requirePublicReachability without a configured check fails closed instead 
       domain: 'example.com',
     }),
   ).rejects.toThrow(/publicReachability check/);
+  expect(writes).toBe(0);
 });
 
 test('requirePublicReachability fails closed while hosting is unreachable, and the identical prepared publication succeeds once it is not', async () => {
@@ -232,12 +238,13 @@ test('requirePublicReachability fails closed while hosting is unreachable, and t
 test('a well-formed but mismatched public log fails closed under requirePublicReachability rather than passing on shape alone', async () => {
   const decoyStore = storage();
   const decoySdk = OriginalsSDK.create({ signer, storageAdapter: decoyStore });
-  const decoy = await decoySdk.lifecycle.publishToWeb(
+  const decoy = await decoySdk.lifecycle.prepareWebPublication(
     await decoySdk.lifecycle.createAsset([]),
     { domain: 'example.com' },
   );
-  const decoyPath = new URL(parseAssetDid(decoy.did).logUrl).pathname.slice(1);
-  const decoyLog = (await decoyStore.getObject('example.com', decoyPath))!.content;
+  const decoyLog = new TextEncoder().encode(
+    decoy.didLog.map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+  );
 
   const sdk = OriginalsSDK.create({
     signer,
@@ -279,4 +286,81 @@ test('a byte-different copy of this exact DID and asset fails closed even though
   await expect(sdk.lifecycle.publishPreparedToWeb(prepared)).rejects.toThrow(
     'not independently reachable',
   );
+});
+
+// fetchPublicReachabilityCheck itself: a real HTTPS GET, never through the
+// storage adapter. It must reject an oversized response by streaming and
+// capping bytes as they arrive rather than buffering an unbounded body in
+// full first (the same stream-before-allocation class of bug as #606).
+test('fetchPublicReachabilityCheck returns the exact bytes for a small reachable response', async () => {
+  const realFetch = globalThis.fetch;
+  const body = new TextEncoder().encode('hello did log');
+  globalThis.fetch = (async () =>
+    new Response(body, { status: 200 })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toEqual(body);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck returns null without buffering a body that streams past the cap', async () => {
+  const realFetch = globalThis.fetch;
+  let cancelled = false;
+  let enqueuedChunks = 0;
+  const CHUNK = new Uint8Array(1024 * 1024).fill(1); // 1 MiB per chunk, cap is 2 MiB
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      enqueuedChunks++;
+      controller.enqueue(CHUNK); // never signals done — an unbounded/hostile body
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  globalThis.fetch = (async () =>
+    new Response(stream, { status: 200 })) as typeof fetch; // no Content-Length header
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+    // Cancelled after only a few MiB, not read until Bun's own test timeout.
+    expect(cancelled).toBe(true);
+    expect(enqueuedChunks).toBeLessThan(10);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('fetchPublicReachabilityCheck rejects a Content-Length that already exceeds the cap', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(new Uint8Array([1]), {
+      status: 200,
+      headers: { "content-length": String(100 * 1024 * 1024) },
+    })) as typeof fetch;
+  try {
+    const result = await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(result).toBeNull();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+
+test('the public checker omits credentials and cached responses and refuses redirects', async () => {
+  const realFetch = globalThis.fetch;
+  let requested: RequestInit | undefined;
+  globalThis.fetch = (async (_url, init) => {
+    requested = init;
+    return new Response('public log');
+  }) as typeof fetch;
+  try {
+    await fetchPublicReachabilityCheck('https://example.com/did.jsonl');
+    expect(requested?.credentials).toBe('omit');
+    expect(requested?.cache).toBe('no-store');
+    expect(requested?.redirect).toBe('error');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

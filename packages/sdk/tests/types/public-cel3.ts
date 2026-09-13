@@ -4,6 +4,7 @@ import SDK, {
   OriginalsAsset,
   LifecycleManager,
   createLocalSigner,
+  fetchPublicReachabilityCheck,
   type OriginalsSDKOptions,
   type AssetEnvelope,
   type AssetResource,
@@ -14,12 +15,17 @@ import type {
   AssetResourceInput,
   CelSigner,
   HostedEvidence,
+  HostingEvidence,
+  PublicReachabilityCheck,
+  HostedAssetsOptions,
   AssetVerification,
 } from "@originals/sdk/types";
 import {
   verifyHistory,
+  checkpointFromHistory,
   type AssetState,
   type DeepReadonly,
+  type HistoryCheckpoint,
 } from "@originals/sdk/cel";
 import { OriginalsSDK as LocalSDK } from "@originals/sdk/v3";
 
@@ -29,6 +35,11 @@ const signer: CelSigner = createLocalSigner(
 );
 const config: OriginalsConfig = { signer, network: "regtest" };
 const options: OriginalsSDKOptions = config;
+const publicCheck: PublicReachabilityCheck = fetchPublicReachabilityCheck;
+const hostingOptions: HostedAssetsOptions = { publicReachability: publicCheck, requirePublicReachability: true };
+const publicOptions: OriginalsSDKOptions = { ...config, ...hostingOptions };
+const publicationEvidence: HostingEvidence = 'independently-verified';
+void publicOptions; void publicationEvidence;
 const input: AssetResourceInput = {
   id: "bytes",
   mediaType: "image/png",
@@ -45,7 +56,11 @@ const subpathEnvelope: SubpathEnvelope = envelope;
 const loaded: OriginalsAsset = (
   await SDK.create().lifecycle.loadAsset(subpathEnvelope)
 ).asset;
-const state: DeepReadonly<AssetState> = verifyHistory(loaded.celLog).state;
+const history = verifyHistory(loaded.celLog);
+const state: DeepReadonly<AssetState> = history.state;
+const freshness: "unknown" | "checkpoint-consistent" | "externally-anchored" = history.freshness;
+const checkpoint: HistoryCheckpoint = checkpointFromHistory(history);
+void freshness; void checkpoint;
 await LocalSDK.create().lifecycle.loadAsset(loaded.serialize());
 void resource;
 void state;
