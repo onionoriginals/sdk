@@ -32,13 +32,13 @@ export { DIDCache, type DIDCacheConfig, type DIDCacheStorage, type DIDCacheEntry
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';
 export * as encoding from '@originals/cel/encoding';
-export { 
-  CredentialManager,
-  type ResourceCreatedSubject,
-  type ResourceUpdatedSubject,
-  type MigrationSubject,
-  type OwnershipSubject,
-  type CredentialChainOptions
+export { CredentialManager } from './vc/SafeCredentialManager.js';
+export type {
+  ResourceCreatedSubject,
+  ResourceUpdatedSubject,
+  MigrationSubject,
+  OwnershipSubject,
+  CredentialChainOptions
 } from './vc/CredentialManager.js';
 export {
   StatusListManager,

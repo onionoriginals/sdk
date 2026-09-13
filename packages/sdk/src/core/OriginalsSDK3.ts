@@ -4,7 +4,7 @@ import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
 import { AssetResolver, type SatProvider } from "../v3/resolution.js";
-import { CredentialManager } from "../vc/CredentialManager.js";
+import { CredentialManager } from "../vc/SafeCredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
 import { Logger } from "../utils/Logger.js";

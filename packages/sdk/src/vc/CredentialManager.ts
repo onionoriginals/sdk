@@ -24,8 +24,9 @@ import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager } from './cryptosuites/eddsa.js';
-import { Verifier, checkCredentialValidityPeriod, type StatusListResolver } from './Verifier.js';
+import { Verifier, checkCredentialValidityPeriod } from './Verifier.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { credentialStatusEntries, isCredentialStatusEntry, describeMalformedStatusEntry } from './credentialStatus.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
 import { StructuredError } from '@originals/cel';
@@ -141,16 +142,6 @@ export interface CredentialChainOptions {
 export class CredentialManager {
   private readonly metrics?: MetricsCollector;
   public readonly statusList: StatusListManager;
-  /**
-   * Optional resolver used by the ordinary `verifyCredential` entry point to
-   * check a declared `credentialStatus` (issue #600). Unset by default:
-   * `verifyCredential` still fails closed on a credential that declares a
-   * status entry it cannot check — set this when the caller can supply one,
-   * so ordinary verification is both safe (fails closed without it) and
-   * capable (actually checks status with it) rather than silently skipping
-   * status the way it used to.
-   */
-  public statusListResolver?: StatusListResolver;
 
   constructor(private config: OriginalsConfig, private didManager: DIDManager, metrics?: MetricsCollector) {
     // Required since plan 037. Without a resolver, Data Integrity proofs fell
@@ -369,57 +360,8 @@ export class CredentialManager {
     }); // end tracked
   }
 
-  /**
-   * Verify a credential's signature and, when it declares one, its
-   * revocation/suspension status.
-   *
-   * Safe by default (issue #600): a credential that declares a
-   * `credentialStatus` is no longer accepted on signature alone. Set
-   * {@link statusListResolver} so this can actually check it; without one, a
-   * credential declaring a status entry fails closed here — its revocation
-   * state is unknown, not verified, so a caller gating on this method alone
-   * cannot be shown a revoked credential as good. For a caller-supplied
-   * status list (rather than a resolver) with a verified/revoked/suspended
-   * breakdown, use `verifyCredentialWithStatus`. For deliberate signature-only
-   * verification — explicitly named, per issue #600, rather than the silent
-   * default this used to be — use `verifyCredentialSignature`.
-   */
   async verifyCredential(credential: VerifiableCredential): Promise<boolean> {
     return this.tracked('credential.verify', async () => {
-      if (!(await this.verifyCredentialSignature(credential))) {
-        return false;
-      }
-      const verifier = new Verifier(this.didManager, { statusListResolver: this.statusListResolver });
-      try {
-        // checkCredentialStatus awaits statusListResolver directly with no
-        // internal try/catch (unlike Verifier.verifyCredential, which wraps
-        // its whole body); a rejecting resolver — a normal network failure,
-        // not a bug — must not escape this method's documented boolean
-        // contract and abort the caller's flow.
-        const statusResult = await verifier.checkCredentialStatus(credential);
-        return statusResult.verified;
-      } catch {
-        return false;
-      }
-    });
-  }
-
-  /**
-   * Signature/proof verification only — deliberately does not check
-   * `credentialStatus`. This is the explicitly-named signature-only entry
-   * point (issue #600): ordinary callers should use `verifyCredential`, which
-   * also enforces status when `statusListResolver` is configured (and fails
-   * closed, rather than silently passing, when the credential declares a
-   * status entry and none is configured).
-   *
-   * Used internally to check the signature of a status list credential
-   * itself (which does not carry its own `credentialStatus`, so recursing
-   * into status checking there would be redundant) and inside
-   * `verifyCredentialWithStatus`, which evaluates status separately against
-   * its caller-supplied list.
-   */
-  async verifyCredentialSignature(credential: VerifiableCredential): Promise<boolean> {
-    return this.tracked('credential.verifySignature', async () => {
     interface ProofWithCryptosuite {
       cryptosuite?: string;
     }
@@ -437,13 +379,15 @@ export class CredentialManager {
       //
       // The DIDManager is now required (plan 037): a DI proof used to fall
       // through to the legacy digest path when none was supplied, which NO DI
-      // proof can satisfy — so `verifyCredentialSignature` returned a silent
-      // `false` that read as "invalid signature" rather than "no resolver".
+      // proof can satisfy — so `verifyCredential` returned a silent `false`
+      // that read as "invalid signature" rather than "no resolver".
       if (hasCryptosuite) {
         const verifier = new Verifier(this.didManager);
-        // Proof-only: this method deliberately never checks status (see
-        // above); checkStatus:false keeps that true regardless of whether a
-        // resolver happens to be configured on the manager.
+        // Proof-only entry point: revocation/suspension is checked by the
+        // dedicated verifyCredentialWithStatus (which supplies the status
+        // list). Pass checkStatus:false so a valid, non-revoked credential
+        // that merely declares a credentialStatus is not rejected here for
+        // lack of a resolver.
         const res = await verifier.verifyCredential(credential, { checkStatus: false });
         return res.verified;
       }
@@ -504,13 +448,25 @@ export class CredentialManager {
    * whenever `revoked` or `suspended` is true (issue #345), so callers gating
    * on `verified` alone cannot accept a revoked credential.
    *
+   * `credentialStatus` may declare more than one entry (VCDM 2.0 permits an
+   * array), and different entries may reference different status lists (e.g.
+   * separate revocation and suspension lists). `statusListCredential` accepts
+   * either one credential or an array of them; every declared entry is
+   * evaluated against whichever supplied list its own `statusListCredential`
+   * reference names. An entry whose reference does not match any supplied
+   * list fails closed with a clear "no matching list supplied" error rather
+   * than being skipped. For a resolver-based alternative that fetches each
+   * entry's list on demand instead of requiring the caller to supply all of
+   * them up front, use `Verifier.checkCredentialStatus` /
+   * `Verifier.verifyCredential` with a `statusListResolver`.
+   *
    * @param credential - The credential to verify
-   * @param statusListCredential - The resolved status list credential (required if credential has credentialStatus)
+   * @param statusListCredential - The resolved status list credential(s) (required if credential has credentialStatus); pass an array when entries reference more than one list
    * @returns Result with signature validity and revocation status
    */
   async verifyCredentialWithStatus(
     credential: VerifiableCredential,
-    statusListCredential?: VerifiableCredential
+    statusListCredential?: VerifiableCredential | VerifiableCredential[]
   ): Promise<{
     verified: boolean;
     revoked: boolean;
@@ -522,11 +478,9 @@ export class CredentialManager {
     let revoked = false;
     let suspended = false;
 
-    // Verify signature. Deliberately signature-only: status is evaluated
-    // explicitly below against the caller-supplied `statusListCredential`,
-    // not via `verifyCredential`'s own (resolver-based) status check.
+    // Verify signature
     try {
-      verified = await this.verifyCredentialSignature(credential);
+      verified = await this.verifyCredential(credential);
       if (!verified) {
         errors.push('Credential signature verification failed');
       }
@@ -534,10 +488,17 @@ export class CredentialManager {
       errors.push(`Signature verification error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Check revocation status if applicable
-    const status = credential.credentialStatus as BitstringStatusListEntry | undefined;
-    if (status?.type === 'BitstringStatusListEntry') {
-      if (!statusListCredential) {
+    // Check revocation status if applicable. credentialStatus may be a
+    // singleton or an array (VCDM 2.0); every declared entry is evaluated so
+    // an array-shaped value cannot skip status checking entirely (issue #592).
+    const entries = credentialStatusEntries(credential);
+    const suppliedLists: VerifiableCredential[] = !statusListCredential
+      ? []
+      : Array.isArray(statusListCredential)
+        ? statusListCredential
+        : [statusListCredential];
+    if (entries.length > 0) {
+      if (suppliedLists.length === 0) {
         // Fail closed: the credential declares a status entry but no status
         // list was supplied to evaluate it. Leaving `verified: true` here would
         // report an unknown revocation state as "valid", so a caller gating on
@@ -546,54 +507,84 @@ export class CredentialManager {
         // (Verifier.verifyCredential), which rejects a credential whose declared
         // status cannot be checked.
         verified = false;
-        errors.push('Credential has a BitstringStatusListEntry but no status list credential was provided');
+        errors.push('Credential has a credentialStatus but no status list credential was provided');
       } else {
-        try {
-          // Trust checks (issue #238, shared with Verifier via
-          // validateStatusListCredentialTrust — issue #301): the supplied
-          // status list credential must be the referenced one, must carry a
-          // valid proof, and must be issued by the checked credential's
-          // issuer — otherwise a holder can hand the verifier a fabricated
-          // all-zeros list and bypass revocation.
-          const trust = await validateStatusListCredentialTrust(
-            credential,
-            status,
-            statusListCredential,
-            async (listVC) => {
-              // Signature-only: the status list credential does not carry its
-              // own credentialStatus, so there is nothing recursive to check,
-              // and using verifyCredential's resolver-based status check here
-              // would be redundant.
-              const ok = await this.verifyCredentialSignature(listVC);
-              return { verified: ok, errors: [] };
-            }
-          );
-          if (!trust.verified) {
-            throw new Error(trust.errors.join('; '));
-          }
-
-          const result = this.statusList.checkStatus(status, statusListCredential);
-          if (result.isSet) {
-            // A determinate revoked/suspended state must fail verification:
-            // a caller gating on `verified` alone would otherwise accept a
-            // revoked credential (issue #345). This aligns with
-            // Verifier.checkCredentialStatus, which returns verified: false
-            // for the same state.
+        for (const status of entries) {
+          if (!isCredentialStatusEntry(status)) {
+            // A malformed array element must fail closed the same as any
+            // other unevaluable entry, not throw when `.type` is read below.
             verified = false;
-            if (result.statusPurpose === 'revocation') {
-              revoked = true;
-              errors.push('Credential has been revoked');
-            } else {
-              suspended = true;
-              errors.push('Credential has been suspended');
-            }
+            errors.push(`Credential declares a malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
+            continue;
           }
-        } catch (err) {
-          // Fail closed: a status entry that cannot be evaluated (purpose
-          // mismatch, out-of-range index, corrupt encodedList) must not be
-          // treated as "not revoked".
-          verified = false;
-          errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
+          if (status.type !== 'BitstringStatusListEntry') {
+            // Unsupported status mechanism: this verifier cannot evaluate it,
+            // so the credential's status through this entry is unknown. Fail
+            // closed rather than silently ignoring it.
+            verified = false;
+            errors.push(
+              `Unsupported credentialStatus type '${status.type}': this verifier cannot evaluate it, ` +
+              'so the credential\'s status through this entry is unknown.'
+            );
+            continue;
+          }
+          const bitstringStatus = status as BitstringStatusListEntry;
+          try {
+            // Different entries may reference different lists (e.g. separate
+            // revocation and suspension lists) — pick the supplied list this
+            // entry actually names rather than always checking against the
+            // first/only one. No match means this entry cannot be evaluated
+            // with what the caller supplied.
+            const matchingList = suppliedLists.find((list) => list.id === bitstringStatus.statusListCredential);
+            if (!matchingList) {
+              throw new Error(
+                `This entry's statusListCredential reference (${bitstringStatus.statusListCredential}) does not match ` +
+                `the id of any supplied status list credential`
+              );
+            }
+
+            // Trust checks (issue #238, shared with Verifier via
+            // validateStatusListCredentialTrust — issue #301): the matched
+            // status list credential must carry a valid proof and must be
+            // issued by the checked credential's issuer — otherwise a holder
+            // can hand the verifier a fabricated all-zeros list and bypass
+            // revocation.
+            const trust = await validateStatusListCredentialTrust(
+              credential,
+              bitstringStatus,
+              matchingList,
+              async (listVC) => {
+                const ok = await this.verifyCredential(listVC);
+                return { verified: ok, errors: [] };
+              }
+            );
+            if (!trust.verified) {
+              throw new Error(trust.errors.join('; '));
+            }
+
+            const result = this.statusList.checkStatus(bitstringStatus, matchingList);
+            if (result.isSet) {
+              // A determinate revoked/suspended state must fail verification:
+              // a caller gating on `verified` alone would otherwise accept a
+              // revoked credential (issue #345). This aligns with
+              // Verifier.checkCredentialStatus, which returns verified: false
+              // for the same state.
+              verified = false;
+              if (result.statusPurpose === 'revocation') {
+                revoked = true;
+                errors.push('Credential has been revoked');
+              } else {
+                suspended = true;
+                errors.push('Credential has been suspended');
+              }
+            }
+          } catch (err) {
+            // Fail closed: a status entry that cannot be evaluated (purpose
+            // mismatch, out-of-range index, corrupt encodedList) must not be
+            // treated as "not revoked".
+            verified = false;
+            errors.push(`Status check error: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     }
@@ -726,7 +717,12 @@ export class CredentialManager {
       if (!did) {
         return null;
       }
-      const didDoc = await this.didManager.resolveDID(did);
+      // This fallback runs when the document loader failed for a non-security
+      // reason (e.g. a transient live did:webvh resolution error) and still
+      // decides whether a key is presently authorized — the same
+      // current-authority decision as the loader itself, so it must not
+      // accept a stale/pinned cached document either (issue #602).
+      const didDoc = await this.didManager.resolveDID(did, { mode: 'current' });
       interface DIDDocWithVMs {
         verificationMethod?: Array<{
           id?: string;
@@ -1321,12 +1317,25 @@ export class CredentialManager {
   }
 
   /**
-   * Extract and validate the BitstringStatusListEntry from a credential.
+   * Extract and validate the single BitstringStatusListEntry from a
+   * credential. `credentialStatus` may be an array (VCDM 2.0); this
+   * management path (revoke/suspend/check a specific list) requires the
+   * caller's credential to declare exactly one entry, since guessing which
+   * of several entries to act on would risk updating the wrong status list.
    */
   private extractStatusEntry(credential: VerifiableCredential): BitstringStatusListEntry {
-    const status = credential.credentialStatus;
-    if (!status) {
+    const entries = credentialStatusEntries(credential);
+    if (entries.length === 0) {
       throw new Error('Credential has no credentialStatus field');
+    }
+    if (entries.length > 1) {
+      throw new Error(
+        'Credential declares multiple credentialStatus entries; this operation requires exactly one.'
+      );
+    }
+    const status = entries[0];
+    if (!isCredentialStatusEntry(status)) {
+      throw new Error(`Malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
     }
     if (status.type !== 'BitstringStatusListEntry') {
       throw new Error(

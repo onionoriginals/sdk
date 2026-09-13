@@ -22,6 +22,12 @@ import { canonicalizeEvent } from '../../src/canonicalize';
 // removed in the security hardening; non-did:key proofs without a resolver
 // now fail closed. Use a did:key signer so verifyEventLog can verify offline.
 let signerOpts: CreateOptions;
+// The signer's own self-certifying did:key — legacy `data.did` genesis events
+// must bind to the key that actually signed them (#590), so anything the
+// verification baseline expects to pass `verifyEventLog` needs `data.did`
+// (and, for legacy shape, `data.creator`) set to THIS, not an arbitrary
+// did:webvh string the signer has no relationship to.
+let signerDid: string;
 
 beforeAll(async () => {
   const ed25519 = await import('@noble/ed25519');
@@ -29,6 +35,7 @@ beforeAll(async () => {
   const publicKeyBytes = new Uint8Array(await (ed25519 as any).getPublicKeyAsync(privateKeyBytes));
   const pub = multikey.encodePublicKey(publicKeyBytes, 'Ed25519');
   const verificationMethod = `did:key:${pub}#${pub}`;
+  signerDid = `did:key:${pub}`;
 
   signerOpts = {
     signer: async (data: unknown): Promise<DataIntegrityProof> => {
@@ -179,11 +186,11 @@ describe('CEL Event Log Performance', () => {
       for (let i = 0; i < 10; i++) {
         let log = await createEventLog({
           name: `Verify Test ${i}`,
-          did: `did:webvh:example.com:4z6MkVerify${i}`,
+          did: signerDid,
           layer: 'peer',
           createdAt: new Date().toISOString(),
           resources: [],
-          creator: `did:webvh:example.com:4z6MkVerify${i}`,
+          creator: signerDid,
         }, signerOpts);
         // Add 5 updates each
         for (let j = 0; j < 5; j++) {
