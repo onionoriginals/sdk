@@ -45,18 +45,22 @@ function deriveFromRawTransaction(rawHex: string): { tags: { contentType?: strin
   } catch {
     return [];
   }
+  // An inscription id's index is global across the whole reveal transaction, not
+  // scoped to one input: a batch reveal can carry inscriptions across multiple
+  // script-path inputs, each contributing its envelopes in input order.
+  const inscriptions: { tags: { contentType?: string }; body: Uint8Array }[] = [];
   for (let i = 0; i < tx.inputsLength; i++) {
     const witness = tx.getInput(i).finalScriptWitness;
     if (!witness || witness.length !== 3) continue;
     try {
       const decoded = btc.Script.decode(witness[1]);
       const parsed = parseInscriptions(decoded, true);
-      if (parsed?.length) return parsed;
+      if (parsed?.length) inscriptions.push(...parsed);
     } catch {
       continue;
     }
   }
-  return [];
+  return inscriptions;
 }
 
 /**

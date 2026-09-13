@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import * as btc from '@scure/btc-signer';
-import { secp256k1 } from '@noble/curves/secp256k1.js';
+import * as ordinals from 'micro-ordinals';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { digestBytes, type SatSnapshot } from '@originals/cel/v3';
 import { prepareInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat.js';
 import type { PreparedInscriptionOnSat } from '../../../src/bitcoin/inscription-recovery.js';
@@ -158,6 +159,73 @@ test('leaves an inscription uncovered, rather than guessing, when no envelope is
     fetchImpl: mock.fetchImpl,
   })(snapshot);
   expect(evidence).toEqual([]);
+});
+
+test('collects inscriptions across multiple script-path inputs of one batch reveal', async () => {
+  // A batch reveal spends its inscriptions across separate inputs; the
+  // inscription index is global across the whole transaction, not scoped
+  // to one input, so every script-path input must contribute its envelopes.
+  const pubkey1 = schnorr.getPublicKey(new Uint8Array(32).fill(2));
+  const pubkey2 = schnorr.getPublicKey(new Uint8Array(32).fill(3));
+  const revealWitness = (pubkey: Uint8Array, inscription: { tags: { contentType: string }; body: Uint8Array }) => {
+    const script = ordinals.p2tr_ord_reveal(pubkey, [inscription]).script;
+    const fakeControl = new Uint8Array(33);
+    fakeControl[0] = 0xc0;
+    fakeControl.set(pubkey, 1);
+    return [new Uint8Array(64).fill(1), script, fakeControl];
+  };
+  const first = { tags: { contentType: 'text/plain' }, body: new TextEncoder().encode('first') };
+  const second = { tags: { contentType: 'text/plain' }, body: new TextEncoder().encode('second') };
+  const tx = new btc.Transaction({
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+    allowLegacyWitnessUtxo: true,
+    disableScriptCheck: true,
+  });
+  tx.addOutput({ script: new Uint8Array(34), amount: 1000n });
+  tx.addInput({ txid: '11'.repeat(32), index: 0, finalScriptWitness: revealWitness(pubkey1, first) }, true);
+  tx.addInput({ txid: '22'.repeat(32), index: 0, finalScriptWitness: revealWitness(pubkey2, second) }, true);
+  const revealTxHex = Buffer.from(tx.toBytes(true, true)).toString('hex');
+  const revealTxId = btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  }).id;
+
+  const blockHash = 'b'.repeat(64);
+  const snapshot: SatSnapshot = {
+    network: 'regtest',
+    sat: '1250000000',
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [0, 1].map((index) => ({
+      id: `${revealTxId}i${index}`,
+      revealTxid: revealTxId,
+      network: 'regtest',
+      sat: '1250000000',
+      confirmed: true,
+      creation: { height: 1, blockHash, transactionIndex: 0, inscriptionIndex: index },
+      body: {
+        status: 'complete',
+        mediaType: 'text/plain',
+        bytes: new TextEncoder().encode(index === 0 ? 'first' : 'second'),
+        metadata: null,
+      },
+    })),
+  };
+  const mock = core({ [revealTxId]: revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot);
+  expect(evidence).toEqual([
+    { inscriptionId: `${revealTxId}i0`, mediaType: 'text/plain', contentDigest: digestBytes(first.body) },
+    { inscriptionId: `${revealTxId}i1`, mediaType: 'text/plain', contentDigest: digestBytes(second.body) },
+  ]);
 });
 
 test('skips unconfirmed and incomplete publications without consulting the node', async () => {

@@ -396,3 +396,21 @@ test("fails closed rather than falling back to an unqualified claim when the con
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   expect(result.status).toBe("incomplete");
 });
+
+test("never consults the content validator for a snapshot resolveSat would reject on its own", async () => {
+  const { snapshot } = await boundary();
+  // An internally inconsistent snapshot (index tip disagrees with the chain
+  // tip) fails resolveSat's own structural checks before content is ever
+  // relevant; the content validator must not be charged an RPC round trip
+  // for evidence that could never have been accepted regardless.
+  const broken = { ...snapshot, indexHealthy: false };
+  let calls = 0;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => broken },
+    contentValidator: async () => { calls++; return []; },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+  expect(calls).toBe(0);
+});

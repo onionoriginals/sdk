@@ -122,22 +122,30 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
-      let independentContent: Awaited<ReturnType<ContentValidator>> | undefined;
-      if (this.contentValidator) {
-        // A configured content validator that cannot be consulted fails closed,
-        // the same as a configured chain/enumeration validator: it must not be
-        // possible to silently fall back to an unqualified provider claim by
-        // making the independent source unreachable.
-        try {
-          independentContent = await this.contentValidator(snapshot);
-        } catch {
-          return {
-            resolution: failure(
-              "incomplete",
-              "Independent content validation is unavailable",
-            ) as SatResolution,
-          };
-        }
+      // Validate the snapshot's own structure/chain-position claims locally
+      // before spending an external RPC round trip on it: a snapshot that
+      // resolveSat would reject anyway (bad block hash, wrong sat/network,
+      // inconsistent reveal position) should surface that deterministic
+      // reason rather than an unrelated content-validator failure, and never
+      // burns a request against the independently trusted node for data
+      // that was never going to be accepted regardless of its content.
+      const baseline = resolveSat(snapshot, options);
+      if (baseline.status !== "accepted" || !this.contentValidator)
+        return { snapshot, resolution: baseline };
+      // A configured content validator that cannot be consulted fails closed,
+      // the same as a configured chain/enumeration validator: it must not be
+      // possible to silently fall back to an unqualified provider claim by
+      // making the independent source unreachable.
+      let independentContent: Awaited<ReturnType<ContentValidator>>;
+      try {
+        independentContent = await this.contentValidator(snapshot);
+      } catch {
+        return {
+          resolution: failure(
+            "incomplete",
+            "Independent content validation is unavailable",
+          ) as SatResolution,
+        };
       }
       return {
         snapshot,
