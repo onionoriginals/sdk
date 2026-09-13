@@ -2175,15 +2175,27 @@ export function createBitcoinRoutes(deps: {
             ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
           });
         }
-        // Skip the write once depth/height/hash/status all already match:
-        // this is the steady state for a record sitting well below the
-        // settlement threshold that keeps being re-polled while other work
-        // is pending.
+        // Skip the write once depth/height/hash/status all already match —
+        // the steady state for a record sitting well below the settlement
+        // threshold that keeps being re-polled while other work is pending.
+        // Mirror setStatus's own semantics rather than comparing raw fields:
+        // an OMITTED height/hash never counts as a change on its own (it
+        // leaves the stored value as-is, or store.setStatus clears height
+        // only when hashChanged proves the identity actually moved) — a
+        // literal-field comparison would otherwise treat "still confirmed,
+        // provider's best-effort height lookup failed again" as a change on
+        // every single poll, writing to disk and bumping `updatedAt` for a
+        // read that changed nothing.
+        const hashChanged = st.blockHash !== undefined && st.blockHash !== current.confirmedBlockHash;
+        const heightChanged =
+          st.blockHeight !== undefined
+            ? st.blockHeight !== current.confirmedBlockHeight
+            : hashChanged && current.confirmedBlockHeight !== undefined;
         if (
           current.status !== 'confirmed' ||
           current.confirmations !== st.confirmations ||
-          current.confirmedBlockHeight !== st.blockHeight ||
-          current.confirmedBlockHash !== st.blockHash
+          heightChanged ||
+          hashChanged
         ) {
           store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash });
           changed = true;
