@@ -49,9 +49,8 @@ test('publish authenticates to npm via OIDC trusted publishing, not a long-lived
   assert.ok(publish >= 0, 'publish job must run changesets/action@v2 to publish');
   assert.match(publishSteps.slice(0, publish + 1).join('\n'), /registry-url: "https:\/\/registry.npmjs.org"/);
 
-  // NODE_AUTH_TOKEN on the publish step would make npm silently prefer token
-  // auth over OIDC, defeating the trusted-publishing migration without any
-  // visible failure. It must never reappear on the publish step.
+  // npm tries OIDC first, then token authentication. A token fallback could
+  // mask a misconfigured trusted publisher, so this step must omit it.
   assert.doesNotMatch(publishSteps[publish], /NODE_AUTH_TOKEN/);
   assert.doesNotMatch(publishSteps[publish], /NPM_CONFIG_PROVENANCE/);
   // `npm whoami` only validates the old token path and cannot validate OIDC
