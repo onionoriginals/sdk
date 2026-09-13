@@ -138,18 +138,22 @@ lower-level root exports.
 
 ## Credential verification is safe-by-default for declared status
 
-`CredentialManager.verifyCredential` and `UnifiedVerifier.verify()`'s
-credential branch used to verify a credential on signature alone, even when
-it declared `credentialStatus`. They now check that declared status by
-default: configure a `statusListResolver` to have it actually evaluated
-(every entry, singleton or array), or expect a credential that declares a
-status you cannot evaluate to **fail closed** rather than silently pass.
-Callers that intentionally want the old signature-only behavior — for
-example, checking a status list credential's own signature before reading
-it — call the newly, explicitly named `verifyCredentialSignature` instead.
-`UnifiedVerifier.verify()` also now returns an `assurance: { signature,
-status, freshness }` breakdown (each `'checked' | 'failed' | 'unknown'`), so
-a caller can tell "checked and passed" apart from "never checked." Pass
-`signatureOnly: true` to `UnifiedVerifier.verify()` to keep the old
-signature-only behavior explicitly (reported as `unknown` status, never
-silently `checked`).
+`CredentialManager.verifyCredential` used to verify a credential on
+signature alone, even when it declared `credentialStatus`. It now checks
+that declared status by default: configure `credentialManager.statusListResolver`
+to have it actually evaluated (every entry, singleton or array), or expect a
+credential that declares a status you cannot evaluate to **fail closed**
+rather than silently pass. Callers that intentionally want the old
+signature-only behavior — for example, checking a status list credential's
+own signature before reading it — call the newly, explicitly named
+`verifyCredentialSignature` instead; `verifyCredentialWithStatus` (evaluating
+a caller-supplied status list directly) is unaffected.
+
+`OriginalsAsset.verify()` (the retained previous-format lifecycle asset)
+calls this same `verifyCredential` for its credential checks when a
+`credentialManager` dependency is supplied, so it inherits the new
+fail-closed default too. Its other tiered-verification behavior — treating
+signatures and hash-only resources as unchecked rather than failed when a
+dependency isn't supplied at all — is unchanged; that is deliberate, existing
+behavior distinct from this credential-status default and is not part of
+this release.
