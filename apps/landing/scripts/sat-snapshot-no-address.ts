@@ -83,22 +83,18 @@ try {
   assert.equal(after.enumerationComplete, true);
   assert.equal(after.indexHealthy, true);
   assert.ok(after.tipAfter.height > before.tipAfter.height);
-  // A genuinely separate Core process starts on its own fork, then imports the
-  // primary's blocks without trusting the indexer's JSON chain assertions.
-  independent = await startRegtest({ indexAddresses: false });
+  // A genuinely separate Core process validates the primary's raw blocks before
+  // starting its own ord index; it does not trust the indexer's JSON assertions.
+  const initialBlocks: string[] = [];
+  for (let height = 1; height <= after.tipAfter.height; height++) {
+    initialBlocks.push(await env.rpc<string>('getblock', [await env.rpc<string>('getblockhash', [height]), 0]));
+  }
+  independent = await startRegtest({ indexAddresses: false, initialBlocks });
   const validator = () => {
     const separator = independent!.rpcAuth.indexOf(':');
     return createBitcoinCoreChainValidator({ endpoint: independent!.rpcUrl,
       rpcAuth: { username: independent!.rpcAuth.slice(0, separator), password: independent!.rpcAuth.slice(separator + 1) } });
   };
-  await assert.rejects(validator()(after), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
-  await independent.rpc('invalidateblock', [await independent.rpc('getblockhash', [1])]);
-  for (let height = 1; height <= after.tipAfter.height; height++) {
-    const hash = await env.rpc<string>('getblockhash', [height]);
-    const block = await env.rpc<string>('getblock', [hash, 0]);
-    assert.equal(await independent.rpc('submitblock', [block]), null);
-  }
-  await independent.sync();
   await validator()(after);
   const altered = structuredClone(after);
   altered.blocks[0].txids = ['f'.repeat(64)];
@@ -115,7 +111,7 @@ try {
     satoshi, inscriptionId: reveal.inscriptionId, pngBytes: png.length, ownershipBefore: before.ownership, ownershipAfter: after.ownership,
     tipBefore: before.tipAfter, tipAfter: after.tipAfter,
     checks: ['real ord address index disabled', 'complete sat enumeration', 'exact PNG bytes', 'initial owner and satpoint',
-      'real confirmed sat transfer', 'fresh owner and satpoint', 'unchanged publication evidence', 'separate Core rejects initial fork', 'independent Core validates real inscription blocks',
+      'real confirmed sat transfer', 'fresh owner and satpoint', 'unchanged publication evidence', 'separate Core validates imported raw blocks', 'independent Core validates real inscription blocks',
       'fabricated block transactions rejected', 'independent reorg rejected', 'reconsider and authenticated restart validated'], success: true };
   if (process.env.REGTEST_RECEIPT) await writeFile(process.env.REGTEST_RECEIPT, JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify(receipt, null, 2));

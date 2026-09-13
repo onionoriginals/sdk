@@ -7,7 +7,7 @@ import type { Subprocess } from 'bun';
 export type RegtestRestartTarget = 'core' | 'ord' | 'both';
 
 /** Disposable real nodes, with no public peers, public RPC or production wallet. */
-export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
+export async function startRegtest(options: { indexAddresses?: boolean; initialBlocks?: readonly string[] } = {}) {
   const indexAddresses = options.indexAddresses ?? true;
   const dataDir = await mkdtemp(join(tmpdir(), 'originals-regtest-'));
   const coreDir = join(dataDir, 'core');
@@ -156,7 +156,14 @@ export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
     await rpc('createwallet', ['originals-regtest']);
     const miningAddress = await rpc<string>('getnewaddress', ['', 'bech32'], 'originals-regtest');
     // Bootstrap mines a mature wallet in one mutation; allow slow CI disks without retrying it.
-    await rpc('generatetoaddress', [101, miningAddress], undefined, 60_000);
+    if (options.initialBlocks) {
+      // A second independent node validates imported blocks before ord creates
+      // its index, avoiding an artificial 101-block indexer reorg at startup.
+      for (const block of options.initialBlocks) {
+        const result = await rpc<string | null>('submitblock', [block]);
+        if (result !== null) throw new Error(`Initial regtest block rejected: ${result}`);
+      }
+    } else await rpc('generatetoaddress', [101, miningAddress], undefined, 60_000);
     startOrd();
     await sync();
     return {
