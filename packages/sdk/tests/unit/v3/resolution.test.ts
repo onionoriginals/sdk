@@ -387,6 +387,31 @@ test("fails closed when the independent enumeration source sees a publication th
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("fails closed when the independent source's own snapshot is incomplete, unhealthy or unstable, rather than granting cross-checked for free", async () => {
+  const { snapshot } = await boundary();
+  const cases: [string, (s: SatSnapshot) => SatSnapshot][] = [
+    ["incomplete enumeration", (s) => ({ ...s, enumerationComplete: false })],
+    ["unhealthy index", (s) => ({ ...s, indexHealthy: false })],
+    [
+      "unstable tip",
+      (s) => ({ ...s, tipAfter: { ...s.tipAfter, hash: "1".repeat(64) } }),
+    ],
+  ];
+  for (const [, corrupt] of cases) {
+    const independent = corrupt(structuredClone(snapshot));
+    const sdk = OriginalsSDK.create({
+      network: "regtest",
+      satProvider: { getSatSnapshot: async () => snapshot },
+      independentEnumeration: {
+        label: "second-ord-instance",
+        provider: { getSatSnapshot: async () => independent },
+      },
+    });
+    const result = await sdk.lifecycle.resolveAssetFromSat("123");
+    expect(result.status).toBe("incomplete");
+  }
+});
+
 test("fails closed when a configured independent enumeration source cannot be reached, rather than silently degrading to provider-asserted", async () => {
   const { snapshot } = await boundary();
   const sdk = OriginalsSDK.create({

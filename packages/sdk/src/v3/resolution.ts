@@ -76,6 +76,20 @@ const failure = (
   scope: "sat",
   crossSatCanonicality: "unknown",
 });
+const sameTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
+  !!a && !!b && a.height === b.height && a.hash === b.hash;
+/**
+ * A second source can only corroborate enumeration completeness if its own
+ * observation was itself complete, healthy and stable. An independent
+ * snapshot that fails these is unusable evidence, not weaker evidence: it
+ * must not be able to confer "cross-checked" by reporting less.
+ */
+const usableIndependentSnapshot = (snapshot: SatSnapshot): boolean =>
+  snapshot.enumerationComplete === true &&
+  snapshot.indexHealthy === true &&
+  Array.isArray(snapshot.publications) &&
+  sameTip(snapshot.tipBefore, snapshot.tipAfter) &&
+  sameTip(snapshot.tipBefore, snapshot.indexTip);
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
 export class AssetResolver {
@@ -161,6 +175,18 @@ export class AssetResolver {
             resolution: failure(
               "inconsistent-evidence",
               "Independent enumeration source snapshot differs from requested sat or network",
+            ) as SatResolution,
+          };
+        // An incomplete, unhealthy or unstable independent snapshot must
+        // not confer "cross-checked": an empty or partial enumeration list
+        // trivially never disagrees with the primary snapshot, so a broken
+        // or dishonest second source could otherwise earn full assurance by
+        // reporting nothing at all.
+        if (!usableIndependentSnapshot(independentSnapshot))
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not report a complete, healthy, stable observation",
             ) as SatResolution,
           };
         independentEnumeration = {
