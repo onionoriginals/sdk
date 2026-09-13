@@ -133,6 +133,10 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const result = await verifyEventLog(log, { ordinalsProvider: provider, checkHeadFreshness: true });
     expect(result.verified).toBe(true);
     expect(STALE(result)).toBe(false);
+    // headFreshnessChecked is the ground-truth signal that verifyHeadFreshness
+    // actually ran (issue #600 / Greptile review of #653) — callers must not
+    // have to re-derive "was this anchored" from proof shape themselves.
+    expect(result.headFreshnessChecked).toBe(true);
   });
 
   test('TRUNCATION: a valid prefix fails STALE_LOG once a later append is re-inscribed', async () => {
@@ -213,6 +217,9 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const result = await verifyEventLog(log, { ordinalsProvider: limited, checkHeadFreshness: true });
     expect(result.verified).toBe(false);
     expect(STALE(result)).toBe(true);
+    // The check genuinely ran (and failed) — distinct from the custom-verifier
+    // and never-anchored cases below, where it never runs at all.
+    expect(result.headFreshnessChecked).toBe(true);
   });
 
   test('custom verifier + checkHeadFreshness → incompatible, fails closed (not a silent pass)', async () => {
@@ -227,6 +234,10 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     });
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => /incompatible with a custom verifier/i.test(e))).toBe(true);
+    // The custom-verifier path never establishes anchoredSat, so the check
+    // never actually ran — this is a configuration-error rejection, not a
+    // genuine freshness failure.
+    expect(result.headFreshnessChecked).toBe(false);
   });
 
   test('a migrate with a second witness on a NON-signed sat fails closed (witness must match the signed anchoring sat)', async () => {
@@ -323,6 +334,9 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const result = await verifyEventLog(log, { checkHeadFreshness: true });
     expect(result.verified).toBe(true);
     expect(STALE(result)).toBe(false);
+    // Never anchored ⇒ nothing to be fresh against ⇒ the check never ran,
+    // regardless of the flag being set.
+    expect(result.headFreshnessChecked).toBe(false);
   });
 
   test('default (flag omitted): a truncated prefix still verifies — zero behavior change for existing callers', async () => {
@@ -335,5 +349,6 @@ describe('checkHeadFreshness — truncated-log detection', () => {
     const result = await verifyEventLog(prefix, { ordinalsProvider: provider });
     expect(result.verified).toBe(true);
     expect(STALE(result)).toBe(false);
+    expect(result.headFreshnessChecked).toBe(false);
   });
 });

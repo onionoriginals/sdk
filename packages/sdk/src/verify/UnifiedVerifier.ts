@@ -65,29 +65,6 @@ export interface UnifiedVerificationResult {
   details?: unknown;
 }
 
-/**
- * Whether any event in the log carries a `bitcoin-ordinals-2024` witness
- * proof — i.e. the log is anchored to a satoshi, so head-freshness is
- * something to actually check rather than the documented no-op
- * `checkHeadFreshness` is for an unanchored log (see `VerifyOptions.checkHeadFreshness`
- * in `@originals/cel`).
- */
-function eventLogHasBitcoinWitness(log: EventLog): boolean {
-  // `document` reaches verify() as `unknown` and classifyDocument only checks
-  // that `events` is an array — a malformed/attacker-supplied log can have a
-  // missing or non-array `proof` (or a non-object event) on some entry.
-  // verifyEventLog itself handles that by returning a failed result; this
-  // helper must not throw on the same input and turn verify() into a
-  // rejected promise instead of the `verified: false` result it should be.
-  return log.events.some((event) => {
-    const proof = (event as { proof?: unknown } | null)?.proof;
-    return (
-      Array.isArray(proof) &&
-      proof.some((p) => (p as { cryptosuite?: string } | null)?.cryptosuite === 'bitcoin-ordinals-2024')
-    );
-  });
-}
-
 /** Heuristic discriminator. Returns the kind a document should route to. */
 export function classifyDocument(document: unknown): VerifiableKind {
   if (!document || typeof document !== 'object') return 'unknown';
@@ -122,12 +99,18 @@ export interface UnifiedVerifierOptions {
   statusListResolver?: StatusListResolver;
   /**
    * Explicitly request signature/proof-only verification for this call:
-   * status and head-freshness checks are skipped even when their
-   * dependencies are configured, and reported `unknown` rather than
-   * `checked`. Ordinary callers should leave this false — the safe default
-   * runs every check it can and fails closed on what it can't (issue #600).
-   * Use this only when the caller has an independent, out-of-band reason to
-   * trust current authority (e.g. offline/air-gapped verification).
+   * credential status and event-log head-freshness checks are skipped even
+   * when their dependencies are configured, and reported `unknown` rather
+   * than `checked`. Ordinary callers should leave this false — the safe
+   * default runs every check it can and fails closed on what it can't (issue
+   * #600). Use this only when the caller has an independent, out-of-band
+   * reason to trust current authority (e.g. offline/air-gapped verification).
+   *
+   * For an event log, this does NOT withhold a configured `ordinalsProvider`
+   * from witness-proof, uniqueness, or content-match verification — those
+   * are part of the bundled "signature" verdict, not the freshness check
+   * this option skips. A configured provider is still required (and still
+   * used) to verify a btco-anchored log's witness proof at all.
    */
   signatureOnly?: boolean;
 }
@@ -206,20 +189,32 @@ export class UnifiedVerifier {
       }
       case 'eventLog': {
         const log = document as EventLog;
-        const provider = signatureOnly ? undefined : this.options?.ordinalsProvider;
+        // The provider is needed for witness-proof, uniqueness, and
+        // content-match verification, none of which is what `signatureOnly`
+        // means to skip — those are part of the bundled "signature" verdict
+        // (see the assurance field's doc comment above). Withholding it
+        // entirely would fail an otherwise-valid anchored log outright rather
+        // than just skipping head-freshness, since btco witness proofs are
+        // gating and require a provider to verify at all. `signatureOnly`
+        // therefore only ever disables `checkHeadFreshness`.
+        const provider = this.options?.ordinalsProvider;
         const res = await verifyEventLog(log, {
           resolveKey: createDidManagerKeyResolver(this.didManager),
           ordinalsProvider: provider,
-          checkHeadFreshness: provider !== undefined,
+          checkHeadFreshness: !signatureOnly && provider !== undefined,
         });
-        // Only claim freshness was actually exercised when the log is
-        // genuinely anchored (checkHeadFreshness is a documented no-op
-        // otherwise) AND a provider was consulted. Even then, only ever
-        // report the affirmative `checked` case: a false `verified` cannot be
-        // attributed to freshness specifically over proof/chain/uniqueness
-        // (see the field's doc on UnifiedVerificationResult.assurance).
-        const freshnessExercised = !signatureOnly && provider !== undefined && eventLogHasBitcoinWitness(log);
-        const freshness: CheckState = freshnessExercised && res.verified ? 'checked' : 'unknown';
+        // Trust CEL's own `headFreshnessChecked` flag rather than re-deriving
+        // "the log looks anchored" from proof shape in this file: a
+        // bitcoin-ordinals-2024-shaped proof can appear on a log whose
+        // authority walk never actually established an anchor (e.g. on a
+        // non-anchor event, or one an attacker crafted), so that shape alone
+        // is not proof the check ran. `headFreshnessChecked` is only ever
+        // true when `verifyHeadFreshness` was genuinely invoked. Even then,
+        // only ever report the affirmative `checked` case: a false `verified`
+        // cannot be attributed to freshness specifically over
+        // proof/chain/uniqueness (see the field's doc on
+        // UnifiedVerificationResult.assurance).
+        const freshness: CheckState = res.headFreshnessChecked && res.verified ? 'checked' : 'unknown';
         return {
           kind,
           verified: res.verified,

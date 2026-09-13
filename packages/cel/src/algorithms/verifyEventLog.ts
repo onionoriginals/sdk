@@ -1346,6 +1346,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: missing events array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1354,6 +1355,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: events is not an array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1362,6 +1364,7 @@ export async function verifyEventLog(
       verified: false,
       errors: ['Invalid event log: empty events array'],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1374,6 +1377,7 @@ export async function verifyEventLog(
       verified: false,
       errors: [`Invalid event log: first event must be a 'create' event (found '${String(log.events[0].type)}')`],
       events: [],
+      headFreshnessChecked: false,
     };
   }
 
@@ -1862,6 +1866,7 @@ export async function verifyEventLog(
   // requesting the check there is a configuration error (it would silently pass)
   // and instead fails closed.
   let staleLogError: string | undefined;
+  let headFreshnessChecked = false;
   if (options?.checkHeadFreshness) {
     if (options?.verifier) {
       staleLogError =
@@ -1869,6 +1874,7 @@ export async function verifyEventLog(
         `on-chain authority walk that head freshness is validated against`;
     } else if (anchoredSat) {
       staleLogError = await verifyHeadFreshness(log, anchoredSat, options?.ordinalsProvider) ?? undefined;
+      headFreshnessChecked = true;
     }
     // No anchoredSat ⇒ the log was never btco-anchored (a signed btco migrate
     // that failed the anchor checks failed the whole log above), so there is
@@ -1949,6 +1955,7 @@ export async function verifyEventLog(
     verified: allProofsValid && allChainsValid && !authorityError && !deactivationViolated && !midLogCreateViolated && !expectedDidError && !staleLogError && !uniquenessError && !contentMismatchError,
     errors,
     events: eventVerifications,
+    headFreshnessChecked,
     ...(assetDid !== undefined ? { assetDid } : {}),
     // Class machinery is default-path only; never synthesized under a custom
     // verifier.
