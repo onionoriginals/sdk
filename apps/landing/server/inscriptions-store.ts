@@ -103,11 +103,11 @@ export interface InscriptionRecord {
    */
   confirmations?: number;
   /**
-   * Block height of the MOST RECENT observed confirmation. Unlike
+   * Last defined block height observed while confirmed. Unlike
    * `confirmations`, this is NOT cleared when a reorg demotes the record off
    * `confirmed`: it is deliberately sticky, so a later reconfirmation can be
-   * compared against it. Replaced or cleared by a fresh confirmed
-   * observation; never read as "currently confirmed" without also checking
+   * compared against it. Replaced only by a defined fresh height;
+   * height and hash may come from different observations and remain stale after retirement; never read as "currently confirmed" without also checking
    * `status`.
    *
    * Height alone is NOT block identity: an ordinary one-block reorg can
@@ -119,11 +119,11 @@ export interface InscriptionRecord {
    */
   confirmedBlockHeight?: number;
   /**
-   * Block hash of the MOST RECENT observed confirmation — the real block
+   * Last defined block hash observed while confirmed — the real block
    * IDENTITY, sticky across a demotion for the same reason as
    * `confirmedBlockHeight`. A same-height reorg (block A replaced by block B
    * at height H) changes this even though `confirmedBlockHeight` alone would
-   * not notice. ABSENT when the provider did not supply one; a caller must
+   * not notice. ABSENT until the provider has supplied one; a caller must
    * not treat a missing hash as "unchanged" — fall back to comparing
    * `confirmedBlockHeight` in that case.
    */
@@ -164,7 +164,7 @@ export interface InscriptionsStore {
    * read just reported, recorded only when `status` is `confirmed`.
    * `confirmations` (a live depth) is cleared for every other status.
    * `evidence.blockHeight`/`evidence.blockHash` are instead STICKY across a
-   * demotion — see `InscriptionRecord.confirmedBlockHeight` /
+   * demotion and reads omitting that field — see `InscriptionRecord.confirmedBlockHeight` /
    * `confirmedBlockHash` — so a later reconfirmation can be compared against
    * the pre-reorg block identity rather than read as a continuation of it.
    * Omit `evidence` (or leave a field off it) when the caller does not have a
@@ -584,9 +584,9 @@ export function createInscriptionsStore(opts: {
       // here would erase the sole anchor a SAME-HEIGHT reorg needs to be
       // detected against, permanently disabling that detection for every
       // later poll until the next read happens to include a value again.
-      // A stale value briefly paired with a fresher depth reading is a
-      // narrow, self-correcting display quirk; losing the comparison anchor
-      // is not. Only a fresh, defined value ever overwrites the previous one.
+      // These are independent last-known values, not a single current tuple;
+      // they may remain stale after retirement. Only fresh depth controls
+      // retirement. A fresh, defined value overwrites its previous field.
       if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
         rec.confirmedBlockHeight = evidence.blockHeight;
       }
