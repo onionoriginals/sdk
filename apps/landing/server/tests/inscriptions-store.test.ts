@@ -60,7 +60,7 @@ describe('inscriptions-store', () => {
     expect(r.confirmedBlockHash).toBe('b'.repeat(64));
   });
 
-  test('#567: a confirmed update without a block hash CLEARS the stale one rather than keeping it', () => {
+  test('#567: a confirmed update without a block hash keeps the prior one, so a later same-height reorg is still detectable', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
     const commitTxId = 'c'.repeat(64);
@@ -69,14 +69,18 @@ describe('inscriptions-store', () => {
     expect(store.get('sub-1', commitTxId)!.confirmedBlockHash).toBe('a'.repeat(64));
 
     // Still confirmed (no demotion in between), but THIS read's evidence has
-    // no hash — a provider hiccup, not a reorg. Pairing the OLD hash with a
-    // fresh confirmations/height reading would assert an identity this read
-    // never actually observed, so it must be cleared, not left stale.
+    // no hash — a provider hiccup, not a reorg. Clearing it here would erase
+    // the only anchor bitcoin.ts's reorg comparison has to detect a LATER
+    // same-height reorg (block A replaced by block B at the same height):
+    // once cleared, that comparison could only fall back to height, which by
+    // definition cannot see a same-height replacement. A stale hash briefly
+    // paired with a fresher depth reading is the smaller, self-correcting
+    // problem, so the previous value is kept rather than cleared.
     store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 2, blockHeight: 100 });
     const r = store.get('sub-1', commitTxId)!;
     expect(r.confirmations).toBe(2);
     expect(r.confirmedBlockHeight).toBe(100);
-    expect(r.confirmedBlockHash).toBeUndefined();
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
   });
 
   test('supersede preserves the record (and its reveal hex) while freeing the outpoint', () => {
@@ -429,7 +433,7 @@ describe('pendingRevealBroadcasts', () => {
   });
 });
 
-test('a fresh confirmed observation without height clears the prior block height', () => {
+test('a fresh confirmed observation without height keeps the prior block height (only a fresh value overwrites it)', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
   const store = createInscriptionsStore({ dataDir });
   const record = rec({});
@@ -437,9 +441,13 @@ test('a fresh confirmed observation without height clears the prior block height
   store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
   store.setStatus('sub-1', record.commitTxId, 'reveal_broadcast');
   expect(store.get('sub-1', record.commitTxId)?.confirmedBlockHeight).toBe(100);
+  // This read's evidence omits height (e.g. a provider's best-effort height
+  // lookup failed) but still updates the hash. Height must NOT be cleared:
+  // losing it here would leave the reorg comparison with no depth/position
+  // fallback at all if a later read ever omits hash too.
   store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHash: 'b'.repeat(64) });
   const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
   expect(reloaded.confirmations).toBe(2);
   expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
-  expect(reloaded.confirmedBlockHeight).toBeUndefined();
+  expect(reloaded.confirmedBlockHeight).toBe(100);
 });

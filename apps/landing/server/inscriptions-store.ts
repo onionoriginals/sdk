@@ -576,18 +576,22 @@ export function createInscriptionsStore(opts: {
       // `confirmedBlockHash` — so a later reconfirmation can still be
       // compared against them.
       rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
-      if (status === 'confirmed') {
-        rec.confirmedBlockHeight = evidence?.blockHeight;
+      // Height/hash are the ONLY record of this reveal's last known block
+      // identity, and the reorg comparison in bitcoin.ts reads them back on
+      // the very next poll. They must survive an evidence-less read (a
+      // provider hiccup that still reports `confirmed` but omits height
+      // and/or hash) exactly as they survive a demotion: clearing either one
+      // here would erase the sole anchor a SAME-HEIGHT reorg needs to be
+      // detected against, permanently disabling that detection for every
+      // later poll until the next read happens to include a value again.
+      // A stale value briefly paired with a fresher depth reading is a
+      // narrow, self-correcting display quirk; losing the comparison anchor
+      // is not. Only a fresh, defined value ever overwrites the previous one.
+      if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
+        rec.confirmedBlockHeight = evidence.blockHeight;
       }
-      // A fresh confirmed read replaces block evidence together. An omitted
-      // hash, like an omitted height, must CLEAR the
-      // old value rather than leave it in place. Leaving it would pair a
-      // stale hash with this read's new confirmations/height, presenting an
-      // identity that was never actually observed together with them. This
-      // is independent of demotion: `status !== 'confirmed'` never reaches
-      // here at all, so the hash still survives a demotion untouched.
-      if (status === 'confirmed') {
-        rec.confirmedBlockHash = evidence?.blockHash;
+      if (status === 'confirmed' && evidence?.blockHash !== undefined) {
+        rec.confirmedBlockHash = evidence.blockHash;
       }
       writeAll(subOrgId, recs);
     },
