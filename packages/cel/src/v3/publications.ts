@@ -114,8 +114,8 @@ export type SatResolution = Readonly<
        * The complete observation contains only unconfirmed publications for this sat:
        * something was broadcast, but nothing has reached this snapshot's confirmation
        * depth yet, so no boundary could be evaluated either way. Distinct from
-       * `not-found`, which means confirmed data was inspected and no valid boundary
-       * was found in it.
+       * `not-found`, which means either no publications were observed for this sat at
+       * all, or confirmed data was inspected and no valid boundary was found in it.
        */
       status: "pending";
       reason: string;
