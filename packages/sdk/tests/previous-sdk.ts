@@ -10,13 +10,7 @@ export type { AssetEnvelope } from '../src/lifecycle/assetEnvelope.js';
 export type { OriginalsConfig, AssetResource, AssetResourceInput } from '../src/types/common.js';
 export { toCelSigner } from '../src/crypto/OriginalsSigner.js';
 // CEL (Cryptographic Event Log) exports
-export {
-  OriginalsCel,
-  type CelLayer,
-  type CelSigner,
-  type OriginalsCelConfig,
-  type OriginalsCelOptions,
-} from '@originals/cel';
+export { OriginalsCel, type CelLayer, type CelSigner, type OriginalsCelConfig, type OriginalsCelOptions } from '@originals/cel/legacy';
 export type {
   EventLog,
   LogEntry,
@@ -32,20 +26,14 @@ export type {
   DeactivateOptions,
   VerifyOptions,
 } from '@originals/cel';
-export {
-  createEventLog,
-  updateEventLog,
-  deactivateEventLog,
-  verifyEventLog,
-  witnessEvent,
-} from '@originals/cel';
+export { createEventLog, updateEventLog, deactivateEventLog, verifyEventLog, witnessEvent } from '@originals/cel/legacy';
 export {
   computeDigestMultibase,
   verifyDigestMultibase,
   decodeDigestMultibase,
   digestMultibaseEquals,
 } from '@originals/cel';
-export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel';
+export { witnessSigningBytes, celProofSigningInput, canonicalizeEvent } from '@originals/cel/legacy';
 // The CEL proof labels: one written, one accepted for logs sealed under the
 // previous name. The suite pair is plan 042; the type pair renames the claim
 // `DataIntegrityProof` made and never implemented.
@@ -72,14 +60,9 @@ export {
   createExternalReference,
   verifyExternalReference,
 } from '@originals/cel';
-export {
-  PeerCelManager,
-  type CelAssetData,
-  type PeerAssetData,
-  type PeerCelConfig,
-} from '@originals/cel';
-export { WebVHCelManager } from '@originals/cel';
-export { BtcoCelManager } from '@originals/cel';
+export { PeerCelManager, type CelAssetData, type PeerAssetData, type PeerCelConfig } from '@originals/cel/legacy';
+export { WebVHCelManager } from '@originals/cel/legacy';
+export { BtcoCelManager } from '@originals/cel/legacy';
 export type { WitnessService } from '@originals/cel';
 export { HttpWitness, HttpWitnessError } from '@originals/cel';
 export { BitcoinWitness, BitcoinWitnessError, type BitcoinWitnessProof } from '@originals/cel';
@@ -91,9 +74,4 @@ export {
   serializeEventLogCbor,
   parseEventLogCbor,
 } from '@originals/cel';
-export {
-  celSignerFromKeyPair,
-  createKeyStoreCelSigner,
-  currentControllerVm,
-  hexSha256ToDigestMultibase,
-} from '@originals/cel';
+export { celSignerFromKeyPair, createKeyStoreCelSigner, currentControllerVm, hexSha256ToDigestMultibase } from '@originals/cel/legacy';

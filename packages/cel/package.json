@@ -34,6 +34,11 @@
       "import": "./dist/testing/index.js",
       "default": "./dist/testing/index.js"
     },
+    "./legacy": {
+      "types": "./dist/legacy.d.ts",
+      "import": "./dist/legacy.js",
+      "default": "./dist/legacy.js"
+    },
     "./v3": {
       "types": "./dist/v3/index.d.ts",
       "import": "./dist/v3/index.js",

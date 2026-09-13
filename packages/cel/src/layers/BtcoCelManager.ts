@@ -21,6 +21,7 @@ import { computeDigestMultibase } from '../hash.js';
 import { canonicalizeEntryForChain } from '../canonicalize.js';
 import { CEL_PROOF_TYPE } from '../proofVerification.js';
 import { beginCustodyFold, custodyFoldStep, finishCustodyFold } from '../algorithms/classifyEntries.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 /**
  * Configuration options for BtcoCelManager
@@ -39,6 +40,26 @@ export interface BtcoCelConfig {
    * network in the signed data, so this is never consulted for them.
    */
   network?: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  /**
+   * `migrate()` fails closed by default (see issue #597 / #643): this class
+   * inscribes a did:btco document whose only anchor is
+   * `service[0].serviceEndpoint.headDigestMultibase` — a head digest of the
+   * migrate event, not the asset's full CEL boundary history the CEL 3
+   * recovery model needs. A recipient holding just the inscribed document
+   * and the bare sat cannot reconstruct pre-inscription history from this
+   * writer alone. This class is retained only for the previous-format
+   * lifecycle and its regression tests (see
+   * docs/history/previous-sdk/CLAUDE.md); it is not a compatibility path for
+   * CEL 3 / SDK 3.0. Real, fully recoverable Bitcoin publication lives in the
+   * SDK's CEL 3 path (`packages/sdk/src/v3/bitcoin.ts` / `hosted.ts`, or
+   * `@originals/cel/v3`).
+   *
+   * Set this to `true` only to knowingly exercise this retained legacy path
+   * (e.g. previous-format regression tests or the legacy `originals-cel`
+   * CLI); production code that needs a fully recoverable Bitcoin migration
+   * should not set it.
+   */
+  acknowledgeIncompleteHistory?: boolean;
 }
 
 /**
@@ -238,6 +259,29 @@ export class BtcoCelManager {
     const lastEvent = webvhLog.events[webvhLog.events.length - 1];
     if (lastEvent.type === 'deactivate') {
       throw new Error('Cannot migrate a deactivated event log');
+    }
+
+    // Fail closed (issue #597): this class inscribes a did:btco document that
+    // commits only to a head digest of the migrate event (see BtcoCelConfig.
+    // acknowledgeIncompleteHistory), not the asset's full CEL boundary
+    // history. Only proceed once the caller has explicitly acknowledged that
+    // limitation. Runs after all input validation above (empty log, missing
+    // create event, wrong source layer, deactivated log) so those error paths
+    // are unaffected, and before any Bitcoin inscription is attempted.
+    if (!this.config.acknowledgeIncompleteHistory) {
+      throw new StructuredError(
+        'CEL_BTCO_INCOMPLETE_HISTORY',
+        'BtcoCelManager.migrate() inscribes a did:btco document that commits only to a ' +
+        "head digest of the migrate event (service[0].serviceEndpoint.headDigestMultibase), " +
+        "not the asset's full CEL boundary history. A recipient holding just the inscribed " +
+        'document and the bare sat cannot reconstruct pre-inscription history from this ' +
+        'writer alone. This class is retained only for the previous-format lifecycle and its ' +
+        'regression tests, not as a compatibility path for CEL 3 / SDK 3.0 (see ' +
+        "docs/history/previous-sdk/CLAUDE.md). For a fully recoverable Bitcoin migration, use " +
+        'the SDK\'s CEL 3 Bitcoin publication path (packages/sdk/src/v3/bitcoin.ts / hosted.ts, ' +
+        'or @originals/cel/v3) instead. To knowingly exercise this retained legacy path, pass ' +
+        '{ acknowledgeIncompleteHistory: true } in the BtcoCelManager config.'
+      );
     }
 
     const network = bitcoinManager.network;

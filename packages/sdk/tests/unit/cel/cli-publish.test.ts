@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { publishCommand } from '../../../src/cel/cli/publish';
-import { createEventLog } from '@originals/cel';
+import { createEventLog } from '@originals/cel/legacy';
 import { serializeEventLogJson } from '@originals/cel';
 import { parseEventLogJson } from '@originals/cel';
 import type { DataIntegrityProof } from '@originals/cel';

@@ -93,6 +93,76 @@ describe('DataIntegrityProofManager branches', () => {
     expect(proof.proofValue.startsWith('z')).toBe(true);
   });
 
+  // #604: EdDSACryptosuiteManager.createProofConfiguration() used to always
+  // stamp its own `created`, silently discarding a caller-supplied value with
+  // no way for the caller to tell. It must now honor an explicit timestamp.
+  test('createProof honors a caller-supplied created timestamp instead of silently discarding it', async () => {
+    const { DIDManager } = await import('../../../../src/did/DIDManager');
+    const { createDocumentLoader } = await import('../../../../src/vc/documentLoader');
+    const didManager = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519' } as any);
+    const loader = createDocumentLoader(didManager);
+    const privateKey = new Uint8Array(32).map((_, i) => (i + 11) & 0xff);
+    const created = '2020-01-01T00:00:00.000Z';
+    const proof = await DataIntegrityProofManager.createProof(
+      {
+        '@context': ['https://www.w3.org/ns/credentials/v2'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        credentialSubject: { id: 'did:example:subject' }
+      },
+      {
+        verificationMethod: 'did:example:issuer#key-1',
+        proofPurpose: 'assertionMethod',
+        cryptosuite: 'eddsa-rdfc-2022',
+        created,
+        privateKey,
+        documentLoader: loader
+      } as any
+    );
+    expect(proof.created).toBe(created);
+  });
+
+  // Omitting `created` must still fall back to the current time, not throw
+  // or leave the field unset.
+  test('createProof defaults created to the current time when omitted', async () => {
+    const { DIDManager } = await import('../../../../src/did/DIDManager');
+    const { createDocumentLoader } = await import('../../../../src/vc/documentLoader');
+    const didManager = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519' } as any);
+    const loader = createDocumentLoader(didManager);
+    const privateKey = new Uint8Array(32).map((_, i) => (i + 11) & 0xff);
+    const before = Date.now();
+    const proof = await DataIntegrityProofManager.createProof(
+      {
+        '@context': ['https://www.w3.org/ns/credentials/v2'],
+        type: ['VerifiableCredential'],
+        issuer: 'did:example:issuer',
+        credentialSubject: { id: 'did:example:subject' }
+      },
+      {
+        verificationMethod: 'did:example:issuer#key-1',
+        proofPurpose: 'assertionMethod',
+        cryptosuite: 'eddsa-rdfc-2022',
+        privateKey,
+        documentLoader: loader
+      } as any
+    );
+    const createdMs = Date.parse(proof.created as string);
+    expect(Number.isNaN(createdMs)).toBe(false);
+    expect(createdMs).toBeGreaterThanOrEqual(before - 1000);
+    expect(createdMs).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  test('createProof rejects a caller-supplied previousProof', async () => {
+    await expect(DataIntegrityProofManager.createProof({ id: 'x' }, {
+      verificationMethod: 'did:ex#key-1',
+      proofPurpose: 'assertionMethod',
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-rdfc-2022',
+      previousProof: 'urn:uuid:prior-proof',
+      privateKey: new Uint8Array(32)
+    } as any)).rejects.toThrow('ProofOptions.previousProof is not supported');
+  });
+
   // bbs-2023 is parked (#591): verifyProof fails closed on the suite itself,
   // before any key resolution, so no base or derived BBS proof can verify.
   test('bbs-2023 on verify is rejected as disabled', async () => {

@@ -7,6 +7,7 @@ import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import type { DataIntegrityProof } from './cryptosuites/eddsa.js';
 import { StatusListManager } from './StatusListManager.js';
 import { validateStatusListCredentialTrust } from './statusListTrust.js';
+import { credentialStatusEntries, isCredentialStatusEntry, describeMalformedStatusEntry } from './credentialStatus.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
@@ -115,6 +116,38 @@ export class Verifier {
       const proofValue = vc.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
 
+      // Refuse to silently reduce a proof array to "verify proof[0]". A proof
+      // array implies multiple proofs matter (e.g. a multi-sig threshold),
+      // but this ordinary single-proof path has no dependency/threshold
+      // semantics for the rest of the array — checking only proof[0] would
+      // let a credential "verify" while every other proof, and any policy
+      // those proofs were meant to satisfy, goes unchecked (issue #604).
+      if (Array.isArray(proofValue) && proofValue.length > 1) {
+        return {
+          verified: false,
+          errors: [
+            'Credential has multiple proofs; verifyCredential only checks a single proof and cannot ' +
+            'evaluate the rest of the array. Use verifyCredentialMultiSig() with an explicit MultiSigPolicy ' +
+            'to verify a multi-proof credential.'
+          ]
+        };
+      }
+      // A proof declaring previousProof implies a Data Integrity proof chain,
+      // but nothing in this SDK creates or traverses that dependency graph —
+      // DataIntegrityProofManager.createProof rejects previousProof outright,
+      // and verification here never inspects it. Accepting such a proof would
+      // let a caller believe a chained/dependent approval was checked when
+      // only a standalone signature was (issue #604).
+      if ((proof as { previousProof?: unknown } | undefined)?.previousProof !== undefined) {
+        return {
+          verified: false,
+          errors: [
+            'Proof declares previousProof, but this SDK does not verify Data Integrity proof chains. ' +
+            'The dependency was not checked.'
+          ]
+        };
+      }
+
       // Bind the signing key to the credential issuer. The proof is verified
       // against whatever key `proof.verificationMethod` resolves to, so without
       // this check an attacker can sign a credential that names a trusted
@@ -154,24 +187,11 @@ export class Verifier {
         return validityResult;
       }
 
-      // Check credential status (revocation/suspension) if requested. Only
-      // BitstringStatusListEntry is evaluable by this verifier; unknown
-      // status types are ignored (checkCredentialStatus treats them as
-      // no-ops), so they must not trip the fail-closed resolver check.
-      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
-      if (options.checkStatus !== false && statusType === 'BitstringStatusListEntry') {
-        if (!this.statusListResolver) {
-          // Fail closed: the credential declares a status entry but this
-          // verifier has no way to check it. Silently returning verified
-          // would accept revoked credentials.
-          return {
-            verified: false,
-            errors: [
-              'Credential declares credentialStatus but no statusListResolver is configured. ' +
-              'Provide a statusListResolver, or pass checkStatus: false to explicitly skip revocation checking.'
-            ]
-          };
-        }
+      // Check credential status (revocation/suspension) if requested.
+      // checkCredentialStatus evaluates every declared entry (credentialStatus
+      // may be a singleton or an array — issue #592) and fails closed on
+      // anything it cannot evaluate, so no gating on entry shape belongs here.
+      if (options.checkStatus !== false) {
         const statusResult = await this.checkCredentialStatus(vc);
         if (!statusResult.verified) {
           return statusResult;
@@ -218,9 +238,16 @@ export class Verifier {
    * `assertionMethod` for credentials, `authentication` for presentations.
    * When the verification method's DID document is resolvable and declares the
    * corresponding relationship, the verification method must also be listed
-   * (by reference or embedded) under that relationship. Unresolvable DIDs
-   * skip the relationship check — the key itself is still authenticated by
-   * the controller binding plus signature verification.
+   * (by reference or embedded) under that relationship — matched by complete
+   * resolved DID URL, never by fragment alone (see H05 / issue #593). Only
+   * did:key — the one self-certifying method with no separate relationship
+   * document by design — skips the check when unresolvable, falling back to
+   * the controller binding plus signature verification that already ran.
+   * Every other DID method (did:webvh, did:btco, did:cel, and any future
+   * method DIDManager learns to resolve) fails closed when its document is
+   * unavailable, rather than allow-listing only the methods known today —
+   * an unlisted method must not silently regain the fail-open behavior this
+   * fix removes.
    */
   private async checkProofPurpose(
     proof: unknown,
@@ -242,13 +269,38 @@ export class Verifier {
 
     const vmDid = verificationMethod.split('#')[0];
     let didDoc: { [k: string]: unknown } | null = null;
+    let resolutionFailed = false;
     try {
-      didDoc = (await this.didManager.resolveDID(vmDid)) as { [k: string]: unknown } | null;
+      // Proof-purpose authorization is a current-authority decision: a
+      // cached (even pinned) pre-rotation document must not keep an
+      // externally-retired key authorized (issue #602).
+      didDoc = (await this.didManager.resolveDID(vmDid, { mode: 'current' })) as { [k: string]: unknown } | null;
     } catch {
       didDoc = null;
+      resolutionFailed = true;
     }
     if (!didDoc) {
-      return { verified: true, errors: [] };
+      // did:key is the SDK's one self-certifying DID method: the identifier
+      // IS the public key, it publishes no separate relationship document by
+      // design, and there is therefore no authorization evidence to be
+      // missing — the controller binding + signature check already ran.
+      // Every other method is document-backed (or, if some future method
+      // isn't, it must say so explicitly here, not by falling through a
+      // permissive default) and fails closed when its document is
+      // unavailable per H05's acceptance criteria: missing authorization
+      // evidence must never produce an unqualified success.
+      const isSelfCertifying = vmDid.startsWith('did:key:');
+      if (isSelfCertifying) {
+        return { verified: true, errors: [] };
+      }
+      return {
+        verified: false,
+        errors: [
+          resolutionFailed
+            ? `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} failed to resolve`
+            : `Cannot verify ${expectedPurpose} authorization: DID document for ${vmDid} is unavailable`
+        ]
+      };
     }
 
     const relationship = didDoc[expectedPurpose];
@@ -261,10 +313,21 @@ export class Verifier {
       };
     }
 
-    const fragment = verificationMethod.split('#')[1];
+    // Resolve each relationship entry to an absolute DID URL exactly as DID
+    // Core's relative-reference resolution requires — any entry that is not
+    // itself an absolute "did:...' DID URL is a relative DID URL (typically
+    // "#key-1", but also the "/path", ";params", and "?query" forms DID Core
+    // permits) that means "resolve against this DID document's own id" — and
+    // compare complete resolved DID URLs only. Comparing by fragment alone
+    // (the prior behavior) let a relationship entry naming a completely
+    // different, foreign DID such as "did:example:other#key-1" authorize an
+    // unrelated proof key "did:example:issuer#key-1" merely because the
+    // fragments coincided (H05): the DID prefix must match too, not just the
+    // fragment.
+    const didDocId = typeof didDoc.id === 'string' ? didDoc.id : vmDid;
+    const resolveEntryId = (id: string): string => (id.startsWith('did:') ? id : `${didDocId}${id}`);
     const matches = (id: unknown): boolean =>
-      typeof id === 'string' &&
-      (id === verificationMethod || (fragment !== undefined && id.split('#')[1] === fragment));
+      typeof id === 'string' && resolveEntryId(id) === verificationMethod;
     const authorized = relationship.some((entry) =>
       typeof entry === 'string' ? matches(entry) : matches((entry as { id?: unknown })?.id)
     );
@@ -286,46 +349,82 @@ export class Verifier {
   }
 
   /**
-   * Check a credential's revocation/suspension status against its status list.
-   * Requires a statusListResolver to be configured.
+   * Check a credential's revocation/suspension status against its status
+   * list(s). `credentialStatus` may be a singleton or an array (VCDM 2.0);
+   * every declared entry is evaluated — a single revoked/suspended or
+   * otherwise-unevaluable entry fails the credential (issue #592), same as a
+   * single declared entry always has.
    */
   async checkCredentialStatus(vc: VerifiableCredential): Promise<VerificationResult> {
-    const status = vc.credentialStatus as BitstringStatusListEntry | undefined;
-    if (!status || status.type !== 'BitstringStatusListEntry') {
+    const entries = credentialStatusEntries(vc);
+    if (entries.length === 0) {
       return { verified: true, errors: [] };
     }
 
-    if (!this.statusListResolver) {
-      return { verified: false, errors: ['No status list resolver configured'] };
-    }
-
-    const statusListVC = await this.statusListResolver(status.statusListCredential);
-    if (!statusListVC) {
-      return { verified: false, errors: [`Could not resolve status list credential: ${status.statusListCredential}`] };
-    }
-
-    // The status list credential itself must be trustworthy before its bits
-    // decide revocation. Without these checks a holder (or a poisoned
-    // resolver channel) can supply a fabricated all-zeros list and bypass
-    // revocation entirely (issue #238). Per the W3C Bitstring Status List
-    // algorithm the verifier must validate the status list credential.
-    const trust = await this.validateStatusListCredential(vc, status, statusListVC);
-    if (!trust.verified) {
-      return trust;
-    }
-
-    const manager = new StatusListManager();
-    try {
-      const checkResult = manager.checkStatus(status, statusListVC);
-      if (checkResult.isSet) {
-        const action = checkResult.statusPurpose === 'revocation' ? 'revoked' : 'suspended';
-        return { verified: false, errors: [`Credential has been ${action}`] };
+    const errors: string[] = [];
+    for (const status of entries) {
+      if (!isCredentialStatusEntry(status)) {
+        // A malformed array element (not an object, or no string `type`)
+        // must fail closed the same as any other unevaluable entry, not
+        // throw when the checks below read `.type` off it.
+        errors.push(`Credential declares a malformed credentialStatus entry: ${describeMalformedStatusEntry(status)}`);
+        continue;
       }
-      return { verified: true, errors: [] };
-    } catch (e) {
-      const error = e as Error;
-      return { verified: false, errors: [`Status check failed: ${error.message}`] };
+      if (status.type !== 'BitstringStatusListEntry') {
+        // Unsupported status mechanism: this verifier has no way to evaluate
+        // it, so the credential's status through this entry is unknown. Fail
+        // closed rather than silently treating an unrecognized entry as "not
+        // revoked".
+        errors.push(
+          `Unsupported credentialStatus type '${status.type}': this verifier cannot evaluate it, ` +
+          'so the credential\'s status through this entry is unknown.'
+        );
+        continue;
+      }
+
+      if (!this.statusListResolver) {
+        // Fail closed: the credential declares a status entry but this
+        // verifier has no way to check it. Silently returning verified
+        // would accept revoked credentials.
+        errors.push(
+          'Credential declares credentialStatus but no statusListResolver is configured. ' +
+          'Provide a statusListResolver, or pass checkStatus: false to explicitly skip revocation checking.'
+        );
+        continue;
+      }
+
+      const bitstringStatus = status as BitstringStatusListEntry;
+      const statusListVC = await this.statusListResolver(bitstringStatus.statusListCredential);
+      if (!statusListVC) {
+        errors.push(`Could not resolve status list credential: ${bitstringStatus.statusListCredential}`);
+        continue;
+      }
+
+      // The status list credential itself must be trustworthy before its bits
+      // decide revocation. Without these checks a holder (or a poisoned
+      // resolver channel) can supply a fabricated all-zeros list and bypass
+      // revocation entirely (issue #238). Per the W3C Bitstring Status List
+      // algorithm the verifier must validate the status list credential.
+      const trust = await this.validateStatusListCredential(vc, bitstringStatus, statusListVC);
+      if (!trust.verified) {
+        errors.push(...trust.errors);
+        continue;
+      }
+
+      const manager = new StatusListManager();
+      try {
+        const checkResult = manager.checkStatus(bitstringStatus, statusListVC);
+        if (checkResult.isSet) {
+          const action = checkResult.statusPurpose === 'revocation' ? 'revoked' : 'suspended';
+          errors.push(`Credential has been ${action}`);
+        }
+      } catch (e) {
+        const error = e as Error;
+        errors.push(`Status check failed: ${error.message}`);
+      }
     }
+
+    return errors.length > 0 ? { verified: false, errors } : { verified: true, errors: [] };
   }
 
   /**
@@ -534,25 +633,14 @@ export class Verifier {
         result.errors.push(...validity.errors);
       }
 
-      // Enforce revocation. When this verifier has a status list resolver,
-      // check the declared status like the single-sig path does; without one,
-      // fail closed on a declared BitstringStatusListEntry rather than
-      // silently accepting a possibly-revoked credential (issue #340).
-      const statusType = (vc.credentialStatus as BitstringStatusListEntry | undefined)?.type;
-      if (statusType === 'BitstringStatusListEntry') {
-        if (this.statusListResolver) {
-          const statusResult = await this.checkCredentialStatus(vc);
-          if (!statusResult.verified) {
-            result.verified = false;
-            result.errors.push(...statusResult.errors);
-          }
-        } else {
-          result.verified = false;
-          result.errors.push(
-            'Credential declares credentialStatus but no statusListResolver is configured. ' +
-            'Provide a statusListResolver to check revocation for multi-sig credentials.'
-          );
-        }
+      // Enforce revocation the same way the single-sig path does —
+      // checkCredentialStatus evaluates every declared entry (singleton or
+      // array, issue #592) and fails closed on anything it cannot evaluate,
+      // including a missing resolver (issue #340).
+      const statusResult = await this.checkCredentialStatus(vc);
+      if (!statusResult.verified) {
+        result.verified = false;
+        result.errors.push(...statusResult.errors);
       }
 
       // Check timelock
@@ -602,6 +690,28 @@ export class Verifier {
       }
       const proofValue = vp.proof;
       const proof = Array.isArray(proofValue) ? proofValue[0] : proofValue;
+
+      // See the matching guard in verifyCredential (issue #604): a proof
+      // array is not reducible to "verify proof[0]", and there is no
+      // multi-proof presentation policy in this SDK to redirect to.
+      if (Array.isArray(proofValue) && proofValue.length > 1) {
+        return {
+          verified: false,
+          errors: [
+            'Presentation has multiple proofs; verifyPresentation only checks a single proof and cannot ' +
+            'evaluate the rest of the array.'
+          ]
+        };
+      }
+      if ((proof as { previousProof?: unknown } | undefined)?.previousProof !== undefined) {
+        return {
+          verified: false,
+          errors: [
+            'Proof declares previousProof, but this SDK does not verify Data Integrity proof chains. ' +
+            'The dependency was not checked.'
+          ]
+        };
+      }
 
       // Bind the presentation proof to the holder: the key that signs the
       // presentation must be controlled by the DID named as `holder`. Without

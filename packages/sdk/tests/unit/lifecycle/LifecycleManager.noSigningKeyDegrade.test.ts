@@ -2,7 +2,7 @@
 import { describe, test, expect } from 'bun:test';
 import { OriginalsSDK } from '../../previous-sdk';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { currentControllerVm } from '@originals/cel';
+import { currentControllerVm } from '@originals/cel/legacy';
 import type { CelAppendSkippedEvent } from '../../../src/events/types';
 
 /**
