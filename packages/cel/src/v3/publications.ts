@@ -110,6 +110,22 @@ export type SatResolution = Readonly<
       chainEvidence: Readonly<ChainEvidence>;
     }
   | {
+      /**
+       * The complete observation contains only unconfirmed publications for this sat:
+       * something was broadcast, but nothing has reached this snapshot's confirmation
+       * depth yet, so no boundary could be evaluated either way. Distinct from
+       * `not-found`, which means confirmed data was inspected and no valid boundary
+       * was found in it.
+       */
+      status: "pending";
+      reason: string;
+      scope: "sat";
+      crossSatCanonicality: "unknown";
+      chainEvidence: Readonly<ChainEvidence>;
+      /** Unconfirmed publication ids observed for this sat, in snapshot order. */
+      pending: readonly string[];
+    }
+  | {
       status: "accepted";
       scope: "sat";
       crossSatCanonicality: "unknown";
@@ -469,11 +485,24 @@ export function resolveSat(
       ignore(error.code);
     }
   }
-  if (!history)
+  if (!history) {
+    // No confirmed publication was even a candidate: everything observed is still
+    // unconfirmed, so there is nothing yet to judge as valid or invalid. Report that
+    // distinctly from "not-found" (confirmed data was inspected and rejected).
+    if (ordered.length === 0 && pending.length > 0)
+      return {
+        status: "pending",
+        reason: "Only unconfirmed publications observed; no confirmed boundary yet",
+        scope: "sat",
+        crossSatCanonicality: "unknown",
+        chainEvidence: { assurance: "provider-asserted" },
+        pending,
+      };
     return failure(
       "not-found",
       "No valid boundary in the complete sat observations",
     );
+  }
   // Snapshot data cannot select its own trust level. Explicit application-side
   // validation in the SDK may upgrade the resolved result after checking this view.
   const chainEvidence: ChainEvidence = { assurance: "provider-asserted" };

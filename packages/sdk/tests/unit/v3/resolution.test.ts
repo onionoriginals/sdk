@@ -386,6 +386,35 @@ test("an unsupported-capability DID resolution reports no chain evidence was eve
   expect(metadata.didDocumentMetadata.chainEvidence.assurance).toBe("unavailable");
 });
 
+test("a sat whose only publication is still unconfirmed resolves as pending, not silently as not-found", async () => {
+  const { snapshot } = await boundary();
+  const pendingSnapshot: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((publication) => ({
+      ...publication,
+      confirmed: false,
+    })),
+  };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => pendingSnapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("pending");
+  if (result.status !== "pending") throw new Error(result.status);
+  expect(result.pending).toEqual(pendingSnapshot.publications.map((p) => p.id));
+
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didResolutionMetadata.status).toBe("pending");
+  expect(metadata.didDocument).toBeNull();
+  expect(metadata.didDocumentMetadata.pending).toEqual(result.pending);
+
+  // The plain (non-metadata) resolveDID call treats "pending" like any other
+  // inconclusive status: it throws rather than silently returning null, so a
+  // caller can't confuse "not confirmed yet" with "confirmed absent."
+  await expect(sdk.did.resolveDID("did:btco:reg:123")).rejects.toThrow();
+});
+
 test("a provider that fabricates a self-consistent alternate tip, or silently omits a later publication, still only ever yields a provider-asserted result", async () => {
   const { snapshot, log } = await boundary();
 
