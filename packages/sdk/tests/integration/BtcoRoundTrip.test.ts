@@ -4,8 +4,8 @@ import { OriginalsSDK } from '../previous-sdk';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { computeDigestMultibase } from '@originals/cel';
-import { canonicalizeEntryForChain } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel';
+import { canonicalizeEntryForChain } from '@originals/cel/legacy';
+import { verifyEventLog } from '@originals/cel/legacy';
 
 describe('did:btco round-trip (#375)', () => {
   test('lifecycle-inscribed asset resolves through the SDK resolver', async () => {

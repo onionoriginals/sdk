@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseAssetDid, verifyHistory, CelError } from "../../src/v3/index.js";
+import { parseAssetAlias, verifyHistory, CelError } from "../../src/v3/index.js";
 import authority from "../../../../docs/research/cel-core-vectors/histories.json";
 import symbolic from "../../../../docs/research/cel-authority-vectors/histories.json";
 
@@ -10,13 +10,14 @@ test("migration accepts canonical alias syntax but exposes WebVH method binding 
   expect(result.state.alias).toBe("did:btco:reg:5000000000");
   expect(result.bitcoinAcceptance).toBe("unverified");
   expect(result.webvhBinding).toBe("unverified");
-  expect(
-    parseAssetDid(authority.entries.W.event.operation.data.to),
-  ).toMatchObject({
-    method: "webvh",
+  const webvhAlias = parseAssetAlias(authority.entries.W.event.operation.data.to);
+  expect(webvhAlias).toMatchObject({
+    layer: "webvh",
     logUrl: "https://example.com/art/did.jsonl",
     methodBinding: "unverified",
   });
+  // The lifecycle-layer discriminator, not a claim that the "cel" layer is a DID method.
+  expect("method" in webvhAlias).toBe(false);
   expect(() =>
     verifyHistory({ log: [symbolic.entries.G, symbolic.entries.W] }),
   ).toThrow();
@@ -30,7 +31,7 @@ for (const did of [
   "did:cel:invalid",
 ])
   test(`rejects noncanonical asset alias ${did}`, () => {
-    expect(() => parseAssetDid(did)).toThrow();
+    expect(() => parseAssetAlias(did)).toThrow();
   });
 test("rejects malformed WebVH paths, host and port without fetching them", () => {
   const scid = authority.entries.W.event.operation.data.to.split(":")[2];
@@ -42,10 +43,10 @@ test("rejects malformed WebVH paths, host and port without fetching them", () =>
     "example.com%3a3000",
     "example.com:",
   ]) {
-    expect(() => parseAssetDid(`did:webvh:${scid}:${tail}`)).toThrow();
+    expect(() => parseAssetAlias(`did:webvh:${scid}:${tail}`)).toThrow();
   }
   try {
-    parseAssetDid(`did:webvh:${scid}:xn--bcher-kva.example:art`);
+    parseAssetAlias(`did:webvh:${scid}:xn--bcher-kva.example:art`);
     throw new Error("unexpected acceptance");
   } catch (error) {
     expect(error).toBeInstanceOf(CelError);
@@ -57,7 +58,7 @@ test("URL parser failures become structured invalid-DID results", () => {
   const scid = authority.entries.W.event.operation.data.to.split(":")[2];
   for (const host of ["example.123", "256.256.256.256"]) {
     try {
-      parseAssetDid(`did:webvh:${scid}:${host}`);
+      parseAssetAlias(`did:webvh:${scid}:${host}`);
       throw new Error("unexpected acceptance");
     } catch (error) {
       expect(error).toBeInstanceOf(CelError);

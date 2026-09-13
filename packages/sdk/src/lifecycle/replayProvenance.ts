@@ -43,7 +43,7 @@
 import type { EventLog } from '@originals/cel';
 import { deriveDidCel } from '@originals/cel';
 import { parseSatoshiIdentifier } from '@originals/cel';
-import { beginCustodyFold, custodyFoldStep } from '@originals/cel';
+import { beginCustodyFold, custodyFoldStep } from '@originals/cel/legacy';
 
 /** Honest sentinel: a btco migration whose satoshi cannot be recovered from the log. */
 export const BTCO_SATOSHI_UNKNOWN = 'did:btco:?';

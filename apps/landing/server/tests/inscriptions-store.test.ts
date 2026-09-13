@@ -335,6 +335,32 @@ describe('deposit bindings and the cross-user reader', () => {
     expect(all.filter((d) => d.network === 'mainnet')).toHaveLength(2);
   });
 
+  test('recordDepositRead skips the write for an unchanged read inside the heartbeat, but not past it', () => {
+    // #496 item 4: skipping every unchanged write is what let `lastRead.at`
+    // freeze indefinitely while a poller kept reporting the same balance —
+    // the balance sweep's drop-out rule reads exactly that timestamp. A
+    // floor on how stale it may go keeps a still-being-checked address from
+    // silently aging out.
+    let clock = 1_000_000;
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')), now: () => clock });
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
+
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const firstAt = store.listBoundDeposits().deposits[0].lastReadAt;
+
+    // Same unchanged read, well inside the heartbeat: no write, timestamp holds.
+    clock += 5 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    expect(store.listBoundDeposits().deposits[0].lastReadAt).toBe(firstAt);
+
+    // Same unchanged read, past the heartbeat: a write still lands.
+    clock += 61 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const laterAt = store.listBoundDeposits().deposits[0].lastReadAt;
+    expect(laterAt).not.toBe(firstAt);
+    expect(Date.parse(laterAt!)).toBe(clock);
+  });
+
   test('one unreadable user does not blind the sweep to every other stranger', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
     const store = createInscriptionsStore({ dataDir });
@@ -401,4 +427,19 @@ describe('pendingRevealBroadcasts', () => {
     const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
     expect(subs).toEqual(['sub-1', 'sub-2']);
   });
+});
+
+test('a fresh confirmed observation without height clears the prior block height', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+  store.setStatus('sub-1', record.commitTxId, 'reveal_broadcast');
+  expect(store.get('sub-1', record.commitTxId)?.confirmedBlockHeight).toBe(100);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHash: 'b'.repeat(64) });
+  const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
+  expect(reloaded.confirmations).toBe(2);
+  expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
+  expect(reloaded.confirmedBlockHeight).toBeUndefined();
 });

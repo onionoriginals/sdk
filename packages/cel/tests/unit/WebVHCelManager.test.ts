@@ -110,7 +110,7 @@ describe('WebVHCelManager', () => {
     let manager: WebVHCelManager;
 
     beforeEach(() => {
-      manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
     });
 
     it('should migrate a peer log to webvh layer', async () => {
@@ -356,7 +356,7 @@ describe('WebVHCelManager', () => {
   describe('migrate with witnesses', () => {
     it('should add witness proof when witness is configured', async () => {
       const witness = createMockWitness();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness]);
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness], { acknowledgeNonConformantId: true });
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -367,7 +367,7 @@ describe('WebVHCelManager', () => {
 
     it('should add multiple witness proofs', async () => {
       const witnesses = [createMockWitness(), createMockWitness()];
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', witnesses);
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', witnesses, { acknowledgeNonConformantId: true });
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -378,7 +378,7 @@ describe('WebVHCelManager', () => {
 
     it('should have witnessedAt on witness proofs', async () => {
       const witness = createMockWitness();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness]);
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [witness], { acknowledgeNonConformantId: true });
       
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
@@ -394,7 +394,7 @@ describe('WebVHCelManager', () => {
           throw new Error('Witness unavailable');
         },
       };
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [failingWitness]);
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [failingWitness], { acknowledgeNonConformantId: true });
       
       const peerLog = await createPeerLog();
       await expect(manager.migrate(peerLog)).rejects.toThrow('Witness unavailable');
@@ -403,7 +403,7 @@ describe('WebVHCelManager', () => {
 
   describe('getCurrentState', () => {
     it('should return state after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -414,7 +414,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should preserve original name after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -424,7 +424,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should include migration metadata', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -435,7 +435,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should have migratedAt as updatedAt', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -445,7 +445,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('should not be deactivated after migration', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -503,7 +503,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('surfaces the controller and applies rotateKey hand-off in replay', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -526,7 +526,7 @@ describe('WebVHCelManager', () => {
     });
 
     it('replays first-class transfer events into owner metadata', async () => {
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const peerLog = await createPeerLog();
       const webvhLog = await manager.migrate(peerLog);
 
@@ -621,7 +621,8 @@ describe('WebVHCelManager', () => {
       const webvhManager = new WebVHCelManager(
         createMockSigner(),
         'gallery.example.com',
-        [witness]
+        [witness],
+        { acknowledgeNonConformantId: true }
       );
       const webvhLog = await webvhManager.migrate(peerLog);
 
@@ -641,7 +642,7 @@ describe('WebVHCelManager', () => {
       ];
       const { log: peerLog } = await peerManager.create('Multi-Resource', resources);
 
-      const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const webvhManager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await webvhManager.migrate(peerLog);
 
       const state = webvhManager.getCurrentState(webvhLog);
@@ -650,7 +651,7 @@ describe('WebVHCelManager', () => {
 
     it('should verify migrated log has correct event chain', async () => {
       const peerLog = await createPeerLog();
-      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       const webvhLog = await manager.migrate(peerLog);
 
       // First event: create
@@ -668,8 +669,8 @@ describe('WebVHCelManager', () => {
       const peerLog = await createPeerLog();
       const sourceDid = (peerLog.events[0].data as Record<string, unknown>).did as string;
       
-      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com');
-      const manager2 = new WebVHCelManager(createMockSigner(), 'example.com');
+      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
+      const manager2 = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
       
       const log1 = await manager1.migrate(peerLog);
       const log2 = await manager2.migrate(peerLog);
@@ -684,8 +685,8 @@ describe('WebVHCelManager', () => {
     it('should use different domains in DID', async () => {
       const peerLog = await createPeerLog();
       
-      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com');
-      const manager2 = new WebVHCelManager(createMockSigner(), 'other.com');
+      const manager1 = new WebVHCelManager(createMockSigner(), 'example.com', [], { acknowledgeNonConformantId: true });
+      const manager2 = new WebVHCelManager(createMockSigner(), 'other.com', [], { acknowledgeNonConformantId: true });
       
       const log1 = await manager1.migrate(peerLog);
       const log2 = await manager2.migrate(peerLog);
@@ -695,6 +696,45 @@ describe('WebVHCelManager', () => {
       
       expect((data1.targetDid as string).includes('example.com')).toBe(true);
       expect((data2.targetDid as string).includes('other.com')).toBe(true);
+    });
+  });
+
+  describe('non-conformant identifier guard (#603)', () => {
+    it('fails closed by default instead of minting an unconformant did:webvh id', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const peerLog = await createPeerLog();
+
+      await expect(manager.migrate(peerLog)).rejects.toThrow(
+        /not conformant with the did:webvh method/
+      );
+    });
+
+    it('still fails closed when acknowledgeNonConformantId is explicitly false', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+        acknowledgeNonConformantId: false,
+      });
+      const peerLog = await createPeerLog();
+
+      await expect(manager.migrate(peerLog)).rejects.toThrow(
+        /not conformant with the did:webvh method/
+      );
+    });
+
+    it('runs the retained legacy path once acknowledgeNonConformantId is true', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com', [], {
+        acknowledgeNonConformantId: true,
+      });
+      const peerLog = await createPeerLog();
+
+      const webvhLog = await manager.migrate(peerLog);
+      expect(webvhLog.events[1].type).toBe('migrate');
+    });
+
+    it('checks conformance before minting an id, not after — input validation errors still surface first', async () => {
+      const manager = new WebVHCelManager(createMockSigner(), 'example.com');
+      const emptyLog: EventLog = { events: [] };
+
+      await expect(manager.migrate(emptyLog)).rejects.toThrow('Cannot migrate an empty event log');
     });
   });
 });

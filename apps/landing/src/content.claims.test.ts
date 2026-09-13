@@ -2,17 +2,27 @@ import { describe, test, expect } from 'bun:test';
 import { hero, protocol, site, why } from './content';
 
 /**
- * What the page is allowed to claim (protocol design review, 2026-08).
+ * What the page is allowed to claim (protocol design review, 2026-08;
+ * narrowed by hostile-audit finding M11 / issue #605, 2026-09-11).
  *
- * Two overclaims had to come out, and both are the kind that creep back in
- * during a copy pass because they read better than the truth:
+ * The August review treated "priority of publication" (being first) as a
+ * claim distinct from authorship and strong enough to sell. The September
+ * audit found that claim itself overstated the evidence: Bitcoin resolution
+ * is sat-scoped (`crossSatCanonicality: 'unknown'`), so the protocol cannot
+ * rule out a competing creation signed on a different sat, and publishing to
+ * the web (did:webvh) and inscribing on Bitcoin (did:btco) are separate,
+ * sequential lifecycle steps, never simultaneous. So the page may no longer
+ * claim global "first", or that Bitcoin anchoring happens the moment you
+ * publish. What it can honestly claim: a signed, byte-exact history that
+ * anyone can re-verify, later anchored and ordered on Bitcoin.
  *
- * 1. "Proof you made it." The protocol proves that a key signed this hash,
- *    that Bitcoin timestamped it, and that this key anchored this log first.
- *    It cannot prove authorship — anyone can inscribe someone else's file, and
- *    identity is the hash of the genesis event, so a thief's log verifies just
- *    as green as the creator's. Priority of publication is the real claim, and
- *    it is strong enough to sell.
+ * Three overclaims had to come out, and all three are the kind that creep
+ * back in during a copy pass because they read better than the truth:
+ *
+ * 1. "Proof you made it." The protocol proves that a key signed this hash and
+ *    that Bitcoin later accepted and ordered it. It cannot prove authorship —
+ *    anyone can inscribe someone else's file, and identity is the hash of the
+ *    genesis event, so a thief's log verifies just as green as the creator's.
  *
  * 2. "Without trusting you, us, or any platform." Every on-chain fact in the
  *    verify path — which inscriptions sit on a sat, their block heights, their
@@ -21,8 +31,14 @@ import { hero, protocol, site, why } from './content';
  *    signature checks are genuinely trustless; the Bitcoin reads are not, and
  *    the page has to say which is which.
  *
+ * 3. "Published it first" / "who was first" / Bitcoin anchoring "the moment
+ *    you publish". A sat-scoped index cannot prove there is no competing
+ *    creation elsewhere, and publish and inscribe are different steps at
+ *    different times — so neither global priority nor instant anchoring is
+ *    something verification actually shows.
+ *
  * These assert the shape of the claim, not the exact wording — rewrite the
- * copy freely, just not back into either of those.
+ * copy freely, just not back into any of those.
  */
 
 /** Every string the page ships, flattened. */
@@ -37,16 +53,34 @@ function allCopy(): string[] {
   return out;
 }
 
-describe('the page claims first publication, not authorship', () => {
+describe('the page claims a signed history, not authorship or global priority', () => {
   test('no copy claims the protocol proves who made the work', () => {
     // "who made it" / "you made it" are the specific phrasings that were live.
     const offenders = allCopy().filter((s) => /\b(you|who) made it\b/i.test(s));
     expect(offenders).toEqual([]);
   });
 
-  test('the headline and title lead with being first', () => {
-    expect(hero.headline.toLowerCase()).toContain('first');
-    expect(site.title.toLowerCase()).toContain('first');
+  test('no copy claims global first-publication (#605)', () => {
+    // Bitcoin resolution is sat-scoped (`crossSatCanonicality: 'unknown'`):
+    // the protocol cannot rule out a competing creation signed on another
+    // sat, so "first" / "who was first" overstates what it actually proves.
+    // Covers the literal phrasings that were live plus the paraphrases a
+    // routine copy edit could reach for instead (flagged in review on #623).
+    const firstPublicationClaim =
+      /\bpublished it first\b|\bwho was first\b|\bfirst to publish\b|\bpublication priority\b|\bpriority of publication\b|\bprove(?:s)? .*\bfirst\b/i;
+    const offenders = allCopy().filter((s) => firstPublicationClaim.test(s));
+    expect(offenders).toEqual([]);
+  });
+
+  test('no copy claims Bitcoin anchoring happens the moment you publish (#605)', () => {
+    // Publishing to the web (did:webvh) and inscribing on Bitcoin (did:btco)
+    // are separate, sequential lifecycle steps, never simultaneous. Covers
+    // "the moment you publish" plus equivalent instant-anchoring phrasings
+    // (flagged in review on #623).
+    const instantAnchoringClaim =
+      /the moment you publish\b|\banchor(?:ed|s|ing)?\s+(?:the moment|when|as soon as|instantly when)\s+you publish\b/i;
+    const offenders = allCopy().filter((s) => instantAnchoringClaim.test(s));
+    expect(offenders).toEqual([]);
   });
 });
 

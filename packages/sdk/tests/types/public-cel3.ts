@@ -4,6 +4,7 @@ import SDK, {
   OriginalsAsset,
   LifecycleManager,
   createLocalSigner,
+  fetchPublicReachabilityCheck,
   type OriginalsSDKOptions,
   type AssetEnvelope,
   type AssetResource,
@@ -14,12 +15,17 @@ import type {
   AssetResourceInput,
   CelSigner,
   HostedEvidence,
+  HostingEvidence,
+  PublicReachabilityCheck,
+  HostedAssetsOptions,
   AssetVerification,
 } from "@originals/sdk/types";
 import {
   verifyHistory,
+  checkpointFromHistory,
   type AssetState,
   type DeepReadonly,
+  type HistoryCheckpoint,
 } from "@originals/sdk/cel";
 import { OriginalsSDK as LocalSDK } from "@originals/sdk/v3";
 
@@ -29,6 +35,11 @@ const signer: CelSigner = createLocalSigner(
 );
 const config: OriginalsConfig = { signer, network: "regtest" };
 const options: OriginalsSDKOptions = config;
+const publicCheck: PublicReachabilityCheck = fetchPublicReachabilityCheck;
+const hostingOptions: HostedAssetsOptions = { publicReachability: publicCheck, requirePublicReachability: true };
+const publicOptions: OriginalsSDKOptions = { ...config, ...hostingOptions };
+const publicationEvidence: HostingEvidence = 'independently-verified';
+void publicOptions; void publicationEvidence;
 const input: AssetResourceInput = {
   id: "bytes",
   mediaType: "image/png",
@@ -45,7 +56,11 @@ const subpathEnvelope: SubpathEnvelope = envelope;
 const loaded: OriginalsAsset = (
   await SDK.create().lifecycle.loadAsset(subpathEnvelope)
 ).asset;
-const state: DeepReadonly<AssetState> = verifyHistory(loaded.celLog).state;
+const history = verifyHistory(loaded.celLog);
+const state: DeepReadonly<AssetState> = history.state;
+const freshness: "unknown" | "checkpoint-consistent" | "externally-anchored" = history.freshness;
+const checkpoint: HistoryCheckpoint = checkpointFromHistory(history);
+void freshness; void checkpoint;
 await LocalSDK.create().lifecycle.loadAsset(loaded.serialize());
 void resource;
 void state;
@@ -103,7 +118,11 @@ import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
-import { deriveAssetId, deriveDid, normalizeAssetId, assetDigest } from '@originals/sdk/cel';
+import { deriveAssetId, normalizeAssetId, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
+// @ts-expect-error Removed from the CEL 2 / SDK 4 surface; use deriveAssetId.
+import { deriveDid } from '@originals/sdk/cel';
+// @ts-expect-error Renamed to parseAssetAlias; the historical name no longer resolves.
+import { parseAssetDid } from '@originals/sdk/cel';
 const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
 const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
 const inspectedEnvelope: AssetEnvelope = inspected.envelope;
@@ -117,16 +136,25 @@ inspectedState.name = 'replacement';
 void inspectedEnvelope;
 const currentVersion: 4 = currentEnvelope.version;
 const canonicalAssetId: string = state.assetId;
-const legacyAlias: string = state.didCel;
+// @ts-expect-error AssetState no longer exposes the deprecated Originals 3.0 alias field.
+state.didCel;
+// The historical alias is reconstructible from the still-public digest helper,
+// without a dedicated compatibility field or the removed deriveDid knob.
+const legacyAlias: string = 'did:cel:' + assetDigest(canonicalAssetId);
 const legacyEnvelope = {
   format: 'originals/asset', version: 3, assetDid: legacyAlias,
   eventLog: loaded.celLog, resources: currentEnvelope.resources,
 };
 await SDK.create().lifecycle.loadAsset(legacyEnvelope);
-verifyHistory(loaded.celLog, {expectedDid: legacyAlias, expectedAssetId: canonicalAssetId});
+verifyHistory(loaded.celLog, {expectedAssetId: canonicalAssetId});
+// @ts-expect-error expectedDid was removed from the supported surface; use expectedAssetId.
+verifyHistory(loaded.celLog, {expectedDid: legacyAlias});
 const canonicalFromEvent: string = deriveAssetId(loaded.celLog.log[0].event);
-const legacyFromEvent: string = deriveDid(loaded.celLog.log[0].event);
-const digest: string = assetDigest(normalizeAssetId(legacyFromEvent));
+const digest: string = assetDigest(normalizeAssetId(legacyAlias));
+const parsedAlias: AssetAlias = parseAssetAlias(legacyAlias);
+if (parsedAlias.layer === 'cel') void parsedAlias.did;
+// @ts-expect-error The discriminator names the lifecycle layer (cel/webvh/btco), not a DID method.
+void parsedAlias.method;
 // @ts-expect-error New envelopes do not expose the removed unsigned field.
 currentEnvelope.assetDid;
-void currentVersion; void canonicalFromEvent; void digest;
+void currentVersion; void canonicalFromEvent; void digest; void deriveDid; void parseAssetDid;

@@ -131,6 +131,19 @@ export interface VerificationResult {
   /** Per-event verification details */
   events: EventVerification[];
   /**
+   * Whether `verifyHeadFreshness` actually ran (options.checkHeadFreshness was
+   * true, the default non-custom-verifier path was used, AND the log's
+   * authority walk established an on-chain anchor). `true` here is the only
+   * reliable signal that a passing `verified` result reflects a genuine
+   * freshness check rather than the flag being a no-op on an unanchored log or
+   * a custom-verifier path that never establishes an anchor — a caller cannot
+   * safely infer "freshness was checked" from the presence of a
+   * bitcoin-ordinals-2024 proof shape alone, since that proof could appear on
+   * a log whose anchor walk never actually completed. Always `false` when
+   * `checkHeadFreshness` was not requested.
+   */
+  headFreshnessChecked: boolean;
+  /**
    * The asset DID this log backs, when derivable from the genesis event:
    * the DERIVED `did:cel:<digest>` for new-shape (`data.controller`) logs, or
    * the declared `data.did` for legacy logs. Absent for shapeless logs.

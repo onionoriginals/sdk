@@ -203,8 +203,8 @@ export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
 
 // One public CEL 3 parser, proof verifier and state fold.
-export { verifyHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
-export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
+export { verifyHistory, checkpointFromHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
+export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, HistoryCheckpoint, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
 
 // Default export
 export default OriginalsSDK;
@@ -213,7 +213,9 @@ export * as v3 from './v3/index.js';
 
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./v3/resolution.js";
 
-export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from "./v3/hosted.js";
+export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./v3/hosted.js";
+
+export { fetchPublicReachabilityCheck } from "./v3/hosted.js";
 
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./v3/bitcoin.js";
 

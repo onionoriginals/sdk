@@ -17,7 +17,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockRemoteSigner } from '../../src/crypto/MockRemoteSigner';
 import { assertSignerConformance } from '../../src/crypto/signerConformance';
 import { canonicalDidKeyVm } from '../../src/crypto/OriginalsSigner';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { createHash } from 'crypto';
 import type { EventTypeMap } from '../../src/events/types';
 

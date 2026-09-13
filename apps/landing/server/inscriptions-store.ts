@@ -57,6 +57,13 @@ export interface InscriptionRecord {
   changeAddress: string;
   status: InscriptionStatus;
   /**
+   * The retained signed pair passed independent funding-value and fee checks.
+   * Approval may be reused only for identical commit/reveal bytes, including
+   * witnesses; transaction IDs alone do not bind transaction size. Legacy rows
+   * without this flag and retired rows without artifacts require fresh checks.
+   */
+  economicsVerified?: boolean;
+  /**
    * Set when a rebuilt pair took over this record's funding outpoint after
    * its own commit broadcast failed. The record (and its reveal hex) is kept,
    * never deleted: the failed broadcast may have been ambiguous — the commit
@@ -99,7 +106,7 @@ export interface InscriptionRecord {
    * Block height of the MOST RECENT observed confirmation. Unlike
    * `confirmations`, this is NOT cleared when a reorg demotes the record off
    * `confirmed`: it is deliberately sticky, so a later reconfirmation can be
-   * compared against it. Only ever overwritten by a fresh confirmed
+   * compared against it. Replaced or cleared by a fresh confirmed
    * observation; never read as "currently confirmed" without also checking
    * `status`.
    *
@@ -176,6 +183,12 @@ export interface InscriptionsStore {
    * UI's staleness clock reads.
    */
   markRebroadcast(subOrgId: string, commitTxId: string): void;
+  /**
+   * Persist first-time economics approval for a legacy record after its retained
+   * signed pair passes verification. Later exact retries can survive an indexer
+   * outage or a changed fee estimate. Leaves status and updatedAt unchanged.
+   */
+  markEconomicsVerified(subOrgId: string, commitTxId: string): void;
   list(subOrgId: string): InscriptionRecord[];
   /** The LIVE (non-superseded) record whose commit spends this `${txid}:${vout}` outpoint. */
   findByOutpoint(subOrgId: string, outpoint: string): InscriptionRecord | null;
@@ -307,6 +320,15 @@ export interface BoundDeposit {
   /** Anything still holding recovery artifacts — an inscription in flight. */
   hasPendingInscription: boolean;
 }
+
+/**
+ * Ceiling on how stale a persisted `lastRead.at` may go while a poller keeps
+ * reporting the same unchanged balance (#496 item 4). Bounded well under the
+ * balance sweep's 24h drop-out horizon, and aligned with its ~hourly cadence,
+ * so an address that is genuinely still being checked never freezes into a
+ * false "nobody has looked in 24h" reading.
+ */
+const DEPOSIT_READ_HEARTBEAT_MS = 60 * 60_000;
 
 export type DepositAlertKind = 'indexer_unavailable' | 'indexer_rate_limited';
 
@@ -554,11 +576,11 @@ export function createInscriptionsStore(opts: {
       // `confirmedBlockHash` — so a later reconfirmation can still be
       // compared against them.
       rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
-      if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
-        rec.confirmedBlockHeight = evidence.blockHeight;
+      if (status === 'confirmed') {
+        rec.confirmedBlockHeight = evidence?.blockHeight;
       }
-      // Hash is the trusted identity a caller compares for reorg detection —
-      // unlike height, a FRESH confirmed read that omits it must CLEAR the
+      // A fresh confirmed read replaces block evidence together. An omitted
+      // hash, like an omitted height, must CLEAR the
       // old value rather than leave it in place. Leaving it would pair a
       // stale hash with this read's new confirmations/height, presenting an
       // identity that was never actually observed together with them. This
@@ -574,6 +596,13 @@ export function createInscriptionsStore(opts: {
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
       rec.rebroadcastAt = new Date(now()).toISOString();
+      writeAll(subOrgId, recs);
+    },
+    markEconomicsVerified(subOrgId, commitTxId) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      rec.economicsVerified = true;
       writeAll(subOrgId, recs);
     },
     list(subOrgId) {
@@ -721,15 +750,24 @@ export function createInscriptionsStore(opts: {
       const state = readDepositState(subOrgId);
       const previous = state.lastRead ?? null;
       // A trusted read ENDS the outage — the alert is dropped, not merged.
-      // Skip the write when nothing changed: this is the 15s-poll path, and
-      // an fsync per poll per creator is real cost for no information.
+      // Skip the write when nothing changed AND the last write is still fresh
+      // (this is the 15s-poll path, and an fsync per poll per creator is real
+      // cost for no information) — but a write still lands at least once per
+      // DEPOSIT_READ_HEARTBEAT_MS even when unchanged (#496 item 4). Without
+      // that floor, `lastRead.at` freezes at whatever it was when the balance
+      // last actually changed, and the balance sweep's drop-out rule reads
+      // exactly that timestamp: an idle, actively-rechecked, zero-balance
+      // address would silently age out of the sweep after 24h even though the
+      // sweep kept re-reading it every pass — the opposite of what "every
+      // pass re-reads it, which is what keeps it in scope" is supposed to mean.
       const last = state.lastRead;
       if (
         !state.alert &&
         last &&
         last.confirmedSats === read.confirmedSats &&
         last.address === read.address &&
-        last.network === read.network
+        last.network === read.network &&
+        now() - Date.parse(last.at) < DEPOSIT_READ_HEARTBEAT_MS
       ) {
         return previous;
       }
