@@ -81,11 +81,18 @@ export interface PublicationEvidence {
  * a distinct dimension from enumeration completeness, since a compromised
  * or buggy primary provider could otherwise misreport who currently holds
  * the sat while still enumerating every inscription on it correctly.
+ * Ownership is mutable state, unlike enumeration (which only ever grows):
+ * `tip` (the independent source's own chain tip when it made that
+ * observation) must accompany `ownership` and must match this snapshot's
+ * `tipBefore`. Without that, agreement could just mean the independent
+ * source observed an earlier or later tip where the sat happened to have
+ * the same holder, which does not corroborate the *current* owner.
  */
 export interface IndependentEnumeration {
   source: string;
   inscriptionIds: readonly string[];
   ownership?: SatSnapshot["ownership"];
+  tip?: ChainTip;
 }
 export type SatResolution = Readonly<
   | {
@@ -244,6 +251,21 @@ export function resolveSat(
       )
     )
       return failure("incomplete", "Invalid independent ownership evidence");
+    // Ownership is mutable, unlike enumeration: agreement only corroborates
+    // the *current* owner if both observations were made at the same chain
+    // tip. Without that, a stale or differently-timed independent snapshot
+    // could coincidentally match and overstate assurance.
+    const independentTip = options.independentEnumeration.tip;
+    if (!validTip(independentTip))
+      return failure(
+        "incomplete",
+        "Missing independent source chain tip for ownership evidence",
+      );
+    if (!sameTip(independentTip as ChainTip, snapshot.tipBefore))
+      return failure(
+        "chain-changed",
+        "Independent ownership evidence is not at the primary snapshot's chain tip",
+      );
     if (
       independentOwnership.owner !== snapshot.ownership.owner ||
       independentOwnership.satpoint !== snapshot.ownership.satpoint

@@ -463,6 +463,28 @@ test("fails closed when the independent source reports a different current sat o
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("does not credit ownership agreement observed at a different chain tip (stale evidence must not overstate assurance)", async () => {
+  const { snapshot } = await boundary();
+  const independent = structuredClone(snapshot);
+  const staleTip = {
+    height: snapshot.tipBefore.height - 1,
+    hash: "2".repeat(64),
+  };
+  independent.tipBefore = staleTip;
+  independent.tipAfter = staleTip;
+  independent.indexTip = staleTip;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => independent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("chain-changed");
+});
+
 test("fails closed when the independent source reports a different sat satpoint", async () => {
   const { snapshot } = await boundary();
   const independent = structuredClone(snapshot);

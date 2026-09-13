@@ -168,6 +168,7 @@ export class AssetResolver {
             source: string;
             inscriptionIds: string[];
             ownership: SatSnapshot["ownership"];
+            tip: SatSnapshot["tipBefore"];
           }
         | undefined;
       if (this.independentEnumeration) {
@@ -214,6 +215,7 @@ export class AssetResolver {
           source: this.independentEnumeration.label,
           inscriptionIds: independentSnapshot.publications.map((p) => p.id),
           ownership: independentSnapshot.ownership,
+          tip: independentSnapshot.tipBefore,
         };
       }
       return {

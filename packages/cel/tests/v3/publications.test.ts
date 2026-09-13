@@ -219,13 +219,14 @@ test("ownership assurance stays provider-asserted when an independent source is 
     expect(result.ownershipAssurance).toBe("provider-asserted");
 });
 
-test("cross-checks ownership when an independent source reports the same owner and satpoint", () => {
+test("cross-checks ownership when an independent source reports the same owner and satpoint at the same tip", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
     independentEnumeration: {
       source: "second-ord-instance",
       inscriptionIds: snapshot.publications.map((p) => p.id),
       ownership: { ...snapshot.ownership },
+      tip: { ...snapshot.tipBefore },
     },
   });
   expect(result.status).toBe("accepted");
@@ -240,6 +241,7 @@ test("fails closed when an independent source reports a different current owner"
       source: "second-ord-instance",
       inscriptionIds: snapshot.publications.map((p) => p.id),
       ownership: { ...snapshot.ownership, owner: "someone-else" },
+      tip: { ...snapshot.tipBefore },
     },
   });
   expect(result.status).toBe("inconsistent-evidence");
@@ -256,6 +258,7 @@ test("fails closed when an independent source reports a different satpoint", () 
         ...snapshot.ownership,
         satpoint: "f".repeat(64) + ":0:0",
       },
+      tip: { ...snapshot.tipBefore },
     },
   });
   expect(result.status).toBe("inconsistent-evidence");
@@ -270,9 +273,36 @@ test("rejects malformed independent ownership evidence rather than ignoring it",
       inscriptionIds: snapshot.publications.map((p) => p.id),
       // @ts-expect-error deliberately malformed for the test
       ownership: { owner: 42, satpoint: null },
+      tip: { ...snapshot.tipBefore },
     },
   });
   expect(result.status).toBe("incomplete");
+});
+
+test("fails closed when independent ownership evidence has no accompanying chain tip", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership },
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("does not credit ownership agreement observed at a different chain tip (stale evidence must not overstate assurance)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership },
+      tip: { ...snapshot.tipBefore, height: snapshot.tipBefore.height - 1 },
+    },
+  });
+  expect(result.status).toBe("chain-changed");
+  expect("state" in result).toBe(false);
 });
 
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
