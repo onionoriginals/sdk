@@ -166,6 +166,9 @@ export class AssetResolver {
       return failure(
         "identity-mismatch",
         "Asset network differs from configured provider",
+        // Rejected before any provider was even consulted: no snapshot, and
+        // therefore no provider assertion, was ever obtained.
+        "unavailable",
       ) as SatResolution;
     return (await this.observe(parsed.sat, { expectedDid })).resolution;
   }

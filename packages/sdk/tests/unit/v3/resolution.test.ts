@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
+import { AssetResolver } from "../../../src/v3/resolution.js";
 import {
   createLocalSigner,
   signEvent,
@@ -449,4 +450,15 @@ test("a provider that throws before returning any snapshot never obtained chain 
     throw new Error("unexpected accept");
   expect(mismatchedResult.chainEvidence).toBe("node-validated");
   expect(mismatchedResult.source).toBe("regtest-core+ord");
+});
+
+test("check() rejects a cross-network identity before any provider is consulted, with no chain evidence obtained", async () => {
+  const resolver = new AssetResolver("regtest");
+  // A mainnet-shaped did (no network prefix) queried against a
+  // regtest-configured resolver: rejected purely from parsing the identity,
+  // before any provider call, so no snapshot -- and no provider assertion --
+  // was ever obtained.
+  const result = await resolver.check("did:btco:123", "did:btco:123");
+  expect(result.status).toBe("identity-mismatch");
+  expect(result.chainEvidence).toBe("unavailable");
 });
