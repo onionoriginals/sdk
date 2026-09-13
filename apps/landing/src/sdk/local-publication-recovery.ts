@@ -86,11 +86,12 @@ export async function recoverLocalPublication(
   const { DurableHostingStorageAdapter } =
     await import("./durable-hosting-adapter");
   const { HttpOrdinalsProvider } = await import("./http-ordinals-provider");
+  const { publicReachabilityRequired } = await import("./engine");
   assertCurrentAccount();
   const sdk = OriginalsSDK.create({
     storageAdapter: new DurableHostingStorageAdapter(),
     publicReachability: fetchPublicReachabilityCheck,
-    requirePublicReachability: true,
+    requirePublicReachability: publicReachabilityRequired(),
     ...(item.kind === "bitcoin"
       ? {
           network: (prepared as PreparedBitcoinPublication).transactions
