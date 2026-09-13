@@ -210,6 +210,36 @@ describe('UnifiedVerifier reports what it actually checked (issue #600)', () => 
     expect(res.assurance).toEqual({ signature: 'checked', status: 'checked' });
   });
 
+  test('a credential with an explicit empty credentialStatus array: assurance.status is "checked" (vacuously), same as undeclared', async () => {
+    // Regression (Greptile review of PR #653): `credentialStatus: []` is
+    // truthy, so a bare `!credential.credentialStatus` check treated it as
+    // "declared but uncheckable" and required a statusListResolver — diverging
+    // from CredentialManager/Verifier.checkCredentialStatus, which normalizes
+    // through credentialStatusEntries() and correctly treats zero entries
+    // (singleton absent OR an explicit empty array) as vacuously verified.
+    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const { skMb, issuer, vm } = await makeKeyPair();
+    const signed = await sdk.credentials.signCredential(
+      {
+        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+        type: ['VerifiableCredential'],
+        issuer,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: 'did:example:subject-600h' },
+        credentialStatus: [],
+      } as any,
+      skMb,
+      vm
+    );
+
+    const unified = new UnifiedVerifier(didManager);
+    const res = await unified.verify(signed);
+    // No statusListResolver configured — this must NOT fail closed, since
+    // Verifier.checkCredentialStatus itself would not require one here.
+    expect(res.verified).toBe(true);
+    expect(res.assurance).toEqual({ signature: 'checked', status: 'checked' });
+  });
+
   test('a credential declaring credentialStatus with no statusListResolver: unknown, and fails closed', async () => {
     const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/6', 0);

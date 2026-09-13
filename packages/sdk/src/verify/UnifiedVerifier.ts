@@ -11,6 +11,7 @@
  * resolution is described in the design doc but not wired here.
  */
 import { Verifier, type StatusListResolver } from '../vc/Verifier.js';
+import { credentialStatusEntries } from '../vc/credentialStatus.js';
 import { verifyEventLog } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import type { DIDManager } from '../did/DIDManager.js';
@@ -151,8 +152,15 @@ export class UnifiedVerifier {
           statusState = 'unknown';
         } else if (signatureOnly) {
           statusState = 'unknown';
-        } else if (!credential.credentialStatus) {
-          statusState = 'checked'; // nothing declared: vacuously fine
+        } else if (credentialStatusEntries(credential).length === 0) {
+          // Nothing declared: vacuously fine. Uses the same normalizer
+          // checkCredentialStatus itself evaluates against (issue #592) —
+          // a bare truthiness check on credentialStatus would diverge on an
+          // explicit empty array ([]), which is truthy but declares zero
+          // entries, so it must be treated identically to "not declared" here
+          // rather than as "declared but uncheckable" (Greptile review of
+          // #653).
+          statusState = 'checked';
         } else if (!this.options?.statusListResolver) {
           // Declared but uncheckable: a missing dependency, not a pass.
           statusState = 'unknown';
