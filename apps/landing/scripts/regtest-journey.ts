@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { RegtestProvider, OriginalsSDK, createLocalSigner, parseDocument, type OriginalsAsset, type PreparedBitcoinPublication } from '@originals/sdk';
+import { RegtestProvider, OriginalsSDK, createLocalSigner, fetchPublicReachabilityCheck, parseDocument, type OriginalsAsset, type PreparedBitcoinPublication } from '@originals/sdk';
 import type { TurnkeyBitcoinClient } from '../src/auth/turnkey-session';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../server/cookies';
@@ -88,6 +88,7 @@ try {
   const nextController = createLocalSigner('Ed25519', new Uint8Array(32).fill(8));
   const storageAdapter = new HttpHostingStorageAdapter({ baseUrl: origin, fetchImpl: browserFetch });
   const sdk = OriginalsSDK.create({ network: 'regtest', signer: controller, ordinalsProvider: httpProvider,
+    publicReachability: fetchPublicReachabilityCheck, requirePublicReachability: true,
     storageAdapter, enableLogging: false, logging: { level: 'error' } });
   const cold = () => OriginalsSDK.create({ network: 'regtest', ordinalsProvider: provider,
     storageAdapter: new HttpHostingStorageAdapter({ baseUrl: origin }), enableLogging: false, logging: { level: 'error' } });
@@ -97,6 +98,7 @@ try {
   const local = await sdk.lifecycle.createAsset([{ id: 'art.png', mediaType: 'image/png', content: png }]);
   checkpoint('publish-hosted');
   const published = await sdk.lifecycle.publishToWeb(local, { domain: new URL(origin).host });
+  assert.equal(published.hostingEvidence, 'independently-verified', 'unauthenticated HTTPS method log is publicly reachable');
   const webDid = published.did;
   assert.equal(local.state.layer, 'cel', 'publication returns a new asset without changing local identity');
   const freshWeb = await cold().lifecycle.resolveAssetFromWeb(webDid);
@@ -164,9 +166,16 @@ try {
   }
   checkpoint('mine-boundary');
   const [block] = await env.mine();
-  const listed = await (await browserFetch(`${origin}/api/btc/inscribe`)).json() as { inscriptions: Array<{ status: string }> };
+  const listed = await (await browserFetch(`${origin}/api/btc/inscribe`)).json() as {
+    inscriptions: Array<{ status: string; settled?: boolean; confirmedBlockHash?: string }>;
+  };
   assert.equal(listed.inscriptions[0].status, 'confirmed');
+  assert.equal(listed.inscriptions[0].settled, false, 'one confirmation is not yet settled');
   assert.ok(store().get(sub, submit.commitTxId)?.revealTxHex, 'one confirmation retains recovery bytes');
+  // Real Core evidence for #567's block-identity check: the hash Core reports
+  // for the pre-reorg block, captured before invalidateblock replaces it.
+  const beforeReorgHash = listed.inscriptions[0].confirmedBlockHash;
+  assert.match(beforeReorgHash ?? '', /^[0-9a-f]{64}$/, 'a real confirmation carries a real block hash');
   const readAccepted = async () => {
     const result = await cold().lifecycle.resolveAssetFromSat(expectedSat);
     assert.equal(result.status, 'accepted', JSON.stringify(result));
@@ -188,6 +197,10 @@ try {
   assert.notEqual(orphaned.status, 'accepted', 'orphaned boundary cannot remain accepted');
   const reorganized = await (await browserFetch(`${origin}/api/btc/inscribe`)).json() as { inscriptions: Array<{ status: string }> };
   assert.equal(reorganized.inscriptions[0].status, 'reveal_broadcast', 'reorg demotes confirmation');
+  // The demotion clears live confirmations but the pre-reorg block hash stays
+  // on the persisted record — it is the only way the next reconfirmation can
+  // tell it apart from an ordinary depth increase (#567).
+  assert.equal(store().get(sub, submit.commitTxId)?.confirmedBlockHash, beforeReorgHash, 'block hash survives the demotion');
   await env.rpc('setmocktime', [Math.floor(Date.now() / 1000) + 600]);
   checkpoint('reconfirm-boundary');
   await env.mine(2);
@@ -196,7 +209,14 @@ try {
   assert.deepEqual((await cold().lifecycle.loadAsset(JSON.stringify(recovered.asset.serialize()))).asset.resources[0].content, png);
   await env.mine(4);
   await sweepInscriptions!();
-  assert.equal(store().get(sub, submit.commitTxId)?.retired, true, 'six confirmations retire pair bytes');
+  const settled = store().get(sub, submit.commitTxId);
+  assert.equal(settled?.retired, true, 'six confirmations retire pair bytes');
+  // Real Core evidence that a same-height reorg is caught by HASH: Core's
+  // invalidateblock + remine replaced the block at (approximately) the same
+  // height with a genuinely different one, and the reconciler's persisted
+  // identity reflects that — not the pre-reorg block this sat used to sit in.
+  assert.match(settled?.confirmedBlockHash ?? '', /^[0-9a-f]{64}$/, 'settlement freezes a real block hash');
+  assert.notEqual(settled?.confirmedBlockHash, beforeReorgHash, 'settled block hash reflects the POST-reorg chain, not the invalidated one');
   const publications = [submit.inscriptionId];
   let lastPublicationBlock = '';
   const publishDelta = async (asset: OriginalsAsset, expectedEntries: number, media?: Uint8Array) => {

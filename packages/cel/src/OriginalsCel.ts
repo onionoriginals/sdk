@@ -140,22 +140,26 @@ export class OriginalsCel {
 
   /**
    * Gets or creates the WebVHCelManager instance
-   * 
+   *
    * @throws Error if domain is not configured for webvh operations
    */
-  private getWebVHManager(domain?: string): WebVHCelManager {
+  private getWebVHManager(domain?: string, acknowledgeNonConformantId?: boolean): WebVHCelManager {
     const webvhDomain = domain || this.config.webvh?.domain;
-    
+
     if (!webvhDomain) {
       throw new Error('WebVH operations require a domain. Provide it in config.webvh.domain');
     }
-    
+
     // Always create a new instance with the current domain to support different domains
     return new WebVHCelManager(
       this.signer,
       webvhDomain,
       this.config.webvh?.witnesses || [],
-      this.config.webvh
+      {
+        ...this.config.webvh,
+        acknowledgeNonConformantId:
+          acknowledgeNonConformantId ?? this.config.webvh?.acknowledgeNonConformantId,
+      }
     );
   }
 
@@ -333,19 +337,22 @@ export class OriginalsCel {
    * 
    * @example
    * ```typescript
-   * // Migrate peer to webvh
+   * // Migrate peer to webvh. WebVHCelManager mints a did:webvh-labeled
+   * // identifier that is not did:webvh-conformant (issue #603); pass
+   * // acknowledgeNonConformantId to knowingly use that retained legacy path.
    * const webvhLog = await cel.migrate(peerLog, 'webvh', {
-   *   domain: 'example.com'
+   *   domain: 'example.com',
+   *   acknowledgeNonConformantId: true,
    * });
-   * 
+   *
    * // Migrate webvh to btco
    * const btcoLog = await cel.migrate(webvhLog, 'btco');
    * ```
    */
   async migrate(
-    log: EventLog, 
+    log: EventLog,
     targetLayer: CelLayer,
-    options?: { domain?: string }
+    options?: { domain?: string; acknowledgeNonConformantId?: boolean }
   ): Promise<EventLog> {
     const currentLayer = this.getCurrentLayer(log);
     
@@ -368,7 +375,7 @@ export class OriginalsCel {
           throw new Error(`Invalid migration: ${currentLayer} → webvh. Can only migrate peer → webvh.`);
         }
         const domain = options?.domain || this.config.webvh?.domain;
-        return this.getWebVHManager(domain).migrate(log);
+        return this.getWebVHManager(domain, options?.acknowledgeNonConformantId).migrate(log);
       }
 
       case 'btco': {

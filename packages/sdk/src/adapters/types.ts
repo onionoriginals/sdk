@@ -94,7 +94,16 @@ export interface OrdinalsProvider {
     fundingUtxo: { txid: string; vout: number; value: number; scriptPubKey?: string };
     changeAddress: string;
   }): Promise<{ commitTxId: string; revealTxId: string; status: 'commit_broadcast' | 'reveal_broadcast' }>;
-  getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
+  /**
+   * `blockHash` is the identity of the block the tx last confirmed in, not
+   * merely its height: a one-block reorg can replace the block at a given
+   * height with a different one, and a consumer comparing heights alone
+   * cannot tell that apart from uninterrupted confirmation. Providers that
+   * cannot supply it (no block-hash source, or a not-yet-updated
+   * implementation) omit it; a consumer should treat that as "identity
+   * unknown", not "unchanged".
+   */
+  getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
     /** Static content. Provide exactly one of data / buildContent. */

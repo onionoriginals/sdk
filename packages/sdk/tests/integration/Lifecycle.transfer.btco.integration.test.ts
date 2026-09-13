@@ -32,8 +32,9 @@ describe('rotation-aware did:cel derivation (item 4a)', () => {
   // a PRE-anchor rotateKey, hand-built with cel primitives and loaded through
   // loadAsset — the code path that actually derives the announced document.
   test('loadAsset announces the ROTATED (current) key, not the retired genesis key', async () => {
-    const { createEventLog, appendEvent, celSignerFromKeyPair, deriveDidCel, createCelDidDocument, hexSha256ToDigestMultibase } =
-      await import('@originals/cel');
+    const { deriveDidCel, createCelDidDocument } = await import('@originals/cel');
+    const { createEventLog, appendEvent, celSignerFromKeyPair, hexSha256ToDigestMultibase } =
+      await import('@originals/cel/legacy');
     const km = new KeyManager();
     const genesisKp = await km.generateKeyPair('Ed25519');
     const rotatedKp = await km.generateKeyPair('Ed25519');

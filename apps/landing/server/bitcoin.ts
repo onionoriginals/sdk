@@ -458,6 +458,37 @@ export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): O
 }
 
 /**
+ * A Map with a per-entry TTL that sweeps everything expired on every write —
+ * so a caller-chosen key space (e.g. the fee estimator's `blocks`, which
+ * `/api/btc/fee` accepts with no allowlist) cannot grow the map for the life
+ * of the process just by failing for a target nobody retries. `get` treats
+ * an expired entry as absent without removing it itself, so a read-only poll
+ * never pays the sweep; the next WRITE (an unrelated key's own entry) is what
+ * clears it.
+ */
+export function createExpiringCache<K, V>(ttlMs: number, now: () => number = () => Date.now()) {
+  const entries = new Map<K, { at: number; value: V }>();
+  return {
+    get(key: K): V | undefined {
+      const entry = entries.get(key);
+      return entry && now() - entry.at < ttlMs ? entry.value : undefined;
+    },
+    set(key: K, value: V): void {
+      for (const [k, entry] of entries) {
+        if (now() - entry.at >= ttlMs) entries.delete(k);
+      }
+      entries.set(key, { at: now(), value });
+    },
+    delete(key: K): void {
+      entries.delete(key);
+    },
+    get size(): number {
+      return entries.size;
+    },
+  };
+}
+
+/**
  * Split confirmed outputs into what may fund an inscription and what may not.
  * `ok: false` means the classification itself failed — the caller must refuse
  * to spend anything rather than fall back to "probably clean".
@@ -535,6 +566,26 @@ export function estimateInscriptionCostSats(opts: {
   const revealVB = REVEAL_BASE_VB + Math.ceil((opts.contentBytes + 300) / 4);
   const buffer = opts.bufferMultiplier ?? 1.5;
   return Math.ceil(opts.feeRate * (commitVB + revealVB) * buffer) + (opts.postageSats ?? POSTAGE_SATS);
+}
+
+/**
+ * A commit's `.vsize` throws ("Transaction is not finalized") the moment ANY
+ * input lacks a witness/scriptSig — which a structurally valid but genuinely
+ * UNSIGNED funding input does. This route never independently verifies the
+ * commit's OWN signature (only the reveal's, via `validateInscriptionReveal`;
+ * an invalid or absent commit signature fails at broadcast instead), so an
+ * unfinalized commit can legitimately reach this far. Fall back to the same
+ * structural estimate the deposit quote sizes itself from — accurate enough
+ * for a fee BOUND, and independent of witness bytes entirely.
+ */
+function safeCommitVsize(commit: btc.Transaction): number {
+  try {
+    return commit.vsize;
+  } catch {
+    const outputsVB = Array.from({ length: commit.outputsLength }, (_, i) => (i === 0 ? P2TR_OUTPUT_VB : P2WPKH_OUTPUT_VB))
+      .reduce((n, vb) => n + vb, 0);
+    return COMMIT_OVERHEAD_VB + outputsVB + COMMIT_INPUT_VB * commit.inputsLength;
+  }
 }
 
 /** Signs a built funding tx and returns broadcast-ready raw tx hex. */
@@ -655,6 +706,20 @@ export function createBitcoinRoutes(deps: {
   moneyLog?: MoneyLogger;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /**
+   * The explicit settlement policy (#567): confirmation depth at which a
+   * confirmed reveal is treated as settled and its recovery artifacts are
+   * retired. An application recovery horizon, not a Bitcoin finality
+   * guarantee — deeper reorgs than this remain possible. Anything that is
+   * not a positive integer falls back to the default (`positiveInt`).
+   *
+   * Floored at six (CLAUDE.md's "six-confirmation retention rule"): this
+   * knob exists to let a deployment retain recovery artifacts LONGER than
+   * the default, never shorter — a lower value would silently shrink the
+   * window past a reorg could invalidate a discarded signed pair with
+   * nothing left to recover from.
+   */
+  recoveryConfirmations?: number;
 }): {
   funding: Handler;
   sat: Handler;
@@ -705,8 +770,14 @@ export function createBitcoinRoutes(deps: {
   // within the hour.
   const REVEAL_REBROADCAST_AFTER_MS = 30 * 60_000;
   // Application recovery horizon, not a Bitcoin finality guarantee. Retain
-  // both signed transactions and recheck the chain until six confirmations.
-  const RECOVERY_CONFIRMATIONS = 6;
+  // both signed transactions and recheck the chain until this many
+  // confirmations — the explicit settlement policy behind the `settled` flag
+  // in the /api/btc/inscribe response (#567). Configurable UPWARD only: a
+  // deployment may extend this past the default for extra margin, but never
+  // shrink it below six, the repository's documented retention floor
+  // (CLAUDE.md's "six-confirmation retention rule") — going lower would
+  // retire a signed pair's recovery artifacts before that window closes.
+  const RECOVERY_CONFIRMATIONS = Math.max(6, positiveInt(deps.recoveryConfirmations, 6));
 
   // ONE fee source for the money path (R3/KTD3). The deposit quote, the
   // /api/btc/fee estimate the browser builds the inscription against, and the
@@ -718,12 +789,31 @@ export function createBitcoinRoutes(deps: {
   // QuickNode quota once a minute, not once a tick, with an in-flight promise
   // per target so a cold cache under concurrent polls refreshes ONCE.
   const FEE_CACHE_MS = 60_000;
+  // A short negative TTL for a FAILED estimate (#496 item 2). Without it, an
+  // estimator outage gets no backoff at all: the in-flight slot below clears
+  // on rejection same as on success, so every one of N creators' 4/min polls
+  // issues a fresh RPC against a dependency that is already down. This does
+  // not floor or fabricate a rate — a poll inside the window still fails
+  // closed with the same error, just without re-asking the estimator.
+  const FEE_FAILURE_CACHE_MS = 10_000;
   // Mirrors the SDK's MAX_REASONABLE_FEE_RATE (bitcoin/BitcoinManager.ts): a
   // compromised estimator must not be able to quote an arbitrary number at a
   // creator. Kept local — the SDK does not export it.
   const MAX_FEE_RATE_SAT_VB = 10_000;
+  // How far the fee an inscribe commit/reveal actually pays may exceed the
+  // live estimate before it counts as excessive (#493/M07). Wide enough to
+  // absorb a real fee-rate move between quote and broadcast; still a hard
+  // multiple of the observed rate, so a signer cannot relabel skimmed change
+  // as "fee" without tripping it.
+  const MAX_FEE_RATE_TOLERANCE_MULTIPLIER = 10;
   const feeCache = new Map<number, { at: number; rate: number }>();
   const feeInFlight = new Map<number, Promise<number>>();
+  // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
+  // caller sending many distinct values could otherwise grow a plain failure
+  // map for the life of the process — an entry used to clear only when that
+  // exact target later succeeded, which an invalid target never does.
+  // createExpiringCache sweeps expired entries on every write instead.
+  const feeFailureCache = createExpiringCache<number, string>(FEE_FAILURE_CACHE_MS, now);
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
@@ -731,17 +821,27 @@ export function createBitcoinRoutes(deps: {
     if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
     const pending = feeInFlight.get(blocks);
     if (pending) return pending;
+    const failedMessage = feeFailureCache.get(blocks);
+    if (failedMessage !== undefined) {
+      throw new Error(failedMessage);
+    }
     const run = (async () => {
-      const estimated = await provider.estimateFee(blocks);
-      if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
-        throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+      try {
+        const estimated = await provider.estimateFee(blocks);
+        if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
+          throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
+        }
+        const rate = Math.ceil(estimated);
+        if (rate > MAX_FEE_RATE_SAT_VB) {
+          throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
+        }
+        feeCache.set(blocks, { at: now(), rate });
+        feeFailureCache.delete(blocks);
+        return rate;
+      } catch (e) {
+        feeFailureCache.set(blocks, (e as Error).message);
+        throw e;
       }
-      const rate = Math.ceil(estimated);
-      if (rate > MAX_FEE_RATE_SAT_VB) {
-        throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
-      }
-      feeCache.set(blocks, { at: now(), rate });
-      return rate;
     })();
     feeInFlight.set(blocks, run);
     // Clear the slot AFTER it is set — an estimator that throws synchronously
@@ -1319,6 +1419,33 @@ export function createBitcoinRoutes(deps: {
     }
   }
 
+  /** Read funding amounts from txid-verified previous transactions, including spent outputs. */
+  async function resolveFundingValues(
+    inputs: Array<{ txid: string; vout: number }>,
+    fundingScript: string
+  ): Promise<bigint | null> {
+    if (!indexer) return null;
+    const byTxid = new Map<string, btc.Transaction>();
+    let totalSats = 0n;
+    for (const { txid, vout } of inputs) {
+      const key = txid.toLowerCase();
+      let tx = byTxid.get(key);
+      if (!tx) {
+        const raw = await fetchRawTxHex({ ...indexer, txid: key, fetchImpl: deps.fetchImpl });
+        const parsed = raw ? parseRawTx(raw) : null;
+        if (!parsed || parsed.id.toLowerCase() !== key) return null;
+        tx = parsed;
+        byTxid.set(key, tx);
+      }
+      if (!Number.isSafeInteger(vout) || vout < 0 || vout >= tx.outputsLength) return null;
+      const output = tx.getOutput(vout);
+      if (typeof output.amount !== 'bigint' || output.amount < 0n ||
+          hex.encode(output.script ?? new Uint8Array()) !== fundingScript) return null;
+      totalSats += output.amount;
+    }
+    return totalSats;
+  }
+
   /**
    * Broadcast, treating an already-known tx as success. Returns an error
    * message or null. Accepts undefined so callers can pass a retired record's
@@ -1483,6 +1610,15 @@ export function createBitcoinRoutes(deps: {
       return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
     }
     const commitTxId = commit.id;
+    // Cached approval applies only to retained signed bytes, including witnesses.
+    let existingByCommitId: InscriptionRecord | null;
+    try {
+      existingByCommitId = store.get(sub, commitTxId);
+    } catch (e) {
+      const unreadable = unreadableRecords(sub, e);
+      if (unreadable) return unreadable;
+      throw e;
+    }
 
     const reveal = parseRawTx(revealTxHex);
     if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
@@ -1499,6 +1635,26 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
+    const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
+    function checkRecordedPair(existing: InscriptionRecord | null): Response | null {
+      if (!existing) return null;
+      if (existing.revealTxId !== revealTxId) {
+        return refuse('commit_reveal_mismatch', {
+          error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.',
+        }, 409);
+      }
+      // Transaction IDs exclude witnesses; accepting different bytes would both
+      // invalidate the cached size/fee check and leave recovery holding another pair.
+      if ((existing.signedCommitHex && existing.signedCommitHex.toLowerCase() !== signedPair.commit) ||
+          (existing.revealTxHex && existing.revealTxHex.toLowerCase() !== signedPair.reveal)) {
+        return refuse('signed_pair_mismatch', {
+          error: 'signed_pair_mismatch', message: 'This commit is already on record with different signed transaction bytes.',
+        }, 409);
+      }
+      return null;
+    }
+    const pairMismatch = checkRecordedPair(existingByCommitId);
+    if (pairMismatch) return pairMismatch;
 
     // Where the money goes (#493): step 5b never looked at output 1, so a signer that
     // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
@@ -1540,8 +1696,11 @@ export function createBitcoinRoutes(deps: {
     if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
       return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
     }
-    if (reveal.outputsLength < 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
-      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal output must pay changeAddress.' }, 400);
+    // Exactly one output, not merely "at least one" (hostile-audit M07): an
+    // extra reveal output is an undeclared, unchecked place for value to go —
+    // the amount check below only looks at output 0.
+    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal must have exactly one output, paying changeAddress.' }, 400);
     }
 
     // Transaction ids exclude witness bytes. Validate the committed script and
@@ -1553,14 +1712,95 @@ export function createBitcoinRoutes(deps: {
     }
 
     // Cheap syntax, transaction shape and bound-address checks precede this
-    // slot. Every provider-backed attempt consumes it, including refused
-    // continuations, so invalid controller proofs cannot trigger unlimited
-    // full sat scans.
+    // slot. Every provider-backed attempt consumes it — the economics check
+    // below included — so invalid controller proofs cannot trigger unlimited
+    // indexer/fee-estimator lookups any more than they could full sat scans.
     const perUser = inscribeUserLimiter.check(sub);
     if (!perUser.allowed) {
       return json({ error: 'inscribe_user_cap' }, 429, {
         'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
       });
+    }
+
+    // Reconstruct funding independently of client-declared values. Only an
+    // exact retained pair with persisted approval may skip a fresh check during
+    // an indexer outage or fee-rate change. Legacy/retired rows are re-verified.
+    const alreadyVerified = existingByCommitId?.economicsVerified &&
+      existingByCommitId.signedCommitHex?.toLowerCase() === signedPair.commit &&
+      existingByCommitId.revealTxHex?.toLowerCase() === signedPair.reveal;
+    if (!alreadyVerified) {
+      if (!indexer) {
+        return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
+      }
+      const totalInputSats = await resolveFundingValues(
+        declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
+      );
+      if (totalInputSats === null) {
+        return refuse('funding_value_unavailable', {
+          error: 'funding_value_unavailable',
+          message: 'Could not independently verify funding values at the bound deposit address.',
+        }, 503);
+      }
+
+      let reasonableFeeRate: number;
+      try {
+        reasonableFeeRate = await currentFeeRate(1);
+      } catch (e) {
+        return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+      }
+      // Generous but bounded: absorbs a real fee-rate move between quote and
+      // broadcast without letting a signer relabel skimmed change as "fee".
+      const maxFeeRateSatVb = Math.min(MAX_FEE_RATE_SAT_VB, Math.max(reasonableFeeRate, 1) * MAX_FEE_RATE_TOLERANCE_MULTIPLIER);
+
+      const commitOutput0Amount = commit.getOutput(0).amount ?? 0n;
+      const commitChangeAmount = commit.outputsLength === 2 ? (commit.getOutput(1).amount ?? 0n) : 0n;
+      if (commitOutput0Amount + commitChangeAmount > totalInputSats) {
+        return refuse(
+          'commit_outputs_exceed_inputs',
+          { error: 'commit_invariant_violation', message: 'Commit outputs exceed the independently verified funding value.' },
+          400
+        );
+      }
+      const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
+      const commitVsize = safeCommitVsize(commit);
+      const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
+      if (commitFeeSats > maxCommitFeeSats) {
+        return refuse(
+          'commit_fee_excessive',
+          { error: 'commit_invariant_violation', message: 'Commit pays an unreasonably high fee for its size; change may have been redirected to fee.' },
+          400
+        );
+      }
+      if (commit.outputsLength === 1) {
+        // No change output at all: legitimate only when the true surplus, after
+        // a reasonable fee, would not clear dust. Otherwise a signer could
+        // simply DROP the change output and let the whole surplus become fee.
+        const reasonableFeeSats = BigInt(Math.ceil(reasonableFeeRate * commitVsize));
+        const undisclosedSurplus = commitFeeSats > reasonableFeeSats ? commitFeeSats - reasonableFeeSats : 0n;
+        if (undisclosedSurplus >= BigInt(POSTAGE_SATS)) {
+          return refuse(
+            'commit_change_omitted',
+            { error: 'commit_invariant_violation', message: 'Commit omits a change output despite a spendable surplus above dust.' },
+            400
+          );
+        }
+      } else if (commitChangeAmount > 0n && commitChangeAmount < BigInt(POSTAGE_SATS)) {
+        return refuse('commit_change_dust', { error: 'commit_invariant_violation', message: 'Commit change output is below the dust limit.' }, 400);
+      }
+
+      // The reveal's input value is CRYPTOGRAPHICALLY bound to commit output 0's
+      // amount — validateInscriptionReveal above verified the Schnorr signature
+      // over exactly that amount — so only its allocation between the creator's
+      // output and fee is still unverified.
+      const revealOutput0Amount = reveal.getOutput(0).amount ?? 0n;
+      if (revealOutput0Amount > commitOutput0Amount) {
+        return refuse('reveal_outputs_exceed_input', { error: 'reveal_invariant_violation', message: 'Reveal output exceeds its input value.' }, 400);
+      }
+      const revealFeeSats = commitOutput0Amount - revealOutput0Amount;
+      const maxRevealFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * reveal.vsize));
+      if (revealFeeSats > maxRevealFeeSats) {
+        return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
+      }
     }
 
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
@@ -1611,6 +1851,7 @@ export function createBitcoinRoutes(deps: {
       fundingOutpoints: outpoints,
       changeAddress,
       status: 'signed',
+      economicsVerified: true,
       createdAt: at,
       updatedAt: at,
     };
@@ -1623,6 +1864,12 @@ export function createBitcoinRoutes(deps: {
     const refusal = await withSubLock(sub, async (): Promise<Response | null> => {
       let rivals: InscriptionRecord[];
       try {
+        // Another submission may have persisted this commit while provider reads
+        // awaited. Recheck inside the same lock as create/approval persistence.
+        const recorded = store.get(sub, commitTxId);
+        const mismatch = checkRecordedPair(recorded);
+        if (mismatch) return mismatch;
+        if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
         const unreadable = unreadableRecords(sub, e);
@@ -1725,12 +1972,18 @@ export function createBitcoinRoutes(deps: {
    * 2. LIVE pairs stuck at commit_broadcast (reveal broadcast failed at some
    *    point) get their reveal completed from the persisted copy once their
    *    commit confirms.
-   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS. An earlier confirmation
-   *    remains reversible: retain both transactions, demote after a reorg, and
-   *    rebroadcast. Retire the artifacts only at the retention horizon.
-   *    One that is STILL unconfirmed
-   *    after REVEAL_REBROADCAST_AFTER_MS is re-pushed from the persisted
-   *    pair, commit first — either or both may have left the mempool.
+   * 3. Reveals are checked until RECOVERY_CONFIRMATIONS: the explicit
+   *    settlement policy (#567). A `confirmed` record below that depth is
+   *    reported `settled: false` — confirmed-but-unsettled, both transactions
+   *    retained, confirmation depth and block height persisted on every
+   *    change — because it remains reversible: a reorg demotes it back to
+   *    `reveal_broadcast` (clearing that depth/height) and it is rebroadcast.
+   *    A reconfirmation is recorded even when it lands at a DIFFERENT block
+   *    height than last observed. Only at the retention horizon are the
+   *    recovery artifacts retired and the record reported `settled: true`.
+   *    One that is STILL unconfirmed after REVEAL_REBROADCAST_AFTER_MS is
+   *    re-pushed from the persisted pair, commit first — either or both may
+   *    have left the mempool.
    */
   const inscribeList: Handler = async (req, _url, clientIp) => {
     const sub = authSub(req);
@@ -1739,6 +1992,7 @@ export function createBitcoinRoutes(deps: {
     if (limited) return limited;
     return reconciler.reconcileUser(sub);
   };
+
 
   /**
    * POST /api/btc/inscribe/rebroadcast { commitTxId } — finish a stranded
@@ -1765,7 +2019,20 @@ export function createBitcoinRoutes(deps: {
     }
     if (!rec) return json({ error: 'not_found' }, 404);
     if (rec.status === 'confirmed' && rec.retired) {
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      // Settled: confirmations/confirmedBlockHeight/confirmedBlockHash are
+      // the frozen values from whichever poll crossed the threshold — a
+      // retired record is never rechecked, so there is nothing fresher to
+      // report.
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled: true,
+        confirmations: rec.confirmations,
+        ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+        ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
+      });
     }
     // Retired: the record is terminal (its outpoint was won by a pair that
     // confirmed), so the recovery artifacts were dropped. Nothing to push.
@@ -1796,9 +2063,23 @@ export function createBitcoinRoutes(deps: {
     }
     if (revealStatus?.confirmed) {
       reclaimIfSuperseded();
-      store.setStatus(sub, commitTxId, 'confirmed');
-      if ((revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) store.retire(sub, commitTxId);
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'confirmed' });
+      store.setStatus(sub, commitTxId, 'confirmed', {
+        confirmations: revealStatus.confirmations,
+        blockHeight: revealStatus.blockHeight,
+        blockHash: revealStatus.blockHash,
+      });
+      const settled = (revealStatus.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS;
+      if (settled) store.retire(sub, commitTxId);
+      return json({
+        commitTxId,
+        revealTxId: rec.revealTxId,
+        inscriptionId: rec.inscriptionId,
+        status: 'confirmed',
+        settled,
+        confirmations: revealStatus.confirmations,
+        ...(revealStatus.blockHeight !== undefined ? { confirmedBlockHeight: revealStatus.blockHeight } : {}),
+        ...(revealStatus.blockHash !== undefined ? { confirmedBlockHash: revealStatus.blockHash } : {}),
+      });
     }
     try {
       if (revealStatus && rec.status === 'confirmed') {

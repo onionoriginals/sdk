@@ -19,8 +19,12 @@ DID-method conformance. Asset controller identity continues to use `did:key`,
 and WebVH/Bitcoin aliases retain their separate verification requirements.
 
 Strict historical Originals 3 `did:cel:<genesis-multihash>` strings remain
-readable as compatibility aliases of the same authenticated genesis. Deprecated
-`state.didCel` and `deriveDid` expose that spelling only. They do not resolve a
-DID or implement another protocol. Preserve old signed migrations, method logs,
+readable as compatibility aliases of the same authenticated genesis, through
+`normalizeAssetId`/`sameAssetIdentity`, `state.aliases` when the spelling
+occurs in authenticated signed migration history, or by reconstructing it as
+`"did:cel:" + assetDigest(state.assetId)`. The once-deprecated `state.didCel`
+field and `deriveDid` function, which exposed that spelling as first-class
+API, are removed from the CEL 2 / SDK 4 surface. None of these resolve a DID
+or implement another protocol. Preserve old signed migrations, method logs,
 hosted paths and inscriptions; normalize the public asset identity through the
 current identity helpers without rewriting history.

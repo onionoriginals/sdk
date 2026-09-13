@@ -224,7 +224,44 @@ describe('inscribe-path transitions (R29)', () => {
   const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
   const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
-  function buildPair(fundingTxid = 'a'.repeat(64)) {
+  /**
+   * Fake indexer backing store for the inscribe route's independent
+   * input-value lookup (#493 M07): `GET /tx/<txid>/hex` answers from this
+   * map, keyed by each transaction's OWN computed id — the route rejects a
+   * fetched transaction whose id doesn't match the txid it was requested
+   * under.
+   */
+  const FUNDING_TX_HEX = new Map<string, string>();
+  let fundingSeq = 0;
+  /** Builds, registers and returns the real txid of a funding transaction paying `value` sats at `vout` to `scriptPubKey`. */
+  function makeFundingUtxo(vout: number, value: number, scriptPubKey: string): string {
+    fundingSeq++;
+    const tx = new btc.Transaction({ allowUnknownOutputs: true });
+    tx.addInput({
+      txid: fundingSeq.toString(16).padStart(64, '0'),
+      index: 0,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(value) + 10_000n },
+    });
+    for (let i = 0; i < vout; i++) tx.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
+    tx.sign(USER_PRIV);
+    tx.finalize();
+    const txid = tx.id;
+    FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+    return txid;
+  }
+  function fakeIndexerFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const m = url.match(/\/tx\/([0-9a-fA-F]+)\/hex$/);
+      const raw = m ? FUNDING_TX_HEX.get(m[1].toLowerCase()) : undefined;
+      return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  function buildPair() {
+    const fundingTxid = makeFundingUtxo(0, 50_000, USER_SCRIPT);
     const commit = new btc.Transaction();
     commit.addInput({
       txid: fundingTxid,
@@ -255,9 +292,15 @@ describe('inscribe-path transitions (R29)', () => {
     };
   }
 
-  function inscribeHarness(broadcast?: (txHex: string) => Promise<string>) {
+  function inscribeHarness(
+    broadcast?: (txHex: string) => Promise<string>,
+    opts?: {
+      getTransactionStatus?: (txid: string) => Promise<{ confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }>;
+      dataDir?: string;
+    }
+  ) {
     const cap = capture();
-    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'money-insc-')) });
+    const store = createInscriptionsStore({ dataDir: opts?.dataDir ?? mkdtempSync(join(tmpdir(), 'money-insc-')) });
     // #493: an unbound account may not name its own change address, so bind it
     // as the real flow does when a creator reads their deposit address.
     store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
@@ -267,15 +310,19 @@ describe('inscribe-path transitions (R29)', () => {
         async broadcastTransaction(txHex: string) {
           return broadcast ? broadcast(txHex) : 'f'.repeat(64);
         },
-        async getTransactionStatus() { return { confirmed: false }; },
+        async getTransactionStatus(txid: string) {
+          return opts?.getTransactionStatus ? opts.getTransactionStatus(txid) : { confirmed: false };
+        },
         async estimateFee() { return 3; },
       } as unknown as Parameters<typeof createBitcoinRoutes>[0]['provider'],
       inscriptions: store,
       // Clean coins: the route now classifies the declared outpoints itself (#493).
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
-    return { routes, cap };
+    return { routes, cap, store };
   }
 
   async function submit(routes: ReturnType<typeof inscribeHarness>['routes'], body: unknown) {
@@ -326,6 +373,105 @@ describe('inscribe-path transitions (R29)', () => {
     expect((await res.json() as { status: string }).status).toBe('commit_broadcast');
     expect(cap.of('inscribe_failed')[0].reason).toBe('reveal_broadcast_failed');
     expect(cap.of('inscribe_broadcast')[0].status).toBe('commit_broadcast');
+  });
+
+  async function poll(routes: ReturnType<typeof inscribeHarness>['routes']) {
+    const token = signToken('sub-1', EMAIL, undefined, { secret: JWT });
+    const cookie = serializeCookie(getAuthCookieConfig(token));
+    const req = new Request('http://host/api/btc/inscribe', { headers: { cookie } });
+    const res = await routes.inscribeList(req, new URL(req.url));
+    return ((await res.json()) as {
+      inscriptions: Array<{
+        status: string;
+        settled?: boolean;
+        confirmations?: number;
+        confirmedBlockHeight?: number;
+        confirmedBlockHash?: string;
+      }>;
+    }).inscriptions[0];
+  }
+
+  test('#567: confirmed-but-unsettled vs settled, block identity survives a reorg-reconfirm, retirement only at the settlement threshold', async () => {
+    const pair = buildPair();
+    const chain = { confirmed: true, confirmations: 1, blockHeight: 100 };
+    const { routes, cap, store } = inscribeHarness(undefined, {
+      getTransactionStatus: async () => ({ ...chain }),
+    });
+    await submit(routes, pair);
+
+    // Confirmed, but well below the settlement threshold: both transactions
+    // retained, block identity persisted, NOT settled.
+    let row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(false);
+    expect(row.confirmations).toBe(1);
+    expect(row.confirmedBlockHeight).toBe(100);
+    expect(store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+    // A reorg un-confirms the reveal: demotes back to reveal_broadcast, and
+    // the now-stale confirmed-block evidence is cleared, not carried forward.
+    chain.confirmed = false;
+    row = await poll(routes);
+    expect(row.status).toBe('reveal_broadcast');
+    expect(row.settled).toBeUndefined();
+    expect(row.confirmations).toBeUndefined();
+    expect(row.confirmedBlockHeight).toBeUndefined();
+
+    // It reconfirms — but in a DIFFERENT block than before the reorg. That is
+    // recorded as its own event, distinct from an ordinary depth increase.
+    chain.confirmed = true;
+    chain.confirmations = 1;
+    chain.blockHeight = 101;
+    row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(false);
+    expect(row.confirmedBlockHeight).toBe(101);
+    const reorgs = cap.of('inscribe_reorg_reconfirmed');
+    expect(reorgs).toHaveLength(1);
+    expect(reorgs[0].previousBlockHeight).toBe(100);
+    expect(reorgs[0].blockHeight).toBe(101);
+
+    // Depth alone crossing the settlement policy — same block, more
+    // confirmations — is what finally retires the recovery artifacts.
+    chain.confirmations = 6;
+    row = await poll(routes);
+    expect(row.status).toBe('confirmed');
+    expect(row.settled).toBe(true);
+    expect(row.confirmedBlockHeight).toBe(101);
+    expect(store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+    // A retired record is never rechecked again, so a later reorg at this
+    // depth cannot un-settle it — only a fresh (unretired) confirmation can.
+    expect(cap.of('inscribe_reorg_reconfirmed')).toHaveLength(1);
+  });
+
+  test('#567: a same-height reorg (block A replaced by block B) is caught by hash even though height never changes', async () => {
+    const pair = buildPair();
+    const chain = { confirmed: true, confirmations: 1, blockHeight: 500, blockHash: 'a'.repeat(64) };
+    const { routes, cap, store } = inscribeHarness(undefined, {
+      getTransactionStatus: async () => ({ ...chain }),
+    });
+    await submit(routes, pair);
+
+    let row = await poll(routes);
+    expect(row.confirmedBlockHeight).toBe(500);
+    expect(row.confirmedBlockHash).toBe('a'.repeat(64));
+    expect(cap.of('inscribe_reorg_reconfirmed')).toHaveLength(0);
+
+    // An ordinary one-block reorg: the tx reconfirms in a DIFFERENT block at
+    // the exact SAME height. A poll that only compared height — or one that
+    // missed the transient unconfirmed gap entirely, which this scenario
+    // does not even require — would see nothing worth reporting.
+    chain.blockHash = 'b'.repeat(64);
+    row = await poll(routes);
+    expect(row.confirmedBlockHeight).toBe(500);
+    expect(row.confirmedBlockHash).toBe('b'.repeat(64));
+    const reorgs = cap.of('inscribe_reorg_reconfirmed');
+    expect(reorgs).toHaveLength(1);
+    expect(reorgs[0].previousBlockHeight).toBe(500);
+    expect(reorgs[0].blockHeight).toBe(500);
+    expect(reorgs[0].previousBlockHash).toBe('a'.repeat(64));
+    expect(reorgs[0].blockHash).toBe('b'.repeat(64));
+    expect(store.get('sub-1', pair.commitTxId)?.confirmedBlockHash).toBe('b'.repeat(64));
   });
 });
 
@@ -437,6 +583,33 @@ describe('the periodic balance sweep (R29)', () => {
     expect(later.scanned).toBe(1);
     expect(later.withBalance).toBe(1);
     expect(cap.of('deposit_balance_held').every((e) => e.address === ADDRESS)).toBe(true);
+  });
+
+  // #496 item 4: `recordDepositRead` used to skip its write whenever the
+  // reported balance was unchanged, with no ceiling on how long that could
+  // go on. That froze `lastRead.at` at the last actual balance CHANGE, not
+  // the last time anyone checked — so the drop-out clock above kept ticking
+  // even while the sweep itself kept re-reading the address every pass. An
+  // address that never once went unwatched still silently timed out.
+  test('an idle address the sweep keeps re-checking every hour never drops out', async () => {
+    const hour = 60 * 60_000;
+    let clock = Date.parse('2026-01-01T00:00:00.000Z');
+    const { sweep, store } = sweepHarness({
+      balances: { [OTHER_ADDRESS]: 0 },
+      now: () => clock,
+    });
+    store.bindDepositAddress('sub-2', 'mainnet', OTHER_ADDRESS);
+
+    let last: Awaited<ReturnType<typeof sweep>> | undefined;
+    for (let i = 0; i < 30; i++) {
+      clock += hour;
+      last = await sweep();
+    }
+    // 30 hourly passes, every one of them reading this address: it was never
+    // left unchecked for anywhere near the 24h drop-out horizon, so it must
+    // still be in scope.
+    expect(last!.candidates).toBe(1);
+    expect(last!.scanned).toBe(1);
   });
 
   test('an unreadable address is counted, not swallowed, and does not stop the pass', async () => {

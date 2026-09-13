@@ -119,7 +119,7 @@ export class RegtestProvider implements OrdinalsProvider {
 
   async estimateFee(): Promise<number> { await this.assertNetwork(); return this.feeRate; }
 
-  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; confirmations: number; blockHeight?: number }> {
+  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; confirmations: number; blockHeight?: number; blockHash?: string }> {
     if (!TXID.test(txid)) throw new Error('Invalid transaction id');
     await this.assertNetwork();
     try {
@@ -128,7 +128,10 @@ export class RegtestProvider implements OrdinalsProvider {
       if (!confirmations || !tx.blockhash) return { confirmed: false, confirmations: 0 };
       const header = await this.rpc<{ height: number; confirmations: number }>('getblockheader', [tx.blockhash]);
       if (header.confirmations < 1) return { confirmed: false, confirmations: 0 };
-      return { confirmed: true, confirmations, blockHeight: header.height };
+      // blockhash is the real block IDENTITY — kept alongside height so a
+      // caller can detect an ordinary reorg that replaces the block at a
+      // given height with a different one (#567).
+      return { confirmed: true, confirmations, blockHeight: header.height, blockHash: tx.blockhash };
     } catch (error) {
       if ((error as { code?: number }).code === -5) return { confirmed: false, confirmations: 0 };
       throw error;

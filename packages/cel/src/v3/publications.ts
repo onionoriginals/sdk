@@ -1,7 +1,7 @@
 import { normalizeAssetId } from "./identity.js";
 import { freeze } from "./immutable.js";
 import { CelError } from "./errors.js";
-import { parseAssetDid, type BitcoinNetwork } from "./dids.js";
+import { parseAssetAlias, type BitcoinNetwork } from "./dids.js";
 import { parseDocument, eventDigest } from "./profile.js";
 import {
   verifyHistory,
@@ -111,7 +111,7 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
+  options: { expectedAssetId?: string } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -128,19 +128,9 @@ export function resolveSat(
   const queriedDid = "did:btco:" + prefix + snapshot.sat;
   let expectedAssetId: string | undefined;
   try {
-    for (const expected of [options.expectedAssetId, options.expectedDid]) {
-      if (expected === undefined) continue;
-      const normalized = normalizeAssetId(expected);
-      if (expectedAssetId !== undefined && expectedAssetId !== normalized)
-        return failure("invalid", "Conflicting requested asset identities");
-      expectedAssetId = normalized;
-    }
-    parseAssetDid(queriedDid);
-    if (
-      options.expectedDid !== undefined &&
-      parseAssetDid(options.expectedDid).method !== "cel"
-    )
-      return failure("invalid", "Expected a genesis asset identity");
+    if (options.expectedAssetId !== undefined)
+      expectedAssetId = normalizeAssetId(options.expectedAssetId);
+    parseAssetAlias(queriedDid);
   } catch (error) {
     if (!(error instanceof CelError)) throw error;
     return failure("invalid", error.code);

@@ -78,7 +78,7 @@ const buildWebvhLog = async (): Promise<EventLog> => {
   const { log: peerLog } = await peerMgr.create('Coverage Asset', [
     { digestMultibase: 'uCoverageHash', mediaType: 'image/png' },
   ]);
-  const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com');
+  const webvhMgr = new WebVHCelManager(createMockSigner(), 'coverage.example.com', [], { acknowledgeNonConformantId: true });
   return webvhMgr.migrate(peerLog);
 };
 
@@ -91,7 +91,9 @@ describe('CEL-CORE-012/happy – webvh→btco migration via BtcoCelManager', () 
 
   beforeAll(async () => {
     const webvhLog = await buildWebvhLog();
-    const btcoMgr = new BtcoCelManager(createMockSigner(), createMockBitcoinManager());
+    const btcoMgr = new BtcoCelManager(createMockSigner(), createMockBitcoinManager(), {
+      acknowledgeIncompleteHistory: true,
+    });
     btcoLog = await btcoMgr.migrate(webvhLog);
   });
 

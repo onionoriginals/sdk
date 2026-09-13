@@ -310,3 +310,13 @@ describe('createInscriptionReconciler: sweepInscriptions', () => {
     expect(firstResult.processed).toBe(1);
   });
 });
+
+test.each([1, 0, -1, NaN, Infinity, 1.5])('direct factory keeps the six-confirmation floor for %s', async recoveryConfirmations => {
+  const commitTxId = 'e'.repeat(64);
+  const { store, reconciler } = harness({ recoveryConfirmations,
+    txStatus: () => ({ confirmed: true, confirmations: 1 }) });
+  store.create('sub-1', rec({ commitTxId, status: 'reveal_broadcast' }));
+  expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+  expect(store.get('sub-1', commitTxId)?.retired).not.toBe(true);
+  expect(store.get('sub-1', commitTxId)?.signedCommitHex).toBe('02aa');
+});

@@ -27,19 +27,62 @@ const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
 const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
 /**
- * A structurally-valid signed commit (1 input spending the funding UTXO, 2
- * outputs) + reveal (1 input spending commit:0, 1 output). The reveal carries a genuine Taproot inscription witness so the route
- * verifies both transaction invariants and the committed script/signature.
+ * The fake indexer's backing store (#493 M07): `GET /tx/<txid>/hex` answers
+ * straight from this map, keyed by each transaction's OWN computed id. Every
+ * entry is a real, independently parseable, fully-signed transaction whose
+ * output `vout` genuinely carries `value` sats — the inscribe route's
+ * economic envelope check reads it with the same `fetchRawTxHex` + parse path
+ * a live esplora-shaped indexer would answer, and verifies the parsed bytes
+ * actually hash to the txid it asked for, so these fixtures must too.
  */
-function buildPair(
-  fundingTxid = 'a'.repeat(64),
-  fundingVout = 0,
-  opts: { changeTo?: string; revealTo?: string } = {}
-) {
+const FUNDING_TX_HEX = new Map<string, string>();
+let fundingTxSeq = 0;
+
+/**
+ * Builds and registers a funding transaction paying `value` sats at `vout` to
+ * `scriptPubKey`, under its own real, computed txid — required because the
+ * inscribe route rejects a fetched transaction whose id doesn't match the
+ * txid it was requested under (#493 M07). Each call is a distinct UTXO (a
+ * fresh, never-reused ancestor input), so the returned txid is always new.
+ */
+function makeFundingUtxo(
+  value: number,
+  vout = 0,
+  scriptPubKey: string = USER_SCRIPT
+): { txid: string; vout: number; value: number; scriptPubKey: string } {
+  fundingTxSeq++;
+  const tx = new btc.Transaction({ allowUnknownOutputs: true });
+  tx.addInput({
+    // An arbitrary ancestor outpoint, never resolved — this tx exists only so
+    // the fake indexer can serve genuine, self-consistent bytes.
+    txid: fundingTxSeq.toString(16).padStart(64, '0'),
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(value) + 10_000n },
+  });
+  for (let i = 0; i < vout; i++) {
+    tx.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK); // padding, skipped
+  }
+  tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
+  tx.sign(USER_PRIV);
+  tx.finalize();
+  const txid = tx.id;
+  FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+  return { txid, vout, value, scriptPubKey };
+}
+
+/**
+ * A structurally-valid signed commit (1 input spending a fresh funding UTXO,
+ * 2 outputs) + reveal (1 input spending commit:0, 1 output). The reveal
+ * carries a genuine Taproot inscription witness so the route verifies both
+ * transaction invariants and the committed script/signature.
+ */
+function buildPair(opts: { changeTo?: string; revealTo?: string } = {}) {
+  const fundingUtxo = makeFundingUtxo(50_000);
   const commit = new btc.Transaction();
   commit.addInput({
-    txid: fundingTxid,
-    index: fundingVout,
+    txid: fundingUtxo.txid,
+    index: fundingUtxo.vout,
     sequence: 0xfffffffd,
     witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n },
   });
@@ -66,8 +109,50 @@ function buildPair(
     commitTxId,
     revealTxHex,
     revealTxId: reveal.id,
-    fundingUtxo: { txid: fundingTxid, vout: fundingVout, value: 50_000, scriptPubKey: USER_SCRIPT },
+    fundingUtxo,
     changeAddress: USER_ADDRESS,
+  };
+}
+
+/**
+ * A different signed commit/reveal pair over the SAME funding outpoint as
+ * `pair` (same trusted, already-registered input value), with a different
+ * output split so it gets its own commitTxId — a fee-rate bump or a fresh
+ * reveal keypair would do the same in reality. Kept at the same ~2,000 sat
+ * total fee as `buildPair`'s own split so it clears the inscribe route's
+ * economic envelope check (#493 M07) like any genuine rebuild does; tests
+ * that need to violate that envelope build their own pair explicitly instead.
+ */
+function buildRebuiltPair(pair: ReturnType<typeof buildPair>, commitValue: number) {
+  const fundingValue = pair.fundingUtxo.value;
+  const commit = new btc.Transaction();
+  commit.addInput({
+    txid: pair.fundingUtxo.txid,
+    index: pair.fundingUtxo.vout,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(fundingValue) },
+  });
+  commit.addOutputAddress(INSCRIPTION.address, BigInt(commitValue), btc.TEST_NETWORK);
+  commit.addOutputAddress(USER_ADDRESS, BigInt(fundingValue - commitValue - 1_000), btc.TEST_NETWORK);
+  commit.sign(USER_PRIV);
+  commit.finalize();
+
+  const reveal = new btc.Transaction();
+  reveal.addInput({
+    txid: commit.id,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: INSCRIPTION.script, amount: BigInt(commitValue) },
+  });
+  reveal.addOutputAddress(USER_ADDRESS, BigInt(commitValue - 1_000), btc.TEST_NETWORK);
+  INSCRIPTION.finalize(reveal, commit);
+
+  return {
+    ...pair,
+    signedCommitHex: hex.encode(commit.extract()),
+    revealTxHex: hex.encode(reveal.extract()),
+    commitTxId: commit.id,
+    revealTxId: reveal.id,
   };
 }
 
@@ -75,6 +160,7 @@ function buildPair(
  * A signed commit spending SEVERAL funding UTXOs, in the declared order. The
  * first declared input is the identity input (its first sat becomes the
  * did:btco sat), which is why order — not just membership — is checked.
+ * Each `utxos` entry must already be registered (e.g. via `makeFundingUtxo`).
  */
 function buildMultiPair(
   utxos: Array<{ txid: string; vout: number; value: number }>,
@@ -115,6 +201,55 @@ function buildMultiPair(
   };
 }
 
+function buildEconomicsPair(opts: {
+  fundingValue: number;
+  actualFundingValue?: number;
+  fundingScript?: string;
+  commitOutput0: number;
+  /** Omit entirely to build a commit with NO change output. */
+  changeAmount?: number;
+  /** Extra outputs appended to the reveal, beyond its normal single output. */
+  extraRevealOutputs?: Array<{ address: string; amount: number }>;
+  revealOutput0?: number;
+}) {
+  const funding = makeFundingUtxo(opts.actualFundingValue ?? opts.fundingValue, 0, opts.fundingScript);
+  const fundingTxid = funding.txid;
+  const commit = new btc.Transaction();
+  commit.addInput({
+    txid: fundingTxid,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(opts.fundingValue) },
+  });
+  commit.addOutputAddress(INSCRIPTION.address, BigInt(opts.commitOutput0), btc.TEST_NETWORK);
+  if (opts.changeAmount !== undefined) {
+    commit.addOutputAddress(USER_ADDRESS, BigInt(opts.changeAmount), btc.TEST_NETWORK);
+  }
+  commit.sign(USER_PRIV);
+  commit.finalize();
+  const reveal = new btc.Transaction();
+  reveal.addInput({
+    txid: commit.id,
+    index: 0,
+    sequence: 0xfffffffd,
+    witnessUtxo: { script: INSCRIPTION.script, amount: BigInt(opts.commitOutput0) },
+  });
+  const revealOutput0 = opts.revealOutput0 ?? opts.commitOutput0 - 1_000;
+  reveal.addOutputAddress(USER_ADDRESS, BigInt(revealOutput0), btc.TEST_NETWORK);
+  for (const extra of opts.extraRevealOutputs ?? []) {
+    reveal.addOutputAddress(extra.address, BigInt(extra.amount), btc.TEST_NETWORK);
+  }
+  INSCRIPTION.finalize(reveal, commit);
+  return {
+    signedCommitHex: hex.encode(commit.extract()),
+    commitTxId: commit.id,
+    revealTxHex: hex.encode(reveal.extract()),
+    revealTxId: reveal.id,
+    fundingUtxo: { txid: fundingTxid, vout: 0, value: opts.fundingValue, scriptPubKey: USER_SCRIPT },
+    changeAddress: USER_ADDRESS,
+  };
+}
+
 function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1') {
   const token = signToken(sub, 'a@b.com', undefined, { secret: JWT });
   const cookie = serializeCookie(getAuthCookieConfig(token));
@@ -128,16 +263,38 @@ function authedReq(path: string, body?: unknown, method = 'POST', sub = 'sub-1')
 /** Every outpoint is clean — what a well-behaved lookup says about ordinary coins. */
 const CLEAN_ORDINALS: OrdinalLookup = { outpointInscriptions: async () => [] };
 
+/**
+ * The fake indexer's `fetch`: `GET .../tx/<txid>/hex` answers from
+ * FUNDING_TX_HEX (#493 M07's independent input-value lookup), everything else
+ * 404s. Registered while building each test pair.
+ */
+function fakeIndexerFetch(): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+    const m = url.match(/\/tx\/([0-9a-fA-F]+)\/hex$/);
+    const raw = m ? FUNDING_TX_HEX.get(m[1].toLowerCase()) : undefined;
+    return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
+  }) as unknown as typeof fetch;
+}
+
 function harness(opts?: {
   dataDir?: string;
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
-  txStatus?: { confirmed: boolean; confirmations?: number } | ((txid: string) => { confirmed: boolean; confirmations?: number });
+  txStatus?:
+    | { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }
+    | ((txid: string) => { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
   txStatusDelayMs?: number;
   /** The ordinal lookup the route classifies with; `null` = none configured. */
   ordinals?: OrdinalLookup | null;
+  /** The explicit settlement policy (#567); defaults to the route's own default (6). */
+  recoveryConfirmations?: number;
+  /** `null` leaves the inscribe route with no indexer configured — the fail-closed case for #493 M07's value lookup. */
+  indexer?: { api: string } | null;
+  /** Overrides the fake indexer's fetch, e.g. to simulate a read that cannot be trusted. */
+  fetchImpl?: typeof fetch;
 }) {
   const broadcasts: string[] = [];
   const provider = {
@@ -167,14 +324,19 @@ function harness(opts?: {
   // account may not name its own change address. Cases that need the UNBOUND
   // state assert it explicitly rather than relying on the harness.
   if (opts?.bind !== false) store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
+  let indexerFetchCalls = 0;
+  const fetchImpl = opts?.fetchImpl ?? fakeIndexerFetch();
   const routes = createBitcoinRoutes({
     jwtSecret: JWT,
     provider,
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
     ordinals: opts?.ordinals === null ? undefined : (opts?.ordinals ?? CLEAN_ORDINALS),
+    recoveryConfirmations: opts?.recoveryConfirmations,
+    indexer: opts?.indexer === null ? undefined : (opts?.indexer ?? { api: 'https://fake-indexer.test' }),
+    fetchImpl: ((...args: Parameters<typeof fetch>) => { indexerFetchCalls++; return fetchImpl(...args); }) as typeof fetch,
   });
-  return { routes, store, broadcasts, dataDir };
+  return { routes, store, broadcasts, dataDir, indexerCallCount: () => indexerFetchCalls };
 }
 
 async function post(routes: ReturnType<typeof harness>['routes'], body: unknown) {
@@ -261,7 +423,7 @@ describe('POST /api/btc/inscribe', () => {
   test('rejects a reveal that does not spend the commit output 0', async () => {
     const { routes, broadcasts } = harness();
     const pair = buildPair();
-    const other = buildPair('c'.repeat(64)); // reveal spends a different commit
+    const other = buildPair(); // reveal spends a different commit
     const res = await post(routes, { ...pair, revealTxHex: other.revealTxHex });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
@@ -273,18 +435,7 @@ describe('POST /api/btc/inscribe', () => {
     const pair = buildPair();
     expect((await post(routes, pair)).status).toBe(200);
     // Same outpoint, different commit (different output split → different txid).
-    const rival = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 25_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 25_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 24_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
-    })();
+    const rival = buildRebuiltPair(pair, 21_000);
     const res = await post(routes, rival);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
@@ -305,18 +456,7 @@ describe('POST /api/btc/inscribe', () => {
 
     // Rebuilt pair (fresh reveal keypair → different commit txid), same outpoint:
     // must replace the dead pair instead of 409ing forever.
-    const rebuilt = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const rebuilt = buildRebuiltPair(pair, 22_000);
     const res = await post(routes, rebuilt);
     expect(res.status).toBe(200);
     // The dead pair is PRESERVED (its broadcast failure could have been
@@ -343,18 +483,7 @@ describe('POST /api/btc/inscribe', () => {
     expect((await post(routes, pair)).status).toBe(502);
     expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
 
-    const rebuilt = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()) };
-    })();
+    const rebuilt = buildRebuiltPair(pair, 23_000);
     const res = await post(routes, rebuilt);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
@@ -452,6 +581,8 @@ describe('GET /api/btc/inscribe', () => {
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: store,
       ordinals: CLEAN_ORDINALS,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
     await post(routes, pair); // broadcast both → reveal_broadcast
 
@@ -488,18 +619,7 @@ describe('GET /api/btc/inscribe', () => {
 
     // 2) Rebuilt pair B on the same outpoint supersedes A (A's commit not yet
     //    visible as confirmed) and broadcasts fully.
-    const pairB = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pairA.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pairA, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const pairB = buildRebuiltPair(pairA, 24_000);
     expect((await post(h.routes, pairB)).status).toBe(200);
     expect(h.store.get('sub-1', pairA.commitTxId)!.superseded).toBe(true);
 
@@ -587,18 +707,7 @@ describe('GET /api/btc/inscribe', () => {
     });
     // Pair A fails ambiguously, rebuilt pair B supersedes it and completes.
     expect((await post(routes, pair)).status).toBe(502);
-    const pairB = (() => {
-      const commit = new btc.Transaction();
-      commit.addInput({ txid: pair.fundingUtxo.txid, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } });
-      commit.addOutputAddress(INSCRIPTION.address, 30_000n, btc.TEST_NETWORK);
-      commit.sign(USER_PRIV);
-      commit.finalize();
-      const reveal = new btc.Transaction();
-      reveal.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffd, witnessUtxo: { script: INSCRIPTION.script, amount: 30_000n } });
-      reveal.addOutputAddress(USER_ADDRESS, 29_000n, btc.TEST_NETWORK);
-      INSCRIPTION.finalize(reveal, commit);
-      return { ...pair, signedCommitHex: hex.encode(commit.extract()), revealTxHex: hex.encode(reveal.extract()), commitTxId: commit.id };
-    })();
+    const pairB = buildRebuiltPair(pair, 25_000);
     expect((await post(routes, pairB)).status).toBe(200);
     expect(store.get('sub-1', pair.commitTxId)!.superseded).toBe(true);
 
@@ -838,15 +947,45 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
         if (failReveal && txHex === pair.revealTxHex) throw new Error('down');
         return 'f'.repeat(64);
       },
-      txStatus: { confirmed: true },
+      txStatus: { confirmed: true, confirmations: 1, blockHeight: 300 },
     });
     await post(h.routes, pair); // leaves status commit_broadcast
     const before = h.broadcasts.length;
     const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
     const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { status: string }).status).toBe('confirmed');
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.status).toBe('confirmed');
+    // #567: the manual route reports the same settlement contract as the list
+    // poll — a caller cannot otherwise tell "confirmed" from "confirmed AND
+    // recovery artifacts retired" apart.
+    expect(body.settled).toBe(false); // 1 confirmation, below the default six
+    expect(body.confirmations).toBe(1);
+    expect(body.confirmedBlockHeight).toBe(300);
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
+  });
+
+  test('#567: a manual rebroadcast that crosses the settlement threshold reports settled and retires', async () => {
+    const pair = buildPair();
+    const h = harness({ txStatus: { confirmed: true, confirmations: 6, blockHeight: 400 } });
+    await post(h.routes, pair);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.settled).toBe(true);
+    expect(body.confirmations).toBe(6);
+    expect(body.confirmedBlockHeight).toBe(400);
+    expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+
+    // A second manual call hits the already-retired short-circuit, which must
+    // report the same terminal settlement state from the frozen evidence.
+    const req2 = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req2, new URL(req2.url));
+    const body2 = (await res2.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body2.settled).toBe(true);
+    expect(body2.confirmations).toBe(6);
+    expect(body2.confirmedBlockHeight).toBe(400);
   });
 
   /**
@@ -1025,6 +1164,8 @@ describe('persist-before-broadcast is load-bearing', () => {
       faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
       inscriptions: failing,
       ordinals: CLEAN_ORDINALS,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
     const pair = buildPair();
     const req = authedReq('/api/btc/inscribe', pair);
@@ -1211,8 +1352,8 @@ describe('evicted-reveal recovery', () => {
 describe('terminal records', () => {
   test('a terminally-dead superseded pair is retired on the next poll, freeing its pending slot', async () => {
     const h = harness();
-    const dead = buildPair('1'.repeat(64), 0);
-    const winner = buildPair('2'.repeat(64), 0);
+    const dead = buildPair();
+    const winner = buildPair();
     const base = (p: ReturnType<typeof buildPair>, over: Partial<InscriptionRecord>): InscriptionRecord => ({
       commitTxId: p.commitTxId,
       revealTxId: p.revealTxId,
@@ -1300,9 +1441,9 @@ describe('malformed reveal shapes', () => {
  * the commit must spend, and ANY overlap with a live record is a double-spend.
  */
 describe('POST /api/btc/inscribe — multi-input funding', () => {
-  const A = { txid: 'a'.repeat(64), vout: 0, value: 30_000 };
-  const B = { txid: 'b'.repeat(64), vout: 1, value: 25_000 };
-  const C = { txid: 'c'.repeat(64), vout: 0, value: 40_000 };
+  const A = makeFundingUtxo(30_000, 0);
+  const B = makeFundingUtxo(25_000, 1);
+  const C = makeFundingUtxo(40_000, 0);
 
   test('accepts a two-input commit matching its declared funding set', async () => {
     const { routes, store, broadcasts } = harness();
@@ -1555,7 +1696,7 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
   });
 
   test('refuses a commit whose change output pays somewhere other than changeAddress', async () => {
-    const pair = buildPair('a'.repeat(64), 0, { changeTo: OTHER_ADDRESS });
+    const pair = buildPair({ changeTo: OTHER_ADDRESS });
     const { routes, broadcasts } = harness();
     const res = await post(routes, pair);
     expect(res.status).toBe(400);
@@ -1566,7 +1707,7 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
   });
 
   test('refuses a reveal whose output pays somewhere other than changeAddress', async () => {
-    const pair = buildPair('a'.repeat(64), 0, { revealTo: OTHER_ADDRESS });
+    const pair = buildPair({ revealTo: OTHER_ADDRESS });
     const { routes, broadcasts } = harness();
     const res = await post(routes, pair);
     expect(res.status).toBe(400);
@@ -1608,7 +1749,7 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
   test('an unbound account cannot redirect the money to an address it names', async () => {
     // The attack the truthiness guard permitted: never bind, then point both
     // the commit change and the reveal's inscribed sat at your own address.
-    const pair = buildPair('a'.repeat(64), 0, { changeTo: OTHER_ADDRESS, revealTo: OTHER_ADDRESS });
+    const pair = buildPair({ changeTo: OTHER_ADDRESS, revealTo: OTHER_ADDRESS });
     const { routes, broadcasts } = harness({ bind: false });
     const res = await post(routes, { ...pair, changeAddress: OTHER_ADDRESS });
     expect(res.status).toBe(403);
@@ -1622,6 +1763,146 @@ describe('POST /api/btc/inscribe — server-side defence-in-depth (#493)', () =>
     const res = await post(routes, pair);
     expect(res.status).toBe(200);
     expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+});
+
+/**
+ * The economic envelope (#493 M07). Every check above stops a signer from
+ * redirecting WHERE the money in a signed pair goes; none of it bounds HOW
+ * MUCH stays with the creator. A signer that preserves every script/outpoint
+ * invariant can still omit or shrink the change output and let the
+ * difference land in the fee — these tests exercise the independent
+ * fee/change verification that catches that.
+ */
+describe('POST /api/btc/inscribe — economic envelope (#493 M07)', () => {
+  test('a forged client-declared funding value has no effect — the trusted, independently-read value decides', async () => {
+    const pair = buildPair(); // registers the REAL funding value (50,000) with the fake indexer
+    const { routes, broadcasts } = harness();
+    // The client lies about what its own input is worth; the route must not care.
+    const res = await post(routes, { ...pair, fundingUtxo: { ...pair.fundingUtxo, value: 1 } });
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  test('refuses when the commit OMITS change entirely and the difference becomes fee', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 21_000,
+      // no changeValue: single-output commit
+      revealOutput0: 20_000,
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses when the commit SHRINKS change far below what the funding set actually holds', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 21_000,
+      changeAmount: 1_000, // a genuine rebuild would leave ~28,000 here
+      revealOutput0: 20_000,
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses when the reveal alone pays an excessive fee, even with honest commit change', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 21_000,
+      changeAmount: 28_000, // realistic 1,000 sat commit fee
+      revealOutput0: 500, // reveal fee 20,500 — the theft is entirely in the reveal leg
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('accepts a legitimate no-change pair when the leftover is genuinely dust-sized', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 21_700,
+      commitOutput0: 21_000, // 700 sat commit fee, no room for a change output
+      revealOutput0: 20_500, // 500 sat reveal fee
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  test('refuses when the funding value cannot be independently verified — no indexer configured', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ indexer: null });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('economics_check_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses when the indexer cannot answer for a declared funding outpoint', async () => {
+    const pair = buildPair();
+    // Un-register it — the real-world equivalent of an indexer that has not
+    // (yet) seen this transaction.
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid.toLowerCase());
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('funding_value_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses when the indexer returns bytes for a DIFFERENT transaction than the one requested', async () => {
+    // A compromised or merely buggy indexer/proxy answering the wrong bytes
+    // for a txid lookup — with a smaller output value — would understate the
+    // real funding total and make an excessive fee look acceptable, defeating
+    // the whole envelope. The route must bind the fetched bytes to the txid
+    // it asked for, not just trust whatever comes back under that key.
+    const pair = buildPair();
+    const unrelated = makeFundingUtxo(1); // a different, genuinely-registered transaction
+    FUNDING_TX_HEX.set(
+      pair.fundingUtxo.txid.toLowerCase(),
+      FUNDING_TX_HEX.get(unrelated.txid.toLowerCase())!
+    );
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('funding_value_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('a retry of an already-persisted pair succeeds even if the indexer or fee estimator becomes unavailable', async () => {
+    // The economic envelope is checked once, when a commitTxId is first
+    // accepted. A client resubmitting the SAME signed bytes (a naive retry
+    // after a dropped response) must not be newly refused because the
+    // indexer or fee estimator hiccups AFTER that first acceptance.
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    expect((await post(routes, pair)).status).toBe(200);
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid.toLowerCase());
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts.filter((h) => h === pair.signedCommitHex)).toHaveLength(2);
+  });
+
+  test('a retry whose reveal hex differs only by case still counts as the vetted pair', async () => {
+    // Hex casing carries no economic information — comparing it case-sensitively
+    // would force a harmless resubmission through the same fragility the retry
+    // skip exists to avoid (a live indexer/fee read that can fail on drift).
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    expect((await post(routes, pair)).status).toBe(200);
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid.toLowerCase());
+    const res = await post(routes, { ...pair, revealTxHex: pair.revealTxHex.toUpperCase() });
+    expect(res.status).toBe(200);
+    expect(broadcasts.filter((h) => h.toLowerCase() === pair.signedCommitHex.toLowerCase())).toHaveLength(2);
   });
 });
 
@@ -1651,6 +1932,103 @@ test('one confirmation survives a restart, demotes on reorg, and retires only at
   confirmations = 6;
   expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: the settlement threshold is configurable UPWARD and drives the exposed settled flag', async () => {
+  let confirmations = 1;
+  let blockHeight = 200;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight }),
+    recoveryConfirmations: 8, // deliberately ABOVE the default six, never below
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number }>;
+    }).inscriptions[0];
+  };
+
+  confirmations = 6; // meets the historical default, but NOT the configured 8
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false);
+  expect(row.confirmations).toBe(6);
+  expect(row.confirmedBlockHeight).toBe(200);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 8;
+  row = await poll();
+  expect(row.settled).toBe(true); // meets the CONFIGURED threshold
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: recoveryConfirmations cannot lower the settlement threshold below six', async () => {
+  let confirmations = 1;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight: 200 }),
+    recoveryConfirmations: 1, // an attempt to shrink the retention window
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean }>;
+    }).inscriptions[0];
+  };
+
+  // A confirmation count that would settle at the requested "1" must NOT
+  // retire the recovery artifacts — the floor holds regardless of config.
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 5;
+  row = await poll();
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 6;
+  row = await poll();
+  expect(row.settled).toBe(true);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: a same-height reorg (block A replaced by block B) is detected via block hash, not just height', async () => {
+  // The scenario the height-only check could not see: the reveal reconfirms
+  // at the SAME height after a reorg, in a DIFFERENT block — no intervening
+  // unconfirmed poll required for this to matter, since a poll landing
+  // exactly on the replacement would otherwise read "still confirmed, same
+  // height" and conclude nothing happened.
+  let blockHash = 'a'.repeat(64);
+  const h = harness({
+    txStatus: () => ({ confirmed: true, confirmations: 1, blockHeight: 500, blockHash }),
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; confirmedBlockHeight?: number; confirmedBlockHash?: string }>;
+    }).inscriptions[0];
+  };
+
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.confirmedBlockHeight).toBe(500);
+  expect(row.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same height, different block: an ordinary one-block reorg, not a demotion.
+  blockHash = 'b'.repeat(64);
+  row = await poll();
+  expect(row.confirmedBlockHeight).toBe(500); // height alone looks unchanged…
+  expect(row.confirmedBlockHash).toBe('b'.repeat(64)); // …but the identity moved
 });
 
 test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(
@@ -1750,7 +2128,7 @@ test('a superseded prior confirmation is still reconciled when its commit wins a
 
 describe('bounded durable reconciliation across recovery categories (#496)', () => {
   function seed(h: ReturnType<typeof harness>, index: number, status: InscriptionRecord['status'], superseded = false) {
-    const pair = buildPair(index.toString(16).padStart(64, '0'));
+    const pair = buildPair();
     const at = new Date(Date.now() - 45 * 60_000).toISOString();
     h.store.create('sub-1', { ...pair, inscriptionId: pair.revealTxId + 'i0', fundingOutpoints: [pair.fundingUtxo.txid + ':0'], status, createdAt: at, updatedAt: at, ...(superseded ? { superseded: true } : {}) });
     return pair;
@@ -1818,5 +2196,355 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
     expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
     expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
     expect(restarted.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+  });
+});
+
+describe('POST /api/btc/inscribe — independent economics check (#493/M07)', () => {
+  test('refuses a commit that reduces change and lets the difference become fee', async () => {
+    // 50,000 in, 20,000 to the inscription, only 1,000 back as change — an
+    // honest split would return ~29,000. The other 29,000 becomes "fee".
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 1_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a commit that drops its change output entirely, above dust', async () => {
+    // 21,200 in, 20,000 to the inscription, NO change output at all — a real
+    // signer could simply omit change and let the whole surplus become fee.
+    const pair = buildEconomicsPair({ fundingValue: 21_200, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(['commit_invariant_violation']).toContain(body.error);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('accepts a commit with no change output when the true surplus is legitimately below dust', async () => {
+    // 20,300 in, 20,000 to the inscription: a 300-sat surplus, below the
+    // 546-sat dust limit even before a fee is subtracted — omitting change
+    // here is exactly the correct construction, not an attack.
+    const pair = buildEconomicsPair({ fundingValue: 20_300, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  test('refuses a commit whose outputs exceed the independently verified funding value', async () => {
+    // Signed (and internally fee-balanced) against a claimed 50,000-sat input,
+    // but the indexer — the source of truth — has only ever seen 10,000 sats
+    // at this outpoint: the declared value cannot be trusted on its own.
+    const pair = buildEconomicsPair({ fundingValue: 50_000, actualFundingValue: 10_000, commitOutput0: 20_000, changeAmount: 29_000 });
+    const { routes, broadcasts } = harness();
+
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses an outright excessive absolute fee, regardless of shape', async () => {
+    // 1,000,000 in, 20,000 to the inscription, no change: an order of
+    // magnitude beyond any reasonable fee for the transaction's size.
+    const pair = buildEconomicsPair({ fundingValue: 1_000_000, commitOutput0: 20_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a reveal with an extra output alongside the honest one', async () => {
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 20_000,
+      changeAmount: 29_000,
+      revealOutput0: 15_000,
+      extraRevealOutputs: [{ address: USER_ADDRESS, amount: 4_000 }],
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses a reveal that pays an unreasonably high fee out of its own input', async () => {
+    // The commit side is honest (20,000 funds the reveal); the reveal keeps
+    // only 1,000 of it for the creator and lets 19,000 become "fee".
+    const pair = buildEconomicsPair({
+      fundingValue: 50_000,
+      commitOutput0: 20_000,
+      changeAmount: 29_000,
+      revealOutput0: 1_000,
+    });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('refuses inscribe outright when the funding-value indexer is not configured', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness({ indexer: null });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe('economics_check_unavailable');
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('an honest pair with realistic change still broadcasts', async () => {
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 29_000 });
+    const { routes, broadcasts } = harness();
+    const res = await post(routes, pair);
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  test('a retry of an already-persisted pair succeeds during a funding-history outage', async () => {
+    const pair = buildPair();
+    const { routes, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+
+    // The indexer cannot serve this transaction during the retry.
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid);
+
+    const retry = await post(routes, pair);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { error?: string }).error).toBeUndefined();
+  });
+
+  /**
+   * The retry skip above is gated on `economicsVerified`, not mere record
+   * existence — a record written before this check existed (or by any other
+   * path that never actually ran it) must not get a free pass just because a
+   * row with its commitTxId happens to already be in the store.
+   */
+  test('a legacy record with no economicsVerified flag does NOT bypass re-verification', async () => {
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 1_000 });
+    const { routes, store, broadcasts } = harness();
+    // Simulate a record persisted by code that predates this check: same
+    // commitTxId, no `economicsVerified` flag.
+    store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:${pair.fundingUtxo.vout}`],
+      changeAddress: pair.changeAddress,
+      status: 'signed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const res = await post(routes, pair);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('commit_invariant_violation');
+    expect(broadcasts).toEqual([]);
+  });
+
+  /**
+   * A legacy record that HONESTLY passes re-verification must be upgraded
+   * in place — otherwise every later retry keeps re-deriving economics from
+   * chain state its own prior (successful) attempt has since invalidated.
+   */
+  test('a legacy record is upgraded in place after honestly passing re-verification, surviving a later funding-history outage', async () => {
+    const pair = buildPair(); // honest economics: real change, real fee
+    const { routes, store, broadcasts } = harness();
+    store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:${pair.fundingUtxo.vout}`],
+      changeAddress: pair.changeAddress,
+      status: 'signed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // Deliberately no `economicsVerified` — the record predates the check.
+    });
+
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(store.get('sub-1', pair.commitTxId)!.economicsVerified).toBe(true);
+
+    // The upgraded exact-pair approval survives a subsequent indexer outage.
+    FUNDING_TX_HEX.delete(pair.fundingUtxo.txid);
+    const retry = await post(routes, pair);
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { error?: string }).error).toBeUndefined();
+  });
+
+  /**
+   * The commit's taproot output commits to a SCRIPT/pubkey, not to one
+   * specific spend of it — whoever holds the reveal's ephemeral key (minted
+   * for this same submission) can sign more than one valid reveal against
+   * the same commit. No supported flow ever re-signs just the reveal for an
+   * already-recorded commit, so ANY different reveal for it is refused
+   * outright — before economics even runs — rather than silently accepted
+   * and broadcast while the stored record keeps pointing at the original.
+   */
+  test('a verified commit paired with a DIFFERENT (economically bad) reveal is refused, not re-verified through', async () => {
+    const pair = buildPair(); // honest: commit output0 20_000n, funds reveal1
+    const { routes, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+
+    // A second, DIFFERENT reveal spending the SAME commit output 0 — signed
+    // with the same ephemeral key, so it is genuinely valid — but paying only
+    // 1,000 of the 20,000 sats in and letting 19,000 become "reveal fee".
+    const evilReveal = new btc.Transaction();
+    evilReveal.addInput({
+      txid: pair.commitTxId, index: 0, sequence: 0xfffffffd,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
+    });
+    evilReveal.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    INSCRIPTION.finalize(evilReveal, btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true }));
+
+    const res = await post(routes, { ...pair, revealTxHex: hex.encode(evilReveal.extract()) });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    // Only the first, honest pair ever broadcast.
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
+
+  /**
+   * Same refusal even when the replacement reveal is ITSELF economically
+   * honest: allowing it through would still leave the stored record (and its
+   * inscriptionId, and everything reconciliation/rebroadcast reads from it)
+   * describing the wrong reveal, since `store.create` is a no-op for an
+   * existing commitTxId and never updates it to whatever this request
+   * actually broadcasts.
+   */
+  test('a verified commit paired with a DIFFERENT but economically honest reveal is still refused', async () => {
+    const pair = buildPair(); // honest: commit output0 20_000n, funds reveal1
+    const { routes, store, broadcasts } = harness();
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+
+    // A second, equally honest reveal spending the same commit output 0 —
+    // same destination and a normal fee, just a different transaction.
+    const honestReveal2 = new btc.Transaction();
+    honestReveal2.addInput({
+      txid: pair.commitTxId, index: 0, sequence: 0xfffffffe,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n },
+    });
+    honestReveal2.addOutputAddress(USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
+    INSCRIPTION.finalize(honestReveal2, btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true }));
+
+    const res = await post(routes, { ...pair, revealTxHex: hex.encode(honestReveal2.extract()) });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('reveal_invariant_violation');
+    // Nothing broadcast beyond the original, and the stored record is untouched.
+    expect(broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    expect(store.get('sub-1', pair.commitTxId)!.revealTxId).toBe(pair.revealTxId);
+  });
+
+  /**
+   * The indexer/fee-estimate lookups are provider-backed work, same as the
+   * ordinal check they sit beside — an authenticated caller who has spent
+   * their per-user attempt budget must not be able to keep triggering them.
+   */
+  test('the per-user attempt cap is spent BEFORE any indexer lookup, not after', async () => {
+    const { routes, indexerCallCount } = harness();
+    for (let i = 0; i < 10; i++) {
+      const pair = buildPair();
+      expect((await post(routes, pair)).status).toBe(200);
+    }
+    const callsSoFar = indexerCallCount();
+    expect(callsSoFar).toBeGreaterThan(0);
+
+    const capped = await post(routes, buildPair());
+    expect(capped.status).toBe(429);
+    expect(((await capped.json()) as { error: string }).error).toBe('inscribe_user_cap');
+    // The capped request never reached the indexer.
+    expect(indexerCallCount()).toBe(callsSoFar);
+  });
+});
+
+
+
+describe('economic approval binds the durable signed pair', () => {
+  test('a padded invalid witness cannot authorize a shorter high-fee retry with the same txid', async () => {
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000, changeAmount: 1_000 });
+    const commit = btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex));
+    commit.updateInput(0, { finalScriptWitness: [new Uint8Array(8_000)],
+      witnessUtxo: { script: USER_P2WPKH.script, amount: 50_000n } }, true);
+    const paddedHex = hex.encode(commit.extract());
+    expect(commit.id).toBe(pair.commitTxId);
+    const { routes, store, broadcasts } = harness({
+      broadcast: async raw => {
+        if (raw === paddedHex) throw new Error('invalid witness');
+        return 'f'.repeat(64);
+      },
+    });
+    expect((await post(routes, { ...pair, signedCommitHex: paddedHex })).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)?.economicsVerified).toBe(true);
+    const retry = await post(routes, pair);
+    expect(retry.status).toBe(409);
+    expect((await retry.json()).error).toBe('signed_pair_mismatch');
+    expect(broadcasts).toEqual([]);
+    expect(store.get('sub-1', pair.commitTxId)?.signedCommitHex).toBe(paddedHex);
+  });
+
+  test('simultaneous same-commit submissions persist and broadcast only one reveal', async () => {
+    const pair = buildPair();
+    const commit = btc.Transaction.fromRaw(hex.decode(pair.signedCommitHex));
+    const alternate = new btc.Transaction();
+    alternate.addInput({ txid: commit.id, index: 0, sequence: 0xfffffffe,
+      witnessUtxo: { script: INSCRIPTION.script, amount: 20_000n } });
+    alternate.addOutputAddress(USER_ADDRESS, 19_000n, btc.TEST_NETWORK);
+    INSCRIPTION.finalize(alternate, commit);
+    const alternateHex = hex.encode(alternate.extract());
+    let arrivals = 0;
+    let release!: () => void;
+    const bothReady = new Promise<void>(resolve => { release = resolve; });
+    const { routes, store, broadcasts } = harness({ ordinals: { outpointInscriptions: async () => {
+      if (++arrivals === 2) release();
+      await bothReady;
+      return [];
+    } } });
+    const responses = await Promise.all([
+      post(routes, pair),
+      post(routes, { ...pair, revealTxHex: alternateHex }),
+    ]);
+    expect(responses.map(r => r.status).sort()).toEqual([200, 409]);
+    const retained = store.get('sub-1', pair.commitTxId)!;
+    expect(broadcasts).toEqual([retained.signedCommitHex!, retained.revealTxHex!]);
+  });
+
+  test('a real funding transaction for another address cannot supply the bound account value', async () => {
+    const otherAddress = btc.p2wpkh(secp256k1.getPublicKey(hex.decode('5'.repeat(64)), true), btc.TEST_NETWORK);
+    const pair = buildEconomicsPair({ fundingValue: 50_000, commitOutput0: 20_000,
+      changeAmount: 29_000, fundingScript: hex.encode(otherAddress.script) });
+    const { routes, broadcasts } = harness();
+    expect((await post(routes, pair)).status).toBe(503);
+    expect(broadcasts).toEqual([]);
+  });
+
+  test('a legacy spent-output record can be verified from raw history without a current UTXO listing', async () => {
+    const pair = buildPair();
+    const requested: string[] = [];
+    const fetchImpl = fakeIndexerFetch();
+    const { routes, store } = harness({ fetchImpl: (async (...args: Parameters<typeof fetch>) => {
+      requested.push(String(args[0]));
+      return fetchImpl(...args);
+    }) as typeof fetch });
+    const at = new Date().toISOString();
+    store.create('sub-1', { ...pair, fundingOutpoints: [`${pair.fundingUtxo.txid}:0`],
+      inscriptionId: pair.revealTxId + 'i0', status: 'commit_broadcast', createdAt: at, updatedAt: at });
+    expect((await post(routes, pair)).status).toBe(200);
+    expect(requested).toEqual([`https://fake-indexer.test/tx/${pair.fundingUtxo.txid}/hex`]);
+    expect(store.get('sub-1', pair.commitTxId)?.economicsVerified).toBe(true);
   });
 });

@@ -253,3 +253,12 @@ describe('server-auth', () => {
     });
   });
 });
+
+test('malformed auth error fields do not escape as non-string codes or messages', async () => {
+  const error = await sendOtp('test@example.com', undefined, { fetch: (async () =>
+    new Response(JSON.stringify({ message: { detail: 'invalid' }, error: ['invalid_email'] }), { status: 400 })) as typeof fetch,
+  }).catch(error => error);
+  expect(error).toBeInstanceOf(AuthApiError);
+  expect(error.message).toBe('HTTP 400');
+  expect(error.code).toBeUndefined();
+});

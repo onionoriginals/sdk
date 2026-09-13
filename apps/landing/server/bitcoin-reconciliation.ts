@@ -47,7 +47,7 @@ export function reclaimOutpoint(store: InscriptionsStore, sub: string, rec: Insc
 export interface ReconciliationProvider {
   getTransactionStatus(
     txid: string
-  ): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }>;
+  ): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }>;
 }
 
 export interface InscriptionReconcilerDeps {
@@ -62,7 +62,7 @@ export interface InscriptionReconcilerDeps {
   unreadableRecords(sub: string, e: unknown): Response | null;
   money: MoneyLogger;
   now?: () => number;
-  /** Application recovery horizon, not a Bitcoin finality guarantee. Default 6. */
+  /** Application recovery horizon, not a Bitcoin finality guarantee. Minimum/default 6. */
   recoveryConfirmations?: number;
   /** How long an unconfirmed reveal may sit before the list poll re-pushes it. Default 30 min. */
   revealRebroadcastAfterMs?: number;
@@ -96,7 +96,9 @@ export interface InscriptionReconciler {
  */
 export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): InscriptionReconciler {
   const now = deps.now ?? (() => Date.now());
-  const RECOVERY_CONFIRMATIONS = deps.recoveryConfirmations ?? 6;
+  const requestedConfirmations = deps.recoveryConfirmations;
+  const RECOVERY_CONFIRMATIONS = typeof requestedConfirmations === 'number' && Number.isInteger(requestedConfirmations)
+    ? Math.max(6, requestedConfirmations) : 6;
   const REVEAL_REBROADCAST_AFTER_MS = deps.revealRebroadcastAfterMs ?? 30 * 60_000;
   const { provider, broadcastIdempotent, unreadableRecords, money } = deps;
 
@@ -128,13 +130,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // failure must reach both the caller and the background sweep; it must
       // never become a successful response containing stale record state.
       money('inscribe_failed', { sub, reason: 'reconciliation_store_failed' });
-      return json(
-        {
-          error: 'inscription_reconciliation_failed',
-          message: 'Recovery records could not be reconciled durably. Retry when storage is available.',
-        },
-        503
-      );
+      return json({ error: 'inscription_reconciliation_failed', message: 'Recovery records could not be reconciled durably. Retry when storage is available.' }, 503);
     }
   }
 
@@ -182,7 +178,13 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       }
     }
     const supersededPending = rotate(
-      newestFirst.filter((r) => r.superseded && !r.retired && !!r.revealTxHex && !isDead(r)),
+      newestFirst.filter(
+        (r) =>
+          r.superseded &&
+          !r.retired &&
+          !!r.revealTxHex &&
+          !isDead(r)
+      ),
       cursors.superseded
     );
     // Live pairs stuck at commit_broadcast (their reveal broadcast failed —
@@ -190,9 +192,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     // once THEIR commit confirms, the persisted reveal is completed here
     // automatically, so no state depends on the manual Finish button.
     const liveStuck = rotate(
-      newestFirst.filter(
-        (r) => !r.superseded && !r.retired && (r.status === 'signed' || r.status === 'commit_broadcast') && !!r.revealTxHex
-      ),
+      newestFirst.filter((r) => !r.superseded && !r.retired && (r.status === 'signed' || r.status === 'commit_broadcast') && !!r.revealTxHex),
       cursors.stuck
     );
     const liveUnconfirmed = rotate(
@@ -205,11 +205,8 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     const supersededLimit = 5 - Number(liveStuck.length > 0) - Number(liveUnconfirmed.length > 0);
     const stuckLimit = 5 - Number(liveUnconfirmed.length > 0);
     const readStatus = async (txid: string) => {
-      try {
-        return await provider.getTransactionStatus(txid);
-      } catch {
-        return null; // A provider outage preserves the last observed state.
-      }
+      try { return await provider.getTransactionStatus(txid); }
+      catch { return null; } // A provider outage preserves the last observed state.
     };
     let lookups = 0;
     for (const r of supersededPending) {
@@ -261,14 +258,51 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       const st = await readStatus(r.revealTxId);
       if (!st) continue;
       if (st.confirmed) {
-        if (r.status !== 'confirmed') {
-          store.setStatus(sub, r.commitTxId, 'confirmed');
+        // A reconfirmation whose block IDENTITY differs from the one last
+        // observed means a reorg happened — whether or not this poll (or an
+        // earlier one) ever saw the intervening unconfirmed state to demote
+        // through: `confirmedBlockHash`/`confirmedBlockHeight` deliberately
+        // survive that demotion (see InscriptionRecord) so this comparison
+        // still catches it. Compare HASH when both sides have one — the
+        // actual block identity, which catches an ordinary one-block reorg
+        // that replaces the block at the SAME height with a different one,
+        // something a height-only comparison cannot see. Fall back to height
+        // only when a hash is unavailable on either side (an older record
+        // written before this field existed, or a provider that cannot
+        // supply one). Depth itself is always freshly computed from the
+        // current chain view below, so this is a signal worth logging, not a
+        // correctness gate.
+        const reorgedBlock =
+          current.confirmedBlockHash !== undefined && st.blockHash !== undefined
+            ? st.blockHash !== current.confirmedBlockHash
+            : current.confirmedBlockHeight !== undefined &&
+              st.blockHeight !== undefined &&
+              st.blockHeight !== current.confirmedBlockHeight;
+        if (reorgedBlock) {
+          money('inscribe_reorg_reconfirmed', {
+            sub,
+            commitTxId: r.commitTxId,
+            revealTxId: r.revealTxId,
+            previousBlockHeight: current.confirmedBlockHeight,
+            blockHeight: st.blockHeight,
+            ...(current.confirmedBlockHash !== undefined ? { previousBlockHash: current.confirmedBlockHash } : {}),
+            ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
+          });
+        }
+        // Skip the write once depth/height/hash/status all already match:
+        // this is the steady state for a record sitting well below the
+        // settlement threshold that keeps being re-polled while other work
+        // is pending.
+        if (
+          current.status !== 'confirmed' ||
+          current.confirmations !== st.confirmations ||
+          current.confirmedBlockHeight !== st.blockHeight ||
+          current.confirmedBlockHash !== st.blockHash
+        ) {
+          store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash });
           changed = true;
         }
-        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) {
-          store.retire(sub, r.commitTxId);
-          changed = true;
-        }
+        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
         continue;
       }
       if (r.status === 'confirmed') {
@@ -287,7 +321,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // Both transactions can disappear from the mempool. Replaying the
         // exact retained parent first also works when it is already known;
         // an ambiguous parent failure retains the pair for the next attempt.
-        if (r.signedCommitHex && (await broadcastIdempotent(r.signedCommitHex))) continue;
+        if (r.signedCommitHex && await broadcastIdempotent(r.signedCommitHex)) continue;
         await broadcastIdempotent(r.revealTxHex);
       }
     }
@@ -303,16 +337,29 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     const inscriptions = records.map((r) => {
       const outpoints = outpointsOf(r);
       return {
-        commitTxId: r.commitTxId,
-        revealTxId: r.revealTxId,
-        inscriptionId: r.inscriptionId,
-        // Singular stays the IDENTITY outpoint so existing clients keep working.
-        fundingOutpoint: outpoints[0],
-        fundingOutpoints: outpoints,
-        status: r.status,
-        ...(r.superseded ? { superseded: true } : {}),
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
+      commitTxId: r.commitTxId,
+      revealTxId: r.revealTxId,
+      inscriptionId: r.inscriptionId,
+      // Singular stays the IDENTITY outpoint so existing clients keep working.
+      fundingOutpoint: outpoints[0],
+      fundingOutpoints: outpoints,
+      status: r.status,
+      ...(r.superseded ? { superseded: true } : {}),
+      // The settlement contract (#567): a `confirmed` record is either
+      // confirmed-but-unsettled (still within the recovery window, both
+      // transactions retained) or settled (recovery artifacts retired once
+      // `confirmations` reaches the configured threshold). Absent for every
+      // other status — depth/height are current-truth-while-confirmed only.
+      ...(r.status === 'confirmed'
+        ? {
+            confirmations: r.confirmations,
+            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
+            ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
+          }
+        : {}),
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
       };
     });
     // R31: the deposit-read outage reaches someone who already left. This
@@ -335,17 +382,12 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, 10);
       const failures = [...unreadable];
       for (const sub of subs) {
-        try {
-          if (!(await reconcileUser(sub)).ok) failures.push(sub);
-        } catch {
-          failures.push(sub);
-        }
+        try { if (!(await reconcileUser(sub)).ok) failures.push(sub); }
+        catch { failures.push(sub); }
       }
       sweepCursor += subs.length;
       return { processed: subs.length, unreadable: [...new Set(failures)] };
-    } finally {
-      sweepRunning = false;
-    }
+    } finally { sweepRunning = false; }
   }
 
   return { reconcileUser, sweepInscriptions };

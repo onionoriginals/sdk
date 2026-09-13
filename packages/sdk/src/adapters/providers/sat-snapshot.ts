@@ -1,4 +1,4 @@
-import { parseAssetDid, type BitcoinNetwork, type SatSnapshot } from '@originals/cel/v3';
+import { parseAssetAlias, type BitcoinNetwork, type SatSnapshot } from '@originals/cel/v3';
 import { StructuredError } from '@originals/cel';
 import { hexToBytes } from '@originals/cel/encoding';
 
@@ -69,7 +69,7 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
 }
 
 async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
-  parseAssetDid('did:btco:' + satoshi);
+  parseAssetAlias('did:btco:' + satoshi);
   const readTip = async () => {
     const info = object(await reader.rpc('getblockchaininfo', []));
     const network = networkOf(info.chain);

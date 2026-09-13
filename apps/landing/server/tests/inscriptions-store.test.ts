@@ -29,6 +29,56 @@ describe('inscriptions-store', () => {
     expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('c'.repeat(64));
   });
 
+  test('#567: setStatus persists confirmation evidence, clears depth (not block height) on demotion', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    const commitTxId = 'c'.repeat(64);
+
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    let r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // A reorg demotes it: depth is stale-while-unconfirmed and is cleared,
+    // but the block height/hash it was LAST confirmed at survive the
+    // demotion — the only way a later reconfirmation can tell whether it
+    // landed back in the same block or a different one.
+    store.setStatus('sub-1', commitTxId, 'reveal_broadcast');
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.status).toBe('reveal_broadcast');
+    expect(r.confirmations).toBeUndefined();
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // Reconfirms in a DIFFERENT block: the caller (bitcoin.ts) compares this
+    // against the surviving values to detect the reorg, then overwrites them.
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 101, blockHash: 'b'.repeat(64) });
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(101);
+    expect(r.confirmedBlockHash).toBe('b'.repeat(64));
+  });
+
+  test('#567: a confirmed update without a block hash CLEARS the stale one rather than keeping it', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    const commitTxId = 'c'.repeat(64);
+
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    expect(store.get('sub-1', commitTxId)!.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // Still confirmed (no demotion in between), but THIS read's evidence has
+    // no hash — a provider hiccup, not a reorg. Pairing the OLD hash with a
+    // fresh confirmations/height reading would assert an identity this read
+    // never actually observed, so it must be cleared, not left stale.
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 2, blockHeight: 100 });
+    const r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(2);
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBeUndefined();
+  });
+
   test('supersede preserves the record (and its reveal hex) while freeing the outpoint', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
@@ -285,6 +335,32 @@ describe('deposit bindings and the cross-user reader', () => {
     expect(all.filter((d) => d.network === 'mainnet')).toHaveLength(2);
   });
 
+  test('recordDepositRead skips the write for an unchanged read inside the heartbeat, but not past it', () => {
+    // #496 item 4: skipping every unchanged write is what let `lastRead.at`
+    // freeze indefinitely while a poller kept reporting the same balance —
+    // the balance sweep's drop-out rule reads exactly that timestamp. A
+    // floor on how stale it may go keeps a still-being-checked address from
+    // silently aging out.
+    let clock = 1_000_000;
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'insc-')), now: () => clock });
+    store.bindDepositAddress('sub-1', 'mainnet', 'bc1qone');
+
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const firstAt = store.listBoundDeposits().deposits[0].lastReadAt;
+
+    // Same unchanged read, well inside the heartbeat: no write, timestamp holds.
+    clock += 5 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    expect(store.listBoundDeposits().deposits[0].lastReadAt).toBe(firstAt);
+
+    // Same unchanged read, past the heartbeat: a write still lands.
+    clock += 61 * 60_000;
+    store.recordDepositRead('sub-1', { network: 'mainnet', address: 'bc1qone', confirmedSats: 0 });
+    const laterAt = store.listBoundDeposits().deposits[0].lastReadAt;
+    expect(laterAt).not.toBe(firstAt);
+    expect(Date.parse(laterAt!)).toBe(clock);
+  });
+
   test('one unreadable user does not blind the sweep to every other stranger', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'insc-'));
     const store = createInscriptionsStore({ dataDir });
@@ -351,4 +427,19 @@ describe('pendingRevealBroadcasts', () => {
     const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
     expect(subs).toEqual(['sub-1', 'sub-2']);
   });
+});
+
+test('a fresh confirmed observation without height clears the prior block height', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+  store.setStatus('sub-1', record.commitTxId, 'reveal_broadcast');
+  expect(store.get('sub-1', record.commitTxId)?.confirmedBlockHeight).toBe(100);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHash: 'b'.repeat(64) });
+  const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
+  expect(reloaded.confirmations).toBe(2);
+  expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
+  expect(reloaded.confirmedBlockHeight).toBeUndefined();
 });
