@@ -1,8 +1,11 @@
-# Canonicalization evidence for the proposed CEL profile
+# Canonicalization evidence for the CEL 3 profile
 
-These are literals for evaluating the wire/proof decision, not assertions that
-the new protocol is implemented. See the [contract](../../../specs/originals-cel-v3-profile.md)
-and [primary sources](../2026-09-05-cel-profile-primary-sources.md).
+These are independent literals for evaluating the wire/proof profile; they are
+evidence consumed by production tests (see "Full-document and transport
+reference corpus" below), not an alternate implementation of it. See the
+[contract](../../../specs/originals-cel-v3-profile.md), the
+[versioned profile manifest](../../../specs/README.md), and
+[primary sources](../2026-09-05-cel-profile-primary-sources.md).
 
 `canonical-json.json` contains seven input/canonical-output pairs and four
 rejection cases. Expected canonical strings are independently written from RFC
@@ -41,9 +44,10 @@ first verifies that primitive's published known answer, then signs an Original
 description referencing the existing 68-byte regtest PNG. Signature verification
 passes; changing the title or signing the wrong event wrapper fails verification.
 The nonce is fixed solely for reproducibility. This example has not been produced
-or accepted by the new SDK, nor inscribed. Its application fields now follow the
-linked representation contract; the SDK implementation and full authorization/fold
-checks remain pending.
+or accepted by the SDK, nor inscribed; it is an illustrative signing/canonicalization
+fixture independent of the SDK, not a corpus the SDK's authorization/fold checks
+consume. The SDK's own conformance to the linked representation contract is
+covered separately by the corpus below, which production tests do consume.
 
 ## Full-document and transport reference corpus
 
@@ -67,8 +71,9 @@ suite examples, rather than only agreeing with themselves.
 Python independently checks duplicate decoded JSON names and invalid Unicode.
 CBOR checking inspects original string bytes with fatal UTF-8 decoding before
 cborg conversion. cborg's default text decoder replaces invalid UTF-8; its
-ordinary `decode()` result alone does not satisfy the profile. This observation
-is an implementation requirement, not a claim of a completed production fix.
+ordinary `decode()` result alone does not satisfy the profile. `packages/cel/src/v3/values.ts`
+implements this as `decodeUtf8()`, a fatal, non-repairing decoder used ahead of
+CBOR conversion; `values.test.ts` consumes this corpus against that function.
 
 Run without contacting any network or chain:
 
@@ -90,3 +95,13 @@ identity, Bitcoin authority, complete runtime-object rejection, all limit
 boundaries, or resource retrieval. Reference scripts are not exported by any
 package. Production tests must consume the saved expectations at the contract's
 public verification boundaries; changing implementation must not regenerate them.
+Confirmed current consumers: `packages/cel/tests/v3/profile.test.ts`,
+`identity.test.ts`, and `signing.test.ts` load `profile-documents.json`;
+`history.test.ts` loads it for fold/publication behavior; `values.test.ts`
+loads `transport-inputs.json`; `known-answers.test.ts` loads `canonical-json.json`
+and the `published-w3c/` vectors — each against the `packages/cel/src/v3`
+TypeScript source, not a reimplementation. This validates the source that
+ships as the `@originals/cel/v3` package export, but runs pre-build against
+source directly; the separate "ESM importable (Node)" CI job builds `dist/`
+and smoke-imports it under Node, without replaying this vector corpus against
+the built output.

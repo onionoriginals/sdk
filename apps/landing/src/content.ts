@@ -908,7 +908,7 @@ export const footer = {
         { label: 'Explore Originals', href: '/explore' },
         { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' },
         { label: 'npm — @originals/sdk', href: 'https://www.npmjs.com/package/@originals/sdk' },
-        { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/ORIGINALS_PROTOCOL_SPECIFICATION.md' }
+        { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/specs/README.md' }
       ]
     },
     {
