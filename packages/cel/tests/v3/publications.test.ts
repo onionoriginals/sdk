@@ -205,6 +205,35 @@ test("an independent source reporting an unknown inscription id does not itself 
     expect(result.contentAssurance).toBe("cross-checked");
 });
 
+test("disagreeing evidence for a publication ignored as unrelated never blocks an otherwise valid history", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "inspected-unrelated-bytes-do-not-poison",
+  )!;
+  const snapshot = observations(scenario);
+  const evidence = completeContentEvidence(snapshot);
+  const unrelated = snapshot.publications.find(
+    (p) => p.body.status === "complete" && p.body.mediaType === "text/plain",
+  )!;
+  const entry = evidence.find((e) => e.inscriptionId === unrelated.id)!;
+  expect(entry).toBeDefined();
+  // The independent source disagrees only about content nothing in the
+  // accepted history actually depends on: this inscription is ignored
+  // (CEL_UNRELATED) rather than accepted.
+  entry.contentDigest = digestBytes(new TextEncoder().encode("forged"));
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(
+      result.diagnostics.some(
+        (d) => d.inscriptionId === unrelated.id && d.code === "CEL_UNRELATED",
+      ),
+    ).toBe(true);
+    // Every ACCEPTED publication's evidence still agreed, so the disagreement
+    // on an ignored, irrelevant publication does not downgrade assurance either.
+    expect(result.contentAssurance).toBe("cross-checked");
+  }
+});
+
 for (const scenario of fixtures.cases)
   test(`worked history: ${scenario.id}`, () => {
     const snapshot = observations(scenario);

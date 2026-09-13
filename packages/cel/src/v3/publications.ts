@@ -248,7 +248,10 @@ export function resolveSat(
   if (options.independentContent !== undefined) {
     if (!Array.isArray(options.independentContent))
       return failure("incomplete", "Invalid independent content evidence");
-    for (const entry of options.independentContent) {
+    // Array.isArray narrows a readonly array to `any[]`, so iterate via an
+    // explicit `unknown` cast rather than trusting that narrowed element type.
+    for (const raw of options.independentContent as readonly unknown[]) {
+      const entry = raw as Record<string, unknown> | null;
       if (
         !entry ||
         typeof entry.inscriptionId !== "string" ||
@@ -257,7 +260,11 @@ export function resolveSat(
         independentContentById.has(entry.inscriptionId)
       )
         return failure("incomplete", "Invalid independent content evidence");
-      independentContentById.set(entry.inscriptionId, entry);
+      independentContentById.set(entry.inscriptionId, {
+        inscriptionId: entry.inscriptionId,
+        mediaType: entry.mediaType,
+        contentDigest: entry.contentDigest,
+      });
     }
   }
   if (
@@ -399,18 +406,6 @@ export function resolveSat(
         "Reveal txid is not at the observed block position",
       );
     const contentDigest = digestBytes(publication.body.bytes);
-    const independentContent = independentContentById.get(publication.id);
-    if (independentContent) {
-      if (
-        independentContent.mediaType !== publication.body.mediaType ||
-        independentContent.contentDigest !== contentDigest
-      )
-        return failure(
-          "inconsistent-evidence",
-          "Independent content evidence disagrees with the provider-reported content",
-        );
-      agreedContentIds.add(publication.id);
-    }
     const fingerprint = canonicalizeValue({
       position,
       type: publication.body.mediaType,
@@ -494,8 +489,7 @@ export function resolveSat(
           continue;
         }
       }
-      const contentDigest =
-        body.metadata === null ? undefined : digestBytes(body.bytes);
+      const bodyDigest = digestBytes(body.bytes);
       const inlineResourceIds =
         body.metadata === null
           ? []
@@ -503,7 +497,7 @@ export function resolveSat(
               .filter(
                 (r) =>
                   r.mediaType === body.mediaType &&
-                  r.digestMultibase === contentDigest,
+                  r.digestMultibase === bodyDigest,
               )
               .map((r) => r.id);
       const inlineContentStatus =
@@ -527,6 +521,22 @@ export function resolveSat(
           "identity-mismatch",
           "Earliest valid boundary has a different genesis",
         );
+      // Only a publication actually being committed to history can be denied
+      // by independent evidence: an unrelated/invalid publication ignored
+      // above (CEL_UNRELATED, CEL_NONEXTENDING, CEL_BOUNDARY, height gate)
+      // never reaches here, so it can never block an otherwise valid history.
+      const independentContent = independentContentById.get(publication.id);
+      if (independentContent) {
+        if (
+          independentContent.mediaType !== body.mediaType ||
+          independentContent.contentDigest !== bodyDigest
+        )
+          return failure(
+            "inconsistent-evidence",
+            "Independent content evidence disagrees with the provider-reported content",
+          );
+        agreedContentIds.add(publication.id);
+      }
       history = next;
       lastHeight = publication.creation.height;
       accepted.push({
