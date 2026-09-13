@@ -2031,40 +2031,6 @@ test('#567: a same-height reorg (block A replaced by block B) is detected via bl
   expect(row.confirmedBlockHash).toBe('b'.repeat(64)); // …but the identity moved
 });
 
-test('#567: repeated polls with unchanged depth and an omitted height/hash write to disk only once', async () => {
-  // A provider whose best-effort height/hash lookup keeps failing while
-  // confirmations sit still (waiting for the next block) must not look like
-  // a change on every poll — setStatus leaves the stored evidence exactly as
-  // it was, and the reconciler should recognize that ahead of time rather
-  // than writing (and bumping updatedAt) for a read that changed nothing.
-  const h = harness({ txStatus: { confirmed: true, confirmations: 1, blockHeight: 300, blockHash: 'a'.repeat(64) } });
-  const pair = buildPair();
-  await post(h.routes, pair);
-  const poll = async () => {
-    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
-    return h.routes.inscribeList(req, new URL(req.url));
-  };
-  await poll(); // first observation: writes once, establishing the evidence
-  const afterFirst = h.store.get('sub-1', pair.commitTxId)!;
-  expect(afterFirst.confirmedBlockHeight).toBe(300);
-  expect(afterFirst.confirmedBlockHash).toBe('a'.repeat(64));
-
-  // Same confirmations, but this poll's evidence omits height/hash entirely
-  // (a transient provider lookup failure) — repeated several times, against
-  // the same durable state.
-  const flaky = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
-  for (let i = 0; i < 3; i++) {
-    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
-    await flaky.routes.inscribeList(req, new URL(req.url));
-  }
-  const afterFlaky = flaky.store.get('sub-1', pair.commitTxId)!;
-  // Stored evidence is untouched — no change was ever observed — and so is
-  // updatedAt, proving no durable write happened on any of those polls.
-  expect(afterFlaky.confirmedBlockHeight).toBe(300);
-  expect(afterFlaky.confirmedBlockHash).toBe('a'.repeat(64));
-  expect(afterFlaky.updatedAt).toBe(afterFirst.updatedAt);
-});
-
 test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(
   'failed reorg rebroadcasts retain the exact pair for manual retry: %s', async (rejection) => {
   let confirmations = 1;

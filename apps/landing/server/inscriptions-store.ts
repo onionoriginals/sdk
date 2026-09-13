@@ -103,11 +103,12 @@ export interface InscriptionRecord {
    */
   confirmations?: number;
   /**
-   * Block height of the MOST RECENT observed confirmation. Unlike
+   * Last defined block height observed while confirmed. Unlike
    * `confirmations`, this is NOT cleared when a reorg demotes the record off
    * `confirmed`: it is deliberately sticky, so a later reconfirmation can be
-   * compared against it. Replaced or cleared by a fresh confirmed
-   * observation; never read as "currently confirmed" without also checking
+   * compared against it. Replaced by a defined fresh height, or cleared when
+   * a changed hash establishes a new block without supplying its height;
+   * retained values can remain stale after retirement; never read as "currently confirmed" without also checking
    * `status`.
    *
    * Height alone is NOT block identity: an ordinary one-block reorg can
@@ -119,11 +120,11 @@ export interface InscriptionRecord {
    */
   confirmedBlockHeight?: number;
   /**
-   * Block hash of the MOST RECENT observed confirmation — the real block
+   * Last defined block hash observed while confirmed — the real block
    * IDENTITY, sticky across a demotion for the same reason as
    * `confirmedBlockHeight`. A same-height reorg (block A replaced by block B
    * at height H) changes this even though `confirmedBlockHeight` alone would
-   * not notice. ABSENT when the provider did not supply one; a caller must
+   * not notice. ABSENT until the provider has supplied one; a caller must
    * not treat a missing hash as "unchanged" — fall back to comparing
    * `confirmedBlockHeight` in that case.
    */
@@ -164,7 +165,7 @@ export interface InscriptionsStore {
    * read just reported, recorded only when `status` is `confirmed`.
    * `confirmations` (a live depth) is cleared for every other status.
    * `evidence.blockHeight`/`evidence.blockHash` are instead STICKY across a
-   * demotion — see `InscriptionRecord.confirmedBlockHeight` /
+   * demotion and reads omitting that field — see `InscriptionRecord.confirmedBlockHeight` /
    * `confirmedBlockHash` — so a later reconfirmation can be compared against
    * the pre-reorg block identity rather than read as a continuation of it.
    * Omit `evidence` (or leave a field off it) when the caller does not have a
