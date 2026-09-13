@@ -141,6 +141,17 @@ export type SatResolution = Readonly<
       chainEvidence: Readonly<ChainEvidence>;
       /** Per current resource, whether its exact bytes were recovered from this snapshot's accepted publications. */
       resourceAvailability: readonly Readonly<ResourceAvailabilityRecord>[];
+      /**
+       * `ownership` is a single point-in-time observation of the current holder/satpoint.
+       * This resolver never reconstructs how the sat arrived there: it does not walk the
+       * UTXO/transfer graph from genesis, so it cannot independently derive the sat's
+       * historical trajectory. That stays true even when a second index source corroborates
+       * the same current ownership fact — agreement between indexers is corroboration of
+       * one snapshot, not independent derivation of the transfer path. Always
+       * `'not-independently-derived'` today; reserved so a future independent-derivation
+       * capability has somewhere honest to report a stronger value.
+       */
+      trajectoryAssurance: "not-independently-derived";
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -528,6 +539,7 @@ export function resolveSat(
     webvhBinding: "unverified",
     chainEvidence,
     resourceAvailability,
+    trajectoryAssurance: "not-independently-derived",
   };
   freeze<unknown>(result);
   return result;

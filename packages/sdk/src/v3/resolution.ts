@@ -64,6 +64,8 @@ export interface AssetDIDResolution {
     chainEvidence: Readonly<ChainEvidence>;
     /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
     pending?: readonly string[];
+    /** See `SatResolution.trajectoryAssurance`: ownership is a snapshot fact, never an independently derived transfer path. */
+    trajectoryAssurance?: "not-independently-derived";
   };
 }
 
@@ -313,6 +315,7 @@ export class AssetResolver {
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
         chainEvidence: result.resolution.chainEvidence,
+        trajectoryAssurance: result.resolution.trajectoryAssurance,
       },
     };
   }
