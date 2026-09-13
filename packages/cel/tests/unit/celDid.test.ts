@@ -157,6 +157,24 @@ describe('resolveDidCel (#Phase2 Task 8)', () => {
     expect(await resolveDidCel('did:peer:4zQmWhatever', log)).toBeNull();
   });
 
+  test('#590 a forged legacy data.did cannot claim an arbitrary did:cel-shaped identifier', async () => {
+    // An old-scheme legacy did:cel string is not self-certifying (it is not a
+    // did:key), so it must bind via VM-DID equality like any other
+    // non-self-certifying legacyDid — a bare string match against an
+    // attacker-chosen `data.did` must never be enough. Before the fix,
+    // trust-on-first-use authorized the attacker's own did:key outright and
+    // resolveDidCel handed back a document claiming the attacker's key
+    // controls whatever identifier they typed into `data.did`.
+    const { signer, getPubMb } = realKey();
+    const pubMb = await getPubMb();
+    const claimedDid = 'did:cel:uEiAsomeVictimDigestAttackerDoesNotControl';
+    const forgedLog = await createEventLog(
+      { name: 'Attacker Asset', did: claimedDid, layer: 'peer', resources: [], creator: claimedDid, createdAt: 'x' },
+      { signer, verificationMethod: `did:key:${pubMb}#${pubMb}` }
+    );
+    expect(await resolveDidCel(claimedDid, forgedLog)).toBeNull();
+  });
+
   test('PIN: migrate events do not change resolveDidCel\'s controller', async () => {
     // Staleness adjudications (design §5) rest on migrate being a non-authority
     // event — only rotateKey may hand off the controller. Pin it: appending a
