@@ -158,6 +158,85 @@ test('derives the metadata tag digest from the actual on-chain envelope, indepen
   expect(evidence[0].metadataDigest).not.toBe(digestBytes(CBOR.encode(forgedMetadata)));
 });
 
+test('matches non-canonical but valid CBOR metadata against the exact raw on-chain bytes, not a re-encoding', async () => {
+  // A metadata tag can be written with any valid CBOR encoding, not only the
+  // minimal-length "canonical" form this SDK's own writer happens to produce.
+  // Re-encoding the decoded value canonically before hashing would silently
+  // change the bytes and falsely disagree with an honest provider that
+  // reports the real raw tag bytes — this must compare the exact raw bytes.
+  const pubkey = schnorr.getPublicKey(new Uint8Array(32).fill(4));
+  // CBOR for {n: 5}, but the integer 5 is encoded via the non-minimal
+  // one-byte-follows form (0x18 0x05) instead of the canonical immediate
+  // form (0x05) — both decode to the same value; only the wire bytes differ.
+  const nonCanonicalMetadata = new Uint8Array([0xa1, 0x61, 0x6e, 0x18, 0x05]);
+  const bodyBytes = new TextEncoder().encode('hello');
+  const customScript = btc.Script.encode([
+    pubkey, 'CHECKSIG',
+    0, 'IF',
+    new TextEncoder().encode('ord'),
+    new Uint8Array([1]), new TextEncoder().encode('text/plain'),
+    new Uint8Array([5]), nonCanonicalMetadata,
+    0,
+    bodyBytes,
+    'ENDIF',
+  ]);
+  const fakeControl = new Uint8Array(33);
+  fakeControl[0] = 0xc0;
+  fakeControl.set(pubkey, 1);
+  const tx = new btc.Transaction({
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+    allowLegacyWitnessUtxo: true,
+    disableScriptCheck: true,
+  });
+  tx.addOutput({ script: new Uint8Array(34), amount: 1000n });
+  tx.addInput(
+    { txid: '11'.repeat(32), index: 0, finalScriptWitness: [new Uint8Array(64).fill(1), customScript, fakeControl] },
+    true,
+  );
+  const revealTxHex = Buffer.from(tx.toBytes(true, true)).toString('hex');
+  const revealTxId = btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  }).id;
+  const blockHash = 'b'.repeat(64);
+  const snapshot: SatSnapshot = {
+    network: 'regtest',
+    sat: '1250000000',
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [
+      {
+        id: `${revealTxId}i0`,
+        revealTxid: revealTxId,
+        network: 'regtest',
+        sat: '1250000000',
+        confirmed: true,
+        creation: { height: 1, blockHash, transactionIndex: 0, inscriptionIndex: 0 },
+        // An honest provider reports the exact raw on-chain metadata bytes.
+        body: { status: 'complete', mediaType: 'text/plain', bytes: bodyBytes, metadata: nonCanonicalMetadata },
+      },
+    ],
+  };
+  const mock = core({ [revealTxId]: revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot);
+  expect(evidence[0].metadataDigest).toBe(digestBytes(nonCanonicalMetadata));
+  // A canonical re-encoding of the same decoded value would be shorter (4
+  // bytes: 0xa1 0x61 0x6e 0x05) and therefore digest differently — proving
+  // this is comparing exact raw bytes, not a re-encoded representation.
+  expect(evidence[0].metadataDigest).not.toBe(
+    digestBytes(new Uint8Array([0xa1, 0x61, 0x6e, 0x05])),
+  );
+});
+
 test('metadataDigest is null when the envelope carries no metadata tag', async () => {
   const content = new TextEncoder().encode('log-only body');
   const prepared = await preparedReveal(content, 'application/cel');
