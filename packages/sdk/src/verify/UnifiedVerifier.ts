@@ -11,7 +11,7 @@
  * resolution is described in the design doc but not wired here.
  */
 import { Verifier } from '../vc/Verifier.js';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import type { DIDManager } from '../did/DIDManager.js';
 import type { VerifiableCredential } from '../types/index.js';

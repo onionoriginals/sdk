@@ -9,18 +9,8 @@
  */
 import { describe, test, expect } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
-import {
-  multikey,
-  canonicalizeEvent,
-  canonicalizeEntryForChain,
-  computeDigestMultibase,
-  createEventLog,
-  appendEvent,
-  deriveDidCel,
-  type EventLog,
-  type LogEntry,
-  type OrdinalsLookup,
-} from '@originals/cel';
+import { multikey, computeDigestMultibase, deriveDidCel, type EventLog, type LogEntry, type OrdinalsLookup } from '@originals/cel';
+import { canonicalizeEvent, canonicalizeEntryForChain, createEventLog, appendEvent } from '@originals/cel/legacy';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { UnifiedVerifier } from '../../../src/verify/UnifiedVerifier';
 import { DIDManager } from '../../../src/did/DIDManager';
