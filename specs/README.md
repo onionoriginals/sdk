@@ -17,8 +17,9 @@ to npm. None of them alone is sufficient; each defines a different layer.
 | Bitcoin inscription shape | [`btco-inscription-shape.md`](btco-inscription-shape.md) | What is inscribed on Bitcoin, the boundary-history vs. delta-publication split, and reader-derived chain evidence. |
 
 Published SDK 3.0.0 asset identity is the legacy `did:cel:` + digest spelling
-(see `deriveAssetId` in `packages/cel/src/v3/profile.ts`), not the canonical
-`ni` identifier below; that change is scoped to the next major version.
+(see the deprecated `deriveDid` in `packages/cel/src/v3/profile.ts`), not the
+canonical `ni` identifier below; that change is scoped to the next major
+version.
 
 ## Next major identity contract — SDK 4 / CEL 2
 
