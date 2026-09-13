@@ -576,22 +576,37 @@ export function createInscriptionsStore(opts: {
       // `confirmedBlockHash` — so a later reconfirmation can still be
       // compared against them.
       rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
-      // Height/hash are the ONLY record of this reveal's last known block
-      // identity, and the reorg comparison in bitcoin.ts reads them back on
-      // the very next poll. They must survive an evidence-less read (a
-      // provider hiccup that still reports `confirmed` but omits height
-      // and/or hash) exactly as they survive a demotion: clearing either one
-      // here would erase the sole anchor a SAME-HEIGHT reorg needs to be
-      // detected against, permanently disabling that detection for every
-      // later poll until the next read happens to include a value again.
-      // A stale value briefly paired with a fresher depth reading is a
-      // narrow, self-correcting display quirk; losing the comparison anchor
-      // is not. Only a fresh, defined value ever overwrites the previous one.
-      if (status === 'confirmed' && evidence?.blockHeight !== undefined) {
-        rec.confirmedBlockHeight = evidence.blockHeight;
-      }
-      if (status === 'confirmed' && evidence?.blockHash !== undefined) {
-        rec.confirmedBlockHash = evidence.blockHash;
+      // Height and hash describe ONE block identity, not two independent
+      // facts — they must never drift out of sync with each other. They are
+      // the only record of this reveal's last known block identity, and the
+      // reorg comparison in bitcoin.ts reads them back on the very next
+      // poll, so an evidence-less read (a provider hiccup that still reports
+      // `confirmed` but omits one or both) must not lose them: clearing
+      // either on a bare omission would erase the sole anchor a SAME-HEIGHT
+      // reorg needs to be detected against, permanently disabling that
+      // detection until the next read happens to include a value again.
+      //
+      // But a NEW hash is a NEW block identity, whether or not this read's
+      // height lookup also succeeded (QuickNode resolves them via separate
+      // RPC calls, so one can fail independently of the other). Pairing that
+      // new hash with the OLD block's still-sticky height would describe an
+      // identity that was never actually observed — worse than an absent
+      // height, since a caller can't tell "unknown" from "verified same as
+      // before". So height is cleared (not left stale) exactly when this
+      // read's hash proves the identity changed but doesn't say to what
+      // height; otherwise (hash unchanged, or this read has no hash opinion
+      // at all) the previous height is exactly as valid as before.
+      if (status === 'confirmed') {
+        const freshHash = evidence?.blockHash;
+        const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
+        if (evidence?.blockHeight !== undefined) {
+          rec.confirmedBlockHeight = evidence.blockHeight;
+        } else if (identityChanged) {
+          rec.confirmedBlockHeight = undefined;
+        }
+        if (freshHash !== undefined) {
+          rec.confirmedBlockHash = freshHash;
+        }
       }
       writeAll(subOrgId, recs);
     },
