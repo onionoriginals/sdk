@@ -8,7 +8,7 @@ import {
   CelError,
   encodeDocument,
   eventDigest,
-  parseAssetDid,
+  parseAssetAlias,
   parseDocument,
   signEvent,
   validateDocument,
@@ -248,11 +248,11 @@ export class BitcoinPublications {
             signer!,
           );
           document = full = validateDocument({ log: [...full.log, migration] });
-          verifyHistory(full, { expectedDid: asset.id });
+          verifyHistory(full, { expectedAssetId: asset.id });
         } else {
-          const did = parseAssetDid(state.alias);
+          const did = parseAssetAlias(state.alias);
           if (
-            did.method !== "btco" ||
+            did.layer !== "btco" ||
             did.sat !== sat ||
             did.network !== this.network
           )
