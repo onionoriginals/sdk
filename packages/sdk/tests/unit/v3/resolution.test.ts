@@ -396,6 +396,18 @@ test("fails closed when the independent source's own snapshot is incomplete, unh
       "unstable tip",
       (s) => ({ ...s, tipAfter: { ...s.tipAfter, hash: "1".repeat(64) } }),
     ],
+    [
+      "identical but malformed tips (equal is not the same as valid)",
+      (s) => {
+        const malformed = { height: -1, hash: "not-a-real-hash" };
+        return {
+          ...s,
+          tipBefore: malformed,
+          tipAfter: malformed,
+          indexTip: malformed,
+        };
+      },
+    ],
   ];
   for (const [, corrupt] of cases) {
     const independent = corrupt(structuredClone(snapshot));

@@ -76,18 +76,33 @@ const failure = (
   scope: "sat",
   crossSatCanonicality: "unknown",
 });
+const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
+  const t = tip as { height?: unknown; hash?: unknown } | null | undefined;
+  return (
+    !!t &&
+    Number.isSafeInteger(t.height) &&
+    (t.height as number) >= 0 &&
+    typeof t.hash === "string" &&
+    /^[0-9a-f]{64}$/.test(t.hash)
+  );
+};
 const sameTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
-  !!a && !!b && a.height === b.height && a.hash === b.hash;
+  a.height === b.height && a.hash === b.hash;
 /**
  * A second source can only corroborate enumeration completeness if its own
  * observation was itself complete, healthy and stable. An independent
  * snapshot that fails these is unusable evidence, not weaker evidence: it
- * must not be able to confer "cross-checked" by reporting less.
+ * must not be able to confer "cross-checked" by reporting less. Equal tips
+ * are not enough on their own — two identical malformed values would still
+ * satisfy a bare equality check, so each tip's own shape is validated first.
  */
 const usableIndependentSnapshot = (snapshot: SatSnapshot): boolean =>
   snapshot.enumerationComplete === true &&
   snapshot.indexHealthy === true &&
   Array.isArray(snapshot.publications) &&
+  validChainTip(snapshot.tipBefore) &&
+  validChainTip(snapshot.tipAfter) &&
+  validChainTip(snapshot.indexTip) &&
   sameTip(snapshot.tipBefore, snapshot.tipAfter) &&
   sameTip(snapshot.tipBefore, snapshot.indexTip);
 
