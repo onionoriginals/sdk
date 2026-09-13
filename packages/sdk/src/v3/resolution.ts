@@ -66,13 +66,20 @@ const failure = (
   status: Exclude<SatResolution["status"], "accepted">,
   reason: string,
   chainEvidence: ChainEvidence = "provider-asserted",
+  source?: string,
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
   chainEvidence,
+  ...(source !== undefined ? { source } : {}),
 });
+/** A snapshot was actually obtained, so its own claim (never relabeled upward) governs, same as resolveSat. */
+const chainEvidenceOf = (snapshot: SatSnapshot): ChainEvidence =>
+  snapshot.chainEvidence === "node-validated"
+    ? "node-validated"
+    : "provider-asserted";
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
 export class AssetResolver {
@@ -127,6 +134,10 @@ export class AssetResolver {
           resolution: failure(
             "inconsistent-evidence",
             "Provider snapshot differs from requested sat or network",
+            // A real snapshot was obtained, just not for the requested identity:
+            // reflect what it actually claims rather than discarding it.
+            chainEvidenceOf(snapshot),
+            typeof snapshot.source === "string" ? snapshot.source : undefined,
           ) as SatResolution,
         };
       return { snapshot, resolution: resolveSat(snapshot, options) };
@@ -140,6 +151,10 @@ export class AssetResolver {
             ? "chain-changed"
             : "incomplete",
           "The provider could not obtain a complete sat snapshot",
+          // The provider threw before ever returning a usable snapshot: no
+          // provider assertion was actually obtained here, unlike a resolved
+          // (even if later rejected) snapshot.
+          "unavailable",
         ) as SatResolution,
       };
     }

@@ -410,3 +410,43 @@ test("a provider that fabricates a self-consistent alternate tip, or silently om
   expect(omittedResult.asset.state.name).not.toBe("Never observed");
   expect(omittedResult.resolution.chainEvidence).toBe("provider-asserted");
 });
+
+test("a provider that throws before returning any snapshot never obtained chain evidence, unlike a returned-but-mismatched snapshot", async () => {
+  // The provider never returned anything at all: no snapshot -- and therefore
+  // no provider assertion -- was ever obtained, so this must not be confused
+  // with a provider having actually stood behind a (even if rejected) snapshot.
+  const throwingSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: {
+      getSatSnapshot: async () => {
+        throw new Error("network unreachable");
+      },
+    },
+  });
+  const thrownResult = await throwingSdk.lifecycle.resolveAssetFromSat("123");
+  expect(thrownResult.status).toBe("incomplete");
+  if (thrownResult.status === "accepted") throw new Error("unexpected accept");
+  expect(thrownResult.chainEvidence).toBe("unavailable");
+
+  // A snapshot WAS returned here, just for the wrong sat/network -- the
+  // provider did stand behind it, so its own declared evidence and source
+  // must be preserved rather than discarded for the honest default.
+  const { snapshot } = await boundary();
+  const mismatched: SatSnapshot = {
+    ...snapshot,
+    sat: "999",
+    chainEvidence: "node-validated",
+    source: "regtest-core+ord",
+  };
+  const mismatchedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => mismatched },
+  });
+  const mismatchedResult =
+    await mismatchedSdk.lifecycle.resolveAssetFromSat("123");
+  expect(mismatchedResult.status).toBe("inconsistent-evidence");
+  if (mismatchedResult.status === "accepted")
+    throw new Error("unexpected accept");
+  expect(mismatchedResult.chainEvidence).toBe("node-validated");
+  expect(mismatchedResult.source).toBe("regtest-core+ord");
+});
