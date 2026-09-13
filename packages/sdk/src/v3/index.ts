@@ -14,3 +14,5 @@ export { fetchPublicReachabilityCheck } from "./hosted.js";
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./bitcoin.js";
 
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./envelope.js";
+
+export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./chain-validation.js";

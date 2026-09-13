@@ -1,3 +1,4 @@
+import type { ChainValidator } from "../v3/chain-validation.js";
 import { BitcoinPublications } from "../v3/bitcoin.js";
 import {
   HostedAssets,
@@ -32,6 +33,8 @@ export interface OriginalsSDKOptions
     >,
     LocalConfig {
   satProvider?: SatProvider;
+  /** Explicit independent chain verifier. A configured verifier must succeed for resolution. */
+  chainValidator?: ChainValidator;
   storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
   /** Independent confirmation that a hosted WebVH publication's advertised log is actually public. */
   publicReachability?: PublicReachabilityCheck;
@@ -58,6 +61,7 @@ export class OriginalsSDK {
       [],
       [
         "satProvider",
+        "chainValidator",
         "signer",
         "onAppendFailure",
         "keyStore",
@@ -82,11 +86,13 @@ export class OriginalsSDK {
       signer,
       onAppendFailure,
       satProvider,
+      chainValidator,
       storageAdapter,
       publicReachability,
       requirePublicReachability,
       ...utilities
     } = options;
+    requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -158,6 +164,7 @@ export class OriginalsSDK {
           : undefined),
       local,
       hosted,
+      chainValidator,
     );
     this.lifecycle = new LifecycleManager(
       local,

@@ -12,3 +12,5 @@ export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDReso
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from '../v3/hosted.js';
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from '../v3/bitcoin.js';
 export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRecoveryStore, InscriptionBroadcastState } from '../bitcoin/inscription-recovery.js';
+
+export type { ChainValidator, BitcoinCoreChainValidatorOptions } from "../v3/chain-validation.js";

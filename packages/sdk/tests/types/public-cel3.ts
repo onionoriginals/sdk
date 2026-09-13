@@ -163,3 +163,9 @@ void parsedAlias.method;
 // @ts-expect-error New envelopes do not expose the removed unsigned field.
 currentEnvelope.assetDid;
 void currentVersion; void canonicalFromEvent; void digest; void deriveDid; void parseAssetDid;
+
+import { createBitcoinCoreChainValidator } from '@originals/sdk';
+import type { ChainValidator, BitcoinCoreChainValidatorOptions } from '@originals/sdk/types';
+const coreOptions: BitcoinCoreChainValidatorOptions = { endpoint: 'http://localhost:18443', rpcAuth: { username: 'user', password: 'password' } };
+const chainValidator: ChainValidator = createBitcoinCoreChainValidator(coreOptions);
+OriginalsSDK.create({ network: 'regtest', satProvider, chainValidator });

@@ -224,3 +224,5 @@ export { validateInscriptionReveal } from './bitcoin/inscription-recovery.js';
 export type { InscribeOnSatResult, PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionRecoveryRecord, InscriptionBroadcastState } from './bitcoin/inscribe-on-sat.js';
 
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./v3/envelope.js";
+
+export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./v3/chain-validation.js";
