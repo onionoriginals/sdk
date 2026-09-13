@@ -81,6 +81,13 @@ export interface IndependentContentEvidence {
   mediaType: string;
   /** digestBytes() of the independently-derived on-chain content bytes. */
   contentDigest: string;
+  /**
+   * digestBytes() of the independently-derived on-chain metadata tag, or null when the
+   * envelope carries no metadata tag. Comparable to `publication.body.metadata` (also
+   * null when absent) — both sides compare raw/canonically-reencoded wire bytes, never a
+   * decoded value, so two different CBOR decoders cannot disagree on equality semantics.
+   */
+  metadataDigest: string | null;
 }
 export type SatResolution = Readonly<
   | {
@@ -192,6 +199,7 @@ export function resolveSat(
         typeof entry.inscriptionId !== "string" ||
         typeof entry.mediaType !== "string" ||
         typeof entry.contentDigest !== "string" ||
+        !(entry.metadataDigest === null || typeof entry.metadataDigest === "string") ||
         independentContentById.has(entry.inscriptionId)
       )
         return failure("incomplete", "Invalid independent content evidence");
@@ -199,6 +207,7 @@ export function resolveSat(
         inscriptionId: entry.inscriptionId,
         mediaType: entry.mediaType,
         contentDigest: entry.contentDigest,
+        metadataDigest: entry.metadataDigest,
       });
     }
   }
@@ -458,9 +467,12 @@ export function resolveSat(
       // never reaches here, so it can never block an otherwise valid history.
       const independentContent = independentContentById.get(publication.id);
       if (independentContent) {
+        const bodyMetadataDigest =
+          body.metadata === null ? null : digestBytes(body.metadata);
         if (
           independentContent.mediaType !== body.mediaType ||
-          independentContent.contentDigest !== bodyDigest
+          independentContent.contentDigest !== bodyDigest ||
+          independentContent.metadataDigest !== bodyMetadataDigest
         )
           return failure(
             "inconsistent-evidence",

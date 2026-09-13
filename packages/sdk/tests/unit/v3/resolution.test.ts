@@ -356,11 +356,15 @@ test("cross-checks content when a configured validator independently confirms th
     satProvider: { getSatSnapshot: async () => snapshot },
     contentValidator: async (s) => s.publications
       .filter((p) => p.body.status === "complete")
-      .map((p) => ({
-        inscriptionId: p.id,
-        mediaType: (p.body as { mediaType: string }).mediaType,
-        contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
-      })),
+      .map((p) => {
+        const body = p.body as { mediaType: string; bytes: Uint8Array; metadata: Uint8Array | null };
+        return {
+          inscriptionId: p.id,
+          mediaType: body.mediaType,
+          contentDigest: digestBytes(body.bytes),
+          metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+        };
+      }),
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
@@ -376,10 +380,36 @@ test("fails closed when a configured content validator disagrees with a substitu
     satProvider: { getSatSnapshot: async () => snapshot },
     contentValidator: async (s) => s.publications
       .filter((p) => p.body.status === "complete")
+      .map((p) => {
+        const body = p.body as { metadata: Uint8Array | null };
+        return {
+          inscriptionId: p.id,
+          mediaType: (p.body as { mediaType: string }).mediaType,
+          contentDigest: digestBytes(new TextEncoder().encode("independently observed different content")),
+          metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+        };
+      }),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when a configured content validator disagrees only on the metadata tag", async () => {
+  const { snapshot } = await boundary();
+  // Body and media type match exactly what an independent Bitcoin node
+  // derived; only the CEL metadata tag that actually drives history differs
+  // (e.g. a compromised indexer serving an older or substituted metadata tag
+  // for a real, correctly-content-matching inscription).
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
       .map((p) => ({
         inscriptionId: p.id,
         mediaType: (p.body as { mediaType: string }).mediaType,
-        contentDigest: digestBytes(new TextEncoder().encode("independently observed different content")),
+        contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
+        metadataDigest: digestBytes(new TextEncoder().encode("independently observed different metadata")),
       })),
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");

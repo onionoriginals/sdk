@@ -110,11 +110,15 @@ function completeContentEvidence(
 ): IndependentContentEvidence[] {
   return snapshot.publications
     .filter((p) => p.body.status === "complete")
-    .map((p) => ({
-      inscriptionId: p.id,
-      mediaType: (p.body as { mediaType: string }).mediaType,
-      contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
-    }));
+    .map((p) => {
+      const body = p.body as { mediaType: string; bytes: Uint8Array; metadata: Uint8Array | null };
+      return {
+        inscriptionId: p.id,
+        mediaType: body.mediaType,
+        contentDigest: digestBytes(body.bytes),
+        metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+      };
+    });
 }
 
 test("content assurance defaults to provider-asserted with no independent evidence configured", () => {
@@ -168,12 +172,40 @@ test("fails closed when independent content evidence disagrees only on media typ
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("fails closed when independent metadata evidence disagrees while body and media type still agree", () => {
+  // A compromised indexer could serve the correct main content/media type
+  // (satisfying those two checks) while substituting the CEL metadata tag
+  // that actually drives history — body/media agreement alone must not be
+  // enough to earn cross-checked assurance.
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence[0].metadataDigest).toBeNull();
+  evidence[0] = {
+    ...evidence[0],
+    metadataDigest: digestBytes(new TextEncoder().encode("forged metadata")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
 test("rejects malformed independent content evidence rather than ignoring it", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
     independentContent: [
-      // @ts-expect-error deliberately missing contentDigest for the test
+      // @ts-expect-error deliberately missing contentDigest/metadataDigest for the test
       { inscriptionId: snapshot.publications[0].id, mediaType: "text/plain" },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects independent content evidence with a non-string, non-null metadataDigest", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately invalid metadataDigest type for the test
+      { ...evidence[0], metadataDigest: 12345 },
     ],
   });
   expect(result.status).toBe("incomplete");
@@ -195,6 +227,7 @@ test("an independent source reporting an unknown inscription id does not itself 
     inscriptionId: "f".repeat(64) + "i9",
     mediaType: "text/plain",
     contentDigest: digestBytes(new TextEncoder().encode("unrelated")),
+    metadataDigest: null,
   });
   const result = resolveSat(snapshot, { independentContent: evidence });
   expect(result.status).toBe("accepted");
