@@ -1,6 +1,5 @@
 import * as btc from '@scure/btc-signer';
-import { parseInscriptions } from 'micro-ordinals';
-import { CBOR } from 'micro-ordinals/lib/cbor.js';
+import { parseInscriptions, __test__ as microOrdinalsInternals } from 'micro-ordinals';
 import { StructuredError } from '@originals/cel';
 import { digestBytes, type SatSnapshot, type IndependentContentEvidence } from '@originals/cel/v3';
 import { base64 } from '@scure/base';
@@ -31,6 +30,40 @@ export interface BitcoinCoreContentValidatorOptions {
 const positive = (value: number | undefined, fallback: number) =>
   value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : fallback;
 const inscriptionId = /^([0-9a-f]{64})i(0|[1-9]\d*)$/;
+/** Ordinals inscription envelope tag number for the metadata field (protocol-fixed). */
+const METADATA_TAG = 5;
+
+// `parseInscriptions`'s public surface only returns each tag already CBOR-decoded, so
+// recovering the metadata tag's *raw* wire bytes — needed to compare exact on-chain bytes
+// rather than a re-encoded value — means walking the same envelope/tag-chunk structure
+// `parseInscriptions` itself parses. Reuse micro-ordinals' own (package-exported, if
+// test-labeled) `parseEnvelopes` for envelope/tag-boundary detection rather than
+// reimplementing that scan: it is the exact same code `parseInscriptions` already uses, so
+// envelope indices are guaranteed to line up with `parseInscriptions`' inscription order,
+// and this file never becomes a second, independently-maintained envelope parser.
+type ParsedScript = Parameters<typeof parseInscriptions>[0];
+type RawEnvelope = { payload: ReadonlyArray<Uint8Array | number> };
+const parseEnvelopes = (microOrdinalsInternals as { parseEnvelopes: (script: ParsedScript) => RawEnvelope[] }).parseEnvelopes;
+
+/**
+ * Extract each envelope's raw (pre-CBOR-decode) metadata tag bytes, exactly as pushed
+ * on-chain, in the same order `parseInscriptions` returns inscriptions for this script.
+ * Mirrors `TagCoder`'s tag-chunk-concatenation rule (a tag can be split across multiple
+ * `{tag, data}` pushes when its value exceeds the max script push size; all data chunks for
+ * a given tag concatenate in encounter order) without CBOR-decoding the result.
+ */
+function deriveRawMetadataPerEnvelope(script: ParsedScript): (Uint8Array | undefined)[] {
+  return parseEnvelopes(script).map(({ payload }) => {
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i + 1 < payload.length && payload[i] !== 0; i += 2) {
+      const tag = payload[i];
+      const data = payload[i + 1];
+      if (tag instanceof Uint8Array && tag.length === 1 && tag[0] === METADATA_TAG && data instanceof Uint8Array)
+        chunks.push(data);
+    }
+    return chunks.length ? btc.utils.concatBytes(...chunks) : undefined;
+  });
+}
 
 /**
  * Parse a reveal transaction's taproot script-path witness to recover the exact media type
@@ -39,7 +72,7 @@ const inscriptionId = /^([0-9a-f]{64})i(0|[1-9]\d*)$/;
  * Returns an empty array (never throws) when no such witness is found — this validator only
  * asserts what it could independently confirm; it never asserts absence.
  */
-type DerivedInscription = { tags: { contentType?: string; metadata?: unknown }; body: Uint8Array };
+type DerivedInscription = { tags: { contentType?: string }; body: Uint8Array; rawMetadata?: Uint8Array };
 
 function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
   let tx: btc.Transaction;
@@ -58,7 +91,11 @@ function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
     try {
       const decoded = btc.Script.decode(witness[1]);
       const parsed = parseInscriptions(decoded, true);
-      if (parsed?.length) inscriptions.push(...parsed);
+      if (!parsed?.length) continue;
+      const rawMetadataByEnvelope = deriveRawMetadataPerEnvelope(decoded);
+      parsed.forEach((inscription, index) => {
+        inscriptions.push({ ...inscription, rawMetadata: rawMetadataByEnvelope[index] });
+      });
     } catch {
       continue;
     }
@@ -67,19 +104,14 @@ function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
 }
 
 /**
- * micro-ordinals only exposes the metadata tag already CBOR-decoded, not its raw wire
- * bytes, so exact-byte independent comparison isn't directly available. This re-encodes
- * through the same canonical CBOR coder that decoded it (see `cbor.ts`: encoding always
- * picks one deterministic minimal-length representation for a given decoded value), which
- * round-trips byte-for-byte for metadata this SDK's own writer produced with that same
- * coder. This is a deliberate, explicit comparison representation — not a silently
- * weakened check — but it is a real limitation for interop: metadata written by a
- * non-canonical CBOR encoder (different map key order, non-minimal integer widths) could
- * legitimately fail this specific round-trip and be reported as a disagreement even though
- * the decoded values are equal.
+ * Compares exact on-chain metadata tag bytes rather than a re-encoded decoded value: two
+ * honest observers of the same reveal transaction always agree, independent of any CBOR
+ * encoder's canonicalization choices (map key order, integer width). This avoids the false
+ * disagreement a decode-then-canonically-reencode comparison would produce for valid but
+ * non-canonically-encoded metadata that this SDK's own writer did not itself produce.
  */
-function metadataDigest(metadata: unknown): string | null {
-  return metadata === undefined ? null : digestBytes(CBOR.encode(metadata));
+function metadataDigest(rawMetadata: Uint8Array | undefined): string | null {
+  return rawMetadata === undefined ? null : digestBytes(rawMetadata);
 }
 
 /**
@@ -152,7 +184,7 @@ export function createBitcoinCoreContentValidator(
           inscriptionId: publication.id,
           mediaType: inscription.tags.contentType ?? '',
           contentDigest: digestBytes(inscription.body),
-          metadataDigest: metadataDigest(inscription.tags.metadata),
+          metadataDigest: metadataDigest(inscription.rawMetadata),
         });
       }
       return evidence;

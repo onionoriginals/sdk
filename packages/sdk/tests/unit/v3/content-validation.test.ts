@@ -295,6 +295,126 @@ test('rejects URL credentials and a fragment in the configured endpoint', () => 
   ).toThrow();
 });
 
+function varint(n: number): Buffer {
+  if (n < 0xfd) return Buffer.from([n]);
+  if (n <= 0xffff) {
+    const b = Buffer.alloc(3);
+    b[0] = 0xfd;
+    b.writeUInt16LE(n, 1);
+    return b;
+  }
+  const b = Buffer.alloc(5);
+  b[0] = 0xfe;
+  b.writeUInt32LE(n, 1);
+  return b;
+}
+function pushVarBytes(bytes: Uint8Array): Buffer {
+  return Buffer.concat([varint(bytes.length), Buffer.from(bytes)]);
+}
+
+/**
+ * Hand-assemble a minimal witness transaction whose sole input's witness carries the given
+ * reveal leaf script — bypassing the SDK's own writer (which only ever produces canonically
+ * encoded metadata) so a test can place metadata bytes with an arbitrary, still-valid CBOR
+ * encoding directly on-chain. Signature and control block are dummy bytes: parsing a reveal
+ * transaction's inscription content, as `createBitcoinCoreContentValidator` does, never
+ * checks taproot spend validity, only witness structure and envelope contents.
+ */
+function rawTxWithWitnessScript(leafScript: Uint8Array): string {
+  const version = Buffer.from([2, 0, 0, 0]);
+  const markerFlag = Buffer.from([0x00, 0x01]);
+  const input = Buffer.concat([
+    Buffer.alloc(32, 0x11), // prev txid
+    Buffer.from([0, 0, 0, 0]), // prev vout
+    Buffer.from([0x00]), // empty scriptSig (segwit)
+    Buffer.from([0xff, 0xff, 0xff, 0xff]), // sequence
+  ]);
+  const value = Buffer.alloc(8);
+  value.writeBigUInt64LE(546n, 0);
+  const scriptPubKey = Buffer.concat([Buffer.from([0x51, 0x20]), Buffer.alloc(32, 0x22)]); // OP_1 <32 bytes>
+  const output = Buffer.concat([value, varint(scriptPubKey.length), scriptPubKey]);
+  const witness = Buffer.concat([
+    varint(3),
+    pushVarBytes(new Uint8Array(64).fill(0x33)), // dummy signature
+    pushVarBytes(leafScript),
+    pushVarBytes(new Uint8Array(33).fill(0x44)), // dummy control block
+  ]);
+  return Buffer.concat([
+    version,
+    markerFlag,
+    varint(1),
+    input,
+    varint(1),
+    output,
+    witness,
+    Buffer.alloc(4), // locktime
+  ]).toString('hex');
+}
+
+test('cross-checks honest but non-canonically-encoded on-chain metadata, rather than falsely disagreeing with a re-encoded value', async () => {
+  // Valid CBOR for {"a": 1}, but with the integer given a wasteful non-minimal
+  // 3-byte encoding (major 0, additional info 25, u16be 0x0001) instead of the
+  // 1-byte minimal form a canonical/RFC 8949 encoder would choose. A decode-then-
+  // canonically-reencode comparison disagrees with these exact bytes even though
+  // they are honestly what's on-chain — the bug this test guards against.
+  const nonCanonicalMetadata = Buffer.from([0xa1, 0x61, 0x61, 0x19, 0x00, 0x01]);
+  const body = new TextEncoder().encode('resource bytes');
+  const { script: leafScript } = ordinals.p2tr_ord_reveal(new Uint8Array(32).fill(7), [
+    { tags: { contentType: 'text/plain', unknown: [[Uint8Array.of(5), nonCanonicalMetadata]] }, body },
+  ]);
+  const revealTxHex = rawTxWithWitnessScript(leafScript);
+  const revealTxId = btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  }).id;
+  const inscriptionId = `${revealTxId}i0`;
+  const blockHash = 'b'.repeat(64);
+  const snapshot: SatSnapshot = {
+    network: 'regtest',
+    sat: '1250000000',
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [
+      {
+        id: inscriptionId,
+        revealTxid: revealTxId,
+        network: 'regtest',
+        sat: '1250000000',
+        confirmed: true,
+        creation: { height: 1, blockHash, transactionIndex: 0, inscriptionIndex: 0 },
+        // The provider honestly reports the exact on-chain bytes.
+        body: { status: 'complete', mediaType: 'text/plain', bytes: body, metadata: nonCanonicalMetadata },
+      },
+    ],
+  };
+  const mock = core({ [revealTxId]: revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot);
+  expect(evidence).toEqual([
+    {
+      inscriptionId,
+      mediaType: 'text/plain',
+      contentDigest: digestBytes(body),
+      metadataDigest: digestBytes(nonCanonicalMetadata),
+    },
+  ]);
+  // The historical bug: re-encoding the decoded value canonically produces different
+  // bytes than the honest on-chain original, which would have failed this comparison.
+  const decoded = btc.Script.decode(
+    btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true })
+      .getInput(0).finalScriptWitness![1],
+  );
+  const canonicallyReencoded = CBOR.encode(ordinals.parseInscriptions(decoded, true)![0].tags.metadata);
+  expect(digestBytes(canonicallyReencoded)).not.toBe(digestBytes(nonCanonicalMetadata));
+});
+
 test('bounds total RPC calls', async () => {
   const first = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
   const snapshot = snapshotFor(first, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });

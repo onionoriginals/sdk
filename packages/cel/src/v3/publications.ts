@@ -82,10 +82,10 @@ export interface IndependentContentEvidence {
   /** digestBytes() of the independently-derived on-chain content bytes. */
   contentDigest: string;
   /**
-   * digestBytes() of the independently-derived on-chain metadata tag, or null when the
-   * envelope carries no metadata tag. Comparable to `publication.body.metadata` (also
-   * null when absent) — both sides compare raw/canonically-reencoded wire bytes, never a
-   * decoded value, so two different CBOR decoders cannot disagree on equality semantics.
+   * digestBytes() of the independently-derived on-chain metadata tag's raw wire bytes, or
+   * null when the envelope carries no metadata tag. Comparable to `publication.body.metadata`
+   * (also null when absent) — both sides are exact on-chain bytes, never a re-encoded decoded
+   * value, so no CBOR encoder's canonicalization choices can cause a false disagreement.
    */
   metadataDigest: string | null;
 }
