@@ -5,30 +5,35 @@ import { validateDigest } from "./primitives.js";
 import { MAX_SATOSHI_SUPPLY } from "../utils/satoshi-validation.js";
 
 export type BitcoinNetwork = "mainnet" | "signet" | "regtest" | "testnet";
-export type AssetDid =
-  | { method: "cel"; did: string }
+export type AssetAlias =
+  | { layer: "cel"; did: string }
   | {
-      method: "webvh";
+      layer: "webvh";
       did: string;
       scid: string;
       logUrl: string;
       methodBinding: "unverified";
     }
-  | { method: "btco"; did: string; network: BitcoinNetwork; sat: string };
-/** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding. */
-export function parseAssetDid(did: unknown): AssetDid {
+  | { layer: "btco"; did: string; network: BitcoinNetwork; sat: string };
+/** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
+ * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
+ * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
+ */
+export function parseAssetAlias(did: unknown): AssetAlias {
   requireThat(
     typeof did === "string" && did.length <= 8192,
     "CEL_DID",
-    "Expected a bare asset DID",
+    "Expected a bare asset alias",
   );
   if (did.startsWith("ni:")) {
-    return { method: "cel", did: normalizeAssetId(did) };
+    return { layer: "cel", did: normalizeAssetId(did) };
   }
-  // Retained parser compatibility: this is an Originals 3.0 alias, not DID-method resolution.
+  // Retained parser compatibility for reading authenticated SDK 3 history/aliases;
+  // this is an Originals 3.0 alias, not DID-method resolution, and is not offered
+  // as new migration/authoring input.
   if (did.startsWith("did:cel:")) {
     validateDigest(did.slice(8));
-    return { method: "cel", did };
+    return { layer: "cel", did };
   }
   if (did.startsWith("did:btco:")) {
     const match = /^did:btco:(?:(reg|sig|test):)?(0|[1-9]\d{0,15})$/.exec(did);
@@ -45,7 +50,7 @@ export function parseAssetDid(did: unknown): AssetDid {
           : match[1] === "test"
             ? "testnet"
             : "mainnet";
-    return { method: "btco", did, network, sat: match[2] };
+    return { layer: "btco", did, network, sat: match[2] };
   }
   requireThat(
     did.startsWith("did:webvh:"),
@@ -156,7 +161,7 @@ export function parseAssetDid(did: unknown): AssetDid {
     return encoded;
   });
   return {
-    method: "webvh",
+    layer: "webvh",
     did,
     scid,
     logUrl:

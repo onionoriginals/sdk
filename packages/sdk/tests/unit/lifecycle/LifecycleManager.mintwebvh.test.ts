@@ -5,7 +5,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { OriginalsSDK } from '../../previous-sdk';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { serializeEventLogJson, parseEventLogJson } from '@originals/cel';
 
 describe('publishToWeb mints a real did:webvh (#376)', () => {

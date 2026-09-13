@@ -4,9 +4,12 @@ import { multikey } from './crypto/Multikey.js';
 /**
  * Minimal DID-resolution contract — structurally satisfied by the SDK's
  * DIDManager, so this package needs no compile-time edge to the DID stack.
+ * The optional `mode` mirrors DIDManager's freshness policy (issue #602):
+ * `'current'` asks a mutable-method resolver to bypass any cache and
+ * re-resolve live rather than return a stale/pinned document.
  */
 export interface CelDidResolver {
-  resolveDID(did: string): Promise<DIDDocument | null>;
+  resolveDID(did: string, options?: { mode?: 'cache' | 'current' }): Promise<DIDDocument | null>;
 }
 
 /**
@@ -19,7 +22,10 @@ export function createDidManagerKeyResolver(didManager: CelDidResolver) {
   return async (verificationMethod: string): Promise<Uint8Array | null> => {
     try {
       const did = verificationMethod.split('#')[0];
-      const doc = await didManager.resolveDID(did);
+      // Resolving a signer's key is a current-authority decision: a cached
+      // (even pinned) pre-rotation document must not keep an externally
+      // retired key accepted (issue #602).
+      const doc = await didManager.resolveDID(did, { mode: 'current' });
       const vms = doc?.verificationMethod;
       if (!Array.isArray(vms)) return null;
       const vm =

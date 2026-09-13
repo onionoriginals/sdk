@@ -49,12 +49,12 @@ export class OriginalsAsset {
     document: unknown,
     attachments: ResourceAttachment[],
     config: OriginalsConfig = {},
-    expectedDid?: string,
+    expectedAssetId?: string,
     localResources: LocalResourceAttachment[] = [],
     private readonly resolver?: AssetResolver,
   ) {
     this.#document = validateDocument(document);
-    verifyHistory(this.#document, { expectedDid });
+    verifyHistory(this.#document, { expectedAssetId });
     const budget = new AttachmentBudget();
     this.#attachments = copyAttachments(attachments, budget);
     bindResources(this.#document, this.#attachments);
@@ -146,7 +146,7 @@ export class OriginalsAsset {
       );
     const entry = await signEvent(event, signer);
     const document = validateDocument({ log: [...this.#document.log, entry] });
-    const history = verifyHistory(document, { expectedDid: this.id });
+    const history = verifyHistory(document, { expectedAssetId: this.id });
     const attachments = [...this.#attachments, ...added];
     bindResources(document, attachments);
     // No await between the two assignments: the log and byte attachments commit together.

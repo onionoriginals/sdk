@@ -32,7 +32,7 @@ import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 import { KeyManager } from '../../src/did/KeyManager';
 import { signerFromKeyPair } from '../../src/crypto/OriginalsSigner';
-import { verifyEventLog, appendEvent, celSignerFromKeyPair, currentControllerVm } from '@originals/cel';
+import { verifyEventLog, appendEvent, celSignerFromKeyPair, currentControllerVm } from '@originals/cel/legacy';
 import { replayProvenance } from '../../src/lifecycle/replayProvenance';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import { hashResource } from '../../src/utils/validation';

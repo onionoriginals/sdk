@@ -1,7 +1,7 @@
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
-  parseAssetDid,
+  parseAssetAlias,
   parseDocument,
   resolveSat,
   validateDocument,
@@ -26,8 +26,6 @@ export interface SatProvider {
 }
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
-  /** @deprecated Use expectedAssetId. */
-  expectedDid?: string;
 }
 export type AssetResolution =
   | Exclude<SatResolution, { status: "accepted" }>
@@ -54,7 +52,7 @@ export interface AssetDIDResolution {
 
 export function btcoDid(sat: string, network: BitcoinNetwork): string {
   const did = `did:btco:${network === "mainnet" ? "" : network === "regtest" ? "reg:" : network === "signet" ? "sig:" : "test:"}${sat}`;
-  parseAssetDid(did);
+  parseAssetAlias(did);
   return did;
 }
 const failure = (
@@ -76,9 +74,9 @@ export class AssetResolver {
     private readonly hosted?: HostedAssets,
   ) {}
 
-  async checkWeb(did: string, expectedDid: string): Promise<HostedEvidence> {
+  async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
     return this.hosted
-      ? this.hosted.check(did, expectedDid)
+      ? this.hosted.check(did, expectedAssetId)
       : { status: "incomplete", did, reason: "Configure hosted storage" };
   }
 
@@ -137,14 +135,14 @@ export class AssetResolver {
     }
   }
 
-  async check(did: string, expectedDid: string): Promise<SatResolution> {
-    const parsed = parseAssetDid(did);
-    if (parsed.method !== "btco" || parsed.network !== this.network)
+  async check(did: string, expectedAssetId: string): Promise<SatResolution> {
+    const parsed = parseAssetAlias(did);
+    if (parsed.layer !== "btco" || parsed.network !== this.network)
       return failure(
         "identity-mismatch",
         "Asset network differs from configured provider",
       ) as SatResolution;
-    return (await this.observe(parsed.sat, { expectedDid })).resolution;
+    return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
 
   async resolve(
@@ -238,8 +236,8 @@ export class AssetResolver {
   }
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {
-    const parsed = parseAssetDid(did);
-    if (parsed.method !== "btco" || parsed.network !== this.network)
+    const parsed = parseAssetAlias(did);
+    if (parsed.layer !== "btco" || parsed.network !== this.network)
       throw new CelError(
         "invalid",
         "ASSET_NETWORK",
