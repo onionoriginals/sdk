@@ -24,6 +24,17 @@ import type {
 export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
+/**
+ * A second, independently configured Ordinals index consulted only for its
+ * inscription enumeration on the queried sat, to corroborate that the
+ * primary provider did not omit a publication. `label` is a non-secret
+ * description of the source (never credentials or a full URL) carried into
+ * resolution metadata.
+ */
+export interface IndependentEnumerationSource {
+  label: string;
+  provider: SatProvider;
+}
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
 }
@@ -47,6 +58,7 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    enumerationAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -72,6 +84,7 @@ export class AssetResolver {
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
+    private readonly independentEnumeration?: IndependentEnumerationSource,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -119,7 +132,46 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
-      return { snapshot, resolution: resolveSat(snapshot, options) };
+      let independentEnumeration:
+        | { source: string; inscriptionIds: string[] }
+        | undefined;
+      if (this.independentEnumeration) {
+        // A configured independent source that cannot be consulted fails
+        // closed, the same as a configured chain validator: it must not be
+        // possible to silently fall back to an unqualified provider claim
+        // by making the second source unreachable.
+        let independentSnapshot: SatSnapshot;
+        try {
+          independentSnapshot = structuredClone(
+            await this.independentEnumeration.provider.getSatSnapshot(sat),
+          );
+        } catch {
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not return a usable observation",
+            ) as SatResolution,
+          };
+        }
+        if (
+          independentSnapshot?.sat !== sat ||
+          independentSnapshot.network !== this.network
+        )
+          return {
+            resolution: failure(
+              "inconsistent-evidence",
+              "Independent enumeration source snapshot differs from requested sat or network",
+            ) as SatResolution,
+          };
+        independentEnumeration = {
+          source: this.independentEnumeration.label,
+          inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+        };
+      }
+      return {
+        snapshot,
+        resolution: resolveSat(snapshot, { ...options, independentEnumeration }),
+      };
     } catch (error) {
       return {
         resolution: failure(
@@ -261,6 +313,7 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        enumerationAssurance: result.resolution.enumerationAssurance,
       },
     };
   }

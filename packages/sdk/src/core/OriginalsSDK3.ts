@@ -6,7 +6,11 @@ import {
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
-import { AssetResolver, type SatProvider } from "../v3/resolution.js";
+import {
+  AssetResolver,
+  type SatProvider,
+  type IndependentEnumerationSource,
+} from "../v3/resolution.js";
 import { CredentialManager } from "../vc/CredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
@@ -37,6 +41,14 @@ export interface OriginalsSDKOptions
   publicReachability?: PublicReachabilityCheck;
   /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
   requirePublicReachability?: boolean;
+  /**
+   * A second, independently configured Ordinals index consulted only to
+   * corroborate that `satProvider`/`ordinalsProvider` did not omit an
+   * inscription for the queried sat. When configured, resolution fails
+   * closed rather than accepting an unqualified enumeration if this source
+   * is unreachable or reports an inscription the primary snapshot lacks.
+   */
+  independentEnumeration?: IndependentEnumerationSource;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -76,6 +88,7 @@ export class OriginalsSDK {
         "enableLogging",
         "publicReachability",
         "requirePublicReachability",
+        "independentEnumeration",
       ],
     );
     const {
@@ -85,6 +98,7 @@ export class OriginalsSDK {
       storageAdapter,
       publicReachability,
       requirePublicReachability,
+      independentEnumeration,
       ...utilities
     } = options;
     const local = mutationOptions({ signer, onAppendFailure });
@@ -158,6 +172,7 @@ export class OriginalsSDK {
           : undefined),
       local,
       hosted,
+      independentEnumeration,
     );
     this.lifecycle = new LifecycleManager(
       local,

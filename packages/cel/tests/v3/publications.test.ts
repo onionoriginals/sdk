@@ -143,6 +143,62 @@ for (const scenario of fixtures.cases)
     }
   });
 
+test("enumeration assurance defaults to provider-asserted with no independent source configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks enumeration when an independent source agrees with the primary snapshot", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("cross-checked");
+});
+
+test("a fewer-inscriptions independent source still cross-checks (it just corroborates less)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: { source: "lagging-index", inscriptionIds: [] },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("cross-checked");
+});
+
+test("fails closed when an independent source reports an inscription the primary snapshot omitted", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const omitted =
+    "f".repeat(64) + "i0"; // a plausible id the primary snapshot never listed
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: [...snapshot.publications.map((p) => p.id), omitted],
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("rejects malformed independent enumeration evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      // @ts-expect-error deliberately malformed for the test
+      inscriptionIds: "not-an-array",
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.publications.push({ ...snapshot.publications[0], confirmed: false });
