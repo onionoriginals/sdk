@@ -101,6 +101,19 @@ export interface ResourceAvailabilityRecord {
   version: number;
   availability: ResourceAvailability;
 }
+/**
+ * A confirmed inscription's media type and content digest, established independently of
+ * the Ordinals indexer that served `SatSnapshot.publications` — for example derived by
+ * parsing the reveal transaction's witness envelope directly from a validating Bitcoin
+ * node. This corroborates content/media binding; it is a separate dimension from chain
+ * consistency (`#652`), enumeration completeness, and ownership.
+ */
+export interface IndependentContentEvidence {
+  inscriptionId: string;
+  mediaType: string;
+  /** digestBytes() of the independently-derived on-chain content bytes. */
+  contentDigest: string;
+}
 export type SatResolution = Readonly<
   | {
       status: ResolutionFailure;
@@ -141,6 +154,13 @@ export type SatResolution = Readonly<
       chainEvidence: Readonly<ChainEvidence>;
       /** Per current resource, whether its exact bytes were recovered from this snapshot's accepted publications. */
       resourceAvailability: readonly Readonly<ResourceAvailabilityRecord>[];
+      /**
+       * "cross-checked" only when independent content evidence was supplied and agreed
+       * for every accepted publication; otherwise the provider's own reported bytes and
+       * media type are an unauthenticated assertion. A compromised provider can still
+       * substitute content for a publication no independent source examined.
+       */
+      contentAssurance: "provider-asserted" | "cross-checked";
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -165,7 +185,17 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedAssetId?: string } = {},
+  options: {
+    expectedAssetId?: string;
+    /**
+     * Independently derived media type/content digest for some confirmed inscriptions,
+     * keyed by inscription id. If it disagrees with this snapshot's reported content for
+     * any of them, resolution fails closed rather than accepting a possibly-substituted
+     * body: the primary provider cannot earn "cross-checked" by simply not disagreeing
+     * with itself.
+     */
+    independentContent?: readonly IndependentContentEvidence[];
+  } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -214,6 +244,22 @@ export function resolveSat(
     !Array.isArray(snapshot.blocks)
   )
     return failure("incomplete", "Incomplete sat enumeration");
+  const independentContentById = new Map<string, IndependentContentEvidence>();
+  if (options.independentContent !== undefined) {
+    if (!Array.isArray(options.independentContent))
+      return failure("incomplete", "Invalid independent content evidence");
+    for (const entry of options.independentContent) {
+      if (
+        !entry ||
+        typeof entry.inscriptionId !== "string" ||
+        typeof entry.mediaType !== "string" ||
+        typeof entry.contentDigest !== "string" ||
+        independentContentById.has(entry.inscriptionId)
+      )
+        return failure("incomplete", "Invalid independent content evidence");
+      independentContentById.set(entry.inscriptionId, entry);
+    }
+  }
   if (
     !snapshot.ownership ||
     !Object.prototype.hasOwnProperty.call(snapshot.ownership, "owner") ||
@@ -270,6 +316,7 @@ export function resolveSat(
   const seen = new Map<string, string>(),
     positions = new Map<string, string>();
   const confirmationStates = new Map<string, boolean>();
+  const agreedContentIds = new Set<string>();
   const ordered: (PublicationObservation & { creation: CreationPosition })[] =
       [],
     pending: string[] = [];
@@ -351,10 +398,23 @@ export function resolveSat(
         "inconsistent-evidence",
         "Reveal txid is not at the observed block position",
       );
+    const contentDigest = digestBytes(publication.body.bytes);
+    const independentContent = independentContentById.get(publication.id);
+    if (independentContent) {
+      if (
+        independentContent.mediaType !== publication.body.mediaType ||
+        independentContent.contentDigest !== contentDigest
+      )
+        return failure(
+          "inconsistent-evidence",
+          "Independent content evidence disagrees with the provider-reported content",
+        );
+      agreedContentIds.add(publication.id);
+    }
     const fingerprint = canonicalizeValue({
       position,
       type: publication.body.mediaType,
-      content: digestBytes(publication.body.bytes),
+      content: contentDigest,
       metadata:
         publication.body.metadata === null
           ? null
@@ -514,6 +574,13 @@ export function resolveSat(
         ? "bitcoin-inline"
         : "referenced",
     }));
+  const contentAssurance: "provider-asserted" | "cross-checked" =
+    options.independentContent !== undefined &&
+    accepted.every((publication) =>
+      agreedContentIds.has(publication.inscriptionId),
+    )
+      ? "cross-checked"
+      : "provider-asserted";
   const result: SatResolution = {
     status: "accepted",
     scope: "sat",
@@ -528,6 +595,7 @@ export function resolveSat(
     webvhBinding: "unverified",
     chainEvidence,
     resourceAvailability,
+    contentAssurance,
   };
   freeze<unknown>(result);
   return result;

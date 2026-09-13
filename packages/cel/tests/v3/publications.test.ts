@@ -11,6 +11,7 @@ import {
   encodeDocument,
   verifyHistory,
   type SatSnapshot,
+  type IndependentContentEvidence,
 } from "../../src/v3/index.js";
 
 // These are declared provider observations, not Bitcoin RPC evidence.
@@ -105,6 +106,103 @@ test("accepts the complete boundary at a stable declared snapshot, with possessi
   expect(result.scope).toBe("sat");
   expect(result.crossSatCanonicality).toBe("unknown");
   expect(result.ownership.owner).toBe("A");
+});
+
+function completeContentEvidence(
+  snapshot: SatSnapshot,
+): IndependentContentEvidence[] {
+  return snapshot.publications
+    .filter((p) => p.body.status === "complete")
+    .map((p) => ({
+      inscriptionId: p.id,
+      mediaType: (p.body as { mediaType: string }).mediaType,
+      contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
+    }));
+}
+
+test("content assurance defaults to provider-asserted with no independent evidence configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks content when independent evidence agrees for every accepted publication", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: completeContentEvidence(snapshot),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
+test("partial independent content coverage does not upgrade assurance, and does not fail", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence.length).toBeGreaterThan(0);
+  const result = resolveSat(snapshot, {
+    independentContent: evidence.slice(0, evidence.length - 1),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when independent content evidence disagrees with a substituted body", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  // Simulate a compromised indexer: the on-chain content an independent
+  // Bitcoin node derived disagrees with what the provider actually served.
+  evidence[0] = {
+    ...evidence[0],
+    contentDigest: digestBytes(new TextEncoder().encode("forged content")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("fails closed when independent content evidence disagrees only on media type", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence[0] = { ...evidence[0], mediaType: "image/png" };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("rejects malformed independent content evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately missing contentDigest for the test
+      { inscriptionId: snapshot.publications[0].id, mediaType: "text/plain" },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects duplicate inscription ids in independent content evidence", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [evidence[0], evidence[0]],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("an independent source reporting an unknown inscription id does not itself break resolution", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence.push({
+    inscriptionId: "f".repeat(64) + "i9",
+    mediaType: "text/plain",
+    contentDigest: digestBytes(new TextEncoder().encode("unrelated")),
+  });
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
 });
 
 for (const scenario of fixtures.cases)

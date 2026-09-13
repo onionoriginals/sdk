@@ -8,6 +8,7 @@ import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
 import { AssetResolver, type SatProvider } from "../v3/resolution.js";
+import type { ContentValidator } from "../v3/content-validation.js";
 import { CredentialManager } from "../vc/CredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
@@ -40,6 +41,14 @@ export interface OriginalsSDKOptions
   publicReachability?: PublicReachabilityCheck;
   /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
   requirePublicReachability?: boolean;
+  /**
+   * Independently derives confirmed inscriptions' media type/content from chain data (for
+   * example `createBitcoinCoreContentValidator`), to cross-check against what
+   * `satProvider`/`ordinalsProvider` reports. When configured, resolution fails closed
+   * rather than accepting an unqualified content claim if this validator is unreachable or
+   * disagrees with the provider's reported content.
+   */
+  contentValidator?: ContentValidator;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -80,6 +89,7 @@ export class OriginalsSDK {
         "enableLogging",
         "publicReachability",
         "requirePublicReachability",
+        "contentValidator",
       ],
     );
     const {
@@ -90,6 +100,7 @@ export class OriginalsSDK {
       storageAdapter,
       publicReachability,
       requirePublicReachability,
+      contentValidator,
       ...utilities
     } = options;
     requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
@@ -165,6 +176,7 @@ export class OriginalsSDK {
       local,
       hosted,
       chainValidator,
+      contentValidator,
     );
     this.lifecycle = new LifecycleManager(
       local,
