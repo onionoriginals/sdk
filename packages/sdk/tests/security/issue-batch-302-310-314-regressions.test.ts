@@ -19,11 +19,8 @@ import { MultiSigManager } from '../../src/vc/MultiSigManager';
 import { KeyManager } from '../../src/did/KeyManager';
 import { DIDManager } from '../../src/did/DIDManager';
 import { multikey } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel';
-import {
-  canonicalizeEntryForChain,
-  witnessSigningBytes,
-} from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
+import { canonicalizeEntryForChain, witnessSigningBytes } from '@originals/cel/legacy';
 import { computeDigestMultibase, decodeDigestMultibase } from '@originals/cel';
 import type { EventLog } from '@originals/cel';
 import type { ExternalSigner, MultiSigPolicy, VerifiableCredential } from '../../src/types';
@@ -103,7 +100,7 @@ describe('#314 — witness proofs must sign the digest preimage the verifier rec
 
     const eventData = { name: 'Attested Asset' };
     // Reproduce the controller-proof signing convention used by the SDK.
-    const { canonicalizeEvent } = await import('@originals/cel');
+    const { canonicalizeEvent } = await import('@originals/cel/legacy');
     const controllerSig = await (ed25519 as any).signAsync(
       canonicalizeEvent({ type: 'create', data: eventData }),
       controllerSk,

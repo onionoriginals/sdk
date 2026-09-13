@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { verifyHistory } from '@originals/sdk/cel';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
+import { installLocalStorage } from './cel3-test-helpers';
 
 // Route the browser adapter's PUT /api/host/* AND the resolver's https GETs
 // through one in-process host store, so publish → resolve is deterministic
@@ -35,13 +36,18 @@ function installHostFetch(host: string) {
 describe('publish → resolve roundtrip', () => {
   const host = 'demo.test';
   let restore: () => void;
+  let restoreStorage: () => void;
 
   beforeEach(() => {
     (import.meta as unknown as { env: Record<string, string> }).env ??= {};
     (import.meta as unknown as { env: Record<string, string> }).env.VITE_WEBVH_HOST = host;
     restore = installHostFetch(host);
+    restoreStorage = installLocalStorage().restore;
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    restore();
+    restoreStorage();
+  });
 
   test('publishes the DID log and resolves it back over (mocked) HTTPS', async () => {
     const engine = new DemoEngine();

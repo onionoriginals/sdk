@@ -7,7 +7,7 @@ export type * from './network.js';
 export type * from './multisig.js';
 export type { OriginalsSDKOptions, OriginalsConfig } from '../core/OriginalsSDK3.js';
 export type { AssetResource, AssetResourceInput, AssetEnvelope, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, CreateAssetOptions, LocalResource } from '../v3/types.js';
-export type { CelSigner, AssetState, VerifiedHistory } from '@originals/cel/v3';
+export type { CelSigner, AssetState, VerifiedHistory, HistoryCheckpoint } from '@originals/cel/v3';
 export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from '../v3/resolution.js';
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence } from '../v3/hosted.js';
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from '../v3/bitcoin.js';

@@ -6,6 +6,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { SignetProvider } from '../../../src/bitcoin/providers/SignetProvider';
+import { StructuredError } from '@originals/cel';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -97,5 +98,62 @@ describe('SignetProvider.estimateFee fail-loud policy (issue #351)', () => {
     )) as typeof fetch;
     const provider = new SignetProvider({ ordUrl: 'http://ord', bitcoinRpcUrl: 'http://rpc' });
     await expect(provider.estimateFee(1)).resolves.toBe(12);
+  });
+});
+
+describe('SignetProvider.createInscription capability contract (issue #384)', () => {
+  test('rejects deferred content (buildContent) with a named StructuredError, even without a configured wallet', async () => {
+    const provider = new SignetProvider({ ordUrl: 'http://ord' });
+    const buildContent = () => new Uint8Array([1, 2, 3]);
+
+    await expect(
+      provider.createInscription({ buildContent, contentType: 'application/octet-stream' })
+    ).rejects.toThrow(/buildContent/);
+
+    try {
+      await provider.createInscription({ buildContent, contentType: 'application/octet-stream' });
+      throw new Error('expected createInscription to reject');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('ORD_PROVIDER_UNSUPPORTED');
+    }
+  });
+
+  test('rejects reinscribing a pinned satoshi (targetSatoshi) with a named StructuredError, even without a configured wallet', async () => {
+    const provider = new SignetProvider({ ordUrl: 'http://ord' });
+
+    await expect(
+      provider.createInscription({
+        data: new Uint8Array([1, 2, 3]),
+        contentType: 'application/octet-stream',
+        targetSatoshi: '123456789',
+      })
+    ).rejects.toThrow(/targetSatoshi/);
+
+    try {
+      await provider.createInscription({
+        data: new Uint8Array([1, 2, 3]),
+        contentType: 'application/octet-stream',
+        targetSatoshi: '123456789',
+      });
+      throw new Error('expected createInscription to reject');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('ORD_PROVIDER_UNSUPPORTED');
+    }
+  });
+
+  test('static data without a configured wallet still fails on the wallet-configuration message, not the capability rejection', async () => {
+    const provider = new SignetProvider({ ordUrl: 'http://ord' });
+    await expect(
+      provider.createInscription({ data: new Uint8Array([1, 2, 3]), contentType: 'application/octet-stream' })
+    ).rejects.toThrow(/funded signet wallet/);
+  });
+
+  test('static data with a configured wallet still fails with the CLI-only message (unimplemented, not unsupported)', async () => {
+    const provider = new SignetProvider({ ordUrl: 'http://ord', bitcoinRpcUrl: 'http://rpc' });
+    await expect(
+      provider.createInscription({ data: new Uint8Array([1, 2, 3]), contentType: 'application/octet-stream' })
+    ).rejects.toThrow(/ord wallet inscribe/);
   });
 });
