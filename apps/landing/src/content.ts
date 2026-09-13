@@ -12,10 +12,18 @@ export const site = {
    * assets … local CEL → did:webvh → did:btco') named the library and three DID
    * methods before it named anything a creator wants. Title stays under 60
    * characters and description under 155 so neither is truncated in search.
+   *
+   * Neither claims "first" or an instant Bitcoin timestamp (#605): Bitcoin
+   * resolution is sat-scoped (`crossSatCanonicality: 'unknown'`), so the
+   * protocol cannot rule out a competing creation on another sat, and
+   * publishing to the web and inscribing on Bitcoin are separate, sequential
+   * steps — never "the moment you publish". What it can prove is a signed,
+   * byte-exact history that anyone can re-check, later anchored and ordered
+   * on Bitcoin.
    */
-  title: 'Originals — Proof you published it first, on Bitcoin',
+  title: 'Originals — A signed history, anchored on Bitcoin',
   description:
-    'Screenshots are free. Provenance is not. Timestamp your work on Bitcoin the moment you publish it, so you can show you were first — and who owns it now.',
+    'Screenshots are free. Provenance is not. Sign a byte-exact history of your work, publish it for anyone to verify, and anchor ownership on Bitcoin.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -115,8 +123,8 @@ export const identityPanel = {
 };
 
 export const hero = {
-  eyebrow: 'Anchored on Bitcoin · Timestamped the moment you publish',
-  headline: 'Proof you published it first. Carved into Bitcoin.',
+  eyebrow: 'Signed history · Anchored on Bitcoin',
+  headline: 'A signed provenance trail. Anchored on Bitcoin.',
   subhead:
     'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed history of when it was published, where it lives, and who owns it now — from private draft to Bitcoin-anchored original.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
@@ -156,7 +164,7 @@ export const layers = [
 export const why = {
   id: 'why',
   eyebrow: 'Why it matters',
-  headline: 'The internet copies. Originals prove who was first.',
+  headline: 'The internet copies. Originals keeps the signed record.',
   subhead:
     'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail, timestamped on Bitcoin.',
   cards: [
