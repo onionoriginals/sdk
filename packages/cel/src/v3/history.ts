@@ -36,9 +36,38 @@ export interface VerifiedHistory {
   readonly scope: "controller-history";
   readonly bitcoinAcceptance: "unverified" | "not-applicable";
   readonly webvhBinding: "unverified" | "not-applicable";
+  /**
+   * Freshness/non-equivocation of the presented history, separate from signature-chain
+   * authentication. `"unknown"` when no checkpoint was supplied: a first-time verifier
+   * cannot know this is the latest or only branch. `"checkpoint-consistent"` when a
+   * supplied checkpoint's asset identity and head digest were confirmed to equal or be
+   * extended by this result. `"externally-anchored"` is reserved for witness/anchoring
+   * evidence outside this function's scope.
+   */
+  readonly freshness: "unknown" | "checkpoint-consistent" | "externally-anchored";
   readonly state: DeepReadonly<AssetState>;
 }
 const verified = new WeakSet<VerifiedHistory>();
+
+/**
+ * A portable, serializable record of a previously authenticated state: asset identity,
+ * head digest and entry count. Unlike a `prefix`, a checkpoint carries no object identity
+ * and can be persisted, transmitted to a different verifier, or reloaded after a restart.
+ */
+export interface HistoryCheckpoint {
+  readonly assetId: string;
+  readonly head: string;
+  readonly entryCount: number;
+}
+
+/** Extract a portable checkpoint from an authenticated result, for the caller to persist. */
+export function checkpointFromHistory(history: VerifiedHistory): HistoryCheckpoint {
+  return {
+    assetId: history.state.assetId,
+    head: history.state.head,
+    entryCount: history.state.entryCount,
+  };
+}
 
 function copyState(state: DeepReadonly<AssetState>): AssetState {
   // A derived state can outlive one document's size/value limits. Its components
@@ -56,7 +85,11 @@ function copyState(state: DeepReadonly<AssetState>): AssetState {
 }
 
 /** Shared deterministic transition engine. Input must already pass validateDocument. No network I/O. */
-function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
+function apply(
+  document: CelDocument,
+  prefix?: VerifiedHistory,
+  onEntry?: (entryCount: number, head: string) => void,
+): AssetState {
   let state = prefix ? copyState(prefix.state) : undefined;
   for (const entry of document.log) {
     const proof = verifyEntry(entry),
@@ -94,6 +127,7 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
         head: proof.digest,
         entryCount: 1,
       };
+      onEntry?.(1, proof.digest);
       continue;
     }
     requireThat(
@@ -176,6 +210,7 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
     }
     state.head = proof.digest;
     state.entryCount++;
+    onEntry?.(state.entryCount, state.head);
   }
   requireThat(state, "CEL_GENESIS", "Empty history");
   return state;
@@ -184,13 +219,24 @@ function apply(document: CelDocument, prefix?: VerifiedHistory): AssetState {
 /** Verify all signatures, links and authorized state transitions atomically.
  * A prefix must be an immutable result from this verifier, not a caller-supplied state.
  * Bitcoin acceptance and WebVH method binding always require separate observations.
+ * A `checkpoint` is a portable freshness claim, independently confirmed here, never
+ * trusted. Only positions this call itself authenticates are checkable: exactly the
+ * `prefix` boundary, or an entry in `document.log`. A checkpoint referring to a position
+ * further back than the supplied `prefix` throws `CEL_CHECKPOINT_UNVERIFIABLE`, not a
+ * false "fork" — re-verify from full history to confirm it instead.
  */
 export function verifyHistory(
   input: unknown,
-  options: { prefix?: VerifiedHistory; expectedAssetId?: string; /** @deprecated Use expectedAssetId. */ expectedDid?: string } = {},
+  options: {
+    prefix?: VerifiedHistory;
+    expectedAssetId?: string;
+    /** @deprecated Use expectedAssetId. */ expectedDid?: string;
+    checkpoint?: HistoryCheckpoint;
+  } = {},
 ): VerifiedHistory {
   const document = validateDocument(input),
-    prefix = options.prefix;
+    prefix = options.prefix,
+    checkpoint = options.checkpoint;
   if (prefix !== undefined)
     requireThat(
       verified.has(prefix),
@@ -215,17 +261,67 @@ export function verifyHistory(
       "Delta needs its authenticated prior history",
     );
   }
-  const state = apply(document, prefix);
+  // Only collected when a checkpoint is presented, to prove equal-or-extends against it
+  // from entries this call actually authenticated, never from the checkpoint's own say-so.
+  const observedHeads = checkpoint ? new Map<number, string>() : undefined;
+  const state = apply(
+    document,
+    prefix,
+    observedHeads && ((entryCount, head) => observedHeads.set(entryCount, head)),
+  );
   for (const expected of [options.expectedAssetId, options.expectedDid]) {
     if (expected === undefined) continue;
     requireThat(normalizeAssetId(expected) === state.assetId,
       "CEL_IDENTITY", "Requested identity differs from derived genesis");
+  }
+  let freshness: VerifiedHistory["freshness"] = "unknown";
+  if (checkpoint) {
+    requireThat(
+      typeof checkpoint.assetId === "string" &&
+        typeof checkpoint.head === "string" &&
+        checkpoint.head.length > 0 &&
+        Number.isInteger(checkpoint.entryCount) &&
+        checkpoint.entryCount >= 1,
+      "CEL_CHECKPOINT_MALFORMED",
+      "Checkpoint must be a well-formed { assetId, head, entryCount }",
+    );
+    requireThat(
+      sameAssetIdentity(checkpoint.assetId, state.assetId),
+      "CEL_CHECKPOINT_ASSET",
+      "Checkpoint asset identity differs from the presented history",
+    );
+    requireThat(
+      checkpoint.entryCount <= state.entryCount,
+      "CEL_CHECKPOINT_ROLLBACK",
+      "Presented history is behind the recipient's checkpoint",
+    );
+    // Only entries this call itself authenticated are checkable: the exact prefix
+    // boundary, or a position within document.log. A checkpoint further back than
+    // the supplied prefix is genuinely unprovable here — never silently treated as
+    // a fork, which would misreport "diverges" for what is really "cannot confirm".
+    const prefixEntryCount = prefix?.state.entryCount ?? 0;
+    requireThat(
+      checkpoint.entryCount >= prefixEntryCount,
+      "CEL_CHECKPOINT_UNVERIFIABLE",
+      "Checkpoint predates this call's own prefix boundary; re-verify from full history to confirm it",
+    );
+    const headAtCheckpoint =
+      checkpoint.entryCount === prefixEntryCount
+        ? prefix?.state.head
+        : observedHeads!.get(checkpoint.entryCount);
+    requireThat(
+      headAtCheckpoint !== undefined && headAtCheckpoint === checkpoint.head,
+      "CEL_CHECKPOINT_FORK",
+      "Presented history diverges from the recipient's checkpoint",
+    );
+    freshness = "checkpoint-consistent";
   }
   const result: VerifiedHistory = {
     status: "authenticated",
     scope: "controller-history",
     bitcoinAcceptance: state.layer === "btco" ? "unverified" : "not-applicable",
     webvhBinding: state.layer === "cel" ? "not-applicable" : "unverified",
+    freshness,
     // The state is constructed here, then recursively frozen (never a caller assertion).
     state: freeze(state),
   };
