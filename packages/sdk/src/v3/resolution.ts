@@ -9,6 +9,7 @@ import {
   digestBytes,
   type SatSnapshot,
   type SatResolution,
+  type ResourceAvailabilityRecord,
   type BitcoinNetwork,
   type ChainEvidence,
 } from "@originals/cel/v3";
@@ -29,6 +30,15 @@ export interface SatProvider {
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
 }
+/**
+ * Whether one historical resource version's bytes are recoverable from the accepted
+ * Bitcoin inscriptions alone ("bitcoin-inline"), or depend on a separate off-chain host
+ * ("referenced"). At most one current resource is inlined per publication (see
+ * `inlineResourceId` on `prepareBitcoinPublication`), so a multi-resource asset commonly
+ * has both kinds at once; "referenced" is the expected, by-design state for the rest,
+ * not a defect.
+ */
+export type ResourceAvailability = ResourceAvailabilityRecord;
 export type AssetResolution =
   | Exclude<SatResolution, { status: "accepted" }>
   | {
@@ -37,6 +47,8 @@ export type AssetResolution =
       verification: AssetVerification;
       resolution: Extract<SatResolution, { status: "accepted" }>;
       didDocument: DIDDocument | null;
+      /** One entry per historical resource version in the accepted log, oldest first. */
+      resourceAvailability: ResourceAvailability[];
     };
 export interface AssetDIDResolution {
   didDocument: DIDDocument | null;
@@ -210,12 +222,17 @@ export class AssetResolver {
       const key = JSON.stringify([body.mediaType, digestBytes(body.bytes)]);
       if (!inlineBytes.has(key)) inlineBytes.set(key, body.bytes);
     }
+    const resourceAvailability: ResourceAvailability[] = [];
     for (const resource of catalog) {
-      const bytes = inlineBytes.get(
-        JSON.stringify([resource.mediaType, resource.digestMultibase]),
-      );
+      const key = JSON.stringify([resource.mediaType, resource.digestMultibase]);
+      const bytes = inlineBytes.get(key);
       if (bytes)
         attachments.push(attachment(resource.id, resource.version, bytes));
+      resourceAvailability.push({
+        id: resource.id,
+        version: resource.version,
+        availability: bytes ? "bitcoin-inline" : "referenced",
+      });
     }
     const asset = new OriginalsAsset(
       document,
@@ -252,7 +269,14 @@ export class AssetResolver {
           assertionMethod: [method],
         }
       : null;
-    return { status: "accepted", asset, verification, resolution, didDocument };
+    return {
+      status: "accepted",
+      asset,
+      verification,
+      resolution,
+      didDocument,
+      resourceAvailability,
+    };
   }
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {

@@ -89,6 +89,18 @@ export interface PublicationEvidence {
   inlineResourceIds: string[];
   inlineContentStatus: "not-inline" | "matched" | "unmatched";
 }
+/**
+ * `bitcoin-inline` means these exact current bytes were matched inline in an accepted
+ * publication; `referenced` means the current state names this resource but no accepted
+ * publication in this snapshot carried its bytes on-chain. A resource can regress from
+ * `bitcoin-inline` to `referenced` after an update changes its digest.
+ */
+export type ResourceAvailability = "bitcoin-inline" | "referenced";
+export interface ResourceAvailabilityRecord {
+  id: string;
+  version: number;
+  availability: ResourceAvailability;
+}
 export type SatResolution = Readonly<
   | {
       status: ResolutionFailure;
@@ -111,6 +123,8 @@ export type SatResolution = Readonly<
       webvhBinding: "unverified";
       /** Scoped to chain facts only; never implies verified enumeration completeness. */
       chainEvidence: Readonly<ChainEvidence>;
+      /** Per current resource, whether its exact bytes were recovered from this snapshot's accepted publications. */
+      resourceAvailability: readonly Readonly<ResourceAvailabilityRecord>[];
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -362,7 +376,8 @@ export function resolveSat(
   let history: VerifiedHistory | undefined,
     lastHeight = -1;
   const accepted: PublicationEvidence[] = [],
-    diagnostics: { inscriptionId: string; code: string }[] = [];
+    diagnostics: { inscriptionId: string; code: string }[] = [],
+    inlinedContent = new Set<string>();
   for (const publication of ordered) {
     const ignore = (code: string) =>
       diagnostics.push({ inscriptionId: publication.id, code });
@@ -423,6 +438,9 @@ export function resolveSat(
             : "unmatched";
       if (inlineContentStatus === "unmatched")
         ignore("CEL_INLINE_RESOURCE_MISMATCH");
+      if (inlineResourceIds.length > 0) {
+        inlinedContent.add(JSON.stringify([body.mediaType, contentDigest]));
+      }
       // Choose the first valid boundary independent of a requested genesis filter.
       if (
         !history &&
@@ -459,6 +477,14 @@ export function resolveSat(
   // Snapshot data cannot select its own trust level. Explicit application-side
   // validation in the SDK may upgrade the resolved result after checking this view.
   const chainEvidence: ChainEvidence = { assurance: "provider-asserted" };
+  const resourceAvailability: ResourceAvailabilityRecord[] =
+    history.state.resources.map((resource) => ({
+      id: resource.id,
+      version: resource.version,
+      availability: inlinedContent.has(JSON.stringify([resource.mediaType, resource.digestMultibase]))
+        ? "bitcoin-inline"
+        : "referenced",
+    }));
   const result: SatResolution = {
     status: "accepted",
     scope: "sat",
@@ -472,6 +498,7 @@ export function resolveSat(
     diagnostics,
     webvhBinding: "unverified",
     chainEvidence,
+    resourceAvailability,
   };
   freeze<unknown>(result);
   return result;
