@@ -5,6 +5,7 @@ import {
   createLocalSigner,
   signEvent,
   CelError,
+  type HistoryCheckpoint,
 } from "../../src/v3/index.js";
 
 function codeOf(fn: () => unknown): string {
@@ -187,6 +188,19 @@ test("checkpoint consistency fails closed on wrong asset, rollback, or fork", as
       ),
     ),
   ).toBe("CEL_CHECKPOINT_FORK");
+});
+
+test("a falsy but explicitly-supplied checkpoint fails closed, not silently treated as absent", () => {
+  // A non-TypeScript caller (or one bypassing the type system) can pass `null`, or any
+  // other falsy runtime value, where HistoryCheckpoint is declared. Checking `if (checkpoint)`
+  // would treat that the same as "no checkpoint supplied" and silently return freshness
+  // "unknown" instead of rejecting the malformed request - disabling the caller's requested
+  // rollback/fork protection without telling them. Only `undefined` means "not supplied".
+  for (const malformed of [null, 0, "", false] as unknown as HistoryCheckpoint[]) {
+    expect(
+      codeOf(() => verifyHistory({ log: [genesis] }, { checkpoint: malformed })),
+    ).toBe("CEL_CHECKPOINT_MALFORMED");
+  }
 });
 
 test("a malformed checkpoint can never pass by an undefined-equals-undefined coincidence", () => {

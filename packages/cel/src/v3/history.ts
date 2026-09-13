@@ -261,9 +261,15 @@ export function verifyHistory(
       "Delta needs its authenticated prior history",
     );
   }
+  // A checkpoint is "requested" whenever the caller passed anything but undefined for it,
+  // even a runtime value a non-TypeScript caller supplied that violates HistoryCheckpoint's
+  // shape (null, a primitive, a partial object). Checking truthiness instead would treat
+  // such a malformed-but-supplied checkpoint the same as "no checkpoint", silently
+  // downgrading to freshness "unknown" instead of failing closed.
+  const checkpointRequested = checkpoint !== undefined;
   // Only collected when a checkpoint is presented, to prove equal-or-extends against it
   // from entries this call actually authenticated, never from the checkpoint's own say-so.
-  const observedHeads = checkpoint ? new Map<number, string>() : undefined;
+  const observedHeads = checkpointRequested ? new Map<number, string>() : undefined;
   const state = apply(
     document,
     prefix,
@@ -275,9 +281,10 @@ export function verifyHistory(
       "CEL_IDENTITY", "Requested identity differs from derived genesis");
   }
   let freshness: VerifiedHistory["freshness"] = "unknown";
-  if (checkpoint) {
+  if (checkpointRequested) {
     requireThat(
-      typeof checkpoint.assetId === "string" &&
+      checkpoint !== null &&
+        typeof checkpoint.assetId === "string" &&
         typeof checkpoint.head === "string" &&
         checkpoint.head.length > 0 &&
         Number.isInteger(checkpoint.entryCount) &&
