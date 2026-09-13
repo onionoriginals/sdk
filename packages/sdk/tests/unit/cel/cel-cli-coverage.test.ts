@@ -26,9 +26,9 @@ import { resolveCommand } from '../../../src/cel/cli/resolve';
 import { main } from '../../../src/cel/cli/index';
 
 // CEL algorithms & serialization helpers
-import { createEventLog } from '@originals/cel';
-import { updateEventLog } from '@originals/cel';
-import { deactivateEventLog } from '@originals/cel';
+import { createEventLog } from '@originals/cel/legacy';
+import { updateEventLog } from '@originals/cel/legacy';
+import { deactivateEventLog } from '@originals/cel/legacy';
 import { serializeEventLogJson } from '@originals/cel';
 
 // Types
@@ -36,7 +36,7 @@ import type { DataIntegrityProof, EventLog } from '@originals/cel';
 
 // Multikey + canonicalize for real Ed25519 proofs
 import { multikey } from '@originals/cel';
-import { canonicalizeEvent } from '@originals/cel';
+import { canonicalizeEvent } from '@originals/cel/legacy';
 import { createRealCelSigner } from '../../fixtures/celSigner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ describe('CEL-CLI-002/security: verify with invalid proof signature', () => {
 
 describe('CEL-CLI-003/happy: inspect layer history (peer→webvh)', () => {
   it('shows both layers with a first-class migrate event over a did:cel genesis', async () => {
-    const { appendEvent } = await import('@originals/cel');
+    const { appendEvent } = await import('@originals/cel/legacy');
     const { deriveDidCel } = await import('@originals/cel');
     const signer = makeMockSigner();
     const opts = { signer, verificationMethod: 'did:key:z6MkMock#key-1', proofPurpose: 'assertionMethod' };

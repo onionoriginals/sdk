@@ -12,7 +12,7 @@
  */
 import { Verifier, type StatusListResolver } from '../vc/Verifier.js';
 import { credentialStatusEntries } from '../vc/credentialStatus.js';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { createDidManagerKeyResolver } from '@originals/cel';
 import type { DIDManager } from '../did/DIDManager.js';
 import type { VerifiableCredential } from '../types/index.js';

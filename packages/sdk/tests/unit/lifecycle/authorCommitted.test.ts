@@ -14,7 +14,7 @@ import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter'
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { hashResource } from '../../../src/utils/validation';
-import { currentControllerVm } from '@originals/cel';
+import { currentControllerVm } from '@originals/cel/legacy';
 
 const contentHash = (s: string) => hashResource(Buffer.from(s, 'utf8'));
 

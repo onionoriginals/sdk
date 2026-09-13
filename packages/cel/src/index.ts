@@ -8,11 +8,16 @@
 
 export * from './types.js';
 export * from './hash.js';
-export * from './canonicalize.js';
+// canonicalizeEvent and its derivatives are previous-format-only (issue #599)
+// and are intentionally not exported from this root; import them from
+// '@originals/cel/legacy'.
 export { DID_CEL_PREFIX, deriveDidCel, deriveDidCelFromGenesis, isDidCel, didCelMatchesLog, createCelDidDocument, resolveDidCel } from './celDid.js';
 export * from './btcoDid.js';
 export * from './resourceHead.js';
-export * from './algorithms/index.js';
+// The previous-format event-log algorithms (createEventLog, appendEvent,
+// updateEventLog, deactivateEventLog, verifyEventLog, witnessEvent, the
+// custody-fold helpers) are not exported from this root either (issue #597):
+// import them from '@originals/cel/legacy'.
 export * from './witnesses/index.js';
 export * from './serialization/index.js';
 export * from './ExternalReferenceManager.js';
@@ -29,15 +34,13 @@ export {
   verifyDidKeyProof,
   structuralCheckReason,
 } from './proofVerification.js';
-export * from './layers/index.js';
-export * from './OriginalsCel.js';
+// PeerCelManager / WebVHCelManager / BtcoCelManager, OriginalsCel (which
+// wraps all three), and the previous-format signer helpers (celSignerFromKeyPair,
+// createKeyStoreCelSigner, currentControllerVm, hexSha256ToDigestMultibase) are
+// the previous-format writer surface (issue #597) and live behind
+// '@originals/cel/legacy' only, so a new consumer importing this root cannot
+// reach a previous-format writer and mistake it for the canonical one.
 export * from './keyResolver.js';
-export {
-  celSignerFromKeyPair,
-  createKeyStoreCelSigner,
-  currentControllerVm,
-  hexSha256ToDigestMultibase,
-} from './signerAdapter.js';
 
 // Shared primitives extracted with the CEL core. These are the CANONICAL
 // definitions — @originals/sdk re-exports them, never redefines them.

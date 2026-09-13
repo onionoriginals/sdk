@@ -6,7 +6,7 @@ import { MockKeyStore } from '../../mocks/MockKeyStore';
 import { OriginalsConfig } from '../../../src/types';
 import { MemoryStorageAdapter } from '../../../src/storage/MemoryStorageAdapter';
 import { deriveDidCel } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel';
+import { verifyEventLog } from '@originals/cel/legacy';
 import { OriginalsAsset } from '../../../src/lifecycle/OriginalsAsset';
 
 const config: OriginalsConfig = {
