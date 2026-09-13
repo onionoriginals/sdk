@@ -92,6 +92,42 @@ export interface InscriptionRecord {
   updatedAt: string;
   /** When the reveal was last re-pushed; the throttle clock, separate from `updatedAt`. */
   rebroadcastAt?: string;
+  /**
+   * Confirmation depth last observed while `status` was `confirmed` — the
+   * "confirmed-but-unsettled vs settled" distinction a caller needs before
+   * treating an inscription as final. ABSENT whenever `status` is anything
+   * else: depth is only meaningful while actually confirmed, so a reorg that
+   * un-confirms the reveal clears it rather than leaving a stale number a
+   * caller could mistake for current truth. Frozen at whatever value
+   * triggered `retired`, since a retired record is never rechecked again.
+   */
+  confirmations?: number;
+  /**
+   * Block height of the MOST RECENT observed confirmation. Unlike
+   * `confirmations`, this is NOT cleared when a reorg demotes the record off
+   * `confirmed`: it is deliberately sticky, so a later reconfirmation can be
+   * compared against it. Replaced or cleared by a fresh confirmed
+   * observation; never read as "currently confirmed" without also checking
+   * `status`.
+   *
+   * Height alone is NOT block identity: an ordinary one-block reorg can
+   * replace the block at a given height with a different one, so a height
+   * match does not prove the reveal reconfirmed in the SAME block. See
+   * `confirmedBlockHash`, which is the actual identity check; height is kept
+   * alongside it as a human-readable depth/position hint and as a fallback
+   * for providers that cannot supply a hash.
+   */
+  confirmedBlockHeight?: number;
+  /**
+   * Block hash of the MOST RECENT observed confirmation — the real block
+   * IDENTITY, sticky across a demotion for the same reason as
+   * `confirmedBlockHeight`. A same-height reorg (block A replaced by block B
+   * at height H) changes this even though `confirmedBlockHeight` alone would
+   * not notice. ABSENT when the provider did not supply one; a caller must
+   * not treat a missing hash as "unchanged" — fall back to comparing
+   * `confirmedBlockHeight` in that case.
+   */
+  confirmedBlockHash?: string;
 }
 
 /** A deposit read the server was able to trust, as persisted. */
@@ -123,7 +159,23 @@ export interface InscriptionsStore {
    */
   retire(subOrgId: string, commitTxId: string): void;
   get(subOrgId: string, commitTxId: string): InscriptionRecord | null;
-  setStatus(subOrgId: string, commitTxId: string, status: InscriptionStatus): void;
+  /**
+   * `evidence` is the block height/hash/confirmation depth a fresh provider
+   * read just reported, recorded only when `status` is `confirmed`.
+   * `confirmations` (a live depth) is cleared for every other status.
+   * `evidence.blockHeight`/`evidence.blockHash` are instead STICKY across a
+   * demotion — see `InscriptionRecord.confirmedBlockHeight` /
+   * `confirmedBlockHash` — so a later reconfirmation can be compared against
+   * the pre-reorg block identity rather than read as a continuation of it.
+   * Omit `evidence` (or leave a field off it) when the caller does not have a
+   * fresh read.
+   */
+  setStatus(
+    subOrgId: string,
+    commitTxId: string,
+    status: InscriptionStatus,
+    evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
+  ): void;
   /**
    * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
    * Touches ONLY
@@ -509,7 +561,7 @@ export function createInscriptionsStore(opts: {
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;
     },
-    setStatus(subOrgId, commitTxId, status) {
+    setStatus(subOrgId, commitTxId, status, evidence) {
       const recs = readAll(subOrgId);
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
@@ -517,6 +569,45 @@ export function createInscriptionsStore(opts: {
       rec.updatedAt = new Date(now()).toISOString();
       // Confirmation is reversible. The reconciler explicitly retires the
       // pair only after its configured recovery horizon has elapsed.
+      // Depth is current-truth-while-confirmed only: any OTHER status
+      // (including the reorg demotion back to reveal_broadcast) clears it
+      // rather than carrying a stale reading forward. Block height/hash are
+      // deliberately NOT cleared on demotion — see `confirmedBlockHeight` /
+      // `confirmedBlockHash` — so a later reconfirmation can still be
+      // compared against them.
+      rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
+      // Height and hash describe ONE block identity, not two independent
+      // facts — they must never drift out of sync with each other. They are
+      // the only record of this reveal's last known block identity, and the
+      // reorg comparison in bitcoin.ts reads them back on the very next
+      // poll, so an evidence-less read (a provider hiccup that still reports
+      // `confirmed` but omits one or both) must not lose them: clearing
+      // either on a bare omission would erase the sole anchor a SAME-HEIGHT
+      // reorg needs to be detected against, permanently disabling that
+      // detection until the next read happens to include a value again.
+      //
+      // But a NEW hash is a NEW block identity, whether or not this read's
+      // height lookup also succeeded (QuickNode resolves them via separate
+      // RPC calls, so one can fail independently of the other). Pairing that
+      // new hash with the OLD block's still-sticky height would describe an
+      // identity that was never actually observed — worse than an absent
+      // height, since a caller can't tell "unknown" from "verified same as
+      // before". So height is cleared (not left stale) exactly when this
+      // read's hash proves the identity changed but doesn't say to what
+      // height; otherwise (hash unchanged, or this read has no hash opinion
+      // at all) the previous height is exactly as valid as before.
+      if (status === 'confirmed') {
+        const freshHash = evidence?.blockHash;
+        const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
+        if (evidence?.blockHeight !== undefined) {
+          rec.confirmedBlockHeight = evidence.blockHeight;
+        } else if (identityChanged) {
+          rec.confirmedBlockHeight = undefined;
+        }
+        if (freshHash !== undefined) {
+          rec.confirmedBlockHash = freshHash;
+        }
+      }
       writeAll(subOrgId, recs);
     },
     markRebroadcast(subOrgId, commitTxId) {

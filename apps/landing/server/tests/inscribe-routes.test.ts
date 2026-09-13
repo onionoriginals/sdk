@@ -282,11 +282,15 @@ function harness(opts?: {
   /** Skip the deposit binding, to exercise the UNBOUND refusal (#493). */
   bind?: false;
   broadcast?: (txHex: string) => Promise<string>;
-  txStatus?: { confirmed: boolean; confirmations?: number } | ((txid: string) => { confirmed: boolean; confirmations?: number });
+  txStatus?:
+    | { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }
+    | ((txid: string) => { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string });
   /** Resolve the status lookup on a LATER macrotask — the concurrency window. */
   txStatusDelayMs?: number;
   /** The ordinal lookup the route classifies with; `null` = none configured. */
   ordinals?: OrdinalLookup | null;
+  /** The explicit settlement policy (#567); defaults to the route's own default (6). */
+  recoveryConfirmations?: number;
   /** `null` leaves the inscribe route with no indexer configured — the fail-closed case for #493 M07's value lookup. */
   indexer?: { api: string } | null;
   /** Overrides the fake indexer's fetch, e.g. to simulate a read that cannot be trusted. */
@@ -328,6 +332,7 @@ function harness(opts?: {
     faucet: { address: USER_ADDRESS, signFundingTx: async () => '00' },
     inscriptions: store,
     ordinals: opts?.ordinals === null ? undefined : (opts?.ordinals ?? CLEAN_ORDINALS),
+    recoveryConfirmations: opts?.recoveryConfirmations,
     indexer: opts?.indexer === null ? undefined : (opts?.indexer ?? { api: 'https://fake-indexer.test' }),
     fetchImpl: ((...args: Parameters<typeof fetch>) => { indexerFetchCalls++; return fetchImpl(...args); }) as typeof fetch,
   });
@@ -942,15 +947,45 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
         if (failReveal && txHex === pair.revealTxHex) throw new Error('down');
         return 'f'.repeat(64);
       },
-      txStatus: { confirmed: true },
+      txStatus: { confirmed: true, confirmations: 1, blockHeight: 300 },
     });
     await post(h.routes, pair); // leaves status commit_broadcast
     const before = h.broadcasts.length;
     const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
     const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { status: string }).status).toBe('confirmed');
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.status).toBe('confirmed');
+    // #567: the manual route reports the same settlement contract as the list
+    // poll — a caller cannot otherwise tell "confirmed" from "confirmed AND
+    // recovery artifacts retired" apart.
+    expect(body.settled).toBe(false); // 1 confirmation, below the default six
+    expect(body.confirmations).toBe(1);
+    expect(body.confirmedBlockHeight).toBe(300);
     expect(h.broadcasts.length).toBe(before); // nothing rebroadcast
+  });
+
+  test('#567: a manual rebroadcast that crosses the settlement threshold reports settled and retires', async () => {
+    const pair = buildPair();
+    const h = harness({ txStatus: { confirmed: true, confirmations: 6, blockHeight: 400 } });
+    await post(h.routes, pair);
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body.settled).toBe(true);
+    expect(body.confirmations).toBe(6);
+    expect(body.confirmedBlockHeight).toBe(400);
+    expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+
+    // A second manual call hits the already-retired short-circuit, which must
+    // report the same terminal settlement state from the frozen evidence.
+    const req2 = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req2, new URL(req2.url));
+    const body2 = (await res2.json()) as { status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number };
+    expect(body2.settled).toBe(true);
+    expect(body2.confirmations).toBe(6);
+    expect(body2.confirmedBlockHeight).toBe(400);
   });
 
   /**
@@ -1897,6 +1932,137 @@ test('one confirmation survives a restart, demotes on reorg, and retires only at
   confirmations = 6;
   expect(await poll()).toBe('confirmed');
   expect(reloaded.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: the settlement threshold is configurable UPWARD and drives the exposed settled flag', async () => {
+  let confirmations = 1;
+  let blockHeight = 200;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight }),
+    recoveryConfirmations: 8, // deliberately ABOVE the default six, never below
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean; confirmations?: number; confirmedBlockHeight?: number }>;
+    }).inscriptions[0];
+  };
+
+  confirmations = 6; // meets the historical default, but NOT the configured 8
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false);
+  expect(row.confirmations).toBe(6);
+  expect(row.confirmedBlockHeight).toBe(200);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 8;
+  row = await poll();
+  expect(row.settled).toBe(true); // meets the CONFIGURED threshold
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: recoveryConfirmations cannot lower the settlement threshold below six', async () => {
+  let confirmations = 1;
+  const h = harness({
+    txStatus: () => ({ confirmed: confirmations > 0, confirmations, blockHeight: 200 }),
+    recoveryConfirmations: 1, // an attempt to shrink the retention window
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; settled?: boolean }>;
+    }).inscriptions[0];
+  };
+
+  // A confirmation count that would settle at the requested "1" must NOT
+  // retire the recovery artifacts — the floor holds regardless of config.
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 5;
+  row = await poll();
+  expect(row.settled).toBe(false);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).not.toBe(true);
+
+  confirmations = 6;
+  row = await poll();
+  expect(row.settled).toBe(true);
+  expect(h.store.get('sub-1', pair.commitTxId)?.retired).toBe(true);
+});
+
+test('#567: a same-height reorg (block A replaced by block B) is detected via block hash, not just height', async () => {
+  // The scenario the height-only check could not see: the reveal reconfirms
+  // at the SAME height after a reorg, in a DIFFERENT block — no intervening
+  // unconfirmed poll required for this to matter, since a poll landing
+  // exactly on the replacement would otherwise read "still confirmed, same
+  // height" and conclude nothing happened.
+  let blockHash = 'a'.repeat(64);
+  const h = harness({
+    txStatus: () => ({ confirmed: true, confirmations: 1, blockHeight: 500, blockHash }),
+  });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    const response = await h.routes.inscribeList(req, new URL(req.url));
+    return ((await response.json()) as {
+      inscriptions: Array<{ status: string; confirmedBlockHeight?: number; confirmedBlockHash?: string }>;
+    }).inscriptions[0];
+  };
+
+  let row = await poll();
+  expect(row.status).toBe('confirmed');
+  expect(row.confirmedBlockHeight).toBe(500);
+  expect(row.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same height, different block: an ordinary one-block reorg, not a demotion.
+  blockHash = 'b'.repeat(64);
+  row = await poll();
+  expect(row.confirmedBlockHeight).toBe(500); // height alone looks unchanged…
+  expect(row.confirmedBlockHash).toBe('b'.repeat(64)); // …but the identity moved
+});
+
+test('#567: repeated polls with unchanged depth and an omitted height/hash write to disk only once', async () => {
+  // A provider whose best-effort height/hash lookup keeps failing while
+  // confirmations sit still (waiting for the next block) must not look like
+  // a change on every poll — setStatus leaves the stored evidence exactly as
+  // it was, and the reconciler should recognize that ahead of time rather
+  // than writing (and bumping updatedAt) for a read that changed nothing.
+  const h = harness({ txStatus: { confirmed: true, confirmations: 1, blockHeight: 300, blockHash: 'a'.repeat(64) } });
+  const pair = buildPair();
+  await post(h.routes, pair);
+  const poll = async () => {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    return h.routes.inscribeList(req, new URL(req.url));
+  };
+  await poll(); // first observation: writes once, establishing the evidence
+  const afterFirst = h.store.get('sub-1', pair.commitTxId)!;
+  expect(afterFirst.confirmedBlockHeight).toBe(300);
+  expect(afterFirst.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same confirmations, but this poll's evidence omits height/hash entirely
+  // (a transient provider lookup failure) — repeated several times, against
+  // the same durable state.
+  const flaky = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
+  for (let i = 0; i < 3; i++) {
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    await flaky.routes.inscribeList(req, new URL(req.url));
+  }
+  const afterFlaky = flaky.store.get('sub-1', pair.commitTxId)!;
+  // Stored evidence is untouched — no change was ever observed — and so is
+  // updatedAt, proving no durable write happened on any of those polls.
+  expect(afterFlaky.confirmedBlockHeight).toBe(300);
+  expect(afterFlaky.confirmedBlockHash).toBe('a'.repeat(64));
+  expect(afterFlaky.updatedAt).toBe(afterFirst.updatedAt);
 });
 
 test.each(['local node temporarily unavailable', 'bad-txns-inputs-missingorspent', 'txn-mempool-conflict'])(

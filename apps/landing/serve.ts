@@ -139,6 +139,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         ordinals,
         moneyLog: money,
         inscriptions: inscriptionsStore,
+        recoveryConfirmations: positiveInt(process.env.BTC_RECOVERY_CONFIRMATIONS, 6),
       });
       bitcoin = { ...routes, funding: undefined };
       console.log(`[landing] ${btcNet} inscription configured — /api/btc/* live (creator-pays, no faucet)`);
@@ -174,6 +175,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         ordinals,
         moneyLog: money,
         inscriptions: inscriptionsStore,
+        recoveryConfirmations: positiveInt(process.env.BTC_RECOVERY_CONFIRMATIONS, 6),
       });
     }
   } else {
