@@ -217,7 +217,6 @@ describe('deposit-path transitions (R29)', () => {
 });
 
 describe('inscribe-path transitions (R29)', () => {
-  const moneyLogChainRegistry = new WeakMap<object, Map<string, { txid: string; vout: number; value: number }>>();
   const USER_PRIV = hex.decode('4'.repeat(64));
   const USER_PUB = secp256k1.getPublicKey(USER_PRIV, true);
   const USER_P2WPKH = btc.p2wpkh(USER_PUB, btc.TEST_NETWORK);
@@ -225,7 +224,44 @@ describe('inscribe-path transitions (R29)', () => {
   const USER_SCRIPT = hex.encode(USER_P2WPKH.script);
   const INSCRIPTION = inscriptionFixture(USER_PRIV);
 
-  function buildPair(fundingTxid = 'a'.repeat(64)) {
+  /**
+   * Fake indexer backing store for the inscribe route's independent
+   * input-value lookup (#493 M07): `GET /tx/<txid>/hex` answers from this
+   * map, keyed by each transaction's OWN computed id — the route rejects a
+   * fetched transaction whose id doesn't match the txid it was requested
+   * under.
+   */
+  const FUNDING_TX_HEX = new Map<string, string>();
+  let fundingSeq = 0;
+  /** Builds, registers and returns the real txid of a funding transaction paying `value` sats at `vout` to `scriptPubKey`. */
+  function makeFundingUtxo(vout: number, value: number, scriptPubKey: string): string {
+    fundingSeq++;
+    const tx = new btc.Transaction({ allowUnknownOutputs: true });
+    tx.addInput({
+      txid: fundingSeq.toString(16).padStart(64, '0'),
+      index: 0,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: USER_P2WPKH.script, amount: BigInt(value) + 10_000n },
+    });
+    for (let i = 0; i < vout; i++) tx.addOutputAddress(USER_ADDRESS, 1_000n, btc.TEST_NETWORK);
+    tx.addOutput({ script: hex.decode(scriptPubKey), amount: BigInt(value) });
+    tx.sign(USER_PRIV);
+    tx.finalize();
+    const txid = tx.id;
+    FUNDING_TX_HEX.set(txid.toLowerCase(), hex.encode(tx.extract()));
+    return txid;
+  }
+  function fakeIndexerFetch(): typeof fetch {
+    return (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const m = url.match(/\/tx\/([0-9a-fA-F]+)\/hex$/);
+      const raw = m ? FUNDING_TX_HEX.get(m[1].toLowerCase()) : undefined;
+      return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  function buildPair() {
+    const fundingTxid = makeFundingUtxo(0, 50_000, USER_SCRIPT);
     const commit = new btc.Transaction();
     commit.addInput({
       txid: fundingTxid,
@@ -262,9 +298,6 @@ describe('inscribe-path transitions (R29)', () => {
     // #493: an unbound account may not name its own change address, so bind it
     // as the real flow does when a creator reads their deposit address.
     store.bindDepositAddress('sub-1', 'testnet', USER_ADDRESS);
-    // The independent economics check (#493/M07) re-derives funding values
-    // from the indexer; mock it to confirm exactly the UTXO buildPair() signs.
-    const chainRegistry = new Map<string, { txid: string; vout: number; value: number }>();
     const routes = createBitcoinRoutes({
       jwtSecret: JWT,
       provider: {
@@ -278,26 +311,13 @@ describe('inscribe-path transitions (R29)', () => {
       // Clean coins: the route now classifies the declared outpoints itself (#493).
       ordinals: { outpointInscriptions: async () => [] },
       moneyLog: cap.log,
-      indexer: { api: 'http://mock-indexer.test' },
-      fetchImpl: (async () =>
-        new Response(
-          JSON.stringify([...chainRegistry.values()].map((u) => ({ ...u, status: { confirmed: true } }))),
-          { status: 200, headers: { 'content-type': 'application/json' } }
-        )) as unknown as typeof fetch,
+      indexer: { api: 'https://fake-indexer.test' },
+      fetchImpl: fakeIndexerFetch(),
     });
-    moneyLogChainRegistry.set(routes, chainRegistry);
     return { routes, cap };
   }
 
   async function submit(routes: ReturnType<typeof inscribeHarness>['routes'], body: unknown) {
-    const registry = moneyLogChainRegistry.get(routes);
-    if (registry) {
-      const b = body as { fundingUtxos?: Array<{ txid?: string; vout?: number; value?: number }> } | null | undefined;
-      for (const u of b?.fundingUtxos ?? []) {
-        if (!u || typeof u.txid !== 'string' || typeof u.vout !== 'number') continue;
-        registry.set(`${u.txid.toLowerCase()}:${u.vout}`, { txid: u.txid, vout: u.vout, value: typeof u.value === 'number' ? u.value : 0 });
-      }
-    }
     const token = signToken('sub-1', EMAIL, undefined, { secret: JWT });
     const cookie = serializeCookie(getAuthCookieConfig(token));
     const req = new Request('http://host/api/btc/inscribe', {

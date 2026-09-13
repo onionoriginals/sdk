@@ -57,14 +57,10 @@ export interface InscriptionRecord {
   changeAddress: string;
   status: InscriptionStatus;
   /**
-   * Set once the independent economics check (#493/M07) has verified this
-   * exact commit/reveal pair's amounts against the indexer. `commitTxId`
-   * hashes the exact signed bytes, so a resubmission matching an EXISTING
-   * record is proof the pair is unchanged — but only a record carrying this
-   * flag was ever actually checked. ABSENT on records written before that
-   * check existed: a resubmission of one of those still re-verifies, rather
-   * than silently trusting a pair the server never actually confirmed the
-   * economics of.
+   * The retained signed pair passed independent funding-value and fee checks.
+   * Approval may be reused only for identical commit/reveal bytes, including
+   * witnesses; transaction IDs alone do not bind transaction size. Legacy rows
+   * without this flag and retired rows without artifacts require fresh checks.
    */
   economicsVerified?: boolean;
   /**
@@ -136,14 +132,9 @@ export interface InscriptionsStore {
    */
   markRebroadcast(subOrgId: string, commitTxId: string): void;
   /**
-   * Stamp a record that just passed the independent economics check
-   * (#493/M07) for the first time — a legacy record written before that
-   * check existed, now upgraded after successfully re-verifying. Without
-   * this, a LATER retry of the same record re-derives economics from chain
-   * state THIS attempt's own broadcast may have already invalidated (its
-   * funding outpoint spent), refusing a pair that was genuinely verified.
-   * Touches ONLY `economicsVerified`, like `markRebroadcast` leaves
-   * `updatedAt` alone — this is bookkeeping, not a status transition.
+   * Persist first-time economics approval for a legacy record after its retained
+   * signed pair passes verification. Later exact retries can survive an indexer
+   * outage or a changed fee estimate. Leaves status and updatedAt unchanged.
    */
   markEconomicsVerified(subOrgId: string, commitTxId: string): void;
   list(subOrgId: string): InscriptionRecord[];

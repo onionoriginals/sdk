@@ -1419,6 +1419,33 @@ export function createBitcoinRoutes(deps: {
     }
   }
 
+  /** Read funding amounts from txid-verified previous transactions, including spent outputs. */
+  async function resolveFundingValues(
+    inputs: Array<{ txid: string; vout: number }>,
+    fundingScript: string
+  ): Promise<bigint | null> {
+    if (!indexer) return null;
+    const byTxid = new Map<string, btc.Transaction>();
+    let totalSats = 0n;
+    for (const { txid, vout } of inputs) {
+      const key = txid.toLowerCase();
+      let tx = byTxid.get(key);
+      if (!tx) {
+        const raw = await fetchRawTxHex({ ...indexer, txid: key, fetchImpl: deps.fetchImpl });
+        const parsed = raw ? parseRawTx(raw) : null;
+        if (!parsed || parsed.id.toLowerCase() !== key) return null;
+        tx = parsed;
+        byTxid.set(key, tx);
+      }
+      if (!Number.isSafeInteger(vout) || vout < 0 || vout >= tx.outputsLength) return null;
+      const output = tx.getOutput(vout);
+      if (typeof output.amount !== 'bigint' || output.amount < 0n ||
+          hex.encode(output.script ?? new Uint8Array()) !== fundingScript) return null;
+      totalSats += output.amount;
+    }
+    return totalSats;
+  }
+
   /**
    * Broadcast, treating an already-known tx as success. Returns an error
    * message or null. Accepts undefined so callers can pass a retired record's
@@ -1576,16 +1603,7 @@ export function createBitcoinRoutes(deps: {
       return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
     }
     const commitTxId = commit.id;
-    // `commitTxId` hashes the exact signed bytes, so a record already filed
-    // under it is BYTE-IDENTICAL to what is being resubmitted now — not a new
-    // transaction to (re-)validate. This matters for the economics check
-    // below: by the time a commit is retried (dead-tab recovery, an ambiguous
-    // broadcast, a client that never heard the first 200), its funding UTXO
-    // is typically already spent and will no longer appear in the indexer's
-    // confirmed set. Re-deriving input values would then refuse a legitimate
-    // retry — the "outpoint idempotency" recovery this whole route exists to
-    // support — so a resubmission of an already-persisted pair skips
-    // re-verifying economics that were already verified on its first pass.
+    // Cached approval applies only to retained signed bytes, including witnesses.
     let existingByCommitId: InscriptionRecord | null;
     try {
       existingByCommitId = store.get(sub, commitTxId);
@@ -1610,21 +1628,26 @@ export function createBitcoinRoutes(deps: {
       return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
     }
     const revealTxId = reveal.id;
-    // No supported flow ever re-signs just the reveal for an already-recorded
-    // commit — a legitimate rebuild always produces a fresh commit too (a
-    // NEW commitTxId, handled below as a superseding pair on the outpoint).
-    // Allowing a different reveal here — even an economically honest one —
-    // would leave the stored record (and its inscriptionId, and everything
-    // reconciliation/rebroadcast reads from it) permanently describing the
-    // WRONG reveal, since `store.create` below is a no-op for an existing
-    // commitTxId and never updates it to the new one actually broadcast.
-    if (existingByCommitId && existingByCommitId.revealTxId !== revealTxId) {
-      return refuse(
-        'commit_reveal_mismatch',
-        { error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.' },
-        409
-      );
+    const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
+    function checkRecordedPair(existing: InscriptionRecord | null): Response | null {
+      if (!existing) return null;
+      if (existing.revealTxId !== revealTxId) {
+        return refuse('commit_reveal_mismatch', {
+          error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.',
+        }, 409);
+      }
+      // Transaction IDs exclude witnesses; accepting different bytes would both
+      // invalidate the cached size/fee check and leave recovery holding another pair.
+      if ((existing.signedCommitHex && existing.signedCommitHex.toLowerCase() !== signedPair.commit) ||
+          (existing.revealTxHex && existing.revealTxHex.toLowerCase() !== signedPair.reveal)) {
+        return refuse('signed_pair_mismatch', {
+          error: 'signed_pair_mismatch', message: 'This commit is already on record with different signed transaction bytes.',
+        }, 409);
+      }
+      return null;
     }
+    const pairMismatch = checkRecordedPair(existingByCommitId);
+    if (pairMismatch) return pairMismatch;
 
     // Where the money goes (#493): step 5b never looked at output 1, so a signer that
     // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
@@ -1692,58 +1715,25 @@ export function createBitcoinRoutes(deps: {
       });
     }
 
-    // Independent economics check (hostile-audit M07 / #493): every check
-    // above validates SHAPE and DESTINATION, never how much value came IN. A
-    // signer with custody of the funding key can shrink or drop the change
-    // output and let the difference become miner fee, and nothing above would
-    // notice. Re-derive the true funding value from the indexer rather than
-    // the client-declared `value` on `declared` — that field is
-    // attacker-influenced input, and trusting it would make this whole check
-    // circular.
-    //
-    // Skipped for a resubmission of an already-persisted, ALREADY-VERIFIED
-    // commitTxId (see `existingByCommitId` above): a hash-identical retry was
-    // already checked on its first pass, and by retry time its funding UTXO
-    // is typically already spent and would otherwise fail
-    // `funding_value_unverifiable` for no reason but timing — breaking
-    // exactly the recovery path this route exists to support. Gated on the
-    // `economicsVerified` flag, not mere existence: a record written before
-    // this check existed was never actually verified, so a resubmission of
-    // ONE of those still re-verifies rather than silently trusting it through.
-    //
-    // A mismatched reveal for this commitTxId was already refused above, so
-    // any `existingByCommitId` here is guaranteed to be for THIS revealTxId —
-    // the commit's taproot output only commits to a script/pubkey, not to one
-    // specific spend of it, so without that earlier check, whoever holds the
-    // reveal's ephemeral key could sign a different valid reveal and let an
-    // already-verified commit vouch for amounts/fees never actually checked.
-    if (!existingByCommitId?.economicsVerified) {
+    // Reconstruct funding independently of client-declared values. Only an
+    // exact retained pair with persisted approval may skip a fresh check during
+    // an indexer outage or fee-rate change. Legacy/retired rows are re-verified.
+    const alreadyVerified = existingByCommitId?.economicsVerified &&
+      existingByCommitId.signedCommitHex?.toLowerCase() === signedPair.commit &&
+      existingByCommitId.revealTxHex?.toLowerCase() === signedPair.reveal;
+    if (!alreadyVerified) {
       if (!indexer) {
         return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
       }
-      let chainUtxos: Awaited<ReturnType<typeof fetchAddressUtxos>>;
-      try {
-        chainUtxos = await fetchAddressUtxos({ ...indexer, address: changeAddress, network, fetchImpl: deps.fetchImpl });
-      } catch (e) {
-        return refuse('indexer_unavailable', { error: 'indexer_unavailable', message: (e as Error).message }, 502);
+      const totalInputSats = await resolveFundingValues(
+        declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
+      );
+      if (totalInputSats === null) {
+        return refuse('funding_value_unavailable', {
+          error: 'funding_value_unavailable',
+          message: 'Could not independently verify funding values at the bound deposit address.',
+        }, 503);
       }
-      const trueValueByOutpoint = new Map(chainUtxos.confirmed.map((u) => [`${u.txid.toLowerCase()}:${u.vout}`, u.value]));
-      const trueInputValues: number[] = [];
-      for (const op of outpoints) {
-        const v = trueValueByOutpoint.get(op);
-        // Not currently a confirmed output at the bound address: unconfirmed,
-        // already spent, or never existed. A client-declared value cannot
-        // substitute — trusting it is exactly the gap this check closes.
-        if (v === undefined) {
-          return refuse(
-            'funding_value_unverifiable',
-            { error: 'funding_value_unverifiable', message: 'A declared funding UTXO is not a currently confirmed output at your deposit address.' },
-            400
-          );
-        }
-        trueInputValues.push(v);
-      }
-      const totalInputSats = BigInt(trueInputValues.reduce((n, v) => n + v, 0));
 
       let reasonableFeeRate: number;
       try {
@@ -1804,25 +1794,6 @@ export function createBitcoinRoutes(deps: {
       if (revealFeeSats > maxRevealFeeSats) {
         return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
       }
-
-      // A legacy record (written before this check existed) just passed
-      // re-verification for the first time: persist the flag now. Without
-      // this, `store.create` below would stay a no-op against the existing
-      // row (as it always is for a matching commitTxId), and a LATER retry
-      // would re-derive economics from chain state THIS attempt's own
-      // broadcast may already have invalidated — refusing a pair that was
-      // genuinely, if belatedly, verified.
-      // (A mismatched reveal for this commitTxId was already refused above,
-      // so any `existingByCommitId` here is for the reveal just verified.)
-      if (existingByCommitId) {
-        try {
-          store.markEconomicsVerified(sub, commitTxId);
-        } catch (e) {
-          const unreadable = unreadableRecords(sub, e);
-          if (unreadable) return unreadable;
-          throw e;
-        }
-      }
     }
 
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
@@ -1873,11 +1844,6 @@ export function createBitcoinRoutes(deps: {
       fundingOutpoints: outpoints,
       changeAddress,
       status: 'signed',
-      // By this point either the economics check above just ran fresh for
-      // this commitTxId, or it was skipped because an existing record already
-      // carried this flag — `store.create` is a no-op against that existing
-      // record either way, so setting it here only ever takes effect for a
-      // genuinely new, freshly-verified record.
       economicsVerified: true,
       createdAt: at,
       updatedAt: at,
@@ -1891,6 +1857,12 @@ export function createBitcoinRoutes(deps: {
     const refusal = await withSubLock(sub, async (): Promise<Response | null> => {
       let rivals: InscriptionRecord[];
       try {
+        // Another submission may have persisted this commit while provider reads
+        // awaited. Recheck inside the same lock as create/approval persistence.
+        const recorded = store.get(sub, commitTxId);
+        const mismatch = checkRecordedPair(recorded);
+        if (mismatch) return mismatch;
+        if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
         const unreadable = unreadableRecords(sub, e);
