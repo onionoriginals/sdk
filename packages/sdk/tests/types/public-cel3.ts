@@ -89,11 +89,16 @@ import type {
   PreparedBitcoinPublication,
   SubmittedBitcoinAsset,
   InscriptionRecoveryStore,
+  ContentValidator,
+  BitcoinCoreContentValidatorOptions,
 } from "@originals/sdk/types";
+import { createBitcoinCoreContentValidator } from "@originals/sdk";
 declare const satProvider: SatProvider;
 declare const publicationOptions: BitcoinPublicationOptions;
 declare const recoveryStore: InscriptionRecoveryStore;
-const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider });
+declare const contentValidatorOptions: BitcoinCoreContentValidatorOptions;
+const contentValidator: ContentValidator = createBitcoinCoreContentValidator(contentValidatorOptions);
+const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider, contentValidator });
 const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });

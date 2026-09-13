@@ -4,6 +4,7 @@ import {
   createLocalSigner,
   signEvent,
   encodeDocument,
+  digestBytes,
   type SatSnapshot,
   eventDigest,
 } from "@originals/cel/v3";
@@ -333,4 +334,65 @@ test("resolution retries provider-detected chain movement without accepting part
   } } });
   expect((await sdk.lifecycle.resolveAssetFromSat("123")).status).toBe("accepted");
   expect(reads).toBe(2);
+});
+
+test("content assurance defaults to provider-asserted with no content validator configured", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.contentAssurance).toBe("provider-asserted");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.contentAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks content when a configured validator independently confirms the on-chain bytes", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
+      .map((p) => ({
+        inscriptionId: p.id,
+        mediaType: (p.body as { mediaType: string }).mediaType,
+        contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
+      })),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.contentAssurance).toBe("cross-checked");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.contentAssurance).toBe("cross-checked");
+});
+
+test("fails closed when a configured content validator disagrees with a substituted body", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
+      .map((p) => ({
+        inscriptionId: p.id,
+        mediaType: (p.body as { mediaType: string }).mediaType,
+        contentDigest: digestBytes(new TextEncoder().encode("independently observed different content")),
+      })),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed rather than falling back to an unqualified claim when the content validator is unreachable", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async () => { throw new Error("node unreachable"); },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
 });

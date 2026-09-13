@@ -14,6 +14,7 @@ import type { DIDDocument } from "../types/did.js";
 import { summarizeVerification } from "./verification.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
 import { attachment, resourceCatalog } from "./resources.js";
+import type { ContentValidator } from "./content-validation.js";
 import type {
   OriginalsConfig,
   AssetVerification,
@@ -47,6 +48,7 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    contentAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -72,6 +74,7 @@ export class AssetResolver {
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
+    private readonly contentValidator?: ContentValidator,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -119,7 +122,27 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
-      return { snapshot, resolution: resolveSat(snapshot, options) };
+      let independentContent: Awaited<ReturnType<ContentValidator>> | undefined;
+      if (this.contentValidator) {
+        // A configured content validator that cannot be consulted fails closed,
+        // the same as a configured chain/enumeration validator: it must not be
+        // possible to silently fall back to an unqualified provider claim by
+        // making the independent source unreachable.
+        try {
+          independentContent = await this.contentValidator(snapshot);
+        } catch {
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent content validation is unavailable",
+            ) as SatResolution,
+          };
+        }
+      }
+      return {
+        snapshot,
+        resolution: resolveSat(snapshot, { ...options, independentContent }),
+      };
     } catch (error) {
       return {
         resolution: failure(
@@ -261,6 +284,7 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        contentAssurance: result.resolution.contentAssurance,
       },
     };
   }
