@@ -1,5 +1,4 @@
 import type { AssetSource } from './engine';
-import { textMediaType } from './resource-view';
 
 export const MAX_SOURCE_BYTES = 32 * 1024;
 export class SourceFileError extends Error {
@@ -26,11 +25,9 @@ export async function readAssetFile(file: File): Promise<AssetSource> {
   if (!content.byteLength) throw new SourceFileError('empty');
   const extension = /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase();
   const contentType = file.type || (extension && EXTENSION_CONTENT_TYPES[extension]) || 'application/octet-stream';
-  // A text-ish upload with nothing but whitespace is empty in the sense that
-  // matters: nothing to hash. Decoding arbitrary binary as UTF-8 says nothing
-  // about whether it's "empty", so this only applies to text-shaped content.
-  if (textMediaType(contentType) && !new TextDecoder().decode(content).trim()) {
-    throw new SourceFileError('empty');
-  }
+  // "Non-empty" means non-zero bytes, full stop — a whitespace-only text file
+  // still has real bytes to hash and publish verbatim, same as any other
+  // upload. (The Write tab's own textarea has a separate, content-aware
+  // "nothing typed" check; that's a distinct affordance from a file upload.)
   return { content, filename: file.name, contentType };
 }

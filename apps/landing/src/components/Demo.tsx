@@ -144,6 +144,10 @@ export function Demo() {
   const [uploaded, setUploaded] = useState<{ name: string; content: ResourceContent; contentType: string } | null>(null);
   const [written, setWritten] = useState('');
   const [sourceError, setSourceError] = useState<string | null>(null);
+  // A declared image/* type is a hint, not a guarantee — arbitrary bytes can
+  // carry an image extension. Reset whenever the source itself changes, so a
+  // previous upload's decode failure never bleeds into the next one's preview.
+  const [imagePreviewBroken, setImagePreviewBroken] = useState(false);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
   // The artwork is the asset: regenerated live from title/style/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
@@ -182,8 +186,9 @@ export function Demo() {
     if (title === generateName(style, nonce)) setTitle(generateName(nextStyle, nextNonce));
   };
 
-  const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceIsImage = source.contentType.startsWith('image/') && !imagePreviewBroken;
   const sourceIsPreviewableText = !sourceIsImage && textMediaType(source.contentType);
+  useEffect(() => setImagePreviewBroken(false), [source]);
   const sourceBytes = byteLength(source.content);
   // Measured on the FINAL bytes, whatever produced them. Checking only at
   // upload time missed the Write tab entirely, where multibyte text can pass a
@@ -598,6 +603,7 @@ export function Demo() {
                             : resourceDataUrl(source.content, source.contentType)
                         }
                         alt={`Artwork for “${title || demo.form.defaultTitle}”`}
+                        onError={() => setImagePreviewBroken(true)}
                       />
                     ) : sourceIsPreviewableText ? (
                       <pre className="demo-art-text">{contentText(source.content) || demo.form.writePlaceholder}</pre>

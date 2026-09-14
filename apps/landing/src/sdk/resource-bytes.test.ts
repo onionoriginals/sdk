@@ -55,12 +55,12 @@ describe('binary creator resources', () => {
     await expect(readAssetFile(new File([new Uint8Array(MAX_SOURCE_BYTES + 1)], 'large.png'))).rejects.toThrow('too-big');
     await expect(readAssetFile(new File([], 'empty.png'))).rejects.toThrow('empty');
   });
-  test('rejects a whitespace-only text upload as empty, but not a whitespace-only binary payload', async () => {
-    await expect(readAssetFile(new File(['   \n\t  '], 'blank.txt', { type: 'text/plain' }))).rejects.toThrow('empty');
+  test('a whitespace-only upload has non-zero bytes, so it is accepted, not empty — text or binary alike', async () => {
+    const whitespaceText = await readAssetFile(new File(['   \n\t  '], 'blank.txt', { type: 'text/plain' }));
+    expect(whitespaceText.content).toEqual(new TextEncoder().encode('   \n\t  '));
     const whitespaceBytes = Uint8Array.from([0x20, 0x20, 0x20]);
-    await expect(
-      readAssetFile(new File([whitespaceBytes], 'blank.bin', { type: 'application/octet-stream' }))
-    ).resolves.toBeTruthy();
+    const whitespaceBinary = await readAssetFile(new File([whitespaceBytes], 'blank.bin', { type: 'application/octet-stream' }));
+    expect(whitespaceBinary.content).toEqual(whitespaceBytes);
   });
   test('a stranger brings their own bytes: arbitrary, non-PNG/SVG/text content is accepted verbatim', async () => {
     // Deliberately not a valid PNG (wrong magic bytes) despite the .png name,
@@ -90,7 +90,12 @@ test('arbitrary binary upload (not PNG/SVG/text) preserves exact bytes through h
   expect(state.resource.content).toEqual(blob);
   expect(state.resource.hash).toBe(hex.encode(sha256(blob)));
   expect(state.resource.contentType).toBe('application/octet-stream');
-  expect(inscriptionContentBytes(state)).toBeGreaterThanOrEqual(blob.length);
+  // A bare >= assertion would still pass if the quote silently dropped the
+  // resource bytes entirely — the fixed migration allowance alone dwarfs this
+  // blob. Compare against the same state with an empty resource instead, so
+  // the delta actually proves the binary payload is counted.
+  const withoutResourceBytes = inscriptionContentBytes({ ...state, resource: { ...state.resource, content: new Uint8Array(0) } });
+  expect(inscriptionContentBytes(state) - withoutResourceBytes).toBe(blob.length);
 
   const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
   const { OriginalsSDK, createLocalSigner } = await import('@originals/sdk');
