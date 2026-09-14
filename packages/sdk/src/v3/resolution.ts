@@ -28,9 +28,10 @@ export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
 /**
- * A second, independently configured Ordinals index consulted only for its
- * inscription enumeration on the queried sat, to corroborate that the
- * primary provider did not omit a publication. `label` is a non-secret
+ * A second, independently configured Ordinals index consulted for its
+ * inscription enumeration and current sat ownership observation, to
+ * corroborate that the primary provider did not omit a publication or
+ * misreport who currently holds the sat. `label` is a non-secret
  * description of the source (never credentials or a full URL) carried into
  * resolution metadata.
  */
@@ -78,6 +79,7 @@ export interface AssetDIDResolution {
     enumerationAssurance?: "provider-asserted" | "cross-checked";
     /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
     enumerationSource?: string;
+    ownershipAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -196,7 +198,11 @@ export class AssetResolver {
           ...(validated?.source ? { source: validated.source } : {}) });
       }
       let independentEnumeration:
-        | { source: string; inscriptionIds: string[] }
+        | {
+            source: string;
+            inscriptionIds: string[];
+            ownership: SatSnapshot["ownership"];
+          }
         | undefined;
       if (this.independentEnumeration) {
         // A configured independent source that cannot be consulted fails
@@ -244,6 +250,7 @@ export class AssetResolver {
         independentEnumeration = {
           source: this.independentEnumeration.label,
           inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+          ownership: independentSnapshot.ownership,
         };
       }
       return {
@@ -416,6 +423,7 @@ export class AssetResolver {
         chainEvidence: result.resolution.chainEvidence,
         enumerationAssurance: result.resolution.enumerationAssurance,
         enumerationSource: result.resolution.enumerationSource,
+        ownershipAssurance: result.resolution.ownershipAssurance,
       },
     };
   }

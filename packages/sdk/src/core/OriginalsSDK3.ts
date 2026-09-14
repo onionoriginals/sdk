@@ -45,11 +45,13 @@ export interface OriginalsSDKOptions
   /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
   requirePublicReachability?: boolean;
   /**
-   * A second, independently configured Ordinals index consulted only to
+   * A second, independently configured Ordinals index consulted to
    * corroborate that `satProvider`/`ordinalsProvider` did not omit an
-   * inscription for the queried sat. When configured, resolution fails
-   * closed rather than accepting an unqualified enumeration if this source
-   * is unreachable or reports an inscription the primary snapshot lacks.
+   * inscription for the queried sat, and that its reported current sat
+   * ownership agrees. When configured, resolution fails closed rather than
+   * accepting an unqualified enumeration or ownership claim if this source
+   * is unreachable, reports an inscription the primary snapshot lacks, or
+   * disagrees about who currently holds the sat.
    */
   independentEnumeration?: IndependentEnumerationSource;
 }

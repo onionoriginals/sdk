@@ -715,3 +715,51 @@ test("an unreachable independent enumeration source does not discard an already-
   expect(result.chainEvidence.assurance).toBe("node-validated");
   expect(result.chainEvidence.source).toBe("local-core-node");
 });
+
+test("cross-checks ownership against the same independently configured second index and carries the assurance into DID metadata", async () => {
+  const { snapshot } = await boundary();
+  const agreeing = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => agreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.ownershipAssurance).toBe(
+    "cross-checked",
+  );
+});
+
+test("without an independent source configured, resolution still accepts but only claims provider-asserted ownership", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when the independent enumeration source disagrees about who currently holds the sat", async () => {
+  const { snapshot } = await boundary();
+  const disagreeing = structuredClone(snapshot);
+  disagreeing.ownership = { owner: "a-different-holder", satpoint: disagreeing.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => disagreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
