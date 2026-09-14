@@ -84,13 +84,23 @@ function checkedContent(
     : undefined;
   const tags = { contentType, ...(metadata ? { metadata } : {}) };
   // Public secp256k1 generator x-coordinate; only script sizing, never reveal-key custody.
-  const script = p2tr_ord_reveal(
-    Buffer.from(
-      "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-      "hex",
-    ),
-    [{ tags, body: content }],
-  ).script;
+  let script: Uint8Array;
+  try {
+    script = p2tr_ord_reveal(
+      Buffer.from(
+        "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "hex",
+      ),
+      [{ tags, body: content }],
+    ).script;
+  } catch (cause) {
+    invalid(
+      "ASSET_INSCRIPTION_METADATA",
+      `The CEL metadata could not be encoded for Bitcoin inscription: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
   if (script.length > MAX_INSCRIPTION_SCRIPT_BYTES)
     invalid(
       "ASSET_INSCRIPTION_LIMIT",
