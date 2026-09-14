@@ -1,3 +1,4 @@
+import type { ContentValidator } from "./content-validation.js";
 import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
@@ -28,12 +29,12 @@ export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
 /**
- * A second, independently configured Ordinals index consulted to corroborate
- * two dimensions of the primary provider's assertions: that it did not omit
- * an inscription on the queried sat (enumeration), and that it reports the
- * same current owner/satpoint for that sat (ownership/trajectory). `label`
- * is a non-secret description of the source (never credentials or a full
- * URL) carried into resolution metadata.
+ * A second, independently configured Ordinals index consulted for its
+ * inscription enumeration and current sat ownership observation, to
+ * corroborate that the primary provider did not omit a publication or
+ * misreport who currently holds the sat. `label` is a non-secret
+ * description of the source (never credentials or a full URL) carried into
+ * resolution metadata.
  */
 export interface IndependentEnumerationSource {
   label: string;
@@ -73,11 +74,16 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
-    enumerationAssurance?: "provider-asserted" | "cross-checked";
-    ownershipAssurance?: "provider-asserted" | "cross-checked";
     chainEvidence: Readonly<ChainEvidence>;
     /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
     pending?: readonly string[];
+    /** See `SatResolution.trajectoryAssurance`: ownership is a snapshot fact, never an independently derived transfer path. */
+    trajectoryAssurance?: "not-independently-derived";
+    enumerationAssurance?: "provider-asserted" | "cross-checked";
+    /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+    enumerationSource?: string;
+    ownershipAssurance?: "provider-asserted" | "cross-checked";
+    contentAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -107,7 +113,7 @@ const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
     /^[0-9a-f]{64}$/.test(t.hash)
   );
 };
-const sameTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
+const sameChainTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
   a.height === b.height && a.hash === b.hash;
 /**
  * A second source can only corroborate enumeration completeness if its own
@@ -124,8 +130,8 @@ const usableIndependentSnapshot = (snapshot: SatSnapshot): boolean =>
   validChainTip(snapshot.tipBefore) &&
   validChainTip(snapshot.tipAfter) &&
   validChainTip(snapshot.indexTip) &&
-  sameTip(snapshot.tipBefore, snapshot.tipAfter) &&
-  sameTip(snapshot.tipBefore, snapshot.indexTip);
+  sameChainTip(snapshot.tipBefore, snapshot.tipAfter) &&
+  sameChainTip(snapshot.tipBefore, snapshot.indexTip);
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
 export class AssetResolver {
@@ -136,6 +142,7 @@ export class AssetResolver {
     private readonly hosted?: HostedAssets,
     private readonly chainValidator?: ChainValidator,
     private readonly independentEnumeration?: IndependentEnumerationSource,
+    private readonly contentValidator?: ContentValidator,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -186,12 +193,20 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
+      let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
+      if (this.chainValidator) {
+        // The validator is selected by application configuration, never by snapshot
+        // fields or an advertised provider method. A detached copy protects the
+        // exact view subsequently resolved from mutation during asynchronous checks.
+        const validated = await this.chainValidator(structuredClone(snapshot));
+        chainEvidence = Object.freeze({ assurance: "node-validated",
+          ...(validated?.source ? { source: validated.source } : {}) });
+      }
       let independentEnumeration:
         | {
             source: string;
             inscriptionIds: string[];
-            ownership: SatSnapshot["ownership"];
-            tip: SatSnapshot["tipBefore"];
+            ownership?: SatSnapshot["ownership"];
           }
         | undefined;
       if (this.independentEnumeration) {
@@ -209,6 +224,7 @@ export class AssetResolver {
             resolution: failure(
               "incomplete",
               "Independent enumeration source did not return a usable observation",
+              chainEvidence,
             ) as SatResolution,
           };
         }
@@ -220,6 +236,7 @@ export class AssetResolver {
             resolution: failure(
               "inconsistent-evidence",
               "Independent enumeration source snapshot differs from requested sat or network",
+              chainEvidence,
             ) as SatResolution,
           };
         // An incomplete, unhealthy or unstable independent snapshot must
@@ -232,25 +249,63 @@ export class AssetResolver {
             resolution: failure(
               "incomplete",
               "Independent enumeration source did not report a complete, healthy, stable observation",
+              chainEvidence,
             ) as SatResolution,
           };
         independentEnumeration = {
           source: this.independentEnumeration.label,
           inscriptionIds: independentSnapshot.publications.map((p) => p.id),
-          ownership: independentSnapshot.ownership,
-          tip: independentSnapshot.tipBefore,
+          // Ownership is a snapshot of current state, not an append-only list
+          // like enumeration: comparing it across two different chain tips is
+          // meaningless (a lagging source's honestly-stale owner could equal
+          // a dishonest primary's misreported "current" owner at a later
+          // tip). Only forward it when both observations describe the same
+          // tip; otherwise this cross-check silently sits out this round
+          // rather than fail resolution just for one source lagging.
+          ...(sameChainTip(independentSnapshot.tipBefore, snapshot.tipBefore)
+            ? { ownership: independentSnapshot.ownership }
+            : {}),
         };
       }
-      let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
-      if (this.chainValidator) {
-        // The validator is selected by application configuration, never by snapshot
-        // fields or an advertised provider method. A detached copy protects the
-        // exact view subsequently resolved from mutation during asynchronous checks.
-        const validated = await this.chainValidator(structuredClone(snapshot));
-        chainEvidence = Object.freeze({ assurance: "node-validated",
-          ...(validated?.source ? { source: validated.source } : {}) });
+      // Validate the snapshot's own structure/chain-position claims locally
+      // before spending an external RPC round trip on it: a snapshot that
+      // resolveSat would reject anyway (bad block hash, wrong sat/network,
+      // inconsistent reveal position) should surface that deterministic
+      // reason rather than an unrelated content-validator failure, and never
+      // burns a request against the independently trusted node for data
+      // that was never going to be accepted regardless of its content.
+      const baseline = resolveSat(snapshot, { ...options, independentEnumeration });
+      if (baseline.status !== "accepted" || !this.contentValidator)
+        return { snapshot, resolution: Object.freeze({ ...baseline, chainEvidence }) };
+      // A configured content validator that cannot be consulted fails closed,
+      // the same as a configured chain/enumeration validator: it must not be
+      // possible to silently fall back to an unqualified provider claim by
+      // making the independent source unreachable.
+      let independentContent: Awaited<ReturnType<ContentValidator>>;
+      try {
+        // Preserve the exact snapshot already corroborated by the other checks.
+        independentContent = await this.contentValidator(
+          structuredClone(snapshot),
+          baseline.publications.map((publication) => publication.inscriptionId),
+        );
+      } catch {
+        return {
+          resolution: Object.freeze({
+            ...(failure(
+              "incomplete",
+              "Independent content validation is unavailable",
+            ) as SatResolution),
+            chainEvidence,
+          }),
+        };
       }
-      return { snapshot, resolution: Object.freeze({ ...resolveSat(snapshot, { ...options, independentEnumeration }), chainEvidence }) };
+      return {
+        snapshot,
+        resolution: Object.freeze({
+          ...resolveSat(snapshot, { ...options, independentEnumeration, independentContent }),
+          chainEvidence,
+        }),
+      };
     } catch (error) {
       return {
         resolution: failure(
@@ -411,9 +466,12 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
-        enumerationAssurance: result.resolution.enumerationAssurance,
-        ownershipAssurance: result.resolution.ownershipAssurance,
         chainEvidence: result.resolution.chainEvidence,
+        trajectoryAssurance: result.resolution.trajectoryAssurance,
+        enumerationAssurance: result.resolution.enumerationAssurance,
+        enumerationSource: result.resolution.enumerationSource,
+        ownershipAssurance: result.resolution.ownershipAssurance,
+        contentAssurance: result.resolution.contentAssurance,
       },
     };
   }
