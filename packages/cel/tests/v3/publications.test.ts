@@ -153,6 +153,31 @@ test("does not accept conflicting confirmed and pending records for one inscript
   expect(resolveSat(snapshot).status).toBe("inconsistent-evidence");
 });
 
+test("reports pending, not not-found, when every observed publication is still unconfirmed", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  for (const publication of snapshot.publications) publication.confirmed = false;
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("pending");
+  if (result.status === "pending")
+    expect(result.pending).toEqual(snapshot.publications.map((p) => p.id));
+});
+
+test("a sat with no observed publications at all is still not-found, not pending", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  snapshot.publications = [];
+  expect(resolveSat(snapshot).status).toBe("not-found");
+});
+
+test("an invalid confirmed boundary stays not-found even alongside an unrelated pending publication", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "migration-from-must-match-current-alias",
+  )!;
+  const snapshot = observations(scenario);
+  snapshot.publications.push({ ...snapshot.publications[0], confirmed: false, id: "a".repeat(64) + "i9", revealTxid: "a".repeat(64) });
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("not-found");
+});
+
 test("chain evidence defaults to provider-asserted when the snapshot omits it", () => {
   const result = resolveSat(observations(fixtures.cases[0]));
   expect(result.status).toBe("accepted");

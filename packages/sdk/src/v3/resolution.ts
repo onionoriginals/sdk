@@ -62,6 +62,8 @@ export interface AssetDIDResolution {
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
     chainEvidence: Readonly<ChainEvidence>;
+    /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
+    pending?: readonly string[];
   };
 }
 
@@ -71,7 +73,7 @@ export function btcoDid(sat: string, network: BitcoinNetwork): string {
   return did;
 }
 const failure = (
-  status: Exclude<SatResolution["status"], "accepted">,
+  status: Exclude<SatResolution["status"], "accepted" | "pending">,
   reason: string,
   chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" },
 ): AssetResolution => ({
@@ -292,7 +294,12 @@ export class AssetResolver {
       return {
         didDocument: null,
         didResolutionMetadata: { status: result.status, error: result.reason },
-        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown", chainEvidence: result.chainEvidence },
+        didDocumentMetadata: {
+          scope: "sat",
+          crossSatCanonicality: "unknown",
+          chainEvidence: result.chainEvidence,
+          ...(result.status === "pending" ? { pending: result.pending } : {}),
+        },
       };
     return {
       didDocument: result.didDocument,
