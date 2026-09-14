@@ -2083,12 +2083,24 @@ export function createBitcoinRoutes(deps: {
     // reconciliation branches skip, with a conflicting rival still "live".
     // (If the rival later wins on-chain anyway, the list poll's
     // confirmation-driven reconciliation swaps the roles back.)
-    const reclaimIfSuperseded = () => {
-      if (rec.superseded) reclaimOutpoint(store, sub, rec);
+    const reclaimIfSuperseded = (r: InscriptionRecord) => {
+      if (r.superseded) reclaimOutpoint(store, sub, r);
+    };
+    // Re-read immediately before a store write that follows an awaited
+    // broadcast: the commit/reveal pushes below are further network calls a
+    // concurrent reconciliation/sweep pass can retire this exact record
+    // across, same as the status lookup above. Returns the fresh, still-live
+    // record to mutate, or a terminal Response when it no longer is (#705).
+    const reloadIfStillLive = (): InscriptionRecord | Response => {
+      const fresh = loadRecord();
+      if (fresh instanceof Response) return fresh;
+      if (!fresh) return json({ error: 'not_found' }, 404);
+      if (fresh.retired) return fresh.status === 'confirmed' ? confirmedSettled(fresh) : notRecoverable();
+      return fresh;
     };
 
     if (revealStatus?.confirmed) {
-      reclaimIfSuperseded();
+      reclaimIfSuperseded(rec);
       store.setStatus(sub, commitTxId, 'confirmed', {
         confirmations: revealStatus.confirmations,
         blockHeight: revealStatus.blockHeight,
@@ -2148,7 +2160,9 @@ export function createBitcoinRoutes(deps: {
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
-      reclaimIfSuperseded();
+      const afterCommit = reloadIfStillLive();
+      if (afterCommit instanceof Response) return afterCommit;
+      reclaimIfSuperseded(afterCommit);
       store.setStatus(sub, commitTxId, 'commit_broadcast');
     }
     let revealErr = await broadcastIdempotent(rec.revealTxHex);
@@ -2169,7 +2183,9 @@ export function createBitcoinRoutes(deps: {
     if (revealErr) {
       return json({ commitTxId, revealTxId, inscriptionId, status: 'commit_broadcast' });
     }
-    reclaimIfSuperseded();
+    const afterReveal = reloadIfStillLive();
+    if (afterReveal instanceof Response) return afterReveal;
+    reclaimIfSuperseded(afterReveal);
     store.setStatus(sub, commitTxId, 'reveal_broadcast');
     return json({ commitTxId, revealTxId, inscriptionId, status: 'reveal_broadcast' });
   };

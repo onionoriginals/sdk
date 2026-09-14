@@ -1180,6 +1180,48 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     // Only the initial `post` broadcast anything; the manual call broadcasts nothing.
     expect(h.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
   });
+
+  /**
+   * #705 — the re-read after the status lookup only closes the race up to
+   * that point. The commit/reveal broadcasts that follow are further
+   * awaited network calls, so a concurrent retire landing during one of
+   * THOSE can be overwritten the same way if the final status write isn't
+   * also guarded by a fresh read.
+   */
+  test('#705: a concurrent retirement during the reveal broadcast await is not overwritten by a stale reveal_broadcast write', async () => {
+    const pair = buildPair();
+    let allowReveal = false;
+    let delayReveal = false;
+    const h = harness({
+      txStatus: { confirmed: false },
+      broadcast: async (txHex) => {
+        if (txHex === pair.revealTxHex) {
+          if (!allowReveal) throw new Error('connection reset'); // leaves `post` at commit_broadcast
+          if (delayReveal) await new Promise((r) => setTimeout(r, 5)); // the window the retire lands in
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    await post(h.routes, pair); // commit_broadcast (reveal push failed)
+    allowReveal = true;
+    delayReveal = true;
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const pending = h.routes.inscribeRebroadcast(req, new URL(req.url));
+    // While the manual call's reveal broadcast is in flight, a background
+    // reconciliation/sweep pass retires this exact record.
+    await new Promise((r) => setTimeout(r, 0));
+    h.store.retire('sub-1', pair.commitTxId);
+    const res = await pending;
+
+    // The retire must win: no resurrected non-terminal status on the row.
+    expect(res.status).toBe(410);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.retired).toBe(true);
+    expect(rec.status).not.toBe('reveal_broadcast');
+    expect(rec.signedCommitHex).toBeUndefined();
+    expect(rec.revealTxHex).toBeUndefined();
+  });
 });
 
 /**
