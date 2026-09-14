@@ -1016,3 +1016,43 @@ test("resolveSat still treats a disallowed profile as ignorable, not unsupported
     code: "CEL_PROFILE",
   });
 });
+
+// An unrelated/non-extending confirmed inscription carrying a recognized-but-unimplemented
+// CCG shape must not be able to block resolution of an otherwise valid, already-accepted
+// history just by sharing the sat — Bitcoin possession never restores or grants CEL
+// authority, so a later, unrelated holder inscribing arbitrary dataReference/previousLog
+// bytes on the same sat must be exactly as ignorable as any other non-extending candidate.
+test("resolveSat ignores an unrelated CCG dataReference candidate that does not extend the accepted head, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const unrelatedDataReferenceEntry = {
+    event: {
+      previousEvent: digestBytes(new TextEncoder().encode("unrelated history head")),
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("unrelated off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [unrelatedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});

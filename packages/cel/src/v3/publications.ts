@@ -9,7 +9,7 @@ import {
   type AssetState,
   type DeepReadonly,
 } from "./history.js";
-import { canonicalizeValue } from "./values.js";
+import { canonicalizeValue, decodeValue } from "./values.js";
 import { digestBytes } from "./primitives.js";
 
 export interface ChainTip {
@@ -231,6 +231,39 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   crossSatCanonicality: "unknown",
   chainEvidence: { assurance: "provider-asserted" },
 });
+/**
+ * Best-effort, pre-validation read of a candidate's first entry's `previousEvent`,
+ * used only to decide whether a structural-validation failure that recognizes an
+ * unsupported CCG shape is actually attempting to extend the accepted head — not
+ * to authenticate or otherwise trust the candidate. Never throws: a candidate too
+ * malformed to even read this field is not a plausible continuation either.
+ */
+function candidatePreviousEvent(body: {
+  bytes: Uint8Array;
+  metadata: Uint8Array | null;
+}): string | undefined {
+  let raw;
+  try {
+    raw =
+      body.metadata !== null
+        ? decodeValue(body.metadata, "cbor")
+        : decodeValue(body.bytes, "json");
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+    return undefined;
+  const log = raw.log;
+  if (!Array.isArray(log) || log.length === 0) return undefined;
+  const first = log[0];
+  if (typeof first !== "object" || first === null || Array.isArray(first))
+    return undefined;
+  const event = first.event;
+  if (typeof event !== "object" || event === null || Array.isArray(event))
+    return undefined;
+  const previousEvent = event.previousEvent;
+  return typeof previousEvent === "string" ? previousEvent : undefined;
+}
 
 /** Resolve a sat from complete observations using the same signature/authority fold as offline history.
  * The result is qualified to the supplied chain/index snapshot and provider trust.
@@ -661,7 +694,15 @@ export function resolveSat(
         error.status === "unsupported" &&
         (error.code === "CEL_WEBVH_IDNA" ||
           error.code === "CEL_DATA_REFERENCE" ||
-          error.code === "CEL_PREVIOUS_LOG")
+          error.code === "CEL_PREVIOUS_LOG") &&
+        // A recognized-but-unimplemented CCG shape only blocks resolution when it is
+        // actually attempting to extend the currently accepted head: an unrelated or
+        // non-extending confirmed inscription on the same sat (for example from a
+        // later, unrelated holder — Bitcoin possession never restores or grants CEL
+        // authority) must remain ignorable, exactly like any other non-extending
+        // candidate, rather than blocking an otherwise valid, already-accepted history.
+        history !== undefined &&
+        candidatePreviousEvent(body) === history.state.head
       )
         return failure("unsupported-capability", error.code);
       // Fully inspected disallowed or invalid profile candidates are ignorable;
