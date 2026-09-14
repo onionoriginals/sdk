@@ -3,6 +3,7 @@ import {
   createTurnkeyClient,
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
+  createInProcessSubOrgLock,
 } from '../src/server/turnkey-client';
 
 describe('turnkey-client', () => {
@@ -433,6 +434,150 @@ describe('turnkey-client', () => {
       const callArgs = (createSubOrganization as any).mock.calls[0][0];
       expect(callArgs.rootUsers[0].userName).toBe('bob@example.com');
       expect(callArgs.rootUsers[0].userEmail).toBe('bob@example.com');
+    });
+
+    describe('concurrency (TOCTOU race, #728)', () => {
+      test('two concurrent calls for the same brand-new email create only one sub-org and resolve to the same ID', async () => {
+        // Reproduces the race from #728: both calls must observe an
+        // initially-empty lookup, yet only one createSubOrganization call may
+        // happen, and both callers must resolve to the same sub-org ID.
+        //
+        // The mock backend is stateful (like the real Turnkey API): once a
+        // sub-org is created, a subsequent lookup for the same email finds
+        // it. Without serializing the lookup-then-create sequence, both
+        // calls would independently observe an empty lookup (as in the
+        // real #728 race) and both would create; with serialization, the
+        // second call's lookup runs only after the first call's create has
+        // taken effect.
+        let createCalls = 0;
+        let persistedSubOrgIds: string[] = [];
+        const getSubOrgIds = mock(() => Promise.resolve({ organizationIds: persistedSubOrgIds }));
+        const getWallets = mock(() => Promise.resolve({ wallets: [{ walletId: 'w1' }] }));
+        const createSubOrganization = mock(async () => {
+          // Yield so an unserialized second call would have a chance to
+          // start its own lookup/create before this one finishes.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          createCalls++;
+          const id = `sub-org-${createCalls}`;
+          persistedSubOrgIds = [id];
+          return {
+            activity: {
+              result: { createSubOrganizationResultV7: { subOrganizationId: id } },
+            },
+          };
+        });
+        const client = createMockClient({
+          getSubOrgIds,
+          getWallets,
+          createSubOrganization,
+        });
+
+        const [a, b] = await Promise.all([
+          getOrCreateTurnkeySubOrg('race-new-user@example.com', client),
+          getOrCreateTurnkeySubOrg('race-new-user@example.com', client),
+        ]);
+
+        expect(createCalls).toBe(1);
+        expect(a).toBe(b);
+        expect(a).toBe('sub-org-1');
+      });
+
+      test('does not serialize concurrent calls for unrelated emails', async () => {
+        const seen: string[] = [];
+        const client = createMockClient({
+          getSubOrgIds: mock(async (params: any) => {
+            seen.push(params.filterValue);
+            await new Promise((resolve) => setTimeout(resolve, 15));
+            return { organizationIds: ['existing'] };
+          }),
+        });
+
+        const startedAt = Date.now();
+        await Promise.all([
+          getOrCreateTurnkeySubOrg('alice-unrelated@example.com', client),
+          getOrCreateTurnkeySubOrg('bob-unrelated@example.com', client),
+        ]);
+        const elapsedMs = Date.now() - startedAt;
+
+        // Both lookups must have started before either finished (i.e. they
+        // ran concurrently); if the lock serialized unrelated keys this
+        // would take roughly 2x as long.
+        expect(seen.sort()).toEqual(['alice-unrelated@example.com', 'bob-unrelated@example.com']);
+        expect(elapsedMs).toBeLessThan(28);
+      });
+
+      test('releases the lock after a failed call so a later call for the same email proceeds', async () => {
+        const failingClient = createMockClient({
+          getSubOrgIds: mock(() => Promise.reject(new Error('lookup exploded'))),
+        });
+        await expect(
+          getOrCreateTurnkeySubOrg('retry-after-failure@example.com', failingClient)
+        ).rejects.toThrow('lookup exploded');
+
+        const recoveredClient = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['recovered_org'] })),
+        });
+        const result = await getOrCreateTurnkeySubOrg(
+          'retry-after-failure@example.com',
+          recoveredClient
+        );
+        expect(result).toBe('recovered_org');
+      });
+    });
+
+    describe('createInProcessSubOrgLock', () => {
+      test('serializes calls for the same key', async () => {
+        const lock = createInProcessSubOrgLock();
+        const order: string[] = [];
+
+        const first = lock.withLock('key-a', async () => {
+          order.push('first-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('first-end');
+          return 1;
+        });
+        const second = lock.withLock('key-a', async () => {
+          order.push('second-start');
+          return 2;
+        });
+
+        expect(await Promise.all([first, second])).toEqual([1, 2]);
+        expect(order).toEqual(['first-start', 'first-end', 'second-start']);
+      });
+
+      test('does not serialize calls for different keys', async () => {
+        const lock = createInProcessSubOrgLock();
+        const order: string[] = [];
+
+        const first = lock.withLock('key-a', async () => {
+          order.push('a-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('a-end');
+        });
+        const second = lock.withLock('key-b', async () => {
+          order.push('b-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('b-end');
+        });
+
+        await Promise.all([first, second]);
+        // Both should have started before either finished.
+        expect(order.slice(0, 2).sort()).toEqual(['a-start', 'b-start']);
+      });
+
+      test('releases the lock even when the guarded function throws', async () => {
+        const lock = createInProcessSubOrgLock();
+
+        await expect(
+          lock.withLock('key-a', async () => {
+            throw new Error('boom');
+          })
+        ).rejects.toThrow('boom');
+
+        // A subsequent call for the same key must not be blocked forever.
+        const result = await lock.withLock('key-a', async () => 'ok');
+        expect(result).toBe('ok');
+      });
     });
   });
 });
