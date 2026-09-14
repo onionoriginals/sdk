@@ -160,6 +160,8 @@ export type SatResolution = Readonly<
        * provider can still omit history no independent source observed.
        */
       enumerationAssurance: "provider-asserted" | "cross-checked";
+      /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+      enumerationSource?: string;
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -245,9 +247,11 @@ export function resolveSat(
     return failure("incomplete", "Incomplete sat enumeration");
   let enumerationAssurance: "provider-asserted" | "cross-checked" =
     "provider-asserted";
+  let enumerationSource: string | undefined;
   if (options.independentEnumeration) {
-    const { inscriptionIds } = options.independentEnumeration;
+    const { source, inscriptionIds } = options.independentEnumeration;
     if (
+      typeof source !== "string" ||
       !Array.isArray(inscriptionIds) ||
       !inscriptionIds.every((id) => typeof id === "string")
     )
@@ -259,6 +263,7 @@ export function resolveSat(
         "Independent enumeration source reports an inscription absent from the primary snapshot",
       );
     enumerationAssurance = "cross-checked";
+    enumerationSource = source;
   }
   if (
     !snapshot.ownership ||
@@ -575,6 +580,7 @@ export function resolveSat(
     chainEvidence,
     resourceAvailability,
     enumerationAssurance,
+    ...(enumerationSource !== undefined ? { enumerationSource } : {}),
   };
   freeze<unknown>(result);
   return result;

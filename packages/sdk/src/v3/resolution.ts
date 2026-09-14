@@ -76,6 +76,8 @@ export interface AssetDIDResolution {
     /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
     pending?: readonly string[];
     enumerationAssurance?: "provider-asserted" | "cross-checked";
+    /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+    enumerationSource?: string;
   };
 }
 
@@ -211,6 +213,7 @@ export class AssetResolver {
             resolution: failure(
               "incomplete",
               "Independent enumeration source did not return a usable observation",
+              chainEvidence,
             ) as SatResolution,
           };
         }
@@ -222,6 +225,7 @@ export class AssetResolver {
             resolution: failure(
               "inconsistent-evidence",
               "Independent enumeration source snapshot differs from requested sat or network",
+              chainEvidence,
             ) as SatResolution,
           };
         // An incomplete, unhealthy or unstable independent snapshot must
@@ -234,6 +238,7 @@ export class AssetResolver {
             resolution: failure(
               "incomplete",
               "Independent enumeration source did not report a complete, healthy, stable observation",
+              chainEvidence,
             ) as SatResolution,
           };
         independentEnumeration = {
@@ -410,6 +415,7 @@ export class AssetResolver {
         webvhBinding: "unverified",
         chainEvidence: result.resolution.chainEvidence,
         enumerationAssurance: result.resolution.enumerationAssurance,
+        enumerationSource: result.resolution.enumerationSource,
       },
     };
   }

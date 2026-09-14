@@ -163,8 +163,29 @@ test("cross-checks enumeration when an independent source agrees with the primar
     },
   });
   expect(result.status).toBe("accepted");
-  if (result.status === "accepted")
+  if (result.status === "accepted") {
     expect(result.enumerationAssurance).toBe("cross-checked");
+    expect(result.enumerationSource).toBe("second-ord-instance");
+  }
+});
+
+test("does not report an enumeration source when no independent source was consulted", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationSource).toBeUndefined();
+});
+
+test("rejects a non-string independent enumeration source label", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      // @ts-expect-error deliberately malformed for the test
+      source: 123,
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("incomplete");
 });
 
 test("a fewer-inscriptions independent source still cross-checks (it just corroborates less)", () => {

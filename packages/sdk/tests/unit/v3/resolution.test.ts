@@ -597,9 +597,13 @@ test("cross-checks enumeration against an independently configured second index 
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
   expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.enumerationSource).toBe("second-ord-instance");
   const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
   expect(metadata.didDocumentMetadata.enumerationAssurance).toBe(
     "cross-checked",
+  );
+  expect(metadata.didDocumentMetadata.enumerationSource).toBe(
+    "second-ord-instance",
   );
 });
 
@@ -688,4 +692,26 @@ test("fails closed when a configured independent enumeration source cannot be re
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   expect(result.status).toBe("incomplete");
+});
+
+test("an unreachable independent enumeration source does not discard an already-established node-validated chain evidence", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async () => ({ source: "local-core-node" }),
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: {
+        getSatSnapshot: async () => {
+          throw new Error("second index unreachable");
+        },
+      },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+  if (result.status === "accepted") throw new Error("accepted");
+  expect(result.chainEvidence.assurance).toBe("node-validated");
+  expect(result.chainEvidence.source).toBe("local-core-node");
 });
