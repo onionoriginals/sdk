@@ -483,27 +483,31 @@ describe('turnkey-client', () => {
       });
 
       test('does not serialize concurrent calls for unrelated emails', async () => {
-        const seen: string[] = [];
+        // Record start/end events instead of asserting on wall-clock elapsed
+        // time (flaky under CI scheduling delays): a correct implementation
+        // must start BOTH lookups before EITHER finishes.
+        const events: string[] = [];
         const client = createMockClient({
           getSubOrgIds: mock(async (params: any) => {
-            seen.push(params.filterValue);
+            events.push(`start:${params.filterValue}`);
             await new Promise((resolve) => setTimeout(resolve, 15));
+            events.push(`end:${params.filterValue}`);
             return { organizationIds: ['existing'] };
           }),
         });
 
-        const startedAt = Date.now();
         await Promise.all([
           getOrCreateTurnkeySubOrg('alice-unrelated@example.com', client),
           getOrCreateTurnkeySubOrg('bob-unrelated@example.com', client),
         ]);
-        const elapsedMs = Date.now() - startedAt;
 
-        // Both lookups must have started before either finished (i.e. they
-        // ran concurrently); if the lock serialized unrelated keys this
-        // would take roughly 2x as long.
-        expect(seen.sort()).toEqual(['alice-unrelated@example.com', 'bob-unrelated@example.com']);
-        expect(elapsedMs).toBeLessThan(28);
+        const startEvents = events.filter((e) => e.startsWith('start:'));
+        const endEvents = events.filter((e) => e.startsWith('end:'));
+        // If the lock serialized unrelated keys, bob's start would come
+        // after alice's end (events: start:alice, end:alice, start:bob,
+        // end:bob). Concurrent execution interleaves both starts first.
+        expect(startEvents).toEqual(['start:alice-unrelated@example.com', 'start:bob-unrelated@example.com']);
+        expect(events.indexOf(startEvents[1])).toBeLessThan(events.indexOf(endEvents[0]));
       });
 
       test('releases the lock after a failed call so a later call for the same email proceeds', async () => {
