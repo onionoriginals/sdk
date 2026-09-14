@@ -283,26 +283,37 @@ function entryExtendsUnderController(
 
 /**
  * Whether a candidate body is a genuinely authenticated attempt to extend `history` with a
- * recognized-but-unsupported CCG shape (`dataReference`/`previousLog`).
+ * recognized-but-unsupported CCG `dataReference` shape.
  *
- * `dataReference` and `previousLog` are rejected by `eventShape`/`validateDocument` before
- * any proof is ever inspected — unlike `CEL_WEBVH_IDNA`, which can only be thrown after
- * `verifyEntry` has already authenticated the entry inside `apply()`. Gating
- * `unsupported-capability` on nothing but a raw, unauthenticated `previousEvent` string
- * would let anyone — with no controller key at all — permanently block resolution of a
- * real Original by inscribing a candidate claiming to extend its head.
+ * `dataReference` is rejected by `eventShape`/`validateDocument` before any proof is ever
+ * inspected — unlike `CEL_WEBVH_IDNA`, which can only be thrown after `verifyEntry` has
+ * already authenticated the entry inside `apply()`. Gating `unsupported-capability` on
+ * nothing but a raw, unauthenticated `previousEvent` string would let anyone — with no
+ * controller key at all — permanently block resolution of a real Original by inscribing a
+ * candidate claiming to extend its head.
  *
  * A multi-entry document's *first* entry being genuinely signed is not enough either:
  * `validateDocument` validates every entry's shape via `.forEach`, so the entry that
- * actually throws the unsupported-shape error may be any later entry appended after a
- * genuinely controller-signed one — each proof signs only its own event, never the whole
- * log. So every entry strictly before the offending one must itself be fully authenticated
+ * actually throws `CEL_DATA_REFERENCE` may be any later entry appended after a genuinely
+ * controller-signed one — each proof signs only its own event, never the whole log. So
+ * every entry strictly before the offending one must itself be fully authenticated
  * (signature, chain linkage and controller authority, exactly as `apply()` enforces,
  * including any controller rotation among them) via `verifyHistory`, and only the
  * resulting head/controller after that authenticated prefix may be checked against the
- * offending entry itself. For `previousLog`, the unsupported condition is only reached
- * after its *entire* wrapped log already passed full structural validation, so that whole
- * wrapped log must itself verify as an authenticated extension of `history`.
+ * offending entry itself.
+ *
+ * `previousLog` is deliberately NOT handled here: unlike `dataReference` (embedded inside
+ * the signed operation) or `CEL_WEBVH_IDNA` (reachable only after full signature
+ * authentication), `previousLog` is a document-level wrapper that sits entirely outside any
+ * signed event, and its own proof has no CCG-specified target
+ * (docs/research/2026-09-05-cel-profile-primary-sources.md documents this as an unresolved
+ * gap in the upstream draft). Authenticating only the *wrapped* log would not establish that
+ * the controller authorized the wrapping itself — anyone can wrap any log, controller-signed
+ * or not, in a `previousLog` envelope, which would let a permissionless observer flip a
+ * resolution from `accepted` to `unsupported-capability` at will. `resolveSat` therefore
+ * always treats `CEL_PREVIOUS_LOG` as ignorable; Originals 3 itself never produces
+ * `previousLog` documents (specs/originals-cel-v3-profile.md), so this does not blind
+ * resolution to any real writer output.
  * Never throws: a candidate too malformed to check is not a plausible continuation either.
  */
 function candidateAuthenticatedContinuation(
@@ -319,15 +330,6 @@ function candidateAuthenticatedContinuation(
     return false;
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
-  if (Object.prototype.hasOwnProperty.call(raw, "previousLog")) {
-    try {
-      verifyHistory({ log: raw.log }, { prefix: history });
-      return true;
-    } catch (error) {
-      if (!(error instanceof CelError)) throw error;
-      return false;
-    }
-  }
   const log = raw.log;
   if (!Array.isArray(log) || log.length === 0) return false;
   let offendingIndex = -1;
@@ -336,10 +338,7 @@ function candidateAuthenticatedContinuation(
       validateEntry(log[i]);
     } catch (error) {
       if (!(error instanceof CelError)) throw error;
-      if (
-        error.status === "unsupported" &&
-        (error.code === "CEL_DATA_REFERENCE" || error.code === "CEL_PREVIOUS_LOG")
-      )
+      if (error.status === "unsupported" && error.code === "CEL_DATA_REFERENCE")
         offendingIndex = i;
       break;
     }
@@ -808,34 +807,37 @@ export function resolveSat(
         return failure("unsupported-capability", error.code);
       if (
         error.status === "unsupported" &&
-        (error.code === "CEL_DATA_REFERENCE" ||
-          error.code === "CEL_PREVIOUS_LOG") &&
-        // `dataReference`/`previousLog` are rejected by eventShape/validateDocument
-        // before any proof is ever inspected. A recognized-but-unimplemented CCG
-        // shape may therefore only block resolution when it is both actually
-        // attempting to extend the currently accepted head AND authenticated by
-        // the current controller's own signature — checking only the raw,
-        // unauthenticated `previousEvent` string would let anyone without the
-        // controller key permanently deny resolution of a real Original by
-        // inscribing a single unsigned candidate claiming to extend its head.
-        // An unrelated, non-extending, or unauthenticated candidate (for example
-        // from a later, unrelated holder — Bitcoin possession never restores or
-        // grants CEL authority) remains exactly as ignorable as any other invalid
-        // candidate, rather than blocking an otherwise valid, already-accepted
-        // history.
+        error.code === "CEL_DATA_REFERENCE" &&
+        // `dataReference` is rejected by eventShape/validateDocument before any
+        // proof is ever inspected. A recognized-but-unimplemented CCG shape may
+        // therefore only block resolution when it is both actually attempting to
+        // extend the currently accepted head AND authenticated by the current
+        // controller's own signature — checking only the raw, unauthenticated
+        // `previousEvent` string would let anyone without the controller key
+        // permanently deny resolution of a real Original by inscribing a single
+        // unsigned candidate claiming to extend its head. An unrelated,
+        // non-extending, or unauthenticated candidate (for example from a later,
+        // unrelated holder — Bitcoin possession never restores or grants CEL
+        // authority) remains exactly as ignorable as any other invalid candidate,
+        // rather than blocking an otherwise valid, already-accepted history.
         history !== undefined &&
         candidateAuthenticatedContinuation(body, history)
       )
         return failure("unsupported-capability", error.code);
-      // Fully inspected disallowed or invalid profile candidates, and any
-      // dataReference/previousLog candidate that does not both extend the
-      // accepted head and carry a genuine current-controller signature, are
-      // ignorable; unavailable bytes were rejected above, before application
-      // parsing. This also covers other "unsupported" codes (CEL_PROFILE,
-      // CEL_SUITE): those mark material this implementation intentionally
-      // rejects, not a recognized CCG shape it merely cannot verify, so they
-      // must not poison an otherwise valid sat history the way an
-      // unsupported-capability result does.
+      // Fully inspected disallowed or invalid profile candidates, any
+      // dataReference candidate that does not both extend the accepted head and
+      // carry a genuine current-controller signature, and every previousLog
+      // candidate are ignorable; unavailable bytes were rejected above, before
+      // application parsing. previousLog is always ignorable here: its wrapper
+      // sits entirely outside any signed event (unlike dataReference or
+      // CEL_WEBVH_IDNA) and its own proof has no CCG-specified target, so nothing
+      // ties the wrapper itself to controller authority — authenticating only the
+      // wrapped log would let a permissionless observer force this same block by
+      // wrapping a copy of any log, controller-signed or not. This also covers
+      // other "unsupported" codes (CEL_PROFILE, CEL_SUITE): those mark material
+      // this implementation intentionally rejects, not a recognized CCG shape it
+      // merely cannot verify, so they must not poison an otherwise valid sat
+      // history the way an unsupported-capability result does.
       ignore(error.code);
     }
   }

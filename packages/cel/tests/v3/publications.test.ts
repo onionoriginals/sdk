@@ -1156,7 +1156,16 @@ test("resolveSat reports unsupported-capability when a genuinely controller-sign
   expect(result.reason).toBe("CEL_DATA_REFERENCE");
 });
 
-test("resolveSat reports unsupported-capability for a chained CCG previousLog continuation, never a stale accepted head (#686)", async () => {
+// previousLog is always ignorable, even when its wrapped log is genuinely signed by the
+// current controller: unlike dataReference (embedded inside the signed operation) or
+// CEL_WEBVH_IDNA (reachable only after full signature authentication), the previousLog
+// wrapper sits entirely outside any signed event and its own proof has no CCG-specified
+// target. Authenticating only the wrapped log would not establish that the controller
+// authorized the *wrapping* — anyone can wrap a copy of any log, controller-signed or not,
+// in a previousLog envelope, which would let a permissionless observer flip a resolution
+// from accepted to unsupported-capability at will. So resolveSat never blocks on
+// CEL_PREVIOUS_LOG, regardless of what the wrapped log itself contains.
+test("resolveSat ignores a chained CCG previousLog continuation even when its wrapped log is genuinely controller-signed, rather than blocking resolution (#686 review follow-up)", async () => {
   const resourceA = new TextEncoder().encode("resource A bytes"),
     resourceB = new TextEncoder().encode("resource B bytes");
   const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
@@ -1190,15 +1199,17 @@ test("resolveSat reports unsupported-capability for a chained CCG previousLog co
       unsupportedCapabilityDelta(log, resourceA, previousLogDoc),
     ),
   );
-  expect(result.status).toBe("unsupported-capability");
-  if (result.status !== "unsupported-capability") throw new Error(result.status);
-  expect(result.reason).toBe("CEL_PREVIOUS_LOG");
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_PREVIOUS_LOG",
+  });
 });
 
-// Same permission-less-DoS concern as the dataReference case: a previousLog candidate's
-// own inner entry must be authenticated by the current controller before the unsupported
-// wrapper may block resolution — a validly-shaped entry signed by any other key must
-// remain ignorable rather than permanently denying resolution of a real Original.
+// Same outcome with a wrapped entry signed by a key other than the current controller,
+// confirming previousLog's ignorability does not depend on the wrapped log's signer.
 test("resolveSat ignores a CCG previousLog candidate whose inner entry is not signed by the current controller, rather than blocking resolution (#686 review follow-up)", async () => {
   const resourceA = new TextEncoder().encode("resource A bytes"),
     resourceB = new TextEncoder().encode("resource B bytes");
