@@ -1,3 +1,4 @@
+import type { ContentValidator } from "../v3/content-validation.js";
 import type { ChainValidator } from "../v3/chain-validation.js";
 import { BitcoinPublications } from "../v3/bitcoin.js";
 import {
@@ -7,8 +8,11 @@ import {
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
-import { AssetResolver, type SatProvider } from "../v3/resolution.js";
-import type { ContentValidator } from "../v3/content-validation.js";
+import {
+  AssetResolver,
+  type SatProvider,
+  type IndependentEnumerationSource,
+} from "../v3/resolution.js";
 import { CredentialManager } from "../vc/CredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
@@ -41,6 +45,16 @@ export interface OriginalsSDKOptions
   publicReachability?: PublicReachabilityCheck;
   /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
   requirePublicReachability?: boolean;
+  /**
+   * A second, independently configured Ordinals index consulted to
+   * corroborate that `satProvider`/`ordinalsProvider` did not omit an
+   * inscription for the queried sat, and that its reported current sat
+   * ownership agrees. When configured, resolution fails closed rather than
+   * accepting an unqualified enumeration or ownership claim if this source
+   * is unreachable, reports an inscription the primary snapshot lacks, or
+   * disagrees about who currently holds the sat.
+   */
+  independentEnumeration?: IndependentEnumerationSource;
   /**
    * Independently derives confirmed inscriptions' media type/content from chain data (for
    * example `createBitcoinCoreContentValidator`), to cross-check against what
@@ -89,6 +103,7 @@ export class OriginalsSDK {
         "enableLogging",
         "publicReachability",
         "requirePublicReachability",
+        "independentEnumeration",
         "contentValidator",
       ],
     );
@@ -100,6 +115,7 @@ export class OriginalsSDK {
       storageAdapter,
       publicReachability,
       requirePublicReachability,
+      independentEnumeration,
       contentValidator,
       ...utilities
     } = options;
@@ -177,6 +193,7 @@ export class OriginalsSDK {
       local,
       hosted,
       chainValidator,
+      independentEnumeration,
       contentValidator,
     );
     this.lifecycle = new LifecycleManager(

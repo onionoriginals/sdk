@@ -17,12 +17,14 @@ import { HttpOrdinalsProvider } from '../src/sdk/http-ordinals-provider';
 import { HttpHostingStorageAdapter } from '../src/sdk/http-hosting-adapter';
 import { TurnkeySatSigner } from '../src/sdk/turnkey-sat-signer';
 import { startRegtest } from '../../../scripts/regtest/environment';
+import { startOwnershipCheck } from '../../../scripts/regtest/ownership-check';
 
 const hashResource = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 const env = await startRegtest();
 let app: ReturnType<typeof Bun.serve> | undefined;
 let indexer: ReturnType<typeof Bun.serve> | undefined;
+let ownershipCheck: Awaited<ReturnType<typeof startOwnershipCheck>> | undefined;
 const nativeFetch = globalThis.fetch;
 const checkpoint = (stage: string) => console.log(JSON.stringify({ stage, at: new Date().toISOString() }));
 try {
@@ -290,9 +292,14 @@ try {
     await assert.rejects(moved.asset.update({ name: 'retired key after sat move' }, { signer: controller }));
     return transferTxid;
   };
+  checkpoint('independent-ownership');
+  ownershipCheck = await startOwnershipCheck(env, expectedSat, btcoDid);
   checkpoint('sale-and-reacquisition');
   const saleTxid = await moveSat(privateKey, buyerKey);
+  await ownershipCheck.transferred('sale', buyerAddress);
   const reacquisitionTxid = await moveSat(buyerKey, privateKey);
+  await ownershipCheck.transferred('reacquisition', address);
+  await ownershipCheck.finish();
   checkpoint('resource-version');
   const updatedPng = new Uint8Array([...png, 0, 255]);
   await rotated.asset.addResourceVersion('art.png', updatedPng, 'image/png', { signer: nextController });
@@ -307,6 +314,7 @@ try {
   assert.equal(await cold().did.resolveDID(btcoDid), null);
   assert.equal((await cold().did.resolveDIDWithMetadata(btcoDid)).didDocumentMetadata.deactivated, true);
   const receipt = { result: 'pass', format: 'originals/cel/3', chain: 'regtest', fault, ...env.versions, did: btcoDid,
+    ownershipObservations: ownershipCheck.observations,
     webDid, ...submit, publications, saleTxid, reacquisitionTxid, buyerAddress, orphanedRotationBlock, orphanedBlock: block, activeTip: await env.rpc('getbestblockhash'), pngBytes: png.length,
     pngHash: hashResource(png), dataDir: env.dataDir, finalHead: deactivated.asset.state.head,
     checks: ['explicit HTTPS WebVH method and CEL publication', 'cold hosted PNG bytes', 'HTTP deposit/fee/sat/prevtx',
@@ -314,10 +322,15 @@ try {
       'route/store recreation from disk', 'selected sat preserved', 'orphaned boundary rejected after real reorg',
       'reconfirmation', 'cold sat bytes and DID authority', 'CEL 3 JSON reload', 'six-confirmation retention horizon',
       'cold accepted-head delta', 'one-publication rotation plus new-controller update', 'retired controller rejected',
-      'orphaned rotation restores prior controller', 'real sat sale and reacquisition preserve CEL head and authority', 'closed-browser recovery sweep',
+      'orphaned rotation restores prior controller', 'independent Core/ord ownership at matching tips',
+      'lagging and same-height forked tips never upgrade ownership', 'sale and reacquisition corroborated after real index catch-up',
+      'ownership and DID metadata survive independent restart', 'unavailable independent index fails closed', 'real sat sale and reacquisition preserve CEL head and authority', 'closed-browser recovery sweep',
       'new-resource raw media delta', 'historical and current resource bytes', 'log-only deactivation', 'deactivated DID metadata'],
     signer: 'disposable local Bitcoin key through TurnkeySatSigner; disposable CEL keys; no Turnkey service call' };
   await writeFile(join(env.dataDir, 'receipt.json'), JSON.stringify(receipt, null, 2));
   if (process.env.REGTEST_RECEIPT) await writeFile(process.env.REGTEST_RECEIPT, JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify(receipt, null, 2));
-} finally { globalThis.fetch = nativeFetch; app?.stop(true); indexer?.stop(true); await env.stop(); }
+} finally {
+  globalThis.fetch = nativeFetch; app?.stop(true); indexer?.stop(true);
+  try { await ownershipCheck?.stop(); } finally { await env.stop(); }
+}

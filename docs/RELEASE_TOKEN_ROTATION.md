@@ -1,10 +1,79 @@
 # npm publishing credential runbook
 
-The release workflow uses the repository's `NPM_TOKEN` through setup-node's
-`NODE_AUTH_TOKEN` registry configuration. Changesets CLI v3 and action v2 are
-configured with Node 24 for publishing; the Node 20.10 consumer checks run before
-that runtime switch. Merging the stable Version Packages PR is the publication
-gate. Do not run a real publish to test a credential.
+The release workflow now publishes via npm **OIDC trusted publishing**: the
+`publish` job's `id-token: write` permission plus `actions/setup-node`'s
+`registry-url` let npm authenticate the run without any token in the workflow.
+Changesets CLI v3 and action v2 are configured with Node 24 for publishing
+(npm's documented requirement for trusted publishing is npm CLI >= 11.5.1 and
+Node >= 22.14.0); the Node 20.10
+consumer checks run before that runtime switch. Merging the stable Version
+Packages PR is the publication gate. Do not run a real publish to test a
+credential.
+
+## Trusted publisher setup (manual, npm-side, required once per package)
+
+Trusted publishing requires a publisher registered on npmjs.com for **each**
+published package — this is npm account configuration, not something a
+workflow change can do. For every package (`@originals/cel`, `@originals/sdk`,
+`@originals/auth`):
+
+1. Sign into npmjs.com, open the package's Settings, and add a GitHub Actions
+   trusted publisher.
+2. Organization or user: `onionoriginals`. Repository: `sdk`. Workflow filename:
+   `release.yml`. **Leave Environment blank** — `release.yml` deliberately does
+   not run the publish job under a GitHub Environment (the Version PR is the
+   single approval surface), so setting an Environment on the npm side would
+   make the trust tuple disagree and OIDC would fail to authenticate.
+3. For a trusted publisher created after 2026-09-03, npm defaults new
+   configurations to stage-only; explicitly enable direct `npm publish` as
+   well, since this workflow calls `changeset publish` directly.
+4. This account/management action falls under npm's 2FA-bypass restrictions
+   (see below) and needs an interactive session with 2FA, same as rotating a
+   token.
+5. Once all three are registered and verified, open the gate in `release.yml`
+   by setting the non-secret repository variable it checks before publishing:
+
+   ```sh
+   gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true
+   ```
+
+   There is no read-only API the workflow can use to confirm registration
+   itself (npm whoami cannot validate OIDC trust — the exchange only happens
+   during an actual publish attempt), so the `publish` job's first step fails
+   loudly with a link back to these instructions until this variable reads
+   `true`. It stays `true` afterward; there is no per-release reset.
+
+Until every package has a trusted publisher configured **and**
+`NPM_TRUSTED_PUBLISHING_READY` is set, `release.yml`'s `publish` job refuses to
+run at all. **Configure and confirm all three before merging a Version
+Packages PR** — once the gate is open, `changeset publish` publishes all
+pending packages in one run, and if any package's registration was missed or
+misconfigured despite the gate, it can publish the others before failing on
+that one, leaving the release partially out.
+
+**Recovery if that happens:** finish registering the remaining package(s),
+then re-run the `publish` job (or push a no-op commit and let `check-publish`
+re-enter it — it re-evaluates per-package, not per-run). `changeset publish`
+is idempotent: it skips any package/version already on the registry and
+publishes only what is still missing, so a retry after completing
+registration cannot double-publish or corrupt the partially-released
+version set. Nothing needs to be rolled back.
+
+## 2FA-bypass deprecation timeline (why this migration exists)
+
+Per npm's [install-time security and GAT bypass2FA deprecation
+announcement](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/):
+
+- **Early August 2026** — 2FA-bypass granular tokens stop bypassing 2FA for
+  account/management operations (creating tokens, changing package access,
+  configuring trusted publishing). Publishing itself was unaffected by this
+  phase.
+- **~January 2027** — 2FA-bypass granular tokens lose direct publishing
+  entirely, restricted to reading private packages and staging a publish.
+
+The token-based release path (`NPM_TOKEN`) therefore breaks again around
+January 2027 even after a fresh rotation, independent of the 90-day expiry
+below. OIDC trusted publishing has no token to expire or rotate.
 
 ## Current observations
 
@@ -49,12 +118,16 @@ A successful observations job is not by itself proof that every publishing
 permission is configured. Check the reported scope and bypass settings before
 release. npm may require an interactive account session to view token metadata.
 
-The publish workflow separately runs `npm whoami` immediately before publishing,
-so an invalid token stops before provenance signing or registry writes. The weekly
-expiry guard uses `NPM_TOKEN_EXPIRES_AT`; it cannot recover the actual expiry from
-GitHub secret metadata and must not be given a guessed date.
+The publish job no longer runs `npm whoami` or references `NPM_TOKEN` at all —
+it authenticates via OIDC trusted publishing instead (see above). `npm whoami`
+only exercises the long-lived token path and cannot validate a trusted-publisher
+configuration, so it stopped being a useful preflight once the publish step
+switched auth methods. The weekly expiry guard still uses `NPM_TOKEN_EXPIRES_AT`
+and still runs — the token stays configured as an emergency fallback (see
+"Fallback: rotating the token" below) until OIDC has been proven on a real
+release, at which point the token and this rotation chore can be retired.
 
-## Rotate when necessary
+## Fallback: rotating the token (only if OIDC is not yet proven)
 
 1. Sign into npm and open Access Tokens. Inspect the existing credential's expiry
    and permissions, or create a replacement granular token when needed.
@@ -81,9 +154,27 @@ Local `npm whoami` uses the local npm configuration; it does not validate the
 credential stored in GitHub unless that same credential was deliberately
 configured. Prefer the runner observation for release evidence.
 
-Trusted publishing remains a separate migration requiring npm-side publisher
-configuration and verification. The CLI/action upgrades are now complete; they
-do not establish an OIDC trust relationship by themselves.
+Rotating the token no longer restores the automated publish path by itself:
+`release.yml`'s publish step does not read `NPM_TOKEN`/`NODE_AUTH_TOKEN`, by
+design (see "why: not exposing it to the OIDC step" above). A rotated token is
+kept only as a manual/emergency fallback (e.g. `npm publish` from a trusted
+machine) if OIDC trusted publishing is ever unavailable; it is not consulted
+by CI.
+
+## Status: OIDC migration
+
+The CLI/action upgrades (`@changesets/cli` v3, `changesets/action@v2`, Node 24
+release runtime) are complete, and `release.yml`'s publish step now
+authenticates purely via OIDC — it has no code path back to `NPM_TOKEN`. The
+`publish` job additionally refuses to run at all until the
+`NPM_TRUSTED_PUBLISHING_READY` repository variable is set (see "Trusted
+publisher setup" above), so an incomplete migration fails the job immediately
+with instructions rather than reaching npm unauthenticated. What remains is
+the npm-side trusted-publisher registration itself, which only an account
+owner with 2FA can do, setting that variable once it's done, and then one real
+release to prove the end-to-end flow. Once that release succeeds,
+delete/revoke `NPM_TOKEN`, retire `npm-token-expiry.yml`'s tracking issue, and
+close the corresponding rotation issue — there is nothing left to rotate.
 
 Sources: [npm token permissions](https://docs.npmjs.com/about-access-tokens/),
 [token creation and inspection](https://docs.npmjs.com/creating-and-viewing-access-tokens/),

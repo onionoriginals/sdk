@@ -121,6 +121,22 @@ export interface IndependentContentEvidence {
    */
   metadataDigest: string | null;
 }
+/**
+ * All inscription ids an independently configured second Ordinals index
+ * currently reports for the queried sat. `source` is a non-secret label for
+ * that source (never credentials or a full URL), carried into diagnostics.
+ * This corroborates enumeration completeness; it is a separate dimension
+ * from chain/index consistency and does not itself validate Bitcoin facts.
+ * `ownership`, when supplied, is that same independent source's own current
+ * sat-holder observation: a separate corroboration dimension from
+ * enumeration, since a provider could enumerate every inscription correctly
+ * while still fabricating who currently holds the sat.
+ */
+export interface IndependentEnumeration {
+  source: string;
+  inscriptionIds: readonly string[];
+  ownership?: SatSnapshot["ownership"];
+}
 export type SatResolution = Readonly<
   | {
       status: ResolutionFailure;
@@ -168,6 +184,25 @@ export type SatResolution = Readonly<
        * substitute content for a publication no independent source examined.
        */
       contentAssurance: "provider-asserted" | "cross-checked";
+      /**
+       * "cross-checked" only when a caller-supplied independent enumeration
+       * source was consulted and reported no inscription absent from this
+       * snapshot; otherwise the snapshot's own completeness is an
+       * unauthenticated provider assertion. A compromised or incomplete
+       * provider can still omit history no independent source observed.
+       */
+      enumerationAssurance: "provider-asserted" | "cross-checked";
+      /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+      enumerationSource?: string;
+      /**
+       * "cross-checked" only when independent ownership evidence was supplied
+       * (via `independentEnumeration.ownership`) and agreed with this
+       * snapshot's current `owner`/`satpoint`; otherwise current sat
+       * ownership is an unauthenticated provider assertion, distinct from
+       * `enumerationAssurance`. Configuring `independentEnumeration` for
+       * enumeration alone does not itself upgrade ownership assurance.
+       */
+      ownershipAssurance: "provider-asserted" | "cross-checked";
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -202,6 +237,14 @@ export function resolveSat(
      * with itself.
      */
     independentContent?: readonly IndependentContentEvidence[];
+    /**
+     * All inscription ids a second, independently configured Ordinals index
+     * currently reports for this sat. If it reports an id this snapshot
+     * does not contain, resolution fails closed rather than accepting a
+     * possibly-omitted history as complete: the primary provider cannot
+     * earn "cross-checked" by simply not disagreeing with itself.
+     */
+    independentEnumeration?: IndependentEnumeration;
   } = {},
 ): SatResolution {
   const prefix =
@@ -290,6 +333,49 @@ export function resolveSat(
     )
   )
     return failure("incomplete", "Missing live ownership observation");
+  let enumerationAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  let enumerationSource: string | undefined;
+  let ownershipAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  if (options.independentEnumeration) {
+    const { source, inscriptionIds, ownership } = options.independentEnumeration;
+    if (
+      typeof source !== "string" ||
+      !Array.isArray(inscriptionIds) ||
+      !inscriptionIds.every((id) => typeof id === "string")
+    )
+      return failure("incomplete", "Invalid independent enumeration evidence");
+    const known = new Set(snapshot.publications.map((p) => p.id));
+    if (inscriptionIds.some((id) => !known.has(id)))
+      return failure(
+        "inconsistent-evidence",
+        "Independent enumeration source reports an inscription absent from the primary snapshot",
+      );
+    enumerationAssurance = "cross-checked";
+    enumerationSource = source;
+    if (ownership !== undefined) {
+      if (
+        !ownership ||
+        !Object.prototype.hasOwnProperty.call(ownership, "owner") ||
+        !Object.prototype.hasOwnProperty.call(ownership, "satpoint") ||
+        !(ownership.owner === null || typeof ownership.owner === "string") ||
+        !(
+          ownership.satpoint === null || typeof ownership.satpoint === "string"
+        )
+      )
+        return failure("incomplete", "Invalid independent ownership evidence");
+      if (
+        ownership.owner !== snapshot.ownership.owner ||
+        ownership.satpoint !== snapshot.ownership.satpoint
+      )
+        return failure(
+          "inconsistent-evidence",
+          "Independent source disagrees with primary snapshot's current ownership",
+        );
+      ownershipAssurance = "cross-checked";
+    }
+  }
   const blocks = new Map<number, SatSnapshot["blocks"][number]>();
   const blockHashes = new Set<string>();
   for (const block of snapshot.blocks) {
@@ -618,6 +704,9 @@ export function resolveSat(
     chainEvidence,
     resourceAvailability,
     contentAssurance,
+    enumerationAssurance,
+    ...(enumerationSource !== undefined ? { enumerationSource } : {}),
+    ownershipAssurance,
   };
   freeze<unknown>(result);
   return result;
