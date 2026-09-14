@@ -7,6 +7,7 @@ import {
   encodeDocument,
   type SatSnapshot,
   eventDigest,
+  digestBytes,
 } from "@originals/cel/v3";
 
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
@@ -590,4 +591,420 @@ test('validator failures fail closed and validator mutations cannot change the r
   expect(result.status).toBe('accepted');
   if (result.status !== 'accepted') throw new Error(result.status);
   expect(result.resolution.chainEvidence.assurance).toBe('node-validated');
+});
+
+test("cross-checks enumeration against an independently configured second index and carries the assurance into DID metadata", async () => {
+  const { snapshot } = await boundary();
+  const agreeing = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => agreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.enumerationSource).toBe("second-ord-instance");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.enumerationAssurance).toBe(
+    "cross-checked",
+  );
+  expect(metadata.didDocumentMetadata.enumerationSource).toBe(
+    "second-ord-instance",
+  );
+});
+
+test("without an independent source configured, resolution still accepts but only claims provider-asserted enumeration", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when the independent enumeration source sees a publication the primary provider omitted", async () => {
+  const { snapshot } = await boundary();
+  const omittedTx = "9".repeat(64);
+  const independent = structuredClone(snapshot);
+  independent.publications.push({
+    ...independent.publications[0],
+    id: omittedTx + "i0",
+    revealTxid: omittedTx,
+  });
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => independent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when the independent source's own snapshot is incomplete, unhealthy or unstable, rather than granting cross-checked for free", async () => {
+  const { snapshot } = await boundary();
+  const cases: [string, (s: SatSnapshot) => SatSnapshot][] = [
+    ["incomplete enumeration", (s) => ({ ...s, enumerationComplete: false })],
+    ["unhealthy index", (s) => ({ ...s, indexHealthy: false })],
+    [
+      "unstable tip",
+      (s) => ({ ...s, tipAfter: { ...s.tipAfter, hash: "1".repeat(64) } }),
+    ],
+    [
+      "identical but malformed tips (equal is not the same as valid)",
+      (s) => {
+        const malformed = { height: -1, hash: "not-a-real-hash" };
+        return {
+          ...s,
+          tipBefore: malformed,
+          tipAfter: malformed,
+          indexTip: malformed,
+        };
+      },
+    ],
+  ];
+  for (const [, corrupt] of cases) {
+    const independent = corrupt(structuredClone(snapshot));
+    const sdk = OriginalsSDK.create({
+      network: "regtest",
+      satProvider: { getSatSnapshot: async () => snapshot },
+      independentEnumeration: {
+        label: "second-ord-instance",
+        provider: { getSatSnapshot: async () => independent },
+      },
+    });
+    const result = await sdk.lifecycle.resolveAssetFromSat("123");
+    expect(result.status).toBe("incomplete");
+  }
+});
+
+test("fails closed when a configured independent enumeration source cannot be reached, rather than silently degrading to provider-asserted", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: {
+        getSatSnapshot: async () => {
+          throw new Error("second index unreachable");
+        },
+      },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+});
+
+test("an unreachable independent enumeration source does not discard an already-established node-validated chain evidence", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async () => ({ source: "local-core-node" }),
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: {
+        getSatSnapshot: async () => {
+          throw new Error("second index unreachable");
+        },
+      },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+  if (result.status === "accepted") throw new Error("accepted");
+  expect(result.chainEvidence.assurance).toBe("node-validated");
+  expect(result.chainEvidence.source).toBe("local-core-node");
+});
+
+test("cross-checks ownership against the same independently configured second index and carries the assurance into DID metadata", async () => {
+  const { snapshot } = await boundary();
+  const agreeing = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => agreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.ownershipAssurance).toBe(
+    "cross-checked",
+  );
+});
+
+test("without an independent source configured, resolution still accepts but only claims provider-asserted ownership", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when the independent enumeration source disagrees about who currently holds the sat", async () => {
+  const { snapshot } = await boundary();
+  const disagreeing = structuredClone(snapshot);
+  disagreeing.ownership = { owner: "a-different-holder", satpoint: disagreeing.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => disagreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+// Real Core/ord coverage for these tip cases and actual transfers runs in
+// scripts/regtest/ownership-check.ts via the standard regtest journey.
+test("does not cross-check ownership against an independent source observing a different chain tip, even when the values happen to match", async () => {
+  const { snapshot } = await boundary();
+  const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const stale = structuredClone(snapshot);
+  stale.tipBefore = staleTip;
+  stale.tipAfter = staleTip;
+  stale.indexTip = staleTip;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => stale },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  // Enumeration is still corroborated (an older tip's ids are a safe subset to compare),
+  // but ownership from a different tip must not be able to confer cross-checked, even
+  // though its value happens to equal the primary snapshot's.
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("a differing owner at a different independent chain tip does not fail resolution (the comparison is skipped, not evaluated)", async () => {
+  const { snapshot } = await boundary();
+  const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const staleDisagreeing = structuredClone(snapshot);
+  staleDisagreeing.tipBefore = staleTip;
+  staleDisagreeing.tipAfter = staleTip;
+  staleDisagreeing.indexTip = staleTip;
+  staleDisagreeing.ownership = { owner: "an-old-holder", satpoint: staleDisagreeing.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => staleDisagreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("content assurance defaults to provider-asserted with no content validator configured", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.contentAssurance).toBe("provider-asserted");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.contentAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks content when a configured validator independently confirms the on-chain bytes", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
+      .map((p) => {
+        const body = p.body as { mediaType: string; bytes: Uint8Array; metadata: Uint8Array | null };
+        return {
+          inscriptionId: p.id,
+          mediaType: body.mediaType,
+          contentDigest: digestBytes(body.bytes),
+          metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+        };
+      }),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.contentAssurance).toBe("cross-checked");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.contentAssurance).toBe("cross-checked");
+});
+
+test("fails closed when a configured content validator disagrees with a substituted body", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
+      .map((p) => {
+        const body = p.body as { metadata: Uint8Array | null };
+        return {
+          inscriptionId: p.id,
+          mediaType: (p.body as { mediaType: string }).mediaType,
+          contentDigest: digestBytes(new TextEncoder().encode("independently observed different content")),
+          metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+        };
+      }),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when a configured content validator disagrees only on the metadata tag", async () => {
+  const { snapshot } = await boundary();
+  // Body and media type match exactly what an independent Bitcoin node
+  // derived; only the CEL metadata tag that actually drives history differs
+  // (e.g. a compromised indexer serving an older or substituted metadata tag
+  // for a real, correctly-content-matching inscription).
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (s) => s.publications
+      .filter((p) => p.body.status === "complete")
+      .map((p) => ({
+        inscriptionId: p.id,
+        mediaType: (p.body as { mediaType: string }).mediaType,
+        contentDigest: digestBytes((p.body as { bytes: Uint8Array }).bytes),
+        metadataDigest: digestBytes(new TextEncoder().encode("independently observed different metadata")),
+      })),
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed rather than falling back to an unqualified claim when the content validator is unreachable", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async () => { throw new Error("node unreachable"); },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+});
+
+test("never consults the content validator for a snapshot resolveSat would reject on its own", async () => {
+  const { snapshot } = await boundary();
+  // An internally inconsistent snapshot (index tip disagrees with the chain
+  // tip) fails resolveSat's own structural checks before content is ever
+  // relevant; the content validator must not be charged an RPC round trip
+  // for evidence that could never have been accepted regardless.
+  const broken = { ...snapshot, indexHealthy: false };
+  let calls = 0;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => broken },
+    contentValidator: async () => { calls++; return []; },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+  expect(calls).toBe(0);
+});
+
+test("rejects a non-function contentValidator at construction, like chainValidator", () => {
+  expect(() =>
+    // @ts-expect-error deliberately not a function, to check the runtime guard
+    OriginalsSDK.create({ network: "regtest", contentValidator: "not-a-function" }),
+  ).toThrow();
+});
+
+test("only consults the content validator with the inscription ids the baseline resolution actually accepted", async () => {
+  const { snapshot } = await boundary();
+  let received: readonly string[] | undefined;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (_s, acceptedInscriptionIds) => {
+      received = acceptedInscriptionIds;
+      return [];
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(received).toEqual(
+    result.resolution.publications.map((p) => p.inscriptionId),
+  );
+});
+
+test('content, enumeration, and ownership corroboration remain independent when configured together', async () => {
+  const { snapshot } = await boundary();
+  let contentCalls = 0;
+  let corruptContent = false;
+  const second = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: { label: 'second-index', provider: { getSatSnapshot: async () => second } },
+    contentValidator: async s => {
+      contentCalls++;
+      return s.publications.flatMap(p => p.body.status === 'complete' ? [{ inscriptionId: p.id,
+        mediaType: p.body.mediaType, contentDigest: digestBytes(corruptContent ? new Uint8Array([1]) : p.body.bytes),
+        metadataDigest: p.body.metadata === null ? null : digestBytes(p.body.metadata) }] : []);
+    } });
+  const result = await sdk.lifecycle.resolveAssetFromSat('123');
+  expect(result.status).toBe('accepted');
+  if (result.status !== 'accepted') throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe('cross-checked');
+  expect(result.resolution.ownershipAssurance).toBe('cross-checked');
+  expect(result.resolution.contentAssurance).toBe('cross-checked');
+  const metadata = (await sdk.did.resolveDIDWithMetadata('did:btco:reg:123')).didDocumentMetadata;
+  expect(metadata.enumerationAssurance).toBe('cross-checked');
+  expect(metadata.ownershipAssurance).toBe('cross-checked');
+  expect(metadata.contentAssurance).toBe('cross-checked');
+  contentCalls = 0;
+  second.ownership.owner = 'different-holder';
+  expect((await sdk.lifecycle.resolveAssetFromSat('123')).status).toBe('inconsistent-evidence');
+  expect(contentCalls).toBe(0);
+  second.ownership = structuredClone(snapshot.ownership);
+  corruptContent = true;
+  expect((await sdk.lifecycle.resolveAssetFromSat('123')).status).toBe('inconsistent-evidence');
+  expect(contentCalls).toBeGreaterThan(0);
+});
+
+test('content validation cannot change the snapshot already corroborated by chain and ownership checks', async () => {
+  const { snapshot } = await boundary();
+  const originalTip = structuredClone(snapshot.tipBefore);
+  const sdk = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async () => ({ source: 'independent-chain' }),
+    independentEnumeration: { label: 'second-index', provider: { getSatSnapshot: async () => structuredClone(snapshot) } },
+    contentValidator: async view => {
+      for (const tip of [view.tipBefore, view.tipAfter, view.indexTip]) { tip.height += 10; tip.hash = 'f'.repeat(64); }
+      return view.publications.flatMap(p => p.body.status === 'complete' ? [{ inscriptionId: p.id,
+        mediaType: p.body.mediaType, contentDigest: digestBytes(p.body.bytes),
+        metadataDigest: p.body.metadata === null ? null : digestBytes(p.body.metadata) }] : []);
+    } });
+  const result = await sdk.lifecycle.resolveAssetFromSat('123');
+  expect(result.status).toBe('accepted');
+  if (result.status !== 'accepted') throw new Error(result.status);
+  expect(result.resolution.tip).toEqual(originalTip);
+  expect(result.resolution.ownershipAssurance).toBe('cross-checked');
+  expect(result.resolution.contentAssurance).toBe('cross-checked');
+  expect(result.resolution.chainEvidence).toEqual({ assurance: 'node-validated', source: 'independent-chain' });
 });

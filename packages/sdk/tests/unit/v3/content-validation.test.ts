@@ -1,0 +1,464 @@
+import { expect, test } from 'bun:test';
+import * as btc from '@scure/btc-signer';
+import * as ordinals from 'micro-ordinals';
+import { CBOR } from 'micro-ordinals/lib/cbor.js';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
+import { digestBytes, type SatSnapshot } from '@originals/cel/v3';
+import { prepareInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat.js';
+import type { PreparedInscriptionOnSat } from '../../../src/bitcoin/inscription-recovery.js';
+import { getScureNetwork } from '../../../src/bitcoin/transactions/commit.js';
+import { createBitcoinCoreContentValidator } from '../../../src/v3/content-validation.js';
+
+const key = new Uint8Array(32).fill(1);
+const payment = btc.p2wpkh(secp256k1.getPublicKey(key), getScureNetwork('regtest'));
+
+// A real, fully-signed reveal transaction, built the same way the SDK's own
+// writer creates one — the independent validator must derive content from
+// this exact on-chain witness, never from what a provider separately claims.
+async function preparedReveal(
+  content: Uint8Array,
+  contentType: string,
+  metadata?: Record<string, unknown>,
+): Promise<PreparedInscriptionOnSat> {
+  return prepareInscriptionOnSat({
+    buildContent: async () => ({ content, contentType, metadata }),
+    fundingUtxos: [
+      {
+        txid: '12'.repeat(32),
+        vout: 0,
+        value: 100_000,
+        scriptPubKey: Buffer.from(payment.script!).toString('hex'),
+      },
+    ],
+    satSigner: {
+      signAndFinalizeCommitPsbt: async (psbt: string) => {
+        const tx = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), {
+          allowUnknownOutputs: true,
+        });
+        tx.sign(key);
+        tx.finalize();
+        return tx.hex;
+      },
+    },
+    changeAddress: payment.address!,
+    feeRate: 2,
+    network: 'regtest',
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    provider: { getFirstSatOfOutput: async () => '1250000000' } as any,
+  });
+}
+
+function snapshotFor(
+  prepared: PreparedInscriptionOnSat,
+  providerBody: { mediaType: string; bytes: Uint8Array; metadata?: Uint8Array | null },
+): SatSnapshot {
+  const blockHash = 'b'.repeat(64);
+  return {
+    network: 'regtest',
+    sat: prepared.satoshi,
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [prepared.revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [
+      {
+        id: prepared.inscriptionId,
+        revealTxid: prepared.revealTxId,
+        network: 'regtest',
+        sat: prepared.satoshi,
+        confirmed: true,
+        creation: {
+          height: 1,
+          blockHash,
+          transactionIndex: 0,
+          inscriptionIndex: 0,
+        },
+        body: {
+          status: 'complete',
+          mediaType: providerBody.mediaType,
+          bytes: providerBody.bytes,
+          metadata: providerBody.metadata ?? null,
+        },
+      },
+    ],
+  };
+}
+
+// The validator only derives evidence for publications the baseline resolution
+// already accepted; these tests exercise the transaction-parsing/RPC logic
+// directly, so they treat every publication in the test snapshot as accepted.
+const allIds = (snapshot: SatSnapshot) => snapshot.publications.map((p) => p.id);
+
+function core(rawHexByTxid: Record<string, string>) {
+  const calls: unknown[][] = [];
+  const fetchImpl = (async (_url, init) => {
+    const { method, params } = JSON.parse(String(init?.body)) as {
+      method: string;
+      params: unknown[];
+    };
+    calls.push([method, ...params]);
+    if (method === 'getrawtransaction')
+      return Response.json({ result: rawHexByTxid[params[0] as string] ?? null });
+    throw new Error('unexpected method');
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+test('derives independent content from the reveal transaction witness, disagreeing with a substituted provider body', async () => {
+  const content = new TextEncoder().encode('the real on-chain content');
+  const prepared = await preparedReveal(content, 'text/plain');
+  const forgedBody = new TextEncoder().encode('a compromised indexer served this instead');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: forgedBody });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const validator = createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  });
+  const evidence = await validator(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([
+    {
+      inscriptionId: prepared.inscriptionId,
+      mediaType: 'text/plain',
+      contentDigest: digestBytes(content),
+      metadataDigest: null,
+    },
+  ]);
+  expect(evidence[0].contentDigest).not.toBe(digestBytes(forgedBody));
+  expect(mock.calls).toEqual([['getrawtransaction', prepared.revealTxId, 0, 'b'.repeat(64)]]);
+});
+
+test('agrees when the provider honestly reports the same on-chain content', async () => {
+  const content = new TextEncoder().encode('honest content');
+  const prepared = await preparedReveal(content, 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: content });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence[0].contentDigest).toBe(digestBytes(content));
+});
+
+test('derives the metadata tag digest from the actual on-chain envelope, independent of what the provider reports', async () => {
+  const content = new TextEncoder().encode('resource bytes');
+  const onChainMetadata = { profile: 'originals/cel/3', head: 'real-head' };
+  const prepared = await preparedReveal(content, 'image/png', onChainMetadata);
+  // A compromised indexer reports different metadata than what is actually
+  // encoded in the reveal transaction, while the main content still matches.
+  const forgedMetadata = { profile: 'originals/cel/3', head: 'forged-head' };
+  const snapshot = snapshotFor(prepared, {
+    mediaType: 'image/png',
+    bytes: content,
+    metadata: CBOR.encode(forgedMetadata),
+  });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence[0].metadataDigest).toBe(digestBytes(CBOR.encode(onChainMetadata)));
+  expect(evidence[0].metadataDigest).not.toBe(digestBytes(CBOR.encode(forgedMetadata)));
+});
+
+test('matches non-canonical but valid CBOR metadata against the exact raw on-chain bytes, not a re-encoding', async () => {
+  // A metadata tag can be written with any valid CBOR encoding, not only the
+  // minimal-length "canonical" form this SDK's own writer happens to produce.
+  // Re-encoding the decoded value canonically before hashing would silently
+  // change the bytes and falsely disagree with an honest provider that
+  // reports the real raw tag bytes — this must compare the exact raw bytes.
+  const pubkey = schnorr.getPublicKey(new Uint8Array(32).fill(4));
+  // CBOR for {n: 5}, but the integer 5 is encoded via the non-minimal
+  // one-byte-follows form (0x18 0x05) instead of the canonical immediate
+  // form (0x05) — both decode to the same value; only the wire bytes differ.
+  const nonCanonicalMetadata = new Uint8Array([0xa1, 0x61, 0x6e, 0x18, 0x05]);
+  const bodyBytes = new TextEncoder().encode('hello');
+  const customScript = btc.Script.encode([
+    pubkey, 'CHECKSIG',
+    0, 'IF',
+    new TextEncoder().encode('ord'),
+    new Uint8Array([1]), new TextEncoder().encode('text/plain'),
+    new Uint8Array([5]), nonCanonicalMetadata,
+    0,
+    bodyBytes,
+    'ENDIF',
+  ]);
+  const fakeControl = new Uint8Array(33);
+  fakeControl[0] = 0xc0;
+  fakeControl.set(pubkey, 1);
+  const tx = new btc.Transaction({
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+    allowLegacyWitnessUtxo: true,
+    disableScriptCheck: true,
+  });
+  tx.addOutput({ script: new Uint8Array(34), amount: 1000n });
+  tx.addInput(
+    { txid: '11'.repeat(32), index: 0, finalScriptWitness: [new Uint8Array(64).fill(1), customScript, fakeControl] },
+    true,
+  );
+  const revealTxHex = Buffer.from(tx.toBytes(true, true)).toString('hex');
+  const revealTxId = btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  }).id;
+  const blockHash = 'b'.repeat(64);
+  const snapshot: SatSnapshot = {
+    network: 'regtest',
+    sat: '1250000000',
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [
+      {
+        id: `${revealTxId}i0`,
+        revealTxid: revealTxId,
+        network: 'regtest',
+        sat: '1250000000',
+        confirmed: true,
+        creation: { height: 1, blockHash, transactionIndex: 0, inscriptionIndex: 0 },
+        // An honest provider reports the exact raw on-chain metadata bytes.
+        body: { status: 'complete', mediaType: 'text/plain', bytes: bodyBytes, metadata: nonCanonicalMetadata },
+      },
+    ],
+  };
+  const mock = core({ [revealTxId]: revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence[0].metadataDigest).toBe(digestBytes(nonCanonicalMetadata));
+  // A canonical re-encoding of the same decoded value would be shorter (4
+  // bytes: 0xa1 0x61 0x6e 0x05) and therefore digest differently — proving
+  // this is comparing exact raw bytes, not a re-encoded representation.
+  expect(evidence[0].metadataDigest).not.toBe(
+    digestBytes(new Uint8Array([0xa1, 0x61, 0x6e, 0x05])),
+  );
+});
+
+test('metadataDigest is null when the envelope carries no metadata tag', async () => {
+  const content = new TextEncoder().encode('log-only body');
+  const prepared = await preparedReveal(content, 'application/cel');
+  const snapshot = snapshotFor(prepared, { mediaType: 'application/cel', bytes: content });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence[0].metadataDigest).toBeNull();
+});
+
+test('caches raw transaction fetches per distinct reveal txid', async () => {
+  const prepared = await preparedReveal(new TextEncoder().encode('once'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('once') });
+  // A second, distinct accepted inscription id happens to reference the same reveal
+  // transaction (this single-inscription reveal has no envelope at index 1, so it is
+  // independently left uncovered rather than fetched again): fetching one shared
+  // reveal transaction twice would be wasteful.
+  snapshot.publications.push({ ...snapshot.publications[0], id: prepared.revealTxId + 'i1' });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toHaveLength(1);
+  expect(mock.calls.filter((c) => c[0] === 'getrawtransaction')).toHaveLength(1);
+});
+
+test('leaves an inscription uncovered, rather than guessing, when no envelope is found at its index', async () => {
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  // This reveal only carries inscription index 0; ask about index 1 instead.
+  snapshot.publications[0].id = prepared.revealTxId + 'i1';
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([]);
+});
+
+test('collects inscriptions across multiple script-path inputs of one batch reveal', async () => {
+  // A batch reveal spends its inscriptions across separate inputs; the
+  // inscription index is global across the whole transaction, not scoped
+  // to one input, so every script-path input must contribute its envelopes.
+  const pubkey1 = schnorr.getPublicKey(new Uint8Array(32).fill(2));
+  const pubkey2 = schnorr.getPublicKey(new Uint8Array(32).fill(3));
+  const revealWitness = (pubkey: Uint8Array, inscription: { tags: { contentType: string }; body: Uint8Array }) => {
+    const script = ordinals.p2tr_ord_reveal(pubkey, [inscription]).script;
+    const fakeControl = new Uint8Array(33);
+    fakeControl[0] = 0xc0;
+    fakeControl.set(pubkey, 1);
+    return [new Uint8Array(64).fill(1), script, fakeControl];
+  };
+  const first = { tags: { contentType: 'text/plain' }, body: new TextEncoder().encode('first') };
+  const second = { tags: { contentType: 'text/plain' }, body: new TextEncoder().encode('second') };
+  const tx = new btc.Transaction({
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+    allowLegacyWitnessUtxo: true,
+    disableScriptCheck: true,
+  });
+  tx.addOutput({ script: new Uint8Array(34), amount: 1000n });
+  tx.addInput({ txid: '11'.repeat(32), index: 0, finalScriptWitness: revealWitness(pubkey1, first) }, true);
+  tx.addInput({ txid: '22'.repeat(32), index: 0, finalScriptWitness: revealWitness(pubkey2, second) }, true);
+  const revealTxHex = Buffer.from(tx.toBytes(true, true)).toString('hex');
+  const revealTxId = btc.Transaction.fromRaw(Buffer.from(revealTxHex, 'hex'), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  }).id;
+
+  const blockHash = 'b'.repeat(64);
+  const snapshot: SatSnapshot = {
+    network: 'regtest',
+    sat: '1250000000',
+    tipBefore: { height: 1, hash: blockHash },
+    tipAfter: { height: 1, hash: blockHash },
+    indexTip: { height: 1, hash: blockHash },
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 1, hash: blockHash, txids: [revealTxId] }],
+    ownership: { owner: null, satpoint: null },
+    publications: [0, 1].map((index) => ({
+      id: `${revealTxId}i${index}`,
+      revealTxid: revealTxId,
+      network: 'regtest',
+      sat: '1250000000',
+      confirmed: true,
+      creation: { height: 1, blockHash, transactionIndex: 0, inscriptionIndex: index },
+      body: {
+        status: 'complete',
+        mediaType: 'text/plain',
+        bytes: new TextEncoder().encode(index === 0 ? 'first' : 'second'),
+        metadata: null,
+      },
+    })),
+  };
+  const mock = core({ [revealTxId]: revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([
+    { inscriptionId: `${revealTxId}i0`, mediaType: 'text/plain', contentDigest: digestBytes(first.body), metadataDigest: null },
+    { inscriptionId: `${revealTxId}i1`, mediaType: 'text/plain', contentDigest: digestBytes(second.body), metadataDigest: null },
+  ]);
+});
+
+test('skips unconfirmed and incomplete publications without consulting the node', async () => {
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  snapshot.publications[0].confirmed = false;
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([]);
+  expect(mock.calls).toEqual([]);
+});
+
+test('never consults the node for a publication outside the accepted set, even if confirmed and complete', async () => {
+  // A confirmed, complete publication the baseline resolver ignored (unrelated,
+  // non-extending, boundary-invalid, or height-gated) must never be able to deny
+  // an otherwise valid history just because it is unreachable or unparseable on
+  // independent re-derivation -- so the validator must not even look at it.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, []);
+  expect(evidence).toEqual([]);
+  expect(mock.calls).toEqual([]);
+});
+
+test('deduplicates a publication observed more than once in the snapshot to a single evidence entry', async () => {
+  // resolveSat itself tolerates an identical duplicate observation of one
+  // publication; reporting two independent-evidence entries for the same
+  // inscription id would be rejected as malformed, turning an otherwise
+  // accepted result into `incomplete`.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  snapshot.publications.push({ ...snapshot.publications[0] });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toHaveLength(1);
+  expect(evidence[0].inscriptionId).toBe(prepared.inscriptionId);
+});
+
+test('leaves an inscription uncovered, rather than trusting it, when the node returns a transaction for a different id', async () => {
+  // A misbehaving/misconfigured node, or an on-path substitution, could return
+  // bytes for some other transaction than the one actually requested. Assigning
+  // that witness to the requested inscription would let substituted provider
+  // content be labeled cross-checked, or cause false disagreement.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const wrongTx = await preparedReveal(new TextEncoder().encode('y'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  // The node responds to a request for `prepared.revealTxId` with a completely
+  // different, unrelated transaction's raw bytes.
+  const mock = core({ [prepared.revealTxId]: wrongTx.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([]);
+});
+
+test('rejects a non-loopback HTTP endpoint, requiring HTTPS off the local machine', () => {
+  expect(() =>
+    createBitcoinCoreContentValidator({ endpoint: 'http://core.example.com:8332' }),
+  ).toThrow();
+  expect(() => createBitcoinCoreContentValidator({ endpoint: 'https://core.example.com:8332' })).not.toThrow();
+  expect(() => createBitcoinCoreContentValidator({ endpoint: 'http://127.0.0.1:8332' })).not.toThrow();
+});
+
+test('fails when the independent node is unreachable, rather than silently reporting no evidence', async () => {
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  const fetchImpl = (async () => { throw new Error('connection refused'); }) as typeof fetch;
+  await expect(
+    createBitcoinCoreContentValidator({ endpoint: 'http://localhost:18443', fetchImpl })(snapshot, allIds(snapshot)),
+  ).rejects.toMatchObject({ code: 'CONTENT_VALIDATOR_UNAVAILABLE' });
+});
+
+test('rejects URL credentials and a fragment in the configured endpoint', () => {
+  expect(() =>
+    createBitcoinCoreContentValidator({ endpoint: 'http://user:secret@localhost:18443' }),
+  ).toThrow();
+  expect(() =>
+    createBitcoinCoreContentValidator({ endpoint: 'http://localhost:18443#frag' }),
+  ).toThrow();
+});
+
+test('bounds total RPC calls', async () => {
+  const first = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(first, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  const second = await preparedReveal(new TextEncoder().encode('y'), 'text/plain');
+  const blockHash = 'b'.repeat(64);
+  snapshot.blocks[0].txids.push(second.revealTxId);
+  snapshot.publications.push({
+    ...snapshot.publications[0],
+    id: second.inscriptionId,
+    revealTxid: second.revealTxId,
+    creation: { height: 1, blockHash, transactionIndex: 1, inscriptionIndex: 0 },
+  });
+  const mock = core({ [first.revealTxId]: first.revealTxHex, [second.revealTxId]: second.revealTxHex });
+  await expect(
+    createBitcoinCoreContentValidator({
+      endpoint: 'http://localhost:18443',
+      fetchImpl: mock.fetchImpl,
+      maxRequests: 1,
+    })(snapshot, allIds(snapshot)),
+  ).rejects.toMatchObject({ code: 'CONTENT_VALIDATOR_BUDGET_EXCEEDED' });
+});
