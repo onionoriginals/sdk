@@ -518,7 +518,7 @@ export function resolveSat(
       if (inlineContentStatus === "unmatched")
         ignore("CEL_INLINE_RESOURCE_MISMATCH");
       if (inlineResourceIds.length > 0) {
-        inlinedContent.add(JSON.stringify([body.mediaType, contentDigest]));
+        inlinedContent.add(JSON.stringify([body.mediaType, bodyDigest]));
       }
       // Choose the first valid boundary independent of a requested genesis filter.
       if (
