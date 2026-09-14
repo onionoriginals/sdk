@@ -83,25 +83,56 @@ export interface OriginalsStore {
 const CTYPE_SUFFIX = '.ctype';
 const OWNER_SUFFIX = '.owner';
 
+function toBuffer(data: string | Uint8Array): Uint8Array {
+  return typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
+}
+
+/**
+ * `writeSync` is permitted to write fewer bytes than given in one call (a
+ * short write — possible on any fd, not just pipes/sockets). Looping until
+ * every byte is written is what makes the callers below actually atomic:
+ * an unchecked short write would durably commit a truncated file.
+ */
+function writeAllSync(fd: number, data: Uint8Array): void {
+  let written = 0;
+  while (written < data.length) {
+    written += writeSync(fd, data, written, data.length - written);
+  }
+}
+
+/** Best-effort remove; the caller is already unwinding from a real error. */
+function tryUnlink(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* best-effort cleanup */
+  }
+}
+
 /**
  * Atomic AND durable write (write → fsync → rename → fsync dir), matching
  * `inscriptions-store.ts`'s `writeJson`. `rename(2)` on the same filesystem
  * is atomic against a process crash, and fsyncing the temp file before the
  * rename (then the containing directory after) closes the window where a
- * host crash leaves an empty/torn file after reboot.
+ * host crash leaves an empty/torn file after reboot. Any failure before the
+ * rename removes the temp file rather than leaking it.
  */
 function atomicWriteFile(path: string, data: string | Uint8Array): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const fd = openSync(tmp, 'w');
   try {
-    if (typeof data === 'string') writeSync(fd, data);
-    else writeSync(fd, data);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    const fd = openSync(tmp, 'w');
+    try {
+      writeAllSync(fd, toBuffer(data));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  } catch (err) {
+    tryUnlink(tmp);
+    throw err;
   }
-  renameSync(tmp, path);
   if (process.platform !== 'win32') {
     const dirFd = openSync(dirname(path), 'r');
     try {
@@ -118,33 +149,30 @@ function atomicWriteFile(path: string, data: string | Uint8Array): void {
  * place. `link` fails with EEXIST if `path` already exists — an atomic
  * create-if-absent at the filesystem level, so two racing writers can never
  * both believe they created the file first. Throws with `.code === 'EEXIST'`
- * if `path` already exists; the temp file is always cleaned up.
+ * if `path` already exists; the temp file is always cleaned up, whether the
+ * write, the link, or neither succeeded.
  */
 function atomicCreateExclusive(path: string, data: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const fd = openSync(tmp, 'w');
   try {
-    writeSync(fd, data);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    linkSync(tmp, path);
-    if (process.platform !== 'win32') {
-      const dirFd = openSync(dirname(path), 'r');
-      try {
-        fsyncSync(dirFd);
-      } finally {
-        closeSync(dirFd);
-      }
-    }
-  } finally {
+    const fd = openSync(tmp, 'w');
     try {
-      unlinkSync(tmp);
-    } catch {
-      /* best-effort cleanup; the link (or its failure) already decided the outcome */
+      writeAllSync(fd, toBuffer(data));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    linkSync(tmp, path);
+  } finally {
+    tryUnlink(tmp);
+  }
+  if (process.platform !== 'win32') {
+    const dirFd = openSync(dirname(path), 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
     }
   }
 }
@@ -238,12 +266,17 @@ export function createOriginalsStore(opts: {
   function saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void {
     const target = keyToPath(hostedDir, key); // validates traversal
     const ownerPath = target + OWNER_SUFFIX;
-    claimOrVerifyOwner(target, ownerPath, subOrgId);
 
+    // Quota is checked BEFORE the ownership claim below: claiming an
+    // unclaimed key is a durable, one-way commitment (the true owner is then
+    // FORBIDDEN from ever claiming it themselves), so a request that was
+    // always going to be rejected for quota must never reserve the key first.
     const idx = readIndex(subOrgId);
     const prev = idx.sizes[key] ?? 0;
     const nextTotal = idx.totalBytes - prev + bytes.byteLength;
     if (nextTotal > maxTotalBytes) throw new Error('STORE_FULL');
+
+    claimOrVerifyOwner(target, ownerPath, subOrgId);
 
     atomicWriteFile(target, bytes);
     atomicWriteFile(target + CTYPE_SUFFIX, contentType);

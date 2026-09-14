@@ -245,4 +245,20 @@ describe('originals-store', () => {
       store.saveBytes('sub-1', 'h/a/did.jsonl', enc('this is longer than eight bytes'), 'application/jsonl')
     ).toThrow('STORE_FULL');
   });
+
+  test('a quota-rejected upload never reserves the key, so the rightful owner can still claim it', () => {
+    // A caller whose upload is going to be rejected for quota must not be
+    // able to permanently squat an otherwise-unclaimed key: claiming
+    // ownership is a one-way commitment (the true owner would then get
+    // FORBIDDEN forever), so quota must be checked before the ownership
+    // claim, not after.
+    const store = createOriginalsStore({ dataDir: tmpDir(), maxTotalBytes: 8 });
+    const key = 'demo.example.com/uEiExample/resources/uJZtLeUr';
+    expect(() =>
+      store.saveBytes('attacker', key, enc('this is longer than eight bytes'), 'application/jsonl')
+    ).toThrow('STORE_FULL');
+    // The key was never claimed by the failed attempt — the real owner can write it.
+    expect(() => store.saveBytes('sub-1', key, enc('mine'), 'application/jsonl')).not.toThrow();
+    expect(store.serve(new URL(`http://${key}`))!.status).toBe(200);
+  });
 });
