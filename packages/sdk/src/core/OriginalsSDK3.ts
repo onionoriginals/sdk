@@ -1,3 +1,4 @@
+import type { ContentValidator } from "../v3/content-validation.js";
 import type { ChainValidator } from "../v3/chain-validation.js";
 import { BitcoinPublications } from "../v3/bitcoin.js";
 import {
@@ -54,6 +55,14 @@ export interface OriginalsSDKOptions
    * disagrees about who currently holds the sat.
    */
   independentEnumeration?: IndependentEnumerationSource;
+  /**
+   * Independently derives confirmed inscriptions' media type/content from chain data (for
+   * example `createBitcoinCoreContentValidator`), to cross-check against what
+   * `satProvider`/`ordinalsProvider` reports. When configured, resolution fails closed
+   * rather than accepting an unqualified content claim if this validator is unreachable or
+   * disagrees with the provider's reported content.
+   */
+  contentValidator?: ContentValidator;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -95,6 +104,7 @@ export class OriginalsSDK {
         "publicReachability",
         "requirePublicReachability",
         "independentEnumeration",
+        "contentValidator",
       ],
     );
     const {
@@ -106,9 +116,11 @@ export class OriginalsSDK {
       publicReachability,
       requirePublicReachability,
       independentEnumeration,
+      contentValidator,
       ...utilities
     } = options;
     requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
+    requireAsset(contentValidator === undefined || typeof contentValidator === "function", "SDK_CONTENT_VALIDATOR", "contentValidator must be a function");
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -182,6 +194,7 @@ export class OriginalsSDK {
       hosted,
       chainValidator,
       independentEnumeration,
+      contentValidator,
     );
     this.lifecycle = new LifecycleManager(
       local,

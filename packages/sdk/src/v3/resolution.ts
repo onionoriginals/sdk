@@ -1,3 +1,4 @@
+import type { ContentValidator } from "./content-validation.js";
 import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
@@ -80,6 +81,7 @@ export interface AssetDIDResolution {
     /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
     enumerationSource?: string;
     ownershipAssurance?: "provider-asserted" | "cross-checked";
+    contentAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -138,6 +140,7 @@ export class AssetResolver {
     private readonly hosted?: HostedAssets,
     private readonly chainValidator?: ChainValidator,
     private readonly independentEnumeration?: IndependentEnumerationSource,
+    private readonly contentValidator?: ContentValidator,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -262,10 +265,42 @@ export class AssetResolver {
             : {}),
         };
       }
+      // Validate the snapshot's own structure/chain-position claims locally
+      // before spending an external RPC round trip on it: a snapshot that
+      // resolveSat would reject anyway (bad block hash, wrong sat/network,
+      // inconsistent reveal position) should surface that deterministic
+      // reason rather than an unrelated content-validator failure, and never
+      // burns a request against the independently trusted node for data
+      // that was never going to be accepted regardless of its content.
+      const baseline = resolveSat(snapshot, { ...options, independentEnumeration });
+      if (baseline.status !== "accepted" || !this.contentValidator)
+        return { snapshot, resolution: Object.freeze({ ...baseline, chainEvidence }) };
+      // A configured content validator that cannot be consulted fails closed,
+      // the same as a configured chain/enumeration validator: it must not be
+      // possible to silently fall back to an unqualified provider claim by
+      // making the independent source unreachable.
+      let independentContent: Awaited<ReturnType<ContentValidator>>;
+      try {
+        // Preserve the exact snapshot already corroborated by the other checks.
+        independentContent = await this.contentValidator(
+          structuredClone(snapshot),
+          baseline.publications.map((publication) => publication.inscriptionId),
+        );
+      } catch {
+        return {
+          resolution: Object.freeze({
+            ...(failure(
+              "incomplete",
+              "Independent content validation is unavailable",
+            ) as SatResolution),
+            chainEvidence,
+          }),
+        };
+      }
       return {
         snapshot,
         resolution: Object.freeze({
-          ...resolveSat(snapshot, { ...options, independentEnumeration }),
+          ...resolveSat(snapshot, { ...options, independentEnumeration, independentContent }),
           chainEvidence,
         }),
       };
@@ -433,6 +468,7 @@ export class AssetResolver {
         enumerationAssurance: result.resolution.enumerationAssurance,
         enumerationSource: result.resolution.enumerationSource,
         ownershipAssurance: result.resolution.ownershipAssurance,
+        contentAssurance: result.resolution.contentAssurance,
       },
     };
   }

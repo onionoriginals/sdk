@@ -16,3 +16,4 @@ export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubm
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./envelope.js";
 
 export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./chain-validation.js";
+export { createBitcoinCoreContentValidator, type BitcoinCoreContentValidatorOptions, type ContentValidator } from "./content-validation.js";

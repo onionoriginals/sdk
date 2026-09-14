@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { OriginalsSDK, RegtestProvider } from '../../packages/sdk/dist/index.js';
+import { OriginalsSDK, RegtestProvider, createBitcoinCoreContentValidator } from '../../packages/sdk/dist/index.js';
 import { startRegtest } from './environment';
 
 type Environment = Awaited<ReturnType<typeof startRegtest>>;
@@ -25,9 +25,14 @@ export async function startOwnershipCheck(primary: Environment, sat: string, did
     ownershipAssurance: 'provider-asserted' | 'cross-checked';
   }> = [];
   // Reconstruct after restart so the provider reads Core's current cookie.
-  const sdk = () => OriginalsSDK.create({ network: 'regtest', satProvider: primaryProvider,
-    independentEnumeration: { label: source, provider: new RegtestProvider(independent) },
-    enableLogging: false, logging: { level: 'error' } });
+  const sdk = () => {
+    const separator = independent.rpcAuth.indexOf(':');
+    return OriginalsSDK.create({ network: 'regtest', satProvider: primaryProvider,
+      independentEnumeration: { label: source, provider: new RegtestProvider(independent) },
+      contentValidator: createBitcoinCoreContentValidator({ endpoint: independent.rpcUrl,
+        rpcAuth: { username: independent.rpcAuth.slice(0, separator), password: independent.rpcAuth.slice(separator + 1) } }),
+      enableLogging: false, logging: { level: 'error' } });
+  };
   const observe = async (stage: string, assurance: 'provider-asserted' | 'cross-checked', owner?: string) => {
     const [first, second] = await Promise.all([
       primaryProvider.getSatSnapshot(sat), new RegtestProvider(independent).getSatSnapshot(sat),
@@ -39,6 +44,7 @@ export async function startOwnershipCheck(primary: Environment, sat: string, did
     const result = await sdk().lifecycle.resolveAssetFromSat(sat);
     assert.equal(result.status, 'accepted', JSON.stringify(result));
     assert.equal(result.resolution.enumerationAssurance, 'cross-checked');
+    assert.equal(result.resolution.contentAssurance, 'cross-checked', 'raw Core content evidence composes with index ownership checks');
     assert.equal(result.resolution.enumerationSource, source);
     assert.equal(result.resolution.ownershipAssurance, assurance, stage);
     assert.deepEqual(result.resolution.ownership, first.ownership);
@@ -48,6 +54,7 @@ export async function startOwnershipCheck(primary: Environment, sat: string, did
     assert.equal(metadata.didResolutionMetadata.status, 'accepted');
     assert.equal(metadata.didDocumentMetadata.ownershipAssurance, assurance, `${stage}: DID metadata`);
     assert.equal(metadata.didDocumentMetadata.enumerationAssurance, 'cross-checked');
+    assert.equal(metadata.didDocumentMetadata.contentAssurance, 'cross-checked');
     assert.deepEqual(metadata.didDocumentMetadata.ownership, first.ownership);
     assert.equal(metadata.didDocumentMetadata.head, result.asset.state.head);
     observations.push({ stage, primaryTip: first.tipBefore, independentTip: second.tipBefore,

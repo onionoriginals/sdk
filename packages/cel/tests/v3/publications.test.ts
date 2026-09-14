@@ -11,6 +11,7 @@ import {
   encodeDocument,
   verifyHistory,
   type SatSnapshot,
+  type IndependentContentEvidence,
 } from "../../src/v3/index.js";
 
 // These are declared provider observations, not Bitcoin RPC evidence.
@@ -105,6 +106,165 @@ test("accepts the complete boundary at a stable declared snapshot, with possessi
   expect(result.scope).toBe("sat");
   expect(result.crossSatCanonicality).toBe("unknown");
   expect(result.ownership.owner).toBe("A");
+});
+
+function completeContentEvidence(
+  snapshot: SatSnapshot,
+): IndependentContentEvidence[] {
+  return snapshot.publications
+    .filter((p) => p.body.status === "complete")
+    .map((p) => {
+      const body = p.body as { mediaType: string; bytes: Uint8Array; metadata: Uint8Array | null };
+      return {
+        inscriptionId: p.id,
+        mediaType: body.mediaType,
+        contentDigest: digestBytes(body.bytes),
+        metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+      };
+    });
+}
+
+test("content assurance defaults to provider-asserted with no independent evidence configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks content when independent evidence agrees for every accepted publication", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: completeContentEvidence(snapshot),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
+test("partial independent content coverage does not upgrade assurance, and does not fail", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence.length).toBeGreaterThan(0);
+  const result = resolveSat(snapshot, {
+    independentContent: evidence.slice(0, evidence.length - 1),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when independent content evidence disagrees with a substituted body", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  // Simulate a compromised indexer: the on-chain content an independent
+  // Bitcoin node derived disagrees with what the provider actually served.
+  evidence[0] = {
+    ...evidence[0],
+    contentDigest: digestBytes(new TextEncoder().encode("forged content")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("fails closed when independent content evidence disagrees only on media type", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence[0] = { ...evidence[0], mediaType: "image/png" };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when independent metadata evidence disagrees while body and media type still agree", () => {
+  // A compromised indexer could serve the correct main content/media type
+  // (satisfying those two checks) while substituting the CEL metadata tag
+  // that actually drives history — body/media agreement alone must not be
+  // enough to earn cross-checked assurance.
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence[0].metadataDigest).toBeNull();
+  evidence[0] = {
+    ...evidence[0],
+    metadataDigest: digestBytes(new TextEncoder().encode("forged metadata")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("rejects malformed independent content evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately missing contentDigest/metadataDigest for the test
+      { inscriptionId: snapshot.publications[0].id, mediaType: "text/plain" },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects independent content evidence with a non-string, non-null metadataDigest", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately invalid metadataDigest type for the test
+      { ...evidence[0], metadataDigest: 12345 },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects duplicate inscription ids in independent content evidence", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [evidence[0], evidence[0]],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("an independent source reporting an unknown inscription id does not itself break resolution", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence.push({
+    inscriptionId: "f".repeat(64) + "i9",
+    mediaType: "text/plain",
+    contentDigest: digestBytes(new TextEncoder().encode("unrelated")),
+    metadataDigest: null,
+  });
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
+test("disagreeing evidence for a publication ignored as unrelated never blocks an otherwise valid history", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "inspected-unrelated-bytes-do-not-poison",
+  )!;
+  const snapshot = observations(scenario);
+  const evidence = completeContentEvidence(snapshot);
+  const unrelated = snapshot.publications.find(
+    (p) => p.body.status === "complete" && p.body.mediaType === "text/plain",
+  )!;
+  const entry = evidence.find((e) => e.inscriptionId === unrelated.id)!;
+  expect(entry).toBeDefined();
+  // The independent source disagrees only about content nothing in the
+  // accepted history actually depends on: this inscription is ignored
+  // (CEL_UNRELATED) rather than accepted.
+  entry.contentDigest = digestBytes(new TextEncoder().encode("forged"));
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(
+      result.diagnostics.some(
+        (d) => d.inscriptionId === unrelated.id && d.code === "CEL_UNRELATED",
+      ),
+    ).toBe(true);
+    // Every ACCEPTED publication's evidence still agreed, so the disagreement
+    // on an ignored, irrelevant publication does not downgrade assurance either.
+    expect(result.contentAssurance).toBe("cross-checked");
+  }
 });
 
 for (const scenario of fixtures.cases)

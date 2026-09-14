@@ -14,3 +14,4 @@ export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubm
 export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRecoveryStore, InscriptionBroadcastState } from '../bitcoin/inscription-recovery.js';
 
 export type { ChainValidator, BitcoinCoreChainValidatorOptions } from "../v3/chain-validation.js";
+export type { ContentValidator, BitcoinCoreContentValidatorOptions } from '../v3/content-validation.js';
