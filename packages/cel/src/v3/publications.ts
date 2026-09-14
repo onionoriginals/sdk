@@ -657,10 +657,19 @@ export function resolveSat(
       });
     } catch (error) {
       if (!(error instanceof CelError)) throw error;
-      if (error.status === "unsupported" && error.code === "CEL_WEBVH_IDNA")
+      if (
+        error.status === "unsupported" &&
+        (error.code === "CEL_WEBVH_IDNA" ||
+          error.code === "CEL_DATA_REFERENCE" ||
+          error.code === "CEL_PREVIOUS_LOG")
+      )
         return failure("unsupported-capability", error.code);
       // Fully inspected disallowed or invalid profile candidates are ignorable;
-      // unavailable bytes were rejected above, before application parsing.
+      // unavailable bytes were rejected above, before application parsing. This
+      // includes other "unsupported" codes (CEL_PROFILE, CEL_SUITE): those mark
+      // material this implementation intentionally rejects, not a recognized
+      // CCG shape it merely cannot verify, so they must not poison an otherwise
+      // valid sat history the way an unsupported-capability result does.
       ignore(error.code);
     }
   }

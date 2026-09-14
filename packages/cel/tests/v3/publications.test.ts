@@ -9,6 +9,7 @@ import {
   createNonce,
   digestBytes,
   encodeDocument,
+  encodeValue,
   verifyHistory,
   type SatSnapshot,
   type IndependentContentEvidence,
@@ -867,4 +868,151 @@ test.each([
   expect(result.status).toBe('accepted');
   if (result.status !== 'accepted') throw new Error(result.status);
   expect(result.resourceAvailability.find(resource => resource.id === id)?.availability).toBe(expected);
+});
+
+// #686: a recognized-but-unimplemented CCG shape chained onto a valid boundary must be
+// reported as `unsupported-capability`, never silently ignored/dropped as though it were
+// an invalid or unrelated candidate — resolveSat must not report a stale head as `accepted`
+// while a real, uninspectable continuation sits on the same sat.
+function unsupportedCapabilityDelta(
+  boundaryLog: unknown[],
+  boundaryResource: Uint8Array,
+  rawDocument: unknown,
+): SatSnapshot["publications"] {
+  const delta: SatSnapshot["publications"][number] = {
+    id: "e".repeat(64) + "i0",
+    revealTxid: "e".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: {
+      height: 201,
+      blockHash: "f".repeat(64),
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue(rawDocument, "json"),
+      metadata: null,
+    },
+  };
+  return [publicationAt(boundaryLog, boundaryResource, "text/plain"), delta];
+}
+
+function unsupportedCapabilitySnapshot(
+  publications: SatSnapshot["publications"],
+): SatSnapshot {
+  const tip = { height: 201, hash: "f".repeat(64) };
+  return {
+    ...emptySnapshot(),
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    blocks: [
+      ...emptySnapshot().blocks,
+      { height: 201, hash: tip.hash, txids: ["e".repeat(64)] },
+    ],
+    publications,
+  };
+}
+
+test("resolveSat reports unsupported-capability for a chained CCG dataReference continuation, never a stale accepted head (#686)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const dataReferenceEntry = {
+    event: {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [dataReferenceEntry] }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
+});
+
+test("resolveSat reports unsupported-capability for a chained CCG previousLog continuation, never a stale accepted head (#686)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const update = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "chained" } },
+      },
+    },
+    A,
+  );
+  const previousLogDoc = {
+    log: [update],
+    previousLog: {
+      digestMultibase: digestBytes(new TextEncoder().encode("earlier log bytes")),
+      proof: [
+        {
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: "placeholder-verification-method",
+          proofPurpose: "assertionMethod",
+          proofValue: "placeholder-proof-value",
+        },
+      ],
+    },
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, previousLogDoc),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_PREVIOUS_LOG");
+});
+
+// Negative control: a disallowed/unrelated profile on the same sat is fully inspected and
+// intentionally rejected material, not a recognized-but-unimplemented CCG shape — it must
+// remain ignorable and must never poison an otherwise valid accepted history the way an
+// unsupported-capability result does.
+test("resolveSat still treats a disallowed profile as ignorable, not unsupported-capability, on the same sat (#686)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const disallowedProfileEntry = {
+    event: {
+      previousEvent: afterBtco.state.head,
+      operation: { type: "update", data: { profile: "not-originals/cel/3" } },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [disallowedProfileEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_PROFILE",
+  });
 });
