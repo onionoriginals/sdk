@@ -2,15 +2,16 @@ import { normalizeAssetId } from "./identity.js";
 import { freeze } from "./immutable.js";
 import { CelError } from "./errors.js";
 import { parseAssetAlias, type BitcoinNetwork } from "./dids.js";
-import { parseDocument, eventDigest } from "./profile.js";
+import { parseDocument, eventDigest, validateProof } from "./profile.js";
 import {
   verifyHistory,
   type VerifiedHistory,
   type AssetState,
   type DeepReadonly,
 } from "./history.js";
+import { verifyJcsSignature } from "./proofs.js";
 import { canonicalizeValue, decodeValue } from "./values.js";
-import { digestBytes } from "./primitives.js";
+import { decodeBase58, digestBytes } from "./primitives.js";
 
 export interface ChainTip {
   height: number;
@@ -232,16 +233,23 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   chainEvidence: { assurance: "provider-asserted" },
 });
 /**
- * Best-effort, pre-validation read of a candidate's first entry's `previousEvent`,
- * used only to decide whether a structural-validation failure that recognizes an
- * unsupported CCG shape is actually attempting to extend the accepted head — not
- * to authenticate or otherwise trust the candidate. Never throws: a candidate too
- * malformed to even read this field is not a plausible continuation either.
+ * Whether a candidate body's first log entry both claims to extend the accepted head and
+ * carries a genuine signature from the current controller over that exact claim.
+ *
+ * `dataReference` and `previousLog` are rejected by `eventShape`/`validateDocument` before
+ * any proof is ever inspected — unlike `CEL_WEBVH_IDNA`, which can only be thrown after
+ * `verifyEntry` has already authenticated the entry inside `apply()`. Gating
+ * `unsupported-capability` on nothing but the raw, unauthenticated `previousEvent` string
+ * would let anyone — with no controller key at all — permanently block resolution of a
+ * real Original by inscribing a single candidate claiming to extend its head. Only a
+ * candidate whose proof actually verifies against `history.state.controller` may block
+ * resolution; every other candidate remains exactly as ignorable as any other invalid one.
+ * Never throws: a candidate too malformed to check is not a plausible continuation either.
  */
-function candidatePreviousEvent(body: {
-  bytes: Uint8Array;
-  metadata: Uint8Array | null;
-}): string | undefined {
+function candidateAuthenticatedContinuation(
+  body: { bytes: Uint8Array; metadata: Uint8Array | null },
+  history: VerifiedHistory,
+): boolean {
   let raw;
   try {
     raw =
@@ -249,20 +257,45 @@ function candidatePreviousEvent(body: {
         ? decodeValue(body.metadata, "cbor")
         : decodeValue(body.bytes, "json");
   } catch {
-    return undefined;
+    return false;
   }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
-    return undefined;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
   const log = raw.log;
-  if (!Array.isArray(log) || log.length === 0) return undefined;
+  if (!Array.isArray(log) || log.length === 0) return false;
   const first = log[0];
   if (typeof first !== "object" || first === null || Array.isArray(first))
-    return undefined;
+    return false;
   const event = first.event;
   if (typeof event !== "object" || event === null || Array.isArray(event))
-    return undefined;
-  const previousEvent = event.previousEvent;
-  return typeof previousEvent === "string" ? previousEvent : undefined;
+    return false;
+  if (event.previousEvent !== history.state.head) return false;
+  const rawProofs = Array.isArray(first.proof) ? first.proof : [first.proof];
+  if (rawProofs.length < 1 || rawProofs.length > 8) return false;
+  for (const candidate of rawProofs) {
+    let proof;
+    try {
+      proof = validateProof(candidate);
+    } catch {
+      continue;
+    }
+    const controller = proof.verificationMethod.split("#")[0];
+    if (controller !== history.state.controller) continue;
+    const { proofValue, ...configuration } = proof;
+    try {
+      if (
+        verifyJcsSignature(
+          event,
+          configuration,
+          decodeBase58(proofValue),
+          controller,
+        )
+      )
+        return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 /** Resolve a sat from complete observations using the same signature/authority fold as offline history.
@@ -690,27 +723,42 @@ export function resolveSat(
       });
     } catch (error) {
       if (!(error instanceof CelError)) throw error;
+      // CEL_WEBVH_IDNA can only be thrown from inside apply()'s migrate handling,
+      // after verifyEntry and the CEL_CHAIN head-extension/authority checks have
+      // already authenticated the entry — unlike the two CCG codes below, no
+      // separate authentication step is needed here.
+      if (error.status === "unsupported" && error.code === "CEL_WEBVH_IDNA")
+        return failure("unsupported-capability", error.code);
       if (
         error.status === "unsupported" &&
-        (error.code === "CEL_WEBVH_IDNA" ||
-          error.code === "CEL_DATA_REFERENCE" ||
+        (error.code === "CEL_DATA_REFERENCE" ||
           error.code === "CEL_PREVIOUS_LOG") &&
-        // A recognized-but-unimplemented CCG shape only blocks resolution when it is
-        // actually attempting to extend the currently accepted head: an unrelated or
-        // non-extending confirmed inscription on the same sat (for example from a
-        // later, unrelated holder — Bitcoin possession never restores or grants CEL
-        // authority) must remain ignorable, exactly like any other non-extending
-        // candidate, rather than blocking an otherwise valid, already-accepted history.
+        // `dataReference`/`previousLog` are rejected by eventShape/validateDocument
+        // before any proof is ever inspected. A recognized-but-unimplemented CCG
+        // shape may therefore only block resolution when it is both actually
+        // attempting to extend the currently accepted head AND authenticated by
+        // the current controller's own signature — checking only the raw,
+        // unauthenticated `previousEvent` string would let anyone without the
+        // controller key permanently deny resolution of a real Original by
+        // inscribing a single unsigned candidate claiming to extend its head.
+        // An unrelated, non-extending, or unauthenticated candidate (for example
+        // from a later, unrelated holder — Bitcoin possession never restores or
+        // grants CEL authority) remains exactly as ignorable as any other invalid
+        // candidate, rather than blocking an otherwise valid, already-accepted
+        // history.
         history !== undefined &&
-        candidatePreviousEvent(body) === history.state.head
+        candidateAuthenticatedContinuation(body, history)
       )
         return failure("unsupported-capability", error.code);
-      // Fully inspected disallowed or invalid profile candidates are ignorable;
-      // unavailable bytes were rejected above, before application parsing. This
-      // includes other "unsupported" codes (CEL_PROFILE, CEL_SUITE): those mark
-      // material this implementation intentionally rejects, not a recognized
-      // CCG shape it merely cannot verify, so they must not poison an otherwise
-      // valid sat history the way an unsupported-capability result does.
+      // Fully inspected disallowed or invalid profile candidates, and any
+      // dataReference/previousLog candidate that does not both extend the
+      // accepted head and carry a genuine current-controller signature, are
+      // ignorable; unavailable bytes were rejected above, before application
+      // parsing. This also covers other "unsupported" codes (CEL_PROFILE,
+      // CEL_SUITE): those mark material this implementation intentionally
+      // rejects, not a recognized CCG shape it merely cannot verify, so they
+      // must not poison an otherwise valid sat history the way an
+      // unsupported-capability result does.
       ignore(error.code);
     }
   }
