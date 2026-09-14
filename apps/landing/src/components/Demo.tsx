@@ -1,4 +1,4 @@
-import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, type ResourceContent } from '../sdk/resource-view';
+import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
 import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
@@ -183,6 +183,7 @@ export function Demo() {
   };
 
   const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceIsPreviewableText = !sourceIsImage && textMediaType(source.contentType);
   const sourceBytes = byteLength(source.content);
   // Measured on the FINAL bytes, whatever produced them. Checking only at
   // upload time missed the Write tab entirely, where multibyte text can pass a
@@ -199,8 +200,8 @@ export function Demo() {
       const source = await readAssetFile(file);
       setUploaded({ name: source.filename, content: source.content, contentType: source.contentType });
     } catch (error) {
-      const reason = error instanceof SourceFileError ? error.reason : 'wrong-type';
-      setSourceError(reason === 'too-big' ? demo.form.uploadTooBig : reason === 'empty' ? demo.form.uploadEmpty : demo.form.uploadWrongType);
+      const reason = error instanceof SourceFileError ? error.reason : undefined;
+      setSourceError(reason === 'too-big' ? demo.form.uploadTooBig : reason === 'empty' ? demo.form.uploadEmpty : demo.form.uploadReadError);
     }
   };
   // The title/style/nonce whose artwork is actually committed to the log —
@@ -598,8 +599,10 @@ export function Demo() {
                         }
                         alt={`Artwork for “${title || demo.form.defaultTitle}”`}
                       />
-                    ) : (
+                    ) : sourceIsPreviewableText ? (
                       <pre className="demo-art-text">{contentText(source.content) || demo.form.writePlaceholder}</pre>
+                    ) : (
+                      <p className="demo-art-text demo-art-binary">{demo.form.uploadBinaryPreview}</p>
                     )}
                     {sourceKind === 'generate' && (phase === 'idle' || canRevise) && (
                       <button
@@ -688,7 +691,6 @@ export function Demo() {
                         <span>{demo.form.uploadCta}</span>
                         <input
                           type="file"
-                          accept=".png,image/png,.svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
                           disabled={formLocked}
                           onChange={(e) => void onPickFile(e.target.files?.[0])}
                         />
