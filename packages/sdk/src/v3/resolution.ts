@@ -1,3 +1,4 @@
+import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
@@ -8,7 +9,9 @@ import {
   digestBytes,
   type SatSnapshot,
   type SatResolution,
+  type ResourceAvailabilityRecord,
   type BitcoinNetwork,
+  type ChainEvidence,
 } from "@originals/cel/v3";
 import type { DIDDocument } from "../types/did.js";
 import { summarizeVerification } from "./verification.js";
@@ -39,6 +42,15 @@ export interface IndependentEnumerationSource {
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
 }
+/**
+ * Whether one historical resource version's bytes are recoverable from the accepted
+ * Bitcoin inscriptions alone ("bitcoin-inline"), or depend on a separate off-chain host
+ * ("referenced"). At most one current resource is inlined per publication (see
+ * `inlineResourceId` on `prepareBitcoinPublication`), so a multi-resource asset commonly
+ * has both kinds at once; "referenced" is the expected, by-design state for the rest,
+ * not a defect.
+ */
+export type ResourceAvailability = ResourceAvailabilityRecord;
 export type AssetResolution =
   | Exclude<SatResolution, { status: "accepted" }>
   | {
@@ -47,6 +59,8 @@ export type AssetResolution =
       verification: AssetVerification;
       resolution: Extract<SatResolution, { status: "accepted" }>;
       didDocument: DIDDocument | null;
+      /** One entry per historical resource version in the accepted log, oldest first. */
+      resourceAvailability: ResourceAvailability[];
     };
 export interface AssetDIDResolution {
   didDocument: DIDDocument | null;
@@ -61,6 +75,9 @@ export interface AssetDIDResolution {
     webvhBinding?: "unverified";
     enumerationAssurance?: "provider-asserted" | "cross-checked";
     ownershipAssurance?: "provider-asserted" | "cross-checked";
+    chainEvidence: Readonly<ChainEvidence>;
+    /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
+    pending?: readonly string[];
   };
 }
 
@@ -70,13 +87,15 @@ export function btcoDid(sat: string, network: BitcoinNetwork): string {
   return did;
 }
 const failure = (
-  status: Exclude<SatResolution["status"], "accepted">,
+  status: Exclude<SatResolution["status"], "accepted" | "pending">,
   reason: string,
+  chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" },
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence,
 });
 const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
   const t = tip as { height?: unknown; hash?: unknown } | null | undefined;
@@ -115,6 +134,7 @@ export class AssetResolver {
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
+    private readonly chainValidator?: ChainValidator,
     private readonly independentEnumeration?: IndependentEnumerationSource,
   ) {}
 
@@ -152,10 +172,13 @@ export class AssetResolver {
         resolution: failure(
           "unsupported-capability",
           "A complete sat snapshot provider is required",
+          { assurance: "unavailable" },
         ) as SatResolution,
       };
+    let obtainedSnapshot = false;
     try {
       const snapshot = structuredClone(await this.provider.getSatSnapshot(sat));
+      obtainedSnapshot = true;
       if (snapshot?.sat !== sat || snapshot.network !== this.network)
         return {
           resolution: failure(
@@ -218,10 +241,16 @@ export class AssetResolver {
           tip: independentSnapshot.tipBefore,
         };
       }
-      return {
-        snapshot,
-        resolution: resolveSat(snapshot, { ...options, independentEnumeration }),
-      };
+      let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
+      if (this.chainValidator) {
+        // The validator is selected by application configuration, never by snapshot
+        // fields or an advertised provider method. A detached copy protects the
+        // exact view subsequently resolved from mutation during asynchronous checks.
+        const validated = await this.chainValidator(structuredClone(snapshot));
+        chainEvidence = Object.freeze({ assurance: "node-validated",
+          ...(validated?.source ? { source: validated.source } : {}) });
+      }
+      return { snapshot, resolution: Object.freeze({ ...resolveSat(snapshot, { ...options, independentEnumeration }), chainEvidence }) };
     } catch (error) {
       return {
         resolution: failure(
@@ -231,7 +260,8 @@ export class AssetResolver {
             error.code === "SAT_SNAPSHOT_CHAIN_CHANGED"
             ? "chain-changed"
             : "incomplete",
-          "The provider could not obtain a complete sat snapshot",
+          "The provider or configured validator could not establish a complete sat snapshot",
+          { assurance: obtainedSnapshot ? "provider-asserted" : "unavailable" },
         ) as SatResolution,
       };
     }
@@ -243,6 +273,7 @@ export class AssetResolver {
       return failure(
         "identity-mismatch",
         "Asset network differs from configured provider",
+        { assurance: "unavailable" },
       ) as SatResolution;
     return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
@@ -292,12 +323,17 @@ export class AssetResolver {
       const key = JSON.stringify([body.mediaType, digestBytes(body.bytes)]);
       if (!inlineBytes.has(key)) inlineBytes.set(key, body.bytes);
     }
+    const resourceAvailability: ResourceAvailability[] = [];
     for (const resource of catalog) {
-      const bytes = inlineBytes.get(
-        JSON.stringify([resource.mediaType, resource.digestMultibase]),
-      );
+      const key = JSON.stringify([resource.mediaType, resource.digestMultibase]);
+      const bytes = inlineBytes.get(key);
       if (bytes)
         attachments.push(attachment(resource.id, resource.version, bytes));
+      resourceAvailability.push({
+        id: resource.id,
+        version: resource.version,
+        availability: bytes ? "bitcoin-inline" : "referenced",
+      });
     }
     const asset = new OriginalsAsset(
       document,
@@ -334,7 +370,14 @@ export class AssetResolver {
           assertionMethod: [method],
         }
       : null;
-    return { status: "accepted", asset, verification, resolution, didDocument };
+    return {
+      status: "accepted",
+      asset,
+      verification,
+      resolution,
+      didDocument,
+      resourceAvailability,
+    };
   }
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {
@@ -350,7 +393,12 @@ export class AssetResolver {
       return {
         didDocument: null,
         didResolutionMetadata: { status: result.status, error: result.reason },
-        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown" },
+        didDocumentMetadata: {
+          scope: "sat",
+          crossSatCanonicality: "unknown",
+          chainEvidence: result.chainEvidence,
+          ...(result.status === "pending" ? { pending: result.pending } : {}),
+        },
       };
     return {
       didDocument: result.didDocument,
@@ -365,6 +413,7 @@ export class AssetResolver {
         webvhBinding: "unverified",
         enumerationAssurance: result.resolution.enumerationAssurance,
         ownershipAssurance: result.resolution.ownershipAssurance,
+        chainEvidence: result.resolution.chainEvidence,
       },
     };
   }

@@ -129,6 +129,18 @@ does not prove no copy or competing creation exists on another sat. Report
 `scope: sat` and cross-sat canonicality as unknown; never claim global uniqueness
 from the current production adapters. Missing capabilities must produce an
 unavailable/incomplete result, not fabricated ordering or an empty enumeration.
+Every resolution reports `chainEvidence: { assurance, source? }`, where assurance
+is `unavailable`, `provider-asserted`, or `node-validated`. `unavailable` means no
+snapshot was obtained. The deterministic core cannot authenticate provider JSON
+claims and always reports `provider-asserted`. Only the SDK's explicitly configured
+application validator may upgrade chain facts after independent validation.
+An internally coherent fabricated tip is not detectable from provider data alone;
+an independently trusted Core check rejects it. Even a successful Core check does
+not authenticate Ordinals enumeration, sat trajectory/ownership, or inscription
+content bindings. A provider can still omit a later publication while claiming
+complete enumeration. Report these trust limits separately from signed controller
+history and keep cross-sat canonicality unknown.
+
 
 ## One total order, then whole-publication acceptance
 

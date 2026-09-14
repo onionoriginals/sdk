@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
+import { AssetResolver } from "../../../src/v3/resolution.js";
 import {
   createLocalSigner,
   signEvent,
@@ -359,6 +360,74 @@ test("cross-checks enumeration against an independently configured second index 
   );
 });
 
+test("independent ownership and enumeration compose with chain validation and resource availability", async () => {
+  const { snapshot } = await boundary();
+  let validations = 0;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => structuredClone(snapshot) },
+    },
+    chainValidator: async (copy) => {
+      validations++;
+      // Mutating the validator's copy must not change the history being resolved.
+      copy.publications.splice(0);
+      return { source: "independent-core" };
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
+  expect(result.resolution.chainEvidence).toEqual({
+    assurance: "node-validated", source: "independent-core",
+  });
+  expect(result.resolution.resourceAvailability).toEqual([
+    { id: "art", version: 1, availability: "bitcoin-inline" },
+  ]);
+  expect(result.resourceAvailability).toEqual(result.resolution.resourceAvailability);
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.enumerationAssurance).toBe("cross-checked");
+  expect(metadata.didDocumentMetadata.ownershipAssurance).toBe("cross-checked");
+  expect(metadata.didDocumentMetadata.chainEvidence).toEqual(result.resolution.chainEvidence);
+  expect(validations).toBe(2);
+
+  snapshot.publications[0].confirmed = false;
+  const pending = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(pending.didResolutionMetadata.status).toBe("pending");
+  expect(pending.didDocument).toBeNull();
+  expect(pending.didDocumentMetadata.pending).toEqual([txid + "i0"]);
+  expect(pending.didDocumentMetadata.chainEvidence.assurance).toBe("node-validated");
+});
+
+test.each(["chain", "ownership", "enumeration"] as const)(
+  "combined validators fail closed on %s disagreement",
+  async (disagreement) => {
+    const { snapshot } = await boundary();
+    const independent = structuredClone(snapshot);
+    if (disagreement === "ownership") independent.ownership.owner = "other-holder";
+    if (disagreement === "enumeration") {
+      independent.publications.push({ ...independent.publications[0], id: "9".repeat(64) + "i0" });
+    }
+    const sdk = OriginalsSDK.create({
+      network: "regtest",
+      satProvider: { getSatSnapshot: async () => snapshot },
+      independentEnumeration: {
+        label: "second-ord-instance",
+        provider: { getSatSnapshot: async () => independent },
+      },
+      chainValidator: async () => {
+        if (disagreement === "chain") throw new Error("Chain disagreement");
+        return { source: "independent-core" };
+      },
+    });
+    const result = await sdk.lifecycle.resolveAssetFromSat("123");
+    expect(result.status).toBe(disagreement === "chain" ? "incomplete" : "inconsistent-evidence");
+  },
+);
+
 test("without an independent source configured, resolution still accepts but only claims provider-asserted enumeration", async () => {
   const { snapshot } = await boundary();
   const sdk = OriginalsSDK.create({
@@ -502,4 +571,251 @@ test("fails closed when the independent source reports a different sat satpoint"
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("an accepted resolution and its DID metadata are labeled provider-asserted unless an explicit application validator succeeds", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.chainEvidence.assurance).toBe("provider-asserted");
+  expect(result.resolution.chainEvidence.source).toBeUndefined();
+  expect(result.verification.publication?.chainEvidence.assurance).toBe("provider-asserted");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.chainEvidence.assurance).toBe("provider-asserted");
+
+  // An ordinary provider claim cannot upgrade the result.
+  const validated: SatSnapshot = {
+    ...snapshot,
+    chainEvidence: { assurance: "node-validated", source: "untrusted-claim" },
+  };
+  const ordinarySdk = OriginalsSDK.create({ network: "regtest", satProvider: { getSatSnapshot: async () => validated } });
+  const ordinary = await ordinarySdk.lifecycle.resolveAssetFromSat("123");
+  if (ordinary.status !== "accepted") throw new Error(ordinary.status);
+  expect(ordinary.resolution.chainEvidence).toEqual({ assurance: "provider-asserted" });
+  const validatedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => validated },
+    chainValidator: async checked => {
+      expect(checked).toEqual(validated);
+      expect(checked).not.toBe(validated);
+      return { source: "regtest-core+ord" };
+    },
+  });
+  const validatedResult = await validatedSdk.lifecycle.resolveAssetFromSat("123");
+  if (validatedResult.status !== "accepted") throw new Error(validatedResult.status);
+  expect(validatedResult.resolution.chainEvidence.assurance).toBe("node-validated");
+  expect(validatedResult.resolution.chainEvidence.source).toBe("regtest-core+ord");
+  const validatedMetadata = await validatedSdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(validatedMetadata.didDocumentMetadata.chainEvidence.assurance).toBe("node-validated");
+  expect(validatedMetadata.didDocumentMetadata.chainEvidence.source).toBe("regtest-core+ord");
+});
+
+test("an unsupported-capability DID resolution reports no chain evidence was even obtained, without a configured provider", async () => {
+  const sdk = OriginalsSDK.create({ network: "regtest" });
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didResolutionMetadata.status).toBe("unsupported-capability");
+  // No provider was consulted at all, so this must not be confused with a
+  // provider having actually supplied and stood behind a snapshot.
+  expect(metadata.didDocumentMetadata.chainEvidence.assurance).toBe("unavailable");
+});
+
+test("a sat whose only publication is still unconfirmed resolves as pending, not silently as not-found", async () => {
+  const { snapshot } = await boundary();
+  const pendingSnapshot: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((publication) => ({
+      ...publication,
+      confirmed: false,
+    })),
+  };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => pendingSnapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("pending");
+  if (result.status !== "pending") throw new Error(result.status);
+  expect(result.pending).toEqual(pendingSnapshot.publications.map((p) => p.id));
+
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didResolutionMetadata.status).toBe("pending");
+  expect(metadata.didDocument).toBeNull();
+  expect(metadata.didDocumentMetadata.pending).toEqual(result.pending);
+
+  // The plain (non-metadata) resolveDID call treats "pending" like any other
+  // inconclusive status: it throws rather than silently returning null, so a
+  // caller can't confuse "not confirmed yet" with "confirmed absent."
+  await expect(sdk.did.resolveDID("did:btco:reg:123")).rejects.toThrow();
+});
+
+test("a provider that fabricates a self-consistent alternate tip, or silently omits a later publication, still only ever yields a provider-asserted result", async () => {
+  const { snapshot, log } = await boundary();
+
+  // (a) A relocated but internally self-consistent chain state: resolveSat can
+  // only check internal consistency, never independently authenticate the tip
+  // it was handed, so it must accept this -- the honesty has to live in the
+  // chainEvidence label, not in a rejection that core has no way to make.
+  const altHash = "f".repeat(64);
+  const fabricated: SatSnapshot = structuredClone(snapshot);
+  fabricated.tipBefore = fabricated.tipAfter = fabricated.indexTip = {
+    height: 9000,
+    hash: altHash,
+  };
+  fabricated.blocks = [{ height: 9000, hash: altHash, txids: [txid] }];
+  fabricated.publications[0] = {
+    ...fabricated.publications[0],
+    creation: {
+      height: 9000,
+      blockHash: altHash,
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+  };
+  const fabricatedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => fabricated },
+  });
+  const fabricatedResult =
+    await fabricatedSdk.lifecycle.resolveAssetFromSat("123");
+  if (fabricatedResult.status !== "accepted")
+    throw new Error(fabricatedResult.status);
+  expect(fabricatedResult.resolution.tip).toEqual({
+    height: 9000,
+    hash: altHash,
+  });
+  expect(fabricatedResult.resolution.chainEvidence.assurance).toBe("provider-asserted");
+
+  // (b) A later publication genuinely exists but the provider's enumeration
+  // silently drops it while still asserting enumerationComplete: true.
+  // resolveSat has no way to detect the omission -- it resolves the earlier
+  // state as though it were current -- so an omitted-publication result must
+  // never read as anything stronger than provider-asserted either.
+  const laterUpdate = await signEvent(
+    {
+      previousEvent: eventDigest(log.log.at(-1)!.event),
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", name: "Never observed" },
+      },
+    },
+    signer,
+  );
+  const nextTx = "c".repeat(64),
+    nextHash = "d".repeat(64);
+  const complete: SatSnapshot = structuredClone(snapshot);
+  complete.tipBefore =
+    complete.tipAfter =
+    complete.indexTip =
+      { height: 101, hash: nextHash };
+  complete.blocks.push({ height: 101, hash: nextHash, txids: [nextTx] });
+  complete.publications.unshift({
+    id: nextTx + "i0",
+    revealTxid: nextTx,
+    network: "regtest",
+    sat: "123",
+    confirmed: true,
+    creation: {
+      height: 101,
+      blockHash: nextHash,
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeDocument({ log: [laterUpdate] }, "json"),
+      metadata: null,
+    },
+  });
+  const omitting: SatSnapshot = structuredClone(snapshot);
+  const completeSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => complete },
+  });
+  const completeResult =
+    await completeSdk.lifecycle.resolveAssetFromSat("123");
+  if (completeResult.status !== "accepted")
+    throw new Error(completeResult.status);
+  expect(completeResult.asset.state.name).toBe("Never observed");
+  expect(completeResult.resolution.chainEvidence.assurance).toBe("provider-asserted");
+
+  const omittingSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => omitting },
+  });
+  const omittedResult =
+    await omittingSdk.lifecycle.resolveAssetFromSat("123");
+  if (omittedResult.status !== "accepted")
+    throw new Error(omittedResult.status);
+  expect(omittedResult.asset.state.name).not.toBe("Never observed");
+  expect(omittedResult.resolution.chainEvidence.assurance).toBe("provider-asserted");
+});
+
+test("a provider that throws before returning any snapshot never obtained chain evidence, unlike a returned-but-mismatched snapshot", async () => {
+  // The provider never returned anything at all: no snapshot -- and therefore
+  // no provider assertion -- was ever obtained, so this must not be confused
+  // with a provider having actually stood behind a (even if rejected) snapshot.
+  const throwingSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: {
+      getSatSnapshot: async () => {
+        throw new Error("network unreachable");
+      },
+    },
+  });
+  const thrownResult = await throwingSdk.lifecycle.resolveAssetFromSat("123");
+  expect(thrownResult.status).toBe("incomplete");
+  if (thrownResult.status === "accepted") throw new Error("unexpected accept");
+  expect(thrownResult.chainEvidence.assurance).toBe("unavailable");
+
+  // A snapshot WAS returned here, just for the wrong sat/network -- the
+  // provider supplied data, but its claimed upgrade is not trusted.
+  const { snapshot } = await boundary();
+  const mismatched: SatSnapshot = {
+    ...snapshot,
+    sat: "999",
+    chainEvidence: { assurance: "node-validated", source: "untrusted-claim" },
+  };
+  const mismatchedSdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => mismatched },
+  });
+  const mismatchedResult =
+    await mismatchedSdk.lifecycle.resolveAssetFromSat("123");
+  expect(mismatchedResult.status).toBe("inconsistent-evidence");
+  if (mismatchedResult.status === "accepted")
+    throw new Error("unexpected accept");
+  expect(mismatchedResult.chainEvidence.assurance).toBe("provider-asserted");
+  expect(mismatchedResult.chainEvidence.source).toBeUndefined();
+});
+
+test("check() rejects a cross-network identity before any provider is consulted, with no chain evidence obtained", async () => {
+  const resolver = new AssetResolver("regtest");
+  // A mainnet-shaped did (no network prefix) queried against a
+  // regtest-configured resolver: rejected purely from parsing the identity,
+  // before any provider call, so no snapshot -- and no provider assertion --
+  // was ever obtained.
+  const result = await resolver.check("did:btco:123", "did:btco:123");
+  expect(result.status).toBe("identity-mismatch");
+  expect(result.chainEvidence.assurance).toBe("unavailable");
+});
+
+test('validator failures fail closed and validator mutations cannot change the resolved view', async () => {
+  const { snapshot } = await boundary();
+  const failed = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async () => { throw new Error('disagreement'); } });
+  const rejected = await failed.lifecycle.resolveAssetFromSat('123');
+  expect(rejected.status).toBe('incomplete');
+  if (rejected.status === 'accepted') throw new Error('accepted');
+  expect(rejected.chainEvidence.assurance).toBe('provider-asserted');
+  const detached = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async copy => { copy.publications.splice(0); snapshot.publications.splice(0); } });
+  const result = await detached.lifecycle.resolveAssetFromSat('123');
+  expect(result.status).toBe('accepted');
+  if (result.status !== 'accepted') throw new Error(result.status);
+  expect(result.resolution.chainEvidence.assurance).toBe('node-validated');
 });
