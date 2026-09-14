@@ -2,7 +2,12 @@ import { normalizeAssetId } from "./identity.js";
 import { freeze } from "./immutable.js";
 import { CelError } from "./errors.js";
 import { parseAssetAlias, type BitcoinNetwork } from "./dids.js";
-import { parseDocument, eventDigest, validateProof } from "./profile.js";
+import {
+  parseDocument,
+  eventDigest,
+  validateProof,
+  validateEntry,
+} from "./profile.js";
 import {
   verifyHistory,
   type VerifiedHistory,
@@ -10,7 +15,7 @@ import {
   type DeepReadonly,
 } from "./history.js";
 import { verifyJcsSignature } from "./proofs.js";
-import { canonicalizeValue, decodeValue } from "./values.js";
+import { canonicalizeValue, decodeValue, type JsonValue } from "./values.js";
 import { decodeBase58, digestBytes } from "./primitives.js";
 
 export interface ChainTip {
@@ -233,17 +238,71 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   chainEvidence: { assurance: "provider-asserted" },
 });
 /**
- * Whether a candidate body's first log entry both claims to extend the accepted head and
- * carries a genuine signature from the current controller over that exact claim.
+ * Whether an entry (raw, structurally plausible but not yet cryptographically checked)
+ * genuinely extends `head` under `controller`: same check `apply()` would perform, applied
+ * directly to a single raw event/proof pair that itself may never pass full `eventShape`
+ * validation (a recognized-but-unsupported CCG shape). Never throws.
+ */
+function entryExtendsUnderController(
+  entry: { event: JsonValue; proof: JsonValue },
+  head: string,
+  controller: string,
+): boolean {
+  const event = entry.event;
+  if (typeof event !== "object" || event === null || Array.isArray(event))
+    return false;
+  if (event.previousEvent !== head) return false;
+  const rawProofs = Array.isArray(entry.proof) ? entry.proof : [entry.proof];
+  if (rawProofs.length < 1 || rawProofs.length > 8) return false;
+  for (const candidate of rawProofs) {
+    let proof;
+    try {
+      proof = validateProof(candidate);
+    } catch {
+      continue;
+    }
+    const proofController = proof.verificationMethod.split("#")[0];
+    if (proofController !== controller) continue;
+    const { proofValue, ...configuration } = proof;
+    try {
+      if (
+        verifyJcsSignature(
+          event,
+          configuration,
+          decodeBase58(proofValue),
+          proofController,
+        )
+      )
+        return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a candidate body is a genuinely authenticated attempt to extend `history` with a
+ * recognized-but-unsupported CCG shape (`dataReference`/`previousLog`).
  *
  * `dataReference` and `previousLog` are rejected by `eventShape`/`validateDocument` before
  * any proof is ever inspected — unlike `CEL_WEBVH_IDNA`, which can only be thrown after
  * `verifyEntry` has already authenticated the entry inside `apply()`. Gating
- * `unsupported-capability` on nothing but the raw, unauthenticated `previousEvent` string
+ * `unsupported-capability` on nothing but a raw, unauthenticated `previousEvent` string
  * would let anyone — with no controller key at all — permanently block resolution of a
- * real Original by inscribing a single candidate claiming to extend its head. Only a
- * candidate whose proof actually verifies against `history.state.controller` may block
- * resolution; every other candidate remains exactly as ignorable as any other invalid one.
+ * real Original by inscribing a candidate claiming to extend its head.
+ *
+ * A multi-entry document's *first* entry being genuinely signed is not enough either:
+ * `validateDocument` validates every entry's shape via `.forEach`, so the entry that
+ * actually throws the unsupported-shape error may be any later entry appended after a
+ * genuinely controller-signed one — each proof signs only its own event, never the whole
+ * log. So every entry strictly before the offending one must itself be fully authenticated
+ * (signature, chain linkage and controller authority, exactly as `apply()` enforces,
+ * including any controller rotation among them) via `verifyHistory`, and only the
+ * resulting head/controller after that authenticated prefix may be checked against the
+ * offending entry itself. For `previousLog`, the unsupported condition is only reached
+ * after its *entire* wrapped log already passed full structural validation, so that whole
+ * wrapped log must itself verify as an authenticated extension of `history`.
  * Never throws: a candidate too malformed to check is not a plausible continuation either.
  */
 function candidateAuthenticatedContinuation(
@@ -260,42 +319,60 @@ function candidateAuthenticatedContinuation(
     return false;
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
-  const log = raw.log;
-  if (!Array.isArray(log) || log.length === 0) return false;
-  const first = log[0];
-  if (typeof first !== "object" || first === null || Array.isArray(first))
-    return false;
-  const event = first.event;
-  if (typeof event !== "object" || event === null || Array.isArray(event))
-    return false;
-  if (event.previousEvent !== history.state.head) return false;
-  const rawProofs = Array.isArray(first.proof) ? first.proof : [first.proof];
-  if (rawProofs.length < 1 || rawProofs.length > 8) return false;
-  for (const candidate of rawProofs) {
-    let proof;
+  if (Object.prototype.hasOwnProperty.call(raw, "previousLog")) {
     try {
-      proof = validateProof(candidate);
-    } catch {
-      continue;
-    }
-    const controller = proof.verificationMethod.split("#")[0];
-    if (controller !== history.state.controller) continue;
-    const { proofValue, ...configuration } = proof;
-    try {
-      if (
-        verifyJcsSignature(
-          event,
-          configuration,
-          decodeBase58(proofValue),
-          controller,
-        )
-      )
-        return true;
-    } catch {
-      continue;
+      verifyHistory({ log: raw.log }, { prefix: history });
+      return true;
+    } catch (error) {
+      if (!(error instanceof CelError)) throw error;
+      return false;
     }
   }
-  return false;
+  const log = raw.log;
+  if (!Array.isArray(log) || log.length === 0) return false;
+  let offendingIndex = -1;
+  for (let i = 0; i < log.length; i++) {
+    try {
+      validateEntry(log[i]);
+    } catch (error) {
+      if (!(error instanceof CelError)) throw error;
+      if (
+        error.status === "unsupported" &&
+        (error.code === "CEL_DATA_REFERENCE" || error.code === "CEL_PREVIOUS_LOG")
+      )
+        offendingIndex = i;
+      break;
+    }
+  }
+  if (offendingIndex === -1) return false;
+  let head = history.state.head,
+    controller = history.state.controller;
+  if (offendingIndex > 0) {
+    let prefixHistory: VerifiedHistory;
+    try {
+      prefixHistory = verifyHistory(
+        { log: log.slice(0, offendingIndex) },
+        { prefix: history },
+      );
+    } catch (error) {
+      if (!(error instanceof CelError)) throw error;
+      return false;
+    }
+    head = prefixHistory.state.head;
+    controller = prefixHistory.state.controller;
+  }
+  const offending = log[offendingIndex];
+  if (
+    typeof offending !== "object" ||
+    offending === null ||
+    Array.isArray(offending)
+  )
+    return false;
+  return entryExtendsUnderController(
+    offending as { event: JsonValue; proof: JsonValue },
+    head,
+    controller,
+  );
 }
 
 /** Resolve a sat from complete observations using the same signature/authority fold as offline history.

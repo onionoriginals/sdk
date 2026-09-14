@@ -10,6 +10,7 @@ import {
   digestBytes,
   encodeDocument,
   encodeValue,
+  eventDigest,
   verifyHistory,
   jcsSigningMessage,
   decodeController,
@@ -1057,6 +1058,102 @@ test("resolveSat ignores a CCG dataReference candidate signed by a key other tha
     inscriptionId: "e".repeat(64) + "i0",
     code: "CEL_DATA_REFERENCE",
   });
+});
+
+// The exact multi-entry attack found in review: `validateDocument` shape-checks every log
+// entry, so the entry that actually throws the unsupported-shape error may be any later
+// entry appended after a genuinely controller-signed one — a proof signs only its own
+// event, never the whole log. A real signed first entry must not make the candidate as a
+// whole "authenticated"; the offending entry itself still needs its own genuine signature.
+test("resolveSat ignores a CCG dataReference candidate appended, unsigned, after a genuinely controller-signed entry (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const signedUpdate = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "real" } },
+      },
+    },
+    A,
+  );
+  const unsignedDataReferenceEntry = {
+    event: {
+      previousEvent: eventDigest(signedUpdate.event),
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("forged off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [signedUpdate, unsignedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// Positive counterpart: when the entry before the offending one AND the offending entry
+// itself are both genuinely signed by the current controller, the candidate really is an
+// authenticated attempt to extend the head with an unsupported shape, and must still
+// report unsupported-capability rather than being silently (and now incorrectly) ignored.
+test("resolveSat reports unsupported-capability when a genuinely controller-signed entry is followed by an equally authenticated CCG dataReference entry (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const signedUpdate = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "real" } },
+      },
+    },
+    A,
+  );
+  const dataReferenceEvent = {
+    previousEvent: eventDigest(signedUpdate.event),
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const signedDataReferenceEntry = {
+    event: dataReferenceEvent,
+    proof: [await signRawEvent(dataReferenceEvent, A)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [signedUpdate, signedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
 });
 
 test("resolveSat reports unsupported-capability for a chained CCG previousLog continuation, never a stale accepted head (#686)", async () => {
