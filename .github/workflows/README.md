@@ -10,16 +10,27 @@ gated by two human-in-the-loop steps. It triggers on every push to `main`.
 
 Configure these in **Settings → Secrets and variables → Actions**:
 
-#### `NPM_TOKEN` (required to publish)
-An npm **Automation** access token used to publish packages (also used as
-`NODE_AUTH_TOKEN`). npm provenance is enabled via `NPM_CONFIG_PROVENANCE` and the
-workflow's `id-token: write` permission.
+#### npm authentication — OIDC trusted publishing (primary path)
+The `publish` job authenticates to npm via **OIDC trusted publishing**: the
+workflow's `id-token: write` permission plus `actions/setup-node`'s
+`registry-url`. There is no `NODE_AUTH_TOKEN` on the publish step. npm
+provenance is generated automatically for this public repo under trusted
+publishing.
 
-**How to create it:**
+This requires a trusted publisher registered on npmjs.com for each published
+package (`@originals/cel`, `@originals/sdk`, `@originals/auth`) — org
+`onionoriginals`, repo `sdk`, workflow `release.yml`, no Environment. The
+`publish` job's first step refuses to run until the repository variable
+`NPM_TRUSTED_PUBLISHING_READY` is `true`, since there's no read-only way for
+CI to confirm that registration itself. See
+[`docs/RELEASE_TOKEN_ROTATION.md`](../../docs/RELEASE_TOKEN_ROTATION.md) for
+the full setup and current migration status.
 
-1. Log in to [npmjs.com](https://www.npmjs.com).
-2. Profile icon → "Access Tokens" → "Generate New Token" → "Classic Token".
-3. Select **"Automation"** (for CI/CD publishing) and copy the token.
+#### `NPM_TOKEN` (fallback only, not read by the automated publish step)
+An npm granular access token kept configured as a manual/emergency fallback
+until OIDC trusted publishing has been proven on a real release. The `release.yml`
+publish step deliberately does not reference it, so it cannot silently mask an
+OIDC misconfiguration. See `docs/RELEASE_TOKEN_ROTATION.md` for rotation steps.
 
 #### `CHANGESETS_TOKEN` (optional but recommended)
 A PAT (or GitHub App token) used to push the "Version Packages" PR branch. Pushes
@@ -41,11 +52,13 @@ added. Falls back to `GITHUB_TOKEN` when unset.
    compares each package's local version against the npm registry and only proceeds
    when a version is genuinely not yet published (any other registry error fails
    loudly rather than over-publishing).
-3. **Gate 2 — Publish.** The `publish` job runs under the `npm-publish` GitHub
-   Environment, which carries a **required reviewer** — a human must approve in the
-   GitHub UI before anything reaches npm. It builds, runs `scripts/verify-esm.mjs`
-   (refusing to publish a dist Node ESM consumers can't import), then publishes via
-   `changeset publish`, pushing tags and creating GitHub Releases as one step.
+3. **Gate 2 — Publish.** The `publish` job is deliberately **not** bound to a
+   GitHub Environment — merging the Version PR is the single human approval for
+   a release. It builds, runs `scripts/verify-esm.mjs` and
+   `scripts/check-browser-safety.mjs` (refusing to publish a dist that Node ESM
+   or browser/edge consumers can't import), then publishes via `changeset
+   publish` over OIDC trusted publishing, pushing tags and creating GitHub
+   Releases as one step.
 
 ### Adding a Changeset
 
