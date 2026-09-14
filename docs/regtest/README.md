@@ -32,9 +32,21 @@ hash, and the temporary data directory. The runner accepts PNGs up to the local
 hosting service's 256 KiB object limit. The interactive landing file picker has
 a separate 32 KiB limit.
 
+Each journey also starts a second independent Core/ord pair from validated raw
+blocks and exercises the public SDK's ownership assurance. The
+`ownershipObservations` receipt records both real tips and holder/satpoint values
+for matching-tip agreement, an unchanged holder at different heights, equal
+heights on different forks, and a real sale/reacquisition before and after index
+catch-up. Asset and DID reads must report the same assurance. A restarted index
+must corroborate ownership again; a stopped configured index must fail closed.
+These observations use fresh `RegtestProvider` RPC/ord reads, not synthetic
+snapshots. They exercise the matching-tip gate from #669 and do not establish
+independent sat-trajectory derivation or production operator independence.
+
 `REGTEST_LOGS_DIR` copies Core and ord stdout/stderr into a directory per scenario
 on normal completion or caught failure. CI uploads these logs even when an
-assertion fails before a receipt can be written.
+assertion fails before a receipt can be written. The second pair's logs are kept
+in the scenario's `independent-ownership/` subdirectory.
 
 Use `REGTEST_FAULT=none`, `reveal-rejected`, or `commit-response-lost` to run one
 scenario. Use `REGTEST_TOOLS_DIR` to select an archive cache. Alternatively set

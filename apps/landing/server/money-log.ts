@@ -34,6 +34,9 @@ export type MoneyEvent =
   | 'inscribe_failed'
   /** A pair reached the network. */
   | 'inscribe_broadcast'
+  /** A confirmed reveal reconfirmed at a different block height — a reorg
+   *  happened, whether or not a demotion was observed in between polls. */
+  | 'inscribe_reorg_reconfirmed'
   /** Periodic per-address finding: a bound address still holds confirmed sats. */
   | 'deposit_balance_held'
   /** Periodic roll-up of the balance sweep, including the count that matters. */

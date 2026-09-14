@@ -671,7 +671,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     return result;
   }
 
-  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; confirmations?: number }> {
+  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }> {
     if (typeof txid !== 'string' || !/^[0-9a-fA-F]{64}$/.test(txid)) {
       throw new StructuredError(
         'QUICKNODE_INVALID_TXID',
@@ -699,6 +699,9 @@ export class QuickNodeProvider implements OrdinalsProvider {
     // Verbose getrawtransaction reports blockhash but not height; resolve it
     // via getblockheader when available. Height is optional in the provider
     // contract, so a failure here must not mask a confirmed transaction.
+    // blockhash itself is already in hand — it is the actual block IDENTITY
+    // (a one-block reorg can replace the block at a given height with a
+    // different one, which height alone cannot distinguish from continuity).
     let blockHeight: number | undefined;
     if (tx.blockhash) {
       try {
@@ -708,7 +711,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
         // best-effort only
       }
     }
-    return { confirmed: true, confirmations, blockHeight };
+    return { confirmed: true, confirmations, blockHeight, blockHash: tx.blockhash };
   }
 
   async estimateFee(blocks: number = 1): Promise<number> {

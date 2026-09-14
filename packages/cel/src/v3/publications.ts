@@ -38,6 +38,24 @@ export interface PublicationObservation {
         metadata: Uint8Array | null;
       };
 }
+/**
+ * How the snapshot's chain facts (tip, active block hashes, reveal transaction
+ * membership) were established, distinct from indexer enumeration completeness.
+ * `node-validated` never certifies that no later/omitted publication exists —
+ * only an independent index can corroborate enumeration completeness.
+ */
+export interface ChainEvidence {
+  /**
+   * `provider-asserted`: the same provider that supplied Ordinals data also
+   * asserted these chain facts, with no independent cross-check.
+   * `node-validated`: a separately configured Bitcoin node independently
+   * confirmed the chain tip, active block hashes, and reveal transaction
+   * membership this snapshot relies on.
+   */
+  assurance: "unavailable" | "provider-asserted" | "node-validated";
+  /** Non-secret label identifying the independent source (e.g. a host name). Never a credential. */
+  source?: string;
+}
 /** Adapter assertions for one complete, stable view. Core does not authenticate RPC providers or validate Bitcoin consensus. */
 export interface SatSnapshot {
   network: BitcoinNetwork;
@@ -52,6 +70,8 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /** Optional provider claim, never sufficient to upgrade core resolution above provider-asserted. */
+  chainEvidence?: { assurance: 'provider-asserted' | 'node-validated'; source?: string };
 }
 export type ResolutionFailure =
   | "invalid"
@@ -69,12 +89,77 @@ export interface PublicationEvidence {
   inlineResourceIds: string[];
   inlineContentStatus: "not-inline" | "matched" | "unmatched";
 }
+/**
+ * `bitcoin-inline` means these exact current bytes were matched inline in an accepted
+ * publication; `referenced` means the current state names this resource but no accepted
+ * publication in this snapshot carried its bytes on-chain. A resource can regress from
+ * `bitcoin-inline` to `referenced` after an update changes its digest.
+ */
+export type ResourceAvailability = "bitcoin-inline" | "referenced";
+export interface ResourceAvailabilityRecord {
+  id: string;
+  version: number;
+  availability: ResourceAvailability;
+}
+/**
+ * A confirmed inscription's media type and content digest, established independently of
+ * the Ordinals indexer that served `SatSnapshot.publications` — for example derived by
+ * parsing the reveal transaction's witness envelope directly from a validating Bitcoin
+ * node. This corroborates content/media binding; it is a separate dimension from chain
+ * consistency (`#652`), enumeration completeness, and ownership.
+ */
+export interface IndependentContentEvidence {
+  inscriptionId: string;
+  mediaType: string;
+  /** digestBytes() of the independently-derived on-chain content bytes. */
+  contentDigest: string;
+  /**
+   * digestBytes() of the independently-derived on-chain metadata tag, or null when the
+   * envelope carries no metadata tag. Comparable to `publication.body.metadata` (also
+   * null when absent) — both sides compare raw/canonically-reencoded wire bytes, never a
+   * decoded value, so two different CBOR decoders cannot disagree on equality semantics.
+   */
+  metadataDigest: string | null;
+}
+/**
+ * All inscription ids an independently configured second Ordinals index
+ * currently reports for the queried sat. `source` is a non-secret label for
+ * that source (never credentials or a full URL), carried into diagnostics.
+ * This corroborates enumeration completeness; it is a separate dimension
+ * from chain/index consistency and does not itself validate Bitcoin facts.
+ * `ownership`, when supplied, is that same independent source's own current
+ * sat-holder observation: a separate corroboration dimension from
+ * enumeration, since a provider could enumerate every inscription correctly
+ * while still fabricating who currently holds the sat.
+ */
+export interface IndependentEnumeration {
+  source: string;
+  inscriptionIds: readonly string[];
+  ownership?: SatSnapshot["ownership"];
+}
 export type SatResolution = Readonly<
   | {
       status: ResolutionFailure;
       reason: string;
       scope: "sat";
       crossSatCanonicality: "unknown";
+      chainEvidence: Readonly<ChainEvidence>;
+    }
+  | {
+      /**
+       * The complete observation contains only unconfirmed publications for this sat:
+       * something was broadcast, but nothing has reached this snapshot's confirmation
+       * depth yet, so no boundary could be evaluated either way. Distinct from
+       * `not-found`, which means either no publications were observed for this sat at
+       * all, or confirmed data was inspected and no valid boundary was found in it.
+       */
+      status: "pending";
+      reason: string;
+      scope: "sat";
+      crossSatCanonicality: "unknown";
+      chainEvidence: Readonly<ChainEvidence>;
+      /** Unconfirmed publication ids observed for this sat, in snapshot order. */
+      pending: readonly string[];
     }
   | {
       status: "accepted";
@@ -88,6 +173,47 @@ export type SatResolution = Readonly<
       pending: readonly string[];
       diagnostics: readonly Readonly<{ inscriptionId: string; code: string }>[];
       webvhBinding: "unverified";
+      /** Scoped to chain facts only; never implies verified enumeration completeness. */
+      chainEvidence: Readonly<ChainEvidence>;
+      /** Per current resource, whether its exact bytes were recovered from this snapshot's accepted publications. */
+      resourceAvailability: readonly Readonly<ResourceAvailabilityRecord>[];
+      /**
+       * `ownership` is a single point-in-time observation of the current holder/satpoint.
+       * This resolver never reconstructs how the sat arrived there: it does not walk the
+       * UTXO/transfer graph from genesis, so it cannot independently derive the sat's
+       * historical trajectory. That stays true even when a second index source corroborates
+       * the same current ownership fact — agreement between indexers is corroboration of
+       * one snapshot, not independent derivation of the transfer path. Always
+       * `'not-independently-derived'` today; reserved so a future independent-derivation
+       * capability has somewhere honest to report a stronger value.
+       */
+      trajectoryAssurance: "not-independently-derived";
+      /**
+       * "cross-checked" only when independent content evidence was supplied and agreed
+       * for every accepted publication; otherwise the provider's own reported bytes and
+       * media type are an unauthenticated assertion. A compromised provider can still
+       * substitute content for a publication no independent source examined.
+       */
+      contentAssurance: "provider-asserted" | "cross-checked";
+      /**
+       * "cross-checked" only when a caller-supplied independent enumeration
+       * source was consulted and reported no inscription absent from this
+       * snapshot; otherwise the snapshot's own completeness is an
+       * unauthenticated provider assertion. A compromised or incomplete
+       * provider can still omit history no independent source observed.
+       */
+      enumerationAssurance: "provider-asserted" | "cross-checked";
+      /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+      enumerationSource?: string;
+      /**
+       * "cross-checked" only when independent ownership evidence was supplied
+       * (via `independentEnumeration.ownership`) and agreed with this
+       * snapshot's current `owner`/`satpoint`; otherwise current sat
+       * ownership is an unauthenticated provider assertion, distinct from
+       * `enumerationAssurance`. Configuring `independentEnumeration` for
+       * enumeration alone does not itself upgrade ownership assurance.
+       */
+      ownershipAssurance: "provider-asserted" | "cross-checked";
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -103,6 +229,7 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence: { assurance: "provider-asserted" },
 });
 
 /** Resolve a sat from complete observations using the same signature/authority fold as offline history.
@@ -111,7 +238,25 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedAssetId?: string } = {},
+  options: {
+    expectedAssetId?: string;
+    /**
+     * Independently derived media type/content digest for some confirmed inscriptions,
+     * keyed by inscription id. If it disagrees with this snapshot's reported content for
+     * any of them, resolution fails closed rather than accepting a possibly-substituted
+     * body: the primary provider cannot earn "cross-checked" by simply not disagreeing
+     * with itself.
+     */
+    independentContent?: readonly IndependentContentEvidence[];
+    /**
+     * All inscription ids a second, independently configured Ordinals index
+     * currently reports for this sat. If it reports an id this snapshot
+     * does not contain, resolution fails closed rather than accepting a
+     * possibly-omitted history as complete: the primary provider cannot
+     * earn "cross-checked" by simply not disagreeing with itself.
+     */
+    independentEnumeration?: IndependentEnumeration;
+  } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -139,6 +284,17 @@ export function resolveSat(
     ![snapshot.tipBefore, snapshot.tipAfter, snapshot.indexTip].every(validTip)
   )
     return failure("incomplete", "Missing chain/index tip");
+  if (
+    snapshot.chainEvidence !== undefined &&
+    (typeof snapshot.chainEvidence !== "object" ||
+      snapshot.chainEvidence === null ||
+      !["provider-asserted", "node-validated"].includes(
+        snapshot.chainEvidence.assurance,
+      ) ||
+      (snapshot.chainEvidence.source !== undefined &&
+        typeof snapshot.chainEvidence.source !== "string"))
+  )
+    return failure("invalid", "Malformed chain evidence assurance");
   if (!sameTip(snapshot.tipBefore, snapshot.tipAfter))
     return failure("chain-changed", "Chain changed during observation");
   if (!snapshot.indexHealthy || !sameTip(snapshot.tipBefore, snapshot.indexTip))
@@ -149,6 +305,31 @@ export function resolveSat(
     !Array.isArray(snapshot.blocks)
   )
     return failure("incomplete", "Incomplete sat enumeration");
+  const independentContentById = new Map<string, IndependentContentEvidence>();
+  if (options.independentContent !== undefined) {
+    if (!Array.isArray(options.independentContent))
+      return failure("incomplete", "Invalid independent content evidence");
+    // Array.isArray narrows a readonly array to `any[]`, so iterate via an
+    // explicit `unknown` cast rather than trusting that narrowed element type.
+    for (const raw of options.independentContent as readonly unknown[]) {
+      const entry = raw as Record<string, unknown> | null;
+      if (
+        !entry ||
+        typeof entry.inscriptionId !== "string" ||
+        typeof entry.mediaType !== "string" ||
+        typeof entry.contentDigest !== "string" ||
+        !(entry.metadataDigest === null || typeof entry.metadataDigest === "string") ||
+        independentContentById.has(entry.inscriptionId)
+      )
+        return failure("incomplete", "Invalid independent content evidence");
+      independentContentById.set(entry.inscriptionId, {
+        inscriptionId: entry.inscriptionId,
+        mediaType: entry.mediaType,
+        contentDigest: entry.contentDigest,
+        metadataDigest: entry.metadataDigest,
+      });
+    }
+  }
   if (
     !snapshot.ownership ||
     !Object.prototype.hasOwnProperty.call(snapshot.ownership, "owner") ||
@@ -163,6 +344,49 @@ export function resolveSat(
     )
   )
     return failure("incomplete", "Missing live ownership observation");
+  let enumerationAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  let enumerationSource: string | undefined;
+  let ownershipAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  if (options.independentEnumeration) {
+    const { source, inscriptionIds, ownership } = options.independentEnumeration;
+    if (
+      typeof source !== "string" ||
+      !Array.isArray(inscriptionIds) ||
+      !inscriptionIds.every((id) => typeof id === "string")
+    )
+      return failure("incomplete", "Invalid independent enumeration evidence");
+    const known = new Set(snapshot.publications.map((p) => p.id));
+    if (inscriptionIds.some((id) => !known.has(id)))
+      return failure(
+        "inconsistent-evidence",
+        "Independent enumeration source reports an inscription absent from the primary snapshot",
+      );
+    enumerationAssurance = "cross-checked";
+    enumerationSource = source;
+    if (ownership !== undefined) {
+      if (
+        !ownership ||
+        !Object.prototype.hasOwnProperty.call(ownership, "owner") ||
+        !Object.prototype.hasOwnProperty.call(ownership, "satpoint") ||
+        !(ownership.owner === null || typeof ownership.owner === "string") ||
+        !(
+          ownership.satpoint === null || typeof ownership.satpoint === "string"
+        )
+      )
+        return failure("incomplete", "Invalid independent ownership evidence");
+      if (
+        ownership.owner !== snapshot.ownership.owner ||
+        ownership.satpoint !== snapshot.ownership.satpoint
+      )
+        return failure(
+          "inconsistent-evidence",
+          "Independent source disagrees with primary snapshot's current ownership",
+        );
+      ownershipAssurance = "cross-checked";
+    }
+  }
   const blocks = new Map<number, SatSnapshot["blocks"][number]>();
   const blockHashes = new Set<string>();
   for (const block of snapshot.blocks) {
@@ -205,6 +429,7 @@ export function resolveSat(
   const seen = new Map<string, string>(),
     positions = new Map<string, string>();
   const confirmationStates = new Map<string, boolean>();
+  const agreedContentIds = new Set<string>();
   const ordered: (PublicationObservation & { creation: CreationPosition })[] =
       [],
     pending: string[] = [];
@@ -286,10 +511,11 @@ export function resolveSat(
         "inconsistent-evidence",
         "Reveal txid is not at the observed block position",
       );
+    const contentDigest = digestBytes(publication.body.bytes);
     const fingerprint = canonicalizeValue({
       position,
       type: publication.body.mediaType,
-      content: digestBytes(publication.body.bytes),
+      content: contentDigest,
       metadata:
         publication.body.metadata === null
           ? null
@@ -327,7 +553,8 @@ export function resolveSat(
   let history: VerifiedHistory | undefined,
     lastHeight = -1;
   const accepted: PublicationEvidence[] = [],
-    diagnostics: { inscriptionId: string; code: string }[] = [];
+    diagnostics: { inscriptionId: string; code: string }[] = [],
+    inlinedContent = new Set<string>();
   for (const publication of ordered) {
     const ignore = (code: string) =>
       diagnostics.push({ inscriptionId: publication.id, code });
@@ -368,8 +595,7 @@ export function resolveSat(
           continue;
         }
       }
-      const contentDigest =
-        body.metadata === null ? undefined : digestBytes(body.bytes);
+      const bodyDigest = digestBytes(body.bytes);
       const inlineResourceIds =
         body.metadata === null
           ? []
@@ -377,7 +603,7 @@ export function resolveSat(
               .filter(
                 (r) =>
                   r.mediaType === body.mediaType &&
-                  r.digestMultibase === contentDigest,
+                  r.digestMultibase === bodyDigest,
               )
               .map((r) => r.id);
       const inlineContentStatus =
@@ -388,6 +614,9 @@ export function resolveSat(
             : "unmatched";
       if (inlineContentStatus === "unmatched")
         ignore("CEL_INLINE_RESOURCE_MISMATCH");
+      if (inlineResourceIds.length > 0) {
+        inlinedContent.add(JSON.stringify([body.mediaType, bodyDigest]));
+      }
       // Choose the first valid boundary independent of a requested genesis filter.
       if (
         !history &&
@@ -398,6 +627,25 @@ export function resolveSat(
           "identity-mismatch",
           "Earliest valid boundary has a different genesis",
         );
+      // Only a publication actually being committed to history can be denied
+      // by independent evidence: an unrelated/invalid publication ignored
+      // above (CEL_UNRELATED, CEL_NONEXTENDING, CEL_BOUNDARY, height gate)
+      // never reaches here, so it can never block an otherwise valid history.
+      const independentContent = independentContentById.get(publication.id);
+      if (independentContent) {
+        const bodyMetadataDigest =
+          body.metadata === null ? null : digestBytes(body.metadata);
+        if (
+          independentContent.mediaType !== body.mediaType ||
+          independentContent.contentDigest !== bodyDigest ||
+          independentContent.metadataDigest !== bodyMetadataDigest
+        )
+          return failure(
+            "inconsistent-evidence",
+            "Independent content evidence disagrees with the provider-reported content",
+          );
+        agreedContentIds.add(publication.id);
+      }
       history = next;
       lastHeight = publication.creation.height;
       accepted.push({
@@ -416,11 +664,42 @@ export function resolveSat(
       ignore(error.code);
     }
   }
-  if (!history)
+  if (!history) {
+    // No confirmed publication was even a candidate: everything observed is still
+    // unconfirmed, so there is nothing yet to judge as valid or invalid. Report that
+    // distinctly from "not-found" (confirmed data was inspected and rejected).
+    if (ordered.length === 0 && pending.length > 0)
+      return {
+        status: "pending",
+        reason: "Only unconfirmed publications observed; no confirmed boundary yet",
+        scope: "sat",
+        crossSatCanonicality: "unknown",
+        chainEvidence: { assurance: "provider-asserted" },
+        pending,
+      };
     return failure(
       "not-found",
       "No valid boundary in the complete sat observations",
     );
+  }
+  // Snapshot data cannot select its own trust level. Explicit application-side
+  // validation in the SDK may upgrade the resolved result after checking this view.
+  const chainEvidence: ChainEvidence = { assurance: "provider-asserted" };
+  const resourceAvailability: ResourceAvailabilityRecord[] =
+    history.state.resources.map((resource) => ({
+      id: resource.id,
+      version: resource.version,
+      availability: inlinedContent.has(JSON.stringify([resource.mediaType, resource.digestMultibase]))
+        ? "bitcoin-inline"
+        : "referenced",
+    }));
+  const contentAssurance: "provider-asserted" | "cross-checked" =
+    options.independentContent !== undefined &&
+    accepted.every((publication) =>
+      agreedContentIds.has(publication.inscriptionId),
+    )
+      ? "cross-checked"
+      : "provider-asserted";
   const result: SatResolution = {
     status: "accepted",
     scope: "sat",
@@ -433,6 +712,13 @@ export function resolveSat(
     pending,
     diagnostics,
     webvhBinding: "unverified",
+    chainEvidence,
+    resourceAvailability,
+    trajectoryAssurance: "not-independently-derived",
+    contentAssurance,
+    enumerationAssurance,
+    ...(enumerationSource !== undefined ? { enumerationSource } : {}),
+    ownershipAssurance,
   };
   freeze<unknown>(result);
   return result;

@@ -211,7 +211,7 @@ export default OriginalsSDK;
 /** Minimal local-only entry using the same CEL 3 lifecycle as the default SDK. */
 export * as v3 from './v3/index.js';
 
-export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./v3/resolution.js";
+export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution, ResourceAvailability, IndependentEnumerationSource } from "./v3/resolution.js";
 
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./v3/hosted.js";
 
@@ -224,3 +224,6 @@ export { validateInscriptionReveal } from './bitcoin/inscription-recovery.js';
 export type { InscribeOnSatResult, PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionRecoveryRecord, InscriptionBroadcastState } from './bitcoin/inscribe-on-sat.js';
 
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./v3/envelope.js";
+
+export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./v3/chain-validation.js";
+export { createBitcoinCoreContentValidator, type BitcoinCoreContentValidatorOptions, type ContentValidator } from "./v3/content-validation.js";

@@ -1,12 +1,17 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { base58 } from "@scure/base";
 import fixtures from "../../../../docs/research/cel-core-vectors/histories.json";
 import {
   resolveSat,
   createLocalSigner,
   signEvent,
+  createNonce,
+  digestBytes,
   encodeDocument,
+  verifyHistory,
   type SatSnapshot,
+  type IndependentContentEvidence,
 } from "../../src/v3/index.js";
 
 // These are declared provider observations, not Bitcoin RPC evidence.
@@ -101,6 +106,178 @@ test("accepts the complete boundary at a stable declared snapshot, with possessi
   expect(result.scope).toBe("sat");
   expect(result.crossSatCanonicality).toBe("unknown");
   expect(result.ownership.owner).toBe("A");
+  expect(result.trajectoryAssurance).toBe("not-independently-derived");
+});
+
+// #594: `ownership` is a single point-in-time observation. This resolver never
+// walks the UTXO/transfer graph, so it cannot independently derive how the sat
+// arrived at that owner/satpoint — every accepted result must say so honestly,
+// unconditionally, regardless of how many publications or observations agree.
+test("every accepted resolution reports sat trajectory as not independently derived", () => {
+  for (const scenario of fixtures.cases) {
+    const result = resolveSat(observations(scenario));
+    if (result.status === "accepted")
+      expect(result.trajectoryAssurance).toBe("not-independently-derived");
+  }
+});
+
+function completeContentEvidence(
+  snapshot: SatSnapshot,
+): IndependentContentEvidence[] {
+  return snapshot.publications
+    .filter((p) => p.body.status === "complete")
+    .map((p) => {
+      const body = p.body as { mediaType: string; bytes: Uint8Array; metadata: Uint8Array | null };
+      return {
+        inscriptionId: p.id,
+        mediaType: body.mediaType,
+        contentDigest: digestBytes(body.bytes),
+        metadataDigest: body.metadata === null ? null : digestBytes(body.metadata),
+      };
+    });
+}
+
+test("content assurance defaults to provider-asserted with no independent evidence configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks content when independent evidence agrees for every accepted publication", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: completeContentEvidence(snapshot),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
+test("partial independent content coverage does not upgrade assurance, and does not fail", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence.length).toBeGreaterThan(0);
+  const result = resolveSat(snapshot, {
+    independentContent: evidence.slice(0, evidence.length - 1),
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when independent content evidence disagrees with a substituted body", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  // Simulate a compromised indexer: the on-chain content an independent
+  // Bitcoin node derived disagrees with what the provider actually served.
+  evidence[0] = {
+    ...evidence[0],
+    contentDigest: digestBytes(new TextEncoder().encode("forged content")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("fails closed when independent content evidence disagrees only on media type", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence[0] = { ...evidence[0], mediaType: "image/png" };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when independent metadata evidence disagrees while body and media type still agree", () => {
+  // A compromised indexer could serve the correct main content/media type
+  // (satisfying those two checks) while substituting the CEL metadata tag
+  // that actually drives history — body/media agreement alone must not be
+  // enough to earn cross-checked assurance.
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  expect(evidence[0].metadataDigest).toBeNull();
+  evidence[0] = {
+    ...evidence[0],
+    metadataDigest: digestBytes(new TextEncoder().encode("forged metadata")),
+  };
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("rejects malformed independent content evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately missing contentDigest/metadataDigest for the test
+      { inscriptionId: snapshot.publications[0].id, mediaType: "text/plain" },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects independent content evidence with a non-string, non-null metadataDigest", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      // @ts-expect-error deliberately invalid metadataDigest type for the test
+      { ...evidence[0], metadataDigest: 12345 },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects duplicate inscription ids in independent content evidence", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [evidence[0], evidence[0]],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("an independent source reporting an unknown inscription id does not itself break resolution", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  evidence.push({
+    inscriptionId: "f".repeat(64) + "i9",
+    mediaType: "text/plain",
+    contentDigest: digestBytes(new TextEncoder().encode("unrelated")),
+    metadataDigest: null,
+  });
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
+test("disagreeing evidence for a publication ignored as unrelated never blocks an otherwise valid history", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "inspected-unrelated-bytes-do-not-poison",
+  )!;
+  const snapshot = observations(scenario);
+  const evidence = completeContentEvidence(snapshot);
+  const unrelated = snapshot.publications.find(
+    (p) => p.body.status === "complete" && p.body.mediaType === "text/plain",
+  )!;
+  const entry = evidence.find((e) => e.inscriptionId === unrelated.id)!;
+  expect(entry).toBeDefined();
+  // The independent source disagrees only about content nothing in the
+  // accepted history actually depends on: this inscription is ignored
+  // (CEL_UNRELATED) rather than accepted.
+  entry.contentDigest = digestBytes(new TextEncoder().encode("forged"));
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(
+      result.diagnostics.some(
+        (d) => d.inscriptionId === unrelated.id && d.code === "CEL_UNRELATED",
+      ),
+    ).toBe(true);
+    // Every ACCEPTED publication's evidence still agreed, so the disagreement
+    // on an ignored, irrelevant publication does not downgrade assurance either.
+    expect(result.contentAssurance).toBe("cross-checked");
+  }
 });
 
 for (const scenario of fixtures.cases)
@@ -143,10 +320,208 @@ for (const scenario of fixtures.cases)
     }
   });
 
+test("enumeration assurance defaults to provider-asserted with no independent source configured", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks enumeration when an independent source agrees with the primary snapshot", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(result.enumerationAssurance).toBe("cross-checked");
+    expect(result.enumerationSource).toBe("second-ord-instance");
+  }
+});
+
+test("does not report an enumeration source when no independent source was consulted", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationSource).toBeUndefined();
+});
+
+test("rejects a non-string independent enumeration source label", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      // @ts-expect-error deliberately malformed for the test
+      source: 123,
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("a fewer-inscriptions independent source still cross-checks (it just corroborates less)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: { source: "lagging-index", inscriptionIds: [] },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("cross-checked");
+});
+
+test("fails closed when an independent source reports an inscription the primary snapshot omitted", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const omitted =
+    "f".repeat(64) + "i0"; // a plausible id the primary snapshot never listed
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: [...snapshot.publications.map((p) => p.id), omitted],
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("rejects malformed independent enumeration evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      // @ts-expect-error deliberately malformed for the test
+      inscriptionIds: "not-an-array",
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("ownership assurance defaults to provider-asserted with no independent evidence", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("ownership assurance stays provider-asserted when independentEnumeration is configured for enumeration only", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("cross-checks ownership when independent evidence agrees with the primary snapshot", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership },
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("cross-checked");
+});
+
+test("fails closed when independent ownership evidence disagrees on the owner", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership, owner: "someone-else" },
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("fails closed when independent ownership evidence disagrees on the satpoint", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: { ...snapshot.ownership, satpoint: hash("a different location") + ":0:0" },
+    },
+  });
+  expect(result.status).toBe("inconsistent-evidence");
+  expect("state" in result).toBe(false);
+});
+
+test("rejects malformed independent ownership evidence rather than ignoring it", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      // @ts-expect-error deliberately malformed for the test
+      ownership: { owner: "A" },
+    },
+  });
+  expect(result.status).toBe("incomplete");
+});
+
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.publications.push({ ...snapshot.publications[0], confirmed: false });
   expect(resolveSat(snapshot).status).toBe("inconsistent-evidence");
+});
+
+test("reports pending, not not-found, when every observed publication is still unconfirmed", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  for (const publication of snapshot.publications) publication.confirmed = false;
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("pending");
+  if (result.status === "pending")
+    expect(result.pending).toEqual(snapshot.publications.map((p) => p.id));
+});
+
+test("a sat with no observed publications at all is still not-found, not pending", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  snapshot.publications = [];
+  expect(resolveSat(snapshot).status).toBe("not-found");
+});
+
+test("an invalid confirmed boundary stays not-found even alongside an unrelated pending publication", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "migration-from-must-match-current-alias",
+  )!;
+  const snapshot = observations(scenario);
+  snapshot.publications.push({ ...snapshot.publications[0], confirmed: false, id: "a".repeat(64) + "i9", revealTxid: "a".repeat(64) });
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("not-found");
+});
+
+test("chain evidence defaults to provider-asserted when the snapshot omits it", () => {
+  const result = resolveSat(observations(fixtures.cases[0]));
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.chainEvidence).toEqual({ assurance: "provider-asserted" });
+});
+
+test("an ordinary snapshot cannot self-assert independent validation", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  snapshot.chainEvidence = { assurance: "node-validated", source: "core.example" };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.chainEvidence).toEqual({ assurance: "provider-asserted" });
+});
+
+test("chain evidence never upgrades an unrecognized assurance value to node-validated", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  // @ts-expect-error deliberately malformed provider input
+  snapshot.chainEvidence = { assurance: "fabricated" };
+  expect(resolveSat(snapshot).status).toBe("invalid");
 });
 
 test("accepts raw resource bytes with full CEL metadata and binds the exact byte digest", () => {
@@ -271,4 +646,225 @@ test("unmatched inline bytes do not suppress an authorized rotation and continua
     expect(result.publications[1].inlineContentStatus).toBe("unmatched");
     expect(result.publications[1].inlineResourceIds).toEqual([]);
   }
+});
+
+// #378: a boundary/delta carries at most one inline resource body per publication.
+// resourceAvailability must honestly report, per current resource, whether an accepted
+// publication in *this* snapshot actually carried its exact current bytes on-chain.
+const A = createLocalSigner(
+  "Ed25519",
+  new Uint8Array(
+    Buffer.from(
+      "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "hex",
+    ),
+  ),
+);
+const scid = base58.encode(
+  Uint8Array.from([0x12, 0x20, ...createHash("sha256").update("378").digest()]),
+);
+const sat = "5000000001";
+
+async function twoResourceBoundary(resourceA: Uint8Array, resourceB: Uint8Array) {
+  const genesis = await signEvent(
+    {
+      operation: {
+        type: "create",
+        data: {
+          profile: "originals/cel/3",
+          controller: A.controller,
+          createdAt: "2026-09-11T00:00:00Z",
+          nonce: createNonce(),
+          resources: [
+            { id: "a", mediaType: "text/plain", digestMultibase: digestBytes(resourceA) },
+            { id: "b", mediaType: "text/plain", digestMultibase: digestBytes(resourceB) },
+          ],
+        },
+      },
+    },
+    A,
+  );
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: initial.state.assetId,
+          to: `did:webvh:${scid}:example.com:378`,
+          layer: "webvh",
+          migratedAt: "2026-09-11T00:00:01Z",
+        },
+      },
+    },
+    A,
+  );
+  const afterWebvh = verifyHistory({ log: [toWebvh] }, { prefix: initial });
+  const toBtco = await signEvent(
+    {
+      previousEvent: afterWebvh.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: afterWebvh.state.alias,
+          to: `did:btco:reg:${sat}`,
+          layer: "btco",
+          migratedAt: "2026-09-11T00:00:02Z",
+        },
+      },
+    },
+    A,
+  );
+  const afterBtco = verifyHistory({ log: [toBtco] }, { prefix: afterWebvh });
+  expect(afterBtco.state.alias).toBe(`did:btco:reg:${sat}`);
+  return { log: [genesis, toWebvh, toBtco], afterBtco };
+}
+
+function emptySnapshot(): Omit<SatSnapshot, "publications"> {
+  const tip = { height: 200, hash: "b".repeat(64) };
+  return {
+    network: "regtest",
+    sat,
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    indexHealthy: true,
+    enumerationComplete: true,
+    blocks: [{ height: 200, hash: tip.hash, txids: ["c".repeat(64)] }],
+    ownership: { owner: "holder", satpoint: "d".repeat(64) + ":0:0" },
+  };
+}
+
+function publicationAt(
+  log: unknown[],
+  bytes: Uint8Array,
+  mediaType: string,
+): SatSnapshot["publications"][number] {
+  return {
+    id: "c".repeat(64) + "i0",
+    revealTxid: "c".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 200, blockHash: "b".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType,
+      bytes,
+      metadata: encodeDocument({ log }, "cbor"),
+    },
+  };
+}
+
+test("a two-resource boundary reports bitcoin-inline only for the resource whose bytes were actually inlined", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log } = await twoResourceBoundary(resourceA, resourceB);
+  const snapshot: SatSnapshot = {
+    ...emptySnapshot(),
+    publications: [publicationAt(log, resourceA, "text/plain")],
+  };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  // Removing any host changes nothing here: "b" was never carried on-chain.
+  expect(result.resourceAvailability).toEqual([
+    { id: "a", version: 1, availability: "bitcoin-inline" },
+    { id: "b", version: 1, availability: "referenced" },
+  ]);
+});
+
+test("a delta changing two resources leaves only the resource re-inlined at its new digest recoverable", async () => {
+  const resourceA1 = new TextEncoder().encode("resource A v1"),
+    resourceB1 = new TextEncoder().encode("resource B v1"),
+    resourceA2 = new TextEncoder().encode("resource A v2"),
+    resourceB2 = new TextEncoder().encode("resource B v2");
+  const { log: boundaryLog, afterBtco } = await twoResourceBoundary(
+    resourceA1,
+    resourceB1,
+  );
+  const update = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: {
+          profile: "originals/cel/3",
+          resources: [
+            {
+              id: "a",
+              mediaType: "text/plain",
+              digestMultibase: digestBytes(resourceA2),
+              previousDigestMultibase: digestBytes(resourceA1),
+            },
+            {
+              id: "b",
+              mediaType: "text/plain",
+              digestMultibase: digestBytes(resourceB2),
+              previousDigestMultibase: digestBytes(resourceB1),
+            },
+          ],
+        },
+      },
+    },
+    A,
+  );
+  const boundaryPublication = publicationAt(boundaryLog, resourceA1, "text/plain");
+  const deltaPublication: SatSnapshot["publications"][number] = {
+    ...publicationAt([update], resourceA2, "text/plain"),
+    id: "e".repeat(64) + "i0",
+    revealTxid: "e".repeat(64),
+    creation: { height: 201, blockHash: "f".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+  };
+  const snapshot: SatSnapshot = {
+    ...emptySnapshot(),
+    tipBefore: { height: 201, hash: "f".repeat(64) },
+    tipAfter: { height: 201, hash: "f".repeat(64) },
+    indexTip: { height: 201, hash: "f".repeat(64) },
+    blocks: [
+      { height: 200, hash: "b".repeat(64), txids: ["c".repeat(64)] },
+      { height: 201, hash: "f".repeat(64), txids: ["e".repeat(64)] },
+    ],
+    publications: [boundaryPublication, deltaPublication],
+  };
+  const result = resolveSat(snapshot);
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.resources.map((r) => r.digestMultibase)).toEqual([
+    digestBytes(resourceA2),
+    digestBytes(resourceB2),
+  ]);
+  // "a" was re-inlined at its new digest; the boundary's stale bytes for "a" don't count,
+  // and "b" was never carried on-chain at any digest it currently has: without a host,
+  // only "a"'s bytes remain recoverable.
+  expect(result.resourceAvailability).toEqual([
+    { id: "a", version: 2, availability: "bitcoin-inline" },
+    { id: "b", version: 2, availability: "referenced" },
+  ]);
+});
+
+test.each([
+  { id: 'a', mediaType: 'application/octet-stream', expected: 'referenced' },
+  { id: 'b', mediaType: 'text/plain', expected: 'bitcoin-inline' },
+])('current availability follows accepted media type and digest: $id/$mediaType', async ({ id, mediaType, expected }) => {
+  const a = new TextEncoder().encode('shared A content');
+  const b = new TextEncoder().encode('different B content');
+  const { log, afterBtco } = await twoResourceBoundary(a, b);
+  const update = await signEvent({ previousEvent: afterBtco.state.head, operation: { type: 'update', data: {
+    profile: 'originals/cel/3', resources: [{ id, mediaType, digestMultibase: digestBytes(a),
+      previousDigestMultibase: digestBytes(id === 'a' ? a : b) }],
+  } } }, A);
+  const delta = { ...publicationAt([update], new Uint8Array(), 'text/plain'),
+    id: 'e'.repeat(64) + 'i0', revealTxid: 'e'.repeat(64),
+    creation: { height: 201, blockHash: 'f'.repeat(64), transactionIndex: 0, inscriptionIndex: 0 } };
+  const tip = { height: 201, hash: 'f'.repeat(64) };
+  const result = resolveSat({ ...emptySnapshot(), tipBefore: tip, tipAfter: tip, indexTip: tip,
+    blocks: [...emptySnapshot().blocks, { height: 201, hash: tip.hash, txids: ['e'.repeat(64)] }],
+    publications: [publicationAt(log, a, 'text/plain'), delta] });
+  expect(result.status).toBe('accepted');
+  if (result.status !== 'accepted') throw new Error(result.status);
+  expect(result.resourceAvailability.find(resource => resource.id === id)?.availability).toBe(expected);
 });

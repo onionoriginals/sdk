@@ -1,3 +1,5 @@
+import type { ContentValidator } from "./content-validation.js";
+import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
@@ -8,7 +10,9 @@ import {
   digestBytes,
   type SatSnapshot,
   type SatResolution,
+  type ResourceAvailabilityRecord,
   type BitcoinNetwork,
+  type ChainEvidence,
 } from "@originals/cel/v3";
 import type { DIDDocument } from "../types/did.js";
 import { summarizeVerification } from "./verification.js";
@@ -24,9 +28,30 @@ import type {
 export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
+/**
+ * A second, independently configured Ordinals index consulted for its
+ * inscription enumeration and current sat ownership observation, to
+ * corroborate that the primary provider did not omit a publication or
+ * misreport who currently holds the sat. `label` is a non-secret
+ * description of the source (never credentials or a full URL) carried into
+ * resolution metadata.
+ */
+export interface IndependentEnumerationSource {
+  label: string;
+  provider: SatProvider;
+}
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
 }
+/**
+ * Whether one historical resource version's bytes are recoverable from the accepted
+ * Bitcoin inscriptions alone ("bitcoin-inline"), or depend on a separate off-chain host
+ * ("referenced"). At most one current resource is inlined per publication (see
+ * `inlineResourceId` on `prepareBitcoinPublication`), so a multi-resource asset commonly
+ * has both kinds at once; "referenced" is the expected, by-design state for the rest,
+ * not a defect.
+ */
+export type ResourceAvailability = ResourceAvailabilityRecord;
 export type AssetResolution =
   | Exclude<SatResolution, { status: "accepted" }>
   | {
@@ -35,6 +60,8 @@ export type AssetResolution =
       verification: AssetVerification;
       resolution: Extract<SatResolution, { status: "accepted" }>;
       didDocument: DIDDocument | null;
+      /** One entry per historical resource version in the accepted log, oldest first. */
+      resourceAvailability: ResourceAvailability[];
     };
 export interface AssetDIDResolution {
   didDocument: DIDDocument | null;
@@ -47,6 +74,16 @@ export interface AssetDIDResolution {
     scope: "sat";
     crossSatCanonicality: "unknown";
     webvhBinding?: "unverified";
+    chainEvidence: Readonly<ChainEvidence>;
+    /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
+    pending?: readonly string[];
+    /** See `SatResolution.trajectoryAssurance`: ownership is a snapshot fact, never an independently derived transfer path. */
+    trajectoryAssurance?: "not-independently-derived";
+    enumerationAssurance?: "provider-asserted" | "cross-checked";
+    /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+    enumerationSource?: string;
+    ownershipAssurance?: "provider-asserted" | "cross-checked";
+    contentAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -56,14 +93,45 @@ export function btcoDid(sat: string, network: BitcoinNetwork): string {
   return did;
 }
 const failure = (
-  status: Exclude<SatResolution["status"], "accepted">,
+  status: Exclude<SatResolution["status"], "accepted" | "pending">,
   reason: string,
+  chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" },
 ): AssetResolution => ({
   status,
   reason,
   scope: "sat",
   crossSatCanonicality: "unknown",
+  chainEvidence,
 });
+const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
+  const t = tip as { height?: unknown; hash?: unknown } | null | undefined;
+  return (
+    !!t &&
+    Number.isSafeInteger(t.height) &&
+    (t.height as number) >= 0 &&
+    typeof t.hash === "string" &&
+    /^[0-9a-f]{64}$/.test(t.hash)
+  );
+};
+const sameChainTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
+  a.height === b.height && a.hash === b.hash;
+/**
+ * A second source can only corroborate enumeration completeness if its own
+ * observation was itself complete, healthy and stable. An independent
+ * snapshot that fails these is unusable evidence, not weaker evidence: it
+ * must not be able to confer "cross-checked" by reporting less. Equal tips
+ * are not enough on their own — two identical malformed values would still
+ * satisfy a bare equality check, so each tip's own shape is validated first.
+ */
+const usableIndependentSnapshot = (snapshot: SatSnapshot): boolean =>
+  snapshot.enumerationComplete === true &&
+  snapshot.indexHealthy === true &&
+  Array.isArray(snapshot.publications) &&
+  validChainTip(snapshot.tipBefore) &&
+  validChainTip(snapshot.tipAfter) &&
+  validChainTip(snapshot.indexTip) &&
+  sameChainTip(snapshot.tipBefore, snapshot.tipAfter) &&
+  sameChainTip(snapshot.tipBefore, snapshot.indexTip);
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
 export class AssetResolver {
@@ -72,6 +140,9 @@ export class AssetResolver {
     private readonly provider?: SatProvider,
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
+    private readonly chainValidator?: ChainValidator,
+    private readonly independentEnumeration?: IndependentEnumerationSource,
+    private readonly contentValidator?: ContentValidator,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -108,10 +179,13 @@ export class AssetResolver {
         resolution: failure(
           "unsupported-capability",
           "A complete sat snapshot provider is required",
+          { assurance: "unavailable" },
         ) as SatResolution,
       };
+    let obtainedSnapshot = false;
     try {
       const snapshot = structuredClone(await this.provider.getSatSnapshot(sat));
+      obtainedSnapshot = true;
       if (snapshot?.sat !== sat || snapshot.network !== this.network)
         return {
           resolution: failure(
@@ -119,7 +193,119 @@ export class AssetResolver {
             "Provider snapshot differs from requested sat or network",
           ) as SatResolution,
         };
-      return { snapshot, resolution: resolveSat(snapshot, options) };
+      let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
+      if (this.chainValidator) {
+        // The validator is selected by application configuration, never by snapshot
+        // fields or an advertised provider method. A detached copy protects the
+        // exact view subsequently resolved from mutation during asynchronous checks.
+        const validated = await this.chainValidator(structuredClone(snapshot));
+        chainEvidence = Object.freeze({ assurance: "node-validated",
+          ...(validated?.source ? { source: validated.source } : {}) });
+      }
+      let independentEnumeration:
+        | {
+            source: string;
+            inscriptionIds: string[];
+            ownership?: SatSnapshot["ownership"];
+          }
+        | undefined;
+      if (this.independentEnumeration) {
+        // A configured independent source that cannot be consulted fails
+        // closed, the same as a configured chain validator: it must not be
+        // possible to silently fall back to an unqualified provider claim
+        // by making the second source unreachable.
+        let independentSnapshot: SatSnapshot;
+        try {
+          independentSnapshot = structuredClone(
+            await this.independentEnumeration.provider.getSatSnapshot(sat),
+          );
+        } catch {
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not return a usable observation",
+              chainEvidence,
+            ) as SatResolution,
+          };
+        }
+        if (
+          independentSnapshot?.sat !== sat ||
+          independentSnapshot.network !== this.network
+        )
+          return {
+            resolution: failure(
+              "inconsistent-evidence",
+              "Independent enumeration source snapshot differs from requested sat or network",
+              chainEvidence,
+            ) as SatResolution,
+          };
+        // An incomplete, unhealthy or unstable independent snapshot must
+        // not confer "cross-checked": an empty or partial enumeration list
+        // trivially never disagrees with the primary snapshot, so a broken
+        // or dishonest second source could otherwise earn full assurance by
+        // reporting nothing at all.
+        if (!usableIndependentSnapshot(independentSnapshot))
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not report a complete, healthy, stable observation",
+              chainEvidence,
+            ) as SatResolution,
+          };
+        independentEnumeration = {
+          source: this.independentEnumeration.label,
+          inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+          // Ownership is a snapshot of current state, not an append-only list
+          // like enumeration: comparing it across two different chain tips is
+          // meaningless (a lagging source's honestly-stale owner could equal
+          // a dishonest primary's misreported "current" owner at a later
+          // tip). Only forward it when both observations describe the same
+          // tip; otherwise this cross-check silently sits out this round
+          // rather than fail resolution just for one source lagging.
+          ...(sameChainTip(independentSnapshot.tipBefore, snapshot.tipBefore)
+            ? { ownership: independentSnapshot.ownership }
+            : {}),
+        };
+      }
+      // Validate the snapshot's own structure/chain-position claims locally
+      // before spending an external RPC round trip on it: a snapshot that
+      // resolveSat would reject anyway (bad block hash, wrong sat/network,
+      // inconsistent reveal position) should surface that deterministic
+      // reason rather than an unrelated content-validator failure, and never
+      // burns a request against the independently trusted node for data
+      // that was never going to be accepted regardless of its content.
+      const baseline = resolveSat(snapshot, { ...options, independentEnumeration });
+      if (baseline.status !== "accepted" || !this.contentValidator)
+        return { snapshot, resolution: Object.freeze({ ...baseline, chainEvidence }) };
+      // A configured content validator that cannot be consulted fails closed,
+      // the same as a configured chain/enumeration validator: it must not be
+      // possible to silently fall back to an unqualified provider claim by
+      // making the independent source unreachable.
+      let independentContent: Awaited<ReturnType<ContentValidator>>;
+      try {
+        // Preserve the exact snapshot already corroborated by the other checks.
+        independentContent = await this.contentValidator(
+          structuredClone(snapshot),
+          baseline.publications.map((publication) => publication.inscriptionId),
+        );
+      } catch {
+        return {
+          resolution: Object.freeze({
+            ...(failure(
+              "incomplete",
+              "Independent content validation is unavailable",
+            ) as SatResolution),
+            chainEvidence,
+          }),
+        };
+      }
+      return {
+        snapshot,
+        resolution: Object.freeze({
+          ...resolveSat(snapshot, { ...options, independentEnumeration, independentContent }),
+          chainEvidence,
+        }),
+      };
     } catch (error) {
       return {
         resolution: failure(
@@ -129,7 +315,8 @@ export class AssetResolver {
             error.code === "SAT_SNAPSHOT_CHAIN_CHANGED"
             ? "chain-changed"
             : "incomplete",
-          "The provider could not obtain a complete sat snapshot",
+          "The provider or configured validator could not establish a complete sat snapshot",
+          { assurance: obtainedSnapshot ? "provider-asserted" : "unavailable" },
         ) as SatResolution,
       };
     }
@@ -141,6 +328,7 @@ export class AssetResolver {
       return failure(
         "identity-mismatch",
         "Asset network differs from configured provider",
+        { assurance: "unavailable" },
       ) as SatResolution;
     return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
@@ -190,12 +378,17 @@ export class AssetResolver {
       const key = JSON.stringify([body.mediaType, digestBytes(body.bytes)]);
       if (!inlineBytes.has(key)) inlineBytes.set(key, body.bytes);
     }
+    const resourceAvailability: ResourceAvailability[] = [];
     for (const resource of catalog) {
-      const bytes = inlineBytes.get(
-        JSON.stringify([resource.mediaType, resource.digestMultibase]),
-      );
+      const key = JSON.stringify([resource.mediaType, resource.digestMultibase]);
+      const bytes = inlineBytes.get(key);
       if (bytes)
         attachments.push(attachment(resource.id, resource.version, bytes));
+      resourceAvailability.push({
+        id: resource.id,
+        version: resource.version,
+        availability: bytes ? "bitcoin-inline" : "referenced",
+      });
     }
     const asset = new OriginalsAsset(
       document,
@@ -232,7 +425,14 @@ export class AssetResolver {
           assertionMethod: [method],
         }
       : null;
-    return { status: "accepted", asset, verification, resolution, didDocument };
+    return {
+      status: "accepted",
+      asset,
+      verification,
+      resolution,
+      didDocument,
+      resourceAvailability,
+    };
   }
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {
@@ -248,7 +448,12 @@ export class AssetResolver {
       return {
         didDocument: null,
         didResolutionMetadata: { status: result.status, error: result.reason },
-        didDocumentMetadata: { scope: "sat", crossSatCanonicality: "unknown" },
+        didDocumentMetadata: {
+          scope: "sat",
+          crossSatCanonicality: "unknown",
+          chainEvidence: result.chainEvidence,
+          ...(result.status === "pending" ? { pending: result.pending } : {}),
+        },
       };
     return {
       didDocument: result.didDocument,
@@ -261,6 +466,12 @@ export class AssetResolver {
         scope: "sat",
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
+        chainEvidence: result.resolution.chainEvidence,
+        trajectoryAssurance: result.resolution.trajectoryAssurance,
+        enumerationAssurance: result.resolution.enumerationAssurance,
+        enumerationSource: result.resolution.enumerationSource,
+        ownershipAssurance: result.resolution.ownershipAssurance,
+        contentAssurance: result.resolution.contentAssurance,
       },
     };
   }

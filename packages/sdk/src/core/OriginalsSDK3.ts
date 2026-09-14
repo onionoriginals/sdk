@@ -1,3 +1,5 @@
+import type { ContentValidator } from "../v3/content-validation.js";
+import type { ChainValidator } from "../v3/chain-validation.js";
 import { BitcoinPublications } from "../v3/bitcoin.js";
 import {
   HostedAssets,
@@ -6,7 +8,11 @@ import {
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { LifecycleManager } from "../v3/OriginalsSDK.js";
 import { AssetDIDManager } from "../did/AssetDIDManager.js";
-import { AssetResolver, type SatProvider } from "../v3/resolution.js";
+import {
+  AssetResolver,
+  type SatProvider,
+  type IndependentEnumerationSource,
+} from "../v3/resolution.js";
 import { CredentialManager } from "../vc/CredentialManager.js";
 import { BitcoinManager } from "../bitcoin/BitcoinManager.js";
 import { StatusListManager } from "../vc/StatusListManager.js";
@@ -32,11 +38,31 @@ export interface OriginalsSDKOptions
     >,
     LocalConfig {
   satProvider?: SatProvider;
+  /** Explicit independent chain verifier. A configured verifier must succeed for resolution. */
+  chainValidator?: ChainValidator;
   storageAdapter?: StorageAdapter | ManagerConfig["storageAdapter"];
   /** Independent confirmation that a hosted WebVH publication's advertised log is actually public. */
   publicReachability?: PublicReachabilityCheck;
   /** Fail hosted publication rather than label it adapter-asserted when reachability cannot be confirmed. */
   requirePublicReachability?: boolean;
+  /**
+   * A second, independently configured Ordinals index consulted to
+   * corroborate that `satProvider`/`ordinalsProvider` did not omit an
+   * inscription for the queried sat, and that its reported current sat
+   * ownership agrees. When configured, resolution fails closed rather than
+   * accepting an unqualified enumeration or ownership claim if this source
+   * is unreachable, reports an inscription the primary snapshot lacks, or
+   * disagrees about who currently holds the sat.
+   */
+  independentEnumeration?: IndependentEnumerationSource;
+  /**
+   * Independently derives confirmed inscriptions' media type/content from chain data (for
+   * example `createBitcoinCoreContentValidator`), to cross-check against what
+   * `satProvider`/`ordinalsProvider` reports. When configured, resolution fails closed
+   * rather than accepting an unqualified content claim if this validator is unreachable or
+   * disagrees with the provider's reported content.
+   */
+  contentValidator?: ContentValidator;
 }
 export type OriginalsConfig = OriginalsSDKOptions;
 
@@ -58,6 +84,7 @@ export class OriginalsSDK {
       [],
       [
         "satProvider",
+        "chainValidator",
         "signer",
         "onAppendFailure",
         "keyStore",
@@ -76,17 +103,24 @@ export class OriginalsSDK {
         "enableLogging",
         "publicReachability",
         "requirePublicReachability",
+        "independentEnumeration",
+        "contentValidator",
       ],
     );
     const {
       signer,
       onAppendFailure,
       satProvider,
+      chainValidator,
       storageAdapter,
       publicReachability,
       requirePublicReachability,
+      independentEnumeration,
+      contentValidator,
       ...utilities
     } = options;
+    requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
+    requireAsset(contentValidator === undefined || typeof contentValidator === "function", "SDK_CONTENT_VALIDATOR", "contentValidator must be a function");
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||
@@ -158,6 +192,9 @@ export class OriginalsSDK {
           : undefined),
       local,
       hosted,
+      chainValidator,
+      independentEnumeration,
+      contentValidator,
     );
     this.lifecycle = new LifecycleManager(
       local,

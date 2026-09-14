@@ -335,18 +335,23 @@ describe('getTransactionStatus', () => {
     mockRpc('getrawtransaction', { txid: TXID, confirmations: 3, blockhash: BLOCKHASH });
     mockRpc('getblockheader', { hash: BLOCKHASH, height: 800000 });
     const status = await provider().getTransactionStatus(TXID);
-    expect(status).toEqual({ confirmed: true, confirmations: 3, blockHeight: 800000 });
+    expect(status).toEqual({ confirmed: true, confirmations: 3, blockHeight: 800000, blockHash: BLOCKHASH });
     expect(requests[0]).toMatchObject({ method: 'getrawtransaction', params: [TXID, true] });
     expect(requests[1]).toMatchObject({ method: 'getblockheader', params: [BLOCKHASH, true] });
   });
 
-  test('still reports confirmed when getblockheader fails', async () => {
+  test('still reports confirmed (and the block hash) when getblockheader fails', async () => {
+    // blockHash comes straight from getrawtransaction — it must survive even
+    // when the SEPARATE getblockheader call (used only to resolve height)
+    // fails; a caller comparing block IDENTITY across polls (a reorg check)
+    // must not lose that evidence just because height lookup had a hiccup.
     mockRpc('getrawtransaction', { txid: TXID, confirmations: 2, blockhash: BLOCKHASH });
     mockRpcError('getblockheader', { code: -32603, message: 'boom' });
     const status = await provider().getTransactionStatus(TXID);
     expect(status.confirmed).toBe(true);
     expect(status.confirmations).toBe(2);
     expect(status.blockHeight).toBeUndefined();
+    expect(status.blockHash).toBe(BLOCKHASH);
   });
 
   test('reports a mempool transaction as unconfirmed', async () => {

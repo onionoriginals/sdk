@@ -89,15 +89,25 @@ import type {
   PreparedBitcoinPublication,
   SubmittedBitcoinAsset,
   InscriptionRecoveryStore,
+  ContentValidator,
+  BitcoinCoreContentValidatorOptions,
 } from "@originals/sdk/types";
+import { createBitcoinCoreContentValidator } from "@originals/sdk";
 declare const satProvider: SatProvider;
 declare const publicationOptions: BitcoinPublicationOptions;
 declare const recoveryStore: InscriptionRecoveryStore;
-const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider });
+declare const contentValidatorOptions: BitcoinCoreContentValidatorOptions;
+const contentValidator: ContentValidator = createBitcoinCoreContentValidator(contentValidatorOptions);
+const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider, contentValidator });
 const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
 const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat(prepared.transactions.satoshi);
+// Per-resource-version chain-inline vs off-chain-referenced status is part of the public accepted shape.
+if (resolved.status === "accepted") {
+  const availability: "bitcoin-inline" | "referenced" = resolved.resourceAvailability[0].availability;
+  void availability;
+}
 void hosted; void submitted; void resolved;
 
 // The 3.0 freeze excludes confirmation hooks and event payloads from the former lifecycle.
@@ -160,3 +170,9 @@ void parsedAlias.method;
 // @ts-expect-error New envelopes do not expose the removed unsigned field.
 currentEnvelope.assetDid;
 void currentVersion; void canonicalFromEvent; void digest; void deriveDid; void parseAssetDid;
+
+import { createBitcoinCoreChainValidator } from '@originals/sdk';
+import type { ChainValidator, BitcoinCoreChainValidatorOptions } from '@originals/sdk/types';
+const coreOptions: BitcoinCoreChainValidatorOptions = { endpoint: 'http://localhost:18443', rpcAuth: { username: 'user', password: 'password' } };
+const chainValidator: ChainValidator = createBitcoinCoreChainValidator(coreOptions);
+OriginalsSDK.create({ network: 'regtest', satProvider, chainValidator });

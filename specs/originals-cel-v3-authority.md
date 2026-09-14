@@ -57,6 +57,17 @@ from controller history and is never written into a CEL operation. Proof-created
 times do not decide event order or manufacture a unique `updatedAt` value:
 proofs are outside event identity and may differ without changing the event.
 
+Live ownership is also a single point-in-time observation, never an
+independently derived transfer path. Resolution reports the sat's current
+holder/satpoint as asserted by the configured index (or, where a second
+independent index is configured to cross-check that assertion, as corroborated
+between the two), never as a reconstruction of the sat's history from raw
+UTXO/consensus data. Two indexes agreeing on the current holder is corroboration
+of that one snapshot, not independent derivation of how the sat got there. A
+resolution result must say so explicitly (`trajectoryAssurance:
+'not-independently-derived'`) rather than let a stronger enumeration/ownership
+cross-check on the current snapshot read as proof of the historical trajectory.
+
 Apply an operation to a temporary copy only after its schema, signature,
 controller and previousEvent checks pass:
 
@@ -129,6 +140,18 @@ does not prove no copy or competing creation exists on another sat. Report
 `scope: sat` and cross-sat canonicality as unknown; never claim global uniqueness
 from the current production adapters. Missing capabilities must produce an
 unavailable/incomplete result, not fabricated ordering or an empty enumeration.
+Every resolution reports `chainEvidence: { assurance, source? }`, where assurance
+is `unavailable`, `provider-asserted`, or `node-validated`. `unavailable` means no
+snapshot was obtained. The deterministic core cannot authenticate provider JSON
+claims and always reports `provider-asserted`. Only the SDK's explicitly configured
+application validator may upgrade chain facts after independent validation.
+An internally coherent fabricated tip is not detectable from provider data alone;
+an independently trusted Core check rejects it. Even a successful Core check does
+not authenticate Ordinals enumeration, sat trajectory/ownership, or inscription
+content bindings. A provider can still omit a later publication while claiming
+complete enumeration. Report these trust limits separately from signed controller
+history and keep cross-sat canonicality unknown.
+
 
 ## One total order, then whole-publication acceptance
 
