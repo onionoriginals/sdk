@@ -1097,6 +1097,89 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(((await res.json()) as { status: string }).status).toBe('commit_broadcast');
     expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(before);
   });
+
+  /**
+   * #705 — a transient provider status-lookup failure must not be treated as
+   * fresh "not confirmed" evidence. The automatic reconciliation path already
+   * preserves the last observed state on a provider outage
+   * (bitcoin-reconciliation.ts's readStatus); this manual endpoint had no
+   * equivalent guard and would demote an already-CONFIRMED record and
+   * redundantly re-broadcast it.
+   */
+  test('#705: a provider status-lookup failure PRESERVES a CONFIRMED record instead of demoting/rebroadcasting it', async () => {
+    const pair = buildPair();
+    let providerDown = false;
+    const h = harness({
+      txStatus: () => {
+        if (providerDown) throw new Error('ECONNRESET');
+        return { confirmed: true, confirmations: 1, blockHeight: 300 };
+      },
+    });
+    await post(h.routes, pair); // reveal_broadcast
+    const req1 = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res1 = await h.routes.inscribeRebroadcast(req1, new URL(req1.url));
+    expect(res1.status).toBe(200);
+    expect(((await res1.json()) as { status: string }).status).toBe('confirmed');
+    expect(h.store.get('sub-1', pair.commitTxId)?.status).toBe('confirmed');
+    const before = h.broadcasts.length;
+
+    // The provider goes down for the NEXT lookup — an outage, not evidence
+    // the reveal stopped being confirmed.
+    providerDown = true;
+    const req2 = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res2 = await h.routes.inscribeRebroadcast(req2, new URL(req2.url));
+    expect(res2.status).toBe(503);
+    const body2 = (await res2.json()) as { status: string; confirmations?: number; statusUnavailable?: boolean };
+    expect(body2.status).toBe('confirmed');
+    expect(body2.confirmations).toBe(1);
+    expect(body2.statusUnavailable).toBe(true);
+    expect(h.broadcasts.length).toBe(before); // nothing rebroadcast during the outage
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.status).toBe('confirmed'); // not demoted to reveal_broadcast
+    expect(rec.confirmations).toBe(1); // evidence preserved exactly, not cleared
+  });
+
+  /**
+   * #705 — a concurrent reconciliation/sweep pass can retire this exact
+   * record while this handler's own status lookup is still in flight. Acting
+   * on a pre-await snapshot afterward would resurrect a terminal, hex-less
+   * row with a live, non-terminal status — exactly the corrupted
+   * `retired: true` + `status: 'reveal_broadcast'` + no recovery hex state
+   * this issue describes, permanently excluded from every later
+   * reconciliation pass.
+   */
+  test('#705: a concurrent retirement mid-flight is not overwritten by a stale demotion/rebroadcast', async () => {
+    const pair = buildPair();
+    const h = harness({
+      txStatus: { confirmed: false }, // looks like reorg/demotion evidence
+      txStatusDelayMs: 5, // the window the concurrent retire lands in
+    });
+    await post(h.routes, pair); // reveal_broadcast
+    // Seed a prior CONFIRMED observation, as an earlier poll would have.
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 300 });
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const pending = h.routes.inscribeRebroadcast(req, new URL(req.url));
+    // While the manual call's status lookup is in flight, a background
+    // reconciliation/sweep pass retires this exact record (its funding
+    // outpoint's rival just won and confirmed).
+    await new Promise((r) => setTimeout(r, 0));
+    h.store.retire('sub-1', pair.commitTxId);
+    const res = await pending;
+
+    // The retire must win: no broadcast, no resurrected non-terminal status.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; settled?: boolean };
+    expect(body.status).toBe('confirmed');
+    expect(body.settled).toBe(true);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.retired).toBe(true);
+    expect(rec.status).toBe('confirmed'); // NOT overwritten to reveal_broadcast
+    expect(rec.signedCommitHex).toBeUndefined();
+    expect(rec.revealTxHex).toBeUndefined();
+    // Only the initial `post` broadcast anything; the manual call broadcasts nothing.
+    expect(h.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+  });
 });
 
 /**
