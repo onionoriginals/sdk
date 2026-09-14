@@ -3,6 +3,7 @@ import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { parseWitness } from "micro-ordinals";
 import {
+  CelError,
   createLocalSigner,
   encodeDocument,
   parseDocument,
@@ -319,6 +320,23 @@ test("exact metadata envelope funds reveal fees and oversized inscriptions fail 
   expect(
     large.options.satSigner.signAndFinalizeCommitPsbt,
   ).not.toHaveBeenCalled();
+});
+
+test("metadata integers >= 2^32 fail as a structured CelError, not a bare third-party Error", async () => {
+  const f = await fixture();
+  await f.asset.update({ metadata: { biggishNumber: 4294967296 } });
+  const hosted = await f.sdk.lifecycle.publishToWeb(f.asset, {
+    domain: "example.com",
+  });
+  let thrown: unknown;
+  try {
+    await f.sdk.lifecycle.prepareBitcoinPublication(hosted.asset, f.options);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_INSCRIPTION_METADATA");
+  expect(f.options.satSigner.signAndFinalizeCommitPsbt).not.toHaveBeenCalled();
 });
 
 test("valid signed wrapper substituted around a different signed reveal is rejected before submission", async () => {
