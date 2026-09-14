@@ -332,7 +332,7 @@ describe('OriginalsSDK', () => {
       const result = await OriginalsSDK.createDIDOriginal({
         type: 'did',
         domain: 'example.com',
-        signer: signer as any,
+        signer,
         // verifier intentionally omitted
         updateKeys: [keyPair.publicKey],
         verificationMethods: [
