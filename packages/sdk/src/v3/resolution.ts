@@ -27,6 +27,17 @@ import type {
 export interface SatProvider {
   getSatSnapshot(sat: string): Promise<SatSnapshot>;
 }
+/**
+ * A second, independently configured Ordinals index consulted only for its
+ * inscription enumeration on the queried sat, to corroborate that the
+ * primary provider did not omit a publication. `label` is a non-secret
+ * description of the source (never credentials or a full URL) carried into
+ * resolution metadata.
+ */
+export interface IndependentEnumerationSource {
+  label: string;
+  provider: SatProvider;
+}
 export interface AssetResolutionOptions {
   expectedAssetId?: string;
 }
@@ -64,6 +75,7 @@ export interface AssetDIDResolution {
     chainEvidence: Readonly<ChainEvidence>;
     /** Unconfirmed publication ids observed for this sat, present only when `didResolutionMetadata.status` is `"pending"`. */
     pending?: readonly string[];
+    enumerationAssurance?: "provider-asserted" | "cross-checked";
   };
 }
 
@@ -83,6 +95,35 @@ const failure = (
   crossSatCanonicality: "unknown",
   chainEvidence,
 });
+const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
+  const t = tip as { height?: unknown; hash?: unknown } | null | undefined;
+  return (
+    !!t &&
+    Number.isSafeInteger(t.height) &&
+    (t.height as number) >= 0 &&
+    typeof t.hash === "string" &&
+    /^[0-9a-f]{64}$/.test(t.hash)
+  );
+};
+const sameChainTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
+  a.height === b.height && a.hash === b.hash;
+/**
+ * A second source can only corroborate enumeration completeness if its own
+ * observation was itself complete, healthy and stable. An independent
+ * snapshot that fails these is unusable evidence, not weaker evidence: it
+ * must not be able to confer "cross-checked" by reporting less. Equal tips
+ * are not enough on their own — two identical malformed values would still
+ * satisfy a bare equality check, so each tip's own shape is validated first.
+ */
+const usableIndependentSnapshot = (snapshot: SatSnapshot): boolean =>
+  snapshot.enumerationComplete === true &&
+  snapshot.indexHealthy === true &&
+  Array.isArray(snapshot.publications) &&
+  validChainTip(snapshot.tipBefore) &&
+  validChainTip(snapshot.tipAfter) &&
+  validChainTip(snapshot.indexTip) &&
+  sameChainTip(snapshot.tipBefore, snapshot.tipAfter) &&
+  sameChainTip(snapshot.tipBefore, snapshot.indexTip);
 
 /** No cache or creator-local boundary map: every call obtains and checks a fresh complete observation. */
 export class AssetResolver {
@@ -92,6 +133,7 @@ export class AssetResolver {
     private readonly config: OriginalsConfig = {},
     private readonly hosted?: HostedAssets,
     private readonly chainValidator?: ChainValidator,
+    private readonly independentEnumeration?: IndependentEnumerationSource,
   ) {}
 
   async checkWeb(did: string, expectedAssetId: string): Promise<HostedEvidence> {
@@ -151,7 +193,61 @@ export class AssetResolver {
         chainEvidence = Object.freeze({ assurance: "node-validated",
           ...(validated?.source ? { source: validated.source } : {}) });
       }
-      return { snapshot, resolution: Object.freeze({ ...resolveSat(snapshot, options), chainEvidence }) };
+      let independentEnumeration:
+        | { source: string; inscriptionIds: string[] }
+        | undefined;
+      if (this.independentEnumeration) {
+        // A configured independent source that cannot be consulted fails
+        // closed, the same as a configured chain validator: it must not be
+        // possible to silently fall back to an unqualified provider claim
+        // by making the second source unreachable.
+        let independentSnapshot: SatSnapshot;
+        try {
+          independentSnapshot = structuredClone(
+            await this.independentEnumeration.provider.getSatSnapshot(sat),
+          );
+        } catch {
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not return a usable observation",
+            ) as SatResolution,
+          };
+        }
+        if (
+          independentSnapshot?.sat !== sat ||
+          independentSnapshot.network !== this.network
+        )
+          return {
+            resolution: failure(
+              "inconsistent-evidence",
+              "Independent enumeration source snapshot differs from requested sat or network",
+            ) as SatResolution,
+          };
+        // An incomplete, unhealthy or unstable independent snapshot must
+        // not confer "cross-checked": an empty or partial enumeration list
+        // trivially never disagrees with the primary snapshot, so a broken
+        // or dishonest second source could otherwise earn full assurance by
+        // reporting nothing at all.
+        if (!usableIndependentSnapshot(independentSnapshot))
+          return {
+            resolution: failure(
+              "incomplete",
+              "Independent enumeration source did not report a complete, healthy, stable observation",
+            ) as SatResolution,
+          };
+        independentEnumeration = {
+          source: this.independentEnumeration.label,
+          inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+        };
+      }
+      return {
+        snapshot,
+        resolution: Object.freeze({
+          ...resolveSat(snapshot, { ...options, independentEnumeration }),
+          chainEvidence,
+        }),
+      };
     } catch (error) {
       return {
         resolution: failure(
@@ -313,6 +409,7 @@ export class AssetResolver {
         crossSatCanonicality: "unknown",
         webvhBinding: "unverified",
         chainEvidence: result.resolution.chainEvidence,
+        enumerationAssurance: result.resolution.enumerationAssurance,
       },
     };
   }
