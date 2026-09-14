@@ -1636,6 +1636,47 @@ export function createBitcoinRoutes(deps: {
     }
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
+
+    // A retired record is TERMINAL and has its signed hex cleared (#693): the
+    // ordinary mismatch check below treats an ABSENT stored hex as "no
+    // mismatch", so without this it would fall through into a full re-verify
+    // and re-broadcast — regressing a settled record's status back to
+    // `reveal_broadcast` while `retired` stays true, an internally
+    // inconsistent state that reconciliation never revisits. Handle it up
+    // front, before any mismatch/economics/broadcast logic runs.
+    if (existingByCommitId?.retired) {
+      if (existingByCommitId.revealTxId !== revealTxId) {
+        return refuse('commit_reveal_mismatch', {
+          error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.',
+        }, 409);
+      }
+      if (existingByCommitId.status === 'confirmed') {
+        // A plausible ambiguous-acknowledgement retry (CLAUDE.md: "Retained
+        // prepared pairs enable exact recovery after ambiguous
+        // acknowledgements"): return the settled result exactly as last
+        // observed, with no re-verification, broadcast, or state write.
+        return json({
+          commitTxId: existingByCommitId.commitTxId,
+          revealTxId: existingByCommitId.revealTxId,
+          inscriptionId: existingByCommitId.inscriptionId,
+          status: 'confirmed',
+          settled: true,
+          confirmations: existingByCommitId.confirmations,
+          ...(existingByCommitId.confirmedBlockHeight !== undefined
+            ? { confirmedBlockHeight: existingByCommitId.confirmedBlockHeight } : {}),
+          ...(existingByCommitId.confirmedBlockHash !== undefined
+            ? { confirmedBlockHash: existingByCommitId.confirmedBlockHash } : {}),
+        });
+      }
+      // Retired without ever having settled here: a terminally-dead
+      // superseded loser whose funding outpoint a different, confirmed pair
+      // already won. Not recoverable by resubmission — refuse outright
+      // rather than reprocessing a dead row.
+      return refuse('commit_retired', {
+        error: 'commit_retired', message: 'This commit is retired and cannot be resubmitted.',
+      }, 409);
+    }
+
     function checkRecordedPair(existing: InscriptionRecord | null): Response | null {
       if (!existing) return null;
       if (existing.revealTxId !== revealTxId) {
@@ -1867,6 +1908,14 @@ export function createBitcoinRoutes(deps: {
         // Another submission may have persisted this commit while provider reads
         // awaited. Recheck inside the same lock as create/approval persistence.
         const recorded = store.get(sub, commitTxId);
+        // Re-check retirement too: reconciliation runs independently of this
+        // request and could retire this exact commitTxId while the economics/
+        // ordinal checks above were awaiting a provider (#693).
+        if (recorded?.retired) {
+          return refuse('commit_retired', {
+            error: 'commit_retired', message: 'This commit is retired and cannot be resubmitted.',
+          }, 409);
+        }
         const mismatch = checkRecordedPair(recorded);
         if (mismatch) return mismatch;
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);

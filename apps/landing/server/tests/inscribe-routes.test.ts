@@ -1395,6 +1395,74 @@ describe('terminal records', () => {
     expect(res.status).toBe(410);
     expect((await res.json() as { error: string }).error).toBe('not_recoverable');
   });
+
+  // #693 — resubmitting an already-settled signed pair (a realistic retry:
+  // the client resent the exact same bytes because it never saw the original
+  // response) must not regress the record's recorded status.
+  test('resubmitting an already-settled pair after retirement returns the settled result, unchanged', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+      confirmations: 6, blockHeight: 900_000, blockHash: 'b'.repeat(64),
+    });
+    h.store.retire('sub-1', pair.commitTxId);
+    const before = h.store.get('sub-1', pair.commitTxId);
+    const broadcastsBeforeRetry = [...h.broadcasts];
+
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: true,
+      confirmations: 6,
+      confirmedBlockHeight: 900_000,
+      confirmedBlockHash: 'b'.repeat(64),
+    });
+    // No re-verification, broadcast, or state write happened: the record is
+    // byte-for-byte the same settled row it was before the retry.
+    expect(h.broadcasts).toEqual(broadcastsBeforeRetry);
+    expect(h.store.get('sub-1', pair.commitTxId)).toEqual(before);
+  });
+
+  // #693 — the sibling terminal case: a retired record that was NEVER the one
+  // that settled (a terminally-dead superseded loser) must fail closed rather
+  // than being silently reprocessed.
+  test('resubmitting a terminally-dead retired pair (never settled) is refused, not reprocessed', async () => {
+    const h = harness();
+    const dead = buildPair();
+    const winner = buildPair();
+    const base = (p: ReturnType<typeof buildPair>, over: Partial<InscriptionRecord>): InscriptionRecord => ({
+      commitTxId: p.commitTxId,
+      revealTxId: p.revealTxId,
+      inscriptionId: `${p.revealTxId}i0`,
+      signedCommitHex: p.signedCommitHex,
+      revealTxHex: p.revealTxHex,
+      fundingOutpoints: [`${'a'.repeat(64)}:0`],
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      ...over,
+    });
+    h.store.create('sub-1', base(dead, {}));
+    h.store.supersede('sub-1', dead.commitTxId);
+    h.store.create('sub-1', base(winner, { status: 'confirmed', retired: true }));
+    const req = authedReq('/api/btc/inscribe', undefined, 'GET');
+    await h.routes.inscribeList(req, new URL(req.url)); // retires the dead loser
+    const before = h.store.get('sub-1', dead.commitTxId)!;
+    expect(before.retired).toBe(true);
+    expect(before.status).not.toBe('confirmed');
+
+    const res = await post(h.routes, dead);
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toBe('commit_retired');
+    expect(h.store.get('sub-1', dead.commitTxId)).toEqual(before);
+  });
 });
 
 describe('malformed reveal shapes', () => {
