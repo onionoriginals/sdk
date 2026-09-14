@@ -582,3 +582,136 @@ test('validator failures fail closed and validator mutations cannot change the r
   if (result.status !== 'accepted') throw new Error(result.status);
   expect(result.resolution.chainEvidence.assurance).toBe('node-validated');
 });
+
+test("cross-checks enumeration against an independently configured second index and carries the assurance into DID metadata", async () => {
+  const { snapshot } = await boundary();
+  const agreeing = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => agreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.enumerationSource).toBe("second-ord-instance");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.enumerationAssurance).toBe(
+    "cross-checked",
+  );
+  expect(metadata.didDocumentMetadata.enumerationSource).toBe(
+    "second-ord-instance",
+  );
+});
+
+test("without an independent source configured, resolution still accepts but only claims provider-asserted enumeration", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when the independent enumeration source sees a publication the primary provider omitted", async () => {
+  const { snapshot } = await boundary();
+  const omittedTx = "9".repeat(64);
+  const independent = structuredClone(snapshot);
+  independent.publications.push({
+    ...independent.publications[0],
+    id: omittedTx + "i0",
+    revealTxid: omittedTx,
+  });
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => independent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("fails closed when the independent source's own snapshot is incomplete, unhealthy or unstable, rather than granting cross-checked for free", async () => {
+  const { snapshot } = await boundary();
+  const cases: [string, (s: SatSnapshot) => SatSnapshot][] = [
+    ["incomplete enumeration", (s) => ({ ...s, enumerationComplete: false })],
+    ["unhealthy index", (s) => ({ ...s, indexHealthy: false })],
+    [
+      "unstable tip",
+      (s) => ({ ...s, tipAfter: { ...s.tipAfter, hash: "1".repeat(64) } }),
+    ],
+    [
+      "identical but malformed tips (equal is not the same as valid)",
+      (s) => {
+        const malformed = { height: -1, hash: "not-a-real-hash" };
+        return {
+          ...s,
+          tipBefore: malformed,
+          tipAfter: malformed,
+          indexTip: malformed,
+        };
+      },
+    ],
+  ];
+  for (const [, corrupt] of cases) {
+    const independent = corrupt(structuredClone(snapshot));
+    const sdk = OriginalsSDK.create({
+      network: "regtest",
+      satProvider: { getSatSnapshot: async () => snapshot },
+      independentEnumeration: {
+        label: "second-ord-instance",
+        provider: { getSatSnapshot: async () => independent },
+      },
+    });
+    const result = await sdk.lifecycle.resolveAssetFromSat("123");
+    expect(result.status).toBe("incomplete");
+  }
+});
+
+test("fails closed when a configured independent enumeration source cannot be reached, rather than silently degrading to provider-asserted", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: {
+        getSatSnapshot: async () => {
+          throw new Error("second index unreachable");
+        },
+      },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+});
+
+test("an unreachable independent enumeration source does not discard an already-established node-validated chain evidence", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    chainValidator: async () => ({ source: "local-core-node" }),
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: {
+        getSatSnapshot: async () => {
+          throw new Error("second index unreachable");
+        },
+      },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("incomplete");
+  if (result.status === "accepted") throw new Error("accepted");
+  expect(result.chainEvidence.assurance).toBe("node-validated");
+  expect(result.chainEvidence.source).toBe("local-core-node");
+});

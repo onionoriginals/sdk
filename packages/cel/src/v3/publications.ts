@@ -101,6 +101,17 @@ export interface ResourceAvailabilityRecord {
   version: number;
   availability: ResourceAvailability;
 }
+/**
+ * All inscription ids an independently configured second Ordinals index
+ * currently reports for the queried sat. `source` is a non-secret label for
+ * that source (never credentials or a full URL), carried into diagnostics.
+ * This corroborates enumeration completeness; it is a separate dimension
+ * from chain/index consistency and does not itself validate Bitcoin facts.
+ */
+export interface IndependentEnumeration {
+  source: string;
+  inscriptionIds: readonly string[];
+}
 export type SatResolution = Readonly<
   | {
       status: ResolutionFailure;
@@ -141,6 +152,16 @@ export type SatResolution = Readonly<
       chainEvidence: Readonly<ChainEvidence>;
       /** Per current resource, whether its exact bytes were recovered from this snapshot's accepted publications. */
       resourceAvailability: readonly Readonly<ResourceAvailabilityRecord>[];
+      /**
+       * "cross-checked" only when a caller-supplied independent enumeration
+       * source was consulted and reported no inscription absent from this
+       * snapshot; otherwise the snapshot's own completeness is an
+       * unauthenticated provider assertion. A compromised or incomplete
+       * provider can still omit history no independent source observed.
+       */
+      enumerationAssurance: "provider-asserted" | "cross-checked";
+      /** The independent source's non-secret label, present only when `enumerationAssurance` is `"cross-checked"`. */
+      enumerationSource?: string;
     }
 >;
 const hash = (value: unknown): value is string =>
@@ -165,7 +186,17 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
  */
 export function resolveSat(
   snapshot: SatSnapshot,
-  options: { expectedAssetId?: string } = {},
+  options: {
+    expectedAssetId?: string;
+    /**
+     * All inscription ids a second, independently configured Ordinals index
+     * currently reports for this sat. If it reports an id this snapshot
+     * does not contain, resolution fails closed rather than accepting a
+     * possibly-omitted history as complete: the primary provider cannot
+     * earn "cross-checked" by simply not disagreeing with itself.
+     */
+    independentEnumeration?: IndependentEnumeration;
+  } = {},
 ): SatResolution {
   const prefix =
     snapshot.network === "mainnet"
@@ -214,6 +245,26 @@ export function resolveSat(
     !Array.isArray(snapshot.blocks)
   )
     return failure("incomplete", "Incomplete sat enumeration");
+  let enumerationAssurance: "provider-asserted" | "cross-checked" =
+    "provider-asserted";
+  let enumerationSource: string | undefined;
+  if (options.independentEnumeration) {
+    const { source, inscriptionIds } = options.independentEnumeration;
+    if (
+      typeof source !== "string" ||
+      !Array.isArray(inscriptionIds) ||
+      !inscriptionIds.every((id) => typeof id === "string")
+    )
+      return failure("incomplete", "Invalid independent enumeration evidence");
+    const known = new Set(snapshot.publications.map((p) => p.id));
+    if (inscriptionIds.some((id) => !known.has(id)))
+      return failure(
+        "inconsistent-evidence",
+        "Independent enumeration source reports an inscription absent from the primary snapshot",
+      );
+    enumerationAssurance = "cross-checked";
+    enumerationSource = source;
+  }
   if (
     !snapshot.ownership ||
     !Object.prototype.hasOwnProperty.call(snapshot.ownership, "owner") ||
@@ -528,6 +579,8 @@ export function resolveSat(
     webvhBinding: "unverified",
     chainEvidence,
     resourceAvailability,
+    enumerationAssurance,
+    ...(enumerationSource !== undefined ? { enumerationSource } : {}),
   };
   freeze<unknown>(result);
   return result;
