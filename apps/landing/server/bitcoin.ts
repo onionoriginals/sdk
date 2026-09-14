@@ -1637,41 +1637,31 @@ export function createBitcoinRoutes(deps: {
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
-    // A retired record is TERMINAL and has its signed hex cleared (#693): the
-    // ordinary mismatch check below treats an ABSENT stored hex as "no
-    // mismatch", so without this it would fall through into a full re-verify
-    // and re-broadcast — regressing a settled record's status back to
-    // `reveal_broadcast` while `retired` stays true, an internally
-    // inconsistent state that reconciliation never revisits. Handle it up
-    // front, before any mismatch/economics/broadcast logic runs.
-    if (existingByCommitId?.retired) {
-      if (existingByCommitId.revealTxId !== revealTxId) {
-        return refuse('commit_reveal_mismatch', {
-          error: 'reveal_invariant_violation', message: 'This commit is already on record with a different reveal.',
-        }, 409);
-      }
-      if (existingByCommitId.status === 'confirmed') {
-        // A plausible ambiguous-acknowledgement retry (CLAUDE.md: "Retained
-        // prepared pairs enable exact recovery after ambiguous
-        // acknowledgements"): return the settled result exactly as last
-        // observed, with no re-verification, broadcast, or state write.
+    // #693 — a retired record's signed hex is cleared, so its identity can no
+    // longer be checked byte-for-byte; a settled retry is authenticated
+    // instead by revealTxId matching PLUS a fresh, valid reveal witness
+    // (verified by validateInscriptionReveal below) before this is ever
+    // called. A settled (`confirmed`) record's result is returned exactly as
+    // last observed, with no re-verification, broadcast, or state write
+    // (CLAUDE.md: "Retained prepared pairs enable exact recovery after
+    // ambiguous acknowledgements"). A retired record that never settled here
+    // (a terminally-dead superseded loser whose funding outpoint a different,
+    // confirmed pair already won) is refused outright rather than
+    // reprocessed. Shared with the post-lock recheck below, which can also
+    // observe a record retired concurrently by reconciliation.
+    function retiredResubmissionResponse(rec: InscriptionRecord): Response {
+      if (rec.status === 'confirmed') {
         return json({
-          commitTxId: existingByCommitId.commitTxId,
-          revealTxId: existingByCommitId.revealTxId,
-          inscriptionId: existingByCommitId.inscriptionId,
+          commitTxId: rec.commitTxId,
+          revealTxId: rec.revealTxId,
+          inscriptionId: rec.inscriptionId,
           status: 'confirmed',
           settled: true,
-          confirmations: existingByCommitId.confirmations,
-          ...(existingByCommitId.confirmedBlockHeight !== undefined
-            ? { confirmedBlockHeight: existingByCommitId.confirmedBlockHeight } : {}),
-          ...(existingByCommitId.confirmedBlockHash !== undefined
-            ? { confirmedBlockHash: existingByCommitId.confirmedBlockHash } : {}),
+          confirmations: rec.confirmations,
+          ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+          ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
         });
       }
-      // Retired without ever having settled here: a terminally-dead
-      // superseded loser whose funding outpoint a different, confirmed pair
-      // already won. Not recoverable by resubmission — refuse outright
-      // rather than reprocessing a dead row.
       return refuse('commit_retired', {
         error: 'commit_retired', message: 'This commit is retired and cannot be resubmitted.',
       }, 409);
@@ -1750,6 +1740,16 @@ export function createBitcoinRoutes(deps: {
       validateInscriptionReveal(commit, reveal);
     } catch {
       return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
+    }
+
+    // #693 — only past this point has the caller PROVEN possession of a
+    // validly-signed reveal for this exact commit (the check just above): a
+    // retired record's own signed bytes are gone, so txid equality alone
+    // (already established by checkRecordedPair) is not enough to trust a
+    // resubmission claiming to be it. Handle it before any economics/
+    // broadcast logic — a retired record is never legitimately reprocessed.
+    if (existingByCommitId?.retired) {
+      return retiredResubmissionResponse(existingByCommitId);
     }
 
     // Cheap syntax, transaction shape and bound-address checks precede this
@@ -1908,16 +1908,17 @@ export function createBitcoinRoutes(deps: {
         // Another submission may have persisted this commit while provider reads
         // awaited. Recheck inside the same lock as create/approval persistence.
         const recorded = store.get(sub, commitTxId);
-        // Re-check retirement too: reconciliation runs independently of this
-        // request and could retire this exact commitTxId while the economics/
-        // ordinal checks above were awaiting a provider (#693).
-        if (recorded?.retired) {
-          return refuse('commit_retired', {
-            error: 'commit_retired', message: 'This commit is retired and cannot be resubmitted.',
-          }, 409);
-        }
         const mismatch = checkRecordedPair(recorded);
         if (mismatch) return mismatch;
+        // Re-check retirement too: reconciliation runs independently of this
+        // request and could confirm-and-retire this exact commitTxId while
+        // the economics/ordinal checks above were awaiting a provider
+        // (#693). Route through the same settled-vs-terminal decision as the
+        // pre-lock check — a record that settled during that window must
+        // still return its settlement, not a false conflict.
+        if (recorded?.retired) {
+          return retiredResubmissionResponse(recorded);
+        }
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {

@@ -1463,6 +1463,47 @@ describe('terminal records', () => {
     expect((await res.json() as { error: string }).error).toBe('commit_retired');
     expect(h.store.get('sub-1', dead.commitTxId)).toEqual(before);
   });
+
+  // #693 — reconciliation runs independently of any in-flight request: it can
+  // confirm-and-retire a commitTxId WHILE this exact request's own ordinal
+  // check is still awaiting a provider. The pre-lock check (evaluated before
+  // that await) cannot see this; the in-lock recheck must still resolve it as
+  // a settled retry, not a false 409 conflict.
+  test('a record confirmed-and-retired by reconciliation mid-request still returns its settlement', async () => {
+    const pair = buildPair();
+    let ordinalCalls = 0;
+    const h = harness({
+      ordinals: {
+        outpointInscriptions: async () => {
+          ordinalCalls++;
+          if (ordinalCalls === 2) {
+            // Simulate a concurrent reconciliation pass landing exactly in
+            // the window between this resubmission's pre-lock checks (which
+            // already read a NOT-yet-retired record) and its lock recheck.
+            h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+              confirmations: 6, blockHeight: 900_000, blockHash: 'd'.repeat(64),
+            });
+            h.store.retire('sub-1', pair.commitTxId);
+          }
+          return [];
+        },
+      },
+    });
+    await post(h.routes, pair); // ordinalCalls === 1: the original submission
+    const res = await post(h.routes, pair); // ordinalCalls === 2: races the retirement
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: true,
+      confirmations: 6,
+      confirmedBlockHeight: 900_000,
+      confirmedBlockHash: 'd'.repeat(64),
+    });
+  });
 });
 
 describe('malformed reveal shapes', () => {
