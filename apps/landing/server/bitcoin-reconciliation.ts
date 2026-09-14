@@ -12,7 +12,7 @@
  */
 import { json } from './router';
 import { outpointsOf } from './inscriptions-store';
-import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
+import type { InscriptionsStore, InscriptionRecord, StatusExpectation } from './inscriptions-store';
 import type { MoneyLogger } from './money-log';
 
 /**
@@ -309,24 +309,46 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
           current.confirmations !== st.confirmations ||
           current.confirmedBlockHeight !== st.blockHeight ||
           current.confirmedBlockHash !== st.blockHash;
-        // Guarded write (#677/#694): only apply if the record is still
-        // exactly where this pass last observed it — a concurrent pass may
-        // already have confirmed, demoted or retired it while the provider
-        // read above was in flight. When no write was even needed the
-        // record already reflects this evidence, so retirement below may
-        // still proceed; when a write WAS needed but lost the race, a
-        // concurrent pass owns this record now and retirement must not run
-        // against evidence that pass never saw.
+        // Guarded write (#677/#694): only apply if the record's
+        // status/retired/superseded AND its confirmation evidence are still
+        // exactly where this pass last observed them. The evidence fields
+        // matter here specifically: status/retired/superseded alone stay
+        // IDENTICAL across a purely evidence-only concurrent update (a
+        // fresher confirmation depth or reorg block identity written by
+        // another pass) — checking only those three would let a stale pass
+        // silently overwrite newer evidence with older evidence.
         const applied = needsWrite
           ? store.trySetStatus(
               sub, r.commitTxId,
-              { status: current.status, retired: false, superseded: false },
+              {
+                status: current.status, retired: false, superseded: false,
+                confirmations: current.confirmations,
+                confirmedBlockHeight: current.confirmedBlockHeight,
+                confirmedBlockHash: current.confirmedBlockHash,
+              },
               'confirmed',
               { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash }
             )
           : true;
         if (needsWrite && applied) changed = true;
-        if (applied && (st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
+        if (applied && (st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) {
+          // Guarded retire: re-verify against the record's CURRENT on-disk
+          // state immediately before retiring, rather than trusting the
+          // `applied` shortcut above at face value — a concurrent pass could
+          // have demoted (or already retired) this record without touching
+          // the confirmation evidence this pass compared, which would
+          // otherwise let this pass delete a still-live pair's only
+          // recovery artifacts on stale authority. Expect exactly the
+          // evidence this pass just confirmed is current: what it wrote
+          // (if `needsWrite`) or what was already on disk (if not).
+          const retireExpected: StatusExpectation = {
+            status: 'confirmed', retired: false, superseded: false,
+            confirmations: needsWrite ? st.confirmations : current.confirmations,
+            confirmedBlockHeight: needsWrite ? st.blockHeight : current.confirmedBlockHeight,
+            confirmedBlockHash: needsWrite ? st.blockHash : current.confirmedBlockHash,
+          };
+          if (store.tryRetire(sub, r.commitTxId, retireExpected)) changed = true;
+        }
         continue;
       }
       // #677 — the demotion decision itself must read the FRESH pre-await

@@ -214,6 +214,85 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(store.get('sub-1', target)!.status).toBe('reveal_broadcast');
   });
 
+  // #677 follow-up (Greptile P1: "Retirement Uses Stale State") — reaching
+  // the recovery horizon must re-verify the record's CURRENT on-disk state
+  // immediately before retiring, not just trust that "no status write was
+  // needed" means nothing changed. A concurrent pass can demote a record
+  // (clearing confirmations, but leaving the sticky block height/hash and
+  // the still-`confirmed`-looking status/retired/superseded triple
+  // untouched in ways this pass's own lagging evidence read doesn't
+  // distinguish) between this pass's own snapshot and its retire decision.
+  test('reaching the recovery horizon does not retire a record a concurrent pass just demoted, even when this pass\'s own evidence looks unchanged', async () => {
+    const commit = 'd'.repeat(64);
+    const sameHash = 'a'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => {
+        // A concurrent pass (an overlapping poll, or the background sweep)
+        // demotes this record on fresher evidence (e.g. a reorg it saw)
+        // while THIS pass's own read is still in flight — and, realistically
+        // hitting a different or lagging indexer node, THIS pass's own read
+        // below reports the exact evidence already on file, so its own
+        // "did anything change" check sees no difference.
+        store.setStatus('sub-1', commit, 'reveal_broadcast');
+        return { confirmed: true, confirmations: 6, blockHeight: 100, blockHash: sameHash };
+      },
+      recoveryConfirmations: 6,
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: sameHash,
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent demotion must stand: NOT retired, and its recovery hex
+    // must survive — retiring here would delete it for a record that, per
+    // the concurrent pass's fresher evidence, is not actually settled
+    // (exactly the #693 failure mode: reveal_broadcast + retired:true).
+    expect(stored.status).toBe('reveal_broadcast');
+    expect(stored.retired).not.toBe(true);
+    expect(stored.revealTxHex).toBeDefined();
+  });
+
+  // #677 follow-up (Greptile P1: "Guard Ignores Evidence Changes") — the
+  // guarded write must also protect a `confirmed` → `confirmed` transition:
+  // status/retired/superseded alone stay IDENTICAL across a purely
+  // evidence-only concurrent update, so a guard that checks only those three
+  // would let a stale, independently-lagging pass silently overwrite a
+  // concurrent pass's fresher confirmation depth / block identity.
+  test('a stale confirmed-to-confirmed write cannot clobber fresher evidence written by a concurrent pass', async () => {
+    const commit = 'e'.repeat(64);
+    const freshHash = 'b'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => {
+        // A concurrent pass writes FRESHER confirmation evidence for this
+        // exact record while this pass's own read is still in flight.
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 6, blockHeight: 101, blockHash: freshHash,
+        });
+        // This pass's own read is independently lagging: it reports OLDER
+        // evidence than what the concurrent pass just wrote.
+        return { confirmed: true, confirmations: 5, blockHeight: 100, blockHash: 'a'.repeat(64) };
+      },
+      recoveryConfirmations: 6,
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 4, confirmedBlockHeight: 99, confirmedBlockHash: 'c'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent pass's fresher evidence must stand — this pass's own
+    // stale read must not silently overwrite it just because status stayed
+    // `confirmed` on both sides.
+    expect(stored.confirmations).toBe(6);
+    expect(stored.confirmedBlockHeight).toBe(101);
+    expect(stored.confirmedBlockHash).toBe(freshHash);
+  });
+
   // #677 — the mirror-image race: a record settles (reaches the recovery
   // horizon) and is retired by a concurrent pass WHILE this pass's own
   // network read for that exact record is in flight. The guarded write must

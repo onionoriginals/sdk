@@ -2162,13 +2162,17 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
       const h = harness({ txStatus: { confirmed: operation === 'retire' || operation === 'reinstate', confirmations: 6 } });
       const pair = seed(h, 80, operation === 'setStatus' || operation === 'retire' ? 'confirmed' : 'reveal_broadcast', operation === 'reinstate');
       h.store[operation] = () => { throw new Error('simulated disk full'); };
-      // #677 — the reorg-demotion decision now writes through the guarded
-      // `trySetStatus` (so a concurrent pass's transition can't be
-      // clobbered), not `setStatus` directly. A disk-full failure there must
-      // still surface as 503, so the fault is injected on whichever of the
-      // two the demotion path actually calls.
+      // #677 — the reorg-demotion decision and the recovery-horizon
+      // retirement now write through the guarded `trySetStatus`/`tryRetire`
+      // (so a concurrent pass's transition can't be clobbered), not
+      // `setStatus`/`retire` directly. A disk-full failure there must still
+      // surface as 503, so the fault is injected on whichever of the two the
+      // relevant path actually calls.
       if (operation === 'setStatus') {
         h.store.trySetStatus = () => { throw new Error('simulated disk full'); };
+      }
+      if (operation === 'retire') {
+        h.store.tryRetire = () => { throw new Error('simulated disk full'); };
       }
       const response = await poll(h);
       expect(response.status).toBe(503);

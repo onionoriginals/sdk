@@ -26,6 +26,23 @@ import { dirname, join } from 'node:path';
 
 export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
 
+/**
+ * A caller's last-observed snapshot of a record, for `trySetStatus`/
+ * `tryRetire`'s compare-and-set guard. `status`/`retired`/`superseded` are
+ * always compared. `confirmations`/`confirmedBlockHeight`/
+ * `confirmedBlockHash` are compared ONLY when the key is present in the
+ * object (even as `undefined`) — see `trySetStatus`'s doc comment for why a
+ * `confirmed` → `confirmed` write needs this and other transitions don't.
+ */
+export interface StatusExpectation {
+  status: InscriptionStatus;
+  retired?: boolean;
+  superseded?: boolean;
+  confirmations?: number;
+  confirmedBlockHeight?: number;
+  confirmedBlockHash?: string;
+}
+
 export interface InscriptionRecord {
   commitTxId: string;
   revealTxId: string;
@@ -189,19 +206,42 @@ export interface InscriptionsStore {
    * reviving one that was just retired).
    *
    * Applies `status`/`evidence` (identical semantics to `setStatus`) only if
-   * the record's CURRENT on-disk `status`/`retired`/`superseded` still match
-   * `expected` — i.e. nothing else transitioned it since the caller's last
-   * fresh read. Returns whether the write happened; the caller must treat
-   * `false` as "a concurrent pass already handled this record", not an
-   * error, and skip any further action that assumed its own write applied.
+   * the record's CURRENT on-disk state still matches `expected` — i.e.
+   * nothing else transitioned it since the caller's last fresh read.
+   * `status`/`retired`/`superseded` are always checked. `confirmations` /
+   * `confirmedBlockHeight` / `confirmedBlockHash` are checked ONLY when the
+   * caller includes them in `expected` (present, even if `undefined`) —
+   * needed for a `confirmed` → `confirmed` write, where the status/retired/
+   * superseded triple alone stays identical across a purely evidence-only
+   * concurrent update (a fresher confirmation depth or reorg block identity
+   * from another pass), so omitting this check would let a stale pass
+   * silently overwrite newer evidence with older evidence. Omit them for a
+   * write whose expected status itself already discriminates the race (e.g.
+   * a demotion out of `confirmed`).
+   *
+   * Returns whether the write happened; the caller must treat `false` as "a
+   * concurrent pass already handled this record", not an error, and skip
+   * any further action that assumed its own write applied.
    */
   trySetStatus(
     subOrgId: string,
     commitTxId: string,
-    expected: { status: InscriptionStatus; retired?: boolean; superseded?: boolean },
+    expected: StatusExpectation,
     status: InscriptionStatus,
     evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
   ): boolean;
+  /**
+   * Guarded retirement counterpart to `trySetStatus`, for the same
+   * await-then-decide seam (#677 follow-up): retiring unconditionally after
+   * an `await` can delete a record's ONLY recovery artifacts (signed commit
+   * + reveal hex) based on a snapshot a concurrent pass has since moved past
+   * — e.g. demoted after a reorg, or already retired via a different
+   * evidence path. `retire` alone re-checks nothing; this does. Applies
+   * `retire` only if the record's current on-disk state still matches
+   * `expected` (same semantics as `trySetStatus`'s `expected`, evidence
+   * fields included). Returns whether it retired.
+   */
+  tryRetire(subOrgId: string, commitTxId: string, expected: StatusExpectation): boolean;
   /**
    * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
    * Touches ONLY
@@ -542,6 +582,22 @@ export function createInscriptionsStore(opts: {
     rec.updatedAt = new Date(now()).toISOString();
   }
 
+  /**
+   * Shared compare-and-set guard behind `trySetStatus`/`tryRetire`. `in`
+   * (not `!== undefined`) is deliberate: it lets a caller assert "this field
+   * must currently be `undefined`" by passing it explicitly, while a caller
+   * who omits the key entirely skips that check altogether.
+   */
+  function matchesExpected(rec: InscriptionRecord, expected: StatusExpectation): boolean {
+    if (rec.status !== expected.status) return false;
+    if (!!rec.retired !== !!(expected.retired ?? false)) return false;
+    if (!!rec.superseded !== !!(expected.superseded ?? false)) return false;
+    if ('confirmations' in expected && rec.confirmations !== expected.confirmations) return false;
+    if ('confirmedBlockHeight' in expected && rec.confirmedBlockHeight !== expected.confirmedBlockHeight) return false;
+    if ('confirmedBlockHash' in expected && rec.confirmedBlockHash !== expected.confirmedBlockHash) return false;
+    return true;
+  }
+
   /** Shared mutation behind `setStatus`/`trySetStatus`. Caller writes. */
   function applyStatus(
     rec: InscriptionRecord,
@@ -635,6 +691,15 @@ export function createInscriptionsStore(opts: {
       retireInPlace(rec);
       writeAll(subOrgId, recs);
     },
+    tryRetire(subOrgId, commitTxId, expected) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      if (!matchesExpected(rec, expected)) return false;
+      retireInPlace(rec);
+      writeAll(subOrgId, recs);
+      return true;
+    },
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;
     },
@@ -649,13 +714,7 @@ export function createInscriptionsStore(opts: {
       const recs = readAll(subOrgId);
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
-      if (
-        rec.status !== expected.status ||
-        !!rec.retired !== !!(expected.retired ?? false) ||
-        !!rec.superseded !== !!(expected.superseded ?? false)
-      ) {
-        return false;
-      }
+      if (!matchesExpected(rec, expected)) return false;
       applyStatus(rec, status, evidence);
       writeAll(subOrgId, recs);
       return true;
