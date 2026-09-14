@@ -293,6 +293,36 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.confirmedBlockHash).toBe(freshHash);
   });
 
+  // #677 follow-up (Greptile P1, round 2: "sticky evidence vs. raw provider
+  // fields") — the guarded retire's expected snapshot must reflect what
+  // `applyStatus` ACTUALLY wrote, not the raw provider read. When a
+  // confirming read omits block height/hash, `applyStatus`'s sticky-evidence
+  // rule leaves the record's previously-established confirmedBlockHeight/
+  // Hash untouched rather than clearing them — reconstructing the retire
+  // guard's expectation from the raw (undefined) provider fields would then
+  // mismatch the real record and permanently block retirement.
+  test('a threshold-reaching confirmation is still retired when the provider read omits block height/hash', async () => {
+    const commit = 'f'.repeat(64);
+    const { store, reconciler } = harness({
+      // Reaches the recovery horizon, but supplies no block identity at all
+      // — a real, if partial, provider response shape.
+      txStatus: () => ({ confirmed: true, confirmations: 6 }),
+      recoveryConfirmations: 6,
+    });
+    // A prior poll already established sticky block identity.
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 5, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.retired).toBe(true);
+    expect(stored.revealTxHex).toBeUndefined(); // retiring drops the hex
+  });
+
   // #677 — the mirror-image race: a record settles (reaches the recovery
   // horizon) and is retired by a concurrent pass WHILE this pass's own
   // network read for that exact record is in flight. The guarded write must

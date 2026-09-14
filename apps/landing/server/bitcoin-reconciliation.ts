@@ -338,16 +338,28 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
           // have demoted (or already retired) this record without touching
           // the confirmation evidence this pass compared, which would
           // otherwise let this pass delete a still-live pair's only
-          // recovery artifacts on stale authority. Expect exactly the
-          // evidence this pass just confirmed is current: what it wrote
-          // (if `needsWrite`) or what was already on disk (if not).
-          const retireExpected: StatusExpectation = {
-            status: 'confirmed', retired: false, superseded: false,
-            confirmations: needsWrite ? st.confirmations : current.confirmations,
-            confirmedBlockHeight: needsWrite ? st.blockHeight : current.confirmedBlockHeight,
-            confirmedBlockHash: needsWrite ? st.blockHash : current.confirmedBlockHash,
-          };
-          if (store.tryRetire(sub, r.commitTxId, retireExpected)) changed = true;
+          // recovery artifacts on stale authority.
+          //
+          // Re-READ rather than reconstruct the expectation from `st`: when
+          // `needsWrite` just wrote, `applyStatus`'s sticky-evidence rule
+          // means the record's resulting confirmedBlockHeight/Hash are NOT
+          // simply `st.blockHeight`/`st.blockHash` whenever the provider's
+          // read omitted one (it keeps the previous value instead of
+          // clearing it) — using the raw provider fields here would then
+          // permanently mismatch the real record and block retirement of a
+          // genuinely-settled inscription every time the confirming read
+          // has partial block identity. No `await` separates the write
+          // above from this read, so nothing else can have interleaved.
+          const postWrite = store.get(sub, r.commitTxId);
+          const retireExpected: StatusExpectation | undefined = postWrite
+            ? {
+                status: 'confirmed', retired: false, superseded: false,
+                confirmations: postWrite.confirmations,
+                confirmedBlockHeight: postWrite.confirmedBlockHeight,
+                confirmedBlockHash: postWrite.confirmedBlockHash,
+              }
+            : undefined;
+          if (retireExpected && store.tryRetire(sub, r.commitTxId, retireExpected)) changed = true;
         }
         continue;
       }
