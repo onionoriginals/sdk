@@ -1,7 +1,7 @@
 import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner, assetDigest } from "@originals/cel/v3";
+import { CelError, createLocalSigner, assetDigest } from "@originals/cel/v3";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
@@ -48,6 +48,25 @@ test("publish and cold hosted loading preserve CEL 3, separate WebVH method hist
   expect(loaded.verification.verified).toBe(true);
   expect(await loaded.asset.verify()).toBe(true);
 });
+
+test.each(["", "   ", "\t"])(
+  "publishToWeb rejects a blank/whitespace-only domain (%j) with WEBVH_DOMAIN_REQUIRED, before any signing work (#678)",
+  async (domain) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, { domain });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+  },
+);
 
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),

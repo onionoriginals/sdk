@@ -100,7 +100,7 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * must fail loudly rather than mint a DID at a host nobody serves (#531). The
  * configured webvhNetwork tier deliberately does NOT supply a default here.
  */
-function requireWebVHDomain(domain: string | undefined): string {
+export function requireWebVHDomain(domain: string | undefined): string {
   if (typeof domain === 'string' && domain.trim().length > 0) {
     return domain;
   }

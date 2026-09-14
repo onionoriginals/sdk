@@ -155,7 +155,7 @@ export class HostedAssets {
         "ASSET_WEB_STATE",
         "Publish an active local asset with no unsigned drafts",
       );
-    if (typeof options?.domain !== "string" || !options.domain)
+    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
       return error(
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",

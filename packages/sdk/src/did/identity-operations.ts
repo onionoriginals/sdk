@@ -6,6 +6,7 @@ import type {
 } from "../types/did.js";
 import { createDID } from "didwebvh-ts";
 import { normalizeUpdateKey } from "./WebVHManager.js";
+import { requireWebVHDomain } from "./DIDManager.js";
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -253,9 +254,13 @@ export async function createDIDOriginal(
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
 
+  // A blank/whitespace-only domain must fail loudly here, before any signing
+  // work — never mint a permanent did:webvh at a host nobody serves (#531, #678).
+  const domain = requireWebVHDomain(options.domain);
+
   // Create the DID using didwebvh-ts
   const createOptions: Record<string, unknown> = {
-    domain: options.domain,
+    domain,
     signer: options.signer,
     verifier: options.verifier || options.signer, // Use signer as verifier if not provided
     paths: options.paths,
@@ -374,7 +379,11 @@ export async function updateDIDOriginal(
     updateOptions.assertionMethod = options.assertionMethod;
   if (options.keyAgreement !== undefined)
     updateOptions.keyAgreement = options.keyAgreement;
-  if (options.domain !== undefined) updateOptions.domain = options.domain;
+  // A supplied domain (including an explicitly empty string) must be a real
+  // host: an empty string must not silently no-op the move, and whitespace
+  // must not mint an unresolvable did:webvh (#531, #678).
+  if (options.domain !== undefined)
+    updateOptions.domain = requireWebVHDomain(options.domain);
 
   // Update the DID using didwebvh-ts
   const result = await updateDID(updateOptions);
