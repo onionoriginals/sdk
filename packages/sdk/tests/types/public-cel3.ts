@@ -120,7 +120,7 @@ import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
 import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 
 // SDK 4 identity change: stable offline subpath plus explicit SDK 3 read aliases.
-import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from '@originals/sdk/asset-envelope';
+import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection, type AssetEnvelope as SubpathAssetEnvelope } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
 import { deriveAssetId, normalizeAssetId, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
@@ -131,6 +131,8 @@ import { parseAssetDid } from '@originals/sdk/cel';
 const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
 const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
 const inspectedEnvelope: AssetEnvelope = inspected.envelope;
+const assetEnvelopeSubpath: SubpathAssetEnvelope = envelope;
+void assetEnvelopeSubpath;
 const inspectedState: DeepReadonly<AssetState> = inspected.history.state;
 inspectRootEnvelope(envelope);
 inspectLocalEnvelope(envelope);
