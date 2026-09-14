@@ -257,7 +257,7 @@ export async function createDIDOriginal(
   const createOptions: Record<string, unknown> = {
     domain: options.domain,
     signer: options.signer,
-    verifier: options.verifier,
+    verifier: options.verifier || options.signer, // Use signer as verifier if not provided
     paths: options.paths,
     // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
     // accept legacy "did:key:..." input and normalize.
