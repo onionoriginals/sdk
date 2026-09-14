@@ -36,6 +36,10 @@ function harness(opts: {
   broadcast?: (hex: string) => Promise<string>;
   statusThrows?: boolean;
   maxPerPass?: number;
+  /** Records raced out from under this pass: `trySetStatus` reports the
+   *  write as skipped for these commitTxIds, as if a concurrent pass had
+   *  already moved them (#694). */
+  racedCommitTxIds?: Set<string>;
 }) {
   const pushed: string[] = [];
   const statuses: Array<{ sub: string; commitTxId: string; status: string }> = [];
@@ -58,8 +62,10 @@ function harness(opts: {
         pending: opts.pending ?? [{ subOrgId: 'sub-1', record: record() }],
         unreadable: opts.unreadable ?? [],
       }),
-      setStatus: (sub, commitTxId, status) => {
+      trySetStatus: (sub, commitTxId, _expected, status) => {
+        if (opts.racedCommitTxIds?.has(commitTxId)) return false;
         statuses.push({ sub, commitTxId, status });
+        return true;
       },
     } as never,
     provider,
@@ -247,6 +253,27 @@ describe('the inscription completion sweep', () => {
     // That file holds the ONLY copy of a signed reveal.
     expect(r.unreadable).toEqual(['sub-torn']);
     expect(money.map((m) => m.event)).toContain('inscription_sweep_unreadable');
+  });
+
+  // #694 — a concurrent reconciliation pass (the per-user list poll, or an
+  // overlapping sweep run) can confirm or retire this exact record while
+  // THIS pass's own status lookup/broadcast were in flight. The guarded
+  // write must refuse to clobber that pass's result rather than silently
+  // regressing it back to reveal_broadcast.
+  test('a record raced out from under this pass by a concurrent transition is left alone, not clobbered', async () => {
+    const raced = 'c'.repeat(64);
+    const { sweep, statuses, money } = harness({
+      confirmed: true,
+      racedCommitTxIds: new Set([raced]),
+      pending: [{ subOrgId: 'sub-1', record: record({ commitTxId: raced }) }],
+    });
+    const r = await sweep();
+
+    // No write happened — whatever the concurrent pass left in place stands.
+    expect(statuses).toEqual([]);
+    expect(r.raced).toBe(1);
+    expect(r.completed).toBe(0);
+    expect(money.map((m) => m.event)).toContain('inscription_sweep_raced');
   });
 
   test('one bad record does not stop the pass', async () => {

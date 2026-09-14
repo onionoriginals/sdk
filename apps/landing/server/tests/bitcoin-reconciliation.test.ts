@@ -168,6 +168,81 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(b.superseded).toBe(true);
   });
 
+  // #677 — the demotion decision must read a FRESH per-record snapshot, not
+  // the snapshot taken once at the top of the whole reconciliation pass:
+  // that snapshot can already be stale by the time a later record's turn
+  // comes up, if an earlier record processed in the SAME pass concurrently
+  // wrote to it (exactly what an overlapping `reconcileUser` call for the
+  // same user, or the background sweep, would also do).
+  test('a reorg is correctly demoted even when an earlier record in the same pass concurrently confirmed it', async () => {
+    const target = 'a'.repeat(64);
+    const trigger = 'b'.repeat(64);
+    const targetReveal = `${target.slice(0, 62)}r0`;
+    const triggerReveal = `${trigger.slice(0, 62)}r0`;
+    const { store, reconciler } = harness({
+      txStatus: (txid) => {
+        if (txid === triggerReveal) {
+          // While THIS pass's own read for `trigger` is "in flight", a
+          // concurrent pass confirms `target` — before this pass has even
+          // reached `target`'s own turn in the loop.
+          store.setStatus('sub-1', target, 'confirmed', {
+            confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64),
+          });
+          return { confirmed: true, confirmations: 1 };
+        }
+        if (txid === targetReveal) {
+          // This pass's OWN fresh evidence for `target`: the block it was
+          // just marked confirmed in (by the concurrent write above) has
+          // since been reorged out.
+          return { confirmed: false };
+        }
+        return { confirmed: false };
+      },
+    });
+    // `trigger` created AFTER `target` so it sorts first (newest-first) and
+    // is processed before `target` within this one pass.
+    store.create('sub-1', rec({ commitTxId: target, status: 'reveal_broadcast' }));
+    store.create('sub-1', rec({ commitTxId: trigger, status: 'reveal_broadcast' }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+
+    // `target` must be DEMOTED — not left reporting the `confirmed` status a
+    // concurrent write produced mid-pass, now that this pass's own reorg
+    // evidence is in hand. Reading the stale top-of-pass snapshot instead of
+    // a fresh per-record read would silently skip this demotion.
+    expect(inscriptions.find((r) => r.commitTxId === target)!.status).toBe('reveal_broadcast');
+    expect(store.get('sub-1', target)!.status).toBe('reveal_broadcast');
+  });
+
+  // #677 — the mirror-image race: a record settles (reaches the recovery
+  // horizon) and is retired by a concurrent pass WHILE this pass's own
+  // network read for that exact record is in flight. The guarded write must
+  // refuse to write back a decision made from before that retirement, so a
+  // genuinely-settled, retired record can never regress to an internally
+  // inconsistent `reveal_broadcast` + `retired: true` combination (#693).
+  test('a record retired by a concurrent pass during this pass\'s own await is never clobbered', async () => {
+    const commit = 'c'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        // Simulate an overlapping poll (or the background sweep) retiring
+        // this exact record while this pass's own reorg-evidence read for
+        // it is still outstanding.
+        store.retire('sub-1', commit);
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'confirmed', confirmations: 2 }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent retirement stands untouched: no reveal_broadcast +
+    // retired:true corruption, and no rebroadcast of an already-retired pair.
+    expect(stored.retired).toBe(true);
+    expect(stored.status).toBe('confirmed');
+    expect(broadcastCalls).toEqual([]);
+  });
+
   test('an unconfirmed stuck reveal is re-pushed only after the rebroadcast window elapses', async () => {
     const commit = '6'.repeat(64);
     let clock = 0;

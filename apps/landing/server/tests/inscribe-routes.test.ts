@@ -2162,6 +2162,14 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
       const h = harness({ txStatus: { confirmed: operation === 'retire' || operation === 'reinstate', confirmations: 6 } });
       const pair = seed(h, 80, operation === 'setStatus' || operation === 'retire' ? 'confirmed' : 'reveal_broadcast', operation === 'reinstate');
       h.store[operation] = () => { throw new Error('simulated disk full'); };
+      // #677 — the reorg-demotion decision now writes through the guarded
+      // `trySetStatus` (so a concurrent pass's transition can't be
+      // clobbered), not `setStatus` directly. A disk-full failure there must
+      // still surface as 503, so the fault is injected on whichever of the
+      // two the demotion path actually calls.
+      if (operation === 'setStatus') {
+        h.store.trySetStatus = () => { throw new Error('simulated disk full'); };
+      }
       const response = await poll(h);
       expect(response.status).toBe(503);
       expect((await response.json()).error).toBe('inscription_reconciliation_failed');
@@ -2184,7 +2192,11 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
   test('a failed status write after delivery remains an explicit failure and restart retries the durable pair', async () => {
     const h = harness({ txStatus: { confirmed: true, confirmations: 1 } });
     const pair = seed(h, 90, 'commit_broadcast');
+    // #677 — this record advances through the guarded `trySetStatus`, not
+    // `setStatus` directly; inject the fault on both so the test holds
+    // regardless of which one the liveStuck completion path calls.
     h.store.setStatus = () => { throw new Error('simulated disk full after delivery'); };
+    h.store.trySetStatus = () => { throw new Error('simulated disk full after delivery'); };
     const response = await poll(h);
     expect(response.status).toBe(503);
     expect(h.broadcasts).toEqual([pair.revealTxHex]);
