@@ -764,6 +764,8 @@ test("fails closed when the independent enumeration source disagrees about who c
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+// Real Core/ord coverage for these tip cases and actual transfers runs in
+// scripts/regtest/ownership-check.ts via the standard regtest journey.
 test("does not cross-check ownership against an independent source observing a different chain tip, even when the values happen to match", async () => {
   const { snapshot } = await boundary();
   const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
