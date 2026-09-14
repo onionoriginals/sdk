@@ -8,7 +8,10 @@ import didLogRaw from "../../public/example/did-log.jsonl?raw";
 import celLogJson from "../../public/example/cel-log.json";
 
 export interface ExampleCheck {
-  id: "hash" | "log" | "cel";
+  // Matches OriginalCheck's id union (verify-original.ts) — this bundled
+  // example is webvh-only and never passes `sat`, so `verifyOriginal` never
+  // actually produces a "btco" entry here, but its return type allows one.
+  id: "hash" | "log" | "cel" | "btco";
   ok: boolean;
   detail: string;
 }

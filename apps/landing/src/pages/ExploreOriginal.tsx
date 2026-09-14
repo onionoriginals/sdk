@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { PublishedOriginal } from '../../shared/explore';
 import type { OriginalCheck } from '../sdk/verify-original';
+import type { AssetResolution, OrdinalsProvider } from '@originals/sdk';
 import { explore as copy } from '../content';
 import { parseDidLog, digestMultibaseSha256Hex } from './original-detail-data';
 import { OriginalArtwork, publicationDate } from './Explore';
@@ -53,6 +54,37 @@ export function ExploreOriginal({ did }: { did: string }) {
         const state = verifyHistory(celLog).state;
         if (!state.active) throw new Error('inactive publication');
         const digest = state.resources[0]?.digestMultibase;
+        // Bitcoin check: independent of everything above — a fresh provider
+        // snapshot resolved through the real SDK, not a server-asserted
+        // summary. Never blocks the rest of the page; a failed/unavailable
+        // resolution simply surfaces as that one check failing.
+        let btcoResolution: AssetResolution | null = null;
+        if (row.sat) {
+          try {
+            const [{ OriginalsSDK }, { PublicSatSnapshotProvider }] = await Promise.all([
+              import('@originals/sdk'),
+              import('../sdk/public-sat-provider'),
+            ]);
+            const publicProvider = new PublicSatSnapshotProvider();
+            const snapshot = await publicProvider.getSatSnapshot(row.sat);
+            const provider: OrdinalsProvider = publicProvider;
+            // One frozen snapshot for the whole resolution — never a second,
+            // potentially different, live fetch mid-check.
+            const frozenProvider = { ...provider, getSatSnapshot: async () => snapshot };
+            const sdk = OriginalsSDK.create({
+              network: snapshot.network,
+              ordinalsProvider: frozenProvider,
+            });
+            btcoResolution = await sdk.lifecycle.resolveAssetFromSat(row.sat, {
+              expectedAssetId: state.assetId,
+            });
+          } catch (err) {
+            console.error(
+              '[originals-sdk] explore Bitcoin verification failed',
+              err,
+            );
+          }
+        }
         const result = await verifyOriginal({
           did,
           logEntries: parseDidLog(await log.text()),
@@ -61,6 +93,8 @@ export function ExploreOriginal({ did }: { did: string }) {
             ? new Uint8Array(await resource.arrayBuffer())
             : null,
           declaredHash: digest ? digestMultibaseSha256Hex(digest) : null,
+          sat: row.sat ?? null,
+          btcoResolution,
         });
         if (live) setChecks(result);
       } catch {
@@ -155,6 +189,12 @@ export function ExploreOriginal({ did }: { did: string }) {
                 <dt>{copy.hostedIdentity}</dt>
                 <dd>{original.did}</dd>
               </div>
+              {original.sat && (
+                <div>
+                  <dt>{copy.bitcoin}</dt>
+                  <dd>sat {original.sat}</dd>
+                </div>
+              )}
               <div>
                 <dt>{copy.log}</dt>
                 <dd>

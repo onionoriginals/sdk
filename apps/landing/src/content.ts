@@ -1131,9 +1131,10 @@ export const explore = {
   hostedIdentity: 'Published identity',
   log: 'WebVH version history',
   cel: 'Cryptographic event log',
+  bitcoin: 'Bitcoin inscription',
   checking: 'Checking the signatures and file…',
   checked: 'Hosted history and primary file verified',
   incomplete: 'Verification incomplete',
-  checkNote: 'These checks verify the hosted signatures and primary file in your browser. Bitcoin confirmation and possession are separate checks.',
+  checkNote: 'These checks verify the hosted signatures and primary file in your browser, plus — when this Original has migrated to Bitcoin — its accepted on-chain publication, resolved fresh from a public Bitcoin provider.',
   openHistory: 'Inspect the signed artifacts',
 };

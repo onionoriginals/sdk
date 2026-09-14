@@ -11,6 +11,8 @@ export interface PublishedOriginal {
   resourceUrl?: string;
   logUrl: string;
   celUrl: string;
+  /** The satoshi number this Original is inscribed on, once migrated to Bitcoin. Absent for a webvh-only publication. */
+  sat?: string;
 }
 export interface ExplorePage {
   originals: PublishedOriginal[];

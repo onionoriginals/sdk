@@ -1,24 +1,49 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDocument, verifyHistory, sameAssetIdentity } from '@originals/sdk/cel';
-import { Ed25519Verifier } from '@originals/sdk';
+import { parseDocument, verifyHistory, sameAssetIdentity, parseAssetAlias } from '@originals/sdk/cel';
+import type { SatSnapshot } from '@originals/sdk/cel';
+import { Ed25519Verifier, validateSatoshiNumber } from '@originals/sdk';
 import { resolveDIDFromLog } from 'didwebvh-ts';
 import type { PublishedOriginal } from '../shared/explore';
 import type { OriginalsStore } from './originals-store';
 import { createRateLimiter } from './rate-limit';
 import { json } from './router';
+import { encodeSatSnapshot } from './sat-snapshot-codec';
+
+/**
+ * Read-only capability this route needs — never the full money-path
+ * OrdinalsProvider. Optional, matching `OrdinalsProvider`/`FaucetProvider`'s
+ * own optional `getSatSnapshot`, so either can be passed directly.
+ */
+export interface ExploreSatProvider {
+  getSatSnapshot?(sat: string): Promise<SatSnapshot>;
+}
 
 /** Read only the already-public hosted artifacts owned by each account. */
 export function createExploreRoutes({
   store,
   dataDir,
+  satProvider,
   now = Date.now,
 }: {
   store: OriginalsStore;
   dataDir: string;
+  /**
+   * Bounded, unauthenticated Bitcoin read access for the public cold-start
+   * verifier (`/explore/<did>`) to independently resolve an Original's
+   * accepted on-sat history — never funding, signing or broadcast
+   * capability, and never the authenticated `/api/btc/*` money path. Absent
+   * on a deploy without Bitcoin configured, which degrades this route to
+   * `sat_snapshot_unsupported` rather than disabling Explore entirely.
+   */
+  satProvider?: ExploreSatProvider;
   now?: () => number;
 }) {
   const limiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
+  // Bitcoin node reads are far more expensive than the in-memory catalogue, so
+  // this is bounded independently and more tightly — a public, unauthenticated
+  // caller must not be able to use this to flood the configured node/indexer.
+  const satLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
   let cache:
     | { host: string; until: number; rows: Promise<PublishedOriginal[]> }
     | undefined;
@@ -82,6 +107,18 @@ export function createExploreRoutes({
               const urlPath =
                 '/' + path.split('/').map(encodeURIComponent).join('/');
               const digest = primary?.digestMultibase;
+              // The most-recent btco alias, if this Original has migrated to
+              // Bitcoin — aliases accumulate in cel → webvh → btco order, so
+              // the last one that parses as a btco layer is the current sat.
+              let sat: string | undefined;
+              for (const alias of state.aliases) {
+                try {
+                  const parsed = parseAssetAlias(alias);
+                  if (parsed.layer === 'btco') sat = parsed.sat;
+                } catch {
+                  /* Not every alias need parse under every alias grammar. */
+                }
+              }
               found.set(row.did, {
                 did: row.did,
                 assetId: state.assetId,
@@ -102,6 +139,7 @@ export function createExploreRoutes({
                   : {}),
                 logUrl: `${urlPath}/did.jsonl`,
                 celUrl: `${urlPath}/cel.json`,
+                ...(sat ? { sat } : {}),
               });
             } catch {
               /* An invalid publication is not a public gallery entry. */
@@ -133,6 +171,24 @@ export function createExploreRoutes({
     ): Promise<Response> {
       if (req.method !== 'GET')
         return json({ error: 'method_not_allowed' }, 405, { Allow: 'GET' });
+      if (url.pathname.startsWith('/api/explore/sat-snapshot/')) {
+        const satLimit = satLimiter.check(clientIp);
+        if (!satLimit.allowed)
+          return json({ error: 'rate_limited' }, 429, {
+            'Retry-After': String(Math.ceil(satLimit.retryAfterMs / 1000)),
+          });
+        const sat = url.pathname.slice('/api/explore/sat-snapshot/'.length);
+        if (!/^(0|[1-9]\d*)$/.test(sat) || !validateSatoshiNumber(sat).valid)
+          return json({ error: 'bad_request' }, 400);
+        if (typeof satProvider?.getSatSnapshot !== 'function')
+          return json({ error: 'sat_snapshot_unsupported' }, 501);
+        try {
+          const snapshot = await satProvider.getSatSnapshot(sat);
+          return json(encodeSatSnapshot(snapshot));
+        } catch {
+          return json({ error: 'sat_snapshot_unavailable' }, 502);
+        }
+      }
       const rate = limiter.check(clientIp);
       if (!rate.allowed)
         return json({ error: 'rate_limited' }, 429, {
