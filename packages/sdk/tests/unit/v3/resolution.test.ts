@@ -715,3 +715,98 @@ test("an unreachable independent enumeration source does not discard an already-
   expect(result.chainEvidence.assurance).toBe("node-validated");
   expect(result.chainEvidence.source).toBe("local-core-node");
 });
+
+test("cross-checks ownership against the same independently configured second index and carries the assurance into DID metadata", async () => {
+  const { snapshot } = await boundary();
+  const agreeing = structuredClone(snapshot);
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => agreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
+  expect(metadata.didDocumentMetadata.ownershipAssurance).toBe(
+    "cross-checked",
+  );
+});
+
+test("without an independent source configured, resolution still accepts but only claims provider-asserted ownership", async () => {
+  const { snapshot } = await boundary();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("fails closed when the independent enumeration source disagrees about who currently holds the sat", async () => {
+  const { snapshot } = await boundary();
+  const disagreeing = structuredClone(snapshot);
+  disagreeing.ownership = { owner: "a-different-holder", satpoint: disagreeing.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => disagreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+// Real Core/ord coverage for these tip cases and actual transfers runs in
+// scripts/regtest/ownership-check.ts via the standard regtest journey.
+test("does not cross-check ownership against an independent source observing a different chain tip, even when the values happen to match", async () => {
+  const { snapshot } = await boundary();
+  const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const stale = structuredClone(snapshot);
+  stale.tipBefore = staleTip;
+  stale.tipAfter = staleTip;
+  stale.indexTip = staleTip;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => stale },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  // Enumeration is still corroborated (an older tip's ids are a safe subset to compare),
+  // but ownership from a different tip must not be able to confer cross-checked, even
+  // though its value happens to equal the primary snapshot's.
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+test("a differing owner at a different independent chain tip does not fail resolution (the comparison is skipped, not evaluated)", async () => {
+  const { snapshot } = await boundary();
+  const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const staleDisagreeing = structuredClone(snapshot);
+  staleDisagreeing.tipBefore = staleTip;
+  staleDisagreeing.tipAfter = staleTip;
+  staleDisagreeing.indexTip = staleTip;
+  staleDisagreeing.ownership = { owner: "an-old-holder", satpoint: staleDisagreeing.ownership.satpoint };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => staleDisagreeing },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
