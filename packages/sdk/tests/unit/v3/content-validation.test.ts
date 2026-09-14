@@ -87,6 +87,11 @@ function snapshotFor(
   };
 }
 
+// The validator only derives evidence for publications the baseline resolution
+// already accepted; these tests exercise the transaction-parsing/RPC logic
+// directly, so they treat every publication in the test snapshot as accepted.
+const allIds = (snapshot: SatSnapshot) => snapshot.publications.map((p) => p.id);
+
 function core(rawHexByTxid: Record<string, string>) {
   const calls: unknown[][] = [];
   const fetchImpl = (async (_url, init) => {
@@ -112,7 +117,7 @@ test('derives independent content from the reveal transaction witness, disagreei
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
   });
-  const evidence = await validator(snapshot);
+  const evidence = await validator(snapshot, allIds(snapshot));
   expect(evidence).toEqual([
     {
       inscriptionId: prepared.inscriptionId,
@@ -133,7 +138,7 @@ test('agrees when the provider honestly reports the same on-chain content', asyn
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence[0].contentDigest).toBe(digestBytes(content));
 });
 
@@ -153,7 +158,7 @@ test('derives the metadata tag digest from the actual on-chain envelope, indepen
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence[0].metadataDigest).toBe(digestBytes(CBOR.encode(onChainMetadata)));
   expect(evidence[0].metadataDigest).not.toBe(digestBytes(CBOR.encode(forgedMetadata)));
 });
@@ -227,7 +232,7 @@ test('matches non-canonical but valid CBOR metadata against the exact raw on-cha
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence[0].metadataDigest).toBe(digestBytes(nonCanonicalMetadata));
   // A canonical re-encoding of the same decoded value would be shorter (4
   // bytes: 0xa1 0x61 0x6e 0x05) and therefore digest differently — proving
@@ -245,21 +250,24 @@ test('metadataDigest is null when the envelope carries no metadata tag', async (
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence[0].metadataDigest).toBeNull();
 });
 
 test('caches raw transaction fetches per distinct reveal txid', async () => {
   const prepared = await preparedReveal(new TextEncoder().encode('once'), 'text/plain');
   const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('once') });
-  // Two publications happen to share one reveal transaction: fetching it twice would be wasteful.
-  snapshot.publications.push({ ...snapshot.publications[0] });
+  // A second, distinct accepted inscription id happens to reference the same reveal
+  // transaction (this single-inscription reveal has no envelope at index 1, so it is
+  // independently left uncovered rather than fetched again): fetching one shared
+  // reveal transaction twice would be wasteful.
+  snapshot.publications.push({ ...snapshot.publications[0], id: prepared.revealTxId + 'i1' });
   const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
-  expect(evidence).toHaveLength(2);
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toHaveLength(1);
   expect(mock.calls.filter((c) => c[0] === 'getrawtransaction')).toHaveLength(1);
 });
 
@@ -272,7 +280,7 @@ test('leaves an inscription uncovered, rather than guessing, when no envelope is
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence).toEqual([]);
 });
 
@@ -336,7 +344,7 @@ test('collects inscriptions across multiple script-path inputs of one batch reve
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence).toEqual([
     { inscriptionId: `${revealTxId}i0`, mediaType: 'text/plain', contentDigest: digestBytes(first.body), metadataDigest: null },
     { inscriptionId: `${revealTxId}i1`, mediaType: 'text/plain', contentDigest: digestBytes(second.body), metadataDigest: null },
@@ -351,9 +359,68 @@ test('skips unconfirmed and incomplete publications without consulting the node'
   const evidence = await createBitcoinCoreContentValidator({
     endpoint: 'http://localhost:18443',
     fetchImpl: mock.fetchImpl,
-  })(snapshot);
+  })(snapshot, allIds(snapshot));
   expect(evidence).toEqual([]);
   expect(mock.calls).toEqual([]);
+});
+
+test('never consults the node for a publication outside the accepted set, even if confirmed and complete', async () => {
+  // A confirmed, complete publication the baseline resolver ignored (unrelated,
+  // non-extending, boundary-invalid, or height-gated) must never be able to deny
+  // an otherwise valid history just because it is unreachable or unparseable on
+  // independent re-derivation -- so the validator must not even look at it.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, []);
+  expect(evidence).toEqual([]);
+  expect(mock.calls).toEqual([]);
+});
+
+test('deduplicates a publication observed more than once in the snapshot to a single evidence entry', async () => {
+  // resolveSat itself tolerates an identical duplicate observation of one
+  // publication; reporting two independent-evidence entries for the same
+  // inscription id would be rejected as malformed, turning an otherwise
+  // accepted result into `incomplete`.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  snapshot.publications.push({ ...snapshot.publications[0] });
+  const mock = core({ [prepared.revealTxId]: prepared.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toHaveLength(1);
+  expect(evidence[0].inscriptionId).toBe(prepared.inscriptionId);
+});
+
+test('leaves an inscription uncovered, rather than trusting it, when the node returns a transaction for a different id', async () => {
+  // A misbehaving/misconfigured node, or an on-path substitution, could return
+  // bytes for some other transaction than the one actually requested. Assigning
+  // that witness to the requested inscription would let substituted provider
+  // content be labeled cross-checked, or cause false disagreement.
+  const prepared = await preparedReveal(new TextEncoder().encode('x'), 'text/plain');
+  const wrongTx = await preparedReveal(new TextEncoder().encode('y'), 'text/plain');
+  const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
+  // The node responds to a request for `prepared.revealTxId` with a completely
+  // different, unrelated transaction's raw bytes.
+  const mock = core({ [prepared.revealTxId]: wrongTx.revealTxHex });
+  const evidence = await createBitcoinCoreContentValidator({
+    endpoint: 'http://localhost:18443',
+    fetchImpl: mock.fetchImpl,
+  })(snapshot, allIds(snapshot));
+  expect(evidence).toEqual([]);
+});
+
+test('rejects a non-loopback HTTP endpoint, requiring HTTPS off the local machine', () => {
+  expect(() =>
+    createBitcoinCoreContentValidator({ endpoint: 'http://core.example.com:8332' }),
+  ).toThrow();
+  expect(() => createBitcoinCoreContentValidator({ endpoint: 'https://core.example.com:8332' })).not.toThrow();
+  expect(() => createBitcoinCoreContentValidator({ endpoint: 'http://127.0.0.1:8332' })).not.toThrow();
 });
 
 test('fails when the independent node is unreachable, rather than silently reporting no evidence', async () => {
@@ -361,7 +428,7 @@ test('fails when the independent node is unreachable, rather than silently repor
   const snapshot = snapshotFor(prepared, { mediaType: 'text/plain', bytes: new TextEncoder().encode('x') });
   const fetchImpl = (async () => { throw new Error('connection refused'); }) as typeof fetch;
   await expect(
-    createBitcoinCoreContentValidator({ endpoint: 'http://localhost:18443', fetchImpl })(snapshot),
+    createBitcoinCoreContentValidator({ endpoint: 'http://localhost:18443', fetchImpl })(snapshot, allIds(snapshot)),
   ).rejects.toMatchObject({ code: 'CONTENT_VALIDATOR_UNAVAILABLE' });
 });
 
@@ -392,6 +459,6 @@ test('bounds total RPC calls', async () => {
       endpoint: 'http://localhost:18443',
       fetchImpl: mock.fetchImpl,
       maxRequests: 1,
-    })(snapshot),
+    })(snapshot, allIds(snapshot)),
   ).rejects.toMatchObject({ code: 'CONTENT_VALIDATOR_BUDGET_EXCEEDED' });
 });

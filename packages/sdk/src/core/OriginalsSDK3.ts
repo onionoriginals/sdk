@@ -104,6 +104,7 @@ export class OriginalsSDK {
       ...utilities
     } = options;
     requireAsset(chainValidator === undefined || typeof chainValidator === "function", "SDK_CHAIN_VALIDATOR", "chainValidator must be a function");
+    requireAsset(contentValidator === undefined || typeof contentValidator === "function", "SDK_CONTENT_VALIDATOR", "contentValidator must be a function");
     const local = mutationOptions({ signer, onAppendFailure });
     requireAsset(
       utilities.network === undefined ||

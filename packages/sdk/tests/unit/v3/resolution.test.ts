@@ -692,3 +692,28 @@ test("never consults the content validator for a snapshot resolveSat would rejec
   expect(result.status).toBe("incomplete");
   expect(calls).toBe(0);
 });
+
+test("rejects a non-function contentValidator at construction, like chainValidator", () => {
+  expect(() =>
+    // @ts-expect-error deliberately not a function, to check the runtime guard
+    OriginalsSDK.create({ network: "regtest", contentValidator: "not-a-function" }),
+  ).toThrow();
+});
+
+test("only consults the content validator with the inscription ids the baseline resolution actually accepted", async () => {
+  const { snapshot } = await boundary();
+  let received: readonly string[] | undefined;
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    contentValidator: async (_s, acceptedInscriptionIds) => {
+      received = acceptedInscriptionIds;
+      return [];
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(received).toEqual(
+    result.resolution.publications.map((p) => p.inscriptionId),
+  );
+});

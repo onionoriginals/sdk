@@ -10,9 +10,17 @@ import { readResponseBodyCapped } from '../adapters/response-body-limit.js';
  * Independently derive confirmed inscriptions' media type/content from chain data, for
  * cross-checking against `SatSnapshot.publications`. Never discovers trust from provider
  * data: it reads only the sat's reveal transactions, never the primary provider's response.
+ *
+ * `acceptedInscriptionIds` names exactly the publications the baseline (independent-content-free)
+ * resolution actually committed to accepted history — a validator should confine its work to
+ * those ids rather than every confirmed publication in the snapshot, since an unrelated,
+ * non-extending, boundary-invalid, or height-gated publication the resolver already ignores
+ * must never be able to deny an otherwise valid history just because it happens to be
+ * unreachable or unparseable on independent re-derivation.
  */
 export type ContentValidator = (
   snapshot: Readonly<SatSnapshot>,
+  acceptedInscriptionIds: readonly string[],
 ) => Promise<IndependentContentEvidence[]>;
 
 export interface BitcoinCoreContentValidatorOptions {
@@ -81,16 +89,23 @@ function rawMetadataPerEnvelope(script: ScriptType, count: number): (Uint8Array 
  * Parse a reveal transaction's taproot script-path witness to recover the exact media type
  * and content bytes an Ordinals-compatible interpreter would assign each inscription index,
  * independent of whatever an Ordinals indexer separately reports for the same transaction.
- * Returns an empty array (never throws) when no such witness is found — this validator only
- * asserts what it could independently confirm; it never asserts absence.
+ * Returns an empty array (never throws) when no such witness is found, or when the raw bytes
+ * returned by the node do not actually hash to `expectedTxid` — this validator only asserts
+ * what it could independently confirm; it never asserts absence, and never assigns witness
+ * data from a transaction other than the one actually requested.
  */
-function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
+function deriveFromRawTransaction(rawHex: string, expectedTxid: string): DerivedInscription[] {
   let tx: btc.Transaction;
   try {
     tx = btc.Transaction.fromRaw(Buffer.from(rawHex, 'hex'), { allowUnknownInputs: true, allowUnknownOutputs: true });
   } catch {
     return [];
   }
+  // The independently-trusted node's own computed identity for these bytes must match
+  // the txid actually requested. Otherwise this is not evidence about the requested
+  // reveal transaction at all -- whether from a misbehaving/misconfigured node or an
+  // on-path substitution -- and must never be assigned to that inscription's witness.
+  if (tx.id !== expectedTxid) return [];
   // An inscription id's index is global across the whole reveal transaction, not
   // scoped to one input: a batch reveal can carry inscriptions across multiple
   // script-path inputs, each contributing its envelopes in input order.
@@ -125,12 +140,22 @@ function deriveFromRawTransaction(rawHex: string): DerivedInscription[] {
  * content a provider reports for a given confirmed inscription id actually matches what is
  * encoded on-chain for that reveal transaction.
  */
+const isLoopbackHost = (hostname: string) =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+
 export function createBitcoinCoreContentValidator(
   options: BitcoinCoreContentValidatorOptions,
 ): ContentValidator {
   const endpoint = new URL(options.endpoint);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.hash) {
     throw new StructuredError('CONTENT_VALIDATOR_CONFIG', 'Use an HTTP(S) Core endpoint without URL credentials or a fragment');
+  }
+  // Plaintext HTTP exposes any configured Basic RPC credentials and lets an on-path
+  // attacker alter the "independent" evidence in transit, defeating the cross-check
+  // this validator exists to provide. Only exempt an endpoint that cannot leave the
+  // local machine in the first place.
+  if (endpoint.protocol === 'http:' && !isLoopbackHost(endpoint.hostname)) {
+    throw new StructuredError('CONTENT_VALIDATOR_CONFIG', 'A non-loopback Core endpoint must use HTTPS');
   }
   const headers = new Headers({ 'content-type': 'application/json' });
   if (options.rpcAuth) headers.set('authorization', 'Basic ' + base64.encode(
@@ -140,7 +165,7 @@ export function createBitcoinCoreContentValidator(
   const maxRequests = positive(options.maxRequests, 512);
   const maxBytes = positive(options.maxResponseBytes, 8 * 1024 * 1024);
 
-  return async (snapshot) => {
+  return async (snapshot, acceptedInscriptionIds) => {
     const controller = new AbortController();
     const unavailable = () => new StructuredError('CONTENT_VALIDATOR_UNAVAILABLE', 'Independent Bitcoin Core content validation is unavailable');
     const budgetExceeded = () => new StructuredError('CONTENT_VALIDATOR_BUDGET_EXCEEDED', 'Independent content validation budget exceeded');
@@ -164,12 +189,24 @@ export function createBitcoinCoreContentValidator(
       }
     };
     const derive = async (): Promise<IndependentContentEvidence[]> => {
+      // Limited to publications the baseline (independent-content-free) resolution
+      // actually committed to accepted history: an unrelated, non-extending,
+      // boundary-invalid, or height-gated publication the resolver already ignores
+      // must never be able to deny an otherwise valid history just because it is
+      // unreachable or unparseable on independent re-derivation. Also deduplicates by
+      // inscription id -- a snapshot can legitimately carry duplicate observations of
+      // one publication, and reporting more than one evidence entry for the same id
+      // would itself be rejected as malformed, invalidating an otherwise-accepted result.
+      const acceptedIds = new Set(acceptedInscriptionIds);
+      const seen = new Set<string>();
       const evidence: IndependentContentEvidence[] = [];
       const rawTxByTxid = new Map<string, string>();
       for (const publication of snapshot.publications) {
+        if (!acceptedIds.has(publication.id) || seen.has(publication.id)) continue;
         if (publication.confirmed !== true || publication.body?.status !== 'complete') continue;
         const match = inscriptionId.exec(publication.id);
         if (!match) continue;
+        seen.add(publication.id);
         const [, txid, indexText] = match;
         let rawHex = rawTxByTxid.get(txid);
         if (rawHex === undefined) {
@@ -178,10 +215,11 @@ export function createBitcoinCoreContentValidator(
           rawHex = result;
           rawTxByTxid.set(txid, rawHex);
         }
-        const inscriptions = deriveFromRawTransaction(rawHex);
+        const inscriptions = deriveFromRawTransaction(rawHex, txid);
         const inscription = inscriptions[Number(indexText)];
-        // No independently parseable envelope at this index: leave this inscription
-        // uncovered (contentAssurance stays provider-asserted) rather than guessing.
+        // No independently parseable envelope at this index (including a
+        // txid-mismatched response): leave this inscription uncovered
+        // (contentAssurance stays provider-asserted) rather than guessing.
         if (!inscription) continue;
         evidence.push({
           inscriptionId: publication.id,

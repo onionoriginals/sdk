@@ -170,7 +170,10 @@ export class AssetResolver {
       // making the independent source unreachable.
       let independentContent: Awaited<ReturnType<ContentValidator>>;
       try {
-        independentContent = await this.contentValidator(snapshot);
+        independentContent = await this.contentValidator(
+          snapshot,
+          baseline.publications.map((publication) => publication.inscriptionId),
+        );
       } catch {
         return {
           resolution: Object.freeze({
