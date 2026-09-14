@@ -108,6 +108,11 @@ test("a fresh consumer resolves binary bytes and DID authority from the same acc
   const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
   expect(metadata.didDocumentMetadata.ownership).toEqual(snapshot.ownership);
   expect(metadata.didDocumentMetadata.head).toBe(result.asset.state.head);
+  // #594: even a clean, single-observation resolution never claims to have derived
+  // how the sat arrived at this owner — only that this is the current snapshot fact.
+  expect(metadata.didDocumentMetadata.trajectoryAssurance).toBe(
+    "not-independently-derived",
+  );
 });
 
 test("network recovery and verify re-read the accepted head instead of trusting serialized Bitcoin claims", async () => {
@@ -310,6 +315,10 @@ test("a holder-only CEL-shaped inscription cannot substitute creator authority; 
   const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:reg:123");
   expect(metadata.didDocumentMetadata.ownership?.owner).toBe(
     "holder-after-sale",
+  );
+  // A live-possession disagreement is still just a snapshot fact, not a derived transfer path.
+  expect(metadata.didDocumentMetadata.trajectoryAssurance).toBe(
+    "not-independently-derived",
   );
 });
 
