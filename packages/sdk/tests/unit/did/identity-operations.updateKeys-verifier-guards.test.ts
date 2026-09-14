@@ -14,7 +14,20 @@
  */
 
 import { describe, test, expect } from 'bun:test';
+import { StructuredError } from '@originals/cel';
 import { createDIDOriginal, updateDIDOriginal } from '../../../src/did/identity-operations';
+
+/** Assert the thrown value is the named StructuredError. */
+async function expectStructuredError(fn: () => Promise<unknown>, code: string): Promise<void> {
+  let thrown: unknown;
+  try {
+    await fn();
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(StructuredError);
+  expect((thrown as StructuredError).code).toBe(code);
+}
 
 async function makeSigner(keyType: 'Ed25519' | 'ES256K' = 'Ed25519') {
   const { KeyManager } = await import('../../../src/did/KeyManager');
@@ -113,17 +126,19 @@ describe('#719 — signer-as-verifier fallback requires verify() capability', ()
       getVerificationMethodId: () => `did:key:${signingKeyPair.publicKey}`,
       // no verify() — matches the documented public ExternalSigner interface exactly
     };
-    await expect(
-      createDIDOriginal({
-        type: 'did',
-        domain: 'example.com',
-        signer: signOnlySigner as any,
-        updateKeys: [signingKeyPair.publicKey],
-        verificationMethods: [
-          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
-        ],
-      }),
-    ).rejects.toThrow(/verifier is required.*does not implement verify/);
+    await expectStructuredError(
+      () =>
+        createDIDOriginal({
+          type: 'did',
+          domain: 'example.com',
+          signer: signOnlySigner as any,
+          updateKeys: [signingKeyPair.publicKey],
+          verificationMethods: [
+            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+          ],
+        }),
+      'WEBVH_VERIFIER_REQUIRED',
+    );
   });
 
   test('updateDIDOriginal throws a clear error for a sign-only signer with no explicit verifier', async () => {
@@ -143,13 +158,15 @@ describe('#719 — signer-as-verifier fallback requires verify() capability', ()
       sign: async (_input: unknown) => ({ proofValue: 'zSignature' }),
       getVerificationMethodId: () => `did:key:${signingKeyPair.publicKey}`,
     };
-    await expect(
-      updateDIDOriginal({
-        type: 'did',
-        log: created.log,
-        signer: signOnlySigner as any,
-      }),
-    ).rejects.toThrow(/verifier is required.*does not implement verify/);
+    await expectStructuredError(
+      () =>
+        updateDIDOriginal({
+          type: 'did',
+          log: created.log,
+          signer: signOnlySigner as any,
+        }),
+      'WEBVH_VERIFIER_REQUIRED',
+    );
   }, 20000);
 
   test('createDIDOriginal still succeeds when the signer implements verify() and no explicit verifier is given', async () => {

@@ -4,6 +4,7 @@ import type {
   VerificationMethod,
   ServiceEndpoint,
 } from "../types/did.js";
+import { StructuredError } from "@originals/cel";
 import { createDID } from "didwebvh-ts";
 import {
   normalizeUpdateKey,
@@ -152,7 +153,8 @@ function resolveVerifier(
   if (typeof (signer as unknown as { verify?: unknown }).verify === "function") {
     return signer as unknown as ExternalVerifier;
   }
-  throw new Error(
+  throw new StructuredError(
+    "WEBVH_VERIFIER_REQUIRED",
     "verifier is required when the provided signer does not implement verify()",
   );
 }
