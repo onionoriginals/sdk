@@ -92,13 +92,20 @@ import type {
   ContentValidator,
   BitcoinCoreContentValidatorOptions,
 } from "@originals/sdk/types";
-import { createBitcoinCoreContentValidator } from "@originals/sdk";
+import { createBitcoinCoreContentValidator, type IndependentEnumerationSource } from "@originals/sdk";
 declare const satProvider: SatProvider;
 declare const publicationOptions: BitcoinPublicationOptions;
 declare const recoveryStore: InscriptionRecoveryStore;
 declare const contentValidatorOptions: BitcoinCoreContentValidatorOptions;
+declare const independentEnumeration: IndependentEnumerationSource;
 const contentValidator: ContentValidator = createBitcoinCoreContentValidator(contentValidatorOptions);
-const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider, contentValidator });
+const networkSDK = OriginalsSDK.create({
+  signer,
+  network: "regtest",
+  satProvider,
+  contentValidator,
+  independentEnumeration,
+});
 const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
@@ -106,7 +113,15 @@ const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat
 // Per-resource-version chain-inline vs off-chain-referenced status is part of the public accepted shape.
 if (resolved.status === "accepted") {
   const availability: "bitcoin-inline" | "referenced" = resolved.resourceAvailability[0].availability;
-  void availability;
+  const enumerationAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.enumerationAssurance;
+  const ownershipAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.ownershipAssurance;
+  const contentAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.contentAssurance;
+  const trajectoryAssurance: "not-independently-derived" = resolved.resolution.trajectoryAssurance;
+  void availability; void enumerationAssurance; void ownershipAssurance; void contentAssurance; void trajectoryAssurance;
+} else if (resolved.status === "pending") {
+  // Distinct from "not-found": unconfirmed publications were observed for this sat.
+  const pending: readonly string[] = resolved.pending;
+  void pending;
 }
 void hosted; void submitted; void resolved;
 
