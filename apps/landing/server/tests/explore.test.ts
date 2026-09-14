@@ -418,7 +418,7 @@ describe('public Bitcoin sat-snapshot verification', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sat).toBe('1250000000');
-    expect(body.publications[0].body.bytes).toEqual([1, 2, 3]);
+    expect(body.publications[0].body.bytes).toBe('AQID');
     expect(body.publications[0].body.metadata).toBeNull();
     expect(calls).toBe(1);
     // Its own tighter limit (20/min) trips well before the catalogue's
@@ -446,5 +446,27 @@ describe('public Bitcoin sat-snapshot verification', () => {
     const req = new Request('https://gallery.test/api/explore/sat-snapshot/1250000000');
     const res = await routes.handle(req, new URL(req.url), 'ip');
     expect(res.status).toBe(502);
+  });
+  test('rejects an oversized snapshot before encoding it, rather than serializing a huge response', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'originals-explore-'));
+    dirs.push(dataDir);
+    const store = createOriginalsStore({ dataDir });
+    const huge = fakeSnapshot('1250000000');
+    huge.publications[0]!.body = {
+      status: 'complete',
+      mediaType: 'application/octet-stream',
+      // Protocol-permitted (assets may carry up to 32 MiB), but far past
+      // this route's own public content bound.
+      bytes: new Uint8Array(9 * 1024 * 1024),
+      metadata: null,
+    };
+    const routes = createExploreRoutes({
+      store,
+      dataDir,
+      satProvider: { async getSatSnapshot() { return huge; } },
+    });
+    const req = new Request('https://gallery.test/api/explore/sat-snapshot/1250000000');
+    const res = await routes.handle(req, new URL(req.url), 'ip');
+    expect(res.status).toBe(413);
   });
 });

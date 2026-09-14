@@ -28,6 +28,46 @@ const toHex = (bytes: Uint8Array) =>
 
 const short = (did: string) => (did.length > 42 ? `${did.slice(0, 36)}…` : did);
 
+/**
+ * Independently re-resolve the accepted on-sat history from a fresh
+ * provider snapshot (never trusting a server-asserted summary) and confirm
+ * it binds to the SAME asset id and controller the CEL/webvh checks already
+ * verified — a resolvable-but-unrelated sat must not read as proof of this
+ * Original. Exported on its own (not just inlined in `verifyOriginal`) so a
+ * caller can run this potentially-slow, network-bound check independently
+ * of the fast local hash/log/cel checks, instead of it blocking them.
+ */
+export function evaluateBtcoCheck(input: {
+  sat: string;
+  /** Whether the "cel" check above already verified — this can only strengthen that binding, never substitute for it. */
+  celVerified: boolean;
+  /** The CEL/webvh-verified asset id, or null if that verification did not produce one. */
+  assetId: string | null;
+  /** The CEL/webvh-verified controller, or null if that verification did not produce one. */
+  controller: string | null;
+  /** The caller's own fresh `sdk.lifecycle.resolveAssetFromSat(sat, ...)` result, or null if unavailable/failed. */
+  resolution: AssetResolution | null;
+}): OriginalCheck {
+  let btcoOk = false;
+  let btcoDetail = "Bitcoin publication could not be verified";
+  const resolution = input.resolution;
+  if (input.celVerified && input.assetId && input.controller && resolution) {
+    if (resolution.status === "accepted") {
+      const boundAssetId = sameAssetIdentity(resolution.asset.id, input.assetId);
+      const boundController = resolution.resolution.state.controller === input.controller;
+      btcoOk = boundAssetId && boundController;
+      btcoDetail = btcoOk
+        ? `${resolution.resolution.publications.length} accepted on-chain publication${resolution.resolution.publications.length === 1 ? "" : "s"} verified (${resolution.resolution.chainEvidence.assurance}) → sat ${input.sat}`
+        : "Accepted Bitcoin history does not bind to this Original";
+    } else {
+      btcoDetail = `Bitcoin publication not accepted: ${resolution.reason}`;
+    }
+  } else if (!input.celVerified || !input.assetId || !input.controller) {
+    btcoDetail = "Bitcoin publication requires the CEL/WebVH history above to verify first";
+  }
+  return { id: "btco", ok: btcoOk, detail: btcoDetail };
+}
+
 export async function verifyOriginal(input: {
   /** The Original's did:webvh identifier. */
   did: string;
@@ -133,30 +173,19 @@ export async function verifyOriginal(input: {
   checks.push({ id: "cel", ok: celOk, detail: celDetail });
 
   // 4 · Bitcoin: only for an Original that has migrated on-sat (input.sat
-  //     set). Independently re-resolve the accepted on-sat history from a
-  //     fresh provider snapshot (never trusting a server-asserted summary)
-  //     and confirm it binds to the SAME asset id and controller the CEL/
-  //     webvh checks above already verified — a resolvable-but-unrelated sat
-  //     must not read as proof of this Original.
+  //     set). See evaluateBtcoCheck — exported separately so a caller (the
+  //     public Explore page) can run this potentially-slow check on its own
+  //     schedule instead of it blocking the checks above.
   if (input.sat) {
-    let btcoOk = false;
-    let btcoDetail = "Bitcoin publication could not be verified";
-    const resolution = input.btcoResolution;
-    if (celOk && history && resolution) {
-      if (resolution.status === "accepted") {
-        const boundAssetId = sameAssetIdentity(resolution.asset.id, history.state.assetId);
-        const boundController = resolution.resolution.state.controller === history.state.controller;
-        btcoOk = boundAssetId && boundController;
-        btcoDetail = btcoOk
-          ? `${resolution.resolution.publications.length} accepted on-chain publication${resolution.resolution.publications.length === 1 ? "" : "s"} verified (${resolution.resolution.chainEvidence.assurance}) → sat ${input.sat}`
-          : "Accepted Bitcoin history does not bind to this Original";
-      } else {
-        btcoDetail = `Bitcoin publication not accepted: ${resolution.reason}`;
-      }
-    } else if (!celOk || !history) {
-      btcoDetail = "Bitcoin publication requires the CEL/WebVH history above to verify first";
-    }
-    checks.push({ id: "btco", ok: btcoOk, detail: btcoDetail });
+    checks.push(
+      evaluateBtcoCheck({
+        sat: input.sat,
+        celVerified: celOk,
+        assetId: history?.state.assetId ?? null,
+        controller: history?.state.controller ?? null,
+        resolution: input.btcoResolution ?? null,
+      }),
+    );
   }
 
   console.log(

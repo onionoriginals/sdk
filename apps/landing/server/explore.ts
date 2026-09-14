@@ -8,7 +8,7 @@ import type { PublishedOriginal } from '../shared/explore';
 import type { OriginalsStore } from './originals-store';
 import { createRateLimiter } from './rate-limit';
 import { json } from './router';
-import { encodeSatSnapshot } from './sat-snapshot-codec';
+import { encodeSatSnapshot, snapshotContentBytes } from './sat-snapshot-codec';
 
 /**
  * Read-only capability this route needs — never the full money-path
@@ -18,6 +18,15 @@ import { encodeSatSnapshot } from './sat-snapshot-codec';
 export interface ExploreSatProvider {
   getSatSnapshot?(sat: string): Promise<SatSnapshot>;
 }
+
+/**
+ * The public, unauthenticated sat-snapshot route's own content bound — well
+ * above anything this app's own demo ever produces (its upload cap is 32
+ * KiB, see src/sdk/source-file.ts), but far under the protocol's 32 MiB
+ * per-asset ceiling, so a permitted large publication cannot turn one public
+ * request into an outsized response.
+ */
+const PUBLIC_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
 /** Read only the already-public hosted artifacts owned by each account. */
 export function createExploreRoutes({
@@ -184,6 +193,14 @@ export function createExploreRoutes({
           return json({ error: 'sat_snapshot_unsupported' }, 501);
         try {
           const snapshot = await satProvider.getSatSnapshot(sat);
+          // An asset's own content is protocol-permitted up to 32 MiB — fine
+          // for an authenticated, per-user-quota'd caller, but this route is
+          // public and unauthenticated (only IP rate-limited), so serializing
+          // that much content on every permitted request would let a single
+          // caller repeatedly force large responses and large intermediate
+          // allocations. Reject before encoding rather than after.
+          if (snapshotContentBytes(snapshot) > PUBLIC_SNAPSHOT_MAX_BYTES)
+            return json({ error: 'snapshot_too_large' }, 413);
           return json(encodeSatSnapshot(snapshot));
         } catch {
           return json({ error: 'sat_snapshot_unavailable' }, 502);

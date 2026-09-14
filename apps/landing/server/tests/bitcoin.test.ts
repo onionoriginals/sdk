@@ -116,7 +116,7 @@ describe('bitcoin routes', () => {
     expect(reads).toBe(0);
     const res = await invoke('5000000000');
     expect(res.status).toBe(200);
-    expect((await res.json()).publications[0].body).toEqual({ status: 'complete', bytes: [0, 128, 255], metadata: [161, 0] });
+    expect((await res.json()).publications[0].body).toEqual({ status: 'complete', bytes: 'AID/', metadata: 'oQA=' });
     expect(reads).toBe(1);
     const unsupported = createBitcoinRoutes(deps());
     const req = authedReq('/api/btc/sat-snapshot/0', {});

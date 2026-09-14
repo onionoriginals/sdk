@@ -73,10 +73,10 @@ describe('HttpOrdinalsProvider', () => {
 describe('CEL 3 sat snapshot transport', () => {
   test('preserves every body and metadata byte and rejects coercion', async () => {
     const { decodeSatSnapshot } = await import('./http-ordinals-provider');
-    const snapshot = { publications: [{ body: { status: 'complete', bytes: [0, 128, 255], metadata: [161, 0, 255] } }] };
+    const snapshot = { publications: [{ body: { status: 'complete', bytes: 'AID/', metadata: 'oQD/' } }] };
     const decoded = decodeSatSnapshot(snapshot);
     expect(decoded.publications[0].body).toEqual({ status: 'complete', bytes: Uint8Array.from([0, 128, 255]), metadata: Uint8Array.from([161, 0, 255]) });
-    for (const bad of [[256], [-1], [1.5], ['1'], { 0: 1 }]) {
+    for (const bad of [256, [0, 128, 255], 12, null, { 0: 1 }, 'not valid base64!!!']) {
       expect(() => decodeSatSnapshot({ publications: [{ body: { status: 'complete', bytes: bad, metadata: null } }] })).toThrow();
     }
   });

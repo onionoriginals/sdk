@@ -8,6 +8,7 @@
  * QuickNodeProvider's "does not build/sign" contract — so a mislabeled read can
  * never silently fabricate on-chain data in the browser.
  */
+import { base64 } from "@scure/base";
 import type { SatSnapshot } from "@originals/sdk/cel";
 import type { OrdinalsProvider } from "@originals/sdk";
 
@@ -171,7 +172,7 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
   }
 }
 
-/** The JSON boundary carries byte arrays, never implicit string encodings. */
+/** The JSON boundary carries byte content as base64 strings (sat-snapshot-codec.ts). */
 export function decodeSatSnapshot(value: unknown): SatSnapshot {
   if (
     !value ||
@@ -181,12 +182,8 @@ export function decodeSatSnapshot(value: unknown): SatSnapshot {
     throw new Error("Invalid sat snapshot");
   const snapshot = value as SatSnapshot;
   const bytes = (input: unknown): Uint8Array => {
-    if (
-      !Array.isArray(input) ||
-      input.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
-    )
-      throw new Error("Invalid sat snapshot byte array");
-    return Uint8Array.from(input);
+    if (typeof input !== "string") throw new Error("Invalid sat snapshot byte string");
+    return base64.decode(input);
   };
   for (const publication of snapshot.publications) {
     if (!publication || !publication.body)
