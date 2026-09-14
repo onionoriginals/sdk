@@ -201,7 +201,7 @@ export class AssetResolver {
         | {
             source: string;
             inscriptionIds: string[];
-            ownership: SatSnapshot["ownership"];
+            ownership?: SatSnapshot["ownership"];
           }
         | undefined;
       if (this.independentEnumeration) {
@@ -250,7 +250,16 @@ export class AssetResolver {
         independentEnumeration = {
           source: this.independentEnumeration.label,
           inscriptionIds: independentSnapshot.publications.map((p) => p.id),
-          ownership: independentSnapshot.ownership,
+          // Ownership is a snapshot of current state, not an append-only list
+          // like enumeration: comparing it across two different chain tips is
+          // meaningless (a lagging source's honestly-stale owner could equal
+          // a dishonest primary's misreported "current" owner at a later
+          // tip). Only forward it when both observations describe the same
+          // tip; otherwise this cross-check silently sits out this round
+          // rather than fail resolution just for one source lagging.
+          ...(sameChainTip(independentSnapshot.tipBefore, snapshot.tipBefore)
+            ? { ownership: independentSnapshot.ownership }
+            : {}),
         };
       }
       return {
