@@ -1504,6 +1504,39 @@ describe('terminal records', () => {
       confirmedBlockHash: 'd'.repeat(64),
     });
   });
+
+  // #693 — commitTxId/revealTxId exclude witness data, so matching them is
+  // not proof of exact byte identity once a retired record's own hex is
+  // gone. A persisted `signedPairDigest` (captured at creation, retained
+  // across retirement) must still refuse a resubmission whose actual signed
+  // bytes differ, even though its ids line up.
+  test('a retired confirmed record refuses a resubmission whose signed bytes do not match the persisted digest', async () => {
+    const h = harness();
+    const pair = buildPair();
+    // A hand-built fixture standing in for a pair whose witness differed from
+    // what actually settled, despite sharing this commitTxId/revealTxId —
+    // exactly what txid equality alone cannot rule out.
+    h.store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:${pair.fundingUtxo.vout}`],
+      changeAddress: USER_ADDRESS,
+      status: 'confirmed',
+      retired: true,
+      confirmations: 6,
+      confirmedBlockHeight: 900_000,
+      confirmedBlockHash: 'e'.repeat(64),
+      signedPairDigest: 'f'.repeat(64), // deliberately does not match `pair`'s real digest
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toBe('signed_pair_mismatch');
+    expect(h.broadcasts).toEqual([]);
+  });
 });
 
 describe('malformed reveal shapes', () => {

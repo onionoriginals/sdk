@@ -588,6 +588,17 @@ function safeCommitVsize(commit: btc.Transaction): number {
   }
 }
 
+/**
+ * SHA-256 digest of the exact signed commit+reveal hex, INCLUDING witness
+ * bytes — unlike `commit.id`/`reveal.id`, which exclude them. Persisted on a
+ * record at creation and retained across retirement (#693), so a later
+ * resubmission of a retired pair can be checked for byte-for-byte identity
+ * even after the store has dropped the hex itself.
+ */
+function computeSignedPairDigest(commitHex: string, revealHex: string): string {
+  return hex.encode(sha256(new TextEncoder().encode(`${commitHex.toLowerCase()}:${revealHex.toLowerCase()}`)));
+}
+
 /** Signs a built funding tx and returns broadcast-ready raw tx hex. */
 export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 
@@ -1637,19 +1648,30 @@ export function createBitcoinRoutes(deps: {
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
-    // #693 — a retired record's signed hex is cleared, so its identity can no
-    // longer be checked byte-for-byte; a settled retry is authenticated
-    // instead by revealTxId matching PLUS a fresh, valid reveal witness
-    // (verified by validateInscriptionReveal below) before this is ever
-    // called. A settled (`confirmed`) record's result is returned exactly as
-    // last observed, with no re-verification, broadcast, or state write
-    // (CLAUDE.md: "Retained prepared pairs enable exact recovery after
-    // ambiguous acknowledgements"). A retired record that never settled here
-    // (a terminally-dead superseded loser whose funding outpoint a different,
-    // confirmed pair already won) is refused outright rather than
-    // reprocessed. Shared with the post-lock recheck below, which can also
-    // observe a record retired concurrently by reconciliation.
+    // #693 — a retired record's signed hex is cleared, so `commitTxId`/
+    // `revealTxId` (which exclude witness data) cannot alone prove this
+    // resubmission is byte-for-byte the same pair. `signedPairDigest`
+    // (persisted at creation, retained across retirement) closes that gap
+    // when present; a settled retry is additionally authenticated by a
+    // fresh, valid reveal witness (verified by validateInscriptionReveal
+    // below) before this is ever called. A settled (`confirmed`) record's
+    // result is returned exactly as last observed, with no re-verification,
+    // broadcast, or state write (CLAUDE.md: "Retained prepared pairs enable
+    // exact recovery after ambiguous acknowledgements"). A retired record
+    // that never settled here (a terminally-dead superseded loser whose
+    // funding outpoint a different, confirmed pair already won) is refused
+    // outright rather than reprocessed. Shared with the post-lock recheck
+    // below, which can also observe a record retired concurrently by
+    // reconciliation.
     function retiredResubmissionResponse(rec: InscriptionRecord): Response {
+      // ABSENT only on a row written before this field existed; that legacy
+      // case falls back to the id-only matching already done by the caller.
+      if (rec.signedPairDigest !== undefined &&
+          rec.signedPairDigest !== computeSignedPairDigest(signedPair.commit, signedPair.reveal)) {
+        return refuse('signed_pair_mismatch', {
+          error: 'signed_pair_mismatch', message: 'This commit is already on record with different signed transaction bytes.',
+        }, 409);
+      }
       if (rec.status === 'confirmed') {
         return json({
           commitTxId: rec.commitTxId,
@@ -1889,6 +1911,7 @@ export function createBitcoinRoutes(deps: {
       inscriptionId: `${revealTxId}i0`,
       signedCommitHex,
       revealTxHex,
+      signedPairDigest: computeSignedPairDigest(signedCommitHex, revealTxHex),
       fundingOutpoints: outpoints,
       changeAddress,
       status: 'signed',
