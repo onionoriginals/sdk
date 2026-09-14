@@ -5,7 +5,7 @@ export type * from "./types.js";
 export { createLocalSigner, type CelSigner } from "@originals/cel/v3";
 export { ASSET_LIMITS, ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION } from "./envelope.js";
 
-export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution } from "./resolution.js";
+export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution, ResourceAvailability, IndependentEnumerationSource } from "./resolution.js";
 
 export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./hosted.js";
 
@@ -14,3 +14,6 @@ export { fetchPublicReachabilityCheck } from "./hosted.js";
 export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./bitcoin.js";
 
 export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./envelope.js";
+
+export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./chain-validation.js";
+export { createBitcoinCoreContentValidator, type BitcoinCoreContentValidatorOptions, type ContentValidator } from "./content-validation.js";

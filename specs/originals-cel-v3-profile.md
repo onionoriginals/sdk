@@ -315,7 +315,10 @@ These are behavioral boundaries, not frozen export names:
 At minimum distinguish `invalid` (malformed or failed validation),
 `unsupported` (recognized CCG feature/version/suite outside this application),
 `history-required` (valid delta needing its verified prefix), and successful
-checks with their scope. No parse-only, signature-only, offline-btco, partial
+checks with their scope. Chain assurance is separately reported through
+`chainEvidence.assurance`. Provider JSON alone cannot earn `node-validated`;
+that label requires an application-selected independent chain validator and
+covers chain facts only, not Ordinals interpretation or enumeration. No parse-only, signature-only, offline-btco, partial
 provider or unchecked custom-verifier result may be presented as a fully verified
 Original. The fold/resolver decides how invalid unrelated sat publications are
 skipped without claiming unavailable history is complete.

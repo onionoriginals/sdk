@@ -29,6 +29,60 @@ describe('inscriptions-store', () => {
     expect(store.findByOutpoint('sub-1', `${'a'.repeat(64)}:0`)!.commitTxId).toBe('c'.repeat(64));
   });
 
+  test('#567: setStatus persists confirmation evidence, clears depth (not block height) on demotion', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    const commitTxId = 'c'.repeat(64);
+
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    let r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // A reorg demotes it: depth is stale-while-unconfirmed and is cleared,
+    // but the block height/hash it was LAST confirmed at survive the
+    // demotion — the only way a later reconfirmation can tell whether it
+    // landed back in the same block or a different one.
+    store.setStatus('sub-1', commitTxId, 'reveal_broadcast');
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.status).toBe('reveal_broadcast');
+    expect(r.confirmations).toBeUndefined();
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // Reconfirms in a DIFFERENT block: the caller (bitcoin.ts) compares this
+    // against the surviving values to detect the reorg, then overwrites them.
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 101, blockHash: 'b'.repeat(64) });
+    r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(1);
+    expect(r.confirmedBlockHeight).toBe(101);
+    expect(r.confirmedBlockHash).toBe('b'.repeat(64));
+  });
+
+  test('#567: a confirmed update without a block hash keeps the prior one, so a later same-height reorg is still detectable', () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
+    store.create('sub-1', rec({}));
+    const commitTxId = 'c'.repeat(64);
+
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    expect(store.get('sub-1', commitTxId)!.confirmedBlockHash).toBe('a'.repeat(64));
+
+    // Still confirmed (no demotion in between), but THIS read's evidence has
+    // no hash — a provider hiccup, not a reorg. Clearing it here would erase
+    // the only anchor bitcoin.ts's reorg comparison has to detect a LATER
+    // same-height reorg (block A replaced by block B at the same height):
+    // once cleared, that comparison could only fall back to height, which by
+    // definition cannot see a same-height replacement. A stale hash briefly
+    // paired with a fresher depth reading is the smaller, self-correcting
+    // problem, so the previous value is kept rather than cleared.
+    store.setStatus('sub-1', commitTxId, 'confirmed', { confirmations: 2, blockHeight: 100 });
+    const r = store.get('sub-1', commitTxId)!;
+    expect(r.confirmations).toBe(2);
+    expect(r.confirmedBlockHeight).toBe(100);
+    expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+  });
+
   test('supersede preserves the record (and its reveal hex) while freeing the outpoint', () => {
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'is-')) });
     store.create('sub-1', rec({}));
@@ -377,4 +431,48 @@ describe('pendingRevealBroadcasts', () => {
     const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
     expect(subs).toEqual(['sub-1', 'sub-2']);
   });
+});
+
+test('a NEW hash with no height CLEARS the stale height rather than pairing it with the wrong block', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+  store.setStatus('sub-1', record.commitTxId, 'reveal_broadcast');
+  expect(store.get('sub-1', record.commitTxId)?.confirmedBlockHeight).toBe(100);
+  // Height and hash describe ONE block. This read's hash PROVES the identity
+  // changed (e.g. a reconfirmation at a new height, with QuickNode's
+  // best-effort height lookup failing independently of the hash it already
+  // had from the same getrawtransaction call). Keeping the OLD height would
+  // pair it with a hash that was never actually observed at that height —
+  // worse than reporting height as unknown.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHash: 'b'.repeat(64) });
+  const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
+  expect(reloaded.confirmations).toBe(2);
+  expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
+  expect(reloaded.confirmedBlockHeight).toBeUndefined();
+});
+
+test('an evidence-less read (same or absent hash) keeps the prior height — nothing proves the identity changed', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-height2-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+
+  // No hash opinion at all this read (still confirmed, height also absent):
+  // nothing suggests the block changed, so both stay exactly as they were —
+  // the only way a LATER same-height reorg can still be detected against them.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2 });
+  let r = store.get('sub-1', record.commitTxId)!;
+  expect(r.confirmedBlockHeight).toBe(100);
+  expect(r.confirmedBlockHash).toBe('a'.repeat(64));
+
+  // Same hash again, still no height: confirms it's the same block, so the
+  // previously known height for it remains valid too.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 3, blockHash: 'a'.repeat(64) });
+  r = store.get('sub-1', record.commitTxId)!;
+  expect(r.confirmedBlockHeight).toBe(100);
+  expect(r.confirmedBlockHash).toBe('a'.repeat(64));
 });

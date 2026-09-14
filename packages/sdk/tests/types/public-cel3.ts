@@ -89,15 +89,25 @@ import type {
   PreparedBitcoinPublication,
   SubmittedBitcoinAsset,
   InscriptionRecoveryStore,
+  ContentValidator,
+  BitcoinCoreContentValidatorOptions,
 } from "@originals/sdk/types";
+import { createBitcoinCoreContentValidator } from "@originals/sdk";
 declare const satProvider: SatProvider;
 declare const publicationOptions: BitcoinPublicationOptions;
 declare const recoveryStore: InscriptionRecoveryStore;
-const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider });
+declare const contentValidatorOptions: BitcoinCoreContentValidatorOptions;
+const contentValidator: ContentValidator = createBitcoinCoreContentValidator(contentValidatorOptions);
+const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider, contentValidator });
 const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
 const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat(prepared.transactions.satoshi);
+// Per-resource-version chain-inline vs off-chain-referenced status is part of the public accepted shape.
+if (resolved.status === "accepted") {
+  const availability: "bitcoin-inline" | "referenced" = resolved.resourceAvailability[0].availability;
+  void availability;
+}
 void hosted; void submitted; void resolved;
 
 // The 3.0 freeze excludes confirmation hooks and event payloads from the former lifecycle.
@@ -115,7 +125,7 @@ import type { AppendCostEstimate as PreviousQuote } from '@originals/sdk/types';
 import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 
 // SDK 4 identity change: stable offline subpath plus explicit SDK 3 read aliases.
-import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from '@originals/sdk/asset-envelope';
+import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection, type AssetEnvelope as SubpathAssetEnvelope } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
 import { deriveAssetId, normalizeAssetId, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
@@ -126,6 +136,8 @@ import { parseAssetDid } from '@originals/sdk/cel';
 const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
 const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
 const inspectedEnvelope: AssetEnvelope = inspected.envelope;
+const assetEnvelopeSubpath: SubpathAssetEnvelope = envelope;
+void assetEnvelopeSubpath;
 const inspectedState: DeepReadonly<AssetState> = inspected.history.state;
 inspectRootEnvelope(envelope);
 inspectLocalEnvelope(envelope);
@@ -158,3 +170,9 @@ void parsedAlias.method;
 // @ts-expect-error New envelopes do not expose the removed unsigned field.
 currentEnvelope.assetDid;
 void currentVersion; void canonicalFromEvent; void digest; void deriveDid; void parseAssetDid;
+
+import { createBitcoinCoreChainValidator } from '@originals/sdk';
+import type { ChainValidator, BitcoinCoreChainValidatorOptions } from '@originals/sdk/types';
+const coreOptions: BitcoinCoreChainValidatorOptions = { endpoint: 'http://localhost:18443', rpcAuth: { username: 'user', password: 'password' } };
+const chainValidator: ChainValidator = createBitcoinCoreChainValidator(coreOptions);
+OriginalsSDK.create({ network: 'regtest', satProvider, chainValidator });

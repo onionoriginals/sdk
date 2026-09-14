@@ -7,8 +7,9 @@ import type { Subprocess } from 'bun';
 export type RegtestRestartTarget = 'core' | 'ord' | 'both';
 
 /** Disposable real nodes, with no public peers, public RPC or production wallet. */
-export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
+export async function startRegtest(options: { indexAddresses?: boolean; initialBlocks?: readonly string[]; logsDir?: string } = {}) {
   const indexAddresses = options.indexAddresses ?? true;
+  const logsDir = options.logsDir ?? process.env.REGTEST_LOGS_DIR;
   const dataDir = await mkdtemp(join(tmpdir(), 'originals-regtest-'));
   const coreDir = join(dataDir, 'core');
   await mkdir(coreDir);
@@ -69,12 +70,12 @@ export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
     for (const child of [...children].reverse()) {
       try { await terminate(child); } catch (error) { errors.push(error); }
     }
-    if (process.env.REGTEST_LOGS_DIR) {
+    if (logsDir) {
       try {
-        await mkdir(process.env.REGTEST_LOGS_DIR, { recursive: true });
+        await mkdir(logsDir, { recursive: true });
         for (const name of await readdir(dataDir)) {
           if (/^(bitcoin|ord)(\.\d+)?(\.error)?\.log$/.test(name)) {
-            await copyFile(join(dataDir, name), join(process.env.REGTEST_LOGS_DIR, name));
+            await copyFile(join(dataDir, name), join(logsDir, name));
           }
         }
       } catch (error) { errors.push(error); }
@@ -156,7 +157,14 @@ export async function startRegtest(options: { indexAddresses?: boolean } = {}) {
     await rpc('createwallet', ['originals-regtest']);
     const miningAddress = await rpc<string>('getnewaddress', ['', 'bech32'], 'originals-regtest');
     // Bootstrap mines a mature wallet in one mutation; allow slow CI disks without retrying it.
-    await rpc('generatetoaddress', [101, miningAddress], undefined, 60_000);
+    if (options.initialBlocks) {
+      // A second independent node validates imported blocks before ord creates
+      // its index, avoiding an artificial 101-block indexer reorg at startup.
+      for (const block of options.initialBlocks) {
+        const result = await rpc<string | null>('submitblock', [block]);
+        if (result !== null) throw new Error(`Initial regtest block rejected: ${result}`);
+      }
+    } else await rpc('generatetoaddress', [101, miningAddress], undefined, 60_000);
     startOrd();
     await sync();
     return {
