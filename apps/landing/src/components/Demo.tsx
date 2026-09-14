@@ -188,7 +188,12 @@ export function Demo() {
 
   const sourceIsImage = source.contentType.startsWith('image/') && !imagePreviewBroken;
   const sourceIsPreviewableText = !sourceIsImage && textMediaType(source.contentType);
-  useEffect(() => setImagePreviewBroken(false), [source]);
+  // `source` is a fresh object on every recompute of its useMemo above, even
+  // when an unrelated dependency (e.g. regenerated art while a file is
+  // uploaded) changes but this source's own bytes/type don't — key off those
+  // instead of the container object so an already-failed preview doesn't
+  // silently reset and re-attempt the same broken image.
+  useEffect(() => setImagePreviewBroken(false), [source.content, source.contentType]);
   const sourceBytes = byteLength(source.content);
   // Measured on the FINAL bytes, whatever produced them. Checking only at
   // upload time missed the Write tab entirely, where multibyte text can pass a
