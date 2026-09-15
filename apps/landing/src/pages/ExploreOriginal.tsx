@@ -1,9 +1,38 @@
 import { useEffect, useState } from 'react';
 import type { PublishedOriginal } from '../../shared/explore';
 import type { OriginalCheck } from '../sdk/verify-original';
+import type { AssetResolution, OrdinalsProvider } from '@originals/sdk';
 import { explore as copy } from '../content';
 import { parseDidLog, digestMultibaseSha256Hex } from './original-detail-data';
 import { OriginalArtwork, publicationDate } from './Explore';
+
+/**
+ * A fresh Bitcoin provider snapshot resolved through the real SDK, never a
+ * server-asserted summary. Kept separate from the hash/log/cel checks
+ * (see the effect below) — a Bitcoin node observation can take up to its
+ * full deadline, and that must never block the fast local checks from
+ * appearing.
+ */
+async function resolveBtco(
+  sat: string,
+  expectedAssetId: string,
+): Promise<AssetResolution> {
+  const [{ OriginalsSDK }, { PublicSatSnapshotProvider }] = await Promise.all([
+    import('@originals/sdk'),
+    import('../sdk/public-sat-provider'),
+  ]);
+  const publicProvider = new PublicSatSnapshotProvider();
+  const snapshot = await publicProvider.getSatSnapshot(sat);
+  const provider: OrdinalsProvider = publicProvider;
+  // One frozen snapshot for the whole resolution — never a second,
+  // potentially different, live fetch mid-check.
+  const frozenProvider = { ...provider, getSatSnapshot: async () => snapshot };
+  const sdk = OriginalsSDK.create({
+    network: snapshot.network,
+    ordinalsProvider: frozenProvider,
+  });
+  return sdk.lifecycle.resolveAssetFromSat(sat, { expectedAssetId });
+}
 
 export function ExploreOriginal({ did }: { did: string }) {
   const [original, setOriginal] = useState<PublishedOriginal | null>(null);
@@ -46,13 +75,27 @@ export function ExploreOriginal({ did }: { did: string }) {
           read(row.celUrl),
           row.resourceUrl ? read(row.resourceUrl) : Promise.resolve(null),
         ]);
-        const { verifyOriginal } = await import('../sdk/verify-original');
+        const { verifyOriginal, evaluateBtcoCheck } =
+          await import('../sdk/verify-original');
         const { validateDocument, verifyHistory } =
           await import('@originals/sdk/cel');
         const celLog = validateDocument(await cel.json());
         const state = verifyHistory(celLog).state;
         if (!state.active) throw new Error('inactive publication');
         const digest = state.resources[0]?.digestMultibase;
+        // Kick the (potentially slow) Bitcoin resolution off now, but do not
+        // await it here — a node observation can take up to its own full
+        // deadline, and it must never delay the fast local checks below from
+        // appearing. It is awaited separately further down.
+        const btcoPromise = row.sat
+          ? resolveBtco(row.sat, state.assetId).catch((err) => {
+              console.error(
+                '[originals-sdk] explore Bitcoin verification failed',
+                err,
+              );
+              return null;
+            })
+          : null;
         const result = await verifyOriginal({
           did,
           logEntries: parseDidLog(await log.text()),
@@ -63,6 +106,18 @@ export function ExploreOriginal({ did }: { did: string }) {
           declaredHash: digest ? digestMultibaseSha256Hex(digest) : null,
         });
         if (live) setChecks(result);
+        if (row.sat && btcoPromise) {
+          const btcoResolution = await btcoPromise;
+          if (!live) return;
+          const btcoCheck = evaluateBtcoCheck({
+            sat: row.sat,
+            celVerified: result.find((c) => c.id === 'cel')?.ok ?? false,
+            assetId: state.assetId,
+            controller: state.controller,
+            resolution: btcoResolution,
+          });
+          setChecks((prev) => (prev ? [...prev, btcoCheck] : prev));
+        }
       } catch {
         if (live) setChecks([]);
       }
@@ -74,6 +129,7 @@ export function ExploreOriginal({ did }: { did: string }) {
       abort.abort();
     };
   }, [did, attempt]);
+  const bitcoinCheck = checks?.find((check) => check.id === 'btco');
   const verified =
     checks !== null && checks.length > 0 && checks.every((check) => check.ok);
   return (
@@ -155,6 +211,15 @@ export function ExploreOriginal({ did }: { did: string }) {
                 <dt>{copy.hostedIdentity}</dt>
                 <dd>{original.did}</dd>
               </div>
+              {original.sat && (
+                <div>
+                  <dt>{bitcoinCheck?.ok ? copy.bitcoin : copy.bitcoinHint}</dt>
+                  <dd>
+                    sat {original.sat}
+                    {bitcoinCheck && <p>{bitcoinCheck.detail}</p>}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>{copy.log}</dt>
                 <dd>

@@ -195,7 +195,12 @@ export function buildFetch(deps: {
       if (handler) return handler(req, url, clientIp);
     }
 
-    if (deps.explore && (path === '/api/explore' || path === '/api/explore/original')) {
+    if (
+      deps.explore &&
+      (path === '/api/explore' ||
+        path === '/api/explore/original' ||
+        path.startsWith('/api/explore/sat-snapshot/'))
+    ) {
       return deps.explore.handle(req, url, clientIp);
     }
 

@@ -24,6 +24,7 @@ import { outpointsOf } from './inscriptions-store';
 import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-reconciliation';
+import { encodeSatSnapshot } from './sat-snapshot-codec';
 
 /**
  * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
@@ -936,14 +937,7 @@ export function createBitcoinRoutes(deps: {
     if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
     try {
       const snapshot = await provider.getSatSnapshot(satoshi);
-      return json({ ...snapshot, publications: snapshot.publications.map((publication) => ({
-        ...publication,
-        body: publication.body.status === 'complete' ? {
-          ...publication.body,
-          bytes: Array.from(publication.body.bytes),
-          metadata: publication.body.metadata === null ? null : Array.from(publication.body.metadata),
-        } : publication.body,
-      })) });
+      return json(encodeSatSnapshot(snapshot));
     } catch {
       return json({ error: 'sat_snapshot_unavailable' }, 502);
     }
