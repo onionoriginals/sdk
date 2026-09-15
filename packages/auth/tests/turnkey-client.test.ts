@@ -163,6 +163,36 @@ describe('turnkey-client', () => {
       expect(createSubOrganization).toHaveBeenCalled();
     });
 
+    test('provisions the Bitcoin auth-key account with a Bitcoin address format, not Ethereum', async () => {
+      // The secp256k1/m/44'/0'/0'/0/0 account is documented ("Bitcoin path
+      // for auth-key") and consumed for Bitcoin funding/sat verification, so
+      // its addressFormat must match the client-side definition for the same
+      // curve/path rather than defaulting to an Ethereum address.
+      const createSubOrganization = mock(() =>
+        Promise.resolve({
+          activity: {
+            result: {
+              createSubOrganizationResultV7: { subOrganizationId: 'brand_new_org' },
+            },
+          },
+        })
+      );
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        createSubOrganization,
+      });
+
+      await getOrCreateTurnkeySubOrg('new@example.com', client);
+
+      const callArgs = (createSubOrganization as any).mock.calls[0][0];
+      const btcAccount = callArgs.wallet.accounts.find(
+        (acc: { curve: string }) => acc.curve === 'CURVE_SECP256K1'
+      );
+      expect(btcAccount).toBeDefined();
+      expect(btcAccount.path).toBe("m/44'/0'/0'/0/0");
+      expect(btcAccount.addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR');
+    });
+
     test('repairs walletless sub-org in place instead of minting a new identity', async () => {
       // The sub-org ID is the user's stable identity; a missing wallet must
       // be fixed by creating the wallet under the EXISTING sub-org.

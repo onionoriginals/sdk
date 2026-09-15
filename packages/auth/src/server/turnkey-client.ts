@@ -61,7 +61,7 @@ const DEFAULT_WALLET_ACCOUNTS = [
     curve: 'CURVE_SECP256K1',
     pathFormat: 'PATH_FORMAT_BIP32',
     path: "m/44'/0'/0'/0/0", // Bitcoin path for auth-key
-    addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+    addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
   },
   {
     curve: 'CURVE_ED25519',
