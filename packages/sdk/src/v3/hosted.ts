@@ -356,7 +356,7 @@ export class HostedAssets {
       if (url !== `https://${domain}/${path}`)
         return error(
           "ASSET_STORAGE_URL",
-          "Storage URL differs from the permanent hosted path",
+          `Storage adapter returned "${url}" but hosted publication requires exactly "https://${domain}/${path}"; a storage locator is not automatically the WebVH permanent URL (MemoryStorageAdapter's mem:// locator and LocalStorageAdapter's default multi-tenant baseUrl both fail this check by design — use HostedMemoryStorageAdapter or LocalStorageAdapterOptions.originDomain, or a custom adapter that returns this exact URL)`,
         );
     };
     // Publish CEL last. An incomplete upload cannot advertise a complete asset document.
