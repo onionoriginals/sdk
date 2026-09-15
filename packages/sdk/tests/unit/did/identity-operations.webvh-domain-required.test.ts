@@ -15,7 +15,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { StructuredError } from '@originals/cel';
-import { createDIDOriginal, updateDIDOriginal } from '../../../src/did/identity-operations';
+import { createDIDOriginal, updateDIDOriginal } from '../../../src/did/identity-operations.js';
 
 /** Assert the thrown value is the named domain-required StructuredError. */
 async function expectDomainRequired(fn: () => Promise<unknown>): Promise<void> {
@@ -30,8 +30,8 @@ async function expectDomainRequired(fn: () => Promise<unknown>): Promise<void> {
 }
 
 async function makeSigner() {
-  const { KeyManager } = await import('../../../src/did/KeyManager');
-  const { Ed25519Signer } = await import('../../../src/crypto/Signer');
+  const { KeyManager } = await import('../../../src/did/KeyManager.js');
+  const { Ed25519Signer } = await import('../../../src/crypto/Signer.js');
   const { multikey } = await import('@originals/cel');
   const { prepareDataForSigning } = await import('didwebvh-ts');
 
