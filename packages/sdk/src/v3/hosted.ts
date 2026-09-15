@@ -167,9 +167,6 @@ export class HostedAssets {
     );
     if (signer.controller !== asset.state.controller)
       return error("CEL_AUTHORITY", "Only the current controller can publish");
-    const methodSigner = captureSigner(options.webvhSigner ?? signer);
-    if (methodSigner.algorithm !== "Ed25519")
-      return error("WEBVH_SIGNER", "Supply an Ed25519 WebVH method signer");
     // Snapshot before the first await: concurrent edits stay on the caller's local asset.
     const envelope = asset.serialize();
     const state = verifyHistory(envelope.eventLog).state;
@@ -199,6 +196,9 @@ export class HostedAssets {
         didLog,
       };
     }
+    const methodSigner = captureSigner(options.webvhSigner ?? signer);
+    if (methodSigner.algorithm !== "Ed25519")
+      return error("WEBVH_SIGNER", "Supply an Ed25519 WebVH method signer");
     const paths = options.paths ?? [
       "published",
       "anonymous",
