@@ -184,6 +184,19 @@ describe('Domain validation rejects malformed IPv4 (issue #292)', () => {
     expect(validateAndNormalizeDomain('example.com')).toBe('example.com');
     expect(validateAndNormalizeDomain('localhost')).toBe('localhost');
   });
+
+  // A leading-zero octet (e.g. "192.168.001.001") must be rejected outright,
+  // not accepted and returned verbatim: the WHATWG URL parser used to read
+  // back an existing hosted domain (hosted.ts's location()) treats a
+  // leading-zero octet as OCTAL, not decimal ("016" -> "14"), so accepting
+  // it here would let a first-publish domain silently diverge from (or not
+  // even numerically match) the canonical host read back on republish.
+  test('leading-zero IPv4 octets are rejected, not silently reinterpreted', () => {
+    expect(() => validateAndNormalizeDomain('192.168.001.001')).toThrow(/leading zero|Invalid domain/);
+    expect(() => validateAndNormalizeDomain('016.016.016.016')).toThrow(/leading zero|Invalid domain/);
+    // A bare "0" octet is not a leading zero and must still be accepted.
+    expect(validateAndNormalizeDomain('10.0.0.1')).toBe('10.0.0.1');
+  });
 });
 
 describe('Satoshi upper bound excludes non-existent ordinals (issue #292)', () => {

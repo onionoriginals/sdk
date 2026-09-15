@@ -54,11 +54,27 @@ export function validateAndNormalizeDomain(domain: string): string {
   // (issue #292).
   const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
   if (isIP) {
-    const octetsValid = domainPart.split('.').every(octet => parseInt(octet, 10) <= 255);
+    const octets = domainPart.split('.');
+    const octetsValid = octets.every(octet => parseInt(octet, 10) <= 255);
     if (!octetsValid) {
       throw new StructuredError(
         'INVALID_DOMAIN',
         `Invalid domain format: ${domain} - IPv4 octets must be in the range 0-255`
+      );
+    }
+    // Reject leading-zero octets (e.g. "192.168.001.001") outright rather than
+    // accepting them and returning the un-normalized text: the WHATWG URL
+    // parser used elsewhere to read back an existing hosted domain
+    // (packages/sdk/src/v3/hosted.ts's `location()`) treats a leading-zero
+    // octet as OCTAL, not decimal — "016" becomes "14" — so a leading-zero
+    // spelling accepted here would silently diverge from (and in the octal
+    // case, not even numerically match) the canonical host a resolver
+    // reads back, breaking the "same domain" binding comparison used on
+    // republish. Node's own `net.isIPv4` rejects the same inputs.
+    if (octets.some(octet => octet.length > 1 && octet.startsWith('0'))) {
+      throw new StructuredError(
+        'INVALID_DOMAIN',
+        `Invalid domain format: ${domain} - IPv4 octets must not have leading zeros`
       );
     }
   }
