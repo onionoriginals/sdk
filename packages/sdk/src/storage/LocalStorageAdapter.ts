@@ -34,10 +34,22 @@ function requirePath(): typeof import('path') {
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
   private baseUrl?: string;
+  private originDomain?: string;
 
   constructor(options: LocalStorageAdapterOptions) {
     this.baseDir = options.baseDir;
     this.baseUrl = options.baseUrl;
+    this.originDomain = options.originDomain;
+  }
+
+  /** In originDomain mode, every call must target that exact domain (see LocalStorageAdapterOptions.originDomain). */
+  private checkOriginDomain(domain: string): void {
+    if (this.originDomain !== undefined && domain !== this.originDomain) {
+      throw new StructuredError(
+        'STORAGE_DOMAIN_MISMATCH',
+        `LocalStorageAdapter is configured for originDomain "${this.originDomain}" and cannot serve "${domain}" from the same advertised origin.`
+      );
+    }
   }
 
   private sanitizeDomain(domain: string): string {
@@ -81,6 +93,11 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   private toUrl(domain: string, objectPath: string): string {
     const cleanPath = objectPath.replace(/^\/+/, '');
+    if (this.originDomain !== undefined) {
+      // baseUrl already IS this domain's origin: no repeated domain segment.
+      const trimmed = (this.baseUrl ?? `https://${this.originDomain}`).replace(/\/$/, '');
+      return `${trimmed}/${cleanPath}`;
+    }
     if (this.baseUrl) {
       const trimmed = this.baseUrl.replace(/\/$/, '');
       // Use the same sanitized domain the file is physically stored under, so
@@ -92,6 +109,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async putObject(domain: string, objectPath: string, content: Uint8Array | string): Promise<string> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -101,6 +119,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async getObject(domain: string, objectPath: string): Promise<GetObjectResult | null> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
@@ -116,6 +135,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async exists(domain: string, objectPath: string): Promise<boolean> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
@@ -141,6 +161,7 @@ export class LocalStorageAdapter implements StorageAdapter {
    * round-trip through getObject. A never-written domain yields [].
    */
   async listObjects(domain: string, prefix: string): Promise<string[]> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     // Reuse resolvePath's traversal containment for the domain directory.
     const base = this.resolvePath(domain, '');

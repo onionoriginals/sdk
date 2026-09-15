@@ -8,7 +8,17 @@ export interface GetObjectResult {
 }
 
 export interface StorageAdapter {
-  // Writes content at a path under a logical domain root and returns a public URL
+  // Writes content at a path under a logical domain root and returns a public URL.
+  //
+  // The returned URL is a locator this adapter can itself read back through
+  // getObject/exists — it is NOT automatically the WebVH permanent hosted URL.
+  // HostedAssets.publish() (packages/sdk/src/v3/hosted.ts) requires this to
+  // equal exactly `https://${domain}/${path}` for a hosted publish to
+  // succeed; an adapter whose locator uses another scheme (e.g.
+  // MemoryStorageAdapter's `mem://`) or a different path shape is a valid
+  // general-purpose StorageAdapter but cannot satisfy hosted publication
+  // without wrapping (see HostedMemoryStorageAdapter, and
+  // LocalStorageAdapterOptions.originDomain) — see issue #780.
   putObject(domain: string, path: string, content: Uint8Array | string, options?: PutOptions): Promise<string>;
 
   // Reads content from a path under a domain root
@@ -38,5 +48,17 @@ export interface StorageAdapter {
 export interface LocalStorageAdapterOptions {
   baseDir: string;
   baseUrl?: string;
+  /**
+   * Domain-origin mode for a single-tenant local host (issue #780). When set,
+   * `baseUrl` is treated as exactly this domain's public origin: the returned
+   * URL is `${baseUrl}/${path}` with no repeated domain path segment (the
+   * default multi-tenant behavior appends `${domain}` under `baseUrl`, which
+   * duplicates the domain when `baseUrl` already points at that domain's own
+   * origin). Every `putObject`/`getObject`/`exists`/`listObjects` call must
+   * then use this exact domain, or the call throws `STORAGE_DOMAIN_MISMATCH`
+   * rather than silently mapping a different domain's files onto this
+   * adapter's one advertised origin.
+   */
+  originDomain?: string;
 }
 
