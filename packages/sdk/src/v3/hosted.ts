@@ -160,6 +160,12 @@ export class HostedAssets {
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",
       );
+    for (const resource of asset.resources)
+      if (!resource.content)
+        return error(
+          "ASSET_RESOURCE_MISSING",
+          "Supply every historical resource before hosted publication",
+        );
     const signer = captureSigner(
       options.signer ??
         this.config.signer ??
@@ -313,6 +319,12 @@ export class HostedAssets {
         "ASSET_WEBVH_BINDING",
         "Publication alias differs from signed asset history",
       );
+    for (const resource of asset.resources)
+      if (!resource.content)
+        return error(
+          "ASSET_RESOURCE_MISSING",
+          "Supply every historical resource before hosted publication",
+        );
     await this.method(prepared.did, prepared.didLog, asset.id);
     const { domain, prefix } = location(prepared.did);
     const write = async (
@@ -331,18 +343,12 @@ export class HostedAssets {
     };
     // Publish CEL last. An incomplete upload cannot advertise a complete asset document.
     try {
-      for (const resource of asset.resources) {
-        if (!resource.content)
-          return error(
-            "ASSET_RESOURCE_MISSING",
-            "Supply every historical resource before hosted publication",
-          );
+      for (const resource of asset.resources)
         await write(
           prefix + "resources/" + resource.digestMultibase,
-          resource.content,
+          resource.content!,
           "application/octet-stream",
         );
-      }
       await write(
         prefix + "did.jsonl",
         new TextEncoder().encode(
@@ -357,6 +363,11 @@ export class HostedAssets {
         "application/cel",
       );
     } catch (cause) {
+      // A StructuredError/CelError is a deterministic outcome (e.g. the
+      // adapter's own URL contract) that retrying this same object cannot
+      // change; only an unrecognized failure from the storage round trip
+      // itself is genuinely transient and worth telling callers to retry.
+      if (cause instanceof StructuredError) throw cause;
       throw new StructuredError(
         "ASSET_WEB_PUBLISH_INCOMPLETE",
         "Hosted publication incomplete; retry this same prepared publication",

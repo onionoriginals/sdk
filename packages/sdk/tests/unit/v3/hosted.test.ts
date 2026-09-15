@@ -120,6 +120,81 @@ test("a failed upload retries the identical prepared publication and substituted
   ).rejects.toThrow();
 });
 
+// #739: missing historical resource bytes is a permanent, non-retryable
+// defect, not a storage I/O failure. It must be reported as its own
+// ASSET_RESOURCE_MISSING error, both at prepare time (before signing) and
+// again at publish time (before any writes), never rewrapped as the
+// retryable ASSET_WEB_PUBLISH_INCOMPLETE the storage-failure catch produces.
+test("prepareWebPublication rejects an asset missing historical resource bytes before signing anything", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const created = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  await created.addResourceVersion("art", "v2", "text/plain", { signer });
+  const env = created.serialize();
+  env.resources = env.resources.filter((r: { version: number }) => r.version !== 1);
+  const reloaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.loadAsset(env, { allowPartial: true });
+  expect(reloaded.verification.verified).toBe(false);
+  await expect(
+    sdk.lifecycle.prepareWebPublication(reloaded.asset, { domain: "example.com" }),
+  ).rejects.toThrow("Supply every historical resource");
+});
+
+test("publishPreparedToWeb rejects missing historical resource bytes as ASSET_RESOURCE_MISSING, not a retryable storage failure, and writes nothing", async () => {
+  const store = storage();
+  let writes = 0;
+  const put = store.putObject.bind(store);
+  store.putObject = async (...args) => {
+    writes++;
+    return put(...args);
+  };
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const created = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  await created.addResourceVersion("art", "v2", "text/plain", { signer });
+  const prepared = await sdk.lifecycle.prepareWebPublication(created, {
+    domain: "example.com",
+  });
+  // Simulate an incomplete prepared publication (e.g. built from an
+  // allowPartial-loaded asset) by dropping a historical resource attachment;
+  // its catalog entry stays authenticated but binds to no bytes.
+  prepared.asset.resources = prepared.asset.resources.filter(
+    (r) => r.version !== 1,
+  );
+  const failure = await sdk.lifecycle
+    .publishPreparedToWeb(prepared)
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("ASSET_RESOURCE_MISSING");
+  expect((failure as Error).message).not.toContain("retry this same");
+  expect(writes).toBe(0);
+});
+
+test("a wrong adapter-returned storage URL propagates as ASSET_STORAGE_URL, not a retryable publish failure", async () => {
+  const inner = storage();
+  const store: StorageAdapter = {
+    ...inner,
+    async putObject(domain, path, bytes, options) {
+      await inner.putObject(domain, path, bytes, options);
+      return "https://wrong-host.example/" + path;
+    },
+  };
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: "example.com" })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("ASSET_STORAGE_URL");
+  expect((failure as Error).message).not.toContain("retry this same");
+});
+
 test("publication refuses an omitted domain before invoking custody or storage", async () => {
   const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
   const asset = await sdk.lifecycle.createAsset([]);
