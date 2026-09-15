@@ -2082,36 +2082,92 @@ export function createBitcoinRoutes(deps: {
 
     const { commitTxId } = (await req.json().catch(() => ({}))) as { commitTxId?: string };
     if (typeof commitTxId !== 'string' || !commitTxId) return json({ error: 'bad_request' }, 400);
-    let rec: InscriptionRecord | null;
-    try {
-      rec = store.get(sub, commitTxId);
-    } catch (e) {
-      const unreadable = unreadableRecords(sub, e);
-      if (unreadable) return unreadable;
-      throw e;
-    }
-    if (!rec) return json({ error: 'not_found' }, 404);
-    if (rec.status === 'confirmed' && rec.retired) {
-      // Settled: confirmations/confirmedBlockHeight/confirmedBlockHash are
-      // the frozen values from whichever poll crossed the threshold — a
-      // retired record is never rechecked, so there is nothing fresher to
-      // report.
-      return json({
+
+    // A fresh read of the persisted record, or the named 503 for an
+    // unreadable file (R3). Called both before and after the (network)
+    // status lookup below, so every mutating decision acts on current store
+    // state rather than a snapshot a concurrent reconciliation/sweep pass
+    // may have already retired or reclaimed (#705).
+    const loadRecord = (): InscriptionRecord | Response | null => {
+      try {
+        return store.get(sub, commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
+    };
+    // Settled: confirmations/confirmedBlockHeight/confirmedBlockHash are the
+    // frozen values from whichever poll crossed the threshold — a retired
+    // record is never rechecked, so there is nothing fresher to report.
+    const confirmedSettled = (r: InscriptionRecord) =>
+      json({
         commitTxId,
-        revealTxId: rec.revealTxId,
-        inscriptionId: rec.inscriptionId,
+        revealTxId: r.revealTxId,
+        inscriptionId: r.inscriptionId,
         status: 'confirmed',
         settled: true,
-        confirmations: rec.confirmations,
-        ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
-        ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
+        confirmations: r.confirmations,
+        ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
+        ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
       });
-    }
     // Retired: the record is terminal (its outpoint was won by a pair that
     // confirmed), so the recovery artifacts were dropped. Nothing to push.
-    if (!rec.revealTxHex) {
-      return json({ error: 'not_recoverable', message: 'This pair is terminal — its funding outpoint was spent by an inscription that confirmed.' }, 410);
+    const notRecoverable = () =>
+      json({ error: 'not_recoverable', message: 'This pair is terminal — its funding outpoint was spent by an inscription that confirmed.' }, 410);
+
+    const first = loadRecord();
+    if (first instanceof Response) return first;
+    if (!first) return json({ error: 'not_found' }, 404);
+    if (first.status === 'confirmed' && first.retired) return confirmedSettled(first);
+    if (!first.revealTxHex) return notRecoverable();
+    // commitTxId/revealTxId/inscriptionId never change after creation (no
+    // store method touches them); everything else is re-read below.
+    const { revealTxId, inscriptionId } = first;
+
+    // Already CONFIRMED on-chain? Then just record that and succeed. An
+    // unknown or merely-unconfirmed reveal falls through to the (idempotent)
+    // rebroadcast below — QuickNode reports both as { confirmed: false }, so
+    // presence alone cannot distinguish "in mempool" from "never broadcast".
+    // A THIRD outcome — the lookup itself failing — is tracked separately: a
+    // provider outage is not fresh negative evidence and must not be treated
+    // as one (#705).
+    let revealStatus: Awaited<ReturnType<typeof provider.getTransactionStatus>> | undefined;
+    let statusUnavailable = false;
+    try {
+      revealStatus = await provider.getTransactionStatus(revealTxId);
+    } catch {
+      statusUnavailable = true;
     }
+
+    // A network result belongs to the state observed before its await. If
+    // another recovery pass changes that state, report it and stop this attempt.
+    const reloadIfUnchanged = (expected: InscriptionRecord): InscriptionRecord | Response => {
+      const fresh = loadRecord();
+      if (fresh instanceof Response) return fresh;
+      if (!fresh) return json({ error: 'not_found' }, 404);
+      if (fresh.retired) return fresh.status === 'confirmed' ? confirmedSettled(fresh) : notRecoverable();
+      if (
+        fresh.status !== expected.status ||
+        !!fresh.superseded !== !!expected.superseded ||
+        fresh.confirmations !== expected.confirmations ||
+        fresh.confirmedBlockHeight !== expected.confirmedBlockHeight ||
+        fresh.confirmedBlockHash !== expected.confirmedBlockHash
+      ) {
+        return json({
+          commitTxId, revealTxId, inscriptionId, status: fresh.status,
+          ...(fresh.status === 'confirmed' ? {
+            settled: false,
+            confirmations: fresh.confirmations,
+            ...(fresh.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: fresh.confirmedBlockHeight } : {}),
+            ...(fresh.confirmedBlockHash !== undefined ? { confirmedBlockHash: fresh.confirmedBlockHash } : {}),
+          } : {}),
+        });
+      }
+      return fresh;
+    };
+    const rec = reloadIfUnchanged(first);
+    if (rec instanceof Response) return rec;
 
     // Rebroadcasting a SUPERSEDED pair is an explicit choice of this pair for
     // its funding outpoint: any success below must also swap the roles —
@@ -2120,22 +2176,11 @@ export function createBitcoinRoutes(deps: {
     // reconciliation branches skip, with a conflicting rival still "live".
     // (If the rival later wins on-chain anyway, the list poll's
     // confirmation-driven reconciliation swaps the roles back.)
-    const reclaimIfSuperseded = () => {
-      if (rec.superseded) reclaimOutpoint(store, sub, rec);
+    const reclaimIfSuperseded = (r: InscriptionRecord) => {
+      if (r.superseded) reclaimOutpoint(store, sub, r);
     };
-
-    // Already CONFIRMED on-chain? Then just record that and succeed. An
-    // unknown or merely-unconfirmed reveal falls through to the (idempotent)
-    // rebroadcast below — QuickNode reports both as { confirmed: false }, so
-    // presence alone cannot distinguish "in mempool" from "never broadcast".
-    let revealStatus: Awaited<ReturnType<typeof provider.getTransactionStatus>> | undefined;
-    try {
-      revealStatus = await provider.getTransactionStatus(rec.revealTxId);
-    } catch {
-      // No lookup support / transport failure — fall through to rebroadcast.
-    }
     if (revealStatus?.confirmed) {
-      reclaimIfSuperseded();
+      reclaimIfSuperseded(rec);
       store.setStatus(sub, commitTxId, 'confirmed', {
         confirmations: revealStatus.confirmations,
         blockHeight: revealStatus.blockHeight,
@@ -2145,8 +2190,8 @@ export function createBitcoinRoutes(deps: {
       if (settled) store.retire(sub, commitTxId);
       return json({
         commitTxId,
-        revealTxId: rec.revealTxId,
-        inscriptionId: rec.inscriptionId,
+        revealTxId,
+        inscriptionId,
         status: 'confirmed',
         settled,
         confirmations: revealStatus.confirmations,
@@ -2154,11 +2199,36 @@ export function createBitcoinRoutes(deps: {
         ...(revealStatus.blockHash !== undefined ? { confirmedBlockHash: revealStatus.blockHash } : {}),
       });
     }
+
+    if (statusUnavailable && rec.status === 'confirmed') {
+      // A provider outage preserves the last observed state — the same
+      // contract the automatic reconciliation path already implements
+      // (bitcoin-reconciliation.ts's readStatus). An inability to read fresh
+      // status must never itself demote a confirmed record or trigger a
+      // redundant re-broadcast of an already-confirmed transaction.
+      return json(
+        {
+          commitTxId,
+          revealTxId,
+          inscriptionId,
+          status: 'confirmed',
+          settled: false,
+          confirmations: rec.confirmations,
+          ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
+          ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
+          statusUnavailable: true,
+        },
+        503
+      );
+    }
+
     try {
-      if (revealStatus && rec.status === 'confirmed') {
-        // Persist the lost confirmation before attempting recovery. A conflict
-        // or an unavailable broadcaster must not leave a stale confirmed row.
-        // Keep rec's prior status below so the exact commit is retried first.
+      if (!statusUnavailable && rec.status === 'confirmed') {
+        // Explicit unconfirmed/reorg evidence, not merely a failed read:
+        // persist the lost confirmation before attempting recovery. A
+        // conflict or an unavailable broadcaster must not leave a stale
+        // confirmed row. Keep rec's prior status below so the exact commit
+        // is retried first.
         store.setStatus(sub, commitTxId, 'reveal_broadcast');
       }
       store.markRebroadcast(sub, commitTxId);
@@ -2167,13 +2237,26 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'inscription_reconciliation_failed', message: 'Recovery attempt could not be recorded durably. Retry when storage is available.' }, 503);
     }
 
+    // Include this attempt's own synchronous demotion/journal writes in
+    // the next observation, before any further network work.
+    let observed = loadRecord();
+    if (observed instanceof Response) return observed;
+    if (!observed) return json({ error: 'not_found' }, 404);
+
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
+      const afterCommit = reloadIfUnchanged(observed);
+      if (afterCommit instanceof Response) return afterCommit;
       if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
-      reclaimIfSuperseded();
+      reclaimIfSuperseded(afterCommit);
       store.setStatus(sub, commitTxId, 'commit_broadcast');
+      observed = loadRecord();
+      if (observed instanceof Response) return observed;
+      if (!observed) return json({ error: 'not_found' }, 404);
     }
     let revealErr = await broadcastIdempotent(rec.revealTxHex);
+    let afterReveal = reloadIfUnchanged(observed);
+    if (afterReveal instanceof Response) return afterReveal;
     // F1 — the terminal deadlock. A commit that broadcast fine can still be
     // EVICTED from every mempool by a fee spike, and with no reveal child
     // there is no CPFP to pull it back: it never confirms, so the list poll's
@@ -2186,14 +2269,20 @@ export function createBitcoinRoutes(deps: {
     if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
-      if (!commitErr) revealErr = await broadcastIdempotent(rec.revealTxHex);
+      const afterFallbackCommit = reloadIfUnchanged(observed);
+      if (afterFallbackCommit instanceof Response) return afterFallbackCommit;
+      if (!commitErr) {
+        revealErr = await broadcastIdempotent(rec.revealTxHex);
+        afterReveal = reloadIfUnchanged(observed);
+        if (afterReveal instanceof Response) return afterReveal;
+      }
     }
     if (revealErr) {
-      return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'commit_broadcast' });
+      return json({ commitTxId, revealTxId, inscriptionId, status: 'commit_broadcast' });
     }
-    reclaimIfSuperseded();
+    reclaimIfSuperseded(afterReveal);
     store.setStatus(sub, commitTxId, 'reveal_broadcast');
-    return json({ commitTxId, revealTxId: rec.revealTxId, inscriptionId: rec.inscriptionId, status: 'reveal_broadcast' });
+    return json({ commitTxId, revealTxId, inscriptionId, status: 'reveal_broadcast' });
   };
 
   return {
