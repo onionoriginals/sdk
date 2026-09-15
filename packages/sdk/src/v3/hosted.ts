@@ -332,9 +332,27 @@ export class HostedAssets {
       content: Uint8Array,
       contentType: string,
     ) => {
-      const url = await this.storage.putObject(domain, path, content, {
-        contentType,
-      });
+      // Retryability is decided by where a failure originates, not by which
+      // error class it happens to be: the adapter contract places no
+      // restriction on what putObject() may throw, so even a custom
+      // adapter's own StructuredError for a transient condition must still
+      // be wrapped with the recoverable `details.publication`. Only this
+      // function's own deterministic checks (below) bypass that wrapping.
+      let url: string;
+      try {
+        url = await this.storage.putObject(domain, path, content, {
+          contentType,
+        });
+      } catch (cause) {
+        throw new StructuredError(
+          "ASSET_WEB_PUBLISH_INCOMPLETE",
+          "Hosted publication incomplete; retry this same prepared publication",
+          {
+            publication: prepared,
+            cause: cause instanceof Error ? cause.message : "storage failure",
+          },
+        );
+      }
       if (url !== `https://${domain}/${path}`)
         return error(
           "ASSET_STORAGE_URL",
@@ -342,41 +360,25 @@ export class HostedAssets {
         );
     };
     // Publish CEL last. An incomplete upload cannot advertise a complete asset document.
-    try {
-      for (const resource of asset.resources)
-        await write(
-          prefix + "resources/" + resource.digestMultibase,
-          resource.content!,
-          "application/octet-stream",
-        );
+    for (const resource of asset.resources)
       await write(
-        prefix + "did.jsonl",
-        new TextEncoder().encode(
-          prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") +
-            "\n",
-        ),
-        "application/jsonl",
+        prefix + "resources/" + resource.digestMultibase,
+        resource.content!,
+        "application/octet-stream",
       );
-      await write(
-        prefix + "cel.json",
-        encodeDocument(asset.celLog, "json"),
-        "application/cel",
-      );
-    } catch (cause) {
-      // A StructuredError/CelError is a deterministic outcome (e.g. the
-      // adapter's own URL contract) that retrying this same object cannot
-      // change; only an unrecognized failure from the storage round trip
-      // itself is genuinely transient and worth telling callers to retry.
-      if (cause instanceof StructuredError) throw cause;
-      throw new StructuredError(
-        "ASSET_WEB_PUBLISH_INCOMPLETE",
-        "Hosted publication incomplete; retry this same prepared publication",
-        {
-          publication: prepared,
-          cause: cause instanceof Error ? cause.message : "storage failure",
-        },
-      );
-    }
+    await write(
+      prefix + "did.jsonl",
+      new TextEncoder().encode(
+        prepared.didLog.map((entry) => JSON.stringify(entry)).join("\n") +
+          "\n",
+      ),
+      "application/jsonl",
+    );
+    await write(
+      prefix + "cel.json",
+      encodeDocument(asset.celLog, "json"),
+      "application/cel",
+    );
     const hostingEvidence = await this.confirmPublicReachability(
       domain,
       prefix,
