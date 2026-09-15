@@ -47,7 +47,7 @@ beforeAll(async () => {
     "../sdk/verify-original": `export { evaluateBtcoCheck } from ${JSON.stringify(root + "/sdk/verify-original.ts")}; export const verifyOriginal=async()=>['hash','log','cel'].map(id=>({id,ok:true,detail:'fixture hosted verification'}));`,
     "@originals/sdk/cel": `export const validateDocument=x=>x; export const verifyHistory=()=>({state:{active:true,assetId:'ni:///sha-256;'+ 'A'.repeat(43),controller:'controller',resources:[]}});`,
     "../sdk/public-sat-provider": `export class PublicSatSnapshotProvider { async getSatSnapshot(){if(window.qa.mode==='unavailable')throw Error('fixture unavailable');return {network:'regtest'};} }`,
-    "@originals/sdk": `export const OriginalsSDK={create:()=>({lifecycle:{resolveAssetFromSat:async()=>({status:'accepted',asset:{id:window.qa.mode==='accepted'?'ni:///sha-256;'+'A'.repeat(43):'ni:///sha-256;'+'B'.repeat(42)+'A'},resolution:{state:{controller:'controller',active:true},publications:[{}],chainEvidence:{assurance:'node-validated'}}})}})};`,
+    "@originals/sdk": `export const OriginalsSDK={create:()=>({lifecycle:{resolveAssetFromSat:async()=>{if(window.qa.mode==='slow-accepted')await new Promise(r=>setTimeout(r,500));return {status:'accepted',asset:{id:(window.qa.mode==='accepted'||window.qa.mode==='slow-accepted')?'ni:///sha-256;'+'A'.repeat(43):'ni:///sha-256;'+'B'.repeat(42)+'A'},resolution:{state:{controller:'controller',active:true},publications:[{}],chainEvidence:{assurance:'node-validated'}}};}}})};`,
   };
   const build = await Bun.build({
     entrypoints: [pagePath],
@@ -143,6 +143,43 @@ for (const mode of isolated ? ["unrelated", "unavailable", "accepted"] : []) {
             )
             .count(),
         ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+}
+if (isolated) {
+  browserTest(
+    "the verified badge stays pending until the Bitcoin check itself resolves",
+    async () => {
+      const page = await browser.newPage();
+      page.setDefaultTimeout(3000);
+      try {
+        await page.goto(server.url + "?mode=slow-accepted");
+        await page
+          .getByRole("heading", { name: "Fixture Original", exact: true })
+          .waitFor();
+        // The local hash/log/cel checks are all fixture-true and land almost
+        // immediately, well before the 500ms-delayed Bitcoin resolution. If
+        // the badge is computed from those local checks alone, it will read
+        // "verified" here — which is exactly the premature-badge bug.
+        await page.getByText("Checking the signatures and file…").waitFor();
+        expect(
+          await page.locator(".explore-verification").getAttribute("data-verified"),
+        ).not.toBe("true");
+        // Once the Bitcoin check actually resolves, the badge should flip to
+        // verified — proving the pending state above was not a stuck/broken
+        // badge, just an honestly-incomplete one.
+        await page
+          .getByText(
+            "1 accepted on-chain publication verified (node-validated) → sat 42",
+            { exact: true },
+          )
+          .waitFor();
+        expect(
+          await page.locator(".explore-verification").getAttribute("data-verified"),
+        ).toBe("true");
       } finally {
         await page.close();
       }
