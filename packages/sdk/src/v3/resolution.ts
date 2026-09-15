@@ -117,7 +117,7 @@ const layerNetworkMismatch = (): {
   chainEvidence: Readonly<ChainEvidence>;
 } => ({
   status: "identity-mismatch",
-  reason: "Asset network differs from configured provider",
+  reason: "Asset layer or network differs from configured provider",
   scope: "sat",
   crossSatCanonicality: "unknown",
   chainEvidence: { assurance: "unavailable" },
