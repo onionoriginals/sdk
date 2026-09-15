@@ -67,4 +67,21 @@ describe('LocalStorageAdapter originDomain mode (#780)', () => {
     const url = await adapter.putObject('myasset.com', 'a.bin', new Uint8Array([1]));
     expect(url).toBe('https://cdn.example.com/myasset.com/a.bin');
   });
+
+  test('originDomain mode stores files directly under baseDir, with no per-domain subdirectory, matching the advertised URL', async () => {
+    // A static file server rooted at baseDir must find the file at exactly
+    // the path toUrl() advertises (`a/b.bin`) — not nested under a domain
+    // subdirectory it never mentions.
+    const adapter = new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com' });
+    await adapter.putObject('example.com', 'a/b.bin', new Uint8Array([1, 2]));
+    expect(fs.existsSync(path.join(tempDir, 'a', 'b.bin'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, 'example.com', 'a', 'b.bin'))).toBe(false);
+  });
+
+  test('without originDomain, files still nest under a per-domain subdirectory (unchanged multi-tenant layout)', async () => {
+    const adapter = new LocalStorageAdapter({ baseDir: tempDir });
+    await adapter.putObject('myasset.com', 'a.bin', new Uint8Array([1]));
+    expect(fs.existsSync(path.join(tempDir, 'myasset.com', 'a.bin'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, 'a.bin'))).toBe(false);
+  });
 });

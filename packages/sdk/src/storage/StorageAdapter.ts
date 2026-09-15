@@ -57,7 +57,11 @@ export interface LocalStorageAdapterOptions {
    * origin). Every `putObject`/`getObject`/`exists`/`listObjects` call must
    * then use this exact domain, or the call throws `STORAGE_DOMAIN_MISMATCH`
    * rather than silently mapping a different domain's files onto this
-   * adapter's one advertised origin.
+   * adapter's one advertised origin. Files are also stored directly under
+   * `baseDir` with no per-domain subdirectory (unlike the default
+   * multi-tenant layout), so the physical layout matches the URL: pointing
+   * any static file server's document root at `baseDir` serves exactly the
+   * paths this adapter advertises.
    */
   originDomain?: string;
 }

@@ -65,20 +65,29 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   private resolvePath(domain: string, objectPath: string): string {
     const path = requirePath();
-    const safeDomain = this.sanitizeDomain(domain);
     const cleanPath = objectPath.replace(/^\/+/, '');
-    const base = path.resolve(this.baseDir, safeDomain);
-    // Defense in depth: the domain directory itself must be a strict child of
-    // baseDir; '..' segments in a domain (which can derive from external data)
-    // must not become a read/write primitive outside baseDir.
-    const baseRelative = path.relative(path.resolve(this.baseDir), base);
-    if (
-      baseRelative === '' ||
-      baseRelative === '..' ||
-      baseRelative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(baseRelative)
-    ) {
-      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+    // In originDomain mode, checkOriginDomain() already guarantees `domain`
+    // is the one configured domain, so baseDir itself IS that domain's root —
+    // no per-domain subdirectory is needed to keep domains apart, and adding
+    // one would desync the physical layout from toUrl()'s canonical
+    // `${origin}/${path}` (a static file server rooted at baseDir would 404
+    // looking for a domain segment that toUrl() never advertised).
+    const base = this.originDomain !== undefined
+      ? path.resolve(this.baseDir)
+      : path.resolve(this.baseDir, this.sanitizeDomain(domain));
+    if (this.originDomain === undefined) {
+      // Defense in depth: the domain directory itself must be a strict child
+      // of baseDir; '..' segments in a domain (which can derive from
+      // external data) must not become a read/write primitive outside baseDir.
+      const baseRelative = path.relative(path.resolve(this.baseDir), base);
+      if (
+        baseRelative === '' ||
+        baseRelative === '..' ||
+        baseRelative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(baseRelative)
+      ) {
+        throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+      }
     }
     const fullPath = path.resolve(base, cleanPath);
     // Contain object paths inside the domain directory: '..' segments in a
