@@ -257,6 +257,16 @@
   color: var(--text-secondary);
 }
 
+/* An arbitrary-bytes upload (not text, not an image) has nothing to render —
+   say so, centered, rather than leaving the frame looking broken. */
+.demo-art-binary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-style: italic;
+}
+
 .demo-field input,
 .demo-field select {
   width: 100%;

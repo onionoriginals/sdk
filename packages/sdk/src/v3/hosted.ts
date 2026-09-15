@@ -155,7 +155,7 @@ export class HostedAssets {
         "ASSET_WEB_STATE",
         "Publish an active local asset with no unsigned drafts",
       );
-    if (typeof options?.domain !== "string" || !options.domain)
+    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
       return error(
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",
@@ -173,9 +173,6 @@ export class HostedAssets {
     );
     if (signer.controller !== asset.state.controller)
       return error("CEL_AUTHORITY", "Only the current controller can publish");
-    const methodSigner = captureSigner(options.webvhSigner ?? signer);
-    if (methodSigner.algorithm !== "Ed25519")
-      return error("WEBVH_SIGNER", "Supply an Ed25519 WebVH method signer");
     // Snapshot before the first await: concurrent edits stay on the caller's local asset.
     const envelope = asset.serialize();
     const state = verifyHistory(envelope.eventLog).state;
@@ -205,6 +202,9 @@ export class HostedAssets {
         didLog,
       };
     }
+    const methodSigner = captureSigner(options.webvhSigner ?? signer);
+    if (methodSigner.algorithm !== "Ed25519")
+      return error("WEBVH_SIGNER", "Supply an Ed25519 WebVH method signer");
     const paths = options.paths ?? [
       "published",
       "anonymous",

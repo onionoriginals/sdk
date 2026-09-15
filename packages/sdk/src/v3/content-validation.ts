@@ -5,6 +5,7 @@ import { StructuredError } from '@originals/cel';
 import { digestBytes, type SatSnapshot, type IndependentContentEvidence } from '@originals/cel/v3';
 import { base64 } from '@scure/base';
 import { readResponseBodyCapped } from '../adapters/response-body-limit.js';
+import { METADATA_TAG } from '../bitcoin/ordinals-tags.js';
 
 /**
  * Independently derive confirmed inscriptions' media type/content from chain data, for
@@ -49,13 +50,17 @@ const inscriptionId = /^([0-9a-f]{64})i(0|[1-9]\d*)$/;
  */
 type DerivedInscription = { contentType?: string; body: Uint8Array; rawMetadata?: Uint8Array };
 
-const METADATA_TAG = 5;
-
 /**
  * Extract the raw (pre-CBOR-decode) bytes of the metadata tag for each sequential inscription
  * envelope in a script, without invoking any CBOR decoding — so the result is byte-identical
  * to what any raw Ordinals indexer would report for `/r/metadata/:id`, never subject to a
  * canonical-re-encoding mismatch against semantically-equal but differently-encoded CBOR.
+ *
+ * Also the write-side escape hatch from micro-ordinals' own CBOR encoder, which cannot encode a
+ * JS `number` in `[2^32, 2^53)` (see `../bitcoin/ordinals-tags.ts`'s `metadataTagChunks`): callers
+ * that build the metadata tag from pre-encoded CEL CBOR bytes must read it back the same raw way,
+ * never through `Inscription.tags.metadata`, whose micro-ordinals CBOR decode is not this
+ * codebase's concern to keep exactly correct for every CEL-representable value.
  *
  * Only valid once `parseInscriptions(script, true)` has already returned a defined result for
  * this same script: strict mode guarantees every envelope is non-cursed, sequential, and starts
@@ -65,7 +70,7 @@ const METADATA_TAG = 5;
  * format (`OP_FALSE OP_IF "ord" [tag,data]* OP_0 [body-chunks]* OP_ENDIF`), not an internal
  * micro-ordinals implementation detail, so it does not depend on that library's non-public API.
  */
-function rawMetadataPerEnvelope(script: ScriptType, count: number): (Uint8Array | undefined)[] {
+export function rawMetadataPerEnvelope(script: ScriptType, count: number): (Uint8Array | undefined)[] {
   const results: (Uint8Array | undefined)[] = [];
   let pos = 5; // script[0..4] = [pubkey, 'CHECKSIG', 0, 'IF', "ord"]; first envelope's payload starts here
   for (let n = 0; n < count; n++) {

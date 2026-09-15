@@ -16,12 +16,19 @@ import { parseDocument, verifyHistory } from '@originals/sdk/cel';
  */
 import {
   mkdirSync,
-  writeFileSync,
   readFileSync,
   existsSync,
   statSync,
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  renameSync,
+  linkSync,
+  unlinkSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { untrustedHeaders } from './webvh-host';
 
 /** Bitcoin inscription state carried on an Original once it migrates to did:btco. */
@@ -76,6 +83,100 @@ export interface OriginalsStore {
 const CTYPE_SUFFIX = '.ctype';
 const OWNER_SUFFIX = '.owner';
 
+function toBuffer(data: string | Uint8Array): Uint8Array {
+  return typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
+}
+
+/**
+ * `writeSync` is permitted to write fewer bytes than given in one call (a
+ * short write — possible on any fd, not just pipes/sockets). Looping until
+ * every byte is written is what makes the callers below actually atomic:
+ * an unchecked short write would durably commit a truncated file.
+ */
+function writeAllSync(fd: number, data: Uint8Array): void {
+  let written = 0;
+  while (written < data.length) {
+    written += writeSync(fd, data, written, data.length - written);
+  }
+}
+
+/** Best-effort remove; the caller is already unwinding from a real error. */
+function tryUnlink(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* best-effort cleanup */
+  }
+}
+
+/**
+ * Atomic AND durable write (write → fsync → rename → fsync dir), matching
+ * `inscriptions-store.ts`'s `writeJson`. `rename(2)` on the same filesystem
+ * is atomic against a process crash, and fsyncing the temp file before the
+ * rename (then the containing directory after) closes the window where a
+ * host crash leaves an empty/torn file after reboot. Any failure before the
+ * rename removes the temp file rather than leaking it.
+ */
+function atomicWriteFile(path: string, data: string | Uint8Array): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const fd = openSync(tmp, 'w');
+    try {
+      writeAllSync(fd, toBuffer(data));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  } catch (err) {
+    tryUnlink(tmp);
+    throw err;
+  }
+  if (process.platform !== 'win32') {
+    const dirFd = openSync(dirname(path), 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  }
+}
+
+/**
+ * Atomically CREATE `path` with `data`, never overwriting an existing file:
+ * write to a uniquely-named temp file, fsync it, then `link(2)` it into
+ * place. `link` fails with EEXIST if `path` already exists — an atomic
+ * create-if-absent at the filesystem level, so two racing writers can never
+ * both believe they created the file first. Throws with `.code === 'EEXIST'`
+ * if `path` already exists; the temp file is always cleaned up, whether the
+ * write, the link, or neither succeeded.
+ */
+function atomicCreateExclusive(path: string, data: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const fd = openSync(tmp, 'w');
+    try {
+      writeAllSync(fd, toBuffer(data));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    linkSync(tmp, path);
+  } finally {
+    tryUnlink(tmp);
+  }
+  if (process.platform !== 'win32') {
+    const dirFd = openSync(dirname(path), 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  }
+}
+
 /** Split a key into safe segments, rejecting empty / dot / traversal segments. */
 function keySegments(key: string): string[] {
   const segs = decodeURIComponent(key).split('/').filter((s) => s.length > 0);
@@ -118,31 +219,67 @@ export function createOriginalsStore(opts: {
 
   function writeIndex(subOrgId: string, idx: UserIndex): void {
     const path = subFile(dataDir, subOrgId);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(idx));
+    atomicWriteFile(path, JSON.stringify(idx));
+  }
+
+  // First-writer-wins: an object is owned by the sub that created it. A
+  // different user can never overwrite it (defense against a signed-in user
+  // clobbering another's durable DID log/resources). Accidental collisions
+  // don't arise — publisher logs are per-user-slug, asset logs/resources are
+  // per-asset-SCID — so this only ever fires on a deliberate cross-user write.
+  //
+  // The owner marker is the SOLE commit point for ownership, and it is
+  // established (via atomicCreateExclusive, below) BEFORE any resource bytes
+  // are written — never after. That ordering, not just atomicity of each
+  // individual file, is what closes the crash window: a process crash/kill
+  // between this claim and the bytes write below leaves an owner marker with
+  // no bytes yet (a legitimate, resumable in-progress write the same owner
+  // can safely retry), never bytes with no owner marker (which the old code
+  // let a different subOrgId then silently claim as "unowned").
+  //
+  // A key can still reach an inconsistent state from data written before this
+  // fix landed (or from disk corruption): resource bytes present with no
+  // owner marker. There is no way to recover who the true owner was, so that
+  // state fails closed for every caller — including the original owner —
+  // rather than let it be silently (re)claimed.
+  function claimOrVerifyOwner(target: string, ownerPath: string, subOrgId: string): void {
+    if (existsSync(ownerPath)) {
+      if (readFileSync(ownerPath, 'utf8') !== subOrgId) throw new Error('FORBIDDEN');
+      return; // already owned by this caller — safe to (re)write
+    }
+    if (existsSync(target)) {
+      // Orphaned data: bytes with no owner marker. Never guessable/claimable.
+      throw new Error('INCONSISTENT_OWNERSHIP');
+    }
+    try {
+      atomicCreateExclusive(ownerPath, subOrgId);
+    } catch (err) {
+      // Lost the create race to a concurrent writer between the existsSync
+      // check above and here: fall back to the normal verify-owner path.
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      if (!existsSync(ownerPath) || readFileSync(ownerPath, 'utf8') !== subOrgId) {
+        throw new Error('FORBIDDEN');
+      }
+    }
   }
 
   function saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void {
     const target = keyToPath(hostedDir, key); // validates traversal
-    // First-writer-wins: an object is owned by the sub that created it. A
-    // different user can never overwrite it (defense against a signed-in user
-    // clobbering another's durable DID log/resources). Accidental collisions
-    // don't arise — publisher logs are per-user-slug, asset logs/resources are
-    // per-asset-SCID — so this only ever fires on a deliberate cross-user write.
     const ownerPath = target + OWNER_SUFFIX;
-    if (existsSync(ownerPath) && readFileSync(ownerPath, 'utf8') !== subOrgId) {
-      throw new Error('FORBIDDEN');
-    }
 
+    // Quota is checked BEFORE the ownership claim below: claiming an
+    // unclaimed key is a durable, one-way commitment (the true owner is then
+    // FORBIDDEN from ever claiming it themselves), so a request that was
+    // always going to be rejected for quota must never reserve the key first.
     const idx = readIndex(subOrgId);
     const prev = idx.sizes[key] ?? 0;
     const nextTotal = idx.totalBytes - prev + bytes.byteLength;
     if (nextTotal > maxTotalBytes) throw new Error('STORE_FULL');
 
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, bytes);
-    writeFileSync(target + CTYPE_SUFFIX, contentType);
-    writeFileSync(ownerPath, subOrgId);
+    claimOrVerifyOwner(target, ownerPath, subOrgId);
+
+    atomicWriteFile(target, bytes);
+    atomicWriteFile(target + CTYPE_SUFFIX, contentType);
 
     idx.sizes[key] = bytes.byteLength;
     idx.totalBytes = nextTotal;

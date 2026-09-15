@@ -3,6 +3,7 @@ import {
   createTurnkeyClient,
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
+  createInProcessSubOrgLock,
 } from '../src/server/turnkey-client';
 
 describe('turnkey-client', () => {
@@ -161,6 +162,36 @@ describe('turnkey-client', () => {
       const result = await getOrCreateTurnkeySubOrg('new@example.com', client);
       expect(result).toBe('brand_new_org');
       expect(createSubOrganization).toHaveBeenCalled();
+    });
+
+    test('provisions the Bitcoin auth-key account with a Bitcoin address format, not Ethereum', async () => {
+      // The secp256k1/m/44'/0'/0'/0/0 account is documented ("Bitcoin path
+      // for auth-key") and consumed for Bitcoin funding/sat verification, so
+      // its addressFormat must match the client-side definition for the same
+      // curve/path rather than defaulting to an Ethereum address.
+      const createSubOrganization = mock(() =>
+        Promise.resolve({
+          activity: {
+            result: {
+              createSubOrganizationResultV7: { subOrganizationId: 'brand_new_org' },
+            },
+          },
+        })
+      );
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        createSubOrganization,
+      });
+
+      await getOrCreateTurnkeySubOrg('new@example.com', client);
+
+      const callArgs = (createSubOrganization as any).mock.calls[0][0];
+      const btcAccount = callArgs.wallet.accounts.find(
+        (acc: { curve: string }) => acc.curve === 'CURVE_SECP256K1'
+      );
+      expect(btcAccount).toBeDefined();
+      expect(btcAccount.path).toBe("m/44'/0'/0'/0/0");
+      expect(btcAccount.addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR');
     });
 
     test('repairs walletless sub-org in place instead of minting a new identity', async () => {
@@ -356,6 +387,39 @@ describe('turnkey-client', () => {
       expect(createSubOrganization).not.toHaveBeenCalled();
     });
 
+    test('rethrows a message-only "not found" transport error instead of creating a duplicate', async () => {
+      // A generic transport/routing error unrelated to Turnkey's own
+      // NOT_FOUND response (no numeric `code`) must never be treated as
+      // "no existing sub-org" just because its message happens to contain
+      // "not found" - that mints a duplicate identity for an existing user.
+      const transportError = new Error('404 Not Found: no such route on this host');
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(transportError)),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('existing-user@example.com', client)).rejects.toThrow(
+        'Failed to look up existing Turnkey sub-organization'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('rethrows a message-only "does not exist" error wrapped in a cause chain', async () => {
+      const transportError = new Error('upstream service does not exist in this region');
+      const wrapped = new Error('lookup failed', { cause: transportError });
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(wrapped)),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'Failed to look up existing Turnkey sub-organization'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
     test('detects a definitive not-found wrapped in a cause chain', async () => {
       const notFound = Object.assign(new Error('resource not found'), { code: 5 });
       const wrapped = new Error('lookup failed', { cause: notFound });
@@ -433,6 +497,154 @@ describe('turnkey-client', () => {
       const callArgs = (createSubOrganization as any).mock.calls[0][0];
       expect(callArgs.rootUsers[0].userName).toBe('bob@example.com');
       expect(callArgs.rootUsers[0].userEmail).toBe('bob@example.com');
+    });
+
+    describe('concurrency (TOCTOU race, #728)', () => {
+      test('two concurrent calls for the same brand-new email create only one sub-org and resolve to the same ID', async () => {
+        // Reproduces the race from #728: both calls must observe an
+        // initially-empty lookup, yet only one createSubOrganization call may
+        // happen, and both callers must resolve to the same sub-org ID.
+        //
+        // The mock backend is stateful (like the real Turnkey API): once a
+        // sub-org is created, a subsequent lookup for the same email finds
+        // it. Without serializing the lookup-then-create sequence, both
+        // calls would independently observe an empty lookup (as in the
+        // real #728 race) and both would create; with serialization, the
+        // second call's lookup runs only after the first call's create has
+        // taken effect.
+        let createCalls = 0;
+        let persistedSubOrgIds: string[] = [];
+        const getSubOrgIds = mock(() => Promise.resolve({ organizationIds: persistedSubOrgIds }));
+        const getWallets = mock(() => Promise.resolve({ wallets: [{ walletId: 'w1' }] }));
+        const createSubOrganization = mock(async () => {
+          // Yield so an unserialized second call would have a chance to
+          // start its own lookup/create before this one finishes.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          createCalls++;
+          const id = `sub-org-${createCalls}`;
+          persistedSubOrgIds = [id];
+          return {
+            activity: {
+              result: { createSubOrganizationResultV7: { subOrganizationId: id } },
+            },
+          };
+        });
+        const client = createMockClient({
+          getSubOrgIds,
+          getWallets,
+          createSubOrganization,
+        });
+
+        const [a, b] = await Promise.all([
+          getOrCreateTurnkeySubOrg('race-new-user@example.com', client),
+          getOrCreateTurnkeySubOrg('race-new-user@example.com', client),
+        ]);
+
+        expect(createCalls).toBe(1);
+        expect(a).toBe(b);
+        expect(a).toBe('sub-org-1');
+      });
+
+      test('does not serialize concurrent calls for unrelated emails', async () => {
+        // Record start/end events instead of asserting on wall-clock elapsed
+        // time (flaky under CI scheduling delays): a correct implementation
+        // must start BOTH lookups before EITHER finishes.
+        const events: string[] = [];
+        const client = createMockClient({
+          getSubOrgIds: mock(async (params: any) => {
+            events.push(`start:${params.filterValue}`);
+            await new Promise((resolve) => setTimeout(resolve, 15));
+            events.push(`end:${params.filterValue}`);
+            return { organizationIds: ['existing'] };
+          }),
+        });
+
+        await Promise.all([
+          getOrCreateTurnkeySubOrg('alice-unrelated@example.com', client),
+          getOrCreateTurnkeySubOrg('bob-unrelated@example.com', client),
+        ]);
+
+        const startEvents = events.filter((e) => e.startsWith('start:'));
+        const endEvents = events.filter((e) => e.startsWith('end:'));
+        // If the lock serialized unrelated keys, bob's start would come
+        // after alice's end (events: start:alice, end:alice, start:bob,
+        // end:bob). Concurrent execution interleaves both starts first.
+        expect(startEvents).toEqual(['start:alice-unrelated@example.com', 'start:bob-unrelated@example.com']);
+        expect(events.indexOf(startEvents[1])).toBeLessThan(events.indexOf(endEvents[0]));
+      });
+
+      test('releases the lock after a failed call so a later call for the same email proceeds', async () => {
+        const failingClient = createMockClient({
+          getSubOrgIds: mock(() => Promise.reject(new Error('lookup exploded'))),
+        });
+        await expect(
+          getOrCreateTurnkeySubOrg('retry-after-failure@example.com', failingClient)
+        ).rejects.toThrow('lookup exploded');
+
+        const recoveredClient = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['recovered_org'] })),
+        });
+        const result = await getOrCreateTurnkeySubOrg(
+          'retry-after-failure@example.com',
+          recoveredClient
+        );
+        expect(result).toBe('recovered_org');
+      });
+    });
+
+    describe('createInProcessSubOrgLock', () => {
+      test('serializes calls for the same key', async () => {
+        const lock = createInProcessSubOrgLock();
+        const order: string[] = [];
+
+        const first = lock.withLock('key-a', async () => {
+          order.push('first-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('first-end');
+          return 1;
+        });
+        const second = lock.withLock('key-a', async () => {
+          order.push('second-start');
+          return 2;
+        });
+
+        expect(await Promise.all([first, second])).toEqual([1, 2]);
+        expect(order).toEqual(['first-start', 'first-end', 'second-start']);
+      });
+
+      test('does not serialize calls for different keys', async () => {
+        const lock = createInProcessSubOrgLock();
+        const order: string[] = [];
+
+        const first = lock.withLock('key-a', async () => {
+          order.push('a-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('a-end');
+        });
+        const second = lock.withLock('key-b', async () => {
+          order.push('b-start');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          order.push('b-end');
+        });
+
+        await Promise.all([first, second]);
+        // Both should have started before either finished.
+        expect(order.slice(0, 2).sort()).toEqual(['a-start', 'b-start']);
+      });
+
+      test('releases the lock even when the guarded function throws', async () => {
+        const lock = createInProcessSubOrgLock();
+
+        await expect(
+          lock.withLock('key-a', async () => {
+            throw new Error('boom');
+          })
+        ).rejects.toThrow('boom');
+
+        // A subsequent call for the same key must not be blocked forever.
+        const result = await lock.withLock('key-a', async () => 'ok');
+        expect(result).toBe('ok');
+      });
     });
   });
 });
