@@ -23,6 +23,18 @@ describe('bitcoin-address validation', () => {
         expect(() => validateBitcoinAddress('bc1qeklep85ntjz4605drds6aww9u0qr46qzrv5xswd35uhjuj8ahfcqgf6hak', 'mainnet')).not.toThrow();
       });
 
+      test('accepts valid mainnet P2TR (Taproot, bech32m) address', () => {
+        // Regression for https://github.com/onionoriginals/sdk/issues/713:
+        // bitcoinjs-lib v7 requires initEccLib() before it will validate any
+        // Taproot address; this must succeed without one.
+        expect(() => validateBitcoinAddress('bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297', 'mainnet')).not.toThrow();
+      });
+
+      test('rejects mainnet P2TR address with invalid checksum', () => {
+        expect(() => validateBitcoinAddress('bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3298', 'mainnet'))
+          .toThrow(/Invalid Bitcoin address/i);
+      });
+
       test('rejects mainnet address with invalid checksum', () => {
         // Modified last character to break checksum
         expect(() => validateBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdd', 'mainnet'))
@@ -44,6 +56,14 @@ describe('bitcoin-address validation', () => {
         expect(() => validateBitcoinAddress('tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7', 'regtest')).not.toThrow();
       });
 
+      test('accepts a native regtest (bcrt1p) P2TR address', () => {
+        expect(() => validateBitcoinAddress('bcrt1pnk2g6ndajtlzklp6ecwdlx0h77wtkgls4sgwmuerhzawxmzca2gskhckm8', 'regtest')).not.toThrow();
+      });
+
+      test('accepts a testnet-format (tb1p) P2TR address on regtest', () => {
+        expect(() => validateBitcoinAddress('tb1pnk2g6ndajtlzklp6ecwdlx0h77wtkgls4sgwmuerhzawxmzca2gsmwjswa', 'regtest')).not.toThrow();
+      });
+
       test('rejects mainnet address on regtest network', () => {
         expect(() => validateBitcoinAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'regtest'))
           .toThrow(/Invalid/i);
@@ -54,6 +74,11 @@ describe('bitcoin-address validation', () => {
       test('accepts valid signet bech32 (tb1) address', () => {
         // Signet uses tb1 prefix like testnet
         expect(() => validateBitcoinAddress('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx', 'signet')).not.toThrow();
+      });
+
+      test('accepts a valid testnet/signet (tb1p) P2TR address', () => {
+        expect(() => validateBitcoinAddress('tb1pnk2g6ndajtlzklp6ecwdlx0h77wtkgls4sgwmuerhzawxmzca2gsmwjswa', 'testnet')).not.toThrow();
+        expect(() => validateBitcoinAddress('tb1pnk2g6ndajtlzklp6ecwdlx0h77wtkgls4sgwmuerhzawxmzca2gsmwjswa', 'signet')).not.toThrow();
       });
 
       test('accepts valid signet legacy addresses', () => {
@@ -167,6 +192,7 @@ describe('bitcoin-address validation', () => {
           'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',  // P2WPKH
           'bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3', // P2WSH
           'bc1qeklep85ntjz4605drds6aww9u0qr46qzrv5xswd35uhjuj8ahfcqgf6hak', // P2WSH
+          'bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297', // P2TR (Taproot)
         ];
 
         validAddresses.forEach(address => {
@@ -213,8 +239,14 @@ describe('bitcoin-address validation', () => {
     });
   });
 
-  describe('integration with bitcoinjs-lib', () => {
-    test('validates addresses that bitcoinjs-lib can decode', () => {
+  // validateBitcoinAddress() itself no longer depends on bitcoinjs-lib (see #713:
+  // bitcoinjs-lib v7 needs an explicit initEccLib() call before it can validate
+  // Taproot addresses, which this package never provided). These tests keep
+  // bitcoinjs-lib's independent P2WPKH/base58 decoding as a cross-check that the
+  // @scure/btc-signer-based validator hasn't drifted from it for non-Taproot
+  // address types.
+  describe('cross-check against bitcoinjs-lib for non-Taproot addresses', () => {
+    test('validates addresses that bitcoinjs-lib can also decode', () => {
       const validMainnetAddresses = [
         'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
         'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
@@ -223,13 +255,13 @@ describe('bitcoin-address validation', () => {
       validMainnetAddresses.forEach(address => {
         // Should not throw with our validator
         expect(() => validateBitcoinAddress(address, 'mainnet')).not.toThrow();
-        
+
         // Should also not throw with bitcoinjs-lib directly
         expect(() => bitcoin.address.toOutputScript(address, bitcoin.networks.bitcoin)).not.toThrow();
       });
     });
 
-    test('rejects addresses that bitcoinjs-lib rejects', () => {
+    test('rejects addresses that bitcoinjs-lib also rejects', () => {
       const invalidAddresses = [
         'bc1qinvalid',
         '1InvalidBase58',

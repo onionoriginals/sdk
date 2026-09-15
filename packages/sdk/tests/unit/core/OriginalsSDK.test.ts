@@ -321,6 +321,28 @@ describe('OriginalsSDK', () => {
       expect(updated.meta.updateKeys).toEqual([next.keyPair.publicKey]);
     }, 20000);
 
+    test('createDIDOriginal falls back to the signer as verifier when verifier is omitted (#672)', async () => {
+      // Regression: updateDIDOriginal falls back to `options.signer` when no
+      // verifier is supplied, but createDIDOriginal did not, so a signer that
+      // also implements ExternalVerifier — a documented pattern in V3.md —
+      // worked on update but threw "Verifier implementation is required" on create.
+      const { makeSigner } = await makeSignerFactory();
+      const { signer, keyPair } = await makeSigner();
+
+      const result = await OriginalsSDK.createDIDOriginal({
+        type: 'did',
+        domain: 'example.com',
+        signer,
+        // verifier intentionally omitted
+        updateKeys: [keyPair.publicKey],
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        ],
+      });
+
+      expect(result.did).toMatch(/^did:webvh:/);
+    }, 20000);
+
     test('createDIDOriginal rejects legacy did:key updateKeys combined with nextKeyHashes', async () => {
       // nextKeyHashes commit to the exact updateKey string; normalizing the
       // updateKeys while keeping caller-computed hashes would corrupt the

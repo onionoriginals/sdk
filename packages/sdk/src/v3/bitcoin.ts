@@ -1,13 +1,10 @@
 import * as btc from "@scure/btc-signer";
-import {
-  parseWitness,
-  p2tr_ord_reveal,
-  parseInscriptions,
-} from "micro-ordinals";
+import { p2tr_ord_reveal, parseInscriptions } from "micro-ordinals";
 import {
   CelError,
   encodeDocument,
   eventDigest,
+  normalizeSatpoint,
   parseAssetAlias,
   parseDocument,
   signEvent,
@@ -29,7 +26,9 @@ import {
   type InscriptionRecoveryStore,
   type PreparedInscriptionOnSat,
 } from "../bitcoin/inscribe-on-sat.js";
+import { metadataTagChunks } from "../bitcoin/ordinals-tags.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
+import { rawMetadataPerEnvelope } from "./content-validation.js";
 import { decodeEnvelope } from "./envelope.js";
 import { captureSigner } from "./options.js";
 import { AssetResolver, btcoDid } from "./resolution.js";
@@ -77,43 +76,69 @@ function checkedContent(
   contentType: string,
   media: boolean,
 ) {
-  const metadata = media
-    ? (JSON.parse(
-        new TextDecoder().decode(encodeDocument(document, "json")),
-      ) as Record<string, unknown>)
-    : undefined;
-  const tags = { contentType, ...(metadata ? { metadata } : {}) };
+  const metadata = media ? encodeDocument(document, "cbor") : undefined;
+  const tags = {
+    contentType,
+    ...(metadata?.length ? { unknown: metadataTagChunks(metadata) } : {}),
+  };
   // Public secp256k1 generator x-coordinate; only script sizing, never reveal-key custody.
-  const script = p2tr_ord_reveal(
-    Buffer.from(
-      "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-      "hex",
-    ),
-    [{ tags, body: content }],
-  ).script;
+  let script: Uint8Array;
+  try {
+    script = p2tr_ord_reveal(
+      Buffer.from(
+        "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "hex",
+      ),
+      [{ tags, body: content }],
+    ).script;
+  } catch (cause) {
+    invalid(
+      "ASSET_INSCRIPTION_METADATA",
+      `The CEL metadata could not be encoded for Bitcoin inscription: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
   if (script.length > MAX_INSCRIPTION_SCRIPT_BYTES)
     invalid(
       "ASSET_INSCRIPTION_LIMIT",
       "The serialized inscription envelope exceeds the SDK supported 390000-byte script limit",
     );
   if (media) {
-    encodeDocument(document, "cbor");
-    const encoded = parseInscriptions(btc.Script.decode(script));
+    const decoded = btc.Script.decode(script);
+    const parsed = parseInscriptions(decoded, true);
+    const rawMetadata = parsed?.length
+      ? rawMetadataPerEnvelope(decoded, parsed.length)[0]
+      : undefined;
     if (
-      !encoded?.[0].tags.metadata ||
-      !equalDocument(validateDocument(encoded[0].tags.metadata), document)
+      !rawMetadata ||
+      !equalDocument(parseDocument(rawMetadata, "cbor"), document)
     )
       invalid(
         "ASSET_INSCRIPTION_ENCODING",
         "The inscription metadata encoder could not preserve the exact CEL document",
       );
   }
-  return { content, contentType, ...(metadata ? { metadata } : {}) };
+  return { content, contentType, ...(metadata?.length ? { metadata } : {}) };
 }
 const equalDocument = (a: CelDocument, b: CelDocument) =>
   Buffer.from(encodeDocument(a, "json")).equals(
     Buffer.from(encodeDocument(b, "json")),
   );
+/** Decode a taproot script-path witness as a single Ordinals inscription envelope, fail-closed. */
+function parseSingleInscriptionEnvelope(witness: Uint8Array[]) {
+  try {
+    const decoded = btc.Script.decode(witness[1]);
+    return { decoded, inscriptions: parseInscriptions(decoded, true) };
+  } catch (cause) {
+    invalid(
+      "ASSET_BITCOIN_PUBLICATION",
+      `Prepared reveal witness could not be parsed as an Ordinals envelope: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+}
 
 /** Builds exact CEL 3 publications using a fresh accepted sat head and the durable signed-pair transport. */
 export class BitcoinPublications {
@@ -208,14 +233,18 @@ export class BitcoinPublications {
             "ASSET_ACCEPTED_HEAD_REQUIRED",
             "A complete fresh accepted sat observation is required before building a publication",
           );
-        const expectedPoint = `${fundingUtxos[0].txid.toLowerCase()}:${fundingUtxos[0].vout}:0`;
+        const expectedPoint = normalizeSatpoint(
+          `${fundingUtxos[0].txid}:${fundingUtxos[0].vout}:0`,
+        );
         // ord does not track the location of every uninscribed common sat.
         // prepareInscriptionOnSat has already derived this boundary sat from
         // the selected output's exact sat ranges. Later publications must
         // additionally match the accepted inscription's observed location.
+        // Both sides are normalized identically: a configured SatProvider's
+        // reported satpoint carries no casing contract of its own.
         if (
           (state.layer === "btco" || snapshot.ownership.satpoint !== null) &&
-          snapshot.ownership.satpoint !== expectedPoint
+          normalizeSatpoint(snapshot.ownership.satpoint) !== expectedPoint
         )
           invalid(
             "ASSET_SAT_ALIGNMENT",
@@ -423,7 +452,13 @@ export class BitcoinPublications {
       Buffer.from(input.transactions.revealTxHex, "hex"),
       { allowUnknownInputs: true, allowUnknownOutputs: true },
     );
-    const inscriptions = parseWitness(reveal.getInput(0).finalScriptWitness!);
+    const witness = reveal.getInput(0).finalScriptWitness;
+    if (!witness || witness.length !== 3)
+      invalid(
+        "ASSET_BITCOIN_PUBLICATION",
+        "Prepared reveal is missing a taproot script-path witness",
+      );
+    const { decoded, inscriptions } = parseSingleInscriptionEnvelope(witness);
     if (inscriptions?.length !== 1)
       invalid(
         "ASSET_BITCOIN_PUBLICATION",
@@ -439,7 +474,11 @@ export class BitcoinPublications {
         "ASSET_BITCOIN_PUBLICATION",
         "Prepared reveal has unsupported inscription tags",
       );
-    if (inscription.tags.metadata === undefined) {
+    // Read the metadata tag's raw bytes directly (never micro-ordinals' own CBOR-decoded
+    // `inscription.tags.metadata`): that decoder is not relied on to preserve every
+    // CEL-representable value, mirroring the write side's `metadataTagChunks`.
+    const rawMetadata = rawMetadataPerEnvelope(decoded, 1)[0];
+    if (rawMetadata === undefined) {
       if (
         inscription.tags.contentType !== "application/cel" ||
         !equalDocument(parseDocument(inscription.body, "json"), document)
@@ -450,7 +489,7 @@ export class BitcoinPublications {
         );
     } else {
       if (
-        !equalDocument(validateDocument(inscription.tags.metadata), document) ||
+        !equalDocument(parseDocument(rawMetadata, "cbor"), document) ||
         !asset.resources.some(
           (resource) =>
             resource.version ===
