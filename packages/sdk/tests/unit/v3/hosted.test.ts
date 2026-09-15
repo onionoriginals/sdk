@@ -69,6 +69,95 @@ test.each(["", "   ", "\t"])(
   },
 );
 
+// #722: a mixed-case domain is a perfectly valid, commonly-typed hostname —
+// DNS is case-insensitive — but the raw string used to fail deep inside CEL
+// history verification with a confusing CEL_DID error instead of publishing.
+test("publishToWeb normalizes a mixed-case first-publish domain instead of failing with CEL_DID (#722)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "Example.COM",
+  });
+  expect(published.did).toContain(":example.com:");
+  expect(published.did).not.toContain("Example.COM");
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+// #764: padded-but-nonblank input must not mint a DID with embedded
+// whitespace — it is canonicalized (trimmed) the same as case is normalized.
+test("publishToWeb trims a padded first-publish domain instead of embedding whitespace in the DID (#764)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "  example.com  ",
+  });
+  expect(published.did).toContain(":example.com:");
+  expect(published.did).not.toContain(" ");
+  expect(published.did).not.toContain("%20");
+});
+
+// #764 (malformed, nonblank): a domain that is not a usable host once
+// trimmed must fail at this seam with a domain-specific error, not mint a
+// broken DID and not surface an unrelated low-level failure later.
+test("publishToWeb rejects a malformed nonblank domain at the hosted seam instead of minting a broken DID", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, { domain: "not a domain" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("INVALID_DOMAIN");
+});
+
+// #761: republishing to the same host must succeed regardless of the
+// caller's letter case, since the existing hosted identity's stored domain
+// is always the lower-cased `URL#host` form.
+test("publishToWeb accepts a differently-cased but equivalent domain on republish (#761)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  await first.asset.addResourceVersion("art", new Uint8Array([2]), "image/png");
+  const second = await sdk.lifecycle.publishToWeb(first.asset, { domain: "Example.com" });
+  expect(second.did).toBe(first.did);
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(second.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+// #761 (still enforced): a republish naming a genuinely different host must
+// still be rejected — normalization must not weaken the permanent-binding check.
+test("publishToWeb still rejects a republish naming a different host as ASSET_WEBVH_BINDING", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(first.asset, { domain: "other.example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_BINDING");
+});
+
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),
     sdk = OriginalsSDK.create({ signer, storageAdapter: store });

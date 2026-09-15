@@ -23,6 +23,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
+import { validateAndNormalizeDomain } from '../lifecycle/domainUtils.js';
 
 /** A carried-over verification method annotated with the single relationship
  * (purpose) it should assume in the migrated did:webvh document. */
@@ -99,17 +100,26 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * and a did:webvh domain is permanent once published — so an omitted domain
  * must fail loudly rather than mint a DID at a host nobody serves (#531). The
  * configured webvhNetwork tier deliberately does NOT supply a default here.
+ *
+ * A non-blank domain is also canonicalized (trimmed, lowercased, host/port
+ * validated) via {@link validateAndNormalizeDomain} — the same primitive the
+ * legacy lifecycle manager uses — so every did:webvh authoring path builds
+ * its identifier from one normalized value instead of the caller's raw
+ * string. Without this, a padded or mixed-case-but-otherwise-valid domain
+ * used to mint an unresolvable DID containing raw whitespace or fail much
+ * later with a confusing CEL_DID error instead of a domain-specific one
+ * (#722, #761, #764).
  */
 export function requireWebVHDomain(domain: string | undefined): string {
-  if (typeof domain === 'string' && domain.trim().length > 0) {
-    return domain;
+  if (typeof domain !== 'string' || domain.trim().length === 0) {
+    throw new StructuredError(
+      'WEBVH_DOMAIN_REQUIRED',
+      'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
+      '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
+      'networks are not served, and a did:webvh domain is permanent once published.'
+    );
   }
-  throw new StructuredError(
-    'WEBVH_DOMAIN_REQUIRED',
-    'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
-    '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
-    'networks are not served, and a did:webvh domain is permanent once published.'
-  );
+  return validateAndNormalizeDomain(domain);
 }
 
 export class DIDManager {
@@ -173,31 +183,10 @@ export class DIDManager {
     return this.track('did.migrateToDIDWebVH', async () => {
     // The caller must name the host; an omitted domain throws rather than
     // defaulting to a *.originals.build network nobody serves (#531).
-    const targetDomain = requireWebVHDomain(domain);
-
-    // Flexible domain validation - allow development domains with ports
-    const normalized = String(targetDomain || '').trim().toLowerCase();
-    
-    // Split domain and port if present
-    const [domainPart, portPart] = normalized.split(':');
-    
-    // Validate port if present
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new Error(`Invalid domain: ${domain} - invalid port`);
-    }
-    
-    // Allow localhost and IP addresses for development
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-    
-    if (!isLocalhost && !isIP) {
-      // For non-localhost domains, require proper domain format
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new Error('Invalid domain');
-      }
-    }
+    // requireWebVHDomain also canonicalizes (trim + lowercase + host/port
+    // validation), so `normalized` below is already the exact value to mint
+    // the did:webvh identifier from (#722, #761, #764).
+    const normalized = requireWebVHDomain(domain);
 
     // Stable slug derived from the source DID's last segment. The slug becomes
     // both a did:webvh path segment and a directory name in saveDIDLog, so it
