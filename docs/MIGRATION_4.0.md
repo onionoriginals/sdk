@@ -119,6 +119,34 @@ custom proofs remain unsupported; see the historical
 [SDK 3 migration guide](MIGRATION_3.0.md) for that earlier format boundary.
 The exact contract is [Originals asset identity](../specs/originals-asset-identity.md).
 
+## Sat resolution distinguishes pending from not-found, and gains independent cross-checks
+
+`resolveSat()`/`resolveAssetFromSat()`/`did.resolveDIDWithMetadata()` now
+return a `"pending"` status, distinct from `"not-found"`: an all-unconfirmed
+sat (something broadcast, nothing yet at confirmation depth) resolves as
+`"pending"` with the observed unconfirmed publication ids, instead of the
+previous `"not-found"`. A caller that branches on every non-`"accepted"`
+status as equivalent absence should add an explicit `"pending"` case if it
+needs to distinguish "never published" from "published but not yet
+confirmed." `did.resolveDID()` itself is unaffected in kind: it already threw
+`ASSET_RESOLUTION_INCOMPLETE` for any non-`"accepted"`/non-`"not-found"`
+status, and continues to for `"pending"`.
+
+The accepted shape also gains three optional, independently-sourced
+corroboration dimensions, all off by default: `OriginalsSDKOptions.independentEnumeration`
+(a second `SatProvider` cross-checking Ordinals enumeration completeness and
+current sat ownership) and `OriginalsSDKOptions.contentValidator` (for
+example `createBitcoinCoreContentValidator`, cross-checking confirmed
+inscription content/media type against a validating Bitcoin node). The
+accepted result's `enumerationAssurance`, `ownershipAssurance`, and
+`contentAssurance` read `"cross-checked"` only when the corresponding source
+was configured and agreed; otherwise `"provider-asserted"`, unchanged from
+today. `trajectoryAssurance` is always `"not-independently-derived"` —
+`ownership` remains a point-in-time snapshot, never a derivation of the
+sat's historical transfer path. See
+[docs/release/4.0.0-public-api.md](release/4.0.0-public-api.md) for the full
+export list.
+
 ## Previous-format CEL writers move to `@originals/cel/legacy`
 
 `@originals/cel`'s root no longer exports the previous-format (pre-CEL-3)

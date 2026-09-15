@@ -233,14 +233,19 @@ describe('jwt', () => {
       expect(config.options.maxAge).toBe(7 * 24 * 60 * 60 * 1000);
     });
 
-    test('secure is false in non-production', () => {
+    test('secure is true by default in non-production (#676)', () => {
       process.env.NODE_ENV = 'development';
       const config = getAuthCookieConfig('token');
-      expect(config.options.secure).toBe(false);
+      expect(config.options.secure).toBe(true);
     });
 
     test('secure is true in production', () => {
       process.env.NODE_ENV = 'production';
+      const config = getAuthCookieConfig('token');
+      expect(config.options.secure).toBe(true);
+    });
+
+    test('secure is true by default with NODE_ENV unset (#676)', () => {
       const config = getAuthCookieConfig('token');
       expect(config.options.secure).toBe(true);
     });
@@ -260,6 +265,12 @@ describe('jwt', () => {
       const config = getAuthCookieConfig('token', { secure: true });
       expect(config.options.secure).toBe(true);
     });
+
+    test('respects the explicit secure:false local-HTTP escape hatch (#676)', () => {
+      process.env.NODE_ENV = 'production';
+      const config = getAuthCookieConfig('token', { secure: false });
+      expect(config.options.secure).toBe(false);
+    });
   });
 
   describe('getClearAuthCookieConfig', () => {
@@ -278,20 +289,31 @@ describe('jwt', () => {
       expect(config.name).toBe('my_auth');
     });
 
-    test('secure matches environment', () => {
+    test('secure is true by default in production', () => {
       process.env.NODE_ENV = 'production';
       const config = getClearAuthCookieConfig();
       expect(config.options.secure).toBe(true);
+    });
+
+    test('secure is true by default with NODE_ENV unset (#676)', () => {
+      const config = getClearAuthCookieConfig();
+      expect(config.options.secure).toBe(true);
+    });
+
+    test('respects the explicit secure:false local-HTTP escape hatch (#676)', () => {
+      const config = getClearAuthCookieConfig(undefined, { secure: false });
+      expect(config.options.secure).toBe(false);
     });
   });
 });
 
 /**
- * SEC-1 — `secure` is inferred from NODE_ENV, and the platforms this ships to
- * do not set it. An HTTPS-only deployment must be able to say so outright
- * rather than hope an env var is present, on BOTH halves of the cookie's life.
+ * SEC-1 / #676 — `secure` now defaults to `true` unconditionally, since the
+ * platforms this ships to do not reliably set NODE_ENV=production verbatim.
+ * An explicit `{ secure: false }` is the only way to opt out, on BOTH halves
+ * of the cookie's life (set and clear).
  */
-describe('cookie Secure is an explicit choice, not an inference', () => {
+describe('cookie Secure defaults to true regardless of NODE_ENV (#676)', () => {
   const restore = process.env.NODE_ENV;
   afterEach(() => {
     if (restore === undefined) delete process.env.NODE_ENV;
@@ -309,12 +331,21 @@ describe('cookie Secure is an explicit choice, not an inference', () => {
     expect(getClearAuthCookieConfig(undefined, { secure: true }).options.httpOnly).toBe(true);
   });
 
-  test('without an override both still fall back to NODE_ENV', () => {
+  test('without an override both default to secure regardless of NODE_ENV', () => {
     delete process.env.NODE_ENV;
-    expect(getAuthCookieConfig('t').options.secure).toBe(false);
-    expect(getClearAuthCookieConfig().options.secure).toBe(false);
+    expect(getAuthCookieConfig('t').options.secure).toBe(true);
+    expect(getClearAuthCookieConfig().options.secure).toBe(true);
+    process.env.NODE_ENV = 'development';
+    expect(getAuthCookieConfig('t').options.secure).toBe(true);
+    expect(getClearAuthCookieConfig().options.secure).toBe(true);
     process.env.NODE_ENV = 'production';
     expect(getAuthCookieConfig('t').options.secure).toBe(true);
     expect(getClearAuthCookieConfig().options.secure).toBe(true);
+  });
+
+  test('an explicit secure:false opts out even in production', () => {
+    process.env.NODE_ENV = 'production';
+    expect(getAuthCookieConfig('t', { secure: false }).options.secure).toBe(false);
+    expect(getClearAuthCookieConfig(undefined, { secure: false }).options.secure).toBe(false);
   });
 });

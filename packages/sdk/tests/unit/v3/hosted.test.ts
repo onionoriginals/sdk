@@ -1,7 +1,8 @@
 import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
 import { OriginalsSDK } from "../../../src/index.js";
-import { createLocalSigner, assetDigest } from "@originals/cel/v3";
+import { CelError, createLocalSigner, assetDigest } from "@originals/cel/v3";
+import { StructuredError } from "@originals/cel";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
@@ -49,6 +50,25 @@ test("publish and cold hosted loading preserve CEL 3, separate WebVH method hist
   expect(await loaded.asset.verify()).toBe(true);
 });
 
+test.each(["", "   ", "\t"])(
+  "publishToWeb rejects a blank/whitespace-only domain (%j) with WEBVH_DOMAIN_REQUIRED, before any signing work (#678)",
+  async (domain) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, { domain });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+  },
+);
+
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),
     sdk = OriginalsSDK.create({ signer, storageAdapter: store });
@@ -75,6 +95,83 @@ test("republishing updated resource bytes retains the same hosted identity and a
     [3, 4],
   ]);
   expect(loaded.verification.verified).toBe(true);
+});
+
+test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+  });
+  const p256Signer = createLocalSigner("P-256", new Uint8Array(32).fill(7));
+  await published.asset.rotateKey(p256Signer.controller, { signer });
+  await published.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+    { signer: p256Signer },
+  );
+  // The republish path never touches the WebVH method log, so the P-256
+  // controller signer alone is sufficient; no webvhSigner is supplied.
+  const republished = await sdk.lifecycle.publishToWeb(published.asset, {
+    domain: "example.com",
+    signer: p256Signer,
+  });
+  expect(republished.did).toBe(published.did);
+  const loaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+  expect(loaded.asset.resources.map((r) => [...r.content!])).toEqual([
+    [1, 2],
+    [3, 4],
+  ]);
+});
+
+test("republishing after rotating the controller to P-384 succeeds without a separate Ed25519 webvhSigner", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+  });
+  const p384Signer = createLocalSigner("P-384", new Uint8Array(48).fill(7));
+  await published.asset.rotateKey(p384Signer.controller, { signer });
+  await published.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+    { signer: p384Signer },
+  );
+  const republished = await sdk.lifecycle.publishToWeb(published.asset, {
+    domain: "example.com",
+    signer: p384Signer,
+  });
+  expect(republished.did).toBe(published.did);
+});
+
+test("a first-time WebVH publication with a non-Ed25519 controller signer still requires an explicit Ed25519 webvhSigner", async () => {
+  const p256Signer = createLocalSigner("P-256", new Uint8Array(32).fill(9));
+  const sdk = OriginalsSDK.create({
+    signer: p256Signer,
+    storageAdapter: storage(),
+  });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  await expect(
+    sdk.lifecycle.publishToWeb(asset, { domain: "example.com" }),
+  ).rejects.toThrow("Ed25519");
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    webvhSigner: signer,
+  });
+  expect(published.asset.state.layer).toBe("webvh");
 });
 
 test("a failed upload retries the identical prepared publication and substituted media never verifies", async () => {
@@ -118,6 +215,121 @@ test("a failed upload retries the identical prepared publication and substituted
   await expect(
     sdk.lifecycle.resolveAssetFromWeb(published.did),
   ).rejects.toThrow();
+});
+
+// Greptile review on #754: retryability must be decided by where a failure
+// originates (the storage round trip), not by which error class the adapter
+// happens to throw. A custom adapter is free to throw its own StructuredError
+// for a transient condition (e.g. a rate limit); that must still be wrapped
+// as the recoverable ASSET_WEB_PUBLISH_INCOMPLETE with `details.publication`,
+// not rethrown bare and stripped of the retry contract.
+test("a storage adapter's own StructuredError for a transient failure is still wrapped with the recoverable prepared publication", async () => {
+  const inner = storage();
+  let fail = true;
+  const store: StorageAdapter = {
+    ...inner,
+    async putObject(domain, path, bytes, options) {
+      if (fail && path.endsWith("cel.json"))
+        throw new StructuredError("RATE_LIMITED", "Too many requests");
+      return inner.putObject(domain, path, bytes, options);
+    },
+  };
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([5, 6]) },
+  ]);
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: "example.com",
+  });
+  const failure = await sdk.lifecycle
+    .publishPreparedToWeb(prepared)
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe(
+    "ASSET_WEB_PUBLISH_INCOMPLETE",
+  );
+  expect((failure as { details?: { publication?: unknown } }).details?.publication).toBeDefined();
+  fail = false;
+  const published = await sdk.lifecycle.publishPreparedToWeb(
+    (failure as { details: { publication: typeof prepared } }).details
+      .publication,
+  );
+  expect(published.did).toBe(prepared.did);
+});
+
+// #739: missing historical resource bytes is a permanent, non-retryable
+// defect, not a storage I/O failure. It must be reported as its own
+// ASSET_RESOURCE_MISSING error, both at prepare time (before signing) and
+// again at publish time (before any writes), never rewrapped as the
+// retryable ASSET_WEB_PUBLISH_INCOMPLETE the storage-failure catch produces.
+test("prepareWebPublication rejects an asset missing historical resource bytes before signing anything", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const created = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  await created.addResourceVersion("art", "v2", "text/plain", { signer });
+  const env = created.serialize();
+  env.resources = env.resources.filter((r: { version: number }) => r.version !== 1);
+  const reloaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.loadAsset(env, { allowPartial: true });
+  expect(reloaded.verification.verified).toBe(false);
+  await expect(
+    sdk.lifecycle.prepareWebPublication(reloaded.asset, { domain: "example.com" }),
+  ).rejects.toThrow("Supply every historical resource");
+});
+
+test("publishPreparedToWeb rejects missing historical resource bytes as ASSET_RESOURCE_MISSING, not a retryable storage failure, and writes nothing", async () => {
+  const store = storage();
+  let writes = 0;
+  const put = store.putObject.bind(store);
+  store.putObject = async (...args) => {
+    writes++;
+    return put(...args);
+  };
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const created = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  await created.addResourceVersion("art", "v2", "text/plain", { signer });
+  const prepared = await sdk.lifecycle.prepareWebPublication(created, {
+    domain: "example.com",
+  });
+  // Simulate an incomplete prepared publication (e.g. built from an
+  // allowPartial-loaded asset) by dropping a historical resource attachment;
+  // its catalog entry stays authenticated but binds to no bytes.
+  prepared.asset.resources = prepared.asset.resources.filter(
+    (r) => r.version !== 1,
+  );
+  const failure = await sdk.lifecycle
+    .publishPreparedToWeb(prepared)
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("ASSET_RESOURCE_MISSING");
+  expect((failure as Error).message).not.toContain("retry this same");
+  expect(writes).toBe(0);
+});
+
+test("a wrong adapter-returned storage URL propagates as ASSET_STORAGE_URL, not a retryable publish failure", async () => {
+  const inner = storage();
+  const store: StorageAdapter = {
+    ...inner,
+    async putObject(domain, path, bytes, options) {
+      await inner.putObject(domain, path, bytes, options);
+      return "https://wrong-host.example/" + path;
+    },
+  };
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: "example.com" })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("ASSET_STORAGE_URL");
+  expect((failure as Error).message).not.toContain("retry this same");
 });
 
 test("publication refuses an omitted domain before invoking custody or storage", async () => {

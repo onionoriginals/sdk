@@ -103,6 +103,25 @@ const failure = (
   crossSatCanonicality: "unknown",
   chainEvidence,
 });
+/**
+ * Shared by `check()` and `resolveDID()`: a syntactically valid alias that parses
+ * successfully but names a different layer/network than this resolver is configured
+ * for is an ordinary resolution outcome, not a thrown error — only a malformed
+ * identifier should fail parsing itself (see `parseAssetAlias`).
+ */
+const layerNetworkMismatch = (): {
+  status: "identity-mismatch";
+  reason: string;
+  scope: "sat";
+  crossSatCanonicality: "unknown";
+  chainEvidence: Readonly<ChainEvidence>;
+} => ({
+  status: "identity-mismatch",
+  reason: "Asset layer or network differs from configured provider",
+  scope: "sat",
+  crossSatCanonicality: "unknown",
+  chainEvidence: { assurance: "unavailable" },
+});
 const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
   const t = tip as { height?: unknown; hash?: unknown } | null | undefined;
   return (
@@ -325,11 +344,7 @@ export class AssetResolver {
   async check(did: string, expectedAssetId: string): Promise<SatResolution> {
     const parsed = parseAssetAlias(did);
     if (parsed.layer !== "btco" || parsed.network !== this.network)
-      return failure(
-        "identity-mismatch",
-        "Asset network differs from configured provider",
-        { assurance: "unavailable" },
-      ) as SatResolution;
+      return layerNetworkMismatch();
     return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
 
@@ -437,12 +452,21 @@ export class AssetResolver {
 
   async resolveDID(did: string): Promise<AssetDIDResolution> {
     const parsed = parseAssetAlias(did);
-    if (parsed.layer !== "btco" || parsed.network !== this.network)
-      throw new CelError(
-        "invalid",
-        "ASSET_NETWORK",
-        "Expected a Bitcoin asset DID for the configured network",
-      );
+    if (parsed.layer !== "btco" || parsed.network !== this.network) {
+      const mismatch = layerNetworkMismatch();
+      return {
+        didDocument: null,
+        didResolutionMetadata: {
+          status: mismatch.status,
+          error: mismatch.reason,
+        },
+        didDocumentMetadata: {
+          scope: "sat",
+          crossSatCanonicality: "unknown",
+          chainEvidence: mismatch.chainEvidence,
+        },
+      };
+    }
     const result = await this.resolve(parsed.sat);
     if (result.status !== "accepted")
       return {

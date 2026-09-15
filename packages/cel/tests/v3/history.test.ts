@@ -4,6 +4,7 @@ import {
   checkpointFromHistory,
   createLocalSigner,
   signEvent,
+  verifyEntry,
   CelError,
   type HistoryCheckpoint,
 } from "../../src/v3/index.js";
@@ -67,6 +68,76 @@ test("rotation retires A, keeps historical signatures valid and requires B for t
     { controller: A.controller, fromEntry: 0, throughEntry: 1 },
     { controller: B.controller, fromEntry: 2 },
   ]);
+});
+
+test("a no-prefix delta with a broken authority chain is invalid, not history-required", async () => {
+  const updateByA = await signEvent(
+    {
+      // The real prior history this delta needs is absent (that's the whole premise of
+      // "no prefix"); previousEvent only needs to be a well-formed digest here.
+      previousEvent: verifyEntry(genesis).digest,
+      operation: { type: "update", data: { profile, name: "A's update" } },
+    },
+    A,
+  );
+  const updateByB = await signEvent(
+    {
+      previousEvent: verifyEntry(updateByA).digest,
+      operation: { type: "update", data: { profile, name: "B's update" } },
+    },
+    B,
+  );
+  expect(codeOf(() => verifyHistory({ log: [updateByA, updateByB] }))).toBe(
+    "CEL_AUTHORITY",
+  );
+});
+
+test("a no-prefix delta that rotates then updates as the new controller stays history-required", async () => {
+  const rotation = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: B.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const updateByB = await signEvent(
+    {
+      previousEvent: verifyEntry(rotation).digest,
+      operation: { type: "update", data: { profile, name: "Updated by B" } },
+    },
+    B,
+  );
+  expect(
+    codeOf(() => verifyHistory({ log: [rotation, updateByB] })),
+  ).toBe("CEL_HISTORY_REQUIRED");
+});
+
+test("an internally-consistent no-prefix delta still becomes invalid once a real prefix shows the signer was not the controller", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const updateByB = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: { type: "update", data: { profile, name: "Not actually B's turn" } },
+    },
+    B,
+  );
+  // The delta alone (no prefix) is internally consistent - a single entry, one signer -
+  // so it is only history-required.
+  expect(codeOf(() => verifyHistory({ log: [updateByB] }))).toBe(
+    "CEL_HISTORY_REQUIRED",
+  );
+  // But genesis's real controller is A, not B: supplying the actual prefix proves B
+  // never held authority, and the same entry is invalid.
+  expect(codeOf(() => verifyHistory({ log: [updateByB] }, { prefix: initial }))).toBe(
+    "CEL_AUTHORITY",
+  );
 });
 
 for (const id of [

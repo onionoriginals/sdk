@@ -599,6 +599,66 @@ describe('[AUTH-023] ensureWalletWithAccounts', () => {
     expect(createWalletAccounts).toHaveBeenCalled();
     expect(wallets[0].accounts).toHaveLength(3);
   });
+
+  test('when two Ed25519 accounts exist at the wrong paths → still repairs both required roles', async () => {
+    // Regression for #744: a curve-count check (">= 2 Ed25519 accounts")
+    // would treat this wallet as already complete, even though neither
+    // account is at the did-assertion or did-update path. Role-based
+    // detection must still create the two correctly-pathed accounts.
+    const wrongPathAccounts = [
+      {
+        address: 'addr_secp',
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+      },
+      {
+        address: 'addr_wrong1',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/2'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+      {
+        address: 'addr_wrong2',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/3'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+    ];
+
+    const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+
+    const client = makeEnsureClient({
+      getWalletsResponses: [
+        () =>
+          Promise.resolve({
+            wallets: [{ walletId: 'w_wrong_paths', walletName: 'default-wallet' }],
+          }),
+        () =>
+          Promise.resolve({
+            wallets: [{ walletId: 'w_wrong_paths', walletName: 'default-wallet' }],
+          }),
+      ],
+      getWalletAccounts: mock()
+        .mockResolvedValueOnce({ accounts: wrongPathAccounts })
+        .mockResolvedValueOnce({ accounts: fullAccounts }),
+      createWalletAccounts,
+    });
+
+    const wallets = await ensureWalletWithAccounts(client, 'sub_org_123');
+
+    expect(createWalletAccounts).toHaveBeenCalled();
+    const createdAccounts = (createWalletAccounts.mock.calls[0][0] as { accounts: Array<{ path: string }> })
+      .accounts;
+    // Only the two missing roles (did-assertion, did-update) are created -
+    // the wrong-path accounts are left alone and the already-present
+    // bitcoin-auth role is not recreated.
+    expect(createdAccounts).toHaveLength(2);
+    expect(createdAccounts.map((a) => a.path).sort()).toEqual(
+      ["m/44'/501'/0'/0'", "m/44'/501'/1'/0'"].sort()
+    );
+    expect(wallets[0].accounts).toHaveLength(3);
+  });
 });
 
 // ─── AUTH-028: TurnkeyDIDSigner ───────────────────────────────────────────────

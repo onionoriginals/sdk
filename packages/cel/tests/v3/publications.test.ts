@@ -9,9 +9,15 @@ import {
   createNonce,
   digestBytes,
   encodeDocument,
+  encodeValue,
+  eventDigest,
   verifyHistory,
+  normalizeSatpoint,
+  jcsSigningMessage,
+  decodeController,
   type SatSnapshot,
   type IndependentContentEvidence,
+  type CelSigner,
 } from "../../src/v3/index.js";
 
 // These are declared provider observations, not Bitcoin RPC evidence.
@@ -470,6 +476,34 @@ test("rejects malformed independent ownership evidence rather than ignoring it",
   expect(result.status).toBe("incomplete");
 });
 
+test("cross-checks ownership when independent evidence reports the same satpoint in a different hex case", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const [txid, vout, offset] = (snapshot.ownership.satpoint as string).split(":");
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: {
+        ...snapshot.ownership,
+        satpoint: `${txid.toUpperCase()}:${vout}:${offset}`,
+      },
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("cross-checked");
+});
+
+test("normalizeSatpoint lowercases only the txid component and passes through null/malformed values", () => {
+  expect(normalizeSatpoint(null)).toBeNull();
+  expect(normalizeSatpoint("AB".repeat(32) + ":0:0")).toBe("ab".repeat(32) + ":0:0");
+  expect(normalizeSatpoint("ab".repeat(32) + ":3:12")).toBe("ab".repeat(32) + ":3:12");
+  // Not the expected <txid>:<vout>:<offset> shape: returned unchanged rather than coerced.
+  expect(normalizeSatpoint("not-a-satpoint")).toBe("not-a-satpoint");
+  const nonHexTxid = "gg" + "ab".repeat(31) + ":0:0";
+  expect(normalizeSatpoint(nonHexTxid)).toBe(nonHexTxid);
+});
+
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.publications.push({ ...snapshot.publications[0], confirmed: false });
@@ -867,4 +901,455 @@ test.each([
   expect(result.status).toBe('accepted');
   if (result.status !== 'accepted') throw new Error(result.status);
   expect(result.resourceAvailability.find(resource => resource.id === id)?.availability).toBe(expected);
+});
+
+// #686: a recognized-but-unimplemented CCG shape chained onto a valid boundary must be
+// reported as `unsupported-capability`, never silently ignored/dropped as though it were
+// an invalid or unrelated candidate — resolveSat must not report a stale head as `accepted`
+// while a real, uninspectable continuation sits on the same sat.
+function unsupportedCapabilityDelta(
+  boundaryLog: unknown[],
+  boundaryResource: Uint8Array,
+  rawDocument: unknown,
+): SatSnapshot["publications"] {
+  const delta: SatSnapshot["publications"][number] = {
+    id: "e".repeat(64) + "i0",
+    revealTxid: "e".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: {
+      height: 201,
+      blockHash: "f".repeat(64),
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue(rawDocument, "json"),
+      metadata: null,
+    },
+  };
+  return [publicationAt(boundaryLog, boundaryResource, "text/plain"), delta];
+}
+
+function unsupportedCapabilitySnapshot(
+  publications: SatSnapshot["publications"],
+): SatSnapshot {
+  const tip = { height: 201, hash: "f".repeat(64) };
+  return {
+    ...emptySnapshot(),
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    blocks: [
+      ...emptySnapshot().blocks,
+      { height: 201, hash: tip.hash, txids: ["e".repeat(64)] },
+    ],
+    publications,
+  };
+}
+
+// Signs a raw, unvalidated event directly (bypassing signEvent's validateEvent call),
+// since eventShape/validateDocument reject dataReference/previousLog shapes outright —
+// there is no other way to produce a genuinely authenticated proof over such an event.
+async function signRawEvent(
+  event: unknown,
+  signer: CelSigner,
+): Promise<{
+  type: "DataIntegrityProof";
+  cryptosuite: string;
+  verificationMethod: string;
+  proofPurpose: "assertionMethod";
+  proofValue: string;
+}> {
+  const key = decodeController(signer.controller);
+  const configuration = {
+    type: "DataIntegrityProof" as const,
+    cryptosuite: key.algorithm === "Ed25519" ? "eddsa-jcs-2022" : "ecdsa-jcs-2019",
+    verificationMethod: key.verificationMethod,
+    proofPurpose: "assertionMethod" as const,
+  };
+  const signature = await signer.sign(
+    jcsSigningMessage(event, configuration, signer.algorithm),
+  );
+  return { ...configuration, proofValue: "z" + base58.encode(signature) };
+}
+
+// #686 review follow-up: dataReference/previousLog are rejected by eventShape/
+// validateDocument before any proof is ever inspected — unlike CEL_WEBVH_IDNA, which can
+// only be thrown after the entry's signature and controller authority have already been
+// checked inside apply(). So an `unsupported-capability` result must itself require a
+// genuine signature from the currently accepted controller, never just a raw,
+// unauthenticated `previousEvent` string claiming to match the head.
+test("resolveSat reports unsupported-capability for a chained CCG dataReference continuation genuinely authenticated by the current controller (#686)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const dataReferenceEntry = { event, proof: [await signRawEvent(event, A)] };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [dataReferenceEntry] }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
+});
+
+// The permission-less-DoS case this fix closes: an attacker with no controller key at all
+// can still make previousEvent match the accepted head, but an empty proof array can never
+// authenticate that claim, so it must be exactly as ignorable as any other invalid
+// candidate rather than permanently blocking resolution of a real Original.
+test("resolveSat ignores an unauthenticated CCG dataReference candidate that merely claims to extend the head, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const unauthenticatedDataReferenceEntry = {
+    event: {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("forged off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [unauthenticatedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// A candidate can be validly signed and still not be authenticated: a signature from any
+// key other than the sat's current controller must remain ignorable, exactly like an
+// empty/missing proof, never treated as an uninspectable capability block.
+test("resolveSat ignores a CCG dataReference candidate signed by a key other than the current controller, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const impostor = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("forged off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const wrongControllerEntry = {
+    event,
+    proof: [await signRawEvent(event, impostor)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [wrongControllerEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// The exact multi-entry attack found in review: `validateDocument` shape-checks every log
+// entry, so the entry that actually throws the unsupported-shape error may be any later
+// entry appended after a genuinely controller-signed one — a proof signs only its own
+// event, never the whole log. A real signed first entry must not make the candidate as a
+// whole "authenticated"; the offending entry itself still needs its own genuine signature.
+test("resolveSat ignores a CCG dataReference candidate appended, unsigned, after a genuinely controller-signed entry (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const signedUpdate = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "real" } },
+      },
+    },
+    A,
+  );
+  const unsignedDataReferenceEntry = {
+    event: {
+      previousEvent: eventDigest(signedUpdate.event),
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("forged off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [signedUpdate, unsignedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// Positive counterpart: when the entry before the offending one AND the offending entry
+// itself are both genuinely signed by the current controller, the candidate really is an
+// authenticated attempt to extend the head with an unsupported shape, and must still
+// report unsupported-capability rather than being silently (and now incorrectly) ignored.
+test("resolveSat reports unsupported-capability when a genuinely controller-signed entry is followed by an equally authenticated CCG dataReference entry (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const signedUpdate = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "real" } },
+      },
+    },
+    A,
+  );
+  const dataReferenceEvent = {
+    previousEvent: eventDigest(signedUpdate.event),
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const signedDataReferenceEntry = {
+    event: dataReferenceEvent,
+    proof: [await signRawEvent(dataReferenceEvent, A)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [signedUpdate, signedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
+});
+
+// previousLog is always ignorable, even when its wrapped log is genuinely signed by the
+// current controller: unlike dataReference (embedded inside the signed operation) or
+// CEL_WEBVH_IDNA (reachable only after full signature authentication), the previousLog
+// wrapper sits entirely outside any signed event and its own proof has no CCG-specified
+// target. Authenticating only the wrapped log would not establish that the controller
+// authorized the *wrapping* — anyone can wrap a copy of any log, controller-signed or not,
+// in a previousLog envelope, which would let a permissionless observer flip a resolution
+// from accepted to unsupported-capability at will. So resolveSat never blocks on
+// CEL_PREVIOUS_LOG, regardless of what the wrapped log itself contains.
+test("resolveSat ignores a chained CCG previousLog continuation even when its wrapped log is genuinely controller-signed, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const update = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "chained" } },
+      },
+    },
+    A,
+  );
+  const previousLogDoc = {
+    log: [update],
+    previousLog: {
+      digestMultibase: digestBytes(new TextEncoder().encode("earlier log bytes")),
+      proof: [
+        {
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: "placeholder-verification-method",
+          proofPurpose: "assertionMethod",
+          proofValue: "placeholder-proof-value",
+        },
+      ],
+    },
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, previousLogDoc),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_PREVIOUS_LOG",
+  });
+});
+
+// Same outcome with a wrapped entry signed by a key other than the current controller,
+// confirming previousLog's ignorability does not depend on the wrapped log's signer.
+test("resolveSat ignores a CCG previousLog candidate whose inner entry is not signed by the current controller, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const impostor = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
+  const update = await signEvent(
+    {
+      previousEvent: afterBtco.state.head,
+      operation: {
+        type: "update",
+        data: { profile: "originals/cel/3", metadata: { note: "forged" } },
+      },
+    },
+    impostor,
+  );
+  const previousLogDoc = {
+    log: [update],
+    previousLog: {
+      digestMultibase: digestBytes(new TextEncoder().encode("earlier log bytes")),
+      proof: [
+        {
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: "placeholder-verification-method",
+          proofPurpose: "assertionMethod",
+          proofValue: "placeholder-proof-value",
+        },
+      ],
+    },
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, previousLogDoc),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_PREVIOUS_LOG",
+  });
+});
+
+// Negative control: a disallowed/unrelated profile on the same sat is fully inspected and
+// intentionally rejected material, not a recognized-but-unimplemented CCG shape — it must
+// remain ignorable and must never poison an otherwise valid accepted history the way an
+// unsupported-capability result does.
+test("resolveSat still treats a disallowed profile as ignorable, not unsupported-capability, on the same sat (#686)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const disallowedProfileEntry = {
+    event: {
+      previousEvent: afterBtco.state.head,
+      operation: { type: "update", data: { profile: "not-originals/cel/3" } },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [disallowedProfileEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_PROFILE",
+  });
+});
+
+// An unrelated/non-extending confirmed inscription carrying a recognized-but-unimplemented
+// CCG shape must not be able to block resolution of an otherwise valid, already-accepted
+// history just by sharing the sat — Bitcoin possession never restores or grants CEL
+// authority, so a later, unrelated holder inscribing arbitrary dataReference/previousLog
+// bytes on the same sat must be exactly as ignorable as any other non-extending candidate.
+test("resolveSat ignores an unrelated CCG dataReference candidate that does not extend the accepted head, rather than blocking resolution (#686 review follow-up)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const unrelatedDataReferenceEntry = {
+    event: {
+      previousEvent: digestBytes(new TextEncoder().encode("unrelated history head")),
+      operation: {
+        type: "update",
+        dataReference: {
+          digestMultibase: digestBytes(
+            new TextEncoder().encode("unrelated off-chain content"),
+          ),
+          mediaType: "text/plain",
+        },
+      },
+    },
+    proof: [],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, {
+        log: [unrelatedDataReferenceEntry],
+      }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
 });
