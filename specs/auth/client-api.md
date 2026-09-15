@@ -107,11 +107,13 @@ function getKeyByCurve(
 ): WalletAccount | null
 ```
 
-Returns the **first** account matching `curve`. The wallet layout below
-provisions two `CURVE_ED25519` accounts (DID assertion-key and update-key),
-so this can only ever return the assertion-key account for
-`CURVE_ED25519` — there is no way to reach the update-key account through
-this function. Use `getKeyByRole` to select a specific DID-signing account.
+Returns the **first** account matching `curve`, in wallet/account order. The
+wallet layout below provisions two `CURVE_ED25519` accounts (DID
+assertion-key and update-key), so for `CURVE_ED25519` this returns whichever
+of the two happens to come first in the API response — not reliably the
+assertion-key, since account order is not a guaranteed contract — and there
+is no way to select the other one through this function. Use `getKeyByRole`
+to select a specific DID-signing account by its exact role instead.
 
 ---
 

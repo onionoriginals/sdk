@@ -9,6 +9,7 @@ import {
   fetchWallets,
   getKeyByCurve,
   getKeyByRole,
+  TURNKEY_ACCOUNT_ROLES,
 } from '../src/client/turnkey-client';
 import type { TurnkeyWallet } from '../src/types';
 import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
@@ -652,6 +653,19 @@ describe('client/turnkey-client', () => {
     test('returns null for an unrecognized role', () => {
       const wallets: TurnkeyWallet[] = [{ walletId: 'w1', walletName: 'default', accounts: [] }];
       expect(getKeyByRole(wallets, 'not-a-role' as never)).toBeNull();
+    });
+  });
+
+  describe('TURNKEY_ACCOUNT_ROLES', () => {
+    test('is frozen: mutating an entry does not change the table other lookups rely on', () => {
+      expect(Object.isFrozen(TURNKEY_ACCOUNT_ROLES)).toBe(true);
+      expect(Object.isFrozen(TURNKEY_ACCOUNT_ROLES[0])).toBe(true);
+
+      const original = TURNKEY_ACCOUNT_ROLES[0].path;
+      expect(() => {
+        (TURNKEY_ACCOUNT_ROLES[0] as { path: string }).path = 'tampered';
+      }).toThrow();
+      expect(TURNKEY_ACCOUNT_ROLES[0].path).toBe(original);
     });
   });
 });

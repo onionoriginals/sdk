@@ -341,10 +341,12 @@ export async function fetchWallets(
  * Returns the first account matching `curve`, in wallet/account order. This
  * cannot distinguish between two accounts that share a curve — the wallet
  * layout this package provisions has exactly that case (both the DID
- * assertion-key and update-key are `CURVE_ED25519`) — so this always
- * returns the assertion-key account for `CURVE_ED25519` and there is no way
- * to reach the update-key account through this function. Use
- * {@link getKeyByRole} to select a specific DID-signing account instead.
+ * assertion-key and update-key are `CURVE_ED25519`) — so for `CURVE_ED25519`
+ * this returns whichever of the two happens to come first in the API
+ * response (not reliably the assertion-key: Turnkey's account order is not
+ * a guaranteed contract), and there is no way to select the other one
+ * through this function. Use {@link getKeyByRole} to select a specific
+ * DID-signing account by its exact role instead.
  *
  * Kept for backward compatibility with callers that only need a single
  * account of a given curve (e.g. the Bitcoin auth-key, which is the only
@@ -373,10 +375,10 @@ export function getKeyByCurve(
 export type TurnkeyAccountRole = 'bitcoin-auth' | 'did-assertion' | 'did-update';
 
 interface TurnkeyAccountRoleSpec {
-  role: TurnkeyAccountRole;
-  curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
-  path: string;
-  addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
+  readonly role: TurnkeyAccountRole;
+  readonly curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
+  readonly path: string;
+  readonly addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
 }
 
 /**
@@ -386,8 +388,11 @@ interface TurnkeyAccountRoleSpec {
  * - `did-assertion` — the DID assertion-key (`CURVE_ED25519`).
  * - `did-update` — the DID update-key (`CURVE_ED25519`, a distinct path from
  *   `did-assertion` so the two can be resolved independently).
+ *
+ * Frozen (entries included) so a caller can't mutate the table that every
+ * lookup and repair path in this module relies on.
  */
-export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = [
+const TURNKEY_ACCOUNT_ROLE_SPECS: TurnkeyAccountRoleSpec[] = [
   {
     role: 'bitcoin-auth',
     curve: 'CURVE_SECP256K1',
@@ -407,6 +412,10 @@ export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = [
     addressFormat: 'ADDRESS_FORMAT_SOLANA',
   },
 ];
+
+export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = Object.freeze(
+  TURNKEY_ACCOUNT_ROLE_SPECS.map((spec) => Object.freeze({ ...spec }))
+);
 
 /**
  * Get a wallet account by its canonical role (curve + exact derivation
