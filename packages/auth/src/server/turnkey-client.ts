@@ -4,6 +4,7 @@
 
 import { Turnkey } from '@turnkey/sdk-server';
 import { normalizeEmail } from '../email.js';
+import { TURNKEY_ACCOUNT_ROLES } from '../turnkey-roles.js';
 
 export { normalizeEmail };
 
@@ -170,6 +171,79 @@ function isDefinitiveNotFound(error: unknown): boolean {
   return false;
 }
 
+const BITCOIN_AUTH_ROLE = TURNKEY_ACCOUNT_ROLES.find((spec) => spec.role === 'bitcoin-auth')!;
+
+/**
+ * Repair a stale Bitcoin auth-key account left over from before #748's fix:
+ * a sub-org created before that fix has a wallet whose `CURVE_SECP256K1`
+ * `m/44'/0'/0'/0/0` account carries an Ethereum address format instead of
+ * the Bitcoin one the account is documented and consumed as. Turnkey wallet
+ * accounts are immutable once created, so the repair adds a **second**
+ * account at that same curve/path with the corrected address format,
+ * alongside the stale one, rather than mutating anything in place — and
+ * never mints a replacement sub-org.
+ *
+ * Fails soft (logs and returns) when detection itself fails, matching the
+ * existing wallet-count check: a transient read failure must not block
+ * login. An actual repair-write failure (`createWalletAccounts`) propagates,
+ * matching the walletless-repair path's behavior.
+ */
+async function repairStaleBitcoinAuthKey(
+  turnkeyClient: Turnkey,
+  organizationId: string,
+  walletId: string
+): Promise<void> {
+  let accounts: Array<{ curve: string; path: string; addressFormat: string }>;
+  try {
+    const response = await turnkeyClient.apiClient().getWalletAccounts({
+      organizationId,
+      walletId,
+    });
+    accounts = response.accounts || [];
+  } catch (error) {
+    console.error(
+      '[auth] Could not check wallet accounts for a stale Bitcoin auth-key:',
+      error
+    );
+    return;
+  }
+
+  const hasCorrectAccount = accounts.some(
+    (acc) =>
+      acc.curve === BITCOIN_AUTH_ROLE.curve &&
+      acc.path === BITCOIN_AUTH_ROLE.path &&
+      acc.addressFormat === BITCOIN_AUTH_ROLE.addressFormat
+  );
+  if (hasCorrectAccount) {
+    return;
+  }
+
+  const hasStaleAccount = accounts.some(
+    (acc) => acc.curve === BITCOIN_AUTH_ROLE.curve && acc.path === BITCOIN_AUTH_ROLE.path
+  );
+  if (!hasStaleAccount) {
+    // No account at all at the Bitcoin auth-key path - an unexpected wallet
+    // layout outside this repair's scope. Leave it alone rather than guess.
+    return;
+  }
+
+  console.warn(
+    `[auth] Repairing stale Ethereum-formatted Bitcoin auth-key account in wallet ${walletId}`
+  );
+  await turnkeyClient.apiClient().createWalletAccounts({
+    organizationId,
+    walletId,
+    accounts: [
+      {
+        curve: BITCOIN_AUTH_ROLE.curve,
+        pathFormat: 'PATH_FORMAT_BIP32',
+        path: BITCOIN_AUTH_ROLE.path,
+        addressFormat: BITCOIN_AUTH_ROLE.addressFormat,
+      },
+    ],
+  });
+}
+
 /**
  * Get or create a Turnkey sub-organization for a user.
  *
@@ -181,6 +255,10 @@ function isDefinitiveNotFound(error: unknown): boolean {
  *   not-found — transient/API errors are rethrown;
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
+ * - an existing sub-org whose wallet still carries a stale, pre-#748
+ *   Ethereum-formatted Bitcoin auth-key account gets the corrected account
+ *   added **in place** (see {@link repairStaleBitcoinAuthKey}), again rather
+ *   than being replaced;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
  *   selection is deterministic so every login resolves the same identity;
  * - the lookup-then-create sequence is serialized per normalized email via
@@ -252,18 +330,18 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     const existingSubOrgId = [...subOrgIds].sort()[0];
 
     // Ensure the sub-org has a wallet; repair in place if not.
-    let walletCount: number;
+    let wallets: Array<{ walletId?: string }>;
     try {
       const walletsCheck = await turnkeyClient.apiClient().getWallets({
         organizationId: existingSubOrgId,
       });
-      walletCount = walletsCheck.wallets?.length || 0;
+      wallets = walletsCheck.wallets || [];
     } catch (walletCheckErr) {
       console.error('[auth] Could not check wallets in existing sub-org:', walletCheckErr);
       return existingSubOrgId;
     }
 
-    if (walletCount === 0) {
+    if (wallets.length === 0) {
       // Repair the EXISTING identity: create the wallet under the existing
       // sub-org. Creating a new sub-org here would fork the user's identity
       // (and again on every subsequent login).
@@ -273,6 +351,20 @@ async function getOrCreateTurnkeySubOrgUnlocked(
         walletName: DEFAULT_WALLET_NAME,
         accounts: [...DEFAULT_WALLET_ACCOUNTS],
       });
+      return existingSubOrgId;
+    }
+
+    // The sub-org already has at least one wallet: any of them may still
+    // carry a stale, pre-#748 Ethereum-formatted Bitcoin auth-key account
+    // (#749). This package itself only ever provisions one wallet per
+    // sub-org, but a sub-org is not guaranteed to stay that way (manual
+    // Turnkey console action, other tooling), so check every wallet rather
+    // than assuming the stale account - if present - lives in the first one.
+    // Repair each in place rather than minting a replacement sub-org.
+    for (const wallet of wallets) {
+      if (wallet.walletId) {
+        await repairStaleBitcoinAuthKey(turnkeyClient, existingSubOrgId, wallet.walletId);
+      }
     }
 
     return existingSubOrgId;

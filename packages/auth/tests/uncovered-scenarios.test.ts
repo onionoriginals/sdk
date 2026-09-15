@@ -659,6 +659,66 @@ describe('[AUTH-023] ensureWalletWithAccounts', () => {
     );
     expect(wallets[0].accounts).toHaveLength(3);
   });
+
+  test('when the secp256k1 account is at the bitcoin-auth path but the stale Ethereum address format → still repairs it (#749)', async () => {
+    // Regression for #749: a curve+path-only completeness check would treat
+    // this wallet as already having the bitcoin-auth role, since the stale
+    // pre-#748 account sits at the correct curve AND path - only its address
+    // format is wrong. ensureWalletWithAccounts must not be fooled by that
+    // and must add the corrected account.
+    const staleAddressFormatAccounts = [
+      {
+        address: 'addr_secp_stale',
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+      },
+      {
+        address: 'addr_ed1',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/0'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+      {
+        address: 'addr_ed2',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/1'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+    ];
+
+    const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+
+    const client = makeEnsureClient({
+      getWalletsResponses: [
+        () =>
+          Promise.resolve({
+            wallets: [{ walletId: 'w_stale_format', walletName: 'default-wallet' }],
+          }),
+        () =>
+          Promise.resolve({
+            wallets: [{ walletId: 'w_stale_format', walletName: 'default-wallet' }],
+          }),
+      ],
+      getWalletAccounts: mock()
+        .mockResolvedValueOnce({ accounts: staleAddressFormatAccounts })
+        .mockResolvedValueOnce({ accounts: fullAccounts }),
+      createWalletAccounts,
+    });
+
+    const wallets = await ensureWalletWithAccounts(client, 'sub_org_123');
+
+    expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+    const createdAccounts = (
+      createWalletAccounts.mock.calls[0][0] as { accounts: Array<{ path: string; addressFormat: string }> }
+    ).accounts;
+    // Only the bitcoin-auth role is missing; the two DID roles are already
+    // present and must not be recreated.
+    expect(createdAccounts).toHaveLength(1);
+    expect(createdAccounts[0].path).toBe("m/44'/0'/0'/0/0");
+    expect(createdAccounts[0].addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR');
+    expect(wallets[0].accounts).toHaveLength(3);
+  });
 });
 
 // ─── AUTH-028: TurnkeyDIDSigner ───────────────────────────────────────────────
