@@ -126,7 +126,11 @@ test('real WebSocket block checks commit confirmation and broadcasts persisted r
   const complete = createInscriptionCompletionSweep({
     store: {
       pendingRevealBroadcasts: () => ({ pending: record.status === 'commit_broadcast' ? [{ subOrgId: 'creator', record }] : [], unreadable: [] }),
-      setStatus: (_sub, _tx, status) => { record.status = status; },
+      trySetStatus: (_sub, _tx, expected, status) => {
+        if (record.status !== expected.status) return false;
+        record.status = status;
+        return true;
+      },
     },
     provider: {
       getTransactionStatus: async () => { checks++; return { confirmed }; },

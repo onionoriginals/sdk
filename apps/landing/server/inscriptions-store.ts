@@ -26,6 +26,23 @@ import { dirname, join } from 'node:path';
 
 export type InscriptionStatus = 'signed' | 'commit_broadcast' | 'reveal_broadcast' | 'confirmed';
 
+/**
+ * A caller's last-observed snapshot of a record, for `trySetStatus`/
+ * `tryRetire`'s compare-and-set guard. `status`/`retired`/`superseded` are
+ * always compared. `confirmations`/`confirmedBlockHeight`/
+ * `confirmedBlockHash` are compared ONLY when the key is present in the
+ * object (even as `undefined`) — see `trySetStatus`'s doc comment for why a
+ * `confirmed` → `confirmed` write needs this and other transitions don't.
+ */
+export interface StatusExpectation {
+  status: InscriptionStatus;
+  retired?: boolean;
+  superseded?: boolean;
+  confirmations?: number;
+  confirmedBlockHeight?: number;
+  confirmedBlockHash?: string;
+}
+
 export interface InscriptionRecord {
   commitTxId: string;
   revealTxId: string;
@@ -188,6 +205,54 @@ export interface InscriptionsStore {
     status: InscriptionStatus,
     evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
   ): void;
+  /**
+   * Guarded status transition for a caller that read the record, then
+   * AWAITED a network call, then decided a new status (#677, #694): both
+   * `bitcoin-reconciliation.ts` and `inscription-completion-sweep.ts` take a
+   * snapshot, spend real time on a provider round trip, and only then write —
+   * during which a concurrent reconciliation pass for the same record (an
+   * overlapping poll, or the background sweep) can already have moved it.
+   * Writing the old decision back at that point would silently clobber the
+   * concurrent pass's result (e.g. regressing a just-confirmed record, or
+   * reviving one that was just retired).
+   *
+   * Applies `status`/`evidence` (identical semantics to `setStatus`) only if
+   * the record's CURRENT on-disk state still matches `expected` — i.e.
+   * nothing else transitioned it since the caller's last fresh read.
+   * `status`/`retired`/`superseded` are always checked. `confirmations` /
+   * `confirmedBlockHeight` / `confirmedBlockHash` are checked ONLY when the
+   * caller includes them in `expected` (present, even if `undefined`) —
+   * needed for a `confirmed` → `confirmed` write, where the status/retired/
+   * superseded triple alone stays identical across a purely evidence-only
+   * concurrent update (a fresher confirmation depth or reorg block identity
+   * from another pass), so omitting this check would let a stale pass
+   * silently overwrite newer evidence with older evidence. Include them
+   * for demotions from `confirmed` too: newer confirmation evidence must
+   * invalidate a stale negative lookup even when the status is unchanged.
+   *
+   * Returns whether the write happened; the caller must treat `false` as "a
+   * concurrent pass already handled this record", not an error, and skip
+   * any further action that assumed its own write applied.
+   */
+  trySetStatus(
+    subOrgId: string,
+    commitTxId: string,
+    expected: StatusExpectation,
+    status: InscriptionStatus,
+    evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
+  ): boolean;
+  /**
+   * Guarded retirement counterpart to `trySetStatus`, for the same
+   * await-then-decide seam (#677 follow-up): retiring unconditionally after
+   * an `await` can delete a record's ONLY recovery artifacts (signed commit
+   * + reveal hex) based on a snapshot a concurrent pass has since moved past
+   * — e.g. demoted after a reorg, or already retired via a different
+   * evidence path. `retire` alone re-checks nothing; this does. Applies
+   * `retire` only if the record's current on-disk state still matches
+   * `expected` (same semantics as `trySetStatus`'s `expected`, evidence
+   * fields included). Returns whether it retired.
+   */
+  tryRetire(subOrgId: string, commitTxId: string, expected: StatusExpectation): boolean;
   /**
    * Stamp a re-push attempt, including a rejected attempt, to throttle retries.
    * Touches ONLY
@@ -528,6 +593,73 @@ export function createInscriptionsStore(opts: {
     rec.updatedAt = new Date(now()).toISOString();
   }
 
+  /**
+   * Shared compare-and-set guard behind `trySetStatus`/`tryRetire`. `in`
+   * (not `!== undefined`) is deliberate: it lets a caller assert "this field
+   * must currently be `undefined`" by passing it explicitly, while a caller
+   * who omits the key entirely skips that check altogether.
+   */
+  function matchesExpected(rec: InscriptionRecord, expected: StatusExpectation): boolean {
+    if (rec.status !== expected.status) return false;
+    if (!!rec.retired !== !!(expected.retired ?? false)) return false;
+    if (!!rec.superseded !== !!(expected.superseded ?? false)) return false;
+    if ('confirmations' in expected && rec.confirmations !== expected.confirmations) return false;
+    if ('confirmedBlockHeight' in expected && rec.confirmedBlockHeight !== expected.confirmedBlockHeight) return false;
+    if ('confirmedBlockHash' in expected && rec.confirmedBlockHash !== expected.confirmedBlockHash) return false;
+    return true;
+  }
+
+  /** Shared mutation behind `setStatus`/`trySetStatus`. Caller writes. */
+  function applyStatus(
+    rec: InscriptionRecord,
+    status: InscriptionStatus,
+    evidence?: { confirmations?: number; blockHeight?: number; blockHash?: string }
+  ): void {
+    rec.status = status;
+    rec.updatedAt = new Date(now()).toISOString();
+    // Confirmation is reversible. The reconciler explicitly retires the
+    // pair only after its configured recovery horizon has elapsed.
+    // Depth is current-truth-while-confirmed only: any OTHER status
+    // (including the reorg demotion back to reveal_broadcast) clears it
+    // rather than carrying a stale reading forward. Block height/hash are
+    // deliberately NOT cleared on demotion — see `confirmedBlockHeight` /
+    // `confirmedBlockHash` — so a later reconfirmation can still be
+    // compared against them.
+    rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
+    // Height and hash describe ONE block identity, not two independent
+    // facts — they must never drift out of sync with each other. They are
+    // the only record of this reveal's last known block identity, and the
+    // reorg comparison in bitcoin.ts reads them back on the very next
+    // poll, so an evidence-less read (a provider hiccup that still reports
+    // `confirmed` but omits one or both) must not lose them: clearing
+    // either on a bare omission would erase the sole anchor a SAME-HEIGHT
+    // reorg needs to be detected against, permanently disabling that
+    // detection until the next read happens to include a value again.
+    //
+    // But a NEW hash is a NEW block identity, whether or not this read's
+    // height lookup also succeeded (QuickNode resolves them via separate
+    // RPC calls, so one can fail independently of the other). Pairing that
+    // new hash with the OLD block's still-sticky height would describe an
+    // identity that was never actually observed — worse than an absent
+    // height, since a caller can't tell "unknown" from "verified same as
+    // before". So height is cleared (not left stale) exactly when this
+    // read's hash proves the identity changed but doesn't say to what
+    // height; otherwise (hash unchanged, or this read has no hash opinion
+    // at all) the previous height is exactly as valid as before.
+    if (status === 'confirmed') {
+      const freshHash = evidence?.blockHash;
+      const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
+      if (evidence?.blockHeight !== undefined) {
+        rec.confirmedBlockHeight = evidence.blockHeight;
+      } else if (identityChanged) {
+        rec.confirmedBlockHeight = undefined;
+      }
+      if (freshHash !== undefined) {
+        rec.confirmedBlockHash = freshHash;
+      }
+    }
+  }
+
   return {
     create(subOrgId, rec) {
       const recs = readAll(subOrgId);
@@ -570,6 +702,15 @@ export function createInscriptionsStore(opts: {
       retireInPlace(rec);
       writeAll(subOrgId, recs);
     },
+    tryRetire(subOrgId, commitTxId, expected) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      if (!matchesExpected(rec, expected)) return false;
+      retireInPlace(rec);
+      writeAll(subOrgId, recs);
+      return true;
+    },
     get(subOrgId, commitTxId) {
       return readAll(subOrgId).find((r) => r.commitTxId === commitTxId) ?? null;
     },
@@ -577,50 +718,17 @@ export function createInscriptionsStore(opts: {
       const recs = readAll(subOrgId);
       const rec = recs.find((r) => r.commitTxId === commitTxId);
       if (!rec) throw new Error('NOT_FOUND');
-      rec.status = status;
-      rec.updatedAt = new Date(now()).toISOString();
-      // Confirmation is reversible. The reconciler explicitly retires the
-      // pair only after its configured recovery horizon has elapsed.
-      // Depth is current-truth-while-confirmed only: any OTHER status
-      // (including the reorg demotion back to reveal_broadcast) clears it
-      // rather than carrying a stale reading forward. Block height/hash are
-      // deliberately NOT cleared on demotion — see `confirmedBlockHeight` /
-      // `confirmedBlockHash` — so a later reconfirmation can still be
-      // compared against them.
-      rec.confirmations = status === 'confirmed' ? evidence?.confirmations : undefined;
-      // Height and hash describe ONE block identity, not two independent
-      // facts — they must never drift out of sync with each other. They are
-      // the only record of this reveal's last known block identity, and the
-      // reorg comparison in bitcoin.ts reads them back on the very next
-      // poll, so an evidence-less read (a provider hiccup that still reports
-      // `confirmed` but omits one or both) must not lose them: clearing
-      // either on a bare omission would erase the sole anchor a SAME-HEIGHT
-      // reorg needs to be detected against, permanently disabling that
-      // detection until the next read happens to include a value again.
-      //
-      // But a NEW hash is a NEW block identity, whether or not this read's
-      // height lookup also succeeded (QuickNode resolves them via separate
-      // RPC calls, so one can fail independently of the other). Pairing that
-      // new hash with the OLD block's still-sticky height would describe an
-      // identity that was never actually observed — worse than an absent
-      // height, since a caller can't tell "unknown" from "verified same as
-      // before". So height is cleared (not left stale) exactly when this
-      // read's hash proves the identity changed but doesn't say to what
-      // height; otherwise (hash unchanged, or this read has no hash opinion
-      // at all) the previous height is exactly as valid as before.
-      if (status === 'confirmed') {
-        const freshHash = evidence?.blockHash;
-        const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
-        if (evidence?.blockHeight !== undefined) {
-          rec.confirmedBlockHeight = evidence.blockHeight;
-        } else if (identityChanged) {
-          rec.confirmedBlockHeight = undefined;
-        }
-        if (freshHash !== undefined) {
-          rec.confirmedBlockHash = freshHash;
-        }
-      }
+      applyStatus(rec, status, evidence);
       writeAll(subOrgId, recs);
+    },
+    trySetStatus(subOrgId, commitTxId, expected, status, evidence) {
+      const recs = readAll(subOrgId);
+      const rec = recs.find((r) => r.commitTxId === commitTxId);
+      if (!rec) throw new Error('NOT_FOUND');
+      if (!matchesExpected(rec, expected)) return false;
+      applyStatus(rec, status, evidence);
+      writeAll(subOrgId, recs);
+      return true;
     },
     markRebroadcast(subOrgId, commitTxId) {
       const recs = readAll(subOrgId);

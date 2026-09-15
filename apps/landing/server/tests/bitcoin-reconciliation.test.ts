@@ -168,6 +168,247 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(b.superseded).toBe(true);
   });
 
+  // #677 — the demotion decision must read a FRESH per-record snapshot, not
+  // the snapshot taken once at the top of the whole reconciliation pass:
+  // that snapshot can already be stale by the time a later record's turn
+  // comes up, if an earlier record processed in the SAME pass concurrently
+  // wrote to it (exactly what an overlapping `reconcileUser` call for the
+  // same user, or the background sweep, would also do).
+  test('a reorg is correctly demoted even when an earlier record in the same pass concurrently confirmed it', async () => {
+    const target = 'a'.repeat(64);
+    const trigger = 'b'.repeat(64);
+    const targetReveal = `${target.slice(0, 62)}r0`;
+    const triggerReveal = `${trigger.slice(0, 62)}r0`;
+    const { store, reconciler } = harness({
+      txStatus: (txid) => {
+        if (txid === triggerReveal) {
+          // While THIS pass's own read for `trigger` is "in flight", a
+          // concurrent pass confirms `target` — before this pass has even
+          // reached `target`'s own turn in the loop.
+          store.setStatus('sub-1', target, 'confirmed', {
+            confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64),
+          });
+          return { confirmed: true, confirmations: 1 };
+        }
+        if (txid === targetReveal) {
+          // This pass's OWN fresh evidence for `target`: the block it was
+          // just marked confirmed in (by the concurrent write above) has
+          // since been reorged out.
+          return { confirmed: false };
+        }
+        return { confirmed: false };
+      },
+    });
+    // `trigger` created AFTER `target` so it sorts first (newest-first) and
+    // is processed before `target` within this one pass.
+    store.create('sub-1', rec({ commitTxId: target, status: 'reveal_broadcast' }));
+    store.create('sub-1', rec({ commitTxId: trigger, status: 'reveal_broadcast' }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+
+    // `target` must be DEMOTED — not left reporting the `confirmed` status a
+    // concurrent write produced mid-pass, now that this pass's own reorg
+    // evidence is in hand. Reading the stale top-of-pass snapshot instead of
+    // a fresh per-record read would silently skip this demotion.
+    expect(inscriptions.find((r) => r.commitTxId === target)!.status).toBe('reveal_broadcast');
+    expect(store.get('sub-1', target)!.status).toBe('reveal_broadcast');
+  });
+
+  // #677 follow-up (Greptile P1: "Retirement Uses Stale State") — reaching
+  // the recovery horizon must re-verify the record's CURRENT on-disk state
+  // immediately before retiring, not just trust that "no status write was
+  // needed" means nothing changed. A concurrent pass can demote a record
+  // (clearing confirmations, but leaving the sticky block height/hash and
+  // the still-`confirmed`-looking status/retired/superseded triple
+  // untouched in ways this pass's own lagging evidence read doesn't
+  // distinguish) between this pass's own snapshot and its retire decision.
+  test('reaching the recovery horizon does not retire a record a concurrent pass just demoted, even when this pass\'s own evidence looks unchanged', async () => {
+    const commit = 'd'.repeat(64);
+    const sameHash = 'a'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => {
+        // A concurrent pass (an overlapping poll, or the background sweep)
+        // demotes this record on fresher evidence (e.g. a reorg it saw)
+        // while THIS pass's own read is still in flight — and, realistically
+        // hitting a different or lagging indexer node, THIS pass's own read
+        // below reports the exact evidence already on file, so its own
+        // "did anything change" check sees no difference.
+        store.setStatus('sub-1', commit, 'reveal_broadcast');
+        return { confirmed: true, confirmations: 6, blockHeight: 100, blockHash: sameHash };
+      },
+      recoveryConfirmations: 6,
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: sameHash,
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent demotion must stand: NOT retired, and its recovery hex
+    // must survive — retiring here would delete it for a record that, per
+    // the concurrent pass's fresher evidence, is not actually settled
+    // (exactly the #693 failure mode: reveal_broadcast + retired:true).
+    expect(stored.status).toBe('reveal_broadcast');
+    expect(stored.retired).not.toBe(true);
+    expect(stored.revealTxHex).toBeDefined();
+  });
+
+  test('an unchanged stale confirmation cannot retire a newer below-horizon observation', async () => {
+    const commit = '8'.repeat(64);
+    const oldHash = 'a'.repeat(64);
+    const newHash = 'b'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 1, blockHeight: 101, blockHash: newHash,
+        });
+        return { confirmed: true, confirmations: 6, blockHeight: 100, blockHash: oldHash };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: oldHash,
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(1);
+    expect(stored.confirmedBlockHash).toBe(newHash);
+    expect(stored.retired).not.toBe(true);
+    expect(stored.signedCommitHex).toBe('02aa');
+    expect(stored.revealTxHex).toBe('02bb');
+    expect(broadcastCalls).toEqual([]);
+  });
+
+  test('a stale negative lookup cannot demote newer confirmation evidence or trigger rebroadcast', async () => {
+    const commit = '9'.repeat(64);
+    const newHash = 'b'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 2, blockHeight: 101, blockHash: newHash,
+        });
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 1, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(2);
+    expect(stored.confirmedBlockHash).toBe(newHash);
+    expect(stored.retired).not.toBe(true);
+    expect(stored.signedCommitHex).toBe('02aa');
+    expect(stored.revealTxHex).toBe('02bb');
+    expect(broadcastCalls).toEqual([]);
+  });
+
+  // #677 follow-up (Greptile P1: "Guard Ignores Evidence Changes") — the
+  // guarded write must also protect a `confirmed` → `confirmed` transition:
+  // status/retired/superseded alone stay IDENTICAL across a purely
+  // evidence-only concurrent update, so a guard that checks only those three
+  // would let a stale, independently-lagging pass silently overwrite a
+  // concurrent pass's fresher confirmation depth / block identity.
+  test('a stale confirmed-to-confirmed write cannot clobber fresher evidence written by a concurrent pass', async () => {
+    const commit = 'e'.repeat(64);
+    const freshHash = 'b'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => {
+        // A concurrent pass writes FRESHER confirmation evidence for this
+        // exact record while this pass's own read is still in flight.
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 6, blockHeight: 101, blockHash: freshHash,
+        });
+        // This pass's own read is independently lagging: it reports OLDER
+        // evidence than what the concurrent pass just wrote.
+        return { confirmed: true, confirmations: 5, blockHeight: 100, blockHash: 'a'.repeat(64) };
+      },
+      recoveryConfirmations: 6,
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 4, confirmedBlockHeight: 99, confirmedBlockHash: 'c'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent pass's fresher evidence must stand — this pass's own
+    // stale read must not silently overwrite it just because status stayed
+    // `confirmed` on both sides.
+    expect(stored.confirmations).toBe(6);
+    expect(stored.confirmedBlockHeight).toBe(101);
+    expect(stored.confirmedBlockHash).toBe(freshHash);
+  });
+
+  // #677 follow-up (Greptile P1, round 2: "sticky evidence vs. raw provider
+  // fields") — the guarded retire's expected snapshot must reflect what
+  // `applyStatus` ACTUALLY wrote, not the raw provider read. When a
+  // confirming read omits block height/hash, `applyStatus`'s sticky-evidence
+  // rule leaves the record's previously-established confirmedBlockHeight/
+  // Hash untouched rather than clearing them — reconstructing the retire
+  // guard's expectation from the raw (undefined) provider fields would then
+  // mismatch the real record and permanently block retirement.
+  test('a threshold-reaching confirmation is still retired when the provider read omits block height/hash', async () => {
+    const commit = 'f'.repeat(64);
+    const { store, reconciler } = harness({
+      // Reaches the recovery horizon, but supplies no block identity at all
+      // — a real, if partial, provider response shape.
+      txStatus: () => ({ confirmed: true, confirmations: 6 }),
+      recoveryConfirmations: 6,
+    });
+    // A prior poll already established sticky block identity.
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 5, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.retired).toBe(true);
+    expect(stored.revealTxHex).toBeUndefined(); // retiring drops the hex
+  });
+
+  // #677 — the mirror-image race: a record settles (reaches the recovery
+  // horizon) and is retired by a concurrent pass WHILE this pass's own
+  // network read for that exact record is in flight. The guarded write must
+  // refuse to write back a decision made from before that retirement, so a
+  // genuinely-settled, retired record can never regress to an internally
+  // inconsistent `reveal_broadcast` + `retired: true` combination (#693).
+  test('a record retired by a concurrent pass during this pass\'s own await is never clobbered', async () => {
+    const commit = 'c'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        // Simulate an overlapping poll (or the background sweep) retiring
+        // this exact record while this pass's own reorg-evidence read for
+        // it is still outstanding.
+        store.retire('sub-1', commit);
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'confirmed', confirmations: 2 }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent retirement stands untouched: no reveal_broadcast +
+    // retired:true corruption, and no rebroadcast of an already-retired pair.
+    expect(stored.retired).toBe(true);
+    expect(stored.status).toBe('confirmed');
+    expect(broadcastCalls).toEqual([]);
+  });
+
   test('an unconfirmed stuck reveal is re-pushed only after the rebroadcast window elapses', async () => {
     const commit = '6'.repeat(64);
     let clock = 0;

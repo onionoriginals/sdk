@@ -50,6 +50,10 @@ export type MoneyEvent =
   | 'inscription_sweep_waiting'
   /** The commit status could not be read, so nothing was pushed. */
   | 'inscription_sweep_lookup_failed'
+  /** A concurrent reconciliation pass already confirmed or retired this
+   *  record while this sweep's own lookup/broadcast were in flight; this
+   *  pass's write was skipped rather than clobbering that result (#694). */
+  | 'inscription_sweep_raced'
   /** Records files that could not be parsed — signed reveals unreachable. */
   | 'inscription_sweep_unreadable';
 

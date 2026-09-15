@@ -29,7 +29,7 @@ export interface SweepProvider {
 }
 
 export interface CompletionSweepDeps {
-  store: Pick<InscriptionsStore, 'pendingRevealBroadcasts' | 'setStatus'>;
+  store: Pick<InscriptionsStore, 'pendingRevealBroadcasts' | 'trySetStatus'>;
   provider: SweepProvider;
   moneyLog: (event: MoneyEvent, fields?: MoneyFields) => void;
   /**
@@ -49,6 +49,10 @@ export interface CompletionSweepResult {
   waiting: number;
   /** Push attempted and refused; the record stays at commit_broadcast. */
   failed: number;
+  /** A concurrent reconciliation pass already moved the record while this
+   *  pass's own status lookup/broadcast were in flight (#694); this pass's
+   *  write was skipped rather than clobbering that pass's result. */
+  raced: number;
   /** Files that could not be parsed. Their signed reveals are unreachable. */
   unreadable: string[];
 }
@@ -71,6 +75,7 @@ export function createInscriptionCompletionSweep(
       completed: 0,
       waiting: 0,
       failed: 0,
+      raced: 0,
       unreadable: [],
     };
 
@@ -150,7 +155,34 @@ export function createInscriptionCompletionSweep(
       }
 
       // Only now: the reveal is on the network, by our push or someone's.
-      deps.store.setStatus(subOrgId, record.commitTxId, 'reveal_broadcast');
+      //
+      // Guarded write (#694): `record` is the snapshot taken before the
+      // status lookup and broadcast above, both of which awaited real
+      // network round trips. A concurrent reconciliation pass for the same
+      // user (the per-user list poll, or an overlapping sweep run — this
+      // sweep's own `sweepRunning` guard only prevents two sweep passes
+      // overlapping each OTHER, not one overlapping a live poll) can have
+      // confirmed or retired this exact record during either await. Writing
+      // 'reveal_broadcast' unconditionally at that point would silently
+      // regress a genuinely-confirmed record back down, or resurrect a
+      // retired one — the mirror image of #677 in this background sweep.
+      // Only advance the record if it is still exactly where it was found;
+      // otherwise the concurrent pass's result stands.
+      const applied = deps.store.trySetStatus(
+        subOrgId,
+        record.commitTxId,
+        { status: 'commit_broadcast', retired: false, superseded: false },
+        'reveal_broadcast'
+      );
+      if (!applied) {
+        result.raced++;
+        deps.moneyLog('inscription_sweep_raced', {
+          sub: subOrgId,
+          commitTxId: record.commitTxId,
+          revealTxId: record.revealTxId,
+        });
+        continue;
+      }
       result.completed++;
       deps.moneyLog('inscription_sweep_completed', {
         sub: subOrgId,
