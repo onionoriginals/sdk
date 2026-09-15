@@ -1,28 +1,39 @@
-import * as bitcoin from 'bitcoinjs-lib';
+import * as btc from '@scure/btc-signer';
 
 /**
  * Bitcoin network types supported by the validation
  */
 export type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
+// Regtest uses the bech32 prefix 'bcrt', which is not covered by
+// @scure/btc-signer's built-in TEST_NETWORK (which uses 'tb'). Matches the
+// same network object defined in packages/sdk/src/bitcoin/transfer.ts and
+// packages/sdk/src/bitcoin/transactions/commit.ts.
+const REGTEST_NETWORK: typeof btc.NETWORK = {
+  bech32: 'bcrt',
+  pubKeyHash: 0x6f,
+  scriptHash: 0xc4,
+  wif: 0xef,
+};
+
 /**
- * Maps our network names to bitcoinjs-lib network configurations
+ * Maps our network names to @scure/btc-signer network configurations
  */
-const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
+const getNetwork = (network: BitcoinNetwork): typeof btc.NETWORK => {
   switch (network) {
     case 'mainnet':
-      return bitcoin.networks.bitcoin;
+      return btc.NETWORK;
     case 'testnet':
       // testnet4 shares testnet3's bech32 params (tb1) — same as signet below.
-      return bitcoin.networks.testnet;
+      return btc.TEST_NETWORK;
     case 'regtest':
       // Regtest uses testnet parameters but with bcrt prefix
       // However, since many regtest addresses in tests use testnet format,
       // we accept both testnet and regtest addresses for regtest network
-      return bitcoin.networks.regtest;
+      return REGTEST_NETWORK;
     case 'signet':
       // Signet uses the same bech32 prefix as testnet (tb1)
-      return bitcoin.networks.testnet;
+      return btc.TEST_NETWORK;
     default: {
       const exhaustiveCheck: never = network;
       throw new Error(`Unsupported network: ${String(exhaustiveCheck)}`);
@@ -32,11 +43,14 @@ const getNetwork = (network: BitcoinNetwork): bitcoin.Network => {
 
 /**
  * Validates a Bitcoin address format and checksum for the given network.
- * 
- * This function uses bitcoinjs-lib's address.toOutputScript() which performs:
- * - Format validation (bech32, base58check)
+ *
+ * This function uses @scure/btc-signer's Address().decode(), which performs:
+ * - Format validation (bech32/bech32m for P2WPKH/P2WSH/P2TR, base58check for P2PKH/P2SH)
  * - Checksum verification
  * - Network prefix validation
+ *
+ * Unlike bitcoinjs-lib v7, this does not require a separately initialized ECC
+ * backend (`initEccLib()`) to validate Taproot (P2TR/bech32m) addresses.
  * 
  * @param address - The Bitcoin address to validate
  * @param network - The network to validate against ('mainnet', 'regtest', 'signet')
@@ -80,17 +94,17 @@ export function validateBitcoinAddress(address: string, network: BitcoinNetwork)
   try {
     // Get the appropriate network configuration
     const networkConfig = getNetwork(network);
-    
-    // Use bitcoinjs-lib to validate the address format and checksum
+
+    // Use @scure/btc-signer to validate the address format and checksum
     // This will throw if the address is invalid
-    bitcoin.address.toOutputScript(trimmedAddress, networkConfig);
-    
+    btc.Address(networkConfig).decode(trimmedAddress);
+
     return true;
   } catch (error) {
     // For regtest, also try testnet network as many tools use testnet addresses for regtest
     if (network === 'regtest') {
       try {
-        bitcoin.address.toOutputScript(trimmedAddress, bitcoin.networks.testnet);
+        btc.Address(btc.TEST_NETWORK).decode(trimmedAddress);
         return true;
       } catch {
         // Fall through to error handling below

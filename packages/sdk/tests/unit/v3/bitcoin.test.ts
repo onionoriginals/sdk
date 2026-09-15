@@ -193,6 +193,29 @@ test("prepares raw media plus the complete boundary without broadcasting and rou
   );
 });
 
+test("prepares against a Taproot (P2TR) changeAddress without throwing", async () => {
+  // Regression for https://github.com/onionoriginals/sdk/issues/713: bitcoinjs-lib
+  // v7 rejects every Taproot address unless initEccLib() has been called, which
+  // this SDK never did. changeAddress validation must accept a P2TR address (the
+  // conventional choice for an inscription-holding wallet) exactly like P2WPKH.
+  const f = await fixture();
+  const p2trChangeAddress =
+    "bcrt1pnk2g6ndajtlzklp6ecwdlx0h77wtkgls4sgwmuerhzawxmzca2gskhckm8";
+  const p = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, {
+    ...f.options,
+    changeAddress: p2trChangeAddress,
+  });
+  expect(p.kind).toBe("boundary");
+  // The commit transaction's change output (index 1, after the P2TR commit
+  // output at index 0 — see createCommitTransaction) pays the P2TR changeAddress.
+  const commitTx = tx(p.transactions.signedCommitHex);
+  const changeOutput = commitTx.getOutput(1);
+  const expectedScript = btc.OutScript.encode(
+    btc.Address(getScureNetwork("regtest")).decode(p2trChangeAddress),
+  );
+  expect(changeOutput?.script).toEqual(expectedScript);
+});
+
 test("no inline media uses application/cel JSON without metadata", async () => {
   const f = await fixture(false);
   const p = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
