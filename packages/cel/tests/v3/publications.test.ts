@@ -12,6 +12,7 @@ import {
   encodeValue,
   eventDigest,
   verifyHistory,
+  normalizeSatpoint,
   jcsSigningMessage,
   decodeController,
   type SatSnapshot,
@@ -473,6 +474,34 @@ test("rejects malformed independent ownership evidence rather than ignoring it",
     },
   });
   expect(result.status).toBe("incomplete");
+});
+
+test("cross-checks ownership when independent evidence reports the same satpoint in a different hex case", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const [txid, vout, offset] = (snapshot.ownership.satpoint as string).split(":");
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id),
+      ownership: {
+        ...snapshot.ownership,
+        satpoint: `${txid.toUpperCase()}:${vout}:${offset}`,
+      },
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.ownershipAssurance).toBe("cross-checked");
+});
+
+test("normalizeSatpoint lowercases only the txid component and passes through null/malformed values", () => {
+  expect(normalizeSatpoint(null)).toBeNull();
+  expect(normalizeSatpoint("AB".repeat(32) + ":0:0")).toBe("ab".repeat(32) + ":0:0");
+  expect(normalizeSatpoint("ab".repeat(32) + ":3:12")).toBe("ab".repeat(32) + ":3:12");
+  // Not the expected <txid>:<vout>:<offset> shape: returned unchanged rather than coerced.
+  expect(normalizeSatpoint("not-a-satpoint")).toBe("not-a-satpoint");
+  const nonHexTxid = "gg" + "ab".repeat(31) + ":0:0";
+  expect(normalizeSatpoint(nonHexTxid)).toBe(nonHexTxid);
 });
 
 test("does not accept conflicting confirmed and pending records for one inscription", () => {

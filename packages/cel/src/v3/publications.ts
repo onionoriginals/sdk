@@ -237,6 +237,21 @@ const failure = (status: ResolutionFailure, reason: string): SatResolution => ({
   crossSatCanonicality: "unknown",
   chainEvidence: { assurance: "provider-asserted" },
 });
+const SATPOINT = /^([0-9a-fA-F]{64}):(\d+):(\d+)$/;
+/**
+ * Canonicalize a satpoint (`<64-hex-txid>:<vout>:<offset>`) for equality
+ * comparison across independently configured sources. Only the txid's hex
+ * casing is normalized — vout/offset are decimal, not hex. A value that
+ * doesn't match the expected shape is returned unchanged, so a genuinely
+ * malformed or mismatched satpoint still fails comparison rather than being
+ * coerced into matching.
+ */
+export function normalizeSatpoint(satpoint: string | null): string | null {
+  if (satpoint === null) return null;
+  const match = SATPOINT.exec(satpoint);
+  return match ? `${match[1].toLowerCase()}:${match[2]}:${match[3]}` : satpoint;
+}
+
 /**
  * Whether an entry (raw, structurally plausible but not yet cryptographically checked)
  * genuinely extends `head` under `controller`: same check `apply()` would perform, applied
@@ -520,7 +535,8 @@ export function resolveSat(
         return failure("incomplete", "Invalid independent ownership evidence");
       if (
         ownership.owner !== snapshot.ownership.owner ||
-        ownership.satpoint !== snapshot.ownership.satpoint
+        normalizeSatpoint(ownership.satpoint) !==
+          normalizeSatpoint(snapshot.ownership.satpoint)
       )
         return failure(
           "inconsistent-evidence",

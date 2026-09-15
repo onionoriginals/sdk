@@ -284,6 +284,19 @@ test("cold accepted head produces only a new delta, refusing absent evidence, st
   ).rejects.toThrow("first sat");
 });
 
+test("accepts a funding input whose observed satpoint differs only in hex casing", async () => {
+  const f = await fixture();
+  // The default fixture's funding txid ("12" repeated) has no hex letters to
+  // vary casing on, so use one that does; the outpoint is still the sole
+  // funding input, unrelated to any other fixture assumption.
+  const mixedCaseTxid = "ab".repeat(32);
+  f.options.fundingUtxos = [{ ...f.options.fundingUtxos[0], txid: mixedCaseTxid }];
+  // Same outpoint as the funding UTXO, reported by the provider in a different case.
+  f.snapshot.ownership.satpoint = `${mixedCaseTxid.toUpperCase()}:0:0`;
+  const p = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
+  expect(p.kind).toBe("boundary");
+});
+
 test("rejects substituted prepared claims before broadcast and keeps ambiguous submissions explicit", async () => {
   const f = await fixture();
   const p = await f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options);
