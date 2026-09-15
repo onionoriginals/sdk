@@ -42,8 +42,10 @@ export {
   verifyToken,
   getAuthCookieConfig,
   getClearAuthCookieConfig,
+  isAuthTokenCredentialError,
+  AUTH_JWT_ERROR_CODES,
 } from './jwt.js';
-export { createAuthMiddleware } from './middleware.js';
+export { createAuthMiddleware, createOptionalAuthMiddleware } from './middleware.js';
 export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer.js';
 
 

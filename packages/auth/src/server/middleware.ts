@@ -3,7 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { verifyToken } from './jwt.js';
+import { verifyToken, isAuthTokenCredentialError } from './jwt.js';
 import type { AuthMiddlewareOptions, AuthUser, AuthenticatedRequest } from '../types.js';
 
 /**
@@ -81,8 +81,16 @@ export function createAuthMiddleware(
 
       next();
     } catch (error) {
+      if (isAuthTokenCredentialError(error)) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
+      // A misconfigured JWT secret, or a rejection from a caller-supplied
+      // getUserByTurnkeyId/createUser callback, is not evidence that the
+      // caller's credentials are bad — report it as a server error via
+      // Express's error-handling middleware instead of fabricating a 401
+      // (#729, #747).
       console.error('Authentication error:', error);
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return next(error);
     }
   };
 }
@@ -123,9 +131,17 @@ export function createOptionalAuthMiddleware(
       }
 
       next();
-    } catch {
-      // Token invalid or expired, continue without user
-      next();
+    } catch (error) {
+      if (isAuthTokenCredentialError(error)) {
+        // Token invalid or expired: continue anonymously.
+        next();
+        return;
+      }
+      // A misconfigured JWT secret, or a rejection from the caller-supplied
+      // getUserByTurnkeyId callback, is an operational failure, not an
+      // absent/bad credential — propagate it rather than silently treating
+      // the caller as an anonymous guest (#729, #747).
+      next(error);
     }
   };
 }

@@ -4,6 +4,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import { StructuredError } from '@originals/sdk';
 import type { TokenPayload, AuthCookieConfig } from '../types.js';
 
 // 7 days in seconds
@@ -14,15 +15,50 @@ const DEFAULT_JWT_EXPIRES_IN = 7 * 24 * 60 * 60;
 const MIN_JWT_SECRET_LENGTH = 32;
 
 /**
+ * Stable error codes for `signToken`/`verifyToken` failures.
+ *
+ * The `AUTH_JWT_CONFIG_*` codes mean the deployment is misconfigured (missing
+ * or weak secret) — never evidence about the caller's credentials. The
+ * `AUTH_TOKEN_*` codes mean the presented token itself is bad. Callers (e.g.
+ * `createAuthMiddleware`) rely on this split to avoid reporting a server
+ * configuration failure as a 401 (#729, #747).
+ */
+export const AUTH_JWT_ERROR_CODES = {
+  configMissingSecret: 'AUTH_JWT_CONFIG_SECRET_MISSING',
+  configWeakSecret: 'AUTH_JWT_CONFIG_SECRET_WEAK',
+  tokenInvalid: 'AUTH_TOKEN_INVALID',
+  tokenExpired: 'AUTH_TOKEN_EXPIRED',
+  tokenMissingSubject: 'AUTH_TOKEN_MISSING_SUBJECT',
+} as const;
+
+/** Error codes that mean "the token itself is bad" rather than a config/operational failure. */
+export const AUTH_TOKEN_CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set([
+  AUTH_JWT_ERROR_CODES.tokenInvalid,
+  AUTH_JWT_ERROR_CODES.tokenExpired,
+  AUTH_JWT_ERROR_CODES.tokenMissingSubject,
+]);
+
+/** True if `error` is a `StructuredError` reporting a bad token/credential, not a config/operational failure. */
+export function isAuthTokenCredentialError(error: unknown): error is StructuredError {
+  return error instanceof StructuredError && AUTH_TOKEN_CREDENTIAL_ERROR_CODES.has(error.code);
+}
+
+/**
  * Get JWT secret from config or environment
  */
 function getJwtSecret(configSecret?: string): string {
   const secret = configSecret ?? process.env.JWT_SECRET;
   if (!secret) {
-    throw new Error('JWT_SECRET environment variable is required');
+    throw new StructuredError(
+      AUTH_JWT_ERROR_CODES.configMissingSecret,
+      'JWT_SECRET environment variable is required'
+    );
   }
   if (secret.length < MIN_JWT_SECRET_LENGTH) {
-    throw new Error(`JWT secret must be at least ${MIN_JWT_SECRET_LENGTH} characters`);
+    throw new StructuredError(
+      AUTH_JWT_ERROR_CODES.configWeakSecret,
+      `JWT secret must be at least ${MIN_JWT_SECRET_LENGTH} characters`
+    );
   }
   return secret;
 }
@@ -75,7 +111,9 @@ export function signToken(
  * @param token - JWT token string
  * @param options - Additional options
  * @returns Decoded token payload
- * @throws Error if token is invalid or expired
+ * @throws {StructuredError} `AUTH_TOKEN_EXPIRED`/`AUTH_TOKEN_INVALID`/`AUTH_TOKEN_MISSING_SUBJECT`
+ *   for a bad token, or `AUTH_JWT_CONFIG_SECRET_MISSING`/`AUTH_JWT_CONFIG_SECRET_WEAK` for a
+ *   misconfigured server secret — see {@link isAuthTokenCredentialError} to distinguish them.
  */
 export function verifyToken(
   token: string,
@@ -99,16 +137,23 @@ export function verifyToken(
     }) as TokenPayload;
 
     if (!payload.sub) {
-      throw new Error('Token missing sub-organization ID');
+      throw new StructuredError(
+        AUTH_JWT_ERROR_CODES.tokenMissingSubject,
+        'Token missing sub-organization ID'
+      );
     }
 
     return payload;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
-      throw new Error('Token has expired');
+      throw new StructuredError(AUTH_JWT_ERROR_CODES.tokenExpired, 'Token has expired', {
+        cause: error,
+      });
     }
     if (error instanceof jwt.JsonWebTokenError) {
-      throw new Error('Invalid token');
+      throw new StructuredError(AUTH_JWT_ERROR_CODES.tokenInvalid, 'Invalid token', {
+        cause: error,
+      });
     }
     throw error;
   }
