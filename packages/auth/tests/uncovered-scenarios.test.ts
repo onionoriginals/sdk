@@ -202,45 +202,48 @@ describe('[AUTH-005] Auth middleware – error paths', () => {
     }
   });
 
-  test('getUserByTurnkeyId throws → 401 "Invalid or expired token"', async () => {
+  // A valid JWT with an operational lookup failure is not a bad credential:
+  // it must reach Express error handling via next(error), not a fabricated
+  // 401 (#729, #747) — a DB outage must not read as "everyone's logged out".
+  test('getUserByTurnkeyId throws → propagates via next(error), not a 401', async () => {
     const token = signToken('sub_org_123', 'user@example.com', undefined, {
       secret: TEST_SECRET,
     });
     const req = createMockReq({ auth_token: token });
     const res = createMockRes();
-    const next = mock(() => {});
+    const next = mock((_err?: unknown) => {});
+    const dbError = new Error('DB connection failed');
 
     const middleware = createAuthMiddleware({
-      getUserByTurnkeyId: mock(() => Promise.reject(new Error('DB connection failed'))),
+      getUserByTurnkeyId: mock(() => Promise.reject(dbError)),
       jwtSecret: TEST_SECRET,
     });
 
     await middleware(req, res, next as NextFunction);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res._status).toBe(401);
-    expect(res._json).toEqual({ error: 'Invalid or expired token' });
+    expect(res._status).toBe(0);
+    expect(next).toHaveBeenCalledWith(dbError);
   });
 
-  test('createUser throws → 401 with "Invalid or expired token"', async () => {
+  test('createUser throws → propagates via next(error), not a 401', async () => {
     const token = signToken('sub_org_456', 'new@example.com', undefined, {
       secret: TEST_SECRET,
     });
     const req = createMockReq({ auth_token: token });
     const res = createMockRes();
-    const next = mock(() => {});
+    const next = mock((_err?: unknown) => {});
+    const provisionError = new Error('User creation failed');
 
     const middleware = createAuthMiddleware({
       getUserByTurnkeyId: mock(() => Promise.resolve(null)),
-      createUser: mock(() => Promise.reject(new Error('User creation failed'))),
+      createUser: mock(() => Promise.reject(provisionError)),
       jwtSecret: TEST_SECRET,
     });
 
     await middleware(req, res, next as NextFunction);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res._status).toBe(401);
-    expect(res._json).toEqual({ error: 'Invalid or expired token' });
+    expect(res._status).toBe(0);
+    expect(next).toHaveBeenCalledWith(provisionError);
   });
 });
 

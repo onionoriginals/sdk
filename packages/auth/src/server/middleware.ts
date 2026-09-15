@@ -3,7 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { verifyToken } from './jwt.js';
+import { verifyToken, isAuthTokenCredentialError } from './jwt.js';
 import type { AuthMiddlewareOptions, AuthUser, AuthenticatedRequest } from '../types.js';
 
 /**
@@ -39,20 +39,36 @@ export function createAuthMiddleware(
   const cookieName = options.cookieName ?? 'auth_token';
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => {
+    // Get JWT token from HTTP-only cookie
+    const cookies = req.cookies as Record<string, string> | undefined;
+    const token = cookies?.[cookieName];
+
+    if (!token) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    // Verify JWT token in its own try/catch, isolated from the
+    // getUserByTurnkeyId/createUser calls below: classifying an error as a
+    // bad credential must depend on where it came from (verifyToken), never
+    // just on its `code` — a caller-supplied callback could reject with a
+    // StructuredError whose code happens to collide with one of the
+    // AUTH_TOKEN_* codes, and that must still be treated as an operational
+    // failure, not fabricated into a 401 (#729, #747).
+    let payload: ReturnType<typeof verifyToken>;
     try {
-      // Get JWT token from HTTP-only cookie
-      const cookies = req.cookies as Record<string, string> | undefined;
-      const token = cookies?.[cookieName];
-
-      if (!token) {
-        return res.status(401).json({ error: 'Not authenticated' });
+      payload = verifyToken(token, { secret: options.jwtSecret });
+    } catch (error) {
+      if (isAuthTokenCredentialError(error)) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
       }
+      console.error('Authentication error:', error);
+      return next(error);
+    }
 
-      // Verify JWT token
-      const payload = verifyToken(token, { secret: options.jwtSecret });
-      const turnkeySubOrgId = payload.sub;
-      const email = payload.email;
+    const turnkeySubOrgId = payload.sub;
+    const email = payload.email;
 
+    try {
       // Check if user already exists
       let user: AuthUser | null = await options.getUserByTurnkeyId(turnkeySubOrgId);
 
@@ -81,8 +97,11 @@ export function createAuthMiddleware(
 
       next();
     } catch (error) {
+      // A rejection from a caller-supplied callback is always an
+      // operational failure at this point (the token itself already
+      // verified above), so it always reaches Express's error handling.
       console.error('Authentication error:', error);
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return next(error);
     }
   };
 }
@@ -97,19 +116,37 @@ export function createOptionalAuthMiddleware(
   const cookieName = options.cookieName ?? 'auth_token';
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const cookies = req.cookies as Record<string, string> | undefined;
-      const token = cookies?.[cookieName];
+    const cookies = req.cookies as Record<string, string> | undefined;
+    const token = cookies?.[cookieName];
 
-      if (!token) {
+    if (!token) {
+      next();
+      return;
+    }
+
+    // Verify in its own try/catch so classification depends on where the
+    // error came from (verifyToken), never just its `code` — see the
+    // matching comment in createAuthMiddleware (#729, #747).
+    let payload: ReturnType<typeof verifyToken>;
+    try {
+      payload = verifyToken(token, { secret: options.jwtSecret });
+    } catch (error) {
+      if (isAuthTokenCredentialError(error)) {
+        // Token invalid or expired: continue anonymously.
         next();
         return;
       }
+      // A misconfigured JWT secret is an operational failure, not an
+      // absent/bad credential — propagate it rather than silently treating
+      // the caller as an anonymous guest.
+      next(error);
+      return;
+    }
 
-      const payload = verifyToken(token, { secret: options.jwtSecret });
-      const turnkeySubOrgId = payload.sub;
-      const email = payload.email;
+    const turnkeySubOrgId = payload.sub;
+    const email = payload.email;
 
+    try {
       const user = await options.getUserByTurnkeyId(turnkeySubOrgId);
 
       if (user) {
@@ -123,9 +160,11 @@ export function createOptionalAuthMiddleware(
       }
 
       next();
-    } catch {
-      // Token invalid or expired, continue without user
-      next();
+    } catch (error) {
+      // The token already verified above, so a callback rejection here is
+      // always an operational failure — propagate it rather than silently
+      // treating the caller as an anonymous guest.
+      next(error);
     }
   };
 }
