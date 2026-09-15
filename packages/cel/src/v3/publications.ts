@@ -415,6 +415,11 @@ export function resolveSat(
     independentEnumeration?: IndependentEnumeration;
   } = {},
 ): SatResolution {
+  if (Object.prototype.hasOwnProperty.call(options, "expectedDid"))
+    return failure(
+      "invalid",
+      "expectedDid was removed; pass expectedAssetId instead",
+    );
   const prefix =
     snapshot.network === "mainnet"
       ? ""
