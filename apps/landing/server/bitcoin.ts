@@ -21,7 +21,7 @@ import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
-import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
+import type { InscriptionsStore, InscriptionRecord, InscriptionStatus } from './inscriptions-store';
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-reconciliation';
 import { encodeSatSnapshot } from './sat-snapshot-codec';
@@ -1642,22 +1642,26 @@ export function createBitcoinRoutes(deps: {
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
-    // #693 — a retired record's signed hex is cleared, so `commitTxId`/
+    // #693/#755 — a retired record's signed hex is cleared, so `commitTxId`/
     // `revealTxId` (which exclude witness data) cannot alone prove this
     // resubmission is byte-for-byte the same pair. `signedPairDigest`
     // (persisted at creation, retained across retirement) closes that gap
     // when present; a settled retry is additionally authenticated by a
     // fresh, valid reveal witness (verified by validateInscriptionReveal
-    // below) before this is ever called. A settled (`confirmed`) record's
-    // result is returned exactly as last observed, with no re-verification,
-    // broadcast, or state write (CLAUDE.md: "Retained prepared pairs enable
-    // exact recovery after ambiguous acknowledgements"). A retired record
-    // that never settled here (a terminally-dead superseded loser whose
-    // funding outpoint a different, confirmed pair already won) is refused
-    // outright rather than reprocessed. Shared with the post-lock recheck
-    // below, which can also observe a record retired concurrently by
-    // reconciliation.
-    function retiredResubmissionResponse(rec: InscriptionRecord): Response {
+    // below) before this is ever called. A `confirmed` record's result is
+    // returned exactly as last observed, with no re-verification, broadcast,
+    // or state write (CLAUDE.md: "Retained prepared pairs enable exact
+    // recovery after ambiguous acknowledgements") — whether or not it has
+    // yet crossed the six-confirmation retention floor: `settled` reports
+    // `rec.retired`, never hardcoded, so a resubmission of a merely
+    // `confirmed`-but-not-yet-`retired` record (#755) is not misreported as
+    // having crossed a horizon it has not. A retired record that never
+    // settled here (a terminally-dead superseded loser whose funding
+    // outpoint a different, confirmed pair already won) is refused outright
+    // rather than reprocessed. Shared with the post-lock recheck below and
+    // the post-broadcast guards further down, which can also observe a
+    // record confirmed or retired concurrently by reconciliation.
+    function settledResubmissionResponse(rec: InscriptionRecord): Response {
       // ABSENT only on a row written before this field existed; that legacy
       // case falls back to the id-only matching already done by the caller.
       if (rec.signedPairDigest !== undefined &&
@@ -1672,7 +1676,7 @@ export function createBitcoinRoutes(deps: {
           revealTxId: rec.revealTxId,
           inscriptionId: rec.inscriptionId,
           status: 'confirmed',
-          settled: true,
+          settled: rec.retired === true,
           confirmations: rec.confirmations,
           ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
           ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
@@ -1758,14 +1762,17 @@ export function createBitcoinRoutes(deps: {
       return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
     }
 
-    // #693 — only past this point has the caller PROVEN possession of a
+    // #693/#755 — only past this point has the caller PROVEN possession of a
     // validly-signed reveal for this exact commit (the check just above): a
     // retired record's own signed bytes are gone, so txid equality alone
     // (already established by checkRecordedPair) is not enough to trust a
     // resubmission claiming to be it. Handle it before any economics/
     // broadcast logic — a retired record is never legitimately reprocessed.
-    if (existingByCommitId?.retired) {
-      return retiredResubmissionResponse(existingByCommitId);
+    // A `confirmed`-but-not-yet-`retired` record is equally settled state
+    // that a retry must not regress (#755): it is reported exactly as
+    // observed, not pushed back through broadcast/setStatus.
+    if (existingByCommitId?.retired || existingByCommitId?.status === 'confirmed') {
+      return settledResubmissionResponse(existingByCommitId);
     }
 
     // Cheap syntax, transaction shape and bound-address checks precede this
@@ -1916,6 +1923,15 @@ export function createBitcoinRoutes(deps: {
     const declaredSet = new Set(outpoints);
     const covers = (r: InscriptionRecord) => outpointsOf(r).every((o) => declaredSet.has(o));
 
+    // The status this record is actually AT going into the broadcast calls
+    // below (#755): 'signed' for a brand-new commitTxId (nothing else could
+    // have touched it before `store.create` below runs), or the in-lock
+    // snapshot's own status for a resubmission of an existing live record.
+    // Used as the CAS `expected` for the guarded post-broadcast transitions —
+    // never re-derived after the lock releases, since that is exactly the
+    // window reconciliation can move the record in.
+    let preBroadcastStatus: InscriptionStatus = 'signed';
+
     // Read the rivals, judge them, supersede and persist WITHOUT yielding to
     // another submission from this user in between (C5): the guard reads state
     // that a concurrent request would otherwise invalidate mid-flight.
@@ -1927,15 +1943,17 @@ export function createBitcoinRoutes(deps: {
         const recorded = store.get(sub, commitTxId);
         const mismatch = checkRecordedPair(recorded);
         if (mismatch) return mismatch;
-        // Re-check retirement too: reconciliation runs independently of this
-        // request and could confirm-and-retire this exact commitTxId while
-        // the economics/ordinal checks above were awaiting a provider
-        // (#693). Route through the same settled-vs-terminal decision as the
-        // pre-lock check — a record that settled during that window must
-        // still return its settlement, not a false conflict.
-        if (recorded?.retired) {
-          return retiredResubmissionResponse(recorded);
+        // Re-check retirement AND confirmation too: reconciliation runs
+        // independently of this request and could confirm (#755), or
+        // confirm-and-retire (#693), this exact commitTxId while the
+        // economics/ordinal checks above were awaiting a provider. Route
+        // through the same settled-vs-terminal decision as the pre-lock
+        // check — a record that settled during that window must still
+        // return its settlement, not a false conflict or a regression.
+        if (recorded?.retired || recorded?.status === 'confirmed') {
+          return settledResubmissionResponse(recorded);
         }
+        if (recorded) preBroadcastStatus = recorded.status;
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
@@ -2010,7 +2028,17 @@ export function createBitcoinRoutes(deps: {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_broadcast_failed', detail: commitErr });
       return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
     }
-    store.setStatus(sub, commitTxId, 'commit_broadcast');
+    // #755 — guarded, not unconditional: `broadcastIdempotent` above awaited,
+    // and reconciliation runs independently of this request, so it can have
+    // confirmed (or confirmed-and-retired) this exact record in that window.
+    // Advance only from the state this request actually observed; a CAS
+    // failure means it already moved without us, so report its current
+    // settlement/status instead of regressing it.
+    if (!store.trySetStatus(sub, commitTxId, { status: preBroadcastStatus, retired: false, superseded: false }, 'commit_broadcast')) {
+      const moved = store.get(sub, commitTxId);
+      if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
+      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? preBroadcastStatus });
+    }
 
     const revealErr = await broadcastIdempotent(revealTxHex);
     if (revealErr) {
@@ -2020,7 +2048,13 @@ export function createBitcoinRoutes(deps: {
       money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'commit_broadcast' });
       return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'commit_broadcast' });
     }
-    store.setStatus(sub, commitTxId, 'reveal_broadcast');
+    // Same guard for the second transition: the reveal broadcast above is
+    // itself another await reconciliation can act across.
+    if (!store.trySetStatus(sub, commitTxId, { status: 'commit_broadcast', retired: false, superseded: false }, 'reveal_broadcast')) {
+      const moved = store.get(sub, commitTxId);
+      if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
+      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? 'reveal_broadcast' });
+    }
     money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'reveal_broadcast' });
     return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'reveal_broadcast' });
   };
