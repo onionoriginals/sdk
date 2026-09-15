@@ -2140,14 +2140,34 @@ export function createBitcoinRoutes(deps: {
       statusUnavailable = true;
     }
 
-    // Re-read: the status lookup just awaited on the network, and a
-    // concurrent reconciliation/sweep pass may have retired or reclaimed
-    // this exact record while it was in flight. Every decision from here on
-    // acts on THIS read, never the pre-await snapshot above.
-    const rec = loadRecord();
+    // A network result belongs to the state observed before its await. If
+    // another recovery pass changes that state, report it and stop this attempt.
+    const reloadIfUnchanged = (expected: InscriptionRecord): InscriptionRecord | Response => {
+      const fresh = loadRecord();
+      if (fresh instanceof Response) return fresh;
+      if (!fresh) return json({ error: 'not_found' }, 404);
+      if (fresh.retired) return fresh.status === 'confirmed' ? confirmedSettled(fresh) : notRecoverable();
+      if (
+        fresh.status !== expected.status ||
+        !!fresh.superseded !== !!expected.superseded ||
+        fresh.confirmations !== expected.confirmations ||
+        fresh.confirmedBlockHeight !== expected.confirmedBlockHeight ||
+        fresh.confirmedBlockHash !== expected.confirmedBlockHash
+      ) {
+        return json({
+          commitTxId, revealTxId, inscriptionId, status: fresh.status,
+          ...(fresh.status === 'confirmed' ? {
+            settled: false,
+            confirmations: fresh.confirmations,
+            ...(fresh.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: fresh.confirmedBlockHeight } : {}),
+            ...(fresh.confirmedBlockHash !== undefined ? { confirmedBlockHash: fresh.confirmedBlockHash } : {}),
+          } : {}),
+        });
+      }
+      return fresh;
+    };
+    const rec = reloadIfUnchanged(first);
     if (rec instanceof Response) return rec;
-    if (!rec) return json({ error: 'not_found' }, 404);
-    if (rec.retired) return rec.status === 'confirmed' ? confirmedSettled(rec) : notRecoverable();
 
     // Rebroadcasting a SUPERSEDED pair is an explicit choice of this pair for
     // its funding outpoint: any success below must also swap the roles —
@@ -2159,19 +2179,6 @@ export function createBitcoinRoutes(deps: {
     const reclaimIfSuperseded = (r: InscriptionRecord) => {
       if (r.superseded) reclaimOutpoint(store, sub, r);
     };
-    // Re-read immediately before a store write that follows an awaited
-    // broadcast: the commit/reveal pushes below are further network calls a
-    // concurrent reconciliation/sweep pass can retire this exact record
-    // across, same as the status lookup above. Returns the fresh, still-live
-    // record to mutate, or a terminal Response when it no longer is (#705).
-    const reloadIfStillLive = (): InscriptionRecord | Response => {
-      const fresh = loadRecord();
-      if (fresh instanceof Response) return fresh;
-      if (!fresh) return json({ error: 'not_found' }, 404);
-      if (fresh.retired) return fresh.status === 'confirmed' ? confirmedSettled(fresh) : notRecoverable();
-      return fresh;
-    };
-
     if (revealStatus?.confirmed) {
       reclaimIfSuperseded(rec);
       store.setStatus(sub, commitTxId, 'confirmed', {
@@ -2230,15 +2237,26 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'inscription_reconciliation_failed', message: 'Recovery attempt could not be recorded durably. Retry when storage is available.' }, 503);
     }
 
+    // Include this attempt's own synchronous demotion/journal writes in
+    // the next observation, before any further network work.
+    let observed = loadRecord();
+    if (observed instanceof Response) return observed;
+    if (!observed) return json({ error: 'not_found' }, 404);
+
     if ((rec.status === 'signed' || rec.status === 'confirmed') && rec.signedCommitHex) {
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
-      if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
-      const afterCommit = reloadIfStillLive();
+      const afterCommit = reloadIfUnchanged(observed);
       if (afterCommit instanceof Response) return afterCommit;
+      if (commitErr) return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
       reclaimIfSuperseded(afterCommit);
       store.setStatus(sub, commitTxId, 'commit_broadcast');
+      observed = loadRecord();
+      if (observed instanceof Response) return observed;
+      if (!observed) return json({ error: 'not_found' }, 404);
     }
     let revealErr = await broadcastIdempotent(rec.revealTxHex);
+    let afterReveal = reloadIfUnchanged(observed);
+    if (afterReveal instanceof Response) return afterReveal;
     // F1 — the terminal deadlock. A commit that broadcast fine can still be
     // EVICTED from every mempool by a fee spike, and with no reveal child
     // there is no CPFP to pull it back: it never confirms, so the list poll's
@@ -2251,13 +2269,17 @@ export function createBitcoinRoutes(deps: {
     if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
-      if (!commitErr) revealErr = await broadcastIdempotent(rec.revealTxHex);
+      const afterFallbackCommit = reloadIfUnchanged(observed);
+      if (afterFallbackCommit instanceof Response) return afterFallbackCommit;
+      if (!commitErr) {
+        revealErr = await broadcastIdempotent(rec.revealTxHex);
+        afterReveal = reloadIfUnchanged(observed);
+        if (afterReveal instanceof Response) return afterReveal;
+      }
     }
     if (revealErr) {
       return json({ commitTxId, revealTxId, inscriptionId, status: 'commit_broadcast' });
     }
-    const afterReveal = reloadIfStillLive();
-    if (afterReveal instanceof Response) return afterReveal;
     reclaimIfSuperseded(afterReveal);
     store.setStatus(sub, commitTxId, 'reveal_broadcast');
     return json({ commitTxId, revealTxId, inscriptionId, status: 'reveal_broadcast' });

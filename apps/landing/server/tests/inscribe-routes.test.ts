@@ -1188,6 +1188,83 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
    * THOSE can be overwritten the same way if the final status write isn't
    * also guarded by a fresh read.
    */
+  test.each(['commit', 'commit error', 'reveal', 'fallback commit', 'fallback reveal'] as const)(
+    'manual rebroadcast preserves a concurrent unsettled confirmation during %s broadcast', async (at) => {
+      const pair = buildPair();
+      let retry = false;
+      let revealAttempts = 0;
+      const h = harness({
+        txStatus: { confirmed: false },
+        broadcast: async (hex) => {
+          if (!retry) {
+            if (at.startsWith('commit') || hex === pair.revealTxHex) throw new Error('connection reset');
+            return 'f'.repeat(64);
+          }
+          if (hex === pair.revealTxHex) revealAttempts++;
+          if (at.startsWith('fallback') && hex === pair.revealTxHex && revealAttempts === 1)
+            throw new Error('missing inputs');
+          const concurrentConfirmation =
+            ((at.startsWith('commit') || at === 'fallback commit') && hex === pair.signedCommitHex) ||
+            ((at === 'reveal' || at === 'fallback reveal') && hex === pair.revealTxHex);
+          if (concurrentConfirmation)
+            h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+              confirmations: 2, blockHeight: 101, blockHash: 'fresh-block',
+            });
+          if (at === 'commit error') throw new Error('connection reset after confirmation');
+          return 'f'.repeat(64);
+        },
+      });
+      await post(h.routes, pair);
+      retry = true;
+      h.broadcasts.length = 0;
+      const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+
+      const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ status: 'confirmed', confirmations: 2, settled: false });
+      const stored = h.store.get('sub-1', pair.commitTxId)!;
+      expect(stored.status).toBe('confirmed');
+      expect(stored.confirmations).toBe(2);
+      expect(stored.confirmedBlockHash).toBe('fresh-block');
+      expect(stored.retired).not.toBe(true);
+      expect(stored.revealTxHex).toBe(pair.revealTxHex);
+      if (at.startsWith('commit')) expect(revealAttempts).toBe(0);
+      if (at === 'fallback commit') expect(revealAttempts).toBe(1);
+    },
+  );
+
+  test.each([false, true])('manual rebroadcast ignores stale confirmed=%s lookup after a concurrent confirmation update', async (confirmed) => {
+    const pair = buildPair();
+    let retry = false;
+    const h = harness({
+      txStatus: () => {
+        if (retry) h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+          confirmations: 2, blockHeight: 101, blockHash: 'fresh-block',
+        });
+        return { confirmed, confirmations: 6, blockHeight: 100, blockHash: 'old-block' };
+      },
+    });
+    await post(h.routes, pair);
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+      confirmations: 1, blockHeight: 100, blockHash: 'old-block',
+    });
+    retry = true;
+    h.broadcasts.length = 0;
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'confirmed', confirmations: 2, settled: false });
+    const stored = h.store.get('sub-1', pair.commitTxId)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(2);
+    expect(stored.retired).not.toBe(true);
+    expect(stored.revealTxHex).toBe(pair.revealTxHex);
+    expect(h.broadcasts).toEqual([]);
+  });
+
   test('#705: a concurrent retirement during the reveal broadcast await is not overwritten by a stale reveal_broadcast write', async () => {
     const pair = buildPair();
     let allowReveal = false;
