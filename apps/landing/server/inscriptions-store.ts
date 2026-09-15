@@ -226,9 +226,9 @@ export interface InscriptionsStore {
    * superseded triple alone stays identical across a purely evidence-only
    * concurrent update (a fresher confirmation depth or reorg block identity
    * from another pass), so omitting this check would let a stale pass
-   * silently overwrite newer evidence with older evidence. Omit them for a
-   * write whose expected status itself already discriminates the race (e.g.
-   * a demotion out of `confirmed`).
+   * silently overwrite newer evidence with older evidence. Include them
+   * for demotions from `confirmed` too: newer confirmation evidence must
+   * invalidate a stale negative lookup even when the status is unchanged.
    *
    * Returns whether the write happened; the caller must treat `false` as "a
    * concurrent pass already handled this record", not an error, and skip

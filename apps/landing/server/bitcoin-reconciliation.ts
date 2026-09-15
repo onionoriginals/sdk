@@ -340,17 +340,13 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
           // otherwise let this pass delete a still-live pair's only
           // recovery artifacts on stale authority.
           //
-          // Re-READ rather than reconstruct the expectation from `st`: when
-          // `needsWrite` just wrote, `applyStatus`'s sticky-evidence rule
-          // means the record's resulting confirmedBlockHeight/Hash are NOT
-          // simply `st.blockHeight`/`st.blockHash` whenever the provider's
-          // read omitted one (it keeps the previous value instead of
-          // clearing it) — using the raw provider fields here would then
-          // permanently mismatch the real record and block retirement of a
-          // genuinely-settled inscription every time the confirming read
-          // has partial block identity. No `await` separates the write
-          // above from this read, so nothing else can have interleaved.
-          const postWrite = store.get(sub, r.commitTxId);
+          // After our guarded write, read back its sticky block identity;
+          // omitted provider fields need not equal the stored values. With
+          // no write, retain the PRE-await snapshot as the expectation:
+          // rereading here would authorize retirement using evidence that
+          // another pass changed while this lookup was in flight.
+          // No await separates a successful write from this read/retire.
+          const postWrite = needsWrite ? store.get(sub, r.commitTxId) : current;
           const retireExpected: StatusExpectation | undefined = postWrite
             ? {
                 status: 'confirmed', retired: false, superseded: false,
@@ -374,7 +370,12 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // Guarded write: skip the demotion (and the rebroadcast it would
         // trigger) if the record no longer matches what was just observed —
         // e.g. it was retired by a concurrent pass in the meantime.
-        if (store.trySetStatus(sub, r.commitTxId, { status: 'confirmed', retired: false, superseded: false }, 'reveal_broadcast')) {
+        if (store.trySetStatus(sub, r.commitTxId, {
+          status: 'confirmed', retired: false, superseded: false,
+          confirmations: current.confirmations,
+          confirmedBlockHeight: current.confirmedBlockHeight,
+          confirmedBlockHash: current.confirmedBlockHash,
+        }, 'reveal_broadcast')) {
           changed = true;
           store.markRebroadcast(sub, r.commitTxId);
           if (current.signedCommitHex) await broadcastIdempotent(current.signedCommitHex);

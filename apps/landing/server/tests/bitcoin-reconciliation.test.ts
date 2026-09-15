@@ -255,6 +255,63 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.revealTxHex).toBeDefined();
   });
 
+  test('an unchanged stale confirmation cannot retire a newer below-horizon observation', async () => {
+    const commit = '8'.repeat(64);
+    const oldHash = 'a'.repeat(64);
+    const newHash = 'b'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 1, blockHeight: 101, blockHash: newHash,
+        });
+        return { confirmed: true, confirmations: 6, blockHeight: 100, blockHash: oldHash };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: oldHash,
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(1);
+    expect(stored.confirmedBlockHash).toBe(newHash);
+    expect(stored.retired).not.toBe(true);
+    expect(stored.signedCommitHex).toBe('02aa');
+    expect(stored.revealTxHex).toBe('02bb');
+    expect(broadcastCalls).toEqual([]);
+  });
+
+  test('a stale negative lookup cannot demote newer confirmation evidence or trigger rebroadcast', async () => {
+    const commit = '9'.repeat(64);
+    const newHash = 'b'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 2, blockHeight: 101, blockHash: newHash,
+        });
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed',
+      confirmations: 1, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(2);
+    expect(stored.confirmedBlockHash).toBe(newHash);
+    expect(stored.retired).not.toBe(true);
+    expect(stored.signedCommitHex).toBe('02aa');
+    expect(stored.revealTxHex).toBe('02bb');
+    expect(broadcastCalls).toEqual([]);
+  });
+
   // #677 follow-up (Greptile P1: "Guard Ignores Evidence Changes") — the
   // guarded write must also protect a `confirmed` → `confirmed` transition:
   // status/retired/superseded alone stay IDENTICAL across a purely
