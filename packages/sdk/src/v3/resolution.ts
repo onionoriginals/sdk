@@ -344,7 +344,7 @@ export class AssetResolver {
   async check(did: string, expectedAssetId: string): Promise<SatResolution> {
     const parsed = parseAssetAlias(did);
     if (parsed.layer !== "btco" || parsed.network !== this.network)
-      return layerNetworkMismatch() as SatResolution;
+      return layerNetworkMismatch();
     return (await this.observe(parsed.sat, { expectedAssetId })).resolution;
   }
 
