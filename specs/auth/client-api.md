@@ -107,6 +107,41 @@ function getKeyByCurve(
 ): WalletAccount | null
 ```
 
+Returns the **first** account matching `curve`, in wallet/account order. The
+wallet layout below provisions two `CURVE_ED25519` accounts (DID
+assertion-key and update-key), so for `CURVE_ED25519` this returns whichever
+of the two happens to come first in the API response — not reliably the
+assertion-key, since account order is not a guaranteed contract — and there
+is no way to select the other one through this function. Use `getKeyByRole`
+to select a specific DID-signing account by its exact role instead.
+
+---
+
+### `getKeyByRole(wallets, role)`
+
+Find an account by its canonical role — curve **and** exact derivation
+path, not curve alone. Use this to distinguish the DID assertion-key from
+the update-key.
+
+```typescript
+type TurnkeyAccountRole = 'bitcoin-auth' | 'did-assertion' | 'did-update';
+
+function getKeyByRole(
+  wallets: TurnkeyWallet[],
+  role: TurnkeyAccountRole
+): WalletAccount | null
+```
+
+| Role | Curve | Path |
+|---|---|---|
+| `bitcoin-auth` | `CURVE_SECP256K1` | `m/44'/0'/0'/0/0` |
+| `did-assertion` | `CURVE_ED25519` | `m/44'/501'/0'/0'` |
+| `did-update` | `CURVE_ED25519` | `m/44'/501'/1'/0'` |
+
+Returns `null` if no account exists at that role's exact curve + path —
+it never guesses by returning an arbitrary same-curve account. This table
+is also exported as `TURNKEY_ACCOUNT_ROLES`.
+
 ---
 
 ### `createWalletWithAccounts(turnkeyClient, onExpired?)`
