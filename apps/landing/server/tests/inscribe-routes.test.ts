@@ -1739,6 +1739,148 @@ describe('terminal records', () => {
     expect((await res.json() as { error: string }).error).toBe('signed_pair_mismatch');
     expect(h.broadcasts).toEqual([]);
   });
+
+  // #755 — a `confirmed` record that has NOT yet crossed the six-confirmation
+  // retention floor (so `retired` is still unset) is legitimate settled state,
+  // not something a retry may push back through broadcast/setStatus. The
+  // pre-lock guard above only checked `.retired`; this is the case it missed.
+  test('resubmitting a CONFIRMED-but-not-yet-retired pair returns its current settlement, unchanged', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+      confirmations: 2, blockHeight: 100, blockHash: 'b'.repeat(64),
+    });
+    const before = h.store.get('sub-1', pair.commitTxId);
+    const broadcastsBeforeRetry = [...h.broadcasts];
+
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false, // below the retention floor — must not be reported as settled
+      confirmations: 2,
+      confirmedBlockHeight: 100,
+      confirmedBlockHash: 'b'.repeat(64),
+    });
+    // Zero broadcasts, zero mutation: the record is byte-for-byte the same
+    // confirmed-but-unsettled row it was before the retry.
+    expect(h.broadcasts).toEqual(broadcastsBeforeRetry);
+    expect(h.store.get('sub-1', pair.commitTxId)).toEqual(before);
+  });
+
+  // #755 — the in-lock recheck must catch a confirmation (not just a
+  // confirm-and-retire) that lands between this resubmission's pre-lock read
+  // and its lock recheck, while an earlier attempt's ordinal check is still
+  // awaiting a provider.
+  test('a record CONFIRMED (but not retired) by reconciliation mid-request still returns its settlement, not a regression', async () => {
+    const pair = buildPair();
+    let ordinalCalls = 0;
+    const h = harness({
+      ordinals: {
+        outpointInscriptions: async () => {
+          ordinalCalls++;
+          if (ordinalCalls === 2) {
+            h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+              confirmations: 3, blockHeight: 900_000, blockHash: 'd'.repeat(64),
+            });
+          }
+          return [];
+        },
+      },
+    });
+    await post(h.routes, pair); // ordinalCalls === 1: the original submission
+    const res = await post(h.routes, pair); // ordinalCalls === 2: races the confirmation
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 3,
+      confirmedBlockHeight: 900_000,
+      confirmedBlockHash: 'd'.repeat(64),
+    });
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('confirmed');
+  });
+
+  // #755 — a pre-lock/in-lock guard alone is not race-complete: both broadcast
+  // calls below are awaited, so reconciliation can confirm this exact record
+  // WHILE the commit broadcast is in flight. The guarded post-broadcast write
+  // must detect that and report the settlement instead of clobbering it with
+  // an unconditional 'commit_broadcast' write.
+  test('a confirmation landing during the commit broadcast is not clobbered by the guarded status write', async () => {
+    const pair = buildPair();
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) {
+          h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 4, blockHeight: 800_000, blockHash: 'c'.repeat(64),
+          });
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 4,
+      confirmedBlockHeight: 800_000,
+      confirmedBlockHash: 'c'.repeat(64),
+    });
+    // The reveal was never broadcast: the guard stopped before that call.
+    expect(h.broadcasts).toEqual([pair.signedCommitHex]);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.status).toBe('confirmed');
+    expect(rec.confirmations).toBe(4);
+  });
+
+  // #755 — same race, one step later: confirmation lands during the reveal
+  // broadcast, after the guarded commit_broadcast write already succeeded.
+  test('a confirmation landing during the reveal broadcast is not clobbered by the guarded status write', async () => {
+    const pair = buildPair();
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.revealTxHex) {
+          h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 1, blockHeight: 800_001, blockHash: 'e'.repeat(64),
+          });
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 1,
+      confirmedBlockHeight: 800_001,
+      confirmedBlockHash: 'e'.repeat(64),
+    });
+    // Both transactions DID reach the network — only the trailing status
+    // write is guarded — so both broadcasts happened exactly once.
+    expect(h.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.status).toBe('confirmed');
+    expect(rec.confirmations).toBe(1);
+  });
 });
 
 describe('malformed reveal shapes', () => {
