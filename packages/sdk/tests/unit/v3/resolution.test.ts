@@ -647,6 +647,40 @@ test('validator failures fail closed and validator mutations cannot change the r
   expect(result.resolution.chainEvidence.assurance).toBe('node-validated');
 });
 
+test('a configured chainValidator does not turn ordinary mid-observation chain movement into "incomplete"', async () => {
+  const { snapshot } = await boundary();
+  const changing = structuredClone(snapshot);
+  changing.tipAfter.hash = 'e'.repeat(64);
+  // A real independent validator legitimately disagrees when re-checking an
+  // already-stale tipBefore against the node's current (moved-on) tip — this
+  // must not by itself defeat the documented bounded retry on chain movement.
+  let validatorCalls = 0;
+  const withValidator = OriginalsSDK.create({
+    network: 'regtest',
+    satProvider: { getSatSnapshot: async () => changing },
+    chainValidator: async () => {
+      validatorCalls++;
+      throw Object.assign(new Error('disagreement'), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+    },
+  });
+  const result = await withValidator.lifecycle.resolveAssetFromSat('123');
+  expect(result.status).toBe('chain-changed');
+  // The validator is never worth invoking against a snapshot that already
+  // reports its own tip moved mid-observation.
+  expect(validatorCalls).toBe(0);
+
+  // A validator-detected disagreement against a genuinely chain-stable
+  // snapshot is unaffected and still fails closed as "incomplete".
+  const { snapshot: stable } = await boundary();
+  const stableWithValidator = OriginalsSDK.create({
+    network: 'regtest',
+    satProvider: { getSatSnapshot: async () => stable },
+    chainValidator: async () => { throw Object.assign(new Error('disagreement'), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' }); },
+  });
+  const stableResult = await stableWithValidator.lifecycle.resolveAssetFromSat('123');
+  expect(stableResult.status).toBe('incomplete');
+});
+
 test("cross-checks enumeration against an independently configured second index and carries the assurance into DID metadata", async () => {
   const { snapshot } = await boundary();
   const agreeing = structuredClone(snapshot);
