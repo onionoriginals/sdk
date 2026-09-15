@@ -143,7 +143,7 @@ import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection, type AssetEnvelope as SubpathAssetEnvelope } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
-import { deriveAssetId, normalizeAssetId, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
+import { deriveAssetId, normalizeAssetId, normalizeSatpoint, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
 // @ts-expect-error Removed from the CEL 2 / SDK 4 surface; use deriveAssetId.
 import { deriveDid } from '@originals/sdk/cel';
 // @ts-expect-error Renamed to parseAssetAlias; the historical name no longer resolves.
@@ -178,6 +178,9 @@ verifyHistory(loaded.celLog, {expectedAssetId: canonicalAssetId});
 verifyHistory(loaded.celLog, {expectedDid: legacyAlias});
 const canonicalFromEvent: string = deriveAssetId(loaded.celLog.log[0].event);
 const digest: string = assetDigest(normalizeAssetId(legacyAlias));
+const canonicalSatpoint: string | null = normalizeSatpoint('AB'.repeat(32) + ':0:0');
+const absentSatpoint: string | null = normalizeSatpoint(null);
+void canonicalSatpoint; void absentSatpoint;
 const parsedAlias: AssetAlias = parseAssetAlias(legacyAlias);
 if (parsedAlias.layer === 'cel') void parsedAlias.did;
 // @ts-expect-error The discriminator names the lifecycle layer (cel/webvh/btco), not a DID method.
