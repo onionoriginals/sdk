@@ -239,8 +239,18 @@ export function verifyHistory(
       "Prefix must come from this verifier",
     );
   if (!prefix && document.log[0].event.operation.type !== "create") {
-    // A delta is only history-required after its own proofs and internal links pass.
+    // A delta is only history-required once its own proofs, internal links, and
+    // controller-authority continuity all pass. The first entry's own authorization is
+    // inherently undecidable without the real prefix (state-sensitive checks like the
+    // current resource digest, active/deactivated state, or migration alias/layer depend
+    // on prior state this call was not given), so its signer is only ever a *provisional*
+    // controller. Everything after the first entry is fully decidable from the delta
+    // alone: an ordinary operation must be signed by whoever currently holds that
+    // provisional authority, and only `rotateKey` can hand it to someone else. A delta
+    // that already breaks that continuity is not "missing its prefix" — it is invalid
+    // regardless of what any prefix could show.
     let previous: string | undefined;
+    let provisionalController: string | undefined;
     for (const entry of document.log) {
       requireThat(
         entry.event.operation.type !== "create" &&
@@ -248,7 +258,24 @@ export function verifyHistory(
         "CEL_CHAIN",
         "Invalid delta chain",
       );
-      previous = verifyEntry(entry).digest;
+      const { digest, signers } = verifyEntry(entry);
+      if (provisionalController === undefined) {
+        requireThat(
+          signers.every((signer) => signer === signers[0]),
+          "CEL_AUTHORITY",
+          "Every proof on the first entry must be from the same controller",
+        );
+        provisionalController = signers[0];
+      } else {
+        requireThat(
+          signers.every((signer) => signer === provisionalController),
+          "CEL_AUTHORITY",
+          "Every proof must be from the current controller",
+        );
+      }
+      if (entry.event.operation.type === "rotateKey")
+        provisionalController = entry.event.operation.data.newController;
+      previous = digest;
     }
     throw new CelError(
       "history-required",
