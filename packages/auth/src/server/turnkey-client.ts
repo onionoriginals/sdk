@@ -3,6 +3,9 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
+import { normalizeEmail } from '../email.js';
+
+export { normalizeEmail };
 
 export interface TurnkeyClientConfig {
   /** Turnkey API base URL (default: https://api.turnkey.com) */
@@ -39,17 +42,6 @@ export function createTurnkeyClient(config?: Partial<TurnkeyClientConfig>): Turn
     apiPrivateKey,
     defaultOrganizationId: organizationId,
   });
-}
-
-/**
- * Normalize an email address for use as a stable identity key.
- *
- * Turnkey sub-org lookup filters on the exact email string, so
- * `Alice@x.com` and `alice@x.com` would otherwise resolve to different
- * sub-organizations and fork the user's identity.
- */
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
 }
 
 // Wallet/account layout required for DID creation. Shared between the
