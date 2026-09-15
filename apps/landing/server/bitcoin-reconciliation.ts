@@ -217,13 +217,34 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       cursors.superseded++;
       const st = await readStatus(r.commitTxId);
       if (!st?.confirmed) continue;
+      // #758 — re-check after the status-lookup await: a concurrent pass (an
+      // overlapping poll, or the background sweep) may already have retired
+      // or un-superseded this record while this one was waiting on the
+      // provider.
+      const beforeReclaim = store.get(sub, r.commitTxId);
+      if (!beforeReclaim || !beforeReclaim.superseded || beforeReclaim.retired) continue;
       // Reclaim and journal the attempt durably before sending the exact
       // stored reveal. A failed write stops this pass before another side effect.
       reclaimOutpoint(store, sub, r);
       store.markRebroadcast(sub, r.commitTxId);
-      const revealErr = await broadcastIdempotent(r.revealTxHex);
-      store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
       changed = true;
+      // `reclaimOutpoint` clears `superseded` via `reinstate`, so the fresh
+      // post-reclaim snapshot — not `current`/`beforeReclaim` — is the state a
+      // concurrent pass must still match for the guarded write below.
+      const postReclaim = store.get(sub, r.commitTxId);
+      if (!postReclaim) continue;
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      // Guarded write: a concurrent pass may already have moved this record
+      // (confirmed it, retired it, or reclaimed it again) while the reveal
+      // broadcast above was in flight. Only advance it if it is still exactly
+      // where this pass left it after the reclaim; otherwise stop touching it
+      // rather than clobber whatever that other pass decided (#758, mirroring
+      // the #677 guard already used below for `liveStuck`/`liveUnconfirmed`).
+      store.trySetStatus(
+        sub, r.commitTxId,
+        { status: postReclaim.status, retired: false, superseded: false },
+        revealErr ? 'commit_broadcast' : 'reveal_broadcast'
+      );
     }
     for (const r of liveStuck) {
       if (lookups >= stuckLimit) break;

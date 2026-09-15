@@ -166,6 +166,113 @@ describe('createInscriptionReconciler: status transitions', () => {
     const b = inscriptions.find((r) => r.commitTxId === rival)!;
     expect(a.superseded).toBeUndefined();
     expect(b.superseded).toBe(true);
+    // The ordinary, uncontended reclaim path completes the reveal too (#758).
+    expect(a.status).toBe('reveal_broadcast');
+  });
+
+  // #758 — the `supersededPending` reclaim used a bare `setStatus` after TWO
+  // awaits (the status lookup, then the reveal broadcast), so a concurrent
+  // pass that transitioned the same record while either was in flight got
+  // silently clobbered by this pass's own stale decision. These regressions
+  // pin the guarded write that replaced it, mirroring the #677 guards already
+  // covering `liveStuck`/`liveUnconfirmed` below.
+
+  test('a reclaimed pair whose reveal broadcast fails lands at commit_broadcast, not reveal_broadcast', async () => {
+    const winner = 'ee'.repeat(32);
+    const rival = 'ff'.repeat(32);
+    const { store, reconciler } = harness({
+      txStatus: (txid) => ({ confirmed: txid === winner }),
+      broadcastFails: true,
+    });
+    store.create('sub-1', rec({ commitTxId: rival, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.create('sub-1', rec({ commitTxId: winner, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.supersede('sub-1', winner);
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+    expect(inscriptions.find((r) => r.commitTxId === winner)!.status).toBe('commit_broadcast');
+    // The reclaim itself (rival retirement, winner reinstated) still applies
+    // even though the reveal broadcast failed.
+    expect(store.get('sub-1', winner)!.superseded).toBeUndefined();
+    expect(store.get('sub-1', rival)!.superseded).toBe(true);
+  });
+
+  test('a concurrent confirmation during the reclaim\'s reveal broadcast is not clobbered by this pass\'s own stale write', async () => {
+    const winner = 'aa'.repeat(32);
+    const rival = 'bb'.repeat(32);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: rival, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.create('sub-1', rec({ commitTxId: winner, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.supersede('sub-1', winner);
+
+    const broadcastIdempotent = async (txHex: string | undefined): Promise<string | null> => {
+      if (!txHex) return 'no recovery artifact for this record';
+      if (txHex === '02bb') {
+        // Simulate an overlapping poll (or the background sweep) confirming
+        // this exact record while THIS pass's own reveal broadcast for it is
+        // still in flight.
+        store.setStatus('sub-1', winner, 'confirmed', {
+          confirmations: 1, blockHeight: 100, blockHash: 'c'.repeat(64),
+        });
+      }
+      return null;
+    };
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async (txid) => ({ confirmed: txid === winner }) },
+      broadcastIdempotent,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', winner)!;
+    // The concurrent confirmation must stand: this pass's own "reveal
+    // broadcast succeeded" decision, made before it knew about the
+    // confirmation, must not overwrite it.
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(1);
+    // The reclaim itself (rival retirement, winner reinstated) still applies.
+    expect(stored.superseded).toBeUndefined();
+    expect(store.get('sub-1', rival)!.superseded).toBe(true);
+  });
+
+  test('a concurrent retirement during the reclaim\'s reveal broadcast is not clobbered by this pass\'s own stale write', async () => {
+    const winner = 'cc'.repeat(32);
+    const rival = 'dd'.repeat(32);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: rival, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.create('sub-1', rec({ commitTxId: winner, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.supersede('sub-1', winner);
+
+    const broadcastIdempotent = async (txHex: string | undefined): Promise<string | null> => {
+      if (!txHex) return 'no recovery artifact for this record';
+      if (txHex === '02bb') {
+        // Simulate a concurrent pass retiring this exact record while THIS
+        // pass's own reveal broadcast for it is still in flight.
+        store.retire('sub-1', winner);
+      }
+      return null;
+    };
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async (txid) => ({ confirmed: txid === winner }) },
+      broadcastIdempotent,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', winner)!;
+    // The concurrent retirement must stand: no `reveal_broadcast` +
+    // `retired: true` corruption, and its dropped hex must not be
+    // resurrected by this pass's own stale decision.
+    expect(stored.retired).toBe(true);
+    expect(stored.status).toBe('signed');
+    expect(stored.revealTxHex).toBeUndefined();
   });
 
   // #677 — the demotion decision must read a FRESH per-record snapshot, not
