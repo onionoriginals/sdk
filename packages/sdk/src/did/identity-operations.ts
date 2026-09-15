@@ -6,6 +6,7 @@ import type {
 } from "../types/did.js";
 import { StructuredError } from "@originals/cel";
 import { createDID } from "didwebvh-ts";
+import { requireWebVHDomain } from "./DIDManager.js";
 import {
   normalizeUpdateKey,
   assertEd25519WebVHUpdateKeys,
@@ -280,6 +281,10 @@ export async function createDIDOriginal(
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
 
+  // A blank/whitespace-only domain must fail loudly here, before any signing
+  // work — never mint a permanent did:webvh at a host nobody serves (#531, #678).
+  const domain = requireWebVHDomain(options.domain);
+
   // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
   // accept legacy "did:key:..." input and normalize first, then validate —
   // did:webvh log resolution in this SDK is Ed25519-only (see
@@ -291,7 +296,7 @@ export async function createDIDOriginal(
 
   // Create the DID using didwebvh-ts
   const createOptions: Record<string, unknown> = {
-    domain: options.domain,
+    domain,
     signer: options.signer,
     verifier: resolveVerifier(options.signer, options.verifier),
     paths: options.paths,
@@ -412,7 +417,11 @@ export async function updateDIDOriginal(
     updateOptions.assertionMethod = options.assertionMethod;
   if (options.keyAgreement !== undefined)
     updateOptions.keyAgreement = options.keyAgreement;
-  if (options.domain !== undefined) updateOptions.domain = options.domain;
+  // A supplied domain (including an explicitly empty string) must be a real
+  // host: an empty string must not silently no-op the move, and whitespace
+  // must not mint an unresolvable did:webvh (#531, #678).
+  if (options.domain !== undefined)
+    updateOptions.domain = requireWebVHDomain(options.domain);
 
   // Update the DID using didwebvh-ts
   const result = await updateDID(updateOptions);
