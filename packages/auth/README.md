@@ -75,6 +75,17 @@ If no `publicKey` is supplied, `verifyEmailAuth` falls back to generating the ke
 
 **OTP attempt limiting.** A verification session is destroyed after 5 failed attempts; the user must request a new code.
 
+**The session cookie defaults to `Secure`.** `getAuthCookieConfig`/`getClearAuthCookieConfig` set `secure: true` unless you pass `{ secure: false }` explicitly — this does not depend on `NODE_ENV`, since not every deployment platform sets it to exactly `"production"`. Only opt out for local plain-HTTP development:
+
+```typescript
+// Local HTTP development only — never in a deployed environment
+const cookie = getAuthCookieConfig(token, { secure: false });
+// The logout/clear config must opt out the same way, or the clear cookie
+// stays Secure and a plain-HTTP browser will ignore it, leaving the
+// session looking active.
+const clearCookie = getClearAuthCookieConfig(undefined, { secure: false });
+```
+
 ## Documentation
 
 - [Originals SDK repository](https://github.com/onionoriginals/sdk) — source, issues, and protocol documentation

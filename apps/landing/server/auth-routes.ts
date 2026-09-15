@@ -6,6 +6,7 @@ import {
   getAuthCookieConfig,
   getClearAuthCookieConfig,
   type SessionStorage,
+  type SubOrgLock,
 } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { json, type Handler } from './router';
@@ -18,6 +19,12 @@ export function createAuthRoutes(deps: {
   turnkey: Turnkey;
   sessions: SessionStorage;
   jwtSecret: string;
+  // Serializes Turnkey sub-org lookup-then-create per email (#728). Optional
+  // and defaults to @originals/auth's in-process lock, which is NOT safe
+  // across multiple server instances: a multi-instance deploy must pass a
+  // distributed SubOrgLock here, the same way it must pass a shared
+  // `sessions` store instead of the in-memory default.
+  subOrgLock?: SubOrgLock;
 }): { sendOtp: Handler; verifyOtp: Handler; me: Handler; logout: Handler } {
   // Per-client and per-email limiters (README: throttle both). `clientIp` is
   // the identity the server layer resolved (client-ip.ts) — these routes never
@@ -70,7 +77,10 @@ export function createAuthRoutes(deps: {
     if (!sessionId || !code) return json({ error: 'missing_fields', message: 'Session ID and code are required' }, 400);
 
     try {
-      const result = await verifyEmailAuth(sessionId, code, deps.turnkey, deps.sessions, { publicKey });
+      const result = await verifyEmailAuth(sessionId, code, deps.turnkey, deps.sessions, {
+        publicKey,
+        subOrgLock: deps.subOrgLock,
+      });
       if (!result.verified || !result.subOrgId || !result.email) {
         return json({ error: 'verification_failed', message: 'Verification failed' }, 400);
       }
