@@ -386,6 +386,39 @@ describe('turnkey-client', () => {
       expect(createSubOrganization).not.toHaveBeenCalled();
     });
 
+    test('rethrows a message-only "not found" transport error instead of creating a duplicate', async () => {
+      // A generic transport/routing error unrelated to Turnkey's own
+      // NOT_FOUND response (no numeric `code`) must never be treated as
+      // "no existing sub-org" just because its message happens to contain
+      // "not found" - that mints a duplicate identity for an existing user.
+      const transportError = new Error('404 Not Found: no such route on this host');
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(transportError)),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('existing-user@example.com', client)).rejects.toThrow(
+        'Failed to look up existing Turnkey sub-organization'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('rethrows a message-only "does not exist" error wrapped in a cause chain', async () => {
+      const transportError = new Error('upstream service does not exist in this region');
+      const wrapped = new Error('lookup failed', { cause: transportError });
+      const createSubOrganization = mock(() => Promise.resolve({}));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(wrapped)),
+        createSubOrganization,
+      });
+
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'Failed to look up existing Turnkey sub-organization'
+      );
+      expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
     test('detects a definitive not-found wrapped in a cause chain', async () => {
       const notFound = Object.assign(new Error('resource not found'), { code: 5 });
       const wrapped = new Error('lookup failed', { cause: notFound });

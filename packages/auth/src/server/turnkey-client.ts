@@ -74,17 +74,25 @@ const DEFAULT_WALLET_ACCOUNTS = [
  * resource does not exist (as opposed to a transient/network/auth failure).
  * gRPC status code 5 is NOT_FOUND. Walks the `cause` chain (cycle-safe) in
  * case the original Turnkey error arrives wrapped.
+ *
+ * Only the strongly-typed `code === 5` evidence is trusted. `@turnkey/http`'s
+ * `TurnkeyRequestError` always carries a numeric `code` parsed from Turnkey's
+ * own JSON error body, so a genuine Turnkey not-found response is never
+ * missing it; a transport/routing failure (a plain-text 404 from an
+ * unrelated host, a proxy error page) throws a plain `Error` with no `code`
+ * at all. A message-substring match on "not found"/"does not exist" would
+ * therefore accept that unrelated transport error as if it were Turnkey's
+ * own not-found response, and this function must never do that: fall
+ * through to `createSubOrganization` on such an ambiguous error mints a
+ * duplicate identity for an existing user.
  */
 function isDefinitiveNotFound(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (typeof current === 'object' && current !== null && !seen.has(current)) {
     seen.add(current);
-    const { code, message } = current as { code?: unknown; message?: unknown };
+    const { code } = current as { code?: unknown };
     if (code === 5) {
-      return true;
-    }
-    if (typeof message === 'string' && /not[ _-]?found|does not exist/i.test(message)) {
       return true;
     }
     current = (current as { cause?: unknown }).cause;
