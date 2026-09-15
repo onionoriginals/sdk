@@ -61,7 +61,11 @@ export interface LocalStorageAdapterOptions {
    * `baseDir` with no per-domain subdirectory (unlike the default
    * multi-tenant layout), so the physical layout matches the URL: pointing
    * any static file server's document root at `baseDir` serves exactly the
-   * paths this adapter advertises.
+   * paths this adapter advertises. If `baseUrl` is supplied alongside
+   * `originDomain`, the constructor validates it is exactly
+   * `https://${originDomain}` (no port, path, query or fragment) and throws
+   * `STORAGE_INVALID_ORIGIN` immediately otherwise, since hosted publication
+   * can never accept a `putObject()` URL built from anything else.
    */
   originDomain?: string;
 }

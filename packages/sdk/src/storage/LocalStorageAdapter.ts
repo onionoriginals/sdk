@@ -40,6 +40,42 @@ export class LocalStorageAdapter implements StorageAdapter {
     this.baseDir = options.baseDir;
     this.baseUrl = options.baseUrl;
     this.originDomain = options.originDomain;
+    if (this.originDomain !== undefined && this.baseUrl !== undefined) {
+      this.validateOriginBaseUrl(this.baseUrl, this.originDomain);
+    }
+  }
+
+  /**
+   * originDomain mode's toUrl() treats `baseUrl` as this domain's literal
+   * canonical origin (issue #780 review). A mismatched scheme/host, a port,
+   * a path prefix, or a query/fragment would silently write objects under a
+   * URL hosted publication's exact `https://${domain}/${path}` check can
+   * never accept — validate eagerly, before any storage write, instead of
+   * failing late at publish time.
+   */
+  private validateOriginBaseUrl(baseUrl: string, originDomain: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      throw new StructuredError(
+        'STORAGE_INVALID_ORIGIN',
+        `LocalStorageAdapter originDomain mode requires a valid URL for baseUrl, got "${baseUrl}".`
+      );
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== originDomain ||
+      parsed.port !== '' ||
+      (parsed.pathname !== '/' && parsed.pathname !== '') ||
+      parsed.search !== '' ||
+      parsed.hash !== ''
+    ) {
+      throw new StructuredError(
+        'STORAGE_INVALID_ORIGIN',
+        `LocalStorageAdapter originDomain mode requires baseUrl to be exactly "https://${originDomain}" (no port, path, query or fragment — hosted publication can never accept anything else), got "${baseUrl}".`
+      );
+    }
   }
 
   /** In originDomain mode, every call must target that exact domain (see LocalStorageAdapterOptions.originDomain). */

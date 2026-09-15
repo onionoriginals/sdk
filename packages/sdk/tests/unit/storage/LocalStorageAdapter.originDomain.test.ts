@@ -84,4 +84,47 @@ describe('LocalStorageAdapter originDomain mode (#780)', () => {
     expect(fs.existsSync(path.join(tempDir, 'myasset.com', 'a.bin'))).toBe(true);
     expect(fs.existsSync(path.join(tempDir, 'a.bin'))).toBe(false);
   });
+
+  test.each([
+    'http://example.com',
+    'https://wrong-host.example',
+    'https://example.com:8443',
+    'https://example.com/some/prefix',
+    'https://example.com?query=1',
+    'https://example.com#frag',
+    'not a url',
+  ])(
+    'constructor rejects a baseUrl that is not exactly the originDomain\'s bare HTTPS origin (%j)',
+    (baseUrl) => {
+      let thrown: unknown;
+      try {
+        new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com', baseUrl });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(StructuredError);
+      expect((thrown as StructuredError).code).toBe('STORAGE_INVALID_ORIGIN');
+    },
+  );
+
+  test.each(['https://example.com', 'https://example.com/'])(
+    'constructor accepts a baseUrl that is exactly the originDomain\'s bare HTTPS origin (%j)',
+    (baseUrl) => {
+      expect(
+        () => new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com', baseUrl }),
+      ).not.toThrow();
+    },
+  );
+
+  test('an invalid originDomain baseUrl is rejected before any storage write', () => {
+    let thrown: unknown;
+    try {
+      new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com', baseUrl: 'http://example.com' });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(StructuredError);
+    // No domain directory or bare file should have been created.
+    expect(fs.readdirSync(tempDir)).toEqual([]);
+  });
 });
