@@ -354,12 +354,17 @@ async function getOrCreateTurnkeySubOrgUnlocked(
       return existingSubOrgId;
     }
 
-    // The sub-org already has a wallet: it may still carry a stale,
-    // pre-#748 Ethereum-formatted Bitcoin auth-key account (#749). Repair it
-    // in place rather than minting a replacement sub-org.
-    const defaultWalletId = wallets[0]?.walletId;
-    if (defaultWalletId) {
-      await repairStaleBitcoinAuthKey(turnkeyClient, existingSubOrgId, defaultWalletId);
+    // The sub-org already has at least one wallet: any of them may still
+    // carry a stale, pre-#748 Ethereum-formatted Bitcoin auth-key account
+    // (#749). This package itself only ever provisions one wallet per
+    // sub-org, but a sub-org is not guaranteed to stay that way (manual
+    // Turnkey console action, other tooling), so check every wallet rather
+    // than assuming the stale account - if present - lives in the first one.
+    // Repair each in place rather than minting a replacement sub-org.
+    for (const wallet of wallets) {
+      if (wallet.walletId) {
+        await repairStaleBitcoinAuthKey(turnkeyClient, existingSubOrgId, wallet.walletId);
+      }
     }
 
     return existingSubOrgId;

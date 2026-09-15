@@ -391,6 +391,56 @@ describe('turnkey-client', () => {
         expect(createSubOrganization).not.toHaveBeenCalled();
       });
 
+      test('repairs a stale account in a later wallet, not just the first one (Greptile review, PR #770)', async () => {
+        // A sub-org is not guaranteed to have exactly one wallet (this
+        // package only ever provisions one itself, but nothing enforces
+        // that externally). The stale account must be found and repaired
+        // wherever it lives, not only in wallets[0].
+        const correctAccounts = [
+          {
+            address: 'addr_secp_ok',
+            curve: 'CURVE_SECP256K1',
+            path: "m/44'/0'/0'/0/0",
+            addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+          },
+        ];
+        const staleAccounts = [
+          {
+            address: 'addr_secp_stale',
+            curve: 'CURVE_SECP256K1',
+            path: "m/44'/0'/0'/0/0",
+            addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+          },
+        ];
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const getWalletAccounts = mock((params: { walletId: string }) =>
+          Promise.resolve({
+            accounts: params.walletId === 'w_first' ? correctAccounts : staleAccounts,
+          })
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() =>
+            Promise.resolve({ organizationIds: ['multi_wallet_org'] })
+          ),
+          getWallets: mock(() =>
+            Promise.resolve({
+              wallets: [{ walletId: 'w_first' }, { walletId: 'w_second' }],
+            })
+          ),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('multi_wallet_org');
+        expect(getWalletAccounts).toHaveBeenCalledTimes(2);
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        const callArgs = (createWalletAccounts as any).mock.calls[0][0];
+        expect(callArgs.walletId).toBe('w_second');
+        expect(callArgs.accounts[0].addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR');
+      });
+
       test('fails soft (returns the existing sub-org, does not repair) when checking wallet accounts fails', async () => {
         const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
         const client = createMockClient({
