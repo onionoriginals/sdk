@@ -92,13 +92,20 @@ import type {
   ContentValidator,
   BitcoinCoreContentValidatorOptions,
 } from "@originals/sdk/types";
-import { createBitcoinCoreContentValidator } from "@originals/sdk";
+import { createBitcoinCoreContentValidator, type IndependentEnumerationSource } from "@originals/sdk";
 declare const satProvider: SatProvider;
 declare const publicationOptions: BitcoinPublicationOptions;
 declare const recoveryStore: InscriptionRecoveryStore;
 declare const contentValidatorOptions: BitcoinCoreContentValidatorOptions;
+declare const independentEnumeration: IndependentEnumerationSource;
 const contentValidator: ContentValidator = createBitcoinCoreContentValidator(contentValidatorOptions);
-const networkSDK = OriginalsSDK.create({ signer, network: "regtest", satProvider, contentValidator });
+const networkSDK = OriginalsSDK.create({
+  signer,
+  network: "regtest",
+  satProvider,
+  contentValidator,
+  independentEnumeration,
+});
 const hosted: PreparedWebPublication = await networkSDK.lifecycle.prepareWebPublication(asset, { domain: "example.com" });
 const prepared: PreparedBitcoinPublication = await networkSDK.lifecycle.prepareBitcoinPublication(asset, publicationOptions);
 const submitted: SubmittedBitcoinAsset = await networkSDK.lifecycle.publishPreparedToBitcoin(prepared, { recoveryStore });
@@ -106,7 +113,15 @@ const resolved: AssetResolution = await networkSDK.lifecycle.resolveAssetFromSat
 // Per-resource-version chain-inline vs off-chain-referenced status is part of the public accepted shape.
 if (resolved.status === "accepted") {
   const availability: "bitcoin-inline" | "referenced" = resolved.resourceAvailability[0].availability;
-  void availability;
+  const enumerationAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.enumerationAssurance;
+  const ownershipAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.ownershipAssurance;
+  const contentAssurance: "provider-asserted" | "cross-checked" = resolved.resolution.contentAssurance;
+  const trajectoryAssurance: "not-independently-derived" = resolved.resolution.trajectoryAssurance;
+  void availability; void enumerationAssurance; void ownershipAssurance; void contentAssurance; void trajectoryAssurance;
+} else if (resolved.status === "pending") {
+  // Distinct from "not-found": unconfirmed publications were observed for this sat.
+  const pending: readonly string[] = resolved.pending;
+  void pending;
 }
 void hosted; void submitted; void resolved;
 
@@ -128,7 +143,7 @@ import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection, type AssetEnvelope as SubpathAssetEnvelope } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
-import { deriveAssetId, normalizeAssetId, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
+import { deriveAssetId, normalizeAssetId, normalizeSatpoint, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
 // @ts-expect-error Removed from the CEL 2 / SDK 4 surface; use deriveAssetId.
 import { deriveDid } from '@originals/sdk/cel';
 // @ts-expect-error Renamed to parseAssetAlias; the historical name no longer resolves.
@@ -163,6 +178,9 @@ verifyHistory(loaded.celLog, {expectedAssetId: canonicalAssetId});
 verifyHistory(loaded.celLog, {expectedDid: legacyAlias});
 const canonicalFromEvent: string = deriveAssetId(loaded.celLog.log[0].event);
 const digest: string = assetDigest(normalizeAssetId(legacyAlias));
+const canonicalSatpoint: string | null = normalizeSatpoint('AB'.repeat(32) + ':0:0');
+const absentSatpoint: string | null = normalizeSatpoint(null);
+void canonicalSatpoint; void absentSatpoint;
 const parsedAlias: AssetAlias = parseAssetAlias(legacyAlias);
 if (parsedAlias.layer === 'cel') void parsedAlias.did;
 // @ts-expect-error The discriminator names the lifecycle layer (cel/webvh/btco), not a DID method.

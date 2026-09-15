@@ -51,11 +51,65 @@ describe('binary creator resources', () => {
       expect(updated.resource.hash).toBe(original.resource.hash);
     }
   });
-  test('rejects oversized, empty and falsely labelled PNG files', async () => {
+  test('rejects oversized and empty files', async () => {
     await expect(readAssetFile(new File([new Uint8Array(MAX_SOURCE_BYTES + 1)], 'large.png'))).rejects.toThrow('too-big');
     await expect(readAssetFile(new File([], 'empty.png'))).rejects.toThrow('empty');
-    await expect(readAssetFile(new File(['not a PNG'], 'wrong.png'))).rejects.toThrow('wrong-type');
   });
+  test('a whitespace-only upload has non-zero bytes, so it is accepted, not empty — text or binary alike', async () => {
+    const whitespaceText = await readAssetFile(new File(['   \n\t  '], 'blank.txt', { type: 'text/plain' }));
+    expect(whitespaceText.content).toEqual(new TextEncoder().encode('   \n\t  '));
+    const whitespaceBytes = Uint8Array.from([0x20, 0x20, 0x20]);
+    const whitespaceBinary = await readAssetFile(new File([whitespaceBytes], 'blank.bin', { type: 'application/octet-stream' }));
+    expect(whitespaceBinary.content).toEqual(whitespaceBytes);
+  });
+  test('a stranger brings their own bytes: arbitrary, non-PNG/SVG/text content is accepted verbatim', async () => {
+    // Deliberately not a valid PNG (wrong magic bytes) despite the .png name,
+    // and not decodable as clean UTF-8 text: the SDK 3.0.0 criterion is "any
+    // bytes", not a whitelist of formats.
+    const arbitrary = Uint8Array.from([0, 1, 2, 3, 255, 254, 253, 10, 0, 128, 7, 9]);
+    const source = await readAssetFile(new File([arbitrary], 'payload.png'));
+    expect(source.content).toEqual(arbitrary);
+    expect(source.contentType).toBe('image/png'); // no magic-byte validation: file.type/extension is honored, not enforced
+  });
+  test('an unrecognized extension with no browser-supplied type falls back to application/octet-stream', async () => {
+    const bytes = Uint8Array.from([9, 8, 7, 6, 5]);
+    const source = await readAssetFile(new File([bytes], 'payload.bin'));
+    expect(source.contentType).toBe('application/octet-stream');
+    expect(source.content).toEqual(bytes);
+  });
+});
+
+test('arbitrary binary upload (not PNG/SVG/text) preserves exact bytes through hash, deposit quote and hosted round-trip', async () => {
+  const { inscriptionContentBytes } = await import('../components/demo-logic');
+  const blob = Uint8Array.from([0, 1, 2, 3, 255, 254, 253, 10, 0, 128, 42, 7]);
+  const source = await readAssetFile(new File([blob], 'payload.bin'));
+  expect(source.contentType).toBe('application/octet-stream');
+
+  const engine = new DemoEngine();
+  const state = await engine.create('Mine', 'upload', source);
+  expect(state.resource.content).toEqual(blob);
+  expect(state.resource.hash).toBe(hex.encode(sha256(blob)));
+  expect(state.resource.contentType).toBe('application/octet-stream');
+  // A bare >= assertion would still pass if the quote silently dropped the
+  // resource bytes entirely — the fixed migration allowance alone dwarfs this
+  // blob. Compare against the same state with an empty resource instead, so
+  // the delta actually proves the binary payload is counted.
+  const withoutResourceBytes = inscriptionContentBytes({ ...state, resource: { ...state.resource, content: new Uint8Array(0) } });
+  expect(inscriptionContentBytes(state) - withoutResourceBytes).toBe(blob.length);
+
+  const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
+  const { OriginalsSDK, createLocalSigner } = await import('@originals/sdk');
+  const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(2));
+  const sdk = OriginalsSDK.create({ signer, network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519', enableLogging: false });
+  const asset = await sdk.lifecycle.createAsset([{ id: 'payload.bin', mediaType: 'application/octet-stream', content: blob }]);
+  const cel = JSON.parse(JSON.stringify(asset.celLog));
+  const ref = hostedResourceRefs(cel)[0];
+  const built = hostedAssetEnvelope(cel, { [ref.segment]: blob });
+  if ('problem' in built) throw new Error(built.problem.message);
+  expect(built.envelope.resources[0].content).toEqual({ encoding: 'base64', data: btoa(String.fromCharCode(...blob)) });
+  const revived = await new DemoEngine().hydrate(JSON.parse(JSON.stringify(built.envelope)));
+  expect(revived.resource.content).toEqual(blob);
+  expect(revived.resource.hash).toBe(hex.encode(sha256(blob)));
 });
 
 test('hosted PNG bytes become a tagged base64 envelope that verifies in a fresh engine', async () => {

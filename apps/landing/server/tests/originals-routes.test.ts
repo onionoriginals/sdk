@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import { createOriginalsStore } from '../originals-store';
@@ -113,6 +113,34 @@ describe('originals routes — auth gating', () => {
     expect((await put('sub-1')).status).toBe(200); // sub-1 owns it
     expect((await put('sub-2')).status).toBe(403); // sub-2 is refused
     expect((await put('sub-1')).status).toBe(200); // owner may re-write
+  });
+
+  test('orphaned bytes with no owner marker are refused with 409, not silently claimed (#690)', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'originals-routes-'));
+    const store = createOriginalsStore({ dataDir });
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store });
+    // A hash-derived asset path (`u<...>` segment), not a `user-<slug>`
+    // namespace — this is the class of key the namespace guard leaves open to
+    // any signed-in user, relying solely on the store's owner sidecar (#690).
+    const key = 'demo.example.com/uEiExample/resources/uJZtLeUr';
+    // Simulate the crash window this store's write ordering closes: resource
+    // bytes on disk with no `.owner` sidecar (store-level coverage of the
+    // same state lives in originals-store.test.ts). This must fail closed at
+    // the HTTP layer too, for the original owner and any other caller.
+    const path = join(dataDir, 'hosted', ...key.split('/'));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'orphaned bytes, no .owner sidecar');
+
+    const put = (sub: string) => {
+      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+      return routes.hostPut(
+        new Request(url, { method: 'PUT', headers: { 'content-type': 'application/jsonl', cookie: cookieFor(sub) }, body: '{}' }),
+        url,
+        '1.1.1.1'
+      );
+    };
+    expect((await put('sub-1')).status).toBe(409);
+    expect((await put('sub-2')).status).toBe(409);
   });
 
   test('pre-squat blocked: cannot write another user’s namespace even when unclaimed (403)', async () => {

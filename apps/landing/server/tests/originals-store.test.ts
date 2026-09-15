@@ -1,13 +1,18 @@
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createOriginalsStore } from '../originals-store';
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'originals-store-'));
 }
 const enc = (s: string) => new TextEncoder().encode(s);
+
+/** Path to a hosted key's on-disk bytes file, mirroring the store's internal layout. */
+function hostedPath(dataDir: string, key: string): string {
+  return join(dataDir, 'hosted', ...key.split('/'));
+}
 
 describe('originals-store', () => {
   test('saveBytes → serve roundtrip at the resolver URL', () => {
@@ -127,6 +132,63 @@ describe('originals-store', () => {
     expect(store.serve(new URL('http://demo.example.com/user-sub-1/abc/did.jsonl'))!.status).toBe(200);
   });
 
+  test('orphaned bytes with no owner marker fail closed for every caller, including the original writer', () => {
+    // Simulates the crash window this store must close: resource bytes on
+    // disk (e.g. from a pre-fix crash, or filesystem corruption) with no
+    // `.owner` sidecar. #690: this must never be silently claimable by
+    // whichever subOrgId happens to write next — not even the original owner,
+    // since there is no way to verify who that was once the marker is gone.
+    const dataDir = tmpDir();
+    const store = createOriginalsStore({ dataDir });
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const path = hostedPath(dataDir, key);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'orphaned bytes, no .owner sidecar');
+
+    expect(() => store.saveBytes('sub-1', key, enc('mine'), 'application/jsonl')).toThrow(
+      'INCONSISTENT_OWNERSHIP'
+    );
+    expect(() => store.saveBytes('sub-2', key, enc('attacker'), 'application/jsonl')).toThrow(
+      'INCONSISTENT_OWNERSHIP'
+    );
+    // Neither call touched the orphaned bytes.
+    expect(readFileSync(path, 'utf8')).toBe('orphaned bytes, no .owner sidecar');
+  });
+
+  test('a crash after the owner claim but before bytes leaves a resumable, still-protected write', () => {
+    // Simulates the other half of the crash window: the owner marker is
+    // written (the new commit point) but the process dies before the bytes
+    // ever land. The rightful owner must be able to resume; nobody else may.
+    const dataDir = tmpDir();
+    const store = createOriginalsStore({ dataDir });
+    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const path = hostedPath(dataDir, key);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path + '.owner', 'sub-1');
+    expect(existsSync(path)).toBe(false);
+
+    expect(() => store.saveBytes('sub-2', key, enc('attacker'), 'application/jsonl')).toThrow('FORBIDDEN');
+    expect(existsSync(path)).toBe(false); // still never written
+
+    expect(() => store.saveBytes('sub-1', key, enc('resumed'), 'application/jsonl')).not.toThrow();
+    expect(store.serve(new URL('http://demo.example.com/user-sub-1/abc/did.jsonl'))!.status).toBe(200);
+  });
+
+  test('the per-user index survives a stray leftover temp file from an interrupted write', () => {
+    // atomicWriteFile writes to a uniquely-named `.tmp` sibling before the
+    // rename; a crash before the rename leaves that sibling behind. It must
+    // never be mistaken for the real index file.
+    const dataDir = tmpDir();
+    const store = createOriginalsStore({ dataDir });
+    store.recordOriginal('sub-1', { did: 'did:webvh:S:h:a', title: 'A', resourceHash: 'x', createdAt: 't' });
+    const usersDir = join(dataDir, 'users');
+    writeFileSync(join(usersDir, 'sub-1.json.stray.tmp'), 'not valid json{{{');
+
+    expect(store.list('sub-1').map((o) => o.title)).toEqual(['A']);
+    // Cleanup is irrelevant to the assertion above; keep the dir tidy anyway.
+    rmSync(join(usersDir, 'sub-1.json.stray.tmp'));
+  });
+
   test('read: auth-scoped get by key returns the bytes with anti-XSS headers', () => {
     const store = createOriginalsStore({ dataDir: tmpDir() });
     const key = 'demo.example.com/studio/you/abc/did.jsonl';
@@ -182,5 +244,21 @@ describe('originals-store', () => {
     expect(() =>
       store.saveBytes('sub-1', 'h/a/did.jsonl', enc('this is longer than eight bytes'), 'application/jsonl')
     ).toThrow('STORE_FULL');
+  });
+
+  test('a quota-rejected upload never reserves the key, so the rightful owner can still claim it', () => {
+    // A caller whose upload is going to be rejected for quota must not be
+    // able to permanently squat an otherwise-unclaimed key: claiming
+    // ownership is a one-way commitment (the true owner would then get
+    // FORBIDDEN forever), so quota must be checked before the ownership
+    // claim, not after.
+    const store = createOriginalsStore({ dataDir: tmpDir(), maxTotalBytes: 8 });
+    const key = 'demo.example.com/uEiExample/resources/uJZtLeUr';
+    expect(() =>
+      store.saveBytes('attacker', key, enc('this is longer than eight bytes'), 'application/jsonl')
+    ).toThrow('STORE_FULL');
+    // The key was never claimed by the failed attempt — the real owner can write it.
+    expect(() => store.saveBytes('sub-1', key, enc('mine'), 'application/jsonl')).not.toThrow();
+    expect(store.serve(new URL(`http://${key}`))!.status).toBe(200);
   });
 });

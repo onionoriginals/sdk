@@ -81,6 +81,17 @@ export interface InscriptionRecord {
    */
   economicsVerified?: boolean;
   /**
+   * SHA-256 digest of the exact signed commit+reveal hex (including witness
+   * data), computed at creation — BEFORE `retire()` clears
+   * `signedCommitHex`/`revealTxHex`. Unlike `commitTxId`/`revealTxId`
+   * (which exclude witness bytes), this is retained across retirement, so a
+   * later resubmission claiming to be this exact pair can still be checked
+   * for byte-for-byte identity once the hex itself is gone (#693). ABSENT on
+   * rows written before this field existed; those fall back to id-only
+   * matching for a retired resubmission.
+   */
+  signedPairDigest?: string;
+  /**
    * Set when a rebuilt pair took over this record's funding outpoint after
    * its own commit broadcast failed. The record (and its reveal hex) is kept,
    * never deleted: the failed broadcast may have been ambiguous — the commit

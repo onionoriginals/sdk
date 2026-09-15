@@ -1,4 +1,4 @@
-import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, type ResourceContent } from '../sdk/resource-view';
+import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
 import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
@@ -144,6 +144,10 @@ export function Demo() {
   const [uploaded, setUploaded] = useState<{ name: string; content: ResourceContent; contentType: string } | null>(null);
   const [written, setWritten] = useState('');
   const [sourceError, setSourceError] = useState<string | null>(null);
+  // A declared image/* type is a hint, not a guarantee — arbitrary bytes can
+  // carry an image extension. Reset whenever the source itself changes, so a
+  // previous upload's decode failure never bleeds into the next one's preview.
+  const [imagePreviewBroken, setImagePreviewBroken] = useState(false);
   const [nonce, setNonce] = useState(() => getArtSeed().nonce);
   // The artwork is the asset: regenerated live from title/style/nonce while
   // idle, frozen the moment it's created (its bytes are hashed by the SDK).
@@ -182,7 +186,14 @@ export function Demo() {
     if (title === generateName(style, nonce)) setTitle(generateName(nextStyle, nextNonce));
   };
 
-  const sourceIsImage = source.contentType.startsWith('image/');
+  const sourceIsImage = source.contentType.startsWith('image/') && !imagePreviewBroken;
+  const sourceIsPreviewableText = !sourceIsImage && textMediaType(source.contentType);
+  // `source` is a fresh object on every recompute of its useMemo above, even
+  // when an unrelated dependency (e.g. regenerated art while a file is
+  // uploaded) changes but this source's own bytes/type don't — key off those
+  // instead of the container object so an already-failed preview doesn't
+  // silently reset and re-attempt the same broken image.
+  useEffect(() => setImagePreviewBroken(false), [source.content, source.contentType]);
   const sourceBytes = byteLength(source.content);
   // Measured on the FINAL bytes, whatever produced them. Checking only at
   // upload time missed the Write tab entirely, where multibyte text can pass a
@@ -199,8 +210,8 @@ export function Demo() {
       const source = await readAssetFile(file);
       setUploaded({ name: source.filename, content: source.content, contentType: source.contentType });
     } catch (error) {
-      const reason = error instanceof SourceFileError ? error.reason : 'wrong-type';
-      setSourceError(reason === 'too-big' ? demo.form.uploadTooBig : reason === 'empty' ? demo.form.uploadEmpty : demo.form.uploadWrongType);
+      const reason = error instanceof SourceFileError ? error.reason : undefined;
+      setSourceError(reason === 'too-big' ? demo.form.uploadTooBig : reason === 'empty' ? demo.form.uploadEmpty : demo.form.uploadReadError);
     }
   };
   // The title/style/nonce whose artwork is actually committed to the log —
@@ -597,9 +608,12 @@ export function Demo() {
                             : resourceDataUrl(source.content, source.contentType)
                         }
                         alt={`Artwork for “${title || demo.form.defaultTitle}”`}
+                        onError={() => setImagePreviewBroken(true)}
                       />
-                    ) : (
+                    ) : sourceIsPreviewableText ? (
                       <pre className="demo-art-text">{contentText(source.content) || demo.form.writePlaceholder}</pre>
+                    ) : (
+                      <p className="demo-art-text demo-art-binary">{demo.form.uploadBinaryPreview}</p>
                     )}
                     {sourceKind === 'generate' && (phase === 'idle' || canRevise) && (
                       <button
@@ -688,7 +702,6 @@ export function Demo() {
                         <span>{demo.form.uploadCta}</span>
                         <input
                           type="file"
-                          accept=".png,image/png,.svg,image/svg+xml,.txt,.md,.json,.csv,text/plain"
                           disabled={formLocked}
                           onChange={(e) => void onPickFile(e.target.files?.[0])}
                         />
