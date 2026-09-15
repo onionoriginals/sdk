@@ -8,6 +8,7 @@ import {
   fetchUser,
   fetchWallets,
   getKeyByCurve,
+  getKeyByRole,
 } from '../src/client/turnkey-client';
 import type { TurnkeyWallet } from '../src/types';
 import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
@@ -552,6 +553,105 @@ describe('client/turnkey-client', () => {
       ];
       const key = getKeyByCurve(multiWallets, 'CURVE_ED25519');
       expect(key!.address).toBe('found');
+    });
+  });
+
+  describe('getKeyByRole', () => {
+    test('distinguishes the two same-curve DID accounts by role', () => {
+      const wallets: TurnkeyWallet[] = [
+        {
+          walletId: 'w1',
+          walletName: 'default',
+          accounts: [
+            {
+              address: 'addr_secp',
+              curve: 'CURVE_SECP256K1',
+              path: "m/44'/0'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+            },
+            {
+              address: 'addr_assertion',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/0'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+            {
+              address: 'addr_update',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/1'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+          ],
+        },
+      ];
+
+      expect(getKeyByRole(wallets, 'bitcoin-auth')!.address).toBe('addr_secp');
+      expect(getKeyByRole(wallets, 'did-assertion')!.address).toBe('addr_assertion');
+      expect(getKeyByRole(wallets, 'did-update')!.address).toBe('addr_update');
+    });
+
+    test('selects by path regardless of account order (reversed Ed25519 accounts)', () => {
+      // Regression: getKeyByCurve returns whichever Ed25519 account it sees
+      // first, so a caller relying on array order to reach the update-key
+      // would silently get the assertion-key back once the accounts are
+      // returned in a different order. getKeyByRole must not depend on order.
+      const wallets: TurnkeyWallet[] = [
+        {
+          walletId: 'w1',
+          walletName: 'default',
+          accounts: [
+            {
+              address: 'addr_update',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/1'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+            {
+              address: 'addr_assertion',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/0'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+          ],
+        },
+      ];
+
+      expect(getKeyByRole(wallets, 'did-update')!.address).toBe('addr_update');
+      expect(getKeyByRole(wallets, 'did-assertion')!.address).toBe('addr_assertion');
+    });
+
+    test('returns null when the role is provisioned at the wrong path', () => {
+      // Two Ed25519 accounts exist, but neither at a recognized role path -
+      // getKeyByCurve would happily return the first one; getKeyByRole must
+      // refuse to guess.
+      const wallets: TurnkeyWallet[] = [
+        {
+          walletId: 'w1',
+          walletName: 'default',
+          accounts: [
+            {
+              address: 'addr_wrong1',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/2'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+            {
+              address: 'addr_wrong2',
+              curve: 'CURVE_ED25519',
+              path: "m/44'/501'/3'/0'",
+              addressFormat: 'ADDRESS_FORMAT_SOLANA',
+            },
+          ],
+        },
+      ];
+
+      expect(getKeyByRole(wallets, 'did-assertion')).toBeNull();
+      expect(getKeyByRole(wallets, 'did-update')).toBeNull();
+    });
+
+    test('returns null for an unrecognized role', () => {
+      const wallets: TurnkeyWallet[] = [{ walletId: 'w1', walletName: 'default', accounts: [] }];
+      expect(getKeyByRole(wallets, 'not-a-role' as never)).toBeNull();
     });
   });
 });

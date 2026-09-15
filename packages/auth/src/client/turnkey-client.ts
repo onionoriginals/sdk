@@ -336,7 +336,19 @@ export async function fetchWallets(
 }
 
 /**
- * Get key by curve type from wallets
+ * Get key by curve type from wallets.
+ *
+ * Returns the first account matching `curve`, in wallet/account order. This
+ * cannot distinguish between two accounts that share a curve — the wallet
+ * layout this package provisions has exactly that case (both the DID
+ * assertion-key and update-key are `CURVE_ED25519`) — so this always
+ * returns the assertion-key account for `CURVE_ED25519` and there is no way
+ * to reach the update-key account through this function. Use
+ * {@link getKeyByRole} to select a specific DID-signing account instead.
+ *
+ * Kept for backward compatibility with callers that only need a single
+ * account of a given curve (e.g. the Bitcoin auth-key, which is the only
+ * `CURVE_SECP256K1` account).
  */
 export function getKeyByCurve(
   wallets: TurnkeyWallet[],
@@ -345,6 +357,74 @@ export function getKeyByCurve(
   for (const wallet of wallets) {
     for (const account of wallet.accounts) {
       if (account.curve === curve) {
+        return account;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Canonical roles for the Turnkey accounts this package provisions and
+ * depends on. A role is identified by its exact curve **and** derivation
+ * path, not curve alone, so that two same-curve accounts (the DID
+ * assertion-key and update-key are both `CURVE_ED25519`) can be told apart.
+ */
+export type TurnkeyAccountRole = 'bitcoin-auth' | 'did-assertion' | 'did-update';
+
+interface TurnkeyAccountRoleSpec {
+  role: TurnkeyAccountRole;
+  curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
+  path: string;
+  addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
+}
+
+/**
+ * The single source of truth for the wallet layout `createWalletWithAccounts`
+ * provisions and `ensureWalletWithAccounts`/`getKeyByRole` depend on:
+ * - `bitcoin-auth` — the Bitcoin auth-key (`CURVE_SECP256K1`).
+ * - `did-assertion` — the DID assertion-key (`CURVE_ED25519`).
+ * - `did-update` — the DID update-key (`CURVE_ED25519`, a distinct path from
+ *   `did-assertion` so the two can be resolved independently).
+ */
+export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = [
+  {
+    role: 'bitcoin-auth',
+    curve: 'CURVE_SECP256K1',
+    path: "m/44'/0'/0'/0/0",
+    addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+  },
+  {
+    role: 'did-assertion',
+    curve: 'CURVE_ED25519',
+    path: "m/44'/501'/0'/0'",
+    addressFormat: 'ADDRESS_FORMAT_SOLANA',
+  },
+  {
+    role: 'did-update',
+    curve: 'CURVE_ED25519',
+    path: "m/44'/501'/1'/0'",
+    addressFormat: 'ADDRESS_FORMAT_SOLANA',
+  },
+];
+
+/**
+ * Get a wallet account by its canonical role (curve + exact derivation
+ * path), not merely by curve. Use this to fetch the DID assertion-key or
+ * update-key specifically — `getKeyByCurve('CURVE_ED25519')` cannot tell
+ * them apart, since both share that curve.
+ */
+export function getKeyByRole(
+  wallets: TurnkeyWallet[],
+  role: TurnkeyAccountRole
+): TurnkeyWalletAccount | null {
+  const spec = TURNKEY_ACCOUNT_ROLES.find((r) => r.role === role);
+  if (!spec) {
+    return null;
+  }
+  for (const wallet of wallets) {
+    for (const account of wallet.accounts) {
+      if (account.curve === spec.curve && account.path === spec.path) {
         return account;
       }
     }
@@ -364,26 +444,12 @@ export async function createWalletWithAccounts(
     try {
       const response = await turnkeyClient.apiClient().createWallet({
         walletName: 'default-wallet',
-        accounts: [
-          {
-            curve: 'CURVE_SECP256K1',
-            pathFormat: 'PATH_FORMAT_BIP32',
-            path: "m/44'/0'/0'/0/0",
-            addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
-          },
-          {
-            curve: 'CURVE_ED25519',
-            pathFormat: 'PATH_FORMAT_BIP32',
-            path: "m/44'/501'/0'/0'",
-            addressFormat: 'ADDRESS_FORMAT_SOLANA',
-          },
-          {
-            curve: 'CURVE_ED25519',
-            pathFormat: 'PATH_FORMAT_BIP32',
-            path: "m/44'/501'/1'/0'",
-            addressFormat: 'ADDRESS_FORMAT_SOLANA',
-          },
-        ],
+        accounts: TURNKEY_ACCOUNT_ROLES.map((spec) => ({
+          curve: spec.curve,
+          pathFormat: 'PATH_FORMAT_BIP32' as const,
+          path: spec.path,
+          addressFormat: spec.addressFormat,
+        })),
         organizationId: subOrgId,
       });
 
@@ -434,41 +500,26 @@ export async function ensureWalletWithAccounts(
 
       const defaultWallet = wallets[0];
       const allAccounts = defaultWallet.accounts;
-      const secp256k1Accounts = allAccounts.filter((acc) => acc.curve === 'CURVE_SECP256K1');
-      const ed25519Accounts = allAccounts.filter((acc) => acc.curve === 'CURVE_ED25519');
 
-      // Check if we need more accounts
-      if (secp256k1Accounts.length >= 1 && ed25519Accounts.length >= 2) {
+      // Check for each required role by its exact curve + path, not by
+      // curve count: two accounts can share a curve (both DID-signing
+      // accounts are CURVE_ED25519), so a wallet holding two Ed25519
+      // accounts at the *wrong* paths would otherwise be miscounted as
+      // complete while neither required role is actually provisioned.
+      const missingRoles = TURNKEY_ACCOUNT_ROLES.filter(
+        (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+      );
+
+      if (missingRoles.length === 0) {
         return wallets;
       }
 
-      // Need to create additional accounts
-      const accountsToCreate: Array<{
-        curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
-        pathFormat: 'PATH_FORMAT_BIP32';
-        path: string;
-        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
-      }> = [];
-
-      if (secp256k1Accounts.length === 0) {
-        accountsToCreate.push({
-          curve: 'CURVE_SECP256K1',
-          pathFormat: 'PATH_FORMAT_BIP32',
-          path: "m/44'/0'/0'/0/0",
-          addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
-        });
-      }
-
-      const ed25519Needed = 2 - ed25519Accounts.length;
-      for (let i = 0; i < ed25519Needed; i++) {
-        const pathIndex = ed25519Accounts.length + i;
-        accountsToCreate.push({
-          curve: 'CURVE_ED25519',
-          pathFormat: 'PATH_FORMAT_BIP32',
-          path: pathIndex === 0 ? "m/44'/501'/0'/0'" : "m/44'/501'/1'/0'",
-          addressFormat: 'ADDRESS_FORMAT_SOLANA',
-        });
-      }
+      const accountsToCreate = missingRoles.map((spec) => ({
+        curve: spec.curve,
+        pathFormat: 'PATH_FORMAT_BIP32' as const,
+        path: spec.path,
+        addressFormat: spec.addressFormat,
+      }));
 
       if (accountsToCreate.length > 0) {
         console.log(`Creating ${accountsToCreate.length} missing account(s)...`);

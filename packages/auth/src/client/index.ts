@@ -25,6 +25,8 @@ export {
   fetchUser,
   fetchWallets,
   getKeyByCurve,
+  getKeyByRole,
+  TURNKEY_ACCOUNT_ROLES,
   createWalletWithAccounts,
   ensureWalletWithAccounts,
   TurnkeySessionExpiredError,
@@ -32,6 +34,7 @@ export {
   type InitOtpResult,
   type CompleteOtpOptions,
   type CompleteOtpResult,
+  type TurnkeyAccountRole,
 } from './turnkey-client.js';
 
 export {
