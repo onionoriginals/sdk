@@ -216,7 +216,38 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       lookups++;
       cursors.superseded++;
       const st = await readStatus(r.commitTxId);
-      if (!st?.confirmed) continue;
+      if (st === null) continue; // A provider outage preserves the last observed state.
+      if (!st.confirmed) {
+        // #777 — a superseded pair can itself have been `confirmed` earlier
+        // (it was the live record before a rival pair reclaimed the
+        // outpoint; `supersede()` sets `superseded` without touching
+        // `status`/evidence). If ITS OWN commit later stops confirming — a
+        // deeper reorg than the one that superseded it — that stale
+        // `confirmed` status and confirmation evidence must not survive
+        // unchallenged: a caller reading this record would otherwise keep
+        // seeing a settled-looking status the chain no longer backs.
+        // Demote back to `reveal_broadcast`, keeping `superseded: true`.
+        if (current.status === 'confirmed') {
+          // Guarded write, expecting the snapshot taken BEFORE the status
+          // lookup's await (`current`) — including the confirmation evidence
+          // — so a stale negative read here cannot clobber fresher
+          // confirmation evidence a concurrent pass wrote while this pass's
+          // own lookup was in flight (mirroring the `confirmed` demotion
+          // guard below for `liveUnconfirmed`). If the CAS fails, a
+          // concurrent pass has newer state and must win.
+          if (store.trySetStatus(
+            sub, r.commitTxId,
+            {
+              status: 'confirmed', retired: false, superseded: true,
+              confirmations: current.confirmations,
+              confirmedBlockHeight: current.confirmedBlockHeight,
+              confirmedBlockHash: current.confirmedBlockHash,
+            },
+            'reveal_broadcast'
+          )) changed = true;
+        }
+        continue;
+      }
       // #758 — re-check after the status-lookup await: a concurrent pass (an
       // overlapping poll, or the background sweep) may already have retired
       // or un-superseded this record while this one was waiting on the
