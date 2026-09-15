@@ -2035,7 +2035,14 @@ export function createBitcoinRoutes(deps: {
     // failure means it already moved without us, so report its current
     // settlement/status instead of regressing it.
     if (!store.trySetStatus(sub, commitTxId, { status: preBroadcastStatus, retired: false, superseded: false }, 'commit_broadcast')) {
-      const moved = store.get(sub, commitTxId);
+      let moved: InscriptionRecord | null;
+      try {
+        moved = store.get(sub, commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
       if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
       return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? preBroadcastStatus });
     }
@@ -2051,7 +2058,14 @@ export function createBitcoinRoutes(deps: {
     // Same guard for the second transition: the reveal broadcast above is
     // itself another await reconciliation can act across.
     if (!store.trySetStatus(sub, commitTxId, { status: 'commit_broadcast', retired: false, superseded: false }, 'reveal_broadcast')) {
-      const moved = store.get(sub, commitTxId);
+      let moved: InscriptionRecord | null;
+      try {
+        moved = store.get(sub, commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
       if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
       return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? 'reveal_broadcast' });
     }
