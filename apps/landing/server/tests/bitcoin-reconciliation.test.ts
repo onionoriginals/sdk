@@ -170,6 +170,53 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(a.status).toBe('reveal_broadcast');
   });
 
+  // #758 — the OTHER await in this pass, before the reclaim: a concurrent
+  // pass can retire (or reinstate) the exact record this pass is about to
+  // reclaim while the commit-status lookup itself is still in flight. The
+  // pre-reclaim re-check must see that and skip, rather than reclaiming an
+  // outpoint out from under a state a concurrent pass already settled.
+  test('a concurrent retirement during the status lookup prevents reclaiming an already-settled record', async () => {
+    const winner = 'aa'.repeat(32);
+    const rival = 'bb'.repeat(32);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: rival, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.create('sub-1', rec({ commitTxId: winner, status: 'signed', fundingOutpoints: [`${winner}:0`] }));
+    store.supersede('sub-1', winner);
+
+    const broadcastCalls: string[] = [];
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: {
+        getTransactionStatus: async (txid) => {
+          if (txid === winner) {
+            // Simulate a concurrent pass retiring this exact record (e.g. it
+            // was reclaimed and settled via a different path) while THIS
+            // pass's own commit-status lookup for it is still in flight.
+            store.retire('sub-1', winner);
+            return { confirmed: true };
+          }
+          return { confirmed: false };
+        },
+      },
+      broadcastIdempotent: async (txHex) => {
+        broadcastCalls.push(txHex ?? '');
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    // The concurrent retirement stands: this pass must not reclaim the
+    // outpoint (which would resurrect a retired record's hex and touch the
+    // rival) on top of a state a concurrent pass already settled.
+    expect(store.get('sub-1', winner)!.retired).toBe(true);
+    expect(store.get('sub-1', rival)!.superseded).toBeUndefined();
+    expect(broadcastCalls).toEqual([]);
+  });
+
   // #758 — the `supersededPending` reclaim used a bare `setStatus` after TWO
   // awaits (the status lookup, then the reveal broadcast), so a concurrent
   // pass that transitioned the same record while either was in flight got
