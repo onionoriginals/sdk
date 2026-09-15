@@ -257,6 +257,11 @@ export function normalizeSatpoint(satpoint: string | null): string | null {
  * genuinely extends `head` under `controller`: same check `apply()` would perform, applied
  * directly to a single raw event/proof pair that itself may never pass full `eventShape`
  * validation (a recognized-but-unsupported CCG shape). Never throws.
+ *
+ * Every supplied proof must validate and belong to `controller`: per
+ * specs/originals-cel-v3-profile.md's proof-array rule, one valid proof does not excuse
+ * another invalid or unsupported proof in the same array, mirroring `verifyEntry`'s
+ * all-or-nothing behavior in the real fold path.
  */
 function entryExtendsUnderController(
   entry: { event: JsonValue; proof: JsonValue },
@@ -274,26 +279,26 @@ function entryExtendsUnderController(
     try {
       proof = validateProof(candidate);
     } catch {
-      continue;
+      return false;
     }
     const proofController = proof.verificationMethod.split("#")[0];
-    if (proofController !== controller) continue;
+    if (proofController !== controller) return false;
     const { proofValue, ...configuration } = proof;
     try {
       if (
-        verifyJcsSignature(
+        !verifyJcsSignature(
           event,
           configuration,
           decodeBase58(proofValue),
           proofController,
         )
       )
-        return true;
+        return false;
     } catch {
-      continue;
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 /**

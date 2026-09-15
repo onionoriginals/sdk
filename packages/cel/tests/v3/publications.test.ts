@@ -1314,6 +1314,124 @@ test("resolveSat still treats a disallowed profile as ignorable, not unsupported
   });
 });
 
+// #769: entryExtendsUnderController must require every supplied proof to validate, not
+// accept on the first match. A garbage/unsupported proof mixed in with a genuine
+// current-controller proof must still make the whole entry unauthenticated — "one valid
+// proof does not excuse another invalid proof" (specs/originals-cel-v3-profile.md).
+const garbageProof = {
+  type: "DataIntegrityProof",
+  cryptosuite: "not-a-real-suite",
+  verificationMethod: A.controller + "#bogus",
+  proofPurpose: "assertionMethod",
+  proofValue: "zGARBAGE",
+};
+
+test("resolveSat ignores a CCG dataReference candidate whose proof array mixes a genuine current-controller proof with a garbage proof, regardless of order (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("forged off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const genuineProof = await signRawEvent(event, A);
+  for (const proof of [
+    [garbageProof, genuineProof],
+    [genuineProof, garbageProof],
+  ]) {
+    const result = resolveSat(
+      unsupportedCapabilitySnapshot(
+        unsupportedCapabilityDelta(log, resourceA, {
+          log: [{ event, proof }],
+        }),
+      ),
+    );
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error(result.status);
+    expect(result.state.head).toBe(afterBtco.state.head);
+    expect(result.diagnostics).toContainEqual({
+      inscriptionId: "e".repeat(64) + "i0",
+      code: "CEL_DATA_REFERENCE",
+    });
+  }
+});
+
+test("resolveSat ignores a CCG dataReference candidate whose proof array mixes a genuine current-controller proof with a genuine wrong-controller proof (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const impostor = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("forged off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const mixedProofEntry = {
+    event,
+    proof: [await signRawEvent(event, A), await signRawEvent(event, impostor)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [mixedProofEntry] }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// Control: two independently genuine current-controller proofs on the same entry must
+// still count as authenticated — the all-proofs-must-validate rule rejects an invalid
+// proof, not a redundant valid one.
+test("resolveSat reports unsupported-capability when every proof in the array is genuinely signed by the current controller (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const doublySignedEntry = {
+    event,
+    proof: [await signRawEvent(event, A), await signRawEvent(event, A)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [doublySignedEntry] }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
+});
+
 // An unrelated/non-extending confirmed inscription carrying a recognized-but-unimplemented
 // CCG shape must not be able to block resolution of an otherwise valid, already-accepted
 // history just by sharing the sat — Bitcoin possession never restores or grants CEL
