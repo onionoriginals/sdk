@@ -326,6 +326,35 @@ for (const scenario of fixtures.cases)
     }
   });
 
+test("resolveSat rejects the removed expectedDid option instead of silently skipping the identity check", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "requested-later-identity-cannot-filter-away-earlier-boundary",
+  )!;
+  const snapshot = observations(scenario);
+  const expectedDid = (scenario.snapshot as { expectedDid?: string }).expectedDid!;
+
+  // The current, correct key still performs the identity check.
+  expect(resolveSat(snapshot, { expectedAssetId: expectedDid }).status).toBe(
+    "identity-mismatch",
+  );
+
+  // The removed key must fail closed, never silently skip the identity check
+  // as if no identity had been requested at all.
+  expect(
+    resolveSat(snapshot, { expectedDid } as unknown as { expectedAssetId?: string })
+      .status,
+  ).toBe("invalid");
+
+  // Supplying both must still be rejected - the removed key cannot be
+  // shadowed by also passing the current one.
+  expect(
+    resolveSat(snapshot, {
+      expectedAssetId: expectedDid,
+      expectedDid,
+    } as unknown as { expectedAssetId?: string }).status,
+  ).toBe("invalid");
+});
+
 test("enumeration assurance defaults to provider-asserted with no independent source configured", () => {
   const result = resolveSat(observations(fixtures.cases[0]));
   expect(result.status).toBe("accepted");
