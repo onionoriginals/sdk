@@ -140,6 +140,119 @@ test("an internally-consistent no-prefix delta still becomes invalid once a real
   );
 });
 
+test("a no-prefix delta with deactivate-then-update is invalid, not history-required", async () => {
+  const deactivateEntry = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "deactivate",
+        data: { profile, deactivatedAt: "2026-09-05T00:00:00Z" },
+      },
+    },
+    A,
+  );
+  const updateEntry = await signEvent(
+    {
+      previousEvent: verifyEntry(deactivateEntry).digest,
+      operation: { type: "update", data: { profile, name: "should never apply" } },
+    },
+    A,
+  );
+  // Deactivation is terminal under any prefix: no real prefix could ever make this delta
+  // valid, so it must be rejected outright rather than reported as needing more history.
+  expect(
+    codeOf(() => verifyHistory({ log: [deactivateEntry, updateEntry] })),
+  ).toBe("CEL_DEACTIVATED");
+});
+
+test("a no-prefix delta that rotates to the already-current signer is invalid, not history-required", async () => {
+  const selfRotation = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: A.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  // The entry's own signer is its only provisional controller; rotating to that exact
+  // controller is invalid regardless of what any prefix could show.
+  expect(codeOf(() => verifyHistory({ log: [selfRotation] }))).toBe(
+    "CEL_ROTATION",
+  );
+});
+
+test("a no-prefix delta with two migrations to the same layer is invalid, not history-required", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: initial.state.assetId,
+          to: "did:webvh:scid1:example.com:1",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const toWebvhAgain = await signEvent(
+    {
+      previousEvent: verifyEntry(toWebvh).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: "did:webvh:scid1:example.com:1",
+          to: "did:webvh:scid2:example.com:2",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:01Z",
+        },
+      },
+    },
+    A,
+  );
+  // Once the first migration establishes "webvh" as the known layer, a second migration in
+  // the same delta must progress to "btco"; repeating "webvh" is invalid under any prefix.
+  expect(
+    codeOf(() => verifyHistory({ log: [toWebvh, toWebvhAgain] })),
+  ).toBe("CEL_MIGRATION");
+});
+
+test("a no-prefix delta with a single migration still stays history-required", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: initial.state.assetId,
+          to: "did:webvh:scid1:example.com:1",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  // A single migration's own layer can't be checked against unknown prior state, so it
+  // remains history-required, not invalid.
+  expect(codeOf(() => verifyHistory({ log: [toWebvh] }))).toBe(
+    "CEL_HISTORY_REQUIRED",
+  );
+});
+
 for (const id of [
   "valid-signature-wrong-chain-link",
   "valid-log-wrong-requested-DID",

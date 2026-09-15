@@ -248,16 +248,29 @@ export function verifyHistory(
     // alone: an ordinary operation must be signed by whoever currently holds that
     // provisional authority, and only `rotateKey` can hand it to someone else. A delta
     // that already breaks that continuity is not "missing its prefix" — it is invalid
-    // regardless of what any prefix could show.
+    // regardless of what any prefix could show. The same reasoning covers any other state
+    // the delta pins down for itself: once `deactivate` occurs, deactivation is terminal
+    // and every later entry in the same delta is invalid under any prefix; a `rotateKey`
+    // to the signer already holding provisional authority is invalid under any prefix;
+    // and once a `migrate` establishes a known layer, a later `migrate` in the same delta
+    // must strictly progress cel -> webvh -> btco from that known layer.
     let previous: string | undefined;
     let provisionalController: string | undefined;
-    for (const entry of document.log) {
+    let deactivated = false;
+    let provisionalLayer: "cel" | "webvh" | "btco" | undefined;
+    for (const [index, entry] of document.log.entries()) {
       requireThat(
         entry.event.operation.type !== "create" &&
           (!previous || entry.event.previousEvent === previous),
         "CEL_CHAIN",
         "Invalid delta chain",
       );
+      if (index > 0)
+        requireThat(
+          !deactivated,
+          "CEL_DEACTIVATED",
+          "Deactivated history is terminal",
+        );
       const { digest, signers } = verifyEntry(entry);
       if (provisionalController === undefined) {
         requireThat(
@@ -273,8 +286,30 @@ export function verifyHistory(
           "Every proof must be from the current controller",
         );
       }
-      if (entry.event.operation.type === "rotateKey")
-        provisionalController = entry.event.operation.data.newController;
+      const operation = entry.event.operation;
+      if (operation.type === "rotateKey") {
+        requireThat(
+          operation.data.newController !== provisionalController,
+          "CEL_ROTATION",
+          "Rotation must change the controller",
+        );
+        provisionalController = operation.data.newController;
+      } else if (operation.type === "deactivate") {
+        deactivated = true;
+      } else if (operation.type === "migrate") {
+        if (provisionalLayer !== undefined)
+          requireThat(
+            operation.data.layer ===
+              (provisionalLayer === "cel"
+                ? "webvh"
+                : provisionalLayer === "webvh"
+                  ? "btco"
+                  : null),
+            "CEL_MIGRATION",
+            "Migration must follow the current cel to webvh to btco aliases",
+          );
+        provisionalLayer = operation.data.layer;
+      }
       previous = digest;
     }
     throw new CelError(
