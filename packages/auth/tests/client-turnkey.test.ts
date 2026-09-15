@@ -208,6 +208,27 @@ describe('client/turnkey-client', () => {
       const client = createMockClient(mock(() => Promise.reject(new Error('API down'))));
       await expect(initOtp(client, 'user@example.com')).rejects.toThrow('Failed to send OTP');
     });
+
+    test('normalizes a mixed-case/padded email before calling Turnkey', async () => {
+      // Regression for #737: the server flow (getOrCreateTurnkeySubOrg /
+      // initiateEmailAuth) normalizes email via trim+lowercase before every
+      // Turnkey call, since sub-org lookup filters on the exact contact
+      // string. The client-only initOtp entry point must agree, or
+      // "Alice@Example.COM" and "alice@example.com" can be routed to two
+      // different sub-orgs for the same mailbox.
+      const initOtpFn = mock(() =>
+        Promise.resolve({
+          otpId: 'otp_abc',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        })
+      );
+      const client = createMockClient(initOtpFn);
+      await initOtp(client, '  Alice@Example.COM  ');
+
+      expect(initOtpFn).toHaveBeenCalledWith(
+        expect.objectContaining({ contact: 'alice@example.com' })
+      );
+    });
   });
 
   describe('completeOtp', () => {

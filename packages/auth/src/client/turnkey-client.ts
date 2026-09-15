@@ -5,6 +5,7 @@
 
 import { Turnkey } from '@turnkey/sdk-server';
 import { encryptOtpCode } from '../otp-encryption.js';
+import { normalizeEmail } from '../email.js';
 import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types.js';
 
 /**
@@ -168,6 +169,12 @@ export interface CompleteOtpResult {
  * subsequent `otpLogin`; leave `subOrgId` unset unless you know the flow
  * must be scoped otherwise, and mirror whatever org context you use here in
  * {@link completeOtp} via `options.organizationId`.
+ *
+ * `email` is normalized (trim + lowercase) before being sent to Turnkey as
+ * `contact`, matching the server flow's `getOrCreateTurnkeySubOrg`/
+ * `initiateEmailAuth` normalization — Turnkey sub-org lookup filters on the
+ * exact email string, so the two entry points must agree or a user can be
+ * routed to two different sub-orgs for the same mailbox.
  */
 export async function initOtp(
   turnkeyClient: Turnkey,
@@ -177,7 +184,7 @@ export async function initOtp(
   try {
     const result = await turnkeyClient.apiClient().initOtp({
       otpType: 'OTP_TYPE_EMAIL',
-      contact: email,
+      contact: normalizeEmail(email),
       appName: 'Originals',
       ...(subOrgId ? { organizationId: subOrgId } : {}),
     });
