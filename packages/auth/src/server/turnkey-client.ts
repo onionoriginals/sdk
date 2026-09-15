@@ -70,6 +70,76 @@ const DEFAULT_WALLET_ACCOUNTS = [
 ] as const;
 
 /**
+ * A mutual-exclusion lock keyed by string, used to serialize the
+ * lookup-then-create sequence in {@link getOrCreateTurnkeySubOrg} per
+ * normalized email.
+ */
+export interface SubOrgLock {
+  /**
+   * Run `fn` with exclusive access for `key`. Calls for the same `key` must
+   * be serialized (queued, not rejected); calls for different keys must NOT
+   * block one another. Must release the lock once `fn` settles, whether it
+   * resolves or rejects.
+   */
+  withLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
+}
+
+/**
+ * Create an in-process, per-key single-flight lock.
+ *
+ * **Production warning**: like {@link createInMemorySessionStorage}, this
+ * lock only serializes calls within a single process. `@originals/auth`
+ * supports shared/multi-instance deployments, and this lock provides no
+ * protection against two different instances handling concurrent requests
+ * for the same brand-new email at the same time. For multi-instance
+ * deployments, inject a distributed {@link SubOrgLock} (e.g. backed by a
+ * Redis `SET NX` mutex or another cross-process reservation primitive).
+ */
+export function createInProcessSubOrgLock(): SubOrgLock {
+  const queues = new Map<string, Promise<void>>();
+
+  return {
+    withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+      const previous = queues.get(key) ?? Promise.resolve();
+      const run = previous.then(fn, fn);
+      // A tail promise that always settles, so later callers for this key
+      // queue up regardless of whether this call's `fn` threw.
+      const settled = run.then(
+        () => undefined,
+        () => undefined
+      );
+      queues.set(key, settled);
+      // Once this is the last queued call for `key`, drop the entry so the
+      // map doesn't grow unbounded for a long-lived process handling many
+      // distinct emails.
+      void settled.then(() => {
+        if (queues.get(key) === settled) {
+          queues.delete(key);
+        }
+      });
+      return run;
+    },
+  };
+}
+
+// Default lock used when getOrCreateTurnkeySubOrg is called without one.
+let defaultSubOrgLock: SubOrgLock | null = null;
+
+function getDefaultSubOrgLock(): SubOrgLock {
+  if (!defaultSubOrgLock) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '[auth] Using an in-process lock to serialize Turnkey sub-organization ' +
+          'creation: this does not protect against concurrent requests handled ' +
+          'by different instances. Pass a distributed SubOrgLock for multi-instance deployments.'
+      );
+    }
+    defaultSubOrgLock = createInProcessSubOrgLock();
+  }
+  return defaultSubOrgLock;
+}
+
+/**
  * Whether an error from the Turnkey API definitively means the queried
  * resource does not exist (as opposed to a transient/network/auth failure).
  * gRPC status code 5 is NOT_FOUND. Walks the `cause` chain (cycle-safe) in
@@ -112,11 +182,22 @@ function isDefinitiveNotFound(error: unknown): boolean {
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
- *   selection is deterministic so every login resolves the same identity.
+ *   selection is deterministic so every login resolves the same identity;
+ * - the lookup-then-create sequence is serialized per normalized email via
+ *   `lock` (see {@link SubOrgLock}), so two concurrent calls for the same
+ *   brand-new email cannot both observe "no existing sub-org" and both
+ *   create one.
+ *
+ * @param lock - Serializes the lookup-then-create sequence per normalized
+ *   email. Defaults to an in-process lock (see
+ *   {@link createInProcessSubOrgLock}), which is sufficient for a single
+ *   process but NOT across multiple server instances — pass a distributed
+ *   {@link SubOrgLock} in multi-instance deployments.
  */
 export async function getOrCreateTurnkeySubOrg(
   email: string,
-  turnkeyClient: Turnkey
+  turnkeyClient: Turnkey,
+  lock: SubOrgLock = getDefaultSubOrgLock()
 ): Promise<string> {
   const organizationId = process.env.TURNKEY_ORGANIZATION_ID;
   if (!organizationId) {
@@ -125,6 +206,16 @@ export async function getOrCreateTurnkeySubOrg(
 
   const normalizedEmail = normalizeEmail(email);
 
+  return lock.withLock(normalizedEmail, () =>
+    getOrCreateTurnkeySubOrgUnlocked(normalizedEmail, organizationId, turnkeyClient)
+  );
+}
+
+async function getOrCreateTurnkeySubOrgUnlocked(
+  normalizedEmail: string,
+  organizationId: string,
+  turnkeyClient: Turnkey
+): Promise<string> {
   let subOrgIds: string[] = [];
   try {
     const subOrgs = await turnkeyClient.apiClient().getSubOrgIds({

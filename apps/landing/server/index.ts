@@ -1,5 +1,5 @@
 import { createExploreRoutes } from './explore';
-import { createInMemorySessionStorage, type SessionStorage } from '@originals/auth/server';
+import { createInMemorySessionStorage, type SessionStorage, type SubOrgLock } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { json, type Handler } from './router';
 import { getTurnkey } from './turnkey';
@@ -22,6 +22,8 @@ export function buildRoutes(deps: {
   // faucet route entirely instead of leaving a disabled endpoint mounted.
   bitcoin?: Omit<BitcoinRoutes, 'funding'> & { funding?: BitcoinRoutes['funding'] };
   originals?: OriginalsRoutes;
+  // Serializes Turnkey sub-org creation per email (#728); see createAuthRoutes.
+  subOrgLock?: SubOrgLock;
 }): Record<string, Handler> {
   const auth = createAuthRoutes(deps);
   const routes: Record<string, Handler> = {

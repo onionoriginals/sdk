@@ -9,7 +9,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
 import { encryptOtpCode } from '../otp-encryption.js';
-import { getOrCreateTurnkeySubOrg, normalizeEmail } from './turnkey-client.js';
+import { getOrCreateTurnkeySubOrg, normalizeEmail, type SubOrgLock } from './turnkey-client.js';
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
@@ -196,6 +196,15 @@ export interface VerifyEmailAuthOptions {
    * signer key.
    */
   dangerouslyOverrideSignerPublicKey?: string;
+  /**
+   * Serializes the lookup-then-create sequence in
+   * {@link getOrCreateTurnkeySubOrg} per normalized email, preventing two
+   * concurrent verifications for the same brand-new email from minting two
+   * sub-organizations. Defaults to an in-process lock, which is NOT safe
+   * across multiple server instances — pass a distributed `SubOrgLock` for
+   * multi-instance deployments.
+   */
+  subOrgLock?: SubOrgLock;
 }
 
 /**
@@ -334,7 +343,11 @@ export async function verifyEmailAuth(
   // creation).
   let subOrgId: string;
   try {
-    subOrgId = await getOrCreateTurnkeySubOrg(session.email, turnkeyClient);
+    subOrgId = await getOrCreateTurnkeySubOrg(
+      session.email,
+      turnkeyClient,
+      options?.subOrgLock
+    );
   } catch (error) {
     // The OTP was already consumed by the successful verifyOtp above, so
     // this session can never complete: destroy it. Leaving it alive would
