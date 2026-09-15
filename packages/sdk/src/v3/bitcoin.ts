@@ -8,6 +8,7 @@ import {
   CelError,
   encodeDocument,
   eventDigest,
+  normalizeSatpoint,
   parseAssetAlias,
   parseDocument,
   signEvent,
@@ -218,14 +219,18 @@ export class BitcoinPublications {
             "ASSET_ACCEPTED_HEAD_REQUIRED",
             "A complete fresh accepted sat observation is required before building a publication",
           );
-        const expectedPoint = `${fundingUtxos[0].txid.toLowerCase()}:${fundingUtxos[0].vout}:0`;
+        const expectedPoint = normalizeSatpoint(
+          `${fundingUtxos[0].txid}:${fundingUtxos[0].vout}:0`,
+        );
         // ord does not track the location of every uninscribed common sat.
         // prepareInscriptionOnSat has already derived this boundary sat from
         // the selected output's exact sat ranges. Later publications must
         // additionally match the accepted inscription's observed location.
+        // Both sides are normalized identically: a configured SatProvider's
+        // reported satpoint carries no casing contract of its own.
         if (
           (state.layer === "btco" || snapshot.ownership.satpoint !== null) &&
-          snapshot.ownership.satpoint !== expectedPoint
+          normalizeSatpoint(snapshot.ownership.satpoint) !== expectedPoint
         )
           invalid(
             "ASSET_SAT_ALIGNMENT",
