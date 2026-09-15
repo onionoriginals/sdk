@@ -577,6 +577,60 @@ test("check() rejects a cross-network identity before any provider is consulted,
   expect(result.chainEvidence.assurance).toBe("unavailable");
 });
 
+// #695: resolveDID/resolveDIDWithMetadata must surface a resolution status for
+// a cross-network or wrong-layer Bitcoin DID, matching check()'s "never throws
+// for a syntactically valid alias" contract, instead of leaking a raw
+// ASSET_NETWORK CelError.
+test("AssetResolver.resolveDID() surfaces identity-mismatch for a cross-network alias instead of throwing", async () => {
+  const resolver = new AssetResolver("regtest");
+  const result = await resolver.resolveDID("did:btco:123");
+  expect(result.didDocument).toBeNull();
+  expect(result.didResolutionMetadata.status).toBe("identity-mismatch");
+  expect(result.didDocumentMetadata.chainEvidence.assurance).toBe(
+    "unavailable",
+  );
+});
+
+test("AssetResolver.resolveDID() surfaces identity-mismatch for a wrong-layer (webvh) alias instead of throwing", async () => {
+  const resolver = new AssetResolver("regtest");
+  const result = await resolver.resolveDID(
+    "did:webvh:QmWmyoCVmCuFjPT9fAtP8jCFXbT8Zzq5TGfxEbGoZFbBfo:example.com:art",
+  );
+  expect(result.didDocument).toBeNull();
+  expect(result.didResolutionMetadata.status).toBe("identity-mismatch");
+});
+
+test("sdk.did.resolveDIDWithMetadata() never throws for a cross-network did:btco", async () => {
+  const sdk = OriginalsSDK.create({ network: "regtest" });
+  const metadata = await sdk.did.resolveDIDWithMetadata("did:btco:123");
+  expect(metadata.didDocument).toBeNull();
+  expect(metadata.didResolutionMetadata.status).toBe("identity-mismatch");
+});
+
+test("sdk.did.resolveDID() throws only the documented ASSET_RESOLUTION_INCOMPLETE for a cross-network did:btco", async () => {
+  const sdk = OriginalsSDK.create({ network: "regtest" });
+  let thrown: unknown;
+  try {
+    await sdk.did.resolveDID("did:btco:123");
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeDefined();
+  expect((thrown as any).code).toBe("ASSET_RESOLUTION_INCOMPLETE");
+});
+
+test("a malformed did:btco identifier still fails as an invalid identifier, not identity-mismatch", async () => {
+  // A parse-level defect (bad network tag / non-canonical sat) is a different
+  // failure mode than a syntactically valid alias naming the wrong layer or
+  // network, and must keep failing at parse time for both entry points.
+  const resolver = new AssetResolver("regtest");
+  await expect(resolver.resolveDID("did:btco:xyz:123")).rejects.toThrow();
+  const sdk = OriginalsSDK.create({ network: "regtest" });
+  await expect(
+    sdk.did.resolveDIDWithMetadata("did:btco:xyz:123"),
+  ).rejects.toThrow();
+});
+
 test('validator failures fail closed and validator mutations cannot change the resolved view', async () => {
   const { snapshot } = await boundary();
   const failed = OriginalsSDK.create({ network: 'regtest', satProvider: { getSatSnapshot: async () => snapshot },

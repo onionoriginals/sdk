@@ -17,6 +17,7 @@ import { selectUtxos, SimpleUtxoSelectionOptions } from '../utxo-selection.js';
 import { isSegwitScriptPubKey, inputVBytesForScriptPubKey, outputVBytesForAddress } from '../utxo.js';
 import { validateBitcoinAddress } from '../../utils/bitcoin-address.js';
 import { scriptPubKeyForAddress } from '../transfer.js';
+import { metadataTagChunks } from '../ordinals-tags.js';
 
 // Define minimum dust limit (satoshis)
 const MIN_DUST_LIMIT = 546;
@@ -96,8 +97,14 @@ export interface CommitTransactionParams {
   network: BitcoinNetwork;
   /** Optional minimum amount for the commit output */
   minimumCommitAmount?: number;
-  /** Optional metadata for the inscription */
-  metadata?: Record<string, unknown>;
+  /**
+   * Optional metadata for the inscription. A `Uint8Array` is pre-encoded CBOR document bytes
+   * (e.g. `encodeDocument(document, "cbor")`), written verbatim via `metadataTagChunks`
+   * (`tags.unknown`) rather than through micro-ordinals' own CBOR encoder, which cannot encode
+   * a JS `number` in `[2^32, 2^53)`. A plain object is still supported for callers with no such
+   * large-integer risk and goes through `tags.metadata` (micro-ordinals' encoder) unchanged.
+   */
+  metadata?: Uint8Array | Record<string, unknown>;
   /** Optional pointer to target specific satoshi */
   pointer?: number;
   /**
@@ -580,8 +587,14 @@ export async function createCommitTransaction(
     contentType
   };
 
-  // Add metadata if provided
-  if (metadata && Object.keys(metadata).length > 0) {
+  // Add metadata if provided. Pre-encoded bytes are written as raw `unknown` tag/data pushes,
+  // never through `tags.metadata`: micro-ordinals' own CBOR encoder cannot encode a JS `number`
+  // in [2^32, 2^53), which would otherwise permanently block the default inline publication path
+  // for an otherwise-valid CEL document. See ordinals-tags.ts. A plain object still goes through
+  // micro-ordinals' encoder unchanged, for callers with no such large-integer risk.
+  if (metadata instanceof Uint8Array) {
+    if (metadata.length > 0) tags.unknown = metadataTagChunks(metadata);
+  } else if (metadata && Object.keys(metadata).length > 0) {
     tags.metadata = metadata;
   }
 
