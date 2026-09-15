@@ -12,7 +12,7 @@
  */
 import { json } from './router';
 import { outpointsOf } from './inscriptions-store';
-import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
+import type { InscriptionsStore, InscriptionRecord, StatusExpectation } from './inscriptions-store';
 import type { MoneyLogger } from './money-log';
 
 /**
@@ -234,19 +234,30 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       const st = await readStatus(r.commitTxId);
       if (!st) continue;
       if (!st.confirmed) {
-        const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
-        if (!r.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
+        // #677 — read the FRESH pre-await snapshot (`current`), not the
+        // top-of-function one (`r`): by the time this record's turn comes
+        // up, `r` can be arbitrarily stale (other records' awaits already
+        // ran, or a concurrent reconcileUser call for the same user already
+        // moved this exact record).
+        const lastPush = Date.parse(current.rebroadcastAt ?? current.updatedAt);
+        if (!current.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
       }
       store.markRebroadcast(sub, r.commitTxId);
+      let atStatus = current.status;
       if (!st.confirmed) {
-        if (await broadcastIdempotent(r.signedCommitHex!)) continue;
-        store.setStatus(sub, r.commitTxId, 'commit_broadcast');
+        if (await broadcastIdempotent(current.signedCommitHex!)) continue;
+        // Guarded write: a concurrent pass (an overlapping poll, or the
+        // background sweep) may have already moved this record while the
+        // broadcast above was in flight. Only advance it if it is still
+        // exactly where this pass last observed it; otherwise stop touching
+        // it rather than clobber whatever that other pass decided (#677).
+        if (!store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'commit_broadcast')) continue;
+        atStatus = 'commit_broadcast';
         changed = true;
       }
-      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      const revealErr = await broadcastIdempotent(current.revealTxHex);
       if (!revealErr) {
-        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-        changed = true;
+        if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) changed = true;
       }
     }
     for (const r of liveUnconfirmed) {
@@ -293,36 +304,95 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // this is the steady state for a record sitting well below the
         // settlement threshold that keeps being re-polled while other work
         // is pending.
-        if (
+        const needsWrite =
           current.status !== 'confirmed' ||
           current.confirmations !== st.confirmations ||
           current.confirmedBlockHeight !== st.blockHeight ||
-          current.confirmedBlockHash !== st.blockHash
-        ) {
-          store.setStatus(sub, r.commitTxId, 'confirmed', { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash });
-          changed = true;
+          current.confirmedBlockHash !== st.blockHash;
+        // Guarded write (#677/#694): only apply if the record's
+        // status/retired/superseded AND its confirmation evidence are still
+        // exactly where this pass last observed them. The evidence fields
+        // matter here specifically: status/retired/superseded alone stay
+        // IDENTICAL across a purely evidence-only concurrent update (a
+        // fresher confirmation depth or reorg block identity written by
+        // another pass) — checking only those three would let a stale pass
+        // silently overwrite newer evidence with older evidence.
+        const applied = needsWrite
+          ? store.trySetStatus(
+              sub, r.commitTxId,
+              {
+                status: current.status, retired: false, superseded: false,
+                confirmations: current.confirmations,
+                confirmedBlockHeight: current.confirmedBlockHeight,
+                confirmedBlockHash: current.confirmedBlockHash,
+              },
+              'confirmed',
+              { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash }
+            )
+          : true;
+        if (needsWrite && applied) changed = true;
+        if (applied && (st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) {
+          // Guarded retire: re-verify against the record's CURRENT on-disk
+          // state immediately before retiring, rather than trusting the
+          // `applied` shortcut above at face value — a concurrent pass could
+          // have demoted (or already retired) this record without touching
+          // the confirmation evidence this pass compared, which would
+          // otherwise let this pass delete a still-live pair's only
+          // recovery artifacts on stale authority.
+          //
+          // After our guarded write, read back its sticky block identity;
+          // omitted provider fields need not equal the stored values. With
+          // no write, retain the PRE-await snapshot as the expectation:
+          // rereading here would authorize retirement using evidence that
+          // another pass changed while this lookup was in flight.
+          // No await separates a successful write from this read/retire.
+          const postWrite = needsWrite ? store.get(sub, r.commitTxId) : current;
+          const retireExpected: StatusExpectation | undefined = postWrite
+            ? {
+                status: 'confirmed', retired: false, superseded: false,
+                confirmations: postWrite.confirmations,
+                confirmedBlockHeight: postWrite.confirmedBlockHeight,
+                confirmedBlockHash: postWrite.confirmedBlockHash,
+              }
+            : undefined;
+          if (retireExpected && store.tryRetire(sub, r.commitTxId, retireExpected)) changed = true;
         }
-        if ((st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) { store.retire(sub, r.commitTxId); changed = true; }
         continue;
       }
-      if (r.status === 'confirmed') {
-        store.setStatus(sub, r.commitTxId, 'reveal_broadcast');
-        changed = true;
-        store.markRebroadcast(sub, r.commitTxId);
-        if (r.signedCommitHex) await broadcastIdempotent(r.signedCommitHex);
-        if (r.revealTxHex) await broadcastIdempotent(r.revealTxHex);
+      // #677 — the demotion decision itself must read the FRESH pre-await
+      // snapshot (`current`), not the top-of-function one (`r`): `r` can
+      // already be stale by the time this record's turn comes up (e.g. a
+      // concurrent reconcileUser call for the same user confirmed this
+      // exact record while THIS pass's own provider read was in flight).
+      // Reading `r.status` here let a genuinely-reorged-out record stay
+      // reported `confirmed` on stale evidence instead of being demoted.
+      if (current.status === 'confirmed') {
+        // Guarded write: skip the demotion (and the rebroadcast it would
+        // trigger) if the record no longer matches what was just observed —
+        // e.g. it was retired by a concurrent pass in the meantime.
+        if (store.trySetStatus(sub, r.commitTxId, {
+          status: 'confirmed', retired: false, superseded: false,
+          confirmations: current.confirmations,
+          confirmedBlockHeight: current.confirmedBlockHeight,
+          confirmedBlockHash: current.confirmedBlockHash,
+        }, 'reveal_broadcast')) {
+          changed = true;
+          store.markRebroadcast(sub, r.commitTxId);
+          if (current.signedCommitHex) await broadcastIdempotent(current.signedCommitHex);
+          if (current.revealTxHex) await broadcastIdempotent(current.revealTxHex);
+        }
         continue;
       }
       // Keep the manual-retry status clock unchanged; the independent durable
       // attempt timestamp throttles resubmission even after ambiguous delivery.
-      const lastPush = Date.parse(r.rebroadcastAt ?? r.updatedAt);
-      if (r.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
+      const lastPush = Date.parse(current.rebroadcastAt ?? current.updatedAt);
+      if (current.revealTxHex && now() - lastPush >= REVEAL_REBROADCAST_AFTER_MS) {
         store.markRebroadcast(sub, r.commitTxId);
         // Both transactions can disappear from the mempool. Replaying the
         // exact retained parent first also works when it is already known;
         // an ambiguous parent failure retains the pair for the next attempt.
-        if (r.signedCommitHex && await broadcastIdempotent(r.signedCommitHex)) continue;
-        await broadcastIdempotent(r.revealTxHex);
+        if (current.signedCommitHex && await broadcastIdempotent(current.signedCommitHex)) continue;
+        await broadcastIdempotent(current.revealTxHex);
       }
     }
     if (changed) {
