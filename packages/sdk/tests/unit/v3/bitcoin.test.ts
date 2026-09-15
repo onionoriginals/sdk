@@ -1,17 +1,16 @@
 import { expect, test, mock } from "bun:test";
 import * as btc from "@scure/btc-signer";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { parseWitness } from "micro-ordinals";
+import { parseWitness, parseInscriptions } from "micro-ordinals";
 import {
-  CelError,
   createLocalSigner,
-  encodeDocument,
   parseDocument,
   type SatSnapshot,
 } from "@originals/cel/v3";
 import { OriginalsSDK } from "../../../src/index.js";
 import type { PreparedBitcoinPublication } from "../../../src/v3/bitcoin.js";
 import { getScureNetwork } from "../../../src/bitcoin/transactions/commit.js";
+import { rawMetadataPerEnvelope } from "../../../src/v3/content-validation.js";
 
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
 const key = new Uint8Array(32).fill(1);
@@ -29,6 +28,20 @@ const inscription = (p: PreparedBitcoinPublication) =>
   parseWitness(
     tx(p.transactions.revealTxHex).getInput(0).finalScriptWitness!,
   )![0];
+/**
+ * The metadata tag's exact raw (pre-CBOR-decode) bytes, mirroring how a real Ordinals indexer's
+ * `/r/metadata/:id` and this SDK's own `validate()`/content-validation read it — never through
+ * micro-ordinals' `Inscription.tags.metadata`, whose own CBOR decoder is not relied on to
+ * preserve every CEL-representable value (e.g. an integer >= 2^32 decodes to a `bigint`, not a
+ * `number`).
+ */
+const rawMetadata = (p: PreparedBitcoinPublication) => {
+  const decoded = btc.Script.decode(
+    tx(p.transactions.revealTxHex).getInput(0).finalScriptWitness![1],
+  );
+  const parsed = parseInscriptions(decoded, true)!;
+  return rawMetadataPerEnvelope(decoded, parsed.length)[0];
+};
 async function fixture(
   media = true,
   content = png,
@@ -141,10 +154,7 @@ async function fixture(
         status: "complete",
         mediaType: body.tags.contentType!,
         bytes: body.body,
-        metadata:
-          body.tags.metadata === undefined
-            ? null
-            : encodeDocument(body.tags.metadata, "cbor"),
+        metadata: rawMetadata(prepared) ?? null,
       },
     });
     snapshot.ownership.satpoint = id + ":0:0";
@@ -345,21 +355,65 @@ test("exact metadata envelope funds reveal fees and oversized inscriptions fail 
   ).not.toHaveBeenCalled();
 });
 
-test("metadata integers >= 2^32 fail as a structured CelError, not a bare third-party Error", async () => {
+test("default inline path succeeds for metadata integers outside the CBOR-U32 range, and the exact CEL document round-trips through the raw on-chain metadata bytes", async () => {
+  for (const biggishNumber of [
+    2 ** 32,
+    2 ** 32 + 1,
+    Number.MAX_SAFE_INTEGER,
+    -(2 ** 32),
+    -Number.MAX_SAFE_INTEGER,
+  ]) {
+    const f = await fixture();
+    await f.asset.update({ metadata: { biggishNumber } });
+    const hosted = await f.sdk.lifecycle.publishToWeb(f.asset, {
+      domain: "example.com",
+    });
+    // Would previously throw ASSET_INSCRIPTION_METADATA: micro-ordinals' CBOR encoder cannot
+    // encode a JS number in [2^32, 2^53), only reachable via the undocumented
+    // `inlineResourceId: null` escape hatch. The default (no inlineResourceId) call must now
+    // succeed identically to any other inline publication.
+    const prepared = await f.sdk.lifecycle.prepareBitcoinPublication(
+      hosted.asset,
+      f.options,
+    );
+    expect(f.options.satSigner.signAndFinalizeCommitPsbt).toHaveBeenCalled();
+    const bytes = rawMetadata(prepared);
+    expect(bytes).toBeDefined();
+    // The raw on-chain bytes decode (via CEL's own CBOR reader, never micro-ordinals') to
+    // exactly the signed document, integer precision included.
+    expect(parseDocument(bytes!, "cbor")).toEqual(prepared.document);
+    const records = new Map();
+    const result = await f.sdk.lifecycle.publishPreparedToBitcoin(prepared, {
+      recoveryStore: {
+        save: async (r) => {
+          records.set(r.recoveryId, structuredClone(r));
+        },
+        load: async (id) => records.get(id),
+      },
+    });
+    expect(result.status).toBe("submitted");
+    f.accept(prepared);
+    const resolved = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+    if (resolved.status !== "accepted") throw new Error(resolved.status);
+    expect(resolved.asset.state.metadata).toEqual({ biggishNumber });
+  }
+}, 20000);
+
+test("a plain (non-inline) resource unaffected by large integers still succeeds, and inlineResourceId: null remains an explicit product choice, not an automatic fallback", async () => {
   const f = await fixture();
-  await f.asset.update({ metadata: { biggishNumber: 4294967296 } });
+  await f.asset.update({ metadata: { biggishNumber: 2 ** 32 } });
   const hosted = await f.sdk.lifecycle.publishToWeb(f.asset, {
     domain: "example.com",
   });
-  let thrown: unknown;
-  try {
-    await f.sdk.lifecycle.prepareBitcoinPublication(hosted.asset, f.options);
-  } catch (err) {
-    thrown = err;
-  }
-  expect(thrown).toBeInstanceOf(CelError);
-  expect((thrown as CelError).code).toBe("ASSET_INSCRIPTION_METADATA");
-  expect(f.options.satSigner.signAndFinalizeCommitPsbt).not.toHaveBeenCalled();
+  const logOnly = await f.sdk.lifecycle.prepareBitcoinPublication(
+    hosted.asset,
+    { ...f.options, inlineResourceId: null },
+  );
+  expect(inscription(logOnly).tags.contentType).toBe("application/cel");
+  expect(inscription(logOnly).tags.metadata).toBeUndefined();
+  expect(parseDocument(inscription(logOnly).body, "json")).toEqual(
+    logOnly.document,
+  );
 });
 
 test("valid signed wrapper substituted around a different signed reveal is rejected before submission", async () => {
