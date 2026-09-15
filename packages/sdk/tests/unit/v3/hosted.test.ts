@@ -96,6 +96,83 @@ test("republishing updated resource bytes retains the same hosted identity and a
   expect(loaded.verification.verified).toBe(true);
 });
 
+test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+  });
+  const p256Signer = createLocalSigner("P-256", new Uint8Array(32).fill(7));
+  await published.asset.rotateKey(p256Signer.controller, { signer });
+  await published.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+    { signer: p256Signer },
+  );
+  // The republish path never touches the WebVH method log, so the P-256
+  // controller signer alone is sufficient; no webvhSigner is supplied.
+  const republished = await sdk.lifecycle.publishToWeb(published.asset, {
+    domain: "example.com",
+    signer: p256Signer,
+  });
+  expect(republished.did).toBe(published.did);
+  const loaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+  expect(loaded.asset.resources.map((r) => [...r.content!])).toEqual([
+    [1, 2],
+    [3, 4],
+  ]);
+});
+
+test("republishing after rotating the controller to P-384 succeeds without a separate Ed25519 webvhSigner", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+  });
+  const p384Signer = createLocalSigner("P-384", new Uint8Array(48).fill(7));
+  await published.asset.rotateKey(p384Signer.controller, { signer });
+  await published.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+    { signer: p384Signer },
+  );
+  const republished = await sdk.lifecycle.publishToWeb(published.asset, {
+    domain: "example.com",
+    signer: p384Signer,
+  });
+  expect(republished.did).toBe(published.did);
+});
+
+test("a first-time WebVH publication with a non-Ed25519 controller signer still requires an explicit Ed25519 webvhSigner", async () => {
+  const p256Signer = createLocalSigner("P-256", new Uint8Array(32).fill(9));
+  const sdk = OriginalsSDK.create({
+    signer: p256Signer,
+    storageAdapter: storage(),
+  });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  await expect(
+    sdk.lifecycle.publishToWeb(asset, { domain: "example.com" }),
+  ).rejects.toThrow("Ed25519");
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    webvhSigner: signer,
+  });
+  expect(published.asset.state.layer).toBe("webvh");
+});
+
 test("a failed upload retries the identical prepared publication and substituted media never verifies", async () => {
   const inner = storage();
   let fail = true;

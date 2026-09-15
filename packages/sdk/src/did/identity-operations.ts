@@ -4,9 +4,13 @@ import type {
   VerificationMethod,
   ServiceEndpoint,
 } from "../types/did.js";
+import { StructuredError } from "@originals/cel";
 import { createDID } from "didwebvh-ts";
-import { normalizeUpdateKey } from "./WebVHManager.js";
 import { requireWebVHDomain } from "./DIDManager.js";
+import {
+  normalizeUpdateKey,
+  assertEd25519WebVHUpdateKeys,
+} from "./WebVHManager.js";
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -134,6 +138,29 @@ function assertBareUpdateKeysForPrerotation(
 }
 
 /**
+ * Resolve the verifier to hand to didwebvh-ts, falling back to using the
+ * signer as its own verifier only when the signer actually implements
+ * verify(). An ExternalSigner has no verify() (see the `ExternalSigner`
+ * type); silently casting a sign-only signer to a verifier makes
+ * didwebvh-ts fail deep inside with "verifier.verify is not a function"
+ * instead of a clear error at this seam (issue #719). Mirrors the same
+ * guard already applied in WebVHManager.createDIDWebVH.
+ */
+function resolveVerifier(
+  signer: ExternalSigner,
+  verifier: ExternalVerifier | undefined,
+): ExternalVerifier {
+  if (verifier) return verifier;
+  if (typeof (signer as unknown as { verify?: unknown }).verify === "function") {
+    return signer as unknown as ExternalVerifier;
+  }
+  throw new StructuredError(
+    "WEBVH_VERIFIER_REQUIRED",
+    "verifier is required when the provided signer does not implement verify()",
+  );
+}
+
+/**
  * Prepare data for signing using didwebvh-ts's canonical approach
  * This is a public static helper method that wraps didwebvh-ts's prepareDataForSigning
  * to ensure didwebvh-ts is only imported within the SDK
@@ -258,15 +285,22 @@ export async function createDIDOriginal(
   // work — never mint a permanent did:webvh at a host nobody serves (#531, #678).
   const domain = requireWebVHDomain(options.domain);
 
+  // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
+  // accept legacy "did:key:..." input and normalize first, then validate —
+  // did:webvh log resolution in this SDK is Ed25519-only (see
+  // assertEd25519WebVHUpdateKeys), so a non-Ed25519 updateKey must be
+  // rejected here, before signing, rather than minting a DID that can never
+  // resolve afterward (issue #714).
+  const updateKeys = options.updateKeys.map(normalizeUpdateKey);
+  assertEd25519WebVHUpdateKeys(updateKeys);
+
   // Create the DID using didwebvh-ts
   const createOptions: Record<string, unknown> = {
     domain,
     signer: options.signer,
-    verifier: options.verifier || options.signer, // Use signer as verifier if not provided
+    verifier: resolveVerifier(options.signer, options.verifier),
     paths: options.paths,
-    // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
-    // accept legacy "did:key:..." input and normalize.
-    updateKeys: options.updateKeys.map(normalizeUpdateKey),
+    updateKeys,
     verificationMethods: options.verificationMethods,
     context: options.context || [
       "https://www.w3.org/ns/did/v1",
@@ -356,12 +390,16 @@ export async function updateDIDOriginal(
   const updateOptions: Record<string, unknown> = {
     log: options.log,
     signer: options.signer,
-    verifier: options.verifier || options.signer, // Use signer as verifier if not provided
+    verifier: resolveVerifier(options.signer, options.verifier),
   };
 
   // Add optional parameters
-  if (options.updateKeys !== undefined)
-    updateOptions.updateKeys = options.updateKeys.map(normalizeUpdateKey);
+  if (options.updateKeys !== undefined) {
+    // Normalize first, then validate (see createDIDOriginal above; issue #714).
+    const updateKeys = options.updateKeys.map(normalizeUpdateKey);
+    assertEd25519WebVHUpdateKeys(updateKeys);
+    updateOptions.updateKeys = updateKeys;
+  }
   if (options.verificationMethods !== undefined)
     updateOptions.verificationMethods = options.verificationMethods;
   if (options.services !== undefined) updateOptions.services = options.services;

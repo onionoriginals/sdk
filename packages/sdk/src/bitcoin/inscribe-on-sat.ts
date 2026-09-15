@@ -12,7 +12,8 @@ export { submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from './inscri
 export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRecoveryStore, InscriptionBroadcastState } from './inscription-recovery.js';
 
 export interface InscribeOnSatParams {
-  buildContent: (satoshi: string) => Promise<{ content: Uint8Array; contentType: string; metadata?: Record<string, unknown> }>;
+  /** `metadata`: a `Uint8Array` is pre-encoded CBOR document bytes for the Ordinals `metadata` tag, preferred over a plain object where the value may contain an integer outside `[-2^32, 2^32)` (see `createCommitTransaction`'s doc comment for why). */
+  buildContent: (satoshi: string) => Promise<{ content: Uint8Array; contentType: string; metadata?: Uint8Array | Record<string, unknown> }>;
   /**
    * The funding UTXOs this inscription spends, in the order they are spent.
    * `fundingUtxos[0]` is the IDENTITY input: its first sat becomes the

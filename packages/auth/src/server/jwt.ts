@@ -128,14 +128,16 @@ export function getAuthCookieConfig(
     secure?: boolean;
   }
 ): AuthCookieConfig {
-  const isProduction = process.env.NODE_ENV === 'production';
-
   return {
     name: options?.cookieName ?? 'auth_token',
     value: token,
     options: {
       httpOnly: true, // Cannot be accessed by JavaScript (XSS protection)
-      secure: options?.secure ?? isProduction, // HTTPS only in production
+      // Secure by default: not every deployment platform sets
+      // NODE_ENV=production verbatim, so inferring `secure` from it silently
+      // ships the 7-day auth cookie without Secure. Pass `{ secure: false }`
+      // explicitly for local plain-HTTP development (issue #676).
+      secure: options?.secure ?? true,
       sameSite: 'strict', // CSRF protection
       maxAge: options?.maxAge ?? 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
       path: '/', // Available for all routes
@@ -150,21 +152,20 @@ export function getAuthCookieConfig(
  * sent — and could be intercepted — over a channel the original never used, so
  * a deployment that pins `secure: true` on the set must pin it here too.
  * @param cookieName - Name of the cookie to clear
- * @param options - Cookie options; `secure` defaults to NODE_ENV === 'production'
+ * @param options - Cookie options; `secure` defaults to `true` — pass
+ * `{ secure: false }` explicitly for local plain-HTTP development.
  * @returns Cookie configuration for clearing
  */
 export function getClearAuthCookieConfig(
   cookieName?: string,
   options?: { secure?: boolean }
 ): AuthCookieConfig {
-  const isProduction = process.env.NODE_ENV === 'production';
-
   return {
     name: cookieName ?? 'auth_token',
     value: '',
     options: {
       httpOnly: true,
-      secure: options?.secure ?? isProduction,
+      secure: options?.secure ?? true,
       sameSite: 'strict',
       maxAge: 0, // Expire immediately
       path: '/',
