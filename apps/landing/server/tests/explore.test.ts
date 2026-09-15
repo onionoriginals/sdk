@@ -327,6 +327,31 @@ describe('public Explore discovery', () => {
       404,
     );
   });
+  test('normal Bitcoin publication enrichment discovers the sat without changing hosted CEL bytes', async () => {
+    const t = await setup();
+    const did = await t.publish('alice', 'Normal publication');
+    const before = await (await t.request('/api/explore/original?did=' + encodeURIComponent(did))).json();
+    const key = 'gallery.test' + before.original.celUrl;
+    const hosted = t.store.read('alice', key);
+    expect(hosted.ok).toBe(true);
+    const hostedBefore = await hosted.text();
+    t.store.recordOriginal('alice', {
+      did, title: '', resourceHash: '', createdAt: '', satoshi: '1250000000', btcoDid: 'did:btco:1250000000', inscriptionStatus: 'pending',
+    });
+    // A fresh route instance avoids the catalogue's normal short cache.
+    const routes = createExploreRoutes({ store: t.store, dataDir: t.dataDir });
+    const req = new Request('https://gallery.test/api/explore/original?did=' + encodeURIComponent(did));
+    const detail = await (await routes.handle(req, new URL(req.url))).json();
+    expect(detail.original.sat).toBe('1250000000');
+    expect(await t.store.read('alice', key).text()).toBe(hostedBefore);
+  });
+  test.each(['-1', '01', '1.5', '2099999997690000', 'invalid'])('ignores invalid or noncanonical index sat %s', async (satoshi) => {
+    const t = await setup();
+    const did = await t.publish('alice', 'Invalid hint');
+    t.store.recordOriginal('alice', { did, title: '', resourceHash: '', createdAt: '', satoshi });
+    const detail = await (await t.request('/api/explore/original?did=' + encodeURIComponent(did))).json();
+    expect(detail.original.sat).toBeUndefined();
+  });
   test('an Original migrated to Bitcoin exposes its sat publicly; a webvh-only one does not', async () => {
     const t = await setup();
     const webvhOnly = await t.publish('alice', 'Not yet inscribed');
@@ -335,6 +360,7 @@ describe('public Explore discovery', () => {
       'On-chain',
       '1250000000',
     );
+    t.store.recordOriginal('bob', { did: btco, title: '', resourceHash: '', createdAt: '', satoshi: '42' });
     const body = await (await t.request('/api/explore')).json();
     const webvhRow = body.originals.find((o: { did: string }) => o.did === webvhOnly);
     const btcoRow = body.originals.find((o: { did: string }) => o.did === btco);

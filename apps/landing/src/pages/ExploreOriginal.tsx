@@ -129,6 +129,7 @@ export function ExploreOriginal({ did }: { did: string }) {
       abort.abort();
     };
   }, [did, attempt]);
+  const bitcoinCheck = checks?.find((check) => check.id === 'btco');
   const verified =
     checks !== null && checks.length > 0 && checks.every((check) => check.ok);
   return (
@@ -212,8 +213,11 @@ export function ExploreOriginal({ did }: { did: string }) {
               </div>
               {original.sat && (
                 <div>
-                  <dt>{copy.bitcoin}</dt>
-                  <dd>sat {original.sat}</dd>
+                  <dt>{bitcoinCheck?.ok ? copy.bitcoin : copy.bitcoinHint}</dt>
+                  <dd>
+                    sat {original.sat}
+                    {bitcoinCheck && <p>{bitcoinCheck.detail}</p>}
+                  </dd>
                 </div>
               )}
               <div>

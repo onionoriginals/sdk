@@ -38,7 +38,7 @@ describe('native hosted verification', () => {
       asset: { id: assetId },
       verification: {},
       resolution: {
-        state: { controller },
+        state: { controller, active: true },
         publications: [{ inscriptionId: 'reveal' + 'a'.repeat(60) + 'i0' }],
         chainEvidence: { assurance: 'node-validated' },
       },
@@ -68,6 +68,14 @@ describe('native hosted verification', () => {
       btcoResolution: acceptedResolution(state.assetId, 'did:key:zUnrelatedController'),
     });
     expect(wrongController.find((c) => c.id === 'btco')!.ok).toBe(false);
+  });
+  test('a deactivated on-chain history cannot verify an active hosted Original', async () => {
+    const input = await fixture();
+    const { state } = verifyHistory(input.celLog);
+    const resolution = acceptedResolution(state.assetId, state.controller);
+    if (resolution.status === 'accepted') resolution.resolution.state.active = false;
+    const checks = await verifyOriginal({ ...input, sat: '1250000000', btcoResolution: resolution });
+    expect(checks.find((c) => c.id === 'btco')!.ok).toBe(false);
   });
   test('a non-accepted or missing resolution fails the btco check rather than being silently skipped', async () => {
     const input = await fixture();

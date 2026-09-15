@@ -1,4 +1,4 @@
-/** Public discovery projection. Account, funding and claimed Bitcoin state never enter this DTO. */
+/** Public discovery projection. Account and funding details never enter this DTO. Bitcoin discovery hints require client verification. */
 export interface PublishedOriginal {
   did: string;
   assetId: string;
@@ -11,7 +11,7 @@ export interface PublishedOriginal {
   resourceUrl?: string;
   logUrl: string;
   celUrl: string;
-  /** The satoshi number this Original is inscribed on, once migrated to Bitcoin. Absent for a webvh-only publication. */
+  /** Untrusted satoshi discovery hint; verify fresh Bitcoin history against the hosted asset before treating it as a publication. */
   sat?: string;
 }
 export interface ExplorePage {

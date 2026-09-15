@@ -28,6 +28,9 @@ export interface ExploreSatProvider {
  */
 const PUBLIC_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
+const isCanonicalSatoshi = (sat: string): boolean =>
+  /^(0|[1-9]\d*)$/.test(sat) && validateSatoshiNumber(sat).valid;
+
 /** Read only the already-public hosted artifacts owned by each account. */
 export function createExploreRoutes({
   store,
@@ -128,6 +131,13 @@ export function createExploreRoutes({
                   /* Not every alias need parse under every alias grammar. */
                 }
               }
+              // The normal Bitcoin writer enriches the account index without
+              // rewriting hosted CEL. This is only a discovery hint: the browser
+              // must bind a fresh on-sat resolution to the verified hosted asset.
+              if (sat === undefined && typeof row.satoshi === 'string' &&
+                  isCanonicalSatoshi(row.satoshi)) {
+                sat = row.satoshi;
+              }
               found.set(row.did, {
                 did: row.did,
                 assetId: state.assetId,
@@ -187,7 +197,7 @@ export function createExploreRoutes({
             'Retry-After': String(Math.ceil(satLimit.retryAfterMs / 1000)),
           });
         const sat = url.pathname.slice('/api/explore/sat-snapshot/'.length);
-        if (!/^(0|[1-9]\d*)$/.test(sat) || !validateSatoshiNumber(sat).valid)
+        if (!isCanonicalSatoshi(sat))
           return json({ error: 'bad_request' }, 400);
         if (typeof satProvider?.getSatSnapshot !== 'function')
           return json({ error: 'sat_snapshot_unsupported' }, 501);

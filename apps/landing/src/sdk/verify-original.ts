@@ -31,7 +31,7 @@ const short = (did: string) => (did.length > 42 ? `${did.slice(0, 36)}…` : did
 /**
  * Independently re-resolve the accepted on-sat history from a fresh
  * provider snapshot (never trusting a server-asserted summary) and confirm
- * it binds to the SAME asset id and controller the CEL/webvh checks already
+ * its active state binds to the SAME asset id and controller the CEL/webvh checks already
  * verified — a resolvable-but-unrelated sat must not read as proof of this
  * Original. Exported on its own (not just inlined in `verifyOriginal`) so a
  * caller can run this potentially-slow, network-bound check independently
@@ -55,7 +55,7 @@ export function evaluateBtcoCheck(input: {
     if (resolution.status === "accepted") {
       const boundAssetId = sameAssetIdentity(resolution.asset.id, input.assetId);
       const boundController = resolution.resolution.state.controller === input.controller;
-      btcoOk = boundAssetId && boundController;
+      btcoOk = boundAssetId && boundController && resolution.resolution.state.active;
       btcoDetail = btcoOk
         ? `${resolution.resolution.publications.length} accepted on-chain publication${resolution.resolution.publications.length === 1 ? "" : "s"} verified (${resolution.resolution.chainEvidence.assurance}) → sat ${input.sat}`
         : "Accepted Bitcoin history does not bind to this Original";
@@ -80,8 +80,8 @@ export async function verifyOriginal(input: {
   /** The sha-256 hex the provenance declares for those bytes. */
   declaredHash: string | null;
   /**
-   * The satoshi this Original is inscribed on, if it has migrated to
-   * Bitcoin — omitted (or null) for a webvh-only publication, in which case
+   * An untrusted satoshi discovery hint to verify against this Original.
+   * Omitted (or null) when no Bitcoin publication is known, in which case
    * no "btco" check is produced at all.
    */
   sat?: string | null;

@@ -1133,9 +1133,10 @@ export const explore = {
   log: 'WebVH version history',
   cel: 'Cryptographic event log',
   bitcoin: 'Bitcoin inscription',
+  bitcoinHint: 'Satoshi to verify',
   checking: 'Checking the signatures and file…',
   checked: 'Hosted history and primary file verified',
   incomplete: 'Verification incomplete',
-  checkNote: 'These checks verify the hosted signatures and primary file in your browser, plus — when this Original has migrated to Bitcoin — its accepted on-chain publication, resolved fresh from a public Bitcoin provider.',
+  checkNote: 'These checks verify the hosted signatures and primary file in your browser. Any linked Bitcoin publication is checked against fresh public Bitcoin data.',
   openHistory: 'Inspect the signed artifacts',
 };
