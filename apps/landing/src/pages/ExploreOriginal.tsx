@@ -120,7 +120,6 @@ export function ExploreOriginal({ did }: { did: string }) {
             sat: row.sat,
             celVerified: result.find((c) => c.id === 'cel')?.ok ?? false,
             assetId: state.assetId,
-            controller: state.controller,
             resolution: btcoResolution,
           });
           nextChecks = [...result, btcoCheck];
