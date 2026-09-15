@@ -8,6 +8,7 @@ import {
   CelError,
   type HistoryCheckpoint,
 } from "../../src/v3/index.js";
+import { base58 } from "@scure/base";
 
 function codeOf(fn: () => unknown): string {
   try {
@@ -163,6 +164,16 @@ test("a no-prefix delta with deactivate-then-update is invalid, not history-requ
   expect(
     codeOf(() => verifyHistory({ log: [deactivateEntry, updateEntry] })),
   ).toBe("CEL_DEACTIVATED");
+
+  // A forged/invalid proof on the entry after deactivate must still be caught by
+  // signature authentication, not masked by the terminal-deactivation check.
+  const tampered = structuredClone(updateEntry);
+  const signatureBytes = base58.decode(tampered.proof[0].proofValue.slice(1));
+  signatureBytes[0] ^= 0xff;
+  tampered.proof[0].proofValue = "z" + base58.encode(signatureBytes);
+  expect(
+    codeOf(() => verifyHistory({ log: [deactivateEntry, tampered] })),
+  ).toBe("CEL_SIGNATURE");
 });
 
 test("a no-prefix delta that rotates to the already-current signer is invalid, not history-required", async () => {

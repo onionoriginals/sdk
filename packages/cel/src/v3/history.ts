@@ -265,13 +265,13 @@ export function verifyHistory(
         "CEL_CHAIN",
         "Invalid delta chain",
       );
+      const { digest, signers } = verifyEntry(entry);
       if (index > 0)
         requireThat(
           !deactivated,
           "CEL_DEACTIVATED",
           "Deactivated history is terminal",
         );
-      const { digest, signers } = verifyEntry(entry);
       if (provisionalController === undefined) {
         requireThat(
           signers.every((signer) => signer === signers[0]),
