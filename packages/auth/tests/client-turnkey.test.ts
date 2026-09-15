@@ -675,6 +675,54 @@ describe('client/turnkey-client', () => {
       const wallets: TurnkeyWallet[] = [{ walletId: 'w1', walletName: 'default', accounts: [] }];
       expect(getKeyByRole(wallets, 'not-a-role' as never)).toBeNull();
     });
+
+    test('distinguishes a repaired account from the stale one it replaced by address format (#749)', () => {
+      // A sub-org repaired per #749 has TWO CURVE_SECP256K1 accounts at the
+      // identical bitcoin-auth path (Turnkey wallet accounts are immutable,
+      // so the repair adds a second account rather than mutating the first).
+      // Curve + path alone cannot tell them apart; address format must.
+      const wallets: TurnkeyWallet[] = [
+        {
+          walletId: 'w1',
+          walletName: 'default',
+          accounts: [
+            {
+              address: 'addr_stale_eth',
+              curve: 'CURVE_SECP256K1',
+              path: "m/44'/0'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+            {
+              address: 'addr_repaired_btc',
+              curve: 'CURVE_SECP256K1',
+              path: "m/44'/0'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+            },
+          ],
+        },
+      ];
+
+      expect(getKeyByRole(wallets, 'bitcoin-auth')!.address).toBe('addr_repaired_btc');
+    });
+
+    test('returns null when only the stale Ethereum-formatted account exists at the bitcoin-auth path', () => {
+      const wallets: TurnkeyWallet[] = [
+        {
+          walletId: 'w1',
+          walletName: 'default',
+          accounts: [
+            {
+              address: 'addr_stale_eth',
+              curve: 'CURVE_SECP256K1',
+              path: "m/44'/0'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+      ];
+
+      expect(getKeyByRole(wallets, 'bitcoin-auth')).toBeNull();
+    });
   });
 
   describe('TURNKEY_ACCOUNT_ROLES', () => {
