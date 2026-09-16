@@ -13,6 +13,7 @@ import {
   eventDigest,
   verifyHistory,
   normalizeSatpoint,
+  normalizeInscriptionId,
   jcsSigningMessage,
   decodeController,
   type SatSnapshot,
@@ -210,6 +211,18 @@ test("fails closed when independent metadata evidence disagrees while body and m
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("cross-checks content when independent evidence reports the same inscription id in a different hex case (#808)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot).map((e) => ({
+    ...e,
+    inscriptionId: e.inscriptionId.toUpperCase(),
+  }));
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
 test("rejects malformed independent content evidence rather than ignoring it", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
@@ -346,6 +359,19 @@ test("cross-checks enumeration when an independent source agrees with the primar
     expect(result.enumerationAssurance).toBe("cross-checked");
     expect(result.enumerationSource).toBe("second-ord-instance");
   }
+});
+
+test("cross-checks enumeration when an independent source reports the same inscription ids in a different hex case (#808)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id.toUpperCase()),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("cross-checked");
 });
 
 test("does not report an enumeration source when no independent source was consulted", () => {
@@ -502,6 +528,16 @@ test("normalizeSatpoint lowercases only the txid component and passes through nu
   expect(normalizeSatpoint("not-a-satpoint")).toBe("not-a-satpoint");
   const nonHexTxid = "gg" + "ab".repeat(31) + ":0:0";
   expect(normalizeSatpoint(nonHexTxid)).toBe(nonHexTxid);
+});
+
+test("normalizeInscriptionId lowercases the txid and separator and passes through malformed values (#808)", () => {
+  expect(normalizeInscriptionId("AB".repeat(32) + "i0")).toBe("ab".repeat(32) + "i0");
+  expect(normalizeInscriptionId("AB".repeat(32) + "I12")).toBe("ab".repeat(32) + "i12");
+  expect(normalizeInscriptionId("ab".repeat(32) + "i0")).toBe("ab".repeat(32) + "i0");
+  // Not the expected <txid>i<index> shape: returned unchanged rather than coerced.
+  expect(normalizeInscriptionId("not-an-inscription-id")).toBe("not-an-inscription-id");
+  const nonHexTxid = "gg" + "ab".repeat(31) + "i0";
+  expect(normalizeInscriptionId(nonHexTxid)).toBe(nonHexTxid);
 });
 
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
