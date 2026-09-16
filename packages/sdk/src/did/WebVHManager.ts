@@ -696,7 +696,8 @@ export class WebVHManager {
     // resolution, so refuse rather than silently corrupt the log. Document
     // updates on pre-rotation DIDs must go through the pre-rotation rotation path.
     if (this.logHasPendingPrerotation(currentLog)) {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_PREROTATION_UNSUPPORTED',
         'updateDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
         'commits nextKeyHashes). Such DIDs require rotating to the pre-committed key for every ' +
         'new entry; use rotateDIDWebVHKeys with prerotation:true instead.'
@@ -717,7 +718,7 @@ export class WebVHManager {
     const { updateDID } = mod;
 
     if (typeof updateDID !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+      throw new StructuredError('WEBVH_MODULE_LOAD_FAILED', 'Failed to load didwebvh-ts: invalid module exports');
     }
 
     let signer: Signer | ExternalSigner;
@@ -776,7 +777,7 @@ export class WebVHManager {
 
     // Validate the returned DID document
     if (!this.isDIDDocument(result.doc)) {
-      throw new Error('Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_INVALID_RESULT_DOCUMENT', 'Invalid DID document returned from updateDID');
     }
 
     // Save the updated log if output directory is provided
@@ -821,7 +822,8 @@ export class WebVHManager {
       // rather than auto-switching, because `currentKeyPair` has different
       // semantics in pre-rotation mode (it must be the pre-committed next key).
       if (this.logHasPendingPrerotation(currentLog)) {
-        throw new Error(
+        throw new StructuredError(
+          'WEBVH_PREROTATION_REQUIRED',
           'This DID is on a pre-rotation chain (the latest log entry commits nextKeyHashes). ' +
           'Call rotateDIDWebVHKeys with prerotation:true and pass the pre-committed nextKeyPair ' +
           '(returned by the previous create/rotate) as currentKeyPair. A non-pre-rotation ' +
