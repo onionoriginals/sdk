@@ -168,6 +168,86 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(b.superseded).toBe(true);
   });
 
+  // #777 — a superseded pair's own `confirmed` observation is not permanent:
+  // if the rival that superseded it is itself later invalidated by a deeper
+  // reorg, this pair's OWN commit can stop confirming too. Nothing had ever
+  // revisited that case before — the `supersededPending` pass only handled
+  // POSITIVE evidence (reclaim), treating any negative read as a no-op.
+  test('a superseded pair whose own commit stops confirming after a deeper reorg is demoted, not left reporting stale confirmed/settled evidence', async () => {
+    const commit = 'f'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+    const row = inscriptions.find((r) => r.commitTxId === commit)! as {
+      status: string; superseded?: boolean; confirmations?: number; settled?: boolean;
+    };
+    expect(row.status).toBe('reveal_broadcast');
+    expect(row.settled).toBeUndefined();
+    expect(row.confirmations).toBeUndefined();
+    // Demoted, not reclaimed: this pair still lost the outpoint race.
+    expect(row.superseded).toBe(true);
+
+    const stored = store.get('sub-1', commit)!;
+    // Sticky block identity survives the demotion, same as the live path.
+    expect(stored.confirmedBlockHeight).toBe(100);
+    expect(stored.confirmedBlockHash).toBe('a'.repeat(64));
+  });
+
+  test('a provider outage on a superseded pair preserves its last observed confirmed status', async () => {
+    const commit = '7'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: (txid) => {
+        if (txid === commit) throw new Error('indexer unreachable');
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 6, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+    const row = inscriptions.find((r) => r.commitTxId === commit)! as { status: string; confirmations?: number };
+    expect(row.status).toBe('confirmed');
+    expect(row.confirmations).toBe(6);
+    expect(store.get('sub-1', commit)!.superseded).toBe(true);
+  });
+
+  test('a stale negative lookup on a superseded pair cannot clobber confirmation evidence a concurrent pass wrote in the meantime', async () => {
+    const commit = '6'.repeat(64);
+    const newHash = 'b'.repeat(64);
+    const { store, reconciler, broadcastCalls } = harness({
+      txStatus: () => {
+        // A concurrent pass reconfirms this record while THIS pass's own
+        // read (below) is still in flight and comes back negative — e.g. a
+        // lagging indexer node this pass happened to hit.
+        store.setStatus('sub-1', commit, 'confirmed', {
+          confirmations: 2, blockHeight: 101, blockHash: newHash,
+        });
+        return { confirmed: false };
+      },
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 1, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(2);
+    expect(stored.confirmedBlockHash).toBe(newHash);
+    expect(stored.superseded).toBe(true);
+    expect(broadcastCalls).toEqual([]);
+  });
+
   // #677 — the demotion decision must read a FRESH per-record snapshot, not
   // the snapshot taken once at the top of the whole reconciliation pass:
   // that snapshot can already be stale by the time a later record's turn

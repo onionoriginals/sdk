@@ -216,7 +216,34 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       lookups++;
       cursors.superseded++;
       const st = await readStatus(r.commitTxId);
-      if (!st?.confirmed) continue;
+      if (!st) continue; // provider outage preserves the last observed state
+      if (!st.confirmed) {
+        // #777 — fresh NEGATIVE evidence on a superseded pair's OWN commit
+        // means an earlier `confirmed` observation no longer holds: the
+        // rival that superseded this one was itself later invalidated by a
+        // deeper reorg. Demote it exactly like the live path does (#677) —
+        // via `trySetStatus` so a concurrent pass's newer state always wins —
+        // but stay `superseded`: this pair lost the outpoint race regardless
+        // of its own confirmation status, so a demotion here must never
+        // reclaim/reinstate it.
+        if (current.status === 'confirmed') {
+          if (
+            store.trySetStatus(
+              sub, r.commitTxId,
+              {
+                status: 'confirmed', retired: false, superseded: true,
+                confirmations: current.confirmations,
+                confirmedBlockHeight: current.confirmedBlockHeight,
+                confirmedBlockHash: current.confirmedBlockHash,
+              },
+              'reveal_broadcast'
+            )
+          ) {
+            changed = true;
+          }
+        }
+        continue;
+      }
       // Reclaim and journal the attempt durably before sending the exact
       // stored reveal. A failed write stops this pass before another side effect.
       reclaimOutpoint(store, sub, r);
