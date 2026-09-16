@@ -14,11 +14,14 @@ way to talk to Turnkey directly from the browser — use the
 [Server-Proxied Auth Functions](#server-proxied-auth-functions) below for
 browser-side code.
 
-The functions in this section call Turnkey directly and require a
-`Turnkey` client instance and an explicit `subOrgId`. They are for your own
-server code: obtain the client from `createTurnkeyClient()`
-(`@originals/auth/server`, which holds the org API secret) and pass the
-sub-organization ID returned by `verifyEmailAuth`/`initiateEmailAuth`.
+Most functions in this section call Turnkey directly and take a `Turnkey`
+client instance plus a `subOrgId` (required, except `initOtp`'s, which is
+optional — see below). They are for your own server code: obtain the
+client from `createTurnkeyClient()` (`@originals/auth/server`, which holds
+the org API secret) and pass the sub-organization ID returned by
+`verifyEmailAuth`/`initiateEmailAuth`. `getKeyByCurve` and `getKeyByRole`
+are the exception — pure lookups over an already-fetched `TurnkeyWallet[]`,
+with no `Turnkey` client or `subOrgId` involved.
 
 ### `initOtp(turnkeyClient, email, subOrgId?)`
 
@@ -412,7 +415,9 @@ const { verificationToken, publicKey } = await completeOtp(
 
 // Ensure wallet exists
 const wallets = await ensureWalletWithAccounts(turnkeyClient, subOrgId, () => {
-  // Session expired, redirect to login
-  window.location.href = '/login';
+  // Session expired — this runs on your server; withTokenExpiration()
+  // already throws TurnkeySessionExpiredError for the caller to catch, so
+  // this callback is just a hook for side effects (e.g. logging).
+  console.error(`Turnkey API key expired for subOrgId ${subOrgId}`);
 });
 ```
