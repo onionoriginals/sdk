@@ -168,9 +168,32 @@ describe('signed inscription recovery', () => {
     expect(first.broadcast).toBe('reveal_broadcast');
     expect(first.error).toBeUndefined();
 
-    // A retry against a provider that rejects the resubmission for a reason
-    // that carries no evidence the original, already-recorded broadcast was
-    // lost: getTransactionStatus never confirms it either way.
+    // A retry against a provider that rejects the resubmission for an opaque
+    // reason that carries no evidence -- positive or negative -- about
+    // whether the original, already-recorded broadcast was lost:
+    // getTransactionStatus never confirms it either way.
+    const resumed = await resumeInscriptionOnSat({
+      recoveryId: first.recoveryId,
+      recoveryStore: diskStore(directory),
+      provider: {
+        broadcastTransaction: async () => { throw new Error('upstream request timed out'); },
+        getTransactionStatus: async () => ({ confirmed: false }),
+      } as any,
+    });
+
+    expect(resumed.broadcast).toBe('reveal_broadcast');
+    expect(resumed.error).toBeUndefined();
+  }));
+
+  it('never treats a missing-input rejection as proof a prior reveal_broadcast still holds', async () => withStore(async (directory) => {
+    const params = parameters();
+    const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(first.broadcast).toBe('reveal_broadcast');
+
+    // Unlike an "already known" duplicate rejection, a missing-input
+    // rejection carries no positive evidence the prepared pair is still
+    // intact -- it must never be papered over by an earlier success, even
+    // when this exact pair previously reached reveal_broadcast.
     const resumed = await resumeInscriptionOnSat({
       recoveryId: first.recoveryId,
       recoveryStore: diskStore(directory),
@@ -180,8 +203,7 @@ describe('signed inscription recovery', () => {
       } as any,
     });
 
-    expect(resumed.broadcast).toBe('reveal_broadcast');
-    expect(resumed.error).toBeUndefined();
+    expect(resumed.error).toBeDefined();
   }));
 
   it('never tolerates a provider response naming a different transaction, even with a prior reveal_broadcast', async () => withStore(async (directory) => {

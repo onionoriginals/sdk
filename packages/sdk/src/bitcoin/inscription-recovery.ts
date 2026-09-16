@@ -161,6 +161,29 @@ function isAlreadyKnownTxError(error: unknown): boolean {
   return ALREADY_KNOWN_TX_ERRORS.some((known) => message.includes(known));
 }
 
+/**
+ * Rejections meaning "the input this transaction spends is not in the UTXO
+ * set or the mempool" -- i.e. its parent is not on the network right now.
+ * Mirrors apps/landing/server/bitcoin.ts's isMissingInputsError. Deliberately
+ * EXCLUDED from the priorRevealBroadcast tolerance below: unlike an
+ * already-known rejection, a missing-input rejection carries no positive
+ * evidence the prepared pair is still intact, so it must keep surfacing as an
+ * error (or fall through to the ordinary commit-then-reveal recovery flow)
+ * rather than being papered over by an earlier success.
+ */
+const MISSING_INPUT_TX_ERRORS = [
+  'bad-txns-inputs-missingorspent',
+  'missing inputs',
+  'missing-inputs',
+  'unknown input',
+  'unknown-input',
+];
+
+function isMissingInputsError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return MISSING_INPUT_TX_ERRORS.some((known) => message.includes(known));
+}
+
 /** Submit only these exact bytes. Direct broadcasting requires a durable store, never an implicit memory fallback. */
 export async function submitPreparedInscriptionOnSat(params: {
   prepared: PreparedInscriptionOnSat;
@@ -244,13 +267,15 @@ export async function submitPreparedInscriptionOnSat(params: {
     }
     if (commitError !== undefined) {
       // Unknown/not-confirmed conflates absent and mempool in this provider API.
-      // Actual confirmation, the provider's own "already on the network"
-      // rejection, or a prior positive reveal_broadcast record (this pair
-      // necessarily reached a valid commit to get there) all independently
-      // resolve a lost acknowledgement without treating it as a failure.
-      if (!priorRevealBroadcast && !isAlreadyKnownTxError(commitError) && !await isCurrentlyConfirmed(provider, prepared.commitTxId)) {
-        return result(record, commitError);
-      }
+      // Actual confirmation, or the provider's own "already on the network"
+      // rejection, independently resolve a lost acknowledgement. A prior
+      // positive reveal_broadcast record does too, UNLESS this specific
+      // rejection is a missing-input signal: that carries no positive
+      // evidence and must still surface (or trigger real recovery), never be
+      // papered over by an earlier, now-unverifiable success.
+      const tolerated = isAlreadyKnownTxError(commitError) || await isCurrentlyConfirmed(provider, prepared.commitTxId) ||
+        (priorRevealBroadcast && !isMissingInputsError(commitError));
+      if (!tolerated) return result(record, commitError);
     }
     record.broadcast = 'commit_broadcast';
   }
@@ -268,10 +293,11 @@ export async function submitPreparedInscriptionOnSat(params: {
     // Same tolerance as the commit attempt above: a prior definite
     // reveal_broadcast, or the provider's own duplicate-broadcast rejection,
     // is positive evidence this exact reveal is already out there. A
-    // mismatched id, handled above, is never eligible for this tolerance.
-    if (!priorRevealBroadcast && !isAlreadyKnownTxError(revealError) && !await isCurrentlyConfirmed(provider, prepared.revealTxId)) {
-      return result(record, revealError);
-    }
+    // mismatched id, handled above, and a missing-input rejection, which
+    // carries no positive evidence, are never eligible for this tolerance.
+    const tolerated = isAlreadyKnownTxError(revealError) || await isCurrentlyConfirmed(provider, prepared.revealTxId) ||
+      (priorRevealBroadcast && !isMissingInputsError(revealError));
+    if (!tolerated) return result(record, revealError);
   }
   record.broadcast = 'reveal_broadcast';
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
