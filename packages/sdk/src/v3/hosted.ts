@@ -180,9 +180,9 @@ export class HostedAssets {
       const { domain, prefix } = location(state.alias);
       const rawSegments = prefix.split("/").filter(Boolean);
       // parseAssetAlias percent-encodes each segment into the log URL and
-      // collapses no-custom-path onto the literal ".well-known" placeholder
-      // (indistinguishable from a genuine single ".well-known" path segment,
-      // an ambiguity inherent to that encoding, not introduced here).
+      // collapses no-custom-path onto the literal ".well-known" placeholder.
+      // A genuine single ".well-known" custom path segment is rejected at
+      // publish time below, so this placeholder is unambiguous here.
       const existingPaths =
         rawSegments.length === 1 && rawSegments[0] === ".well-known"
           ? []
@@ -223,6 +223,15 @@ export class HostedAssets {
       "anonymous",
       assetDigest(asset.id),
     ];
+    // A lone ".well-known" segment is indistinguishable, once persisted in
+    // the WebVH log URL, from the placeholder parseAssetAlias uses for "no
+    // custom path" — reject it up front so no hosted identity is ever minted
+    // whose stored path this republish check could not unambiguously verify.
+    if (paths.length === 1 && paths[0] === ".well-known")
+      return error(
+        "WEBVH_PATH_RESERVED",
+        "\".well-known\" alone is reserved for the no-custom-path form and cannot be used as a custom path",
+      );
     const key = methodSigner.controller.slice(8);
     const { prepareDataForSigning } = await import("didwebvh-ts");
     const web = await new WebVHManager().createDIDWebVH({
