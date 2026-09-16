@@ -36,6 +36,13 @@ export interface SessionStorage {
  * process restart and are not shared across multiple instances. For
  * production deployments, pass a persistent {@link SessionStorage}
  * implementation backed by Redis, a database, or another shared store.
+ *
+ * **Multi-instance caveat**: {@link verifyEmailAuth}'s single-use replay
+ * guard is only atomic within one process (see the comment above its
+ * `session.verifying` check). `SessionStorage` is synchronous by contract
+ * (tracked as a separate change in #684), so a shared store cannot offer a
+ * real compare-and-swap claim through this interface yet — two instances
+ * racing on the same session can still both pass the guard.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -267,15 +274,24 @@ export async function verifyEmailAuth(
   }
 
   // Single-use guard. This whole block runs synchronously (no `await`
-  // above it since the session/format checks), so for the in-memory and
-  // any similarly synchronous SessionStorage, a second call — issued either
-  // after this one has finished or concurrently while it is still awaiting
-  // Turnkey — cannot observe `verified: false, verifying: false` at the
-  // same time as this call: whichever call's synchronous prefix runs first
-  // claims the session here before the other gets a chance to check it.
-  // This closes both sequential replay (session.verified) and concurrent
+  // above it since the session/format checks), so within one process a
+  // second call — issued either after this one has finished or
+  // concurrently while it is still awaiting Turnkey — cannot observe
+  // `verified: false, verifying: false` at the same time as this call:
+  // whichever call's synchronous prefix runs first claims the session here
+  // before the other gets a chance to check it. This closes both
+  // sequential replay (session.verified) and same-process concurrent
   // replay (session.verifying) of an already-successful or in-progress
   // verification, without re-submitting the same code to Turnkey.
+  //
+  // This is a single-process guarantee, not a distributed one:
+  // `SessionStorage.get`/`set` are synchronous by contract (#684), so
+  // nothing here can make a genuinely shared, multi-instance store (e.g.
+  // Redis) claim atomically across processes — two server instances can
+  // still both read `verifying: false` before either writes `true`. Full
+  // cross-instance replay-safety needs an async, compare-and-swap-capable
+  // `SessionStorage`; see #684 and the "Coordinate the storage shape with
+  // #684" note on #710.
   if (session.verified) {
     throw new Error(
       'This session has already been verified. Please log in or request a new code.'
