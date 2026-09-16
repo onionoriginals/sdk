@@ -140,6 +140,75 @@ async function isCurrentlyConfirmed(provider: OrdinalsProvider, txid: string): P
   catch { return false; }
 }
 
+/**
+ * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
+ * the network. Matched as a closed set rather than a bare /already/: a
+ * transport or provider error that merely CONTAINS the word ("connection
+ * already closed") would otherwise count as a successful broadcast. Mirrors
+ * apps/landing/server/bitcoin.ts's isAlreadyKnownTxError for the same reason:
+ * a duplicate-broadcast rejection of the identical signed bytes is positive
+ * evidence the transaction is already out there, not a failed broadcast.
+ */
+const ALREADY_KNOWN_TX_ERRORS = [
+  'txn-already-in-mempool',
+  'txn-already-known',
+  'transaction already in block chain', // RPC -27
+  'transaction already in mempool',
+];
+
+function isAlreadyKnownTxError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return ALREADY_KNOWN_TX_ERRORS.some((known) => message.includes(known));
+}
+
+/**
+ * Rejections meaning "the input this transaction spends is not in the UTXO
+ * set or the mempool" -- i.e. its parent is not on the network right now.
+ * Mirrors apps/landing/server/bitcoin.ts's isMissingInputsError. Deliberately
+ * EXCLUDED from the priorRevealBroadcast tolerance below: unlike an
+ * already-known rejection, a missing-input rejection carries no positive
+ * evidence the prepared pair is still intact, so it must keep surfacing as an
+ * error (or fall through to the ordinary commit-then-reveal recovery flow)
+ * rather than being papered over by an earlier success.
+ */
+const MISSING_INPUT_TX_ERRORS = [
+  'bad-txns-inputs-missingorspent',
+  'missing inputs',
+  'missing-inputs',
+  'unknown input',
+  'unknown-input',
+];
+
+function isMissingInputsError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return MISSING_INPUT_TX_ERRORS.some((known) => message.includes(known));
+}
+
+/**
+ * Rejections meaning an input this transaction spends is already claimed by a
+ * DIFFERENT transaction currently sitting in the mempool. Unlike a missing-
+ * input rejection (which, given this file's deterministic single-leaf
+ * Taproot reveal script, can only mean the prepared pair's OWN prior
+ * broadcast already spent it), a conflict rejection names an actively
+ * competing transaction right now -- real negative evidence a prior
+ * reveal_broadcast record must never paper over.
+ */
+const CONFLICTING_TX_ERRORS = [
+  'txn-mempool-conflict',
+  'bad-txns-spends-conflicting-tx',
+  'insufficient fee (in bytes)', // legacy Core wording for an unreplaceable conflicting spend
+];
+
+function isConflictingTxError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return CONFLICTING_TX_ERRORS.some((known) => message.includes(known));
+}
+
+/** True only for a rejection that carries no negative evidence about the prepared pair's fate. */
+function isNegativeEvidenceError(error: unknown): boolean {
+  return isMissingInputsError(error) || isConflictingTxError(error);
+}
+
 /** Submit only these exact bytes. Direct broadcasting requires a durable store, never an implicit memory fallback. */
 export async function submitPreparedInscriptionOnSat(params: {
   prepared: PreparedInscriptionOnSat;
@@ -164,6 +233,12 @@ export async function submitPreparedInscriptionOnSat(params: {
     }
     record = structuredClone(saved);
   }
+  // A prior 'reveal_broadcast' record is itself positive proof this exact
+  // reveal already went out. A retry's resubmission of the identical bytes
+  // can be rejected for reasons that carry no evidence the original broadcast
+  // was lost; that ambiguity must never erase already-achieved proof or
+  // manufacture a fresh error out of retrying the same prepared wrapper.
+  const priorRevealBroadcast = saved?.broadcast === 'reveal_broadcast';
   if (saved && record.broadcast !== 'prepared') {
     // A persisted acknowledgement describes an earlier submission, not present
     // chain state. Eviction/reorg can remove either transaction. Only a fresh
@@ -205,24 +280,49 @@ export async function submitPreparedInscriptionOnSat(params: {
   if (record.broadcast === 'prepared' || record.broadcast === 'commit_broadcast_unknown') {
     record.broadcast = 'commit_broadcast_unknown';
     await persist(recoveryStore, record);
-    try {
-      const txid = await provider.broadcastTransaction(prepared.signedCommitHex);
-      if (txid !== prepared.commitTxId) throw new Error('Provider commit id does not match the signed transaction.');
-    } catch (error) {
+    let commitTxid: string | undefined;
+    let commitError: unknown;
+    try { commitTxid = await provider.broadcastTransaction(prepared.signedCommitHex); }
+    catch (error) { commitError = error; }
+    // A response identifying a DIFFERENT transaction is a genuine integrity
+    // failure, not an ambiguous acknowledgement -- it must never be tolerated,
+    // no matter what the persisted record already shows.
+    if (commitTxid !== undefined && commitTxid !== prepared.commitTxId) {
+      return result(record, new Error('Provider commit id does not match the signed transaction.'));
+    }
+    if (commitError !== undefined) {
       // Unknown/not-confirmed conflates absent and mempool in this provider API.
-      // Only actual confirmation can independently resolve a lost acknowledgement.
-      if (!await isCurrentlyConfirmed(provider, prepared.commitTxId)) return result(record, error);
+      // Actual confirmation, or the provider's own "already on the network"
+      // rejection, independently resolve a lost acknowledgement. A prior
+      // positive reveal_broadcast record does too, UNLESS this specific
+      // rejection carries negative evidence (missing input or an actively
+      // conflicting tx): that must still surface (or trigger real recovery),
+      // never be papered over by an earlier, now-unverifiable success.
+      const tolerated = isAlreadyKnownTxError(commitError) || await isCurrentlyConfirmed(provider, prepared.commitTxId) ||
+        (priorRevealBroadcast && !isNegativeEvidenceError(commitError));
+      if (!tolerated) return result(record, commitError);
     }
     record.broadcast = 'commit_broadcast';
   }
   record.broadcast = 'reveal_broadcast_unknown';
   // If this write fails, the previous durable record still contains both transactions.
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
-  try {
-    const txid = await provider.broadcastTransaction(prepared.revealTxHex);
-    if (txid !== prepared.revealTxId) throw new Error('Provider reveal id does not match the signed transaction.');
-  } catch (error) {
-    if (!await isCurrentlyConfirmed(provider, prepared.revealTxId)) return result(record, error);
+  let revealTxid: string | undefined;
+  let revealError: unknown;
+  try { revealTxid = await provider.broadcastTransaction(prepared.revealTxHex); }
+  catch (error) { revealError = error; }
+  if (revealTxid !== undefined && revealTxid !== prepared.revealTxId) {
+    return result(record, new Error('Provider reveal id does not match the signed transaction.'));
+  }
+  if (revealError !== undefined) {
+    // Same tolerance as the commit attempt above: a prior definite
+    // reveal_broadcast, or the provider's own duplicate-broadcast rejection,
+    // is positive evidence this exact reveal is already out there. A
+    // mismatched id, handled above, and any negative-evidence rejection are
+    // never eligible for this tolerance.
+    const tolerated = isAlreadyKnownTxError(revealError) || await isCurrentlyConfirmed(provider, prepared.revealTxId) ||
+      (priorRevealBroadcast && !isNegativeEvidenceError(revealError));
+    if (!tolerated) return result(record, revealError);
   }
   record.broadcast = 'reveal_broadcast';
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
