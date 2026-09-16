@@ -427,6 +427,82 @@ describe('turnkey-client', () => {
         );
         expect(createSubOrganization).not.toHaveBeenCalled();
       });
+
+      test('does not fail the login when a repair-write race is lost to a concurrent repair that already succeeded', async () => {
+        // Two instances can both observe the same missing role and both
+        // attempt to repair it (the lookup-then-repair sequence is only
+        // serialized within one process). If this instance's write loses
+        // that race, the role is still present afterward - failing the
+        // login here would be wrong.
+        let getWalletAccountsCalls = 0;
+        const getWalletAccounts = mock(() => {
+          getWalletAccountsCalls += 1;
+          // First call: initial inventory, missing did-assertion. Second
+          // call: post-failure re-check, now complete because the other
+          // instance's write won the race.
+          return Promise.resolve({
+            accounts: getWalletAccountsCalls === 1 ? [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] : COMPLETE_ACCOUNTS,
+          });
+        });
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('duplicate account for this curve/path'))
+        );
+        const createSubOrganization = mock(() => Promise.resolve({}));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['raced_repair'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+          createSubOrganization,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('raced_repair');
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        expect(getWalletAccounts).toHaveBeenCalledTimes(2);
+        expect(createSubOrganization).not.toHaveBeenCalled();
+      });
+
+      test('propagates the repair-write failure when the post-failure re-check shows the role is still missing', async () => {
+        const getWalletAccounts = mock(() =>
+          Promise.resolve({ accounts: [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] })
+        );
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('transient write failure, not a race'))
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['real_write_failure'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'transient write failure, not a race'
+        );
+      });
+
+      test('propagates the original repair-write failure when the post-failure re-check itself fails', async () => {
+        let getWalletAccountsCalls = 0;
+        const getWalletAccounts = mock(() => {
+          getWalletAccountsCalls += 1;
+          if (getWalletAccountsCalls === 1) {
+            return Promise.resolve({ accounts: [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] });
+          }
+          return Promise.reject(new Error('re-check also failed'));
+        });
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('original write failure'))
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['recheck_fails'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'original write failure'
+        );
+      });
     });
 
     test('picks deterministically (sorted) when multiple sub-orgs exist', async () => {

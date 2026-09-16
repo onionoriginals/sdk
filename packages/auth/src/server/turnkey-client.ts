@@ -325,11 +325,45 @@ async function getOrCreateTurnkeySubOrgUnlocked(
         `[auth] Existing sub-org's wallet is missing ${missingAccounts.length} required ` +
           'account(s); repairing in place'
       );
-      await turnkeyClient.apiClient().createWalletAccounts({
-        organizationId: existingSubOrgId,
-        walletId: targetWalletId,
-        accounts: missingAccounts.map((spec) => ({ ...spec })),
-      });
+      try {
+        await turnkeyClient.apiClient().createWalletAccounts({
+          organizationId: existingSubOrgId,
+          walletId: targetWalletId,
+          accounts: missingAccounts.map((spec) => ({ ...spec })),
+        });
+      } catch (repairWriteErr) {
+        // This read-then-create sequence is only serialized within this
+        // process (see the SubOrgLock production warning above); a
+        // concurrent login handled by another instance can run the same
+        // repair for the same missing role at the same time, and lose the
+        // resulting write race with an error from Turnkey (e.g. a
+        // duplicate-account rejection). Before treating that as a real
+        // failure, re-check whether the role is now present - if a
+        // concurrent repair already added it, the desired end state holds
+        // and this login must not fail on a race it merely lost.
+        let stillMissing = missingAccounts;
+        try {
+          const recheck = await turnkeyClient.apiClient().getWalletAccounts({
+            organizationId: existingSubOrgId,
+            walletId: targetWalletId,
+          });
+          const recheckAccounts = recheck.accounts || [];
+          stillMissing = missingAccounts.filter(
+            (spec) =>
+              !recheckAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+          );
+        } catch {
+          // The re-check itself failed - fall through and propagate the
+          // original write error rather than guess at the true state.
+        }
+        if (stillMissing.length > 0) {
+          throw repairWriteErr;
+        }
+        console.warn(
+          '[auth] Repair write raced with a concurrent repair that already added the ' +
+            'missing account(s); continuing'
+        );
+      }
     }
 
     return existingSubOrgId;
