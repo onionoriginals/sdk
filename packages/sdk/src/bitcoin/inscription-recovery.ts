@@ -184,6 +184,31 @@ function isMissingInputsError(error: unknown): boolean {
   return MISSING_INPUT_TX_ERRORS.some((known) => message.includes(known));
 }
 
+/**
+ * Rejections meaning an input this transaction spends is already claimed by a
+ * DIFFERENT transaction currently sitting in the mempool. Unlike a missing-
+ * input rejection (which, given this file's deterministic single-leaf
+ * Taproot reveal script, can only mean the prepared pair's OWN prior
+ * broadcast already spent it), a conflict rejection names an actively
+ * competing transaction right now -- real negative evidence a prior
+ * reveal_broadcast record must never paper over.
+ */
+const CONFLICTING_TX_ERRORS = [
+  'txn-mempool-conflict',
+  'bad-txns-spends-conflicting-tx',
+  'insufficient fee (in bytes)', // legacy Core wording for an unreplaceable conflicting spend
+];
+
+function isConflictingTxError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return CONFLICTING_TX_ERRORS.some((known) => message.includes(known));
+}
+
+/** True only for a rejection that carries no negative evidence about the prepared pair's fate. */
+function isNegativeEvidenceError(error: unknown): boolean {
+  return isMissingInputsError(error) || isConflictingTxError(error);
+}
+
 /** Submit only these exact bytes. Direct broadcasting requires a durable store, never an implicit memory fallback. */
 export async function submitPreparedInscriptionOnSat(params: {
   prepared: PreparedInscriptionOnSat;
@@ -270,11 +295,11 @@ export async function submitPreparedInscriptionOnSat(params: {
       // Actual confirmation, or the provider's own "already on the network"
       // rejection, independently resolve a lost acknowledgement. A prior
       // positive reveal_broadcast record does too, UNLESS this specific
-      // rejection is a missing-input signal: that carries no positive
-      // evidence and must still surface (or trigger real recovery), never be
-      // papered over by an earlier, now-unverifiable success.
+      // rejection carries negative evidence (missing input or an actively
+      // conflicting tx): that must still surface (or trigger real recovery),
+      // never be papered over by an earlier, now-unverifiable success.
       const tolerated = isAlreadyKnownTxError(commitError) || await isCurrentlyConfirmed(provider, prepared.commitTxId) ||
-        (priorRevealBroadcast && !isMissingInputsError(commitError));
+        (priorRevealBroadcast && !isNegativeEvidenceError(commitError));
       if (!tolerated) return result(record, commitError);
     }
     record.broadcast = 'commit_broadcast';
@@ -293,10 +318,10 @@ export async function submitPreparedInscriptionOnSat(params: {
     // Same tolerance as the commit attempt above: a prior definite
     // reveal_broadcast, or the provider's own duplicate-broadcast rejection,
     // is positive evidence this exact reveal is already out there. A
-    // mismatched id, handled above, and a missing-input rejection, which
-    // carries no positive evidence, are never eligible for this tolerance.
+    // mismatched id, handled above, and any negative-evidence rejection are
+    // never eligible for this tolerance.
     const tolerated = isAlreadyKnownTxError(revealError) || await isCurrentlyConfirmed(provider, prepared.revealTxId) ||
-      (priorRevealBroadcast && !isMissingInputsError(revealError));
+      (priorRevealBroadcast && !isNegativeEvidenceError(revealError));
     if (!tolerated) return result(record, revealError);
   }
   record.broadcast = 'reveal_broadcast';

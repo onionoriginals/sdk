@@ -206,6 +206,26 @@ describe('signed inscription recovery', () => {
     expect(resumed.error).toBeDefined();
   }));
 
+  it('never treats an actively conflicting-tx rejection as proof a prior reveal_broadcast still holds', async () => withStore(async (directory) => {
+    const params = parameters();
+    const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(first.broadcast).toBe('reveal_broadcast');
+
+    // "txn-mempool-conflict" names an actively competing transaction right
+    // now, not our own prior broadcast -- real negative evidence, distinct
+    // from a missing-input rejection, that must never be papered over.
+    const resumed = await resumeInscriptionOnSat({
+      recoveryId: first.recoveryId,
+      recoveryStore: diskStore(directory),
+      provider: {
+        broadcastTransaction: async () => { throw new Error('txn-mempool-conflict'); },
+        getTransactionStatus: async () => ({ confirmed: false }),
+      } as any,
+    });
+
+    expect(resumed.error).toBeDefined();
+  }));
+
   it('never tolerates a provider response naming a different transaction, even with a prior reveal_broadcast', async () => withStore(async (directory) => {
     const params = parameters();
     const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
