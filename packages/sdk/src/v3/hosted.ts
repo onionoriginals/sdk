@@ -178,7 +178,15 @@ export class HostedAssets {
     const state = verifyHistory(envelope.eventLog).state;
     if (state.layer === "webvh") {
       const { domain, prefix } = location(state.alias);
-      const existingPaths = prefix.split("/").filter(Boolean);
+      const rawSegments = prefix.split("/").filter(Boolean);
+      // parseAssetAlias percent-encodes each segment into the log URL and
+      // collapses no-custom-path onto the literal ".well-known" placeholder
+      // (indistinguishable from a genuine single ".well-known" path segment,
+      // an ambiguity inherent to that encoding, not introduced here).
+      const existingPaths =
+        rawSegments.length === 1 && rawSegments[0] === ".well-known"
+          ? []
+          : rawSegments.map((segment) => decodeURIComponent(segment));
       const pathsMismatch =
         options.paths !== undefined &&
         (options.paths.length !== existingPaths.length ||

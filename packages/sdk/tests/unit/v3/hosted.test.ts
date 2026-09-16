@@ -155,6 +155,33 @@ test("republishing with paths that differ from the original hosted path is still
   expect((thrown as CelError).code).toBe("ASSET_WEBVH_BINDING");
 });
 
+// Greptile review on #809: an explicit empty `paths: []` on the original
+// publication collapses to the ".well-known" placeholder segment in the
+// stored alias (parseAssetAlias's own encoding, not something republish
+// chose), so the naive raw-segment comparison treated a matching empty
+// array as a mismatch against that placeholder.
+test("republishing with an explicit empty paths array both times succeeds (#761)", async () => {
+  const store = storage(),
+    sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  expect(second.did).toBe(first.did);
+});
+
 test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
   const store = storage();
   const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
