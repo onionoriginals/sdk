@@ -122,7 +122,7 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(broadcastCalls).toEqual(['02bb']); // only the reveal, not a re-push of the commit
   });
 
-  test('completing a stuck reveal with nobody watching logs it to the money log (#812)', async () => {
+  test('the background sweep completing a stuck reveal logs it to the money log (#812)', async () => {
     const commit = '1a'.repeat(32);
     const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
@@ -135,13 +135,16 @@ describe('createInscriptionReconciler: status transitions', () => {
       money: (event, fields) => { moneyEvents.push({ event, fields }); },
     });
 
-    await reconciler.reconcileUser('sub-1');
+    // Only the background sweep is "nobody watching" (#545); go through it,
+    // not the interactive reconcileUser path, so the event is attributed
+    // correctly.
+    await reconciler.sweepInscriptions();
 
     const completed = moneyEvents.find((m) => m.event === 'inscription_sweep_completed');
     expect(completed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
   });
 
-  test('a failed push is also logged to the money log, not swallowed', async () => {
+  test('the background sweep also logs a failed push to the money log, not swallowed', async () => {
     const commit = '1b'.repeat(32);
     const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
     const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
@@ -154,11 +157,74 @@ describe('createInscriptionReconciler: status transitions', () => {
       money: (event, fields) => { moneyEvents.push({ event, fields }); },
     });
 
-    await reconciler.reconcileUser('sub-1');
+    await reconciler.sweepInscriptions();
 
     const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_push_failed');
     expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit, reason: 'bad-txns-inputs-missingorspent' });
     expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast');
+  });
+
+  test('an interactive poll completing the same stuck reveal is NOT mislabeled as an unattended sweep', async () => {
+    // Greptile flagged this as a real bug in an earlier revision: the
+    // interactive GET /api/btc/inscribe poll shares reconcileRecords with
+    // the background sweep, so without an origin distinction, a user
+    // watching their own screen would be logged as "nobody watching".
+    const commit = '1c'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    const res = await reconciler.reconcileUser('sub-1'); // the interactive path, no origin argument
+    expect(res.status).toBe(200);
+    expect(store.get('sub-1', commit)!.status).toBe('reveal_broadcast'); // still completed…
+    expect(moneyEvents.filter((m) => m.event.startsWith('inscription_sweep_'))).toEqual([]); // …but not sweep-attributed
+  });
+
+  test('the background sweep logs a deliberate no-op wait, not just completions and failures', async () => {
+    const commit = '1d'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast', updatedAt: new Date(SWEEP_NOW).toISOString() }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW, // well within REVEAL_REBROADCAST_AFTER_MS of updatedAt above
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const waiting = moneyEvents.find((m) => m.event === 'inscription_sweep_waiting');
+    expect(waiting?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast'); // untouched, deliberately
+  });
+
+  test('the background sweep logs a lookup failure rather than silently skipping it', async () => {
+    const commit = '1e'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => { throw new Error('indexer unavailable'); } },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_lookup_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
   });
 
   test('a confirmed reveal below the recovery horizon stays confirmed, not retired', async () => {
