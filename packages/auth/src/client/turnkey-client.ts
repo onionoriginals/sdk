@@ -66,6 +66,42 @@ function collectErrorText(error: unknown): string {
 }
 
 /**
+ * True if `error`, or a error in its `cause` chain, carries a structural
+ * `code` of exactly `16` — the gRPC `UNAUTHENTICATED` code Turnkey uses for
+ * an expired session. This walks the same chain as {@link collectErrorText}
+ * but compares the parsed `code` value itself, not serialized text: a
+ * substring/prefix match (e.g. `errorStr.includes('"code":16')`) would also
+ * match an unrelated code like `160` or `1601`, misclassifying it as
+ * session expiry.
+ */
+function hasExpiredSessionCode(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (
+    current !== null &&
+    typeof current === 'object' &&
+    current !== undefined &&
+    !seen.has(current)
+  ) {
+    seen.add(current);
+    let code: unknown;
+    try {
+      code = (current as { code?: unknown }).code;
+    } catch {
+      code = undefined; // a `code` getter/Proxy trap threw
+    }
+    if (code === 16 || code === '16') {
+      return true;
+    }
+    if (!(current instanceof Error)) {
+      break;
+    }
+    current = (current as Error & { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * Wrapper to handle token expiration errors
  */
 export async function withTokenExpiration<T>(
@@ -79,7 +115,7 @@ export async function withTokenExpiration<T>(
     if (
       errorStr.includes('api_key_expired') ||
       errorStr.includes('expired api key') ||
-      errorStr.includes('"code":16')
+      hasExpiredSessionCode(error)
     ) {
       console.warn('Detected expired API key, calling onExpired');
       if (onExpired) {

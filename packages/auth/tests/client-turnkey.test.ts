@@ -87,6 +87,52 @@ describe('client/turnkey-client', () => {
       ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
     });
 
+    // REGRESSION (#800): `code: 16` must be an exact structural match, not a
+    // serialized-text substring/prefix — `160`/`1601` are unrelated codes
+    // (e.g. RESOURCE_EXHAUSTED-shaped) and must propagate unchanged.
+    test('does not misclassify code 160 as expiry (numeric prefix of 16)', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: 160, message: 'quota exceeded, not an auth issue' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    test('does not misclassify code 1601 as expiry (numeric prefix of 16)', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: 1601, message: 'unrelated failure' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    test('does not misclassify a stringified code "160" as expiry', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: '160', message: 'quota exceeded' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    // Control: an exact code 16 nested in the cause chain (distinct from the
+    // top-level cause-chain test below, which uses a differently-shaped
+    // wrapper) is still detected once the prefix match is gone.
+    test('still detects an exact code 16 nested under an unrelated-coded wrapper', async () => {
+      const original = Object.assign(new Error('unauthenticated'), { code: 16 });
+      const wrapped = Object.assign(new Error('request failed'), {
+        code: 160, // the wrapper itself carries an unrelated numeric-prefix code
+        cause: original,
+      });
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(wrapped), onExpired)
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+      expect(onExpired).toHaveBeenCalledTimes(1);
+    });
+
     test('calls onExpired callback for expired keys', async () => {
       const onExpired = mock(() => {});
       const expiredError = { code: 'api_key_expired' };
