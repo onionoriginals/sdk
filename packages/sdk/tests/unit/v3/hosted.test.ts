@@ -97,6 +97,64 @@ test("republishing updated resource bytes retains the same hosted identity and a
   expect(loaded.verification.verified).toBe(true);
 });
 
+// #761 (second defect): the republish binding check rejected any truthy
+// `options.paths`, checking presence instead of equality with the existing
+// hosted path, even though the error message implies a path-equality check.
+test("republishing with the same custom paths as the original publication succeeds (#761)", async () => {
+  const store = storage(),
+    sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const customPaths = ["custom", "myasset"];
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: customPaths,
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: customPaths,
+  });
+  expect(second.did).toBe(first.did);
+  const loaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.resolveAssetFromWeb(first.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test("republishing with paths that differ from the original hosted path is still rejected with ASSET_WEBVH_BINDING (#761)", async () => {
+  const store = storage(),
+    sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["custom", "myasset"],
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(first.asset, {
+      domain: "example.com",
+      paths: ["different", "path"],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_BINDING");
+});
+
 test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
   const store = storage();
   const sdk = OriginalsSDK.create({ signer, storageAdapter: store });

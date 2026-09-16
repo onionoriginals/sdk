@@ -178,7 +178,12 @@ export class HostedAssets {
     const state = verifyHistory(envelope.eventLog).state;
     if (state.layer === "webvh") {
       const { domain, prefix } = location(state.alias);
-      if (domain !== options.domain || options.paths)
+      const existingPaths = prefix.split("/").filter(Boolean);
+      const pathsMismatch =
+        options.paths !== undefined &&
+        (options.paths.length !== existingPaths.length ||
+          options.paths.some((segment, i) => segment !== existingPaths[i]));
+      if (domain !== options.domain || pathsMismatch)
         return error(
           "ASSET_WEBVH_BINDING",
           "An existing hosted identity keeps its permanent domain and path",
