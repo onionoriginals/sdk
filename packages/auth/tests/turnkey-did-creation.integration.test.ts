@@ -128,7 +128,11 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       const result = await createDIDWithTurnkey({
         turnkeyClient,
         updateKeyAccount: {
-          address: 'key_addr_update',
+          // A real Turnkey address is base58 of the raw Ed25519 public key;
+          // the Multikey form is accepted as-is (see base58AddressToEd25519Multikey)
+          // and, unlike an arbitrary placeholder, actually matches updateKeyPublic
+          // below — required since createDIDWithTurnkey now binds the two (#734).
+          address: update.publicKeyMultibase,
           curve: 'CURVE_ED25519',
           path: "m/44'/501'/1'/0'",
           addressFormat: 'ADDRESS_FORMAT_SOLANA',
@@ -173,7 +177,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       await createDIDWithTurnkey({
         turnkeyClient,
         updateKeyAccount: {
-          address: 'key_addr_update',
+          address: update.publicKeyMultibase,
           curve: 'CURVE_ED25519',
           path: "m/44'/501'/1'/0'",
           addressFormat: 'ADDRESS_FORMAT_SOLANA',
@@ -243,7 +247,8 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
         createDIDWithTurnkey({
           turnkeyClient,
           updateKeyAccount: {
-            address: 'key_addr',
+            // Must match updateKeyPublic below (#734 binds address to it).
+            address: 'z6MknGc3omQfErKtumfzKgaEsXYP4amJiosdMXaGK9PFqaHh',
             curve: 'CURVE_ED25519',
             path: "m/44'/501'/1'/0'",
             addressFormat: 'ADDRESS_FORMAT_SOLANA',
@@ -328,6 +333,35 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       expect(callCount()).toBe(0);
     });
 
+    test('rejects a canonical-role account whose address does not correspond to updateKeyPublic', async () => {
+      // Regression for the Greptile review on #801: curve+path are
+      // caller-supplied labels. Copying the canonical did-update curve/path
+      // onto an account for a *different* key must still be rejected.
+      const update = await generateKeypair();
+      const wrongKey = await generateKeypair();
+      const { client, callCount } = makeUnreachableSigningClient();
+
+      await expect(
+        createDIDWithTurnkey({
+          turnkeyClient: client,
+          updateKeyAccount: {
+            address: wrongKey.publicKeyMultibase, // not the key behind updateKeyPublic
+            curve: 'CURVE_ED25519',
+            path: "m/44'/501'/1'/0'", // canonical did-update path
+            addressFormat: 'ADDRESS_FORMAT_SOLANA',
+          },
+          subOrgId: 'sub_org_test',
+          authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
+          assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+          updateKeyPublic: update.publicKeyMultibase,
+          domain: 'magby.originals.build',
+          slug: 'address-mismatch-test',
+        })
+      ).rejects.toBeInstanceOf(TurnkeyUpdateKeyRoleError);
+
+      expect(callCount()).toBe(0);
+    });
+
     test('accepts the canonical did-update account (CURVE_ED25519 at the did-update path)', async () => {
       const update = await generateKeypair();
       const auth = await generateKeypair();
@@ -337,7 +371,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       const result = await createDIDWithTurnkey({
         turnkeyClient,
         updateKeyAccount: {
-          address: 'key_addr_update',
+          address: update.publicKeyMultibase,
           curve: 'CURVE_ED25519',
           path: "m/44'/501'/1'/0'",
           addressFormat: 'ADDRESS_FORMAT_SOLANA',

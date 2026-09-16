@@ -914,7 +914,7 @@ describe('[AUTH-029] createDIDWithTurnkey', () => {
 
     await createDIDWithTurnkey({
       turnkeyClient: client,
-      updateKeyAccount: { address: 'key_addr', curve: 'CURVE_ED25519', path: "m/44'/501'/1'/0'", addressFormat: 'ADDRESS_FORMAT_SOLANA' },
+      updateKeyAccount: { address: FIXTURE_UPDATE_KEY, curve: 'CURVE_ED25519', path: "m/44'/501'/1'/0'", addressFormat: 'ADDRESS_FORMAT_SOLANA' },
       subOrgId: 'sub_org_123',
       authKeyPublic: FIXTURE_AUTH_KEY,
       assertionKeyPublic: FIXTURE_ASSERTION_KEY,
@@ -935,7 +935,8 @@ describe('[AUTH-029] createDIDWithTurnkey', () => {
     await expect(
       createDIDWithTurnkey({
         turnkeyClient: client,
-        updateKeyAccount: { address: 'key_addr', curve: 'CURVE_ED25519', path: "m/44'/501'/1'/0'", addressFormat: 'ADDRESS_FORMAT_SOLANA' },
+        // Must match updateKeyPublic below (#734 binds address to it).
+        updateKeyAccount: { address: FIXTURE_UPDATE_KEY, curve: 'CURVE_ED25519', path: "m/44'/501'/1'/0'", addressFormat: 'ADDRESS_FORMAT_SOLANA' },
         subOrgId: 'sub_org_123',
         authKeyPublic: FIXTURE_AUTH_KEY,
         assertionKeyPublic: FIXTURE_ASSERTION_KEY,
