@@ -102,6 +102,25 @@ test('rejects snapshots, unbound media, stale or incomplete identity evidence, a
   }
 });
 
+test('accepts a reinscription whose provider-reported satpoint txid differs only in hex case from the declared identity (#811)', async () => {
+  const f = await fixture();
+  const [txid, vout, offset] = f.snapshot.ownership.satpoint.split(':');
+  f.snapshot.ownership.satpoint = `${txid.toUpperCase()}:${vout}:${offset}`;
+  const response = await f.invoke();
+  expect(response.status).toBe(200);
+  expect((await response.json()).status).toBe('reveal_broadcast');
+  expect(f.broadcasts()).toBe(2);
+});
+
+test('still rejects a genuinely different satpoint even after hex-case normalization', async () => {
+  const f = await fixture();
+  const [txid, vout, offset] = f.snapshot.ownership.satpoint.split(':');
+  f.snapshot.ownership.satpoint = `${'ab'.repeat(32)}:${vout}:${offset}`;
+  const response = await f.invoke();
+  expect(response.status).toBe(400);
+  expect(f.broadcasts()).toBe(0);
+});
+
 
 test('rejects holder-only signatures and ambiguous inscription scripts before broadcast', async () => {
   const unauthorized = await fixture();

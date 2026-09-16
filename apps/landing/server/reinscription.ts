@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 import { OriginalsSDK, parseDocument, verifyHistory, digestBytes, type OrdinalsProvider } from '@originals/sdk';
+import { normalizeSatpoint } from '@originals/sdk/cel';
 
 /** Recognize only the single, unambiguous inscription envelope emitted by the CEL 3 writer. */
 function readPublication(reveal: btc.Transaction) {
@@ -51,7 +52,7 @@ export async function isAuthorizedReinscription(input: {
     const sdk = OriginalsSDK.create({ network: input.network, ordinalsProvider: input.provider });
     const accepted = await sdk.lifecycle.resolveAssetFromSat(sat);
     if (accepted.status !== 'accepted' || accepted.resolution.pending.length ||
-        accepted.resolution.ownership.satpoint !== `${input.identity.txid.toLowerCase()}:${input.identity.vout}:0` ||
+        normalizeSatpoint(accepted.resolution.ownership.satpoint) !== normalizeSatpoint(`${input.identity.txid}:${input.identity.vout}:0`) ||
         accepted.resolution.ownership.owner !== input.address ||
         publication.document.log[0]?.event.previousEvent !== accepted.asset.state.head) return false;
     const sameSatIds = new Set([...accepted.resolution.publications.map(publication => publication.inscriptionId), ...accepted.resolution.diagnostics.map(diagnostic => diagnostic.inscriptionId)]);
