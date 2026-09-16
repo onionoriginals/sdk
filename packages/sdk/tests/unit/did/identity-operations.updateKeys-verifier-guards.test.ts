@@ -77,6 +77,24 @@ describe('#714 — Ed25519-only updateKeys guard on createDIDOriginal/updateDIDO
     ).rejects.toThrow(/Ed25519/);
   });
 
+  test('createDIDOriginal rejection for a non-Ed25519 updateKey is a StructuredError WEBVH_UPDATE_KEY_NOT_ED25519 (#720)', async () => {
+    const { signer, signingKeyPair, updateKeyPair } = await makeSigner('ES256K');
+    await expectStructuredError(
+      () =>
+        createDIDOriginal({
+          type: 'did',
+          domain: 'example.com',
+          signer: signer as any,
+          verifier: signer as any,
+          updateKeys: [updateKeyPair.publicKey],
+          verificationMethods: [
+            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+          ],
+        }),
+      'WEBVH_UPDATE_KEY_NOT_ED25519',
+    );
+  });
+
   test('createDIDOriginal accepts a legacy did:key-form Ed25519 updateKey (normalize before validate)', async () => {
     const { signer, signingKeyPair, updateKeyPair } = await makeSigner('Ed25519');
     const result = await createDIDOriginal({
