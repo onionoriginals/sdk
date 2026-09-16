@@ -255,6 +255,11 @@ async function repairStaleBitcoinAuthKey(
  *   not-found — transient/API errors are rethrown;
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
+ * - a failure checking whether that wallet exists is rethrown, never
+ *   swallowed into a false "wallet present" success (#805) — unlike the
+ *   sub-org lookup, this check has no legitimate not-found case to
+ *   distinguish, since a genuinely walletless sub-org is a successful empty
+ *   `{ wallets: [] }` response;
  * - an existing sub-org whose wallet still carries a stale, pre-#748
  *   Ethereum-formatted Bitcoin auth-key account gets the corrected account
  *   added **in place** (see {@link repairStaleBitcoinAuthKey}), again rather
@@ -329,7 +334,14 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     }
     const existingSubOrgId = [...subOrgIds].sort()[0];
 
-    // Ensure the sub-org has a wallet; repair in place if not.
+    // Ensure the sub-org has a wallet; repair in place if not. Unlike the
+    // sub-org lookup above, `getWallets` has no legitimate "not found" case
+    // to distinguish: a sub-org with no wallet is a normal, successful
+    // `{ wallets: [] }` response (#805). So any thrown error here - network
+    // blip, timeout, rate limit - must propagate rather than be treated as
+    // "a wallet exists, nothing to repair": swallowing it would report OTP
+    // auth as successful without ever having established that the wallet
+    // exists or is complete.
     let wallets: Array<{ walletId?: string }>;
     try {
       const walletsCheck = await turnkeyClient.apiClient().getWallets({
@@ -337,8 +349,12 @@ async function getOrCreateTurnkeySubOrgUnlocked(
       });
       wallets = walletsCheck.wallets || [];
     } catch (walletCheckErr) {
-      console.error('[auth] Could not check wallets in existing sub-org:', walletCheckErr);
-      return existingSubOrgId;
+      throw new Error(
+        `Failed to check wallets in existing Turnkey sub-organization: ${
+          walletCheckErr instanceof Error ? walletCheckErr.message : String(walletCheckErr)
+        }`,
+        { cause: walletCheckErr }
+      );
     }
 
     if (wallets.length === 0) {

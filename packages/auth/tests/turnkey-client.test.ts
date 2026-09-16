@@ -496,16 +496,71 @@ describe('turnkey-client', () => {
       expect(await getOrCreateTurnkeySubOrg('user@example.com', client2)).toBe('org_alpha');
     });
 
-    test('returns existing sub-org when wallet check fails', async () => {
-      const client = createMockClient({
-        getSubOrgIds: mock(() =>
-          Promise.resolve({ organizationIds: ['fallback_org'] })
-        ),
-        getWallets: mock(() => Promise.reject(new Error('Wallet check failed'))),
+    describe('wallet-check errors propagate instead of reporting fake success (#805)', () => {
+      // getWallets, unlike getSubOrgIds, has no legitimate "not found" case
+      // to fall through on: a genuinely walletless sub-org is a successful
+      // `{ wallets: [] }` response. So ANY error here - transport failure or
+      // a structured Turnkey error - must reject, never be swallowed into
+      // "wallet present, nothing to do" (which would report OTP auth as
+      // successful without ever establishing the wallet exists).
+      test('a transient transport error rejects with zero writes', async () => {
+        const createWallet = mock(() => Promise.resolve({ walletId: 'w_new' }));
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const createSubOrganization = mock(() => Promise.resolve({}));
+        const client = createMockClient({
+          getSubOrgIds: mock(() =>
+            Promise.resolve({ organizationIds: ['fallback_org'] })
+          ),
+          getWallets: mock(() => Promise.reject(new Error('ECONNRESET: socket hang up'))),
+          createWallet,
+          createWalletAccounts,
+          createSubOrganization,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'Failed to check wallets in existing Turnkey sub-organization'
+        );
+        expect(createWallet).not.toHaveBeenCalled();
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+        expect(createSubOrganization).not.toHaveBeenCalled();
       });
 
-      const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
-      expect(result).toBe('fallback_org');
+      test('a structured Turnkey error (e.g. code: 5) also rejects with zero writes', async () => {
+        // Even a shape that would be a "definitive not-found" for the
+        // sub-org lookup must NOT be special-cased here - getWallets has no
+        // analogous not-found case, since an empty wallet list is already
+        // how "no wallet" is represented on success.
+        const notFoundShaped = Object.assign(new Error('resource not found'), { code: 5 });
+        const createWallet = mock(() => Promise.resolve({ walletId: 'w_new' }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() =>
+            Promise.resolve({ organizationIds: ['fallback_org'] })
+          ),
+          getWallets: mock(() => Promise.reject(notFoundShaped)),
+          createWallet,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'Failed to check wallets in existing Turnkey sub-organization'
+        );
+        expect(createWallet).not.toHaveBeenCalled();
+      });
+
+      test('a successful empty wallet list still creates exactly one wallet under the existing sub-org', async () => {
+        const createWallet = mock(() => Promise.resolve({ walletId: 'w_new' }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() =>
+            Promise.resolve({ organizationIds: ['walletless_org'] })
+          ),
+          getWallets: mock(() => Promise.resolve({ wallets: [] })),
+          createWallet,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('walletless_org');
+        expect(createWallet).toHaveBeenCalledTimes(1);
+      });
     });
 
     test('throws when TURNKEY_ORGANIZATION_ID not set', async () => {
