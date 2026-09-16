@@ -772,6 +772,143 @@ describe('email-auth', () => {
         expect(result.verified).toBe(true);
       });
     });
+
+    describe('claimForVerification (cross-instance atomic claim)', () => {
+      function createExternalAtomicStorage(): SessionStorage & {
+        sessions: Map<string, ReturnType<typeof storage.get>>;
+      } {
+        const sessions = new Map<string, NonNullable<ReturnType<typeof storage.get>>>();
+        return {
+          sessions,
+          get: (sessionId: string) => sessions.get(sessionId),
+          set: (sessionId: string, session) => {
+            sessions.set(sessionId, session);
+          },
+          delete: (sessionId: string) => {
+            sessions.delete(sessionId);
+          },
+          cleanup: () => sessions.clear(),
+          // Simulates a real shared store's atomic conditional write (e.g.
+          // a Redis Lua script or a `WHERE verifying = false` SQL update):
+          // resolved asynchronously, and the check-and-set happens as one
+          // indivisible step rather than as separate get/set calls.
+          claimForVerification: async (sessionId: string) => {
+            const session = sessions.get(sessionId);
+            if (!session || session.verified || session.verifying) {
+              return false;
+            }
+            session.verifying = true;
+            sessions.set(sessionId, session);
+            return true;
+          },
+        };
+      }
+
+      test('uses claimForVerification instead of the get-then-set fallback when provided', async () => {
+        const external = createExternalAtomicStorage();
+        const claimForVerification = mock(external.claimForVerification!);
+        external.claimForVerification = claimForVerification;
+
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        const result = await verifyEmailAuth(
+          initResult.sessionId,
+          '123456',
+          client,
+          external,
+          verifyOptions
+        );
+        expect(result.verified).toBe(true);
+        expect(claimForVerification).toHaveBeenCalledWith(initResult.sessionId);
+      });
+
+      test('a claim rejected by the store (already verified) is reported without calling Turnkey again', async () => {
+        const external = createExternalAtomicStorage();
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        await verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions);
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+
+        await expect(
+          verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions)
+        ).rejects.toThrow('already been verified');
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+      });
+
+      test('a claim rejected by the store (in progress) is reported without calling Turnkey', async () => {
+        const external = createExternalAtomicStorage();
+        // Simulate another instance already holding the claim.
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+        const session = external.sessions.get(initResult.sessionId)!;
+        session.verifying = true;
+        external.sessions.set(initResult.sessionId, session);
+
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client2 = createMockTurnkeyClient({ verifyOtp });
+
+        await expect(
+          verifyEmailAuth(initResult.sessionId, '123456', client2, external, verifyOptions)
+        ).rejects.toThrow('already in progress');
+        expect(verifyOtp).not.toHaveBeenCalled();
+      });
+
+      test('two concurrent calls against a shared atomic store: exactly one wins the claim', async () => {
+        const external = createExternalAtomicStorage();
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        const results = await Promise.allSettled([
+          verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions),
+          verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+      });
+
+      test('falls back to the get-then-set claim when the storage has no claimForVerification', async () => {
+        // A minimal custom SessionStorage that intentionally omits
+        // claimForVerification, to exercise the pre-existing fallback path.
+        const sessions = new Map<string, NonNullable<ReturnType<typeof storage.get>>>();
+        const plainStorage: SessionStorage = {
+          get: (sessionId) => sessions.get(sessionId),
+          set: (sessionId, session) => {
+            sessions.set(sessionId, session);
+          },
+          delete: (sessionId) => {
+            sessions.delete(sessionId);
+          },
+          cleanup: () => sessions.clear(),
+        };
+        expect(plainStorage.claimForVerification).toBeUndefined();
+
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, plainStorage);
+
+        const first = await verifyEmailAuth(
+          initResult.sessionId,
+          '123456',
+          client,
+          plainStorage,
+          verifyOptions
+        );
+        expect(first.verified).toBe(true);
+
+        await expect(
+          verifyEmailAuth(initResult.sessionId, '123456', client, plainStorage, verifyOptions)
+        ).rejects.toThrow('already been verified');
+      });
+    });
   });
 
   describe('isSessionVerified', () => {
