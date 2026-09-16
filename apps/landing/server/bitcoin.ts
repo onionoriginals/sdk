@@ -2255,12 +2255,18 @@ export function createBitcoinRoutes(deps: {
     // EVICTED from every mempool by a fee spike, and with no reveal child
     // there is no CPFP to pull it back: it never confirms, so the list poll's
     // confirmed-commit gate never fires, and the reveal is rejected for
-    // missing inputs forever while the creator's rebuild 409s on a live
-    // record. Both transactions can also be evicted after a successful reveal
-    // broadcast. Re-push the persisted commit, then retry. Re-pushing a commit
-    // that is still in the mempool is a harmless no-op — which is why this is
-    // the safe direction.
-    if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
+    // missing inputs while the creator's rebuild 409s on a live record. Both
+    // transactions can also be evicted after a successful reveal broadcast.
+    // Re-push the persisted commit, then retry. Re-pushing a commit that is
+    // still in the mempool is a harmless no-op — which is why this is the
+    // safe direction. (The automatic `liveStuck` reconciliation pass
+    // eventually self-heals the same deadlock too, after
+    // REVEAL_REBROADCAST_AFTER_MS; this guard is what recovers it immediately
+    // on a manual retry.) Check the freshest post-reveal snapshot here, not
+    // the call's original `rec`: this same call can have just moved status
+    // from 'signed' to 'commit_broadcast' above, and this guard must see
+    // that transition, not the stale value read before it.
+    if (revealErr && (afterReveal.status === 'commit_broadcast' || afterReveal.status === 'reveal_broadcast') && afterReveal.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       const afterFallbackCommit = reloadIfUnchanged(observed);
