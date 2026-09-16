@@ -169,17 +169,20 @@ export async function createDIDWithTurnkey(params: {
     signer,
     verifier: signer,
     updateKeys: [signer.getVerificationMethodId()],
+    // `controller` is intentionally omitted: OriginalsSDK.createDIDOriginal's
+    // verificationMethods accept it as optional, and didwebvh-ts derives each
+    // VM's controller as the document's own DID (`vm.controller ?? did`) when
+    // it isn't supplied. Passing `controller: ''` here previously defeated
+    // that fallback, since `??` only replaces null/undefined (issue #804).
     verificationMethods: [
       {
         id: '#key-0',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: authKeyPublic,
       },
       {
         id: '#key-1',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: assertionKeyPublic,
       },
     ],

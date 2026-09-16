@@ -56,7 +56,7 @@ export { validateDID, validateDIDDocument } from './utils/validation.js';
 export * as encoding from './utils/encoding.js';
 export * as cbor from './utils/cbor.js';
 export type { DataIntegrityProof } from './types/proof.js';
-export type { DIDDocument, VerificationMethod, ServiceEndpoint } from './types/did.js';
+export type { DIDDocument, VerificationMethod, VerificationMethodInput, ServiceEndpoint } from './types/did.js';
 export type { KeyStore, KeyPair } from './types/keys.js';
 
 // The explicit new-format core. Existing consumers move here in the SDK migration stage.
