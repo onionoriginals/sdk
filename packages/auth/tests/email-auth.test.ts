@@ -657,6 +657,39 @@ describe('email-auth', () => {
         );
         expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
       });
+
+      test('a burst of concurrent wrong-code guesses only lets one through to Turnkey (#819)', async () => {
+        // The single-use claim (#710) serializes concurrent verification
+        // attempts for one session: only the claim winner ever dispatches
+        // to Turnkey, so a burst of concurrent guesses can't race past the
+        // MAX_OTP_ATTEMPTS backstop the way a purely reactive (count-after-
+        // failure) check could.
+        let calls = 0;
+        const verifyOtp = mock(async () => {
+          calls += 1;
+          // Real network latency: every concurrent request is in flight
+          // simultaneously for a while before any of them resolves, so a
+          // TOCTOU gap would show up here if one existed.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          throw new Error('OTP_INCORRECT: invalid code');
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const N = 15; // far more than MAX_OTP_ATTEMPTS = 5
+        const codes = Array.from({ length: N }, (_, i) => String(100000 + i));
+        const results = await Promise.allSettled(
+          codes.map((code) =>
+            verifyEmailAuth(sessionId, code, client, storage, verifyOptions)
+          )
+        );
+
+        // At most one guess ever crosses the Turnkey boundary during the
+        // race; every other concurrent call is rejected locally as
+        // already-in-progress before it can dispatch.
+        expect(calls).toBe(1);
+        expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      });
     });
 
     describe('single-use guard', () => {
