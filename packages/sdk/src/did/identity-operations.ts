@@ -386,6 +386,16 @@ export async function updateDIDOriginal(
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
 
+  // A supplied domain (including an explicitly empty string) must be a real
+  // host: an empty string must not silently no-op the move, and whitespace
+  // must not mint an unresolvable did:webvh (#531, #678). This is validated
+  // before resolveVerifier below — not just before updateDID — so a blank/
+  // whitespace domain always fails loudly with WEBVH_DOMAIN_REQUIRED, rather
+  // than being masked by WEBVH_VERIFIER_REQUIRED when the caller's signer
+  // also doesn't implement verify() (#792), matching createDIDOriginal's
+  // check ordering (domain before verifier).
+  const domain = options.domain === undefined ? undefined : requireWebVHDomain(options.domain);
+
   // Prepare options for updateDID
   const updateOptions: Record<string, unknown> = {
     log: options.log,
@@ -417,11 +427,9 @@ export async function updateDIDOriginal(
     updateOptions.assertionMethod = options.assertionMethod;
   if (options.keyAgreement !== undefined)
     updateOptions.keyAgreement = options.keyAgreement;
-  // A supplied domain (including an explicitly empty string) must be a real
-  // host: an empty string must not silently no-op the move, and whitespace
-  // must not mint an unresolvable did:webvh (#531, #678).
-  if (options.domain !== undefined)
-    updateOptions.domain = requireWebVHDomain(options.domain);
+  // Reuse the already-validated/canonical domain computed above (#792) —
+  // do not call requireWebVHDomain a second time here.
+  if (domain !== undefined) updateOptions.domain = domain;
 
   // Update the DID using didwebvh-ts
   const result = await updateDID(updateOptions);
