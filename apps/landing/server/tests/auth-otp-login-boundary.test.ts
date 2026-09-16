@@ -4,14 +4,15 @@
  *
  * `verifyEmailAuth` returns a `verificationToken` bound to a P-256 public
  * key: either the client's own (supplied via request `publicKey`), or, when
- * omitted, a server-generated ephemeral keypair whose `privateKey` is only
- * meant to transit this response as a server-only fallback (see
- * `packages/auth/src/types.ts`'s `VerifyAuthResult.privateKey`). Returning a
- * token bound to a key the caller never received is a dead end that still
- * reports `verified: true`; returning the ephemeral `privateKey` itself over
- * HTTP would be a live leak of sensitive key material. This route must do
- * neither: when the request supplied its own `publicKey`, echo the token +
- * that public key; otherwise, report cookie-auth only.
+ * omitted, a server-generated ephemeral keypair whose `privateKey` is also
+ * present on its result, as a server-only fallback (see
+ * `packages/auth/src/types.ts`'s `VerifyAuthResult.privateKey`) — this route
+ * has never forwarded that field to its HTTP response. Returning a
+ * verificationToken bound to a key the caller never received is still a dead
+ * end that reports `verified: true` with nothing the caller can act on. This
+ * route must avoid that dead end without ever starting to forward
+ * `privateKey` itself: when the request supplied its own `publicKey`, echo
+ * the token + that public key; otherwise, report cookie-auth only.
  */
 import { describe, test, expect, mock, afterAll } from 'bun:test';
 import * as realAuthServer from '@originals/auth/server';
