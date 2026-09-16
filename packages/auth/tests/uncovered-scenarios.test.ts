@@ -840,6 +840,97 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
 
     expect(onExpired).toHaveBeenCalled();
   });
+
+  // REGRESSION (#696): a circular-shaped rejection (a common shape for
+  // wrapped fetch errors) used to make the signer's own `JSON.stringify`-based
+  // expiry check throw an unrelated TypeError, masking the real error and
+  // silently defeating expiry detection. `sign`/`signBytes` now rely solely
+  // on `withTokenExpiration`'s guarded classification.
+  test('sign with a circular-shaped expired-session error → still throws TurnkeySessionExpiredError, not a TypeError', async () => {
+    const circularExpired: Record<string, unknown> = {
+      code: 5,
+      message: 'api_key_expired',
+    };
+    circularExpired.self = circularExpired; // circular reference
+
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(circularExpired)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+  });
+
+  test('sign with a circular-shaped non-expiry error → propagates the original error unchanged, onExpired not called', async () => {
+    const circularOther: Record<string, unknown> = {
+      code: 5,
+      message: 'some turnkey failure',
+    };
+    circularOther.self = circularOther; // circular reference
+
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(circularOther)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBe(circularOther);
+
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  // sign() wraps signBytes() in its own withTokenExpiration, so a genuine
+  // expiry detected inside signBytes must not be re-classified (and
+  // onExpired re-invoked) a second time as it propagates through sign()'s
+  // own wrapper.
+  test('sign with expired session → onExpired is called exactly once, not once per wrapper layer', async () => {
+    const expiredError = { code: 'api_key_expired', message: 'api_key_expired' };
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(expiredError)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── AUTH-029: createDIDWithTurnkey ───────────────────────────────────────────

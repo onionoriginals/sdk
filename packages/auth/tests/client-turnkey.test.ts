@@ -133,6 +133,37 @@ describe('client/turnkey-client', () => {
       (a as Error & { cause?: unknown }).cause = b;
       await expect(withTokenExpiration(() => Promise.reject(b))).rejects.toBe(b);
     });
+
+    // REGRESSION (#696): a plain (non-Error) circular-shaped rejection — the
+    // common shape for a wrapped fetch error — must still be classified by
+    // its `.message`, not lost when JSON.stringify throws on the cycle.
+    test('detects expiry from a circular plain-object rejection via its message', async () => {
+      const circularExpired: Record<string, unknown> = {
+        code: 5,
+        message: 'api_key_expired',
+      };
+      circularExpired.self = circularExpired;
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(circularExpired), onExpired)
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+      expect(onExpired).toHaveBeenCalledTimes(1);
+    });
+
+    test('propagates a circular plain-object non-expiry rejection unchanged', async () => {
+      const circularOther: Record<string, unknown> = {
+        code: 5,
+        message: 'some turnkey failure',
+      };
+      circularOther.self = circularOther;
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(circularOther), onExpired)
+      ).rejects.toBe(circularOther);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
   });
 
   describe('initializeTurnkeyClient', () => {

@@ -8,7 +8,7 @@ import { Turnkey } from '@turnkey/sdk-server';
 import { OriginalsSDK, encoding, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
-import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
+import { withTokenExpiration } from './turnkey-client.js';
 
 interface SigningInput {
   document: Record<string, unknown>;
@@ -61,7 +61,7 @@ export class TurnkeyDIDSigner {
         return { proofValue: encoding.multibase.encode(signature, 'base58btc') };
       } catch (error) {
         console.error('[TurnkeyDIDSigner] Error signing with Turnkey:', error);
-        throw this.asExpiryError(error);
+        throw error;
       }
     }, this.onExpired);
   }
@@ -73,30 +73,12 @@ export class TurnkeyDIDSigner {
    */
   async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {
     return withTokenExpiration(async () => {
-      try {
-        const signature = await turnkeySignBytes(
-          { turnkeyClient: this.turnkeyClient, organizationId: this.subOrgId, signWith: this.signWith },
-          data
-        );
-        return { signature };
-      } catch (error) {
-        throw this.asExpiryError(error);
-      }
+      const signature = await turnkeySignBytes(
+        { turnkeyClient: this.turnkeyClient, organizationId: this.subOrgId, signWith: this.signWith },
+        data
+      );
+      return { signature };
     }, this.onExpired);
-  }
-
-  /** Turnkey reports an expired session as a generic error; surface it typed. */
-  private asExpiryError(error: unknown): unknown {
-    const errorStr = JSON.stringify(error);
-    if (
-      errorStr.toLowerCase().includes('api_key_expired') ||
-      errorStr.toLowerCase().includes('expired api key') ||
-      errorStr.toLowerCase().includes('"code":16')
-    ) {
-      this.onExpired?.();
-      return new TurnkeySessionExpiredError();
-    }
-    return error;
   }
 
   /**

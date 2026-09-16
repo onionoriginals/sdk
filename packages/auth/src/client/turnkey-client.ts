@@ -22,10 +22,14 @@ export class TurnkeySessionExpiredError extends Error {
  * Collect searchable text from an error: its message, its JSON
  * serialization, and the same for every error in its `cause` chain.
  *
- * `JSON.stringify` alone is not enough — for a plain `Error` it yields
- * `"{}"` because `message`/`stack` are non-enumerable, and the wrapped
- * client functions rethrow plain `Error`s around the original
- * `TurnkeyRequestError`.
+ * `JSON.stringify` alone is not enough for two reasons: for a plain `Error`
+ * it yields `"{}"` because `message`/`stack` are non-enumerable (and the
+ * wrapped client functions rethrow plain `Error`s around the original
+ * `TurnkeyRequestError`), and for *any* circular-shaped value — an `Error`
+ * or a plain object, such as a wrapped fetch error with a `cause`/`self`
+ * back-reference — it throws instead of serializing. A `.message` string is
+ * captured up front so that failure never discards a real, otherwise-
+ * readable diagnostic (e.g. an expired-session marker).
  */
 function collectErrorText(error: unknown): string {
   const parts: string[] = [];
@@ -42,10 +46,14 @@ function collectErrorText(error: unknown): string {
       }
       current = current.cause;
     } else {
+      const message = (current as { message?: unknown }).message;
+      if (typeof message === 'string') {
+        parts.push(message);
+      }
       try {
         parts.push(typeof current === 'string' ? current : JSON.stringify(current) ?? '');
       } catch {
-        // circular structure
+        // circular structure - message (if any) already captured above
       }
       break;
     }
