@@ -5,7 +5,13 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, encoding, signingInput, base58AddressToEd25519Multikey } from '@originals/sdk';
+import {
+  OriginalsSDK,
+  encoding,
+  signingInput,
+  base58AddressToEd25519Multikey,
+  StructuredError,
+} from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
 import {
@@ -25,9 +31,9 @@ import {
  * a controller that this SDK's own resolvers reject or that carries the
  * wrong authority — this rejects it before any signing call.
  */
-export class TurnkeyUpdateKeyRoleError extends Error {
-  constructor(message: string) {
-    super(message);
+export class TurnkeyUpdateKeyRoleError extends StructuredError {
+  constructor(code: string, message: string) {
+    super(code, message);
     this.name = 'TurnkeyUpdateKeyRoleError';
   }
 }
@@ -182,6 +188,7 @@ export async function createDIDWithTurnkey(params: {
   const updateRole = TURNKEY_ACCOUNT_ROLES.find((r) => r.role === 'did-update')!;
   if (updateKeyAccount.curve !== updateRole.curve || updateKeyAccount.path !== updateRole.path) {
     throw new TurnkeyUpdateKeyRoleError(
+      'TURNKEY_UPDATE_KEY_ROLE_MISMATCH',
       `updateKeyAccount must be the canonical did-update account (curve ${updateRole.curve} ` +
         `at path ${updateRole.path}), got curve ${updateKeyAccount.curve} at path ` +
         `${updateKeyAccount.path}. Use getKeyByRole(wallets, 'did-update') to select the correct account.`
@@ -197,12 +204,14 @@ export async function createDIDWithTurnkey(params: {
     updateKeyAccountMultikey = base58AddressToEd25519Multikey(updateKeyAccount.address);
   } catch (error) {
     throw new TurnkeyUpdateKeyRoleError(
+      'TURNKEY_UPDATE_KEY_INVALID_ADDRESS',
       `updateKeyAccount.address is not a valid ${updateRole.addressFormat} Ed25519 address: ` +
         `${error instanceof Error ? error.message : String(error)}`
     );
   }
   if (updateKeyAccountMultikey !== updateKeyPublic) {
     throw new TurnkeyUpdateKeyRoleError(
+      'TURNKEY_UPDATE_KEY_ADDRESS_MISMATCH',
       `updateKeyAccount.address does not correspond to updateKeyPublic. The did-update role check ` +
         `(curve + path) does not prove the supplied account is the key behind updateKeyPublic — ` +
         `re-derive both from the same getKeyByRole(wallets, 'did-update') result.`
