@@ -122,6 +122,45 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(broadcastCalls).toEqual(['02bb']); // only the reveal, not a re-push of the commit
   });
 
+  test('completing a stuck reveal with nobody watching logs it to the money log (#812)', async () => {
+    const commit = '1a'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const completed = moneyEvents.find((m) => m.event === 'inscription_sweep_completed');
+    expect(completed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+  });
+
+  test('a failed push is also logged to the money log, not swallowed', async () => {
+    const commit = '1b'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async () => 'bad-txns-inputs-missingorspent',
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_push_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit, reason: 'bad-txns-inputs-missingorspent' });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast');
+  });
+
   test('a confirmed reveal below the recovery horizon stays confirmed, not retired', async () => {
     const commit = '2'.repeat(64);
     const { store, reconciler } = harness({
@@ -524,6 +563,61 @@ describe('createInscriptionReconciler: sweepInscriptions', () => {
     expect(result.unreadable).toEqual([]);
     expect(store.get('sub-1', '7'.repeat(64))!.retired).toBe(true);
     expect(store.get('sub-2', '8'.repeat(64))!.retired).toBe(true);
+  });
+
+  test('one pass completes more than 10 distinct stranded users (#812)', async () => {
+    // The retired dedicated completion sweep (#546) budgeted 25 candidates
+    // network-wide; the generalized sweep that replaced it in production
+    // used to cap at 10 distinct sub-orgs per pass, so a batch of stranded
+    // reveals spanning more than 10 users left the rest stuck for another
+    // hour+block cycle. The default budget must clear a batch this size in
+    // one pass.
+    const moneyEvents: string[] = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    const subs = Array.from({ length: 15 }, (_, i) => `sub-${i}`);
+    subs.forEach((sub, i) => {
+      store.create(sub, rec({ commitTxId: i.toString(16).padStart(64, '0'), status: 'commit_broadcast' }));
+    });
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event) => { moneyEvents.push(event); },
+      now: () => SWEEP_NOW,
+    });
+
+    const result = await reconciler.sweepInscriptions();
+
+    expect(result.processed).toBe(15);
+    for (const sub of subs) expect(store.list(sub)[0].status).toBe('reveal_broadcast');
+    // Every unattended reveal push is reconstructable from the money log alone.
+    expect(moneyEvents.filter((e) => e === 'inscription_sweep_completed').length).toBe(15);
+  });
+
+  test('a smaller configured budget still converges over successive passes', async () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    const subs = Array.from({ length: 3 }, (_, i) => `sub-${i}`);
+    subs.forEach((sub, i) => {
+      store.create(sub, rec({ commitTxId: i.toString(16).padStart(64, '0'), status: 'commit_broadcast' }));
+    });
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => SWEEP_NOW,
+      sweepBudget: 2,
+    });
+
+    const first = await reconciler.sweepInscriptions();
+    expect(first.processed).toBe(2); // bounded by the configured budget, not the backlog size
+    const stillStuckAfterFirst = subs.filter((sub) => store.list(sub)[0].status === 'commit_broadcast').length;
+    expect(stillStuckAfterFirst).toBe(1); // one user's turn hasn't come up yet, not stranded
+
+    await reconciler.sweepInscriptions(); // the rotating cursor reaches the remaining user next pass
+    for (const sub of subs) expect(store.list(sub)[0].status).not.toBe('commit_broadcast');
   });
 
   test('a sweep already running is a no-op rather than a concurrent second pass', async () => {

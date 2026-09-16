@@ -66,6 +66,15 @@ export interface InscriptionReconcilerDeps {
   recoveryConfirmations?: number;
   /** How long an unconfirmed reveal may sit before the list poll re-pushes it. Default 30 min. */
   revealRebroadcastAfterMs?: number;
+  /**
+   * Distinct sub-org ids `sweepInscriptions` will reconcile in one pass.
+   * Default 25, matching the per-pass candidate budget the retired dedicated
+   * completion sweep (#546) used — a batch of stranded reveals spanning more
+   * distinct users than this still converges, just over additional passes;
+   * this must not silently shrink back to a value that reintroduces #545's
+   * multi-day stranded-funds delay under realistic load. Minimum 1.
+   */
+  sweepBudget?: number;
 }
 
 export interface InscriptionReconciler {
@@ -100,6 +109,9 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
   const RECOVERY_CONFIRMATIONS = typeof requestedConfirmations === 'number' && Number.isInteger(requestedConfirmations)
     ? Math.max(6, requestedConfirmations) : 6;
   const REVEAL_REBROADCAST_AFTER_MS = deps.revealRebroadcastAfterMs ?? 30 * 60_000;
+  const requestedSweepBudget = deps.sweepBudget;
+  const SWEEP_BUDGET = typeof requestedSweepBudget === 'number' && Number.isInteger(requestedSweepBudget)
+    ? Math.max(1, requestedSweepBudget) : 25;
   const { provider, broadcastIdempotent, unreadableRecords, money } = deps;
 
   // Rotating scan-start cursors for the list poll's reconciliation passes.
@@ -257,7 +269,25 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       }
       const revealErr = await broadcastIdempotent(current.revealTxHex);
       if (!revealErr) {
-        if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) changed = true;
+        // A confirmed commit whose reveal was pushed with nobody watching
+        // (#545): the money log is the only record of a server-initiated
+        // spend the affected user never saw happen.
+        if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) {
+          changed = true;
+          money('inscription_sweep_completed', {
+            sub,
+            commitTxId: r.commitTxId,
+            revealTxId: current.revealTxId,
+            inscriptionId: current.inscriptionId,
+          });
+        }
+      } else {
+        money('inscription_sweep_push_failed', {
+          sub,
+          commitTxId: r.commitTxId,
+          revealTxId: current.revealTxId,
+          reason: revealErr,
+        });
       }
     }
     for (const r of liveUnconfirmed) {
@@ -449,7 +479,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     sweepRunning = true;
     try {
       const { stale, unreadable } = deps.store.sweepStale(0);
-      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, 10);
+      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, SWEEP_BUDGET);
       const failures = [...unreadable];
       for (const sub of subs) {
         try { if (!(await reconcileUser(sub)).ok) failures.push(sub); }
