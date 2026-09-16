@@ -255,6 +255,18 @@ test("rejects duplicate inscription ids in independent content evidence", () => 
   expect(result.status).toBe("incomplete");
 });
 
+test("rejects duplicate inscription ids that differ only in hex case (#808)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      evidence[0],
+      { ...evidence[0], inscriptionId: evidence[0].inscriptionId.toUpperCase() },
+    ],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
 test("an independent source reporting an unknown inscription id does not itself break resolution", () => {
   const snapshot = observations(fixtures.cases[0]);
   const evidence = completeContentEvidence(snapshot);
