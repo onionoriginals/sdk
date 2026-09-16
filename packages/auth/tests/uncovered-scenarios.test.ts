@@ -659,6 +659,65 @@ describe('[AUTH-023] ensureWalletWithAccounts', () => {
     );
     expect(wallets[0].accounts).toHaveLength(3);
   });
+
+  test('when required roles are split across multiple wallets → creates nothing', async () => {
+    // Regression for #765: ensureWalletWithAccounts only inspected
+    // wallets[0], so roles already provisioned in a *different* wallet were
+    // wrongly treated as missing and duplicated into wallets[0].
+    const w0Accounts = [
+      {
+        address: 'addr_secp',
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+      },
+    ];
+    const w1Accounts = [
+      {
+        address: 'addr_ed1',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/0'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+      {
+        address: 'addr_ed2',
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/1'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+    ];
+
+    const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+    const accountsByWallet: Record<string, unknown[]> = {
+      w0: w0Accounts,
+      w1: w1Accounts,
+    };
+
+    const client = {
+      apiClient: () => ({
+        getWallets: mock(() =>
+          Promise.resolve({
+            wallets: [
+              { walletId: 'w0', walletName: 'default-wallet' },
+              { walletId: 'w1', walletName: 'secondary-wallet' },
+            ],
+          })
+        ),
+        getWalletAccounts: mock(({ walletId }: { walletId: string }) =>
+          Promise.resolve({ accounts: accountsByWallet[walletId] ?? [] })
+        ),
+        createWallet: mock(() => Promise.resolve({ walletId: 'w_created' })),
+        createWalletAccounts,
+      }),
+    } as unknown as import('@turnkey/sdk-server').Turnkey;
+
+    const wallets = await ensureWalletWithAccounts(client, 'sub_org_123');
+
+    // Every required role already exists somewhere in the sub-org (bitcoin-auth
+    // in w0, did-assertion/did-update in w1), so nothing should be created.
+    expect(createWalletAccounts).not.toHaveBeenCalled();
+    expect(wallets).toHaveLength(2);
+  });
 });
 
 // ─── AUTH-028: TurnkeyDIDSigner ───────────────────────────────────────────────

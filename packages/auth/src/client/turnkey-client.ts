@@ -515,13 +515,18 @@ export async function ensureWalletWithAccounts(
       }
 
       const defaultWallet = wallets[0];
-      const allAccounts = defaultWallet.accounts;
 
       // Check for each required role by its exact curve + path, not by
       // curve count: two accounts can share a curve (both DID-signing
       // accounts are CURVE_ED25519), so a wallet holding two Ed25519
       // accounts at the *wrong* paths would otherwise be miscounted as
       // complete while neither required role is actually provisioned.
+      //
+      // Scan every wallet in the sub-org, not just wallets[0]: a role that
+      // already exists in a different wallet must not be recreated here,
+      // mirroring how getKeyByRole resolves roles sub-org-wide rather than
+      // per-wallet.
+      const allAccounts = wallets.flatMap((w) => w.accounts);
       const missingRoles = TURNKEY_ACCOUNT_ROLES.filter(
         (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
       );
