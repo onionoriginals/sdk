@@ -164,6 +164,25 @@ describe('client/turnkey-client', () => {
       ).rejects.toBe(circularOther);
       expect(onExpired).not.toHaveBeenCalled();
     });
+
+    // REGRESSION (#696 follow-up): a rejection whose `message` accessor
+    // itself throws (a throwing getter or Proxy trap) must not escape
+    // collectErrorText's classification — that would recreate the exact
+    // error-masking bug this change removes, just via a different property.
+    test('propagates the original rejection when reading its `message` throws', async () => {
+      const throwingMessage = {
+        code: 5,
+        get message(): string {
+          throw new Error('message getter exploded');
+        },
+      };
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(throwingMessage), onExpired)
+      ).rejects.toBe(throwingMessage);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
   });
 
   describe('initializeTurnkeyClient', () => {

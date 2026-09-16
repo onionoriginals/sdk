@@ -46,9 +46,13 @@ function collectErrorText(error: unknown): string {
       }
       current = current.cause;
     } else {
-      const message = (current as { message?: unknown }).message;
-      if (typeof message === 'string') {
-        parts.push(message);
+      try {
+        const message = (current as { message?: unknown }).message;
+        if (typeof message === 'string') {
+          parts.push(message);
+        }
+      } catch {
+        // a `message` getter/Proxy trap threw; fall through to serialization
       }
       try {
         parts.push(typeof current === 'string' ? current : JSON.stringify(current) ?? '');
