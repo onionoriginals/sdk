@@ -27,6 +27,31 @@ export interface SessionStorage {
   set(sessionId: string, session: EmailAuthSession): void;
   delete(sessionId: string): void;
   cleanup(): void;
+  /**
+   * Optional atomic verification claim, used by {@link verifyEmailAuth} to
+   * close the OTP single-use guard across multiple processes sharing one
+   * store.
+   *
+   * Implementations backed by shared storage (Redis, a database) SHOULD
+   * provide this, backed by a real conditional write — e.g. a Redis
+   * `WATCH`/`MULTI`, a Lua script, or a SQL `UPDATE ... WHERE verifying =
+   * false AND verified = false`. It must atomically check that the session
+   * exists and is neither `verified` nor already `verifying`, and if so
+   * mark it `verifying: true` in that same operation, returning `true`
+   * only to the one caller that won the claim.
+   *
+   * `get`/`set` alone cannot do this safely for a shared store: two
+   * processes can each call `get`, both observe `verifying: false`, and
+   * both then `set` — there is no atomicity between the two calls. May
+   * return a `Promise` for stores that require network I/O.
+   *
+   * When omitted, {@link verifyEmailAuth} falls back to a plain
+   * get-then-set claim that is only safe within a single process (see the
+   * comment above its `session.verifying` check) — the default
+   * {@link createInMemorySessionStorage} doesn't need more than that,
+   * since it is itself process-local.
+   */
+  claimForVerification?(sessionId: string): boolean | Promise<boolean>;
 }
 
 /**
@@ -35,7 +60,11 @@ export interface SessionStorage {
  * **Production warning**: This store is ephemeral — sessions are lost on
  * process restart and are not shared across multiple instances. For
  * production deployments, pass a persistent {@link SessionStorage}
- * implementation backed by Redis, a database, or another shared store.
+ * implementation backed by Redis, a database, or another shared store, and
+ * implement {@link SessionStorage.claimForVerification} on it so
+ * {@link verifyEmailAuth}'s single-use guard stays atomic across instances
+ * — without it, two instances racing on the same session can both pass
+ * the guard.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -59,6 +88,17 @@ export function createInMemorySessionStorage(): SessionStorage {
     get: (sessionId: string) => sessions.get(sessionId),
     set: (sessionId: string, session: EmailAuthSession) => sessions.set(sessionId, session),
     delete: (sessionId: string) => sessions.delete(sessionId),
+    // Trivially atomic: this store is a single process's Map, and every
+    // operation here runs synchronously with no intervening `await`.
+    claimForVerification: (sessionId: string) => {
+      const session = sessions.get(sessionId);
+      if (!session || session.verified || session.verifying) {
+        return false;
+      }
+      session.verifying = true;
+      sessions.set(sessionId, session);
+      return true;
+    },
     cleanup: () => {
       clearInterval(cleanupInterval);
       sessions.clear();
@@ -266,6 +306,56 @@ export async function verifyEmailAuth(
     throw new Error('Invalid verification code format');
   }
 
+  // Single-use guard: claim the session before doing anything else that
+  // could be replayed. When the storage implementation provides
+  // `claimForVerification`, that claim is atomic per its own contract
+  // (real cross-instance safety requires a shared store to implement it
+  // with a genuine conditional write — see the interface doc). Otherwise
+  // this falls back to a plain get-then-set claim, which this whole block
+  // runs synchronously (no `await` above it since the session/format
+  // checks) to make safe within one process: a second call — issued
+  // either after this one has finished or concurrently while it is still
+  // awaiting Turnkey — cannot observe `verified: false, verifying: false`
+  // at the same time as this call, since whichever call's synchronous
+  // prefix runs first claims the session here before the other gets a
+  // chance to check it. Without `claimForVerification`, a genuinely shared
+  // multi-instance store can still let two instances both read
+  // `verifying: false` before either writes `true`; see #684.
+  if (storage.claimForVerification) {
+    const claimed = await storage.claimForVerification(sessionId);
+    if (!claimed) {
+      // Re-fetch for a precise error: the rejected claim alone doesn't say
+      // *why* — the session could since have been deleted (expired
+      // cleanup, or an exhausted-attempts destroy racing us), not just
+      // already verified or already in progress.
+      const current = storage.get(sessionId);
+      if (!current) {
+        throw new Error('Invalid or expired session');
+      }
+      if (current.verified) {
+        throw new Error(
+          'This session has already been verified. Please log in or request a new code.'
+        );
+      }
+      throw new Error(
+        'A verification is already in progress for this session. Please wait for it to complete.'
+      );
+    }
+  } else {
+    if (session.verified) {
+      throw new Error(
+        'This session has already been verified. Please log in or request a new code.'
+      );
+    }
+    if (session.verifying) {
+      throw new Error(
+        'A verification is already in progress for this session. Please wait for it to complete.'
+      );
+    }
+    session.verifying = true;
+    storage.set(sessionId, session);
+  }
+
   console.log('[email-auth] Verifying OTP');
 
   // Encrypt the OTP code (plus a client public key) to the target encryption
@@ -287,6 +377,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
+    // Release the claim: this attempt never reached Turnkey, so the
+    // session is still eligible for a retry.
+    session.verifying = false;
+    storage.set(sessionId, session);
     throw new Error(
       `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -329,6 +423,8 @@ export async function verifyEmailAuth(
       );
     }
     session.otpAttempts = attempts;
+    // Release the claim so a corrected code can be retried.
+    session.verifying = false;
     storage.set(sessionId, session);
 
     throw new Error(
@@ -365,6 +461,7 @@ export async function verifyEmailAuth(
 
   // Mark session as verified
   session.verified = true;
+  session.verifying = false;
   session.subOrgId = subOrgId;
   storage.set(sessionId, session);
 
