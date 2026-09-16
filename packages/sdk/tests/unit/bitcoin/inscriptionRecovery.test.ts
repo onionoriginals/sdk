@@ -183,6 +183,26 @@ describe('signed inscription recovery', () => {
     expect(resumed.broadcast).toBe('reveal_broadcast');
     expect(resumed.error).toBeUndefined();
   }));
+
+  it('never tolerates a provider response naming a different transaction, even with a prior reveal_broadcast', async () => withStore(async (directory) => {
+    const params = parameters();
+    const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(first.broadcast).toBe('reveal_broadcast');
+
+    // The provider ACKNOWLEDGES the resubmission (no throw) but names a
+    // different, unrelated transaction id -- a genuine integrity problem
+    // that must be reported as an error regardless of any prior success.
+    const resumed = await resumeInscriptionOnSat({
+      recoveryId: first.recoveryId,
+      recoveryStore: diskStore(directory),
+      provider: {
+        broadcastTransaction: async () => 'ff'.repeat(32),
+        getTransactionStatus: async () => ({ confirmed: false }),
+      } as any,
+    });
+
+    expect(resumed.error).toContain('does not match the signed transaction');
+  }));
 });
 
 

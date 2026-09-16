@@ -232,17 +232,24 @@ export async function submitPreparedInscriptionOnSat(params: {
   if (record.broadcast === 'prepared' || record.broadcast === 'commit_broadcast_unknown') {
     record.broadcast = 'commit_broadcast_unknown';
     await persist(recoveryStore, record);
-    try {
-      const txid = await provider.broadcastTransaction(prepared.signedCommitHex);
-      if (txid !== prepared.commitTxId) throw new Error('Provider commit id does not match the signed transaction.');
-    } catch (error) {
+    let commitTxid: string | undefined;
+    let commitError: unknown;
+    try { commitTxid = await provider.broadcastTransaction(prepared.signedCommitHex); }
+    catch (error) { commitError = error; }
+    // A response identifying a DIFFERENT transaction is a genuine integrity
+    // failure, not an ambiguous acknowledgement -- it must never be tolerated,
+    // no matter what the persisted record already shows.
+    if (commitTxid !== undefined && commitTxid !== prepared.commitTxId) {
+      return result(record, new Error('Provider commit id does not match the signed transaction.'));
+    }
+    if (commitError !== undefined) {
       // Unknown/not-confirmed conflates absent and mempool in this provider API.
       // Actual confirmation, the provider's own "already on the network"
       // rejection, or a prior positive reveal_broadcast record (this pair
       // necessarily reached a valid commit to get there) all independently
       // resolve a lost acknowledgement without treating it as a failure.
-      if (!priorRevealBroadcast && !isAlreadyKnownTxError(error) && !await isCurrentlyConfirmed(provider, prepared.commitTxId)) {
-        return result(record, error);
+      if (!priorRevealBroadcast && !isAlreadyKnownTxError(commitError) && !await isCurrentlyConfirmed(provider, prepared.commitTxId)) {
+        return result(record, commitError);
       }
     }
     record.broadcast = 'commit_broadcast';
@@ -250,15 +257,20 @@ export async function submitPreparedInscriptionOnSat(params: {
   record.broadcast = 'reveal_broadcast_unknown';
   // If this write fails, the previous durable record still contains both transactions.
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
-  try {
-    const txid = await provider.broadcastTransaction(prepared.revealTxHex);
-    if (txid !== prepared.revealTxId) throw new Error('Provider reveal id does not match the signed transaction.');
-  } catch (error) {
+  let revealTxid: string | undefined;
+  let revealError: unknown;
+  try { revealTxid = await provider.broadcastTransaction(prepared.revealTxHex); }
+  catch (error) { revealError = error; }
+  if (revealTxid !== undefined && revealTxid !== prepared.revealTxId) {
+    return result(record, new Error('Provider reveal id does not match the signed transaction.'));
+  }
+  if (revealError !== undefined) {
     // Same tolerance as the commit attempt above: a prior definite
     // reveal_broadcast, or the provider's own duplicate-broadcast rejection,
-    // is positive evidence this exact reveal is already out there.
-    if (!priorRevealBroadcast && !isAlreadyKnownTxError(error) && !await isCurrentlyConfirmed(provider, prepared.revealTxId)) {
-      return result(record, error);
+    // is positive evidence this exact reveal is already out there. A
+    // mismatched id, handled above, is never eligible for this tolerance.
+    if (!priorRevealBroadcast && !isAlreadyKnownTxError(revealError) && !await isCurrentlyConfirmed(provider, prepared.revealTxId)) {
+      return result(record, revealError);
     }
   }
   record.broadcast = 'reveal_broadcast';
