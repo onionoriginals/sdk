@@ -14,6 +14,7 @@ import {
   verifyHistory,
   normalizeSatpoint,
   normalizeInscriptionId,
+  normalizeTxid,
   jcsSigningMessage,
   decodeController,
   type SatSnapshot,
@@ -560,6 +561,58 @@ test("normalizeInscriptionId lowercases the txid and separator and passes throug
   expect(normalizeInscriptionId("not-an-inscription-id")).toBe("not-an-inscription-id");
   const nonHexTxid = "gg" + "ab".repeat(31) + "i0";
   expect(normalizeInscriptionId(nonHexTxid)).toBe(nonHexTxid);
+});
+
+test("normalizeTxid lowercases a 64-hex txid and passes through malformed values unchanged (#821)", () => {
+  expect(normalizeTxid("AB".repeat(32))).toBe("ab".repeat(32));
+  expect(normalizeTxid("ab".repeat(32))).toBe("ab".repeat(32));
+  // Not exactly 64 hex chars: returned unchanged rather than coerced.
+  const tooShort = "ab".repeat(30);
+  expect(normalizeTxid(tooShort)).toBe(tooShort);
+  const nonHex = "gg" + "ab".repeat(31);
+  expect(normalizeTxid(nonHex)).toBe(nonHex);
+});
+
+test("accepts a confirmed publication whose revealTxid differs only in hex case from id/block txids (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: p.revealTxid.toUpperCase() } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("accepted");
+});
+
+test("rejects a revealTxid that disagrees with id/block txids even after case normalization (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: "f".repeat(64) } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("rejects a malformed (non-64-hex) revealTxid rather than coercing it into matching (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: "not-a-txid" } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
 });
 
 test("does not accept conflicting confirmed and pending records for one inscription", () => {

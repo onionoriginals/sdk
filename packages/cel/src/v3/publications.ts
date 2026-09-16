@@ -264,6 +264,18 @@ export function normalizeInscriptionId(id: string): string {
   const match = INSCRIPTION_ID.exec(id);
   return match ? `${match[1].toLowerCase()}${match[2].toLowerCase()}` : id;
 }
+const REVEAL_TXID = /^[0-9a-fA-F]{64}$/;
+/**
+ * Canonicalize a reveal txid for equality comparison against `id`'s parsed
+ * txid and `block.txids` entries, both of which are already guaranteed
+ * lowercase hex by their own validation. Mirrors {@link normalizeSatpoint}/
+ * {@link normalizeInscriptionId}: a value that isn't exactly 64 hex chars is
+ * returned unchanged, so a genuinely malformed txid still fails comparison
+ * rather than being coerced into matching (#821).
+ */
+export function normalizeTxid(txid: string): string {
+  return REVEAL_TXID.test(txid) ? txid.toLowerCase() : txid;
+}
 
 /**
  * Whether an entry (raw, structurally plausible but not yet cryptographically checked)
@@ -664,7 +676,7 @@ export function resolveSat(
     const id = /^([0-9a-f]{64})i(0|[1-9]\d*)$/.exec(publication.id);
     if (
       !id ||
-      id[1] !== publication.revealTxid ||
+      id[1] !== normalizeTxid(publication.revealTxid) ||
       id[2] !== String(position.inscriptionIndex)
     )
       return failure(
@@ -679,7 +691,7 @@ export function resolveSat(
         "chain-changed",
         "Publication block is not in the selected chain",
       );
-    if (block.txids[position.transactionIndex] !== publication.revealTxid)
+    if (block.txids[position.transactionIndex] !== normalizeTxid(publication.revealTxid))
       return failure(
         "inconsistent-evidence",
         "Reveal txid is not at the observed block position",
