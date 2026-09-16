@@ -2253,19 +2253,22 @@ export function createBitcoinRoutes(deps: {
     if (afterReveal instanceof Response) return afterReveal;
     // F1 — the terminal deadlock. A commit that broadcast fine can still be
     // EVICTED from every mempool by a fee spike, and with no reveal child
-    // there is no CPFP to pull it back: it never confirms, so the list poll's
-    // confirmed-commit gate never fires, and the reveal is rejected for
-    // missing inputs while the creator's rebuild 409s on a live record. Both
-    // transactions can also be evicted after a successful reveal broadcast.
-    // Re-push the persisted commit, then retry. Re-pushing a commit that is
-    // still in the mempool is a harmless no-op — which is why this is the
-    // safe direction. (The automatic `liveStuck` reconciliation pass
-    // eventually self-heals the same deadlock too, after
-    // REVEAL_REBROADCAST_AFTER_MS; this guard is what recovers it immediately
-    // on a manual retry.) Check the freshest post-reveal snapshot here, not
-    // the call's original `rec`: this same call can have just moved status
-    // from 'signed' to 'commit_broadcast' above, and this guard must see
-    // that transition, not the stale value read before it.
+    // there is no CPFP to pull it back: it never confirms on its own, so the
+    // list poll's `liveStuck` pass can't take its immediate path (complete
+    // the persisted reveal once THAT commit is observed confirmed), and the
+    // reveal here is rejected for missing inputs while the creator's rebuild
+    // 409s on a live record. Both transactions can also be evicted after a
+    // successful reveal broadcast. Re-push the persisted commit, then retry.
+    // Re-pushing a commit that is still in the mempool is a harmless no-op —
+    // which is why this is the safe direction. (The same `liveStuck` pass
+    // also re-pushes an evicted commit itself once REVEAL_REBROADCAST_AFTER_MS
+    // has passed since the last push, so it does eventually self-heal this
+    // exact deadlock; this guard is what recovers it immediately on a manual
+    // retry instead of waiting for that window.) Check the freshest
+    // post-reveal snapshot here, not the call's original `rec`: this same
+    // call can have just moved status from 'signed' to 'commit_broadcast'
+    // above, and this guard must see that transition, not the stale value
+    // read before it.
     if (revealErr && (afterReveal.status === 'commit_broadcast' || afterReveal.status === 'reveal_broadcast') && afterReveal.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);

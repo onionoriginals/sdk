@@ -991,12 +991,13 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
   /**
    * F1 — the terminal deadlock. A commit that broadcast fine can still be
    * EVICTED from every mempool by a fee spike, and with no reveal child there
-   * is no CPFP to pull it back. It will never confirm, so the list poll's
-   * liveStuck pass (gated on a confirmed commit) never fires, and the reveal
-   * is rejected for missing inputs. This manual retry recovers it
-   * immediately by re-pushing the commit; the automatic `liveStuck`
-   * reconciliation pass would otherwise self-heal the same deadlock after
-   * `REVEAL_REBROADCAST_AFTER_MS` (default 30 minutes) even without it.
+   * is no CPFP to pull it back. It will never confirm on its own, so the
+   * list poll's `liveStuck` pass can't take its immediate path (complete the
+   * persisted reveal once THAT commit is observed confirmed) — but the same
+   * `liveStuck` pass also re-pushes an evicted commit itself once
+   * `REVEAL_REBROADCAST_AFTER_MS` (default 30 minutes) has passed since the
+   * last push, so it does eventually self-heal this exact deadlock. This
+   * manual retry recovers it immediately instead of waiting for that window.
    */
   test('a commit evicted from the mempool is RE-PUSHED before the reveal retry', async () => {
     const pair = buildPair();
