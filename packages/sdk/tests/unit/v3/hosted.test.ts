@@ -347,6 +347,85 @@ test("publication refuses an omitted domain before invoking custody or storage",
   ).toBe(true);
 });
 
+// #798: a missing/blank domain must throw WEBVH_DOMAIN_REQUIRED even when the
+// asset is also in an invalid state for hosted publication, not the
+// ASSET_WEB_STATE that state-validity alone would produce.
+test("an omitted domain on a deactivated (invalid-state) asset still throws WEBVH_DOMAIN_REQUIRED (#798)", async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([]);
+  await asset.deactivate("retired");
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {} as never);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+});
+
+test("a valid domain on a deactivated (invalid-state) asset still throws ASSET_WEB_STATE (#798 control)", async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([]);
+  await asset.deactivate("retired");
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEB_STATE");
+});
+
+test("an omitted domain on an asset with an unsigned local draft still throws WEBVH_DOMAIN_REQUIRED (#798)", async () => {
+  const store = storage();
+  const created = await OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+  }).lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const reader = OriginalsSDK.create({ storageAdapter: store });
+  const asset = (await reader.lifecycle.loadAsset(created.serialize())).asset;
+  await asset.addResourceVersion("art", "draft", "text/plain", {
+    onAppendFailure: "skip",
+  });
+  expect(asset.localResources.length).toBeGreaterThan(0);
+  let thrown: unknown;
+  try {
+    await reader.lifecycle.publishToWeb(asset, {} as never);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+});
+
+test("a valid domain on an asset with an unsigned local draft still throws ASSET_WEB_STATE (#798 control)", async () => {
+  const store = storage();
+  const created = await OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+  }).lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const reader = OriginalsSDK.create({ storageAdapter: store });
+  const asset = (await reader.lifecycle.loadAsset(created.serialize())).asset;
+  await asset.addResourceVersion("art", "draft", "text/plain", {
+    onAppendFailure: "skip",
+  });
+  expect(asset.localResources.length).toBeGreaterThan(0);
+  let thrown: unknown;
+  try {
+    await reader.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEB_STATE");
+});
+
 test('equal resource bytes with different signed media types round-trip without colliding transport metadata', async () => {
   const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
   const asset = await sdk.lifecycle.createAsset([
