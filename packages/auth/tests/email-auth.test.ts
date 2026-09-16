@@ -856,6 +856,29 @@ describe('email-auth', () => {
         expect(verifyOtp).not.toHaveBeenCalled();
       });
 
+      test('a claim rejected because the session was concurrently deleted is reported as invalid/expired, not "in progress"', async () => {
+        const external = createExternalAtomicStorage();
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        // Simulate another concurrent path (expiry cleanup, an exhausted
+        // attempt budget on a racing call) deleting the session out from
+        // under a claim that's already in flight.
+        const originalClaim = external.claimForVerification!;
+        external.claimForVerification = async (sessionId: string) => {
+          external.sessions.delete(sessionId);
+          return originalClaim(sessionId);
+        };
+
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client2 = createMockTurnkeyClient({ verifyOtp });
+
+        await expect(
+          verifyEmailAuth(initResult.sessionId, '123456', client2, external, verifyOptions)
+        ).rejects.toThrow('Invalid or expired session');
+        expect(verifyOtp).not.toHaveBeenCalled();
+      });
+
       test('two concurrent calls against a shared atomic store: exactly one wins the claim', async () => {
         const external = createExternalAtomicStorage();
         let calls = 0;

@@ -324,8 +324,15 @@ export async function verifyEmailAuth(
   if (storage.claimForVerification) {
     const claimed = await storage.claimForVerification(sessionId);
     if (!claimed) {
+      // Re-fetch for a precise error: the rejected claim alone doesn't say
+      // *why* — the session could since have been deleted (expired
+      // cleanup, or an exhausted-attempts destroy racing us), not just
+      // already verified or already in progress.
       const current = storage.get(sessionId);
-      if (current?.verified) {
+      if (!current) {
+        throw new Error('Invalid or expired session');
+      }
+      if (current.verified) {
         throw new Error(
           'This session has already been verified. Please log in or request a new code.'
         );
