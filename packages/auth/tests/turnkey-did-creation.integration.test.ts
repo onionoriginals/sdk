@@ -160,6 +160,16 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
 
       // Log must be present
       expect(result.didLog).toBeTruthy();
+
+      // Every verification method must be self-referential (#804): each
+      // must carry `controller === result.did`, not the empty-string
+      // controller that used to defeat didwebvh-ts's `vm.controller ?? did`
+      // fallback.
+      const doc = result.didDocument as { verificationMethod: Array<{ controller: string }> };
+      expect(doc.verificationMethod.length).toBeGreaterThan(0);
+      for (const vm of doc.verificationMethod) {
+        expect(vm.controller).toBe(result.did);
+      }
     },
     15_000
   );
