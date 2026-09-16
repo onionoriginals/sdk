@@ -152,6 +152,37 @@ describe('signed inscription recovery', () => {
     expect(result.broadcast).toBe('reveal_broadcast');
     expect(calls).toBe(2);
   }));
+
+  it('treats an "already known" duplicate-broadcast rejection as success, not a failure', async () => withStore(async (directory) => {
+    const params = parameters();
+    params.provider.broadcastTransaction = async () => { throw new Error('txn-already-in-mempool'); };
+    params.provider.getTransactionStatus = async () => ({ confirmed: false });
+    const result = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(result.broadcast).toBe('reveal_broadcast');
+    expect(result.error).toBeUndefined();
+  }));
+
+  it('retrying an already-broadcast, still-pending reveal stays reveal_broadcast with no error', async () => withStore(async (directory) => {
+    const params = parameters();
+    const first = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(first.broadcast).toBe('reveal_broadcast');
+    expect(first.error).toBeUndefined();
+
+    // A retry against a provider that rejects the resubmission for a reason
+    // that carries no evidence the original, already-recorded broadcast was
+    // lost: getTransactionStatus never confirms it either way.
+    const resumed = await resumeInscriptionOnSat({
+      recoveryId: first.recoveryId,
+      recoveryStore: diskStore(directory),
+      provider: {
+        broadcastTransaction: async () => { throw new Error('bad-txns-inputs-missingorspent'); },
+        getTransactionStatus: async () => ({ confirmed: false }),
+      } as any,
+    });
+
+    expect(resumed.broadcast).toBe('reveal_broadcast');
+    expect(resumed.error).toBeUndefined();
+  }));
 });
 
 

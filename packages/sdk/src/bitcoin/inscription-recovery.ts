@@ -140,6 +140,27 @@ async function isCurrentlyConfirmed(provider: OrdinalsProvider, txid: string): P
   catch { return false; }
 }
 
+/**
+ * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
+ * the network. Matched as a closed set rather than a bare /already/: a
+ * transport or provider error that merely CONTAINS the word ("connection
+ * already closed") would otherwise count as a successful broadcast. Mirrors
+ * apps/landing/server/bitcoin.ts's isAlreadyKnownTxError for the same reason:
+ * a duplicate-broadcast rejection of the identical signed bytes is positive
+ * evidence the transaction is already out there, not a failed broadcast.
+ */
+const ALREADY_KNOWN_TX_ERRORS = [
+  'txn-already-in-mempool',
+  'txn-already-known',
+  'transaction already in block chain', // RPC -27
+  'transaction already in mempool',
+];
+
+function isAlreadyKnownTxError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
+  return ALREADY_KNOWN_TX_ERRORS.some((known) => message.includes(known));
+}
+
 /** Submit only these exact bytes. Direct broadcasting requires a durable store, never an implicit memory fallback. */
 export async function submitPreparedInscriptionOnSat(params: {
   prepared: PreparedInscriptionOnSat;
@@ -164,6 +185,12 @@ export async function submitPreparedInscriptionOnSat(params: {
     }
     record = structuredClone(saved);
   }
+  // A prior 'reveal_broadcast' record is itself positive proof this exact
+  // reveal already went out. A retry's resubmission of the identical bytes
+  // can be rejected for reasons that carry no evidence the original broadcast
+  // was lost; that ambiguity must never erase already-achieved proof or
+  // manufacture a fresh error out of retrying the same prepared wrapper.
+  const priorRevealBroadcast = saved?.broadcast === 'reveal_broadcast';
   if (saved && record.broadcast !== 'prepared') {
     // A persisted acknowledgement describes an earlier submission, not present
     // chain state. Eviction/reorg can remove either transaction. Only a fresh
@@ -210,8 +237,13 @@ export async function submitPreparedInscriptionOnSat(params: {
       if (txid !== prepared.commitTxId) throw new Error('Provider commit id does not match the signed transaction.');
     } catch (error) {
       // Unknown/not-confirmed conflates absent and mempool in this provider API.
-      // Only actual confirmation can independently resolve a lost acknowledgement.
-      if (!await isCurrentlyConfirmed(provider, prepared.commitTxId)) return result(record, error);
+      // Actual confirmation, the provider's own "already on the network"
+      // rejection, or a prior positive reveal_broadcast record (this pair
+      // necessarily reached a valid commit to get there) all independently
+      // resolve a lost acknowledgement without treating it as a failure.
+      if (!priorRevealBroadcast && !isAlreadyKnownTxError(error) && !await isCurrentlyConfirmed(provider, prepared.commitTxId)) {
+        return result(record, error);
+      }
     }
     record.broadcast = 'commit_broadcast';
   }
@@ -222,7 +254,12 @@ export async function submitPreparedInscriptionOnSat(params: {
     const txid = await provider.broadcastTransaction(prepared.revealTxHex);
     if (txid !== prepared.revealTxId) throw new Error('Provider reveal id does not match the signed transaction.');
   } catch (error) {
-    if (!await isCurrentlyConfirmed(provider, prepared.revealTxId)) return result(record, error);
+    // Same tolerance as the commit attempt above: a prior definite
+    // reveal_broadcast, or the provider's own duplicate-broadcast rejection,
+    // is positive evidence this exact reveal is already out there.
+    if (!priorRevealBroadcast && !isAlreadyKnownTxError(error) && !await isCurrentlyConfirmed(provider, prepared.revealTxId)) {
+      return result(record, error);
+    }
   }
   record.broadcast = 'reveal_broadcast';
   try { await persist(recoveryStore, record); } catch (error) { return result(record, error); }
