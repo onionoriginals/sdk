@@ -271,13 +271,26 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       store.markRebroadcast(sub, r.commitTxId);
       let atStatus = current.status;
       if (!st.confirmed) {
-        if (await broadcastIdempotent(current.signedCommitHex!)) continue;
+        const commitErr = await broadcastIdempotent(current.signedCommitHex!);
+        if (commitErr) {
+          if (origin === 'sweep') {
+            money('inscription_sweep_push_failed', {
+              sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId, leg: 'commit', reason: commitErr,
+            });
+          }
+          continue;
+        }
         // Guarded write: a concurrent pass (an overlapping poll, or the
         // background sweep) may have already moved this record while the
         // broadcast above was in flight. Only advance it if it is still
         // exactly where this pass last observed it; otherwise stop touching
         // it rather than clobber whatever that other pass decided (#677).
-        if (!store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'commit_broadcast')) continue;
+        if (!store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'commit_broadcast')) {
+          if (origin === 'sweep') {
+            money('inscription_sweep_raced', { sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId });
+          }
+          continue;
+        }
         atStatus = 'commit_broadcast';
         changed = true;
       }
@@ -297,12 +310,18 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
               inscriptionId: current.inscriptionId,
             });
           }
+        } else if (origin === 'sweep') {
+          // The reveal genuinely reached the network, but a concurrent pass
+          // already moved this record before this write landed: not a
+          // failure, but still a decision worth reconstructing later (#694).
+          money('inscription_sweep_raced', { sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId });
         }
       } else if (origin === 'sweep') {
         money('inscription_sweep_push_failed', {
           sub,
           commitTxId: r.commitTxId,
           revealTxId: current.revealTxId,
+          leg: 'reveal',
           reason: revealErr,
         });
       }

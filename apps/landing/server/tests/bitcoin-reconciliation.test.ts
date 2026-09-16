@@ -227,6 +227,86 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
   });
 
+  test('the background sweep logs a failed commit rebroadcast, not just reveal pushes', async () => {
+    const commit = '1f'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    // Past the rebroadcast window and still unconfirmed: the loop attempts to
+    // re-push the commit first, and that push fails.
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'commit_broadcast',
+      updatedAt: new Date(SWEEP_NOW - 60 * 60_000).toISOString(),
+    }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      broadcastIdempotent: async () => 'bad-txns-inputs-missingorspent',
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW,
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_push_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit, leg: 'commit' });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast'); // untouched
+  });
+
+  test('the background sweep logs a race when a concurrent pass wins the commit_broadcast transition', async () => {
+    const commit = '2a'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'signed',
+      updatedAt: new Date(SWEEP_NOW - 60 * 60_000).toISOString(),
+    }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      // A concurrent pass moves the record out from under this one between
+      // the commit broadcast and this pass's own guarded write (#677/#694).
+      broadcastIdempotent: async (txHex) => {
+        if (txHex === '02aa') store.setStatus('sub-1', commit, 'reveal_broadcast');
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW,
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const raced = moneyEvents.find((m) => m.event === 'inscription_sweep_raced');
+    expect(raced?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(store.get('sub-1', commit)!.status).toBe('reveal_broadcast'); // the concurrent pass's result stands
+  });
+
+  test('the background sweep logs a race when a concurrent pass wins the reveal_broadcast transition', async () => {
+    const commit = '2b'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      // A concurrent pass retires the record between this pass's reveal push
+      // and its own guarded write.
+      broadcastIdempotent: async (txHex) => {
+        if (txHex === '02bb') store.setStatus('sub-1', commit, 'confirmed', { confirmations: 6 });
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const raced = moneyEvents.find((m) => m.event === 'inscription_sweep_raced');
+    expect(raced?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(moneyEvents.some((m) => m.event === 'inscription_sweep_completed')).toBe(false);
+  });
+
   test('a confirmed reveal below the recovery horizon stays confirmed, not retired', async () => {
     const commit = '2'.repeat(64);
     const { store, reconciler } = harness({
