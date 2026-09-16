@@ -738,7 +738,11 @@ export class WebVHManager {
       } else if (typeof (providedSigner as unknown as { verify?: unknown }).verify === 'function') {
         verifier = providedSigner as unknown as ExternalVerifier;
       } else {
-        throw new Error(
+        // Same code/message as identity-operations.ts's resolveVerifier (#720)
+        // for the identical condition, so the two update APIs share one
+        // error contract instead of two for the same failure.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
           'verifier is required when the provided signer does not implement verify()'
         );
       }

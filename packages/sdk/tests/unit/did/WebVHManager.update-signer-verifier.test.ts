@@ -12,7 +12,7 @@ import { describe, test, expect } from 'bun:test';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey } from '@originals/cel';
+import { multikey, StructuredError } from '@originals/cel';
 import type { ExternalSigner, ExternalVerifier } from '../../../src/types';
 
 /** A signer that ALSO implements verify — mirrors TurnkeyWebVHSigner's shape. */
@@ -113,11 +113,18 @@ describe('#702 — updateDIDWebVH falls back to the signer as verifier', () => {
       updateKeys: [keyPair.publicKey],
     });
 
-    await expect(manager.updateDIDWebVH({
-      did: created.did,
-      currentLog: created.log,
-      updates: { alsoKnownAs: ['did:example:456'] },
-      signer: signOnly,
-    })).rejects.toThrow(/verifier is required when the provided signer does not implement verify/);
+    try {
+      await manager.updateDIDWebVH({
+        did: created.did,
+        currentLog: created.log,
+        updates: { alsoKnownAs: ['did:example:456'] },
+        signer: signOnly,
+      });
+      throw new Error('expected updateDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_VERIFIER_REQUIRED');
+      expect((err as StructuredError).message).toMatch(/verifier is required when the provided signer does not implement verify/);
+    }
   }, 30000);
 });
