@@ -255,13 +255,23 @@ test("rejects duplicate inscription ids in independent content evidence", () => 
   expect(result.status).toBe("incomplete");
 });
 
-test("rejects duplicate inscription ids that differ only in hex case (#808)", () => {
+test("rejects duplicate inscription ids that differ only in hex case, even with conflicting content (#808)", () => {
+  // Distinct content digests: if the dedup check ever regressed to comparing
+  // raw (non-normalized) ids, these two entries would coexist under
+  // different-case map keys instead of being rejected as a duplicate, and
+  // the conflicting second entry could be silently ignored rather than
+  // surfaced. Same-content variants wouldn't distinguish that from a
+  // correctly normalized dedup check.
   const snapshot = observations(fixtures.cases[0]);
   const evidence = completeContentEvidence(snapshot);
   const result = resolveSat(snapshot, {
     independentContent: [
       evidence[0],
-      { ...evidence[0], inscriptionId: evidence[0].inscriptionId.toUpperCase() },
+      {
+        ...evidence[0],
+        inscriptionId: evidence[0].inscriptionId.toUpperCase(),
+        contentDigest: digestBytes(new TextEncoder().encode("conflicting content")),
+      },
     ],
   });
   expect(result.status).toBe("incomplete");
