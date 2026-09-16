@@ -658,6 +658,120 @@ describe('email-auth', () => {
         expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
       });
     });
+
+    describe('single-use guard', () => {
+      test('a second call on an already-verified session is rejected without minting a new token', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const first = await verifyEmailAuth(
+          sessionId,
+          '123456',
+          client,
+          storage,
+          verifyOptions
+        );
+        expect(first.verified).toBe(true);
+        expect(first.verificationToken).toBe('token-1');
+
+        await expect(
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+        ).rejects.toThrow('already been verified');
+
+        // Turnkey must not have been asked to verify the (already-consumed)
+        // OTP a second time, and no second token was minted.
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+      });
+
+      test('two concurrent calls on the same session mint at most one token', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const results = await Promise.allSettled([
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions),
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions),
+        ]);
+
+        const fulfilled = results.filter(
+          (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof verifyEmailAuth>>> =>
+            r.status === 'fulfilled'
+        );
+        const rejected = results.filter((r) => r.status === 'rejected');
+
+        // Exactly one of the two concurrent calls succeeds; the other is
+        // rejected as already-in-progress, and Turnkey's verifyOtp (which
+        // consumes the one-time otpId) is only invoked once.
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect((rejected[0] as PromiseRejectedResult).reason.message).toContain(
+          'already in progress'
+        );
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+
+        const session = storage.get(sessionId)!;
+        expect(session.verified).toBe(true);
+        expect(session.verifying).toBe(false);
+      });
+
+      test('the claim is released after a failed verifyOtp attempt so a corrected code can retry', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return calls === 1
+            ? Promise.reject(new Error('OTP code invalid'))
+            : Promise.resolve({ verificationToken: 'token_ok' });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        const result = await verifyEmailAuth(
+          sessionId,
+          '222222',
+          client,
+          storage,
+          verifyOptions
+        );
+        expect(result.verified).toBe(true);
+        expect(result.verificationToken).toBe('token_ok');
+      });
+
+      test('the claim is released after a failed encryption attempt so a retry with a valid override can proceed', async () => {
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_ok' }));
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        // No signer override: the bundle's signature is untrusted, so
+        // encryptOtpCode throws before Turnkey is ever called.
+        await expect(
+          verifyEmailAuth(sessionId, '123456', client, storage)
+        ).rejects.toThrow('Failed to encrypt OTP code');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        const result = await verifyEmailAuth(
+          sessionId,
+          '123456',
+          client,
+          storage,
+          verifyOptions
+        );
+        expect(result.verified).toBe(true);
+      });
+    });
   });
 
   describe('isSessionVerified', () => {

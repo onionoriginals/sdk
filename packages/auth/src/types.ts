@@ -70,6 +70,14 @@ export interface EmailAuthSession {
   /** Whether the session has been verified */
   verified: boolean;
   /**
+   * Set while a `verifyEmailAuth` call for this session is in flight, from
+   * before the first `await` until the call either succeeds or releases the
+   * claim on failure. Rejects a second call — sequential or concurrent —
+   * from re-submitting the same (already-consumed) OTP to Turnkey and
+   * minting a second, independent verification token.
+   */
+  verifying?: boolean;
+  /**
    * Number of failed OTP verification attempts for this session. The
    * session is destroyed once the attempt budget is exhausted.
    */

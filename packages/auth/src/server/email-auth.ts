@@ -266,6 +266,29 @@ export async function verifyEmailAuth(
     throw new Error('Invalid verification code format');
   }
 
+  // Single-use guard. This whole block runs synchronously (no `await`
+  // above it since the session/format checks), so for the in-memory and
+  // any similarly synchronous SessionStorage, a second call — issued either
+  // after this one has finished or concurrently while it is still awaiting
+  // Turnkey — cannot observe `verified: false, verifying: false` at the
+  // same time as this call: whichever call's synchronous prefix runs first
+  // claims the session here before the other gets a chance to check it.
+  // This closes both sequential replay (session.verified) and concurrent
+  // replay (session.verifying) of an already-successful or in-progress
+  // verification, without re-submitting the same code to Turnkey.
+  if (session.verified) {
+    throw new Error(
+      'This session has already been verified. Please log in or request a new code.'
+    );
+  }
+  if (session.verifying) {
+    throw new Error(
+      'A verification is already in progress for this session. Please wait for it to complete.'
+    );
+  }
+  session.verifying = true;
+  storage.set(sessionId, session);
+
   console.log('[email-auth] Verifying OTP');
 
   // Encrypt the OTP code (plus a client public key) to the target encryption
@@ -287,6 +310,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
+    // Release the claim: this attempt never reached Turnkey, so the
+    // session is still eligible for a retry.
+    session.verifying = false;
+    storage.set(sessionId, session);
     throw new Error(
       `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -329,6 +356,8 @@ export async function verifyEmailAuth(
       );
     }
     session.otpAttempts = attempts;
+    // Release the claim so a corrected code can be retried.
+    session.verifying = false;
     storage.set(sessionId, session);
 
     throw new Error(
@@ -365,6 +394,7 @@ export async function verifyEmailAuth(
 
   // Mark session as verified
   session.verified = true;
+  session.verifying = false;
   session.subOrgId = subOrgId;
   storage.set(sessionId, session);
 
