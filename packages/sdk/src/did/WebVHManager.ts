@@ -340,7 +340,10 @@ export class WebVHManager {
     if (paths && paths.length > 0) {
       for (const segment of paths) {
         if (!this.isValidPathSegment(segment)) {
-          throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+          throw new StructuredError(
+            'WEBVH_INVALID_PATH_SEGMENT',
+            `Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`
+          );
         }
       }
     }
@@ -376,7 +379,10 @@ export class WebVHManager {
     // masked by a "verificationMethods are required" error the caller would hit
     // first only to then discover the combination is unsupported anyway.
     if (prerotation && externalSigner) {
-      throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
+      throw new StructuredError(
+        'WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED',
+        'prerotation is not supported with externalSigner; manage nextKeyHashes externally'
+      );
     }
 
     // keyPair and externalSigner are mutually exclusive (CLAUDE.md gotcha #7).
@@ -393,10 +399,16 @@ export class WebVHManager {
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
-        throw new Error('verificationMethods are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_VERIFICATION_METHODS_REQUIRED',
+          'verificationMethods are required when using externalSigner'
+        );
       }
       if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
-        throw new Error('updateKeys are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_UPDATE_KEYS_REQUIRED',
+          'updateKeys are required when using externalSigner'
+        );
       }
 
 
@@ -409,7 +421,11 @@ export class WebVHManager {
       } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
         verifier = externalSigner as unknown as ExternalVerifier;
       } else {
-        throw new Error(
+        // Same code/message as identity-operations.ts's resolveVerifier and
+        // updateDIDWebVH (#720) for the identical condition, so callers get
+        // one error contract for this failure across every DID API.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
           'externalVerifier is required when the provided externalSigner does not implement verify()'
         );
       }

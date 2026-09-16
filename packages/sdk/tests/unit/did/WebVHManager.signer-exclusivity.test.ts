@@ -158,4 +158,101 @@ describe('DIDManager.createDIDWebVH path-segment validation (delegated to WebVHM
       paths: ['..', 'x'],
     })).rejects.toThrow(/Invalid path segment/);
   }, 15000);
+
+  // #711: WebVHManager.createDIDWebVH's validation-failure paths must throw
+  // a typed StructuredError with a stable .code, matching the public-seam
+  // contract CLAUDE.md documents and that createDIDWebVH is named by name
+  // as a governed call site for.
+  test('malformed path segments throw a StructuredError with a stable code', async () => {
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({ domain: 'example.com', paths: ['..', 'x'] });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_INVALID_PATH_SEGMENT');
+    }
+  }, 15000);
+});
+
+describe('WebVHManager.createDIDWebVH externalSigner validation (#711)', () => {
+  test('prerotation with externalSigner throws WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+        updateKeys: [keyPair.publicKey],
+        prerotation: true,
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED');
+    }
+  }, 15000);
+
+  test('missing verificationMethods with externalSigner throws WEBVH_VERIFICATION_METHODS_REQUIRED', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        updateKeys: [keyPair.publicKey],
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_VERIFICATION_METHODS_REQUIRED');
+    }
+  }, 15000);
+
+  test('missing updateKeys with externalSigner throws WEBVH_UPDATE_KEYS_REQUIRED', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_UPDATE_KEYS_REQUIRED');
+    }
+  }, 15000);
+
+  test('externalSigner without verify() and no externalVerifier throws WEBVH_VERIFIER_REQUIRED', async () => {
+    const km = new KeyManager();
+    const { keyPair } = await buildMockExternalSigner(km);
+    const manager = new WebVHManager();
+    const signOnlySigner: ExternalSigner = {
+      getVerificationMethodId: () => `did:key:${keyPair.publicKey}`,
+      sign: async () => ({ proofValue: '' }),
+    };
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signOnlySigner,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+        updateKeys: [keyPair.publicKey],
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      // Same code identity-operations.ts's resolveVerifier and
+      // updateDIDWebVH use for the identical condition (#720).
+      expect((err as StructuredError).code).toBe('WEBVH_VERIFIER_REQUIRED');
+    }
+  }, 15000);
 });
