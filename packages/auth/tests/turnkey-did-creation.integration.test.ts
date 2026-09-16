@@ -25,7 +25,11 @@ import { describe, test, expect } from 'bun:test';
 // configure it ourselves.
 import { encoding } from '@originals/sdk';
 import * as ed25519Module from '@noble/ed25519';
-import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
+import {
+  TurnkeyDIDSigner,
+  createDIDWithTurnkey,
+  TurnkeyUpdateKeyRoleError,
+} from '../src/client/turnkey-did-signer';
 import { TurnkeySessionExpiredError } from '../src/client/turnkey-client';
 import type { Turnkey } from '@turnkey/sdk-server';
 
@@ -259,4 +263,94 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
     },
     10_000
   );
+
+  describe('#734 — updateKeyAccount role validation', () => {
+    // No signing call should ever be reached for these — assert the client's
+    // signRawPayload is never invoked, in addition to the rejection itself.
+    function makeUnreachableSigningClient(): { client: Turnkey; callCount: () => number } {
+      let calls = 0;
+      const client = {
+        apiClient: () => ({
+          signRawPayload: async () => {
+            calls++;
+            throw new Error('signRawPayload should not be called for a rejected updateKeyAccount');
+          },
+        }),
+      } as unknown as Turnkey;
+      return { client, callCount: () => calls };
+    }
+
+    test('rejects a CURVE_SECP256K1-labeled updateKeyAccount before any signing call', async () => {
+      const { client, callCount } = makeUnreachableSigningClient();
+
+      await expect(
+        createDIDWithTurnkey({
+          turnkeyClient: client,
+          updateKeyAccount: {
+            address: 'key_addr_secp',
+            curve: 'CURVE_SECP256K1',
+            path: "m/44'/501'/1'/0'",
+            addressFormat: 'ADDRESS_FORMAT_SOLANA',
+          },
+          subOrgId: 'sub_org_test',
+          authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
+          assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+          updateKeyPublic: 'z6MknGc3omQfErKtumfzKgaEsXYP4amJiosdMXaGK9PFqaHh',
+          domain: 'magby.originals.build',
+          slug: 'wrong-curve-test',
+        })
+      ).rejects.toBeInstanceOf(TurnkeyUpdateKeyRoleError);
+
+      expect(callCount()).toBe(0);
+    });
+
+    test('rejects an Ed25519 updateKeyAccount at the wrong (assertion-key) path before any signing call', async () => {
+      const { client, callCount } = makeUnreachableSigningClient();
+
+      await expect(
+        createDIDWithTurnkey({
+          turnkeyClient: client,
+          updateKeyAccount: {
+            address: 'key_addr_assertion',
+            curve: 'CURVE_ED25519',
+            path: "m/44'/501'/0'/0'", // did-assertion path, not did-update
+            addressFormat: 'ADDRESS_FORMAT_SOLANA',
+          },
+          subOrgId: 'sub_org_test',
+          authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
+          assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+          updateKeyPublic: 'z6MknGc3omQfErKtumfzKgaEsXYP4amJiosdMXaGK9PFqaHh',
+          domain: 'magby.originals.build',
+          slug: 'wrong-path-test',
+        })
+      ).rejects.toBeInstanceOf(TurnkeyUpdateKeyRoleError);
+
+      expect(callCount()).toBe(0);
+    });
+
+    test('accepts the canonical did-update account (CURVE_ED25519 at the did-update path)', async () => {
+      const update = await generateKeypair();
+      const auth = await generateKeypair();
+      const assertion = await generateKeypair();
+      const turnkeyClient = makeRealSigningClient(update.privateKeyBytes);
+
+      const result = await createDIDWithTurnkey({
+        turnkeyClient,
+        updateKeyAccount: {
+          address: 'key_addr_update',
+          curve: 'CURVE_ED25519',
+          path: "m/44'/501'/1'/0'",
+          addressFormat: 'ADDRESS_FORMAT_SOLANA',
+        },
+        subOrgId: 'sub_org_role_valid_test',
+        authKeyPublic: auth.publicKeyMultibase,
+        assertionKeyPublic: assertion.publicKeyMultibase,
+        updateKeyPublic: update.publicKeyMultibase,
+        domain: 'magby.originals.build',
+        slug: 'role-valid-test-user',
+      });
+
+      expect(result.did).toMatch(/^did:/);
+    }, 15_000);
+  });
 });

@@ -8,7 +8,33 @@ import { Turnkey } from '@turnkey/sdk-server';
 import { OriginalsSDK, encoding, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
-import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
+import {
+  TurnkeySessionExpiredError,
+  TURNKEY_ACCOUNT_ROLES,
+  withTokenExpiration,
+} from './turnkey-client.js';
+
+/**
+ * Thrown by {@link createDIDWithTurnkey} when the supplied `updateKeyAccount`
+ * does not match the canonical `did-update` role (curve `CURVE_ED25519` at
+ * the exact derivation path Turnkey provisions for the DID update key). The
+ * did:webvh log this function mints is Ed25519-only (`packages/sdk/V3.md`:
+ * "Method-log custody must be Ed25519"), so wiring in any other account here
+ * would silently mint a controller that this SDK's own resolvers reject or
+ * that carries the wrong authority — this rejects it before any signing call.
+ */
+export class TurnkeyUpdateKeyRoleError extends Error {
+  constructor(account: Pick<TurnkeyWalletAccount, 'curve' | 'path'>) {
+    const updateRole = TURNKEY_ACCOUNT_ROLES.find((r) => r.role === 'did-update')!;
+    super(
+      `updateKeyAccount must be the canonical did-update account ` +
+        `(curve ${updateRole.curve} at path ${updateRole.path}), got ` +
+        `curve ${account.curve} at path ${account.path}. Use getKeyByRole(wallets, 'did-update') ` +
+        `to select the correct account.`
+    );
+    this.name = 'TurnkeyUpdateKeyRoleError';
+  }
+}
 
 interface SigningInput {
   document: Record<string, unknown>;
@@ -152,6 +178,15 @@ export async function createDIDWithTurnkey(params: {
     slug,
     onExpired,
   } = params;
+
+  // Reject before any signing call: the did:webvh update-key role is
+  // Ed25519-only, and this package provisions the update key at a specific
+  // path distinct from the assertion key (see #744) — a curve check alone
+  // is not enough to tell them apart.
+  const updateRole = TURNKEY_ACCOUNT_ROLES.find((r) => r.role === 'did-update')!;
+  if (updateKeyAccount.curve !== updateRole.curve || updateKeyAccount.path !== updateRole.path) {
+    throw new TurnkeyUpdateKeyRoleError(updateKeyAccount);
+  }
 
   // Create Turnkey signer for the update key
   const signer = new TurnkeyDIDSigner(
