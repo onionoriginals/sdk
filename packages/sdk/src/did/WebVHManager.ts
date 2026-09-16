@@ -70,11 +70,18 @@ export function assertEd25519WebVHUpdateKeys(updateKeys: readonly string[] | und
     let type: string;
     try {
       type = multikey.decodePublicKey(key).type;
-    } catch {
-      throw new Error(`did:webvh updateKey is not a valid public multikey: ${key}`);
+    } catch (e) {
+      // Caller-controlled input (createDIDWebVH's externalSigner path, and
+      // every rotation/recovery entry) crossing the public SDK seam (#711):
+      // needs a stable .code, not a raw Error.
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_INVALID',
+        `did:webvh updateKey is not a valid public multikey: ${key} (${(e as Error).message})`
+      );
     }
     if (type !== 'Ed25519') {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_NOT_ED25519',
         `did:webvh only supports Ed25519 keys (resolution verifies DID logs with Ed25519); updateKey uses ${type}`
       );
     }
@@ -421,9 +428,11 @@ export class WebVHManager {
       } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
         verifier = externalSigner as unknown as ExternalVerifier;
       } else {
-        // Same code/message as identity-operations.ts's resolveVerifier and
-        // updateDIDWebVH (#720) for the identical condition, so callers get
-        // one error contract for this failure across every DID API.
+        // Same .code as identity-operations.ts's resolveVerifier and
+        // updateDIDWebVH (#720) for the identical condition, so callers can
+        // branch on one error contract for this failure across every DID
+        // API. Message text names this API's own externalSigner/
+        // externalVerifier option names rather than matching verbatim.
         throw new StructuredError(
           'WEBVH_VERIFIER_REQUIRED',
           'externalVerifier is required when the provided externalSigner does not implement verify()'

@@ -255,4 +255,43 @@ describe('WebVHManager.createDIDWebVH externalSigner validation (#711)', () => {
       expect((err as StructuredError).code).toBe('WEBVH_VERIFIER_REQUIRED');
     }
   }, 15000);
+
+  test('malformed externalSigner updateKeys throws WEBVH_UPDATE_KEY_INVALID', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+        updateKeys: ['not-a-valid-multikey'],
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_UPDATE_KEY_INVALID');
+    }
+  }, 15000);
+
+  test('non-Ed25519 externalSigner updateKeys throws WEBVH_UPDATE_KEY_NOT_ED25519', async () => {
+    const km = new KeyManager();
+    const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
+    const secp256k1KeyPair = await km.generateKeyPair('ES256K');
+    const manager = new WebVHManager();
+    try {
+      await manager.createDIDWebVH({
+        domain: 'example.com',
+        externalSigner: signer,
+        externalVerifier: verifier,
+        verificationMethods: [{ type: 'Multikey', publicKeyMultibase: keyPair.publicKey }],
+        updateKeys: [secp256k1KeyPair.publicKey],
+      });
+      throw new Error('expected createDIDWebVH to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StructuredError);
+      expect((err as StructuredError).code).toBe('WEBVH_UPDATE_KEY_NOT_ED25519');
+    }
+  }, 15000);
 });
