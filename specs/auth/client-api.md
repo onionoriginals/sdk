@@ -4,76 +4,88 @@ Import: `import { ... } from '@originals/auth/client'`
 
 ---
 
-## Direct Auth Proxy Functions
+## Low-Level Turnkey Functions (server-side only)
 
-These functions call Turnkey directly via the auth proxy.
+**`initializeTurnkeyClient()` has been removed.** It read server-grade org
+API secrets and has unconditionally thrown since it was pulled out of the
+client bundle for that reason; it is not a working entry point despite still
+being exported (as a throw-only compatibility shim). There is no supported
+way to talk to Turnkey directly from the browser — use the
+[Server-Proxied Auth Functions](#server-proxied-auth-functions) below for
+browser-side code.
 
-### `initializeTurnkeyClient()`
+The functions in this section call Turnkey directly and require a
+`Turnkey` client instance and an explicit `subOrgId`. They are for your own
+server code: obtain the client from `createTurnkeyClient()`
+(`@originals/auth/server`, which holds the org API secret) and pass the
+sub-organization ID returned by `verifyEmailAuth`/`initiateEmailAuth`.
 
-Initialize Turnkey client for browser use.
+### `initOtp(turnkeyClient, email, subOrgId?)`
 
-```typescript
-function initializeTurnkeyClient(): TurnkeyClient
-```
-
-**Environment Variables Required:**
-- `VITE_TURNKEY_AUTH_PROXY_CONFIG_ID`
-- `VITE_TURNKEY_ORGANIZATION_ID`
-
----
-
-### `initOtp(turnkeyClient, email)`
-
-Send OTP code to email via Turnkey auth proxy.
+Send OTP code to email via Turnkey (Turnkey v6 encrypted-bundle flow).
 
 ```typescript
 function initOtp(
-  turnkeyClient: TurnkeyClient,
-  email: string
-): Promise<string>  // Returns OTP ID
-```
-
----
-
-### `completeOtp(turnkeyClient, otpId, otpCode, email)`
-
-Verify OTP and establish session with Turnkey.
-
-```typescript
-function completeOtp(
-  turnkeyClient: TurnkeyClient,
-  otpId: string,
-  otpCode: string,
-  email: string
+  turnkeyClient: Turnkey,
+  email: string,
+  subOrgId?: string  // Omit to run under the parent (default) org
 ): Promise<{
-  sessionToken: string;
-  userId: string;
-  action: 'login' | 'signup';
+  otpId: string;
+  otpEncryptionTargetBundle: string;  // Required by completeOtp
 }>
 ```
 
 ---
 
-### `fetchUser(turnkeyClient, onExpired?)`
+### `completeOtp(turnkeyClient, otpId, otpCode, subOrgId, otpEncryptionTargetBundle, options?)`
+
+Verify an OTP code by encrypting it to the target bundle from `initOtp` and
+submitting it to Turnkey (Turnkey v6 no longer accepts plaintext codes).
+
+```typescript
+function completeOtp(
+  turnkeyClient: Turnkey,
+  otpId: string,
+  otpCode: string,
+  subOrgId: string,               // Echoed back in the result, for otpLogin
+  otpEncryptionTargetBundle: string,  // From initOtp's result
+  options?: {
+    publicKey?: string;            // Client P-256 public key to bind the token to
+    organizationId?: string;       // Must match initOtp's org context, if overridden
+    dangerouslyOverrideSignerPublicKey?: string;  // Tests/non-prod only
+  }
+): Promise<{
+  verificationToken: string;
+  subOrgId: string;
+  publicKey: string;
+  privateKey?: string;  // Present only when `options.publicKey` was omitted
+}>
+```
+
+---
+
+### `fetchUser(turnkeyClient, subOrgId, onExpired?)`
 
 Fetch current user information.
 
 ```typescript
 function fetchUser(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<unknown>
 ```
 
 ---
 
-### `fetchWallets(turnkeyClient, onExpired?)`
+### `fetchWallets(turnkeyClient, subOrgId, onExpired?)`
 
 Fetch user's wallets with account details.
 
 ```typescript
 function fetchWallets(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet[]>
 ```
@@ -144,13 +156,14 @@ is also exported as `TURNKEY_ACCOUNT_ROLES`.
 
 ---
 
-### `createWalletWithAccounts(turnkeyClient, onExpired?)`
+### `createWalletWithAccounts(turnkeyClient, subOrgId, onExpired?)`
 
 Create new wallet with required accounts for DID creation.
 
 ```typescript
 function createWalletWithAccounts(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet>
 ```
@@ -161,13 +174,14 @@ Creates wallet with:
 
 ---
 
-### `ensureWalletWithAccounts(turnkeyClient, onExpired?)`
+### `ensureWalletWithAccounts(turnkeyClient, subOrgId, onExpired?)`
 
 Ensure user has required accounts, creating if needed.
 
 ```typescript
 function ensureWalletWithAccounts(
-  turnkeyClient: TurnkeyClient,
+  turnkeyClient: Turnkey,
+  subOrgId: string,
   onExpired?: () => void
 ): Promise<TurnkeyWallet[]>
 ```
@@ -223,8 +237,22 @@ function verifyOtp(
   sessionId: string,
   code: string,
   endpoint?: string,  // Default: '/api/auth/verify-otp'
-  options?: ServerAuthOptions
+  options?: VerifyOtpClientOptions
 ): Promise<VerifyAuthResult>
+```
+
+**Options:**
+```typescript
+interface VerifyOtpClientOptions extends ServerAuthOptions {
+  /**
+   * Compressed P-256 public key (hex) generated in the browser. The
+   * verification token is bound to this key, so `privateKey` is never
+   * present in the result. Strongly recommended: without it, the server
+   * generates the keypair itself and must return the private key in the
+   * response.
+   */
+  publicKey?: string;
+}
 ```
 
 **Returns:**
@@ -233,14 +261,25 @@ interface VerifyAuthResult {
   verified: boolean;
   email: string;
   subOrgId: string;
+  /** Consumed by a subsequent Turnkey `otpLogin` activity. */
+  verificationToken?: string;
+  /** The key the verification token is bound to. */
+  publicKey?: string;
+  /**
+   * Present only when `options.publicKey` was omitted from the request —
+   * the server generated the keypair and must return the private key here.
+   * Sensitive: never log or persist insecurely.
+   */
+  privateKey?: string;
 }
 ```
 
 **Server Endpoint Contract:**
 ```typescript
 // POST /api/auth/verify-otp
-// Body: { sessionId: string, code: string }
-// Response: { verified: boolean, email: string, subOrgId: string }
+// Body: { sessionId: string, code: string, publicKey?: string }
+// Response: VerifyAuthResult (see above) — the exact fields your endpoint
+// returns depend on what it forwards from verifyEmailAuth()'s result.
 ```
 
 ---
@@ -324,34 +363,7 @@ function createDIDWithTurnkey(params: {
 
 ## Usage Examples
 
-### Direct Auth Proxy Flow
-
-```typescript
-import {
-  initializeTurnkeyClient,
-  initOtp,
-  completeOtp,
-  ensureWalletWithAccounts,
-  TurnkeySessionExpiredError
-} from '@originals/auth/client';
-
-// Initialize
-const client = initializeTurnkeyClient();
-
-// Send OTP
-const otpId = await initOtp(client, 'user@example.com');
-
-// Verify OTP
-const { sessionToken, action } = await completeOtp(client, otpId, '123456', 'user@example.com');
-
-// Ensure wallet exists
-const wallets = await ensureWalletWithAccounts(client, () => {
-  // Session expired, redirect to login
-  window.location.href = '/login';
-});
-```
-
-### Server-Proxied Flow
+### Server-Proxied Flow (browser-side, supported)
 
 ```typescript
 import { sendOtp, verifyOtp } from '@originals/auth/client';
@@ -359,11 +371,48 @@ import { sendOtp, verifyOtp } from '@originals/auth/client';
 // Send OTP (calls your server)
 const { sessionId } = await sendOtp('user@example.com');
 
-// Verify OTP (calls your server)
-const { verified, email, subOrgId } = await verifyOtp(sessionId, '123456');
+// Verify OTP (calls your server). Pass a browser-generated publicKey so the
+// verification token's private key never transits the response — see
+// VerifyOtpClientOptions above.
+const { verified, email, subOrgId } = await verifyOtp(sessionId, '123456', undefined, {
+  publicKey: myP256PublicKeyHex,
+});
 
 if (verified) {
   // User authenticated, server may have set a JWT cookie
   window.location.href = '/dashboard';
 }
+```
+
+### Low-Level Turnkey Flow (server-side only)
+
+The Direct Auth Proxy flow this section previously documented required
+`initializeTurnkeyClient()`, which has been removed (it read server-only org
+API secrets). The functions below still exist for server code that already
+holds a `Turnkey` client and a verified `subOrgId` — for example, a custom
+`/api/auth/verify-otp` handler built on `@originals/auth/server`.
+
+```typescript
+import { createTurnkeyClient } from '@originals/auth/server';
+import { initOtp, completeOtp, ensureWalletWithAccounts } from '@originals/auth/client';
+
+const turnkeyClient = createTurnkeyClient();
+
+// Send OTP
+const { otpId, otpEncryptionTargetBundle } = await initOtp(turnkeyClient, 'user@example.com');
+
+// Verify OTP (subOrgId comes from your own sub-org lookup/creation step)
+const { verificationToken, publicKey } = await completeOtp(
+  turnkeyClient,
+  otpId,
+  '123456',
+  subOrgId,
+  otpEncryptionTargetBundle
+);
+
+// Ensure wallet exists
+const wallets = await ensureWalletWithAccounts(turnkeyClient, subOrgId, () => {
+  // Session expired, redirect to login
+  window.location.href = '/login';
+});
 ```
