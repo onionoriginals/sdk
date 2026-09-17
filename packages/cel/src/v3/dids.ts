@@ -126,7 +126,11 @@ export function parseAssetAlias(did: unknown): AssetAlias {
     "CEL_DID",
     "Noncanonical WebVH domain spelling",
   );
-  const encodedPath = path.map((segment) => {
+  // A path segment is canonicalized two ways: the DID method-specific-id spelling
+  // (DID Core's `idchar` excludes a literal `~`, so it must read back as `%7E`) and
+  // the WebVH HTTPS log path spelling (RFC 3986 leaves the unreserved `~` literal).
+  // They agree on every other escaped character; only `~` diverges between the two.
+  const httpEncodedPath = path.map((segment) => {
     requireThat(
       /^(?:[A-Za-z0-9._-]|%[0-9A-Fa-f]{2})+$/.test(segment),
       "CEL_DID",
@@ -149,16 +153,17 @@ export function parseAssetAlias(did: unknown): AssetAlias {
       "CEL_DID",
       "Invalid decoded WebVH path",
     );
-    const encoded = encodeURIComponent(value).replace(
+    const httpEncoded = encodeURIComponent(value).replace(
       /[!'()*]/g,
       (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
     );
+    const didEncoded = httpEncoded.replace(/~/g, "%7E");
     requireThat(
-      encoded === segment,
+      didEncoded === segment,
       "CEL_DID",
       "Noncanonical WebVH path spelling",
     );
-    return encoded;
+    return httpEncoded;
   });
   return {
     layer: "webvh",
@@ -168,7 +173,7 @@ export function parseAssetAlias(did: unknown): AssetAlias {
       "https://" +
       decoded +
       "/" +
-      (encodedPath.length ? encodedPath.join("/") : ".well-known") +
+      (httpEncodedPath.length ? httpEncodedPath.join("/") : ".well-known") +
       "/did.jsonl",
     methodBinding: "unverified",
   };

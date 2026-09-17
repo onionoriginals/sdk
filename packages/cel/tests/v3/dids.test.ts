@@ -54,6 +54,32 @@ test("rejects malformed WebVH paths, host and port without fetching them", () =>
   }
 });
 
+test("WebVH path segments containing a tilde: literal rejected, percent-encoded accepted and mapped to a literal HTTPS log path", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  // RFC 3986 unreserved `~` is not a DID Core `idchar`; a literal tilde segment
+  // must still be rejected the same way it always was.
+  expect(() =>
+    parseAssetAlias(`did:webvh:${scid}:example.com:~alice`),
+  ).toThrow(/Invalid WebVH path component/);
+  // The canonical percent-encoded spelling is a valid DID Core idchar sequence
+  // and must be accepted, with the HTTPS log path leaving `~` literal per RFC 3986.
+  const alias = parseAssetAlias(`did:webvh:${scid}:example.com:%7Ealice`);
+  expect(alias).toMatchObject({
+    layer: "webvh",
+    logUrl: "https://example.com/~alice/did.jsonl",
+    methodBinding: "unverified",
+  });
+  // Lowercase hex is a different (noncanonical) spelling of the same percent-encoding.
+  expect(() =>
+    parseAssetAlias(`did:webvh:${scid}:example.com:%7ealice`),
+  ).toThrow(/Noncanonical WebVH path spelling/);
+  // Control: an RFC 3986 sub-delim ('!') still round-trips through its canonical
+  // percent-encoded form, showing the escaping machinery is otherwise unchanged.
+  expect(() =>
+    parseAssetAlias(`did:webvh:${scid}:example.com:%21alice`),
+  ).not.toThrow();
+});
+
 test("URL parser failures become structured invalid-DID results", () => {
   const scid = authority.entries.W.event.operation.data.to.split(":")[2];
   for (const host of ["example.123", "256.256.256.256"]) {
