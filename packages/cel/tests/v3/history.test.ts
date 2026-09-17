@@ -65,8 +65,56 @@ test("rotation retires A, keeps historical signatures valid and requires B for t
   const result = verifyHistory({ log: [genesis, rotation, updated] });
   expect(result.state.name).toBe("Updated");
   expect(result.state.controllers).toEqual([
-    { controller: A.controller, fromEntry: 0, throughEntry: 1 },
-    { controller: B.controller, fromEntry: 2 },
+    { controller: A.controller, fromEntry: 0, throughEntry: 2 },
+    { controller: B.controller, fromEntry: 3 },
+  ]);
+});
+
+test("controller intervals attribute each rotation entry to its outgoing signer across a two-rotation chain", async () => {
+  const C = createLocalSigner("P-384", new Uint8Array(48).fill(7));
+  const initial = verifyHistory({ log: [genesis] });
+  const rotationAB = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: B.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const rotationBC = await signEvent(
+    {
+      previousEvent: verifyEntry(rotationAB).digest,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: C.controller,
+          rotatedAt: "2026-09-06T00:00:00Z",
+        },
+      },
+    },
+    B,
+  );
+  const updated = await signEvent(
+    {
+      previousEvent: verifyEntry(rotationBC).digest,
+      operation: { type: "update", data: { profile, name: "Updated by C" } },
+    },
+    C,
+  );
+  const result = verifyHistory({
+    log: [genesis, rotationAB, rotationBC, updated],
+  });
+  expect(result.state.controllers).toEqual([
+    { controller: A.controller, fromEntry: 0, throughEntry: 2 },
+    { controller: B.controller, fromEntry: 3, throughEntry: 3 },
+    { controller: C.controller, fromEntry: 4 },
   ]);
 });
 
