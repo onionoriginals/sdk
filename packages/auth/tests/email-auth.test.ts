@@ -796,57 +796,57 @@ describe('email-auth', () => {
   });
 
   describe('isSessionVerified', () => {
-    test('returns false for nonexistent session', () => {
-      expect(isSessionVerified('nonexistent', storage)).toBe(false);
+    test('returns false for nonexistent session', async () => {
+      expect(await isSessionVerified('nonexistent', storage)).toBe(false);
     });
 
-    test('returns false for unverified session', () => {
+    test('returns false for unverified session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: false,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(false);
+      expect(await isSessionVerified('session_1', storage)).toBe(false);
     });
 
-    test('returns true for verified session', () => {
+    test('returns true for verified session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: true,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(true);
+      expect(await isSessionVerified('session_1', storage)).toBe(true);
     });
 
-    test('returns false and cleans up expired session', () => {
+    test('returns false and cleans up expired session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now() - 16 * 60 * 1000,
         verified: true,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(false);
+      expect(await isSessionVerified('session_1', storage)).toBe(false);
       expect(storage.get('session_1')).toBeUndefined();
     });
   });
 
   describe('cleanupSession', () => {
-    test('removes session from storage', () => {
+    test('removes session from storage', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: true,
       });
-      cleanupSession('session_1', storage);
+      await cleanupSession('session_1', storage);
       expect(storage.get('session_1')).toBeUndefined();
     });
 
-    test('does not throw for nonexistent session', () => {
-      expect(() => cleanupSession('nonexistent', storage)).not.toThrow();
+    test('does not throw for nonexistent session', async () => {
+      await expect(cleanupSession('nonexistent', storage)).resolves.toBeUndefined();
     });
   });
 
   describe('getSession', () => {
-    test('returns session data', () => {
+    test('returns session data', async () => {
       const session = {
         email: 'user@example.com',
         subOrgId: 'sub_123',
@@ -855,21 +855,76 @@ describe('email-auth', () => {
         verified: false,
       };
       storage.set('session_1', session);
-      expect(getSession('session_1', storage)).toEqual(session);
+      expect(await getSession('session_1', storage)).toEqual(session);
     });
 
-    test('returns undefined for nonexistent session', () => {
-      expect(getSession('nonexistent', storage)).toBeUndefined();
+    test('returns undefined for nonexistent session', async () => {
+      expect(await getSession('nonexistent', storage)).toBeUndefined();
     });
 
-    test('returns undefined and cleans up expired session', () => {
+    test('returns undefined and cleans up expired session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now() - 16 * 60 * 1000,
         verified: false,
       });
-      expect(getSession('session_1', storage)).toBeUndefined();
+      expect(await getSession('session_1', storage)).toBeUndefined();
       expect(storage.get('session_1')).toBeUndefined();
+    });
+  });
+
+  describe('async SessionStorage (#684)', () => {
+    // A store whose get/set/delete return Promises, matching what a real
+    // Redis/DB-backed SessionStorage looks like (createInMemorySessionStorage
+    // itself stays synchronous, but the interface must support this).
+    function createAsyncSessionStorage(): SessionStorage {
+      const sessions = new Map<string, ReturnType<typeof storage.get>>();
+      return {
+        get: async (sessionId: string) => sessions.get(sessionId) as any,
+        set: async (sessionId: string, session: any) => {
+          sessions.set(sessionId, session);
+        },
+        delete: async (sessionId: string) => {
+          sessions.delete(sessionId);
+        },
+        cleanup: async () => {
+          sessions.clear();
+        },
+      };
+    }
+
+    test('verifyEmailAuth reads a session from an async store instead of treating it as missing', async () => {
+      const asyncStorage = createAsyncSessionStorage();
+      await asyncStorage.set('session_1', {
+        email: 'user@example.com',
+        otpId: 'otp_123',
+        otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        timestamp: Date.now(),
+        verified: false,
+      });
+
+      const client = createMockTurnkeyClient();
+      await expect(
+        verifyEmailAuth('session_1', '123456', client, asyncStorage, verifyOptions)
+      ).resolves.toMatchObject({ verified: true });
+    });
+
+    test('getSession/isSessionVerified/cleanupSession all await an async store', async () => {
+      const asyncStorage = createAsyncSessionStorage();
+      await asyncStorage.set('session_1', {
+        email: 'user@example.com',
+        timestamp: Date.now(),
+        verified: true,
+      });
+
+      expect(await getSession('session_1', asyncStorage)).toMatchObject({
+        email: 'user@example.com',
+        verified: true,
+      });
+      expect(await isSessionVerified('session_1', asyncStorage)).toBe(true);
+
+      await cleanupSession('session_1', asyncStorage);
+      expect(await getSession('session_1', asyncStorage)).toBeUndefined();
     });
   });
 });
