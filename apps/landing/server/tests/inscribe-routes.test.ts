@@ -411,6 +411,45 @@ describe('POST /api/btc/inscribe', () => {
     expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
   });
 
+  test('#865: resubmitting an already reveal_broadcast pair never regresses its status, even when the redundant reveal re-push would fail', async () => {
+    const pair = buildPair();
+    let failReveal = false;
+    const { routes, store, broadcasts } = harness({
+      broadcast: async (txHex) => {
+        // The commit is genuinely already known on a resubmission; the reveal
+        // re-push is made to fail with a realistic, non-"already known"
+        // transient error — the exact trigger from the issue repro.
+        if (txHex === pair.signedCommitHex) throw new Error('Transaction already in block chain');
+        if (failReveal && txHex === pair.revealTxHex) throw new Error('network timeout contacting upstream broadcaster');
+        return 'f'.repeat(64);
+      },
+    });
+
+    const first = await post(routes, pair);
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+
+    // A retry of the exact same signed pair — the client never saw the first
+    // response. Configure the reveal re-push to fail with a transient error
+    // that is NOT recognized as "already known".
+    failReveal = true;
+    const broadcastCountBeforeRetry = broadcasts.length;
+    const second = await post(routes, pair);
+    expect(second.status).toBe(200);
+    const body = (await second.json()) as { commitTxId: string; revealTxId: string; inscriptionId: string; status: string };
+    expect(body.commitTxId).toBe(pair.commitTxId);
+    expect(body.revealTxId).toBe(pair.revealTxId);
+    expect(body.inscriptionId).toBe(`${pair.revealTxId}i0`);
+    expect(body.status).toBe('reveal_broadcast');
+
+    // The resubmission must never re-enter the broadcast/setStatus sequence:
+    // no additional broadcasts, and the persisted status stays exactly as it
+    // was, not regressed to commit_broadcast.
+    expect(broadcasts.length).toBe(broadcastCountBeforeRetry);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+  });
+
   test('rejects a commit that does not spend the declared funding UTXO', async () => {
     const { routes, broadcasts } = harness();
     const pair = buildPair();
