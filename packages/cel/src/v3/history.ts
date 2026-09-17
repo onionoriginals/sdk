@@ -168,11 +168,11 @@ function apply(
           "Rotation must change the controller",
         );
         state.controllers[state.controllers.length - 1].throughEntry =
-          state.entryCount;
+          state.entryCount + 1;
         state.controller = operation.data.newController;
         state.controllers.push({
           controller: state.controller,
-          fromEntry: state.entryCount + 1,
+          fromEntry: state.entryCount + 2,
         });
         break;
       case "deactivate":
