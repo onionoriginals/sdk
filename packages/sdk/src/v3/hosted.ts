@@ -146,6 +146,11 @@ export class HostedAssets {
     asset: OriginalsAsset,
     options: WebPublicationOptions,
   ): Promise<PreparedWebPublication> {
+    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
+      return error(
+        "WEBVH_DOMAIN_REQUIRED",
+        "Supply the permanent WebVH domain",
+      );
     if (
       !["cel", "webvh"].includes(asset.state.layer) ||
       (asset.state.layer === "cel" && !asset.state.active) ||
@@ -154,11 +159,6 @@ export class HostedAssets {
       return error(
         "ASSET_WEB_STATE",
         "Publish an active local asset with no unsigned drafts",
-      );
-    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
-      return error(
-        "WEBVH_DOMAIN_REQUIRED",
-        "Supply the permanent WebVH domain",
       );
     for (const resource of asset.resources)
       if (!resource.content)
