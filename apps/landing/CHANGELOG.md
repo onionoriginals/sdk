@@ -1,5 +1,184 @@
 # @originals/landing
 
+## 0.2.1
+
+### Patch Changes
+
+- 03c275c: Close a crash window in `OriginalsStore.saveBytes` that let a different signed-in user silently overwrite another user's durable hosted DID resource (#690).
+
+  `saveBytes` wrote resource bytes, then the content-type sidecar, then the `.owner` ownership marker as three independent, non-atomic writes. A process crash between the bytes write and the owner write left bytes on disk with no owner marker; the ownership check then read a missing marker as "unclaimed," so the next `saveBytes` call for that key from **any** other user passed the check and overwrote the first user's bytes.
+
+  - The `.owner` marker is now the sole ownership commit point and is created atomically (write-temp, fsync, exclusive `link`) _before_ any resource bytes are written, never after. A crash between the claim and the bytes write leaves a resumable, still-protected in-progress write — never orphaned bytes a stranger can claim.
+  - If a key's resource bytes exist with no owner marker (e.g. data written before this fix, or disk corruption), the store now fails closed with a new `INCONSISTENT_OWNERSHIP` error (mapped to HTTP 409) for every caller, including the original writer, rather than treating the key as unclaimed.
+  - Resource bytes, the content-type sidecar, and the per-user JSON index are now all written with the same atomic write-temp/fsync/rename/fsync-dir pattern already used by `inscriptions-store.ts`, instead of a direct `writeFileSync`.
+
+- 3c130cd: Fix `POST /api/btc/inscribe` regressing a `confirmed`-but-not-yet-`retired` signed commit+reveal pair's stored status when resubmitted (#755).
+- 6fefad4: **Explore now independently re-verifies an Original's accepted Bitcoin publication from public inputs, with no session required (#527).**
+
+  `/explore/<did>` previously verified only the hosted resource bytes, the did:webvh log, and the CEL controller history — a real gap for any Original that had already migrated on-sat, since the site's own Bitcoin read path (`/api/btc/sat-snapshot/:sat`) was signed-in-only. A genuinely cold-start visitor could not confirm the one claim that matters most: that this Original is actually inscribed on Bitcoin.
+
+  The public catalogue now surfaces the sat (`PublishedOriginal.sat`) once an Original's signed history has migrated to `did:btco`. A new unauthenticated, independently rate-limited route (`GET /api/explore/sat-snapshot/:sat`) exposes read-only sat-snapshot access — never funding, signing or broadcast capability, and never the authenticated money-path proxy — bounded to a configured Bitcoin provider and satoshi-number validation. The Explore detail page uses it to run `sdk.lifecycle.resolveAssetFromSat` against a fresh provider snapshot in the visitor's own browser, then binds the accepted result to the SAME asset id and controller the CEL/WebVH checks already verified, so a resolvable-but-unrelated sat cannot read as proof of this Original. A fourth "btco" check (only present when the Original has actually migrated) joins the existing hash/log/cel checks, and the sat is shown in the public provenance panel.
+
+- 6674386: Fix two TOCTOU races (#677, #694) where a background/concurrent reconciliation pass could clobber another pass's result for the same inscription record.
+
+  `bitcoin-reconciliation.ts`'s reorg-demotion decision read the top-of-function record snapshot instead of the fresh per-record read taken just before its own provider round trip, so a record confirmed by a concurrent `reconcileUser` call (an overlapping poll, or the background sweep) mid-pass could be left incorrectly reporting `confirmed` on stale reorg evidence instead of being demoted. `inscription-completion-sweep.ts` had the mirror-image bug: it wrote `reveal_broadcast` unconditionally after its own status lookup/broadcast, which could regress a record a concurrent pass had already confirmed or retired.
+
+  - `InscriptionsStore` gains `trySetStatus`: a guarded status transition that only writes if the record's on-disk `status`/`retired`/`superseded` still match what the caller last observed, returning whether the write applied. Both files now use it wherever a status decision follows an `await`, so a concurrent pass's result is never silently overwritten.
+  - `bitcoin-reconciliation.ts`'s `liveStuck`/`liveUnconfirmed` passes now read the fresh per-record snapshot throughout (not the stale top-of-pass one) and write through `trySetStatus`.
+  - `inscription-completion-sweep.ts` now refuses to advance a record that raced out from under it, logging a new `inscription_sweep_raced` money event instead of clobbering the concurrent result.
+
+- b2961dc: Fix a TOCTOU race (#762) in `POST /api/btc/inscribe`'s rival-confirmation check: it wrote the rival's status with an unguarded `setStatus` after awaiting `provider.getTransactionStatus`, so a concurrent reconciliation pass that legitimately confirmed the same rival (with real confirmation depth/block evidence) while that lookup was in flight could have its `'confirmed'` status silently downgraded back to `'commit_broadcast'`, wiping its confirmations.
+
+  The write now goes through the existing guarded `trySetStatus`, expecting the still-`'signed'` state this branch already observed, matching the pattern used for the same defect class elsewhere in this codebase (#758/#694/#677). On a CAS miss no retry is needed: the fresh provider result still proves the rival won the outpoint, so the request keeps refusing with 409 while leaving the concurrent pass's newer state untouched.
+
+- 26754b8: Fix a TOCTOU race (#758) where the `supersededPending` reconciliation pass could clobber a concurrent pass's result for the same inscription record.
+
+  The pass reads a record, awaits a provider status lookup, reclaims the winning pair's outpoint, then awaits a reveal broadcast before deciding the record's final status — but it wrote that decision with a bare `setStatus` instead of the guarded `trySetStatus` every sibling pass (`liveStuck`, `liveUnconfirmed`) already uses after its own awaits (#677/#709). A concurrent pass (an overlapping poll, or the background sweep) that confirmed or retired the same record while either await was in flight got silently overwritten by this pass's own stale decision.
+
+  The record is now re-checked after the status-lookup await before reclaiming, and the terminal write after the reveal-broadcast await goes through `trySetStatus` against the fresh post-reclaim snapshot (`reclaimOutpoint` clears `superseded`, so that snapshot — not the pre-reclaim one — is what a concurrent pass must still match). The reclaim itself (rival retirement, winner reinstated) still always applies; only the terminal status write is now guarded.
+
+- 3b584a0: **Manual inscription recovery now survives a provider outage and a concurrent retirement without corrupting state (#705).**
+
+  `POST /api/btc/inscribe/rebroadcast` used to fold a transient `getTransactionStatus` failure into the same path as an explicit reorg, so a provider hiccup could demote an already-`confirmed` inscription and trigger a redundant re-broadcast. The automatic reconciliation poll already preserved the last observed state on an outage; the manual endpoint had no equivalent guard.
+
+  The endpoint also acted on a single snapshot of the record read before the status lookup, unchanged across every subsequent broadcast. A concurrent reconciliation/sweep pass that retired the same record mid-flight (its funding outpoint's rival just won and confirmed) could be overwritten by a stale decision, leaving a retired, hex-less row stamped with a live, non-terminal status that later reconciliation permanently ignores.
+
+  The status read is now three explicit outcomes (confirmed / explicitly unconfirmed / unavailable), only explicit evidence can demote a confirmed record, and the record is re-read after the lookup so every mutating decision acts on current store state.
+
+- 75617cb: **Hosted WebVH publication now distinguishes an adapter-asserted read-back from an independently confirmed one** (#601).
+
+  `publishToWeb`/`publishPreparedToWeb` read the newly written DID log back through the same `storageAdapter` that wrote it, so a private or in-memory adapter satisfied the publication contract exactly as well as a genuinely public HTTPS host — nothing distinguished the two, and a fresh `resolveAssetFromWeb` call reused that same adapter rather than an independent fetch.
+
+  - `PublishedWebAsset` gains `hostingEvidence: 'adapter-asserted' | 'independently-verified'`, defaulting to `'adapter-asserted'` — today's actual behavior, now labeled honestly instead of implying public reachability.
+  - New SDK options `publicReachability` (a check that fetches the advertised URL through a path other than the configured storage adapter) and `requirePublicReachability` (fail the publish, with the prepared publication preserved for retry, when that independent check cannot confirm the exact log that was just written).
+  - New export `fetchPublicReachabilityCheck`, a ready-made `publicReachability` implementation using a real HTTPS GET.
+
+  Both options remain opt-in for SDK callers. The landing app requires independent reachability for anonymous and signed-in publication, including cold recovery before saving an account record or deleting its retry wrapper. The default checker omits credentials and cached responses, refuses redirects, and caps streamed responses at 2 MiB with a ten-second deadline. Missing required checker configuration is rejected before any writes; a failed check after upload preserves the exact prepared publication for retry. Separating the publication-host capability from the general `storageAdapter` contract remains follow-on work.
+
+- e099862: **Money path: `POST /api/btc/inscribe` now verifies where the value actually goes, not just where it's declared to go (#493 M07).**
+
+  The server-side re-check added for #493 validated transaction shape and destination — input set, output count, change/reveal script — but never how much value came in, so a signer with custody of the funding key could shrink or drop the commit's change output, or shrink the reveal's own output, and let the difference become miner fee undetected.
+
+  The route now independently re-derives the true value of every declared funding outpoint from the deposit indexer (never the client-declared `value`), and requires the commit's outputs plus a bounded fee to account for the full independently-verified input total. A commit that omits its change output must be justified by a genuine sub-dust surplus; anything larger is refused. The same fee bound now also applies to the reveal's own output, using its cryptographically-bound input value.
+
+  Funding values come from transaction-ID-verified raw previous transactions at the bound deposit address, so spent outputs remain verifiable during recovery. Amounts are summed as integers. Cached approval requires the exact retained signed pair, including witness bytes; concurrent submissions recheck that pair inside the persistence lock. Legacy records must pass verification before their approval is persisted.
+
+- c08a0a8: **Recovery reliability: cache fee-estimator outages briefly, and stop the deposit sweep from silently aging out an address it keeps checking (#496).**
+
+  `currentFeeRate` now remembers a failed estimate for a short window (10s) instead of clearing its single-flight slot on rejection with no backoff. During a real estimator outage, every one of a creator's polls used to issue a fresh RPC against a dependency that was already down; now a poll inside the window gets the same fail-closed error without re-asking the estimator, and a poll past the window is a genuine retry.
+
+  `recordDepositRead` used to skip its write whenever the reported balance was unchanged, with no ceiling on how stale that could get. That froze the persisted `lastRead.at` at the last actual balance _change_ rather than the last time anyone checked — and the balance-sweep's 24h drop-out rule reads exactly that timestamp. An idle, zero-balance address that the sweep kept re-reading every hour could still silently age out of the sweep, because each of those unchanged re-reads was a no-op. A write now lands at least once an hour even when nothing changed, so an address still being actively checked never freezes into a false "nobody has looked in 24h" reading.
+
+  Three other follow-ups filed alongside these in #496 — durable-store write failures surfacing distinctly from a provider outage, a per-pass reconciliation read floor for later categories, and the automatic list-poll recovering a stranded commit without a manual "Finish inscription" click — are already covered by the current reconciliation implementation; this closes the two that were not.
+
+- a800665: Normalize `/api/btc/fee`'s confirmation-target cache key so the 60s fee cache and single-flight dedupe actually work (#771).
+
+  `currentFeeRate()` cached fee estimates keyed by the raw, client-supplied `blocks` number, but `QuickNodeProvider.estimateFee` normalizes that argument to `Math.max(1, Math.floor(blocks))` before making the actual RPC call. Requests whose `blocks` values floor to the same target (e.g. `1`, `1.1`, `1.9999`, `-5`) are functionally identical upstream requests, but each previously got its own cache entry, its own in-flight slot, and its own real QuickNode RPC call — defeating the documented "one estimate per confirmation target per 60s" contract. The success cache (`feeCache`) also had no eviction at all, unlike the adjacent failure cache, so it grew for the life of the process.
+
+  - `currentFeeRate` now normalizes `blocks` to the exact provider-side target before any cache/in-flight lookup, so equivalent requests share one cache entry, one in-flight request, and one failure-cache entry.
+  - The success cache now uses the existing `createExpiringCache` helper (already used for the failure cache) instead of an immortal `Map`, so expired entries are actually swept rather than only shadowed by a timestamp check.
+  - `POST /api/btc/fee` now rejects a non-finite `blocks` value (e.g. `1e400`, which is valid JSON syntax that overflows to `Infinity`) with `400 bad_request` before any estimator call, instead of letting it reach the estimator.
+
+- f491108: Fix `isAuthorizedReinscription` failing closed on a legitimate reinscription when the configured `OrdinalsProvider` reports the satpoint's txid in a different (but still valid) hex case than the caller's declared identity (#811).
+
+  `isAuthorizedReinscription` compared `resolveSat`'s pass-through of the raw provider snapshot's `ownership.satpoint` verbatim against a locally-built, only-partially-lowercased expected satpoint. `ownership.satpoint` carries no casing contract of its own, so a provider spelling the reveal txid in different hex case than `input.identity.txid` made an otherwise fully authorized, correctly-placed CEL continuation rejected as "wrong sat." Both sides are now normalized with the existing `normalizeSatpoint` helper, mirroring the sibling sites already fixed by #751.
+
+- 2e0fa64: Repoint the footer's "Protocol specification" link at the new versioned
+  `specs/README.md` manifest instead of the now-historical
+  `ORIGINALS_PROTOCOL_SPECIFICATION.md`. No behavior change.
+- 29290f7: Remove `deriveDid`, `AssetState.didCel` and the deprecated `expectedDid`
+  verification option from the CEL 2 / SDK 4 asset identity surface; use
+  `deriveAssetId`, `state.assetId`/`state.aliases` and `expectedAssetId` instead.
+  Rename `parseAssetDid` to `parseAssetAlias`, and its result's discriminator
+  from `method` to `layer` (`'cel' | 'webvh' | 'btco'`), since the `cel` layer
+  is not a claim that Originals implements a DID method. Old SDK 3 envelope
+  reading, signed history, hosted paths and inscriptions are unchanged.
+- 2cbf8f2: Fix `POST /api/btc/inscribe` accepting a resubmission of an already-`retired` signed commit+reveal pair (#693).
+
+  Previously, resubmitting the exact same signed bytes for a commit that had already settled — a plausible ambiguous-acknowledgement retry, where the client never saw the original response — was silently reprocessed: the mismatch check treated the retired record's cleared `signedCommitHex`/`revealTxHex` as "no mismatch", so the request fell through into a full re-broadcast that regressed the record's status from `confirmed` back to `reveal_broadcast` while leaving `retired: true` set. That internally-inconsistent combination permanently excluded the record from reconciliation, and the manual `/rebroadcast` endpoint then falsely reported the (in fact fully confirmed) inscription as terminal/`not_recoverable`.
+
+  - A resubmission whose `commitTxId` matches an already-`retired`, settled (`status: 'confirmed'`) record returns the recorded settlement result idempotently — no re-broadcast, no economics/ordinal re-check, and no state write — but only once the resubmitted reveal has passed the same fresh signature verification (`validateInscriptionReveal`) every submission does, and its bytes match a new persisted `signedPairDigest` (a SHA-256 of the exact signed commit+reveal hex, including witness data, captured at creation and retained across retirement). `commitTxId`/`revealTxId` alone exclude witness bytes and so cannot prove exact identity once the retired record's own hex is gone; the digest closes that gap for records created going forward, with legacy rows predating this field falling back to id-only matching.
+  - A resubmission matching a `retired` record that never settled here (a terminally-dead superseded loser whose funding outpoint a different, confirmed pair already won) is refused outright (`commit_retired`, 409) instead of being reprocessed.
+  - The same retirement check — including the digest and settled-vs-terminal decision — is re-applied inside the per-user submission lock, covering the case where reconciliation confirms and retires the record concurrently while this request's own economics/ordinal checks are in flight.
+
+- 3f61fee: **Explore's public Bitcoin verification no longer reports a legitimately rotated Original as unverified (#782).**
+
+  `evaluateBtcoCheck` required the _current_ on-sat controller to exactly equal the controller frozen in the hosted webvh CEL log at the `webvh → btco` migration boundary. Per CLAUDE.md, "Rotation retires the outgoing key; holding or reacquiring the sat does not restore its authority" — a controller rotation signed after anchoring to Bitcoin is normal, protocol-authorized state evolution, not evidence of a broken binding. Any Original that rotated its controller post-anchor failed this check identically to the "unrelated sat" case, giving a public visitor no way to tell a legitimate rotation from actual fraud.
+
+  The controller comparison is removed. The check now verifies `resolution.status === 'accepted'`, the asset identity binding (`sameAssetIdentity`, unchanged), and `state.active` — the same anti-substitution guard the surrounding code already relied on, since the resolver is independently pinned to the expected asset id.
+
+- fdd5478: Define an explicit settlement policy for confirmed Bitcoin inscriptions (#567).
+
+  Durable inscription state only recorded the broadcast phase — it never persisted inclusion block height or distinguished confirmed-but-unsettled from settled, so a reorg-then-reconfirm that landed in a different block was indistinguishable from uninterrupted confirmation.
+
+  - `GET /api/btc/inscribe` and the manual rebroadcast route now report `settled`, `confirmations`, `confirmedBlockHeight`, and `confirmedBlockHash` on confirmed records, instead of a bare `status: 'confirmed'` that could mean either.
+  - The six-confirmation retention/settlement threshold is now an explicit, configurable policy (`recoveryConfirmations` / `BTC_RECOVERY_CONFIRMATIONS`) that can only be raised, never lowered below six.
+  - A reconfirmation whose block identity differs from the one last observed — evidence of a reorg, including an ordinary one-block reorg that replaces the block at the SAME height — is recorded even when an earlier poll never saw the intervening unconfirmed state, and logged as a new `inscribe_reorg_reconfirmed` money-log event.
+
+- 237355a: **Landing demo: the Source picker now accepts any bytes, not just PNG/SVG/text (#540).**
+
+  `readAssetFile()` previously rejected any upload outside PNG/SVG/plain-text as `wrong-type`, and further gated PNG uploads on an exact magic-byte match — contradicting #540's own acceptance criterion, "Accept any bytes in the Source picker." It now accepts any non-empty file up to the existing 32 KiB cap and publishes the bytes verbatim, preserving a usable content type (the browser's `file.type`, an extension-based guess for formats browsers commonly leave blank, or `application/octet-stream`). The file input's restrictive `accept` attribute is removed, and the composer preview shows a generic placeholder instead of garbled bytes for uploads that are neither text nor an image.
+
+- 3f61fee: **Explore's "Verified" badge no longer reads verified before the Bitcoin check has actually resolved (#767).**
+
+  `ExploreOriginal` published the fast local hash/log/cel checks into state as soon as they resolved, then appended the Bitcoin (`"btco"`) check separately once its own (potentially slow) network round-trip completed. Since the badge is computed as `checks.every((check) => check.ok)`, a migrated Original rendered a ✓ "Hosted history and primary file verified" badge for the entire duration of that Bitcoin lookup, even though the one claim the badge exists to prove had not been checked yet — and could subsequently resolve to failed.
+
+  The effect now accumulates the full check batch, including the Bitcoin check when applicable, and publishes it to state exactly once. This keeps the page in its existing "checking" pending state until every applicable check has actually run, so the badge is never shown ahead of the evidence for it.
+
+- Updated dependencies [335abad]
+- Updated dependencies [a136520]
+- Updated dependencies [fdd5478]
+- Updated dependencies [66a9944]
+- Updated dependencies [42cad62]
+- Updated dependencies [5ca171e]
+- Updated dependencies [2cb1f4f]
+- Updated dependencies [2cb1f4f]
+- Updated dependencies [12f605e]
+- Updated dependencies [b210e71]
+- Updated dependencies [d813344]
+- Updated dependencies [ff2d1b3]
+- Updated dependencies [8f02af6]
+- Updated dependencies [0e32a48]
+- Updated dependencies [c7a203e]
+- Updated dependencies [bc129c7]
+- Updated dependencies [3d28934]
+- Updated dependencies [b4f135d]
+- Updated dependencies [11c28f3]
+- Updated dependencies [038895a]
+- Updated dependencies [dd84574]
+- Updated dependencies [730f295]
+- Updated dependencies [75617cb]
+- Updated dependencies [9755861]
+- Updated dependencies [24bfe5d]
+- Updated dependencies [b1fd4c8]
+- Updated dependencies [1dc28aa]
+- Updated dependencies [81cee2d]
+- Updated dependencies [80ccadf]
+- Updated dependencies [077de93]
+- Updated dependencies [1e57416]
+- Updated dependencies [de27b01]
+- Updated dependencies [60443e3]
+- Updated dependencies [29290f7]
+- Updated dependencies [fa89b5b]
+- Updated dependencies [1ee9941]
+- Updated dependencies [139d9be]
+- Updated dependencies [3ed7af1]
+- Updated dependencies [9d770cd]
+- Updated dependencies [5cf9837]
+- Updated dependencies [8710817]
+- Updated dependencies [af7051f]
+- Updated dependencies [244cae1]
+- Updated dependencies [75f31c2]
+- Updated dependencies [8705bfc]
+- Updated dependencies [64b2d19]
+- Updated dependencies [c70b789]
+- Updated dependencies [902de9c]
+- Updated dependencies [810ec9a]
+- Updated dependencies [f246be0]
+- Updated dependencies [5153d0d]
+  - @originals/sdk@4.0.0
+  - @originals/auth@4.0.0
+
 ## 0.2.0
 
 ### Minor Changes

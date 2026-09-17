@@ -1,5 +1,94 @@
 # @originals/auth
 
+## 4.0.0
+
+### Major Changes
+
+- 9d770cd: **Breaking: `getAuthCookieConfig`/`getClearAuthCookieConfig` now default `secure: true` unconditionally**, instead of inferring it from `process.env.NODE_ENV === 'production'` (#676).
+
+  Not every deployment platform sets `NODE_ENV` to exactly `"production"`, so the previous default silently shipped the 7-day auth JWT cookie without `Secure` on any platform that doesn't. That was the bug this closes — but it also means any consumer currently serving over plain HTTP without passing an explicit `secure` option will start receiving `Secure` cookies, which browsers drop on a non-HTTPS origin, breaking auth. Pass `{ secure: false }` explicitly on **both** the set and the clear cookie config to keep the previous plain-HTTP behavior.
+
+### Minor Changes
+
+- 1dc28aa: `sendOtp`/`verifyOtp` (from `@originals/auth/client`) now throw an `AuthApiError` (extends `Error`) instead of a bare `Error` on a non-ok server response. `message` behavior is unchanged for existing callers; `AuthApiError` additionally carries `status` (the HTTP status) and `code` (the server's machine-readable `error` field, when present), so a caller can branch on the failure kind instead of parsing display text. This pairs with the landing app's `auth-routes.ts`, which now returns `{ error: 'invalid_email' | 'rate_limited' | 'send_otp_failed' | 'missing_fields' | 'verification_failed' | 'unauthorized' | 'invalid_token', message }` on every named failure instead of `{ message }` only.
+- 64b2d19: `packages/auth/src/server/email-auth.ts`, `turnkey-client.ts`, and `turnkey-signer.ts` now throw `StructuredError` with a stable `.code` instead of a plain `Error`, completing the remainder of #747 (the JWT slice landed separately). New exported codes: `AUTH_EMAIL_ERROR_CODES`, `AUTH_TURNKEY_ERROR_CODES`, `AUTH_TURNKEY_SIGNER_ERROR_CODES`. Every thrown error keeps its exact original message, so existing `catch (e) { ... e.message ... }` callers are unaffected; callers wanting typed discrimination can now branch on `e.code` (`StructuredError` still extends `Error`).
+
+  **Behavior fix (not just typing):** `verifyEmailAuth`'s OTP-verification catch block previously charged a transient/network failure calling Turnkey's `verifyOtp` (timeout, 5xx, `ECONNRESET`) against the same `MAX_OTP_ATTEMPTS` budget as a genuinely wrong code, so a Turnkey blip during the 15-minute OTP window could exhaust a legitimate user's attempts and lock them out. A definitive Turnkey rejection (a `TurnkeyRequestError`-shaped error carrying a numeric `code`) now throws `AUTH_OTP_CODE_INCORRECT` and still consumes an attempt; anything without that evidence throws the new `AUTH_OTP_VERIFY_TRANSIENT_FAILURE` instead, does not consume an attempt, and leaves the session alive so the same code can be resubmitted. New exported helper `isOtpVerifyTransientFailure(error)` and `extractTurnkeyErrorCode(error)` (also from `turnkey-client.ts`) let callers detect this distinction.
+
+### Patch Changes
+
+- a136520: **Server-side Turnkey sub-org provisioning now assigns the secp256k1 "Bitcoin auth-key" account a Bitcoin address format instead of an Ethereum one** (#689).
+
+  `DEFAULT_WALLET_ACCOUNTS` in `server/turnkey-client.ts` provisioned its `m/44'/0'/0'/0/0` account — its own comment labels it "Bitcoin path for auth-key" — with `ADDRESS_FORMAT_ETHEREUM`, while the identical curve/path account in `client/turnkey-client.ts` already used `ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR`. `getOrCreateTurnkeySubOrg` is the function `apps/landing`'s email-auth flow actually calls to provision real user sub-orgs, so every user's Bitcoin auth-key account was getting an Ethereum-formatted `.address` for a key meant for Bitcoin funding and sat verification.
+
+- b1fd4c8: **Fix (regression of #341/#356, identity-fork): `getOrCreateTurnkeySubOrg`'s sub-org lookup no longer treats a generic transport error as "no existing sub-org."** `isDefinitiveNotFound` previously fell through to `createSubOrganization` on gRPC code `5` (NOT_FOUND) **or** any lookup error whose message matched `/not[ _-]?found|does not exist/i`. That message-substring match also matched errors unrelated to Turnkey's own not-found response — a plain-text `404 Not Found` from a routing/proxy layer, for example — silently minting a duplicate sub-organization (the user's stable identity) for an email that already had one.
+
+  `isDefinitiveNotFound` now trusts only the strongly-typed `code === 5` evidence (still walking a wrapped `cause` chain). `@turnkey/http`'s `TurnkeyRequestError` always carries a numeric `code` parsed from Turnkey's own JSON error body, so a genuine not-found response is never missing it; an unrelated transport/routing failure throws a plain `Error` with no `code` and is now correctly rethrown instead of authorizing creation.
+
+- 81cee2d: **Client-side `initOtp` now normalizes email (trim + lowercase) before calling Turnkey**, matching the server flow (#737).
+
+  Turnkey sub-org lookup filters on the exact `contact` string. `getOrCreateTurnkeySubOrg`/`initiateEmailAuth` already normalized email before every server-side Turnkey call for that reason, but the direct client `initOtp` helper sent the caller-supplied email through verbatim — so a user could be routed to two different Turnkey sub-orgs for differently-cased/padded spellings of the same mailbox. `normalizeEmail` now lives in an isomorphic `packages/auth/src/email.ts`, re-exported from `server/turnkey-client.ts` for compatibility.
+
+- 1ee9941: **`getOrCreateTurnkeySubOrg` now repairs missing required account roles in an existing sub-org's wallet(s), not just a totally missing wallet** (#784).
+
+  Previously, the existing-sub-org branch of `getOrCreateTurnkeySubOrgUnlocked` only checked whether the sub-org had _a_ wallet at all (`walletCount > 0`); it never checked whether that wallet actually carried all three required accounts (`bitcoin-auth`, `did-assertion`, `did-update`). A sub-org whose wallet was missing one or more of those roles — for example from a partial provisioning failure, or from external tooling that added a wallet without the full account layout — stayed incomplete on every login, unlike the client-side `ensureWalletWithAccounts`, which already checked per-role completeness.
+
+  `getOrCreateTurnkeySubOrg` now enumerates accounts across all of the sub-org's wallets, computes which required roles are missing sub-org-wide (a role satisfied in any wallet counts as present), and adds any globally-missing role in place on one deterministic wallet — never duplicating a role that already exists elsewhere in the sub-org, and never minting a replacement sub-org. If enumerating any wallet's accounts fails, the repair is skipped for that login (fails soft) rather than risk inferring a role absent from incomplete data.
+
+- 5cf9837: **`getKeyByRole` selects a Turnkey wallet account by curve + exact derivation path, distinguishing the DID assertion-key from the update-key** (#744).
+
+  `getKeyByCurve(wallets, 'CURVE_ED25519')` always returned the first matching account, so it could never reach the second of the package's two `CURVE_ED25519` accounts (assertion-key at `m/44'/501'/0'/0'`, update-key at `m/44'/501'/1'/0'`). `ensureWalletWithAccounts` had the same blind spot at the completeness-check layer: it counted accounts per curve, so a wallet with two Ed25519 accounts at the _wrong_ paths was miscounted as already complete.
+
+  Added `getKeyByRole(wallets, role)` and the exported `TURNKEY_ACCOUNT_ROLES` table (`'bitcoin-auth' | 'did-assertion' | 'did-update'`, each with its curve/path/address format) as the source of truth for both `createWalletWithAccounts` and `ensureWalletWithAccounts`, which now check each required role by exact path instead of by curve count. `getKeyByCurve` is unchanged and still supported.
+
+- 8710817: **Fixed a TOCTOU race in `getOrCreateTurnkeySubOrg` that could mint two Turnkey sub-organizations for one email** (#728).
+
+  Two concurrent calls for the same brand-new email (two tabs completing OTP verification close together, or a client retry overlapping an in-flight request) could both observe an empty sub-org lookup and both create a sub-organization, forking the user's identity. `getOrCreateTurnkeySubOrg` now serializes its lookup-then-create sequence per normalized email via a new `SubOrgLock`. The default is an in-process lock (`createInProcessSubOrgLock`), sufficient for a single server instance; multi-instance deployments should inject a distributed `SubOrgLock` (e.g. Redis-backed) via `verifyEmailAuth`'s new `subOrgLock` option or directly as `getOrCreateTurnkeySubOrg`'s third argument.
+
+- Updated dependencies [335abad]
+- Updated dependencies [fdd5478]
+- Updated dependencies [66a9944]
+- Updated dependencies [42cad62]
+- Updated dependencies [5ca171e]
+- Updated dependencies [2cb1f4f]
+- Updated dependencies [2cb1f4f]
+- Updated dependencies [12f605e]
+- Updated dependencies [b210e71]
+- Updated dependencies [d813344]
+- Updated dependencies [ff2d1b3]
+- Updated dependencies [8f02af6]
+- Updated dependencies [0e32a48]
+- Updated dependencies [c7a203e]
+- Updated dependencies [bc129c7]
+- Updated dependencies [3d28934]
+- Updated dependencies [b4f135d]
+- Updated dependencies [11c28f3]
+- Updated dependencies [038895a]
+- Updated dependencies [dd84574]
+- Updated dependencies [730f295]
+- Updated dependencies [75617cb]
+- Updated dependencies [9755861]
+- Updated dependencies [24bfe5d]
+- Updated dependencies [80ccadf]
+- Updated dependencies [077de93]
+- Updated dependencies [1e57416]
+- Updated dependencies [de27b01]
+- Updated dependencies [60443e3]
+- Updated dependencies [29290f7]
+- Updated dependencies [fa89b5b]
+- Updated dependencies [139d9be]
+- Updated dependencies [3ed7af1]
+- Updated dependencies [af7051f]
+- Updated dependencies [244cae1]
+- Updated dependencies [75f31c2]
+- Updated dependencies [8705bfc]
+- Updated dependencies [c70b789]
+- Updated dependencies [902de9c]
+- Updated dependencies [810ec9a]
+- Updated dependencies [f246be0]
+- Updated dependencies [5153d0d]
+  - @originals/sdk@4.0.0
+
 ## 3.0.0
 
 ### Major Changes
