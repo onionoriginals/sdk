@@ -1988,7 +1988,24 @@ export function createBitcoinRoutes(deps: {
         try {
           const st = await provider.getTransactionStatus(existing.commitTxId);
           if (st?.confirmed) {
-            store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
+            // Guarded write (#762): the status check above only proved
+            // `existing` was 'signed' BEFORE this await. A concurrent
+            // reconciliation pass can legitimately confirm (and record real
+            // confirmation depth/block evidence for) this exact rival while
+            // this provider lookup is in flight. An unconditional setStatus
+            // here would silently downgrade that fresher 'confirmed' record
+            // back to 'commit_broadcast', wiping its confirmations per
+            // applyStatus. Only apply the transition if the rival is still
+            // exactly the 'signed' record this branch observed; on a CAS
+            // miss, no retry is needed — the fresh provider result still
+            // proves the rival won the outpoint, so this request keeps
+            // refusing with 409 while leaving the concurrent pass's newer
+            // state untouched.
+            store.trySetStatus(
+              sub, existing.commitTxId,
+              { status: 'signed', retired: false, superseded: false },
+              'commit_broadcast'
+            );
             return refuse('outpoint_already_confirmed', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
           }
         } catch {

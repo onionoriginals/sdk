@@ -494,6 +494,54 @@ describe('POST /api/btc/inscribe', () => {
     expect(old.superseded).toBeUndefined();
   });
 
+  test('#762: a rival confirmed by a CONCURRENT pass during this check\'s own status lookup is not clobbered back to commit_broadcast', async () => {
+    const pair = buildPair();
+    // Declared before harness() so the provider mock (constructed inside it)
+    // can close over the same store instance it later returns.
+    let store!: ReturnType<typeof harness>['store'];
+    const h = harness({
+      // The commit "fails" at broadcast time but actually reached the network…
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) throw new Error('connection reset mid-response');
+        return 'f'.repeat(64);
+      },
+      // A concurrent reconciliation pass confirms the SAME rival, with real
+      // evidence, at the exact moment this handler's own
+      // provider.getTransactionStatus(existing.commitTxId) call resolves —
+      // i.e. after `existing.status === 'signed'` was already checked, but
+      // before this handler acts on the (now-stale) "not yet confirmed"
+      // premise. This is the race #762 reports.
+      txStatus: (txid) => {
+        if (txid === pair.commitTxId) {
+          store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 6,
+            blockHeight: 800_000,
+            blockHash: 'ab'.repeat(32),
+          });
+        }
+        return { confirmed: true, confirmations: 6, blockHeight: 800_000, blockHash: 'ab'.repeat(32) };
+      },
+    });
+    store = h.store;
+    const routes = h.routes;
+
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    const rebuilt = buildRebuiltPair(pair, 23_000);
+    const res = await post(routes, rebuilt);
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+    // The concurrent pass's fresher 'confirmed' status and evidence must
+    // survive this handler's own (now-guarded) write, not be silently
+    // downgraded back to 'commit_broadcast' with confirmations wiped.
+    const old = store.get('sub-1', pair.commitTxId)!;
+    expect(old.status).toBe('confirmed');
+    expect(old.confirmations).toBe(6);
+    expect(old.confirmedBlockHeight).toBe(800_000);
+  });
+
   test('malformed submissions do not consume the per-user inscribe cap', async () => {
     const { routes } = harness();
     // Burn well past the 10/hour cap with garbage — every one must 400, and
