@@ -15,7 +15,7 @@ The `@originals/auth` package provides Turnkey-based authentication for the Orig
 │   ├── turnkey-client # Turnkey API integration
 │   └── turnkey-signer # Server-side DID signing
 ├── /client          # Client-side utilities (browser-safe)
-│   ├── turnkey-client # Direct Turnkey auth proxy calls
+│   ├── turnkey-client # Low-level Turnkey calls (server-side use only)
 │   ├── turnkey-did-signer # Client-side DID signing
 │   └── server-auth  # Server-proxied auth helpers [NEW]
 └── /types           # Shared type definitions
@@ -23,22 +23,28 @@ The `@originals/auth` package provides Turnkey-based authentication for the Orig
 
 ## Authentication Patterns
 
-The package supports three authentication patterns:
+The package supports two supported authentication patterns, plus low-level
+server-side building blocks:
 
-### 1. Direct Auth Proxy (Client-side)
-- Client calls Turnkey directly via auth proxy
-- Requires `VITE_TURNKEY_AUTH_PROXY_CONFIG_ID` in client
-- Best for: SPAs where client handles auth flow directly
-
-### 2. Server-Proxied (Server manages API keys)
+### 1. Server-Proxied (Server manages API keys)
 - Client calls YOUR server endpoints
 - Server uses Turnkey API keys to process auth
 - Best for: Apps where server controls auth flow
 
-### 3. Hybrid (Server issues JWTs)
+### 2. Hybrid (Server issues JWTs)
 - Combines OTP verification with server-issued JWTs
 - Server manages session state and user records
 - Best for: Full-stack apps with user databases
+
+### Direct client-side Turnkey calls are not supported
+A prior "Direct Auth Proxy" pattern let the browser call Turnkey directly.
+`initializeTurnkeyClient()` (the entry point for that pattern) has been
+removed for reading server-only org API secrets and now unconditionally
+throws. The low-level functions it used (`initOtp`, `completeOtp`,
+`fetchUser`, `fetchWallets`, `createWalletWithAccounts`,
+`ensureWalletWithAccounts`) remain exported from `@originals/auth/client`,
+but require a `Turnkey` client obtained server-side via `createTurnkeyClient()`
+— see [`client-api.md`](client-api.md#low-level-turnkey-functions-server-side-only).
 
 ## Security Model
 

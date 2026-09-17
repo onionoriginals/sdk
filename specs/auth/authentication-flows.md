@@ -1,47 +1,27 @@
 # Authentication Flows Specification
 
-## Flow 1: Direct Auth Proxy (Client-Side)
+## Flow 1: Direct Auth Proxy (Client-Side) — Removed / Unsupported
 
-Use when: Client handles authentication directly with Turnkey.
+**This flow no longer works.** `initializeTurnkeyClient()` reads server-only
+org API secrets and has been removed from the client module for that
+reason; it unconditionally throws (it remains exported only as a
+compatibility shim). There is no supported way for a browser to talk to
+Turnkey directly. Use [Flow 2: Server-Proxied Authentication](#flow-2-server-proxied-authentication)
+for browser-side code.
 
-```
-┌─────────┐     ┌──────────────┐     ┌─────────┐
-│ Browser │────▶│ Turnkey Auth │────▶│ Turnkey │
-│         │◀────│    Proxy     │◀────│   API   │
-└─────────┘     └──────────────┘     └─────────┘
-```
-
-### Steps
-
-1. **Initialize Client**
-   ```typescript
-   import { initializeTurnkeyClient, initOtp, completeOtp } from '@originals/auth/client';
-
-   const client = initializeTurnkeyClient();
-   // Requires: VITE_TURNKEY_AUTH_PROXY_CONFIG_ID, VITE_TURNKEY_ORGANIZATION_ID
-   ```
-
-2. **Send OTP**
-   ```typescript
-   const otpId = await initOtp(client, 'user@example.com');
-   ```
-
-3. **Verify OTP**
-   ```typescript
-   const { sessionToken, userId, action } = await completeOtp(client, otpId, code, email);
-   // action: 'login' | 'signup'
-   ```
-
-4. **Use Session**
-   ```typescript
-   const wallets = await fetchWallets(client);
-   ```
+If your own server already holds a `Turnkey` client (via `createTurnkeyClient()`
+from `@originals/auth/server`) and a verified `subOrgId`, the low-level
+functions this flow used to describe (`initOtp`, `completeOtp`, `fetchUser`,
+`fetchWallets`, `createWalletWithAccounts`, `ensureWalletWithAccounts`) are
+still available server-side — see their real signatures in
+[`client-api.md`](client-api.md#low-level-turnkey-functions-server-side-only).
 
 ---
 
 ## Flow 2: Server-Proxied Authentication
 
-Use when: Server manages Turnkey API keys and controls auth flow.
+Use when: Server manages Turnkey API keys and controls auth flow. This is
+the supported flow for browser clients.
 
 ```
 ┌─────────┐     ┌────────────┐     ┌─────────┐
@@ -58,8 +38,11 @@ import { sendOtp, verifyOtp } from '@originals/auth/client';
 // Step 1: Request OTP
 const { sessionId, message } = await sendOtp('user@example.com');
 
-// Step 2: Verify OTP
-const { verified, email, subOrgId } = await verifyOtp(sessionId, code);
+// Step 2: Verify OTP. Pass a browser-generated publicKey so the
+// verification token's private key never transits the response.
+const { verified, email, subOrgId } = await verifyOtp(sessionId, code, undefined, {
+  publicKey: myP256PublicKeyHex,
+});
 ```
 
 ### Server-Side (Your Endpoints)
@@ -78,9 +61,13 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
 // POST /api/auth/verify-otp
 app.post('/api/auth/verify-otp', async (req, res) => {
-  const { sessionId, code } = req.body;
-  const result = await verifyEmailAuth(sessionId, code, turnkey);
-  res.json(result); // { verified, email, subOrgId }
+  const { sessionId, code, publicKey } = req.body;
+  const result = await verifyEmailAuth(sessionId, code, turnkey, undefined, { publicKey });
+  res.json(result);
+  // { verified, email, subOrgId, verificationToken?, publicKey?, privateKey? }
+  // verificationToken/publicKey are set once verified; privateKey is only
+  // present when the request omitted publicKey (server-generated fallback
+  // keypair) — see VerifyEmailAuthOptions in packages/auth/src/server.
 });
 ```
 
@@ -178,10 +165,10 @@ interface SessionStorage {
 ### Session Expiration
 
 ```typescript
-import { TurnkeySessionExpiredError, withTokenExpiration } from '@originals/auth/client';
+import { TurnkeySessionExpiredError, fetchWallets } from '@originals/auth/client';
 
 try {
-  const wallets = await fetchWallets(client, () => {
+  const wallets = await fetchWallets(turnkeyClient, subOrgId, () => {
     // Token expired callback
     redirectToLogin();
   });
@@ -191,6 +178,10 @@ try {
   }
 }
 ```
+
+Note: `fetchWallets` is a [low-level, server-side-only function](client-api.md#low-level-turnkey-functions-server-side-only) —
+this pattern applies to your own server code holding a `Turnkey` client, not
+the browser.
 
 ### Server Errors
 
