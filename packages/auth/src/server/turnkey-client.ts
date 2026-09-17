@@ -232,6 +232,10 @@ function isDefinitiveNotFound(error: unknown): boolean {
  *   not-found — transient/API errors are rethrown;
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
+ * - an existing sub-org whose wallet(s) are missing one or more required
+ *   account roles (bitcoin-auth, did-assertion, did-update) gets the
+ *   missing role(s) added **in place**, on one deterministic wallet, rather
+ *   than being silently left incomplete;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
  *   selection is deterministic so every login resolves the same identity;
  * - the lookup-then-create sequence is serialized per normalized email via
@@ -307,18 +311,18 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     const existingSubOrgId = [...subOrgIds].sort()[0];
 
     // Ensure the sub-org has a wallet; repair in place if not.
-    let walletCount: number;
+    let wallets: Array<{ walletId?: string }>;
     try {
       const walletsCheck = await turnkeyClient.apiClient().getWallets({
         organizationId: existingSubOrgId,
       });
-      walletCount = walletsCheck.wallets?.length || 0;
+      wallets = walletsCheck.wallets || [];
     } catch (walletCheckErr) {
       console.error('[auth] Could not check wallets in existing sub-org:', walletCheckErr);
       return existingSubOrgId;
     }
 
-    if (walletCount === 0) {
+    if (wallets.length === 0) {
       // Repair the EXISTING identity: create the wallet under the existing
       // sub-org. Creating a new sub-org here would fork the user's identity
       // (and again on every subsequent login).
@@ -328,6 +332,93 @@ async function getOrCreateTurnkeySubOrgUnlocked(
         walletName: DEFAULT_WALLET_NAME,
         accounts: [...DEFAULT_WALLET_ACCOUNTS],
       });
+      return existingSubOrgId;
+    }
+
+    // The sub-org has at least one wallet, but wallet existence alone does
+    // not mean every required account role (bitcoin-auth, did-assertion,
+    // did-update) is present in it — only the walletless-repair path above
+    // was ever checked. Enumerate accounts across ALL of the sub-org's
+    // wallets (a role may be satisfied in any of them, not just the first)
+    // and repair whichever roles are missing sub-org-wide.
+    //
+    // A failure enumerating any wallet's accounts means the true inventory
+    // is unknown, so this fails soft and skips repair for this login rather
+    // than risk inferring a role absent from incomplete data and creating a
+    // duplicate account for a role that already exists in an unread wallet.
+    const allAccounts: Array<{ curve: string; path: string }> = [];
+    for (const wallet of wallets) {
+      if (!wallet.walletId) {
+        continue;
+      }
+      try {
+        const accountsResponse = await turnkeyClient.apiClient().getWalletAccounts({
+          organizationId: existingSubOrgId,
+          walletId: wallet.walletId,
+        });
+        allAccounts.push(...(accountsResponse.accounts || []));
+      } catch (accountsCheckErr) {
+        console.error(
+          '[auth] Could not check wallet accounts in existing sub-org:',
+          accountsCheckErr
+        );
+        return existingSubOrgId;
+      }
+    }
+
+    const missingAccounts = DEFAULT_WALLET_ACCOUNTS.filter(
+      (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+    );
+
+    const targetWalletId = wallets[0]?.walletId;
+    if (missingAccounts.length > 0 && targetWalletId) {
+      // Create every globally-missing role exactly once, on one
+      // deterministic target wallet (the stable first wallet), rather than
+      // adding it to every wallet that happens to lack it - that would
+      // duplicate a role that is genuinely present elsewhere in the sub-org.
+      console.warn(
+        `[auth] Existing sub-org's wallet is missing ${missingAccounts.length} required ` +
+          'account(s); repairing in place'
+      );
+      try {
+        await turnkeyClient.apiClient().createWalletAccounts({
+          organizationId: existingSubOrgId,
+          walletId: targetWalletId,
+          accounts: missingAccounts.map((spec) => ({ ...spec })),
+        });
+      } catch (repairWriteErr) {
+        // This read-then-create sequence is only serialized within this
+        // process (see the SubOrgLock production warning above); a
+        // concurrent login handled by another instance can run the same
+        // repair for the same missing role at the same time, and lose the
+        // resulting write race with an error from Turnkey (e.g. a
+        // duplicate-account rejection). Before treating that as a real
+        // failure, re-check whether the role is now present - if a
+        // concurrent repair already added it, the desired end state holds
+        // and this login must not fail on a race it merely lost.
+        let stillMissing = missingAccounts;
+        try {
+          const recheck = await turnkeyClient.apiClient().getWalletAccounts({
+            organizationId: existingSubOrgId,
+            walletId: targetWalletId,
+          });
+          const recheckAccounts = recheck.accounts || [];
+          stillMissing = missingAccounts.filter(
+            (spec) =>
+              !recheckAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+          );
+        } catch {
+          // The re-check itself failed - fall through and propagate the
+          // original write error rather than guess at the true state.
+        }
+        if (stillMissing.length > 0) {
+          throw repairWriteErr;
+        }
+        console.warn(
+          '[auth] Repair write raced with a concurrent repair that already added the ' +
+            'missing account(s); continuing'
+        );
+      }
     }
 
     return existingSubOrgId;
