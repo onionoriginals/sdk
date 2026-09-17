@@ -3,6 +3,7 @@ import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
+  normalizeTxid,
   parseAssetAlias,
   parseDocument,
   resolveSat,
@@ -129,11 +130,15 @@ const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
     Number.isSafeInteger(t.height) &&
     (t.height as number) >= 0 &&
     typeof t.hash === "string" &&
-    /^[0-9a-f]{64}$/.test(t.hash)
+    /^[0-9a-f]{64}$/i.test(t.hash)
   );
 };
+// Block hashes carry no casing contract of their own (see #844); normalize
+// with the same 64-hex-char rule as a reveal txid before comparing, so two
+// sources reporting the identical tip in different hex letter case still
+// agree rather than falsely disagreeing.
 const sameChainTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
-  a.height === b.height && a.hash === b.hash;
+  a.height === b.height && normalizeTxid(a.hash) === normalizeTxid(b.hash);
 /**
  * A second source can only corroborate enumeration completeness if its own
  * observation was itself complete, healthy and stable. An independent

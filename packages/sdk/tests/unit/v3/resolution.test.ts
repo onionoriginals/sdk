@@ -671,6 +671,26 @@ test("cross-checks enumeration against an independently configured second index 
   );
 });
 
+test("cross-checks enumeration and ownership when the independent source reports the same tips/blocks in a different hex case (#844)", async () => {
+  const { snapshot } = await boundary();
+  const upper = structuredClone(snapshot);
+  for (const tip of [upper.tipBefore, upper.tipAfter, upper.indexTip])
+    tip.hash = tip.hash.toUpperCase();
+  for (const block of upper.blocks) block.hash = block.hash.toUpperCase();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => upper },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
+});
+
 test("without an independent source configured, resolution still accepts but only claims provider-asserted enumeration", async () => {
   const { snapshot } = await boundary();
   const sdk = OriginalsSDK.create({
