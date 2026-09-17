@@ -34,10 +34,58 @@ function requirePath(): typeof import('path') {
 export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
   private baseUrl?: string;
+  private originDomain?: string;
 
   constructor(options: LocalStorageAdapterOptions) {
     this.baseDir = options.baseDir;
     this.baseUrl = options.baseUrl;
+    this.originDomain = options.originDomain;
+    if (this.originDomain !== undefined && this.baseUrl !== undefined) {
+      this.validateOriginBaseUrl(this.baseUrl, this.originDomain);
+    }
+  }
+
+  /**
+   * originDomain mode's toUrl() treats `baseUrl` as this domain's literal
+   * canonical origin (issue #780 review). A mismatched scheme/host, a port,
+   * a path prefix, or a query/fragment would silently write objects under a
+   * URL hosted publication's exact `https://${domain}/${path}` check can
+   * never accept — validate eagerly, before any storage write, instead of
+   * failing late at publish time.
+   */
+  private validateOriginBaseUrl(baseUrl: string, originDomain: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      throw new StructuredError(
+        'STORAGE_INVALID_ORIGIN',
+        `LocalStorageAdapter originDomain mode requires a valid URL for baseUrl, got "${baseUrl}".`
+      );
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== originDomain ||
+      parsed.port !== '' ||
+      (parsed.pathname !== '/' && parsed.pathname !== '') ||
+      parsed.search !== '' ||
+      parsed.hash !== ''
+    ) {
+      throw new StructuredError(
+        'STORAGE_INVALID_ORIGIN',
+        `LocalStorageAdapter originDomain mode requires baseUrl to be exactly "https://${originDomain}" (no port, path, query or fragment — hosted publication can never accept anything else), got "${baseUrl}".`
+      );
+    }
+  }
+
+  /** In originDomain mode, every call must target that exact domain (see LocalStorageAdapterOptions.originDomain). */
+  private checkOriginDomain(domain: string): void {
+    if (this.originDomain !== undefined && domain !== this.originDomain) {
+      throw new StructuredError(
+        'STORAGE_DOMAIN_MISMATCH',
+        `LocalStorageAdapter is configured for originDomain "${this.originDomain}" and cannot serve "${domain}" from the same advertised origin.`
+      );
+    }
   }
 
   private sanitizeDomain(domain: string): string {
@@ -53,20 +101,29 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   private resolvePath(domain: string, objectPath: string): string {
     const path = requirePath();
-    const safeDomain = this.sanitizeDomain(domain);
     const cleanPath = objectPath.replace(/^\/+/, '');
-    const base = path.resolve(this.baseDir, safeDomain);
-    // Defense in depth: the domain directory itself must be a strict child of
-    // baseDir; '..' segments in a domain (which can derive from external data)
-    // must not become a read/write primitive outside baseDir.
-    const baseRelative = path.relative(path.resolve(this.baseDir), base);
-    if (
-      baseRelative === '' ||
-      baseRelative === '..' ||
-      baseRelative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(baseRelative)
-    ) {
-      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+    // In originDomain mode, checkOriginDomain() already guarantees `domain`
+    // is the one configured domain, so baseDir itself IS that domain's root —
+    // no per-domain subdirectory is needed to keep domains apart, and adding
+    // one would desync the physical layout from toUrl()'s canonical
+    // `${origin}/${path}` (a static file server rooted at baseDir would 404
+    // looking for a domain segment that toUrl() never advertised).
+    const base = this.originDomain !== undefined
+      ? path.resolve(this.baseDir)
+      : path.resolve(this.baseDir, this.sanitizeDomain(domain));
+    if (this.originDomain === undefined) {
+      // Defense in depth: the domain directory itself must be a strict child
+      // of baseDir; '..' segments in a domain (which can derive from
+      // external data) must not become a read/write primitive outside baseDir.
+      const baseRelative = path.relative(path.resolve(this.baseDir), base);
+      if (
+        baseRelative === '' ||
+        baseRelative === '..' ||
+        baseRelative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(baseRelative)
+      ) {
+        throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid domain: resolves outside the storage directory: ${domain}`);
+      }
     }
     const fullPath = path.resolve(base, cleanPath);
     // Contain object paths inside the domain directory: '..' segments in a
@@ -81,6 +138,11 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   private toUrl(domain: string, objectPath: string): string {
     const cleanPath = objectPath.replace(/^\/+/, '');
+    if (this.originDomain !== undefined) {
+      // baseUrl already IS this domain's origin: no repeated domain segment.
+      const trimmed = (this.baseUrl ?? `https://${this.originDomain}`).replace(/\/$/, '');
+      return `${trimmed}/${cleanPath}`;
+    }
     if (this.baseUrl) {
       const trimmed = this.baseUrl.replace(/\/$/, '');
       // Use the same sanitized domain the file is physically stored under, so
@@ -92,6 +154,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async putObject(domain: string, objectPath: string, content: Uint8Array | string): Promise<string> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -101,6 +164,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async getObject(domain: string, objectPath: string): Promise<GetObjectResult | null> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
@@ -116,6 +180,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async exists(domain: string, objectPath: string): Promise<boolean> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     const fullPath = this.resolvePath(domain, objectPath);
     try {
@@ -141,6 +206,7 @@ export class LocalStorageAdapter implements StorageAdapter {
    * round-trip through getObject. A never-written domain yields [].
    */
   async listObjects(domain: string, prefix: string): Promise<string[]> {
+    this.checkOriginDomain(domain);
     await loadNodeModules();
     // Reuse resolvePath's traversal containment for the domain directory.
     const base = this.resolvePath(domain, '');

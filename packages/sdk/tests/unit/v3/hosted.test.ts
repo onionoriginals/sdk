@@ -4,6 +4,9 @@ import { OriginalsSDK } from "../../../src/index.js";
 import { CelError, createLocalSigner, assetDigest } from "@originals/cel/v3";
 import { StructuredError } from "@originals/cel";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
+import { HostedMemoryStorageAdapter } from "../../../src/storage/HostedMemoryStorageAdapter.js";
+import { LocalStorageAdapter } from "../../../src/storage/LocalStorageAdapter.js";
+import { MemoryStorageAdapter } from "../../../src/storage/MemoryStorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
   const files = new Map<
@@ -574,5 +577,68 @@ test('the public checker omits credentials and cached responses and refuses redi
     expect(requested?.redirect).toBe('error');
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+// Regression for #780: neither shipped reference StorageAdapter could complete
+// a hosted publish, because MemoryStorageAdapter's `mem://` locator and
+// LocalStorageAdapter's default multi-tenant `baseUrl` both fail hosted.ts's
+// exact `https://${domain}/${path}` check. These tests exercise the actual
+// shipped adapters (not the inline `storage()` mock above) through
+// publishToWeb + resolveAssetFromWeb end to end.
+
+test('MemoryStorageAdapter cannot complete a hosted publish (documents the still-real mem:// mismatch)', async () => {
+  MemoryStorageAdapter.clear();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: new MemoryStorageAdapter() });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'text/plain', content: 'v1' },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: 'example.com' })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe('ASSET_STORAGE_URL');
+});
+
+test('HostedMemoryStorageAdapter completes publishToWeb and cold resolveAssetFromWeb end to end (#780)', async () => {
+  const store = new HostedMemoryStorageAdapter();
+  const png = new Uint8Array([137, 80, 78, 71, 0, 255]);
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'image/png', content: png },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+  expect(published.status).toBe('published');
+  expect(published.asset.state.layer).toBe('webvh');
+
+  const fresh = OriginalsSDK.create({ storageAdapter: store });
+  const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.asset.id).toBe(asset.id);
+  expect(loaded.asset.resources[0].content).toEqual(png);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test('LocalStorageAdapter with originDomain completes publishToWeb and cold resolveAssetFromWeb end to end (#780)', async () => {
+  const fsSync = await import('fs');
+  const os = await import('os');
+  const path = await import('path');
+  const tempDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'hosted-local-origin-'));
+  try {
+    const store = new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com' });
+    const png = new Uint8Array([1, 2, 3, 4]);
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', mediaType: 'image/png', content: png },
+    ]);
+    const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+    expect(published.status).toBe('published');
+
+    const fresh = OriginalsSDK.create({ storageAdapter: store });
+    const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+    expect(loaded.asset.id).toBe(asset.id);
+    expect(loaded.asset.resources[0].content).toEqual(png);
+    expect(loaded.verification.verified).toBe(true);
+  } finally {
+    fsSync.rmSync(tempDir, { recursive: true, force: true });
   }
 });
