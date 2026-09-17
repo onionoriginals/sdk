@@ -6,6 +6,7 @@ import {
   normalizeEmail,
   createInProcessSubOrgLock,
   extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
   AUTH_TURNKEY_ERROR_CODES,
 } from '../src/server/turnkey-client';
 
@@ -139,6 +140,14 @@ describe('turnkey-client', () => {
       expect(extractTurnkeyErrorCode('nope')).toBeUndefined();
       expect(extractTurnkeyErrorCode(null)).toBeUndefined();
       expect(extractTurnkeyErrorCode(undefined)).toBeUndefined();
+    });
+
+    test('TURNKEY_GRPC_INVALID_ARGUMENT is gRPC code 3', () => {
+      // Pinned to the value confirmed by #819's own repro
+      // ("Turnkey error 3: invalid OTP code"); callers must compare against
+      // this exact code, not merely check a code is present, since other
+      // Turnkey-side failures (auth, rate-limiting) also carry a code.
+      expect(TURNKEY_GRPC_INVALID_ARGUMENT).toBe(3);
     });
   });
 

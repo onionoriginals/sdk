@@ -21,6 +21,7 @@ export {
   normalizeEmail,
   createInProcessSubOrgLock,
   extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
   AUTH_TURNKEY_ERROR_CODES,
   type SubOrgLock,
 } from './turnkey-client.js';

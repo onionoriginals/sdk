@@ -692,6 +692,32 @@ describe('email-auth', () => {
         expect(storage.get(sessionId)!.otpAttempts).toBe(1);
       });
 
+      test('a Turnkey-side failure with a different numeric code (e.g. rate-limiting) is not conflated with a wrong code', async () => {
+        // gRPC code 8 is RESOURCE_EXHAUSTED (rate-limited by Turnkey), not
+        // code 3 (INVALID_ARGUMENT). A structured Turnkey error still
+        // carries a numeric code for this, so a check that merely asks
+        // "is some code present" would wrongly treat it as a rejected OTP
+        // and burn the caller's attempt budget for a failure that has
+        // nothing to do with the code they typed.
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() =>
+            Promise.reject(turnkeyRejection('rate limited', 8))
+          ),
+        });
+        const sessionId = await setupSession(client);
+
+        try {
+          await verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions);
+          throw new Error('expected verifyEmailAuth to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(
+            AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure
+          );
+        }
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+      });
+
       test('a transient failure calling verifyOtp (no numeric Turnkey code) does not consume an attempt', async () => {
         // A Turnkey blip during the 15-minute OTP window (timeout, 5xx,
         // ECONNRESET) never evaluates code correctness at all, so it must

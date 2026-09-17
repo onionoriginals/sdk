@@ -14,6 +14,7 @@ import {
   extractTurnkeyErrorCode,
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
   type SubOrgLock,
 } from './turnkey-client.js';
 
@@ -374,17 +375,18 @@ export async function verifyEmailAuth(
   } catch (error) {
     console.error('❌ OTP verification failed:', error);
 
-    // Only a call Turnkey actually rendered a verdict on may consume part of
-    // the attempt budget. `extractTurnkeyErrorCode` returns a numeric code
-    // only for a genuine `TurnkeyRequestError` (Turnkey evaluated the code
-    // and rejected it); a transient/network failure (timeout, 5xx,
-    // `ECONNRESET`) or an unexpected response shape throws without one,
-    // because the request never reached a point where Turnkey could return
-    // a definitive answer. Charging those against MAX_OTP_ATTEMPTS would let
-    // a Turnkey blip during the 15-minute OTP window exhaust a legitimate
-    // user's budget and lock them out, even though they never typed a wrong
-    // code (#747).
-    if (extractTurnkeyErrorCode(error) === undefined) {
+    // Only Turnkey definitively rejecting THIS code (gRPC INVALID_ARGUMENT)
+    // may consume part of the attempt budget. A plain transport failure
+    // (timeout, 5xx, `ECONNRESET`) never reaches Turnkey at all and so
+    // carries no numeric code; but a *different* numeric Turnkey code
+    // (auth failure, rate-limiting, an internal error) is just as much
+    // "not evidence the caller typed a wrong code" and must not be
+    // conflated with a genuine rejection either — checking merely that some
+    // code is present would do exactly that. Charging any of these against
+    // MAX_OTP_ATTEMPTS would let a Turnkey-side hiccup during the 15-minute
+    // OTP window exhaust a legitimate user's budget and lock them out, even
+    // though they never typed a wrong code (#747/#819).
+    if (extractTurnkeyErrorCode(error) !== TURNKEY_GRPC_INVALID_ARGUMENT) {
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure,
         `OTP verification could not be completed: ${

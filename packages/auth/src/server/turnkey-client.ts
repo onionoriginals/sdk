@@ -164,17 +164,21 @@ function getDefaultSubOrgLock(): SubOrgLock {
  * Walks the `cause` chain (cycle-safe) and returns the first numeric `code`
  * found, or `undefined` if none is present anywhere in the chain.
  *
- * `@turnkey/http`'s `TurnkeyRequestError` always carries a numeric `code`
- * parsed from Turnkey's own JSON error body, so any error Turnkey actually
- * rendered a verdict on carries one; a transport/routing failure (network
- * blip, timeout, DNS, a proxy error page, `ECONNRESET`) throws a plain
- * `Error` with no `code` at all, because the request never reached a point
- * where Turnkey could respond. Presence of a numeric code is therefore
- * itself the strongly-typed evidence that Turnkey processed the request,
- * shared by every call site in this module that needs to distinguish "Turnkey
- * gave a definitive answer" from "the call never got one" (see
- * {@link isDefinitiveNotFound} and `email-auth.ts`'s OTP-verification catch,
- * #747/#819).
+ * `@turnkey/http`'s `TurnkeyRequestError` always carries a numeric gRPC
+ * status `code` parsed from Turnkey's own JSON error body — for ANY error
+ * Turnkey's API returned a response for, not only a rejected OTP: auth
+ * failures, rate-limiting, and internal errors are also structured
+ * `TurnkeyRequestError`s with their own (different) codes. A
+ * transport/routing failure (network blip, timeout, DNS, a proxy error
+ * page, `ECONNRESET`) throws a plain `Error` with no `code` at all, because
+ * the request never reached a point where Turnkey could respond.
+ *
+ * Callers needing "Turnkey definitively rejected THIS SPECIFIC condition"
+ * (e.g. {@link isDefinitiveNotFound}, or `email-auth.ts`'s OTP-verification
+ * catch) must compare the returned code against the exact expected value —
+ * never merely check it is present — or an unrelated Turnkey-side failure
+ * (rate limit, permission, internal error) gets misclassified as that
+ * specific condition (#747/#819).
  */
 export function extractTurnkeyErrorCode(error: unknown): number | undefined {
   const seen = new Set<unknown>();
@@ -191,16 +195,27 @@ export function extractTurnkeyErrorCode(error: unknown): number | undefined {
 }
 
 /**
+ * gRPC status code 3, INVALID_ARGUMENT — the code Turnkey's `verifyOtp`
+ * returns when it definitively rejects a submitted OTP code (confirmed by
+ * #819's own repro: `"Turnkey error 3: invalid OTP code"`). Used by
+ * `email-auth.ts` to distinguish a genuinely wrong code from every other
+ * Turnkey-side failure (auth, rate-limiting, internal errors), which must
+ * NOT be charged against the local brute-force attempt budget.
+ */
+export const TURNKEY_GRPC_INVALID_ARGUMENT = 3;
+
+/**
  * Whether an error from the Turnkey API definitively means the queried
  * resource does not exist (as opposed to a transient/network/auth failure).
  * gRPC status code 5 is NOT_FOUND.
  *
- * Only the strongly-typed `code === 5` evidence is trusted. A
- * message-substring match on "not found"/"does not exist" would accept an
- * unrelated transport error as if it were Turnkey's own not-found response,
- * and this function must never do that: fall through to
- * `createSubOrganization` on such an ambiguous error mints a duplicate
- * identity for an existing user.
+ * Only the strongly-typed `code === 5` evidence is trusted — never merely
+ * "some numeric code is present", since other Turnkey-side failures (auth,
+ * rate-limiting) also carry a code. A message-substring match on "not
+ * found"/"does not exist" would accept an unrelated transport error as if
+ * it were Turnkey's own not-found response, and this function must never do
+ * that: fall through to `createSubOrganization` on such an ambiguous error
+ * mints a duplicate identity for an existing user.
  */
 function isDefinitiveNotFound(error: unknown): boolean {
   return extractTurnkeyErrorCode(error) === 5;
