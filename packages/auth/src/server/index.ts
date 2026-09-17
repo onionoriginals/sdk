@@ -20,6 +20,7 @@ export {
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  AUTH_TURNKEY_CLIENT_ERROR_CODES,
   type SubOrgLock,
 } from './turnkey-client.js';
 export {
@@ -28,6 +29,7 @@ export {
   isSessionVerified,
   cleanupSession,
   getSession,
+  AUTH_EMAIL_ERROR_CODES,
   type SessionStorage,
   type VerifyEmailAuthOptions,
   createInMemorySessionStorage,
@@ -44,7 +46,11 @@ export {
   getClearAuthCookieConfig,
 } from './jwt.js';
 export { createAuthMiddleware } from './middleware.js';
-export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer.js';
+export {
+  TurnkeyWebVHSigner,
+  createTurnkeySigner,
+  AUTH_TURNKEY_SIGNER_ERROR_CODES,
+} from './turnkey-signer.js';
 
 
 

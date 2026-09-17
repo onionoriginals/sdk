@@ -1,6 +1,10 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { TurnkeyWebVHSigner, createTurnkeySigner } from '../src/server/turnkey-signer';
-import { multikey } from '@originals/sdk';
+import {
+  TurnkeyWebVHSigner,
+  createTurnkeySigner,
+  AUTH_TURNKEY_SIGNER_ERROR_CODES,
+} from '../src/server/turnkey-signer';
+import { multikey, StructuredError } from '@originals/sdk';
 
 describe('turnkey-signer', () => {
   describe('createTurnkeySigner', () => {
@@ -88,6 +92,37 @@ describe('turnkey-signer', () => {
           proof: { type: 'DataIntegrityProof' },
         })
       ).rejects.toThrow('Failed to sign with Turnkey');
+    });
+
+    test('sign failure is a StructuredError preserving the original cause (#747)', async () => {
+      const turnkeyError = Object.assign(new Error('signRawPayload rejected'), {
+        code: 7,
+      });
+      const mockClient = {
+        apiClient: () => ({
+          signRawPayload: mock(() => Promise.reject(turnkeyError)),
+        }),
+      } as unknown as import('@turnkey/sdk-server').Turnkey;
+
+      const signer = new TurnkeyWebVHSigner(
+        'sub_org_id',
+        'key_id',
+        'z6MkPubKey',
+        mockClient,
+        'did:key:z6Mk#z6Mk'
+      );
+
+      expect.assertions(3);
+      try {
+        await signer.sign({
+          document: { id: 'did:example:123' },
+          proof: { type: 'DataIntegrityProof' },
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_TURNKEY_SIGNER_ERROR_CODES.signFailed);
+        expect((error as StructuredError).details).toMatchObject({ cause: turnkeyError });
+      }
     });
 
     test('sign rejects a 65-byte signature instead of silently truncating it', async () => {

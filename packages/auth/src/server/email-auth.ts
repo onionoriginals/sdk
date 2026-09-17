@@ -5,11 +5,30 @@
 
 import { randomBytes } from 'node:crypto';
 import { Turnkey } from '@turnkey/sdk-server';
+import { StructuredError } from '@originals/sdk';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
 import { encryptOtpCode } from '../otp-encryption.js';
 import { getOrCreateTurnkeySubOrg, normalizeEmail, type SubOrgLock } from './turnkey-client.js';
+
+/**
+ * Stable error codes for `packages/auth/src/server/email-auth.ts` failures.
+ * Part of #747's incremental `StructuredError` conversion of `packages/auth`'s
+ * server seam (the JWT slice was done separately in #756).
+ */
+export const AUTH_EMAIL_ERROR_CODES = {
+  emailInvalidFormat: 'AUTH_EMAIL_INVALID_FORMAT',
+  otpInitFailed: 'AUTH_OTP_INIT_FAILED',
+  sessionInvalid: 'AUTH_SESSION_INVALID',
+  sessionExpired: 'AUTH_SESSION_EXPIRED',
+  sessionCorrupt: 'AUTH_SESSION_CORRUPT',
+  otpCodeFormatInvalid: 'AUTH_OTP_CODE_FORMAT_INVALID',
+  otpEncryptionFailed: 'AUTH_OTP_ENCRYPTION_FAILED',
+  otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
+  otpVerifyFailed: 'AUTH_OTP_VERIFY_FAILED',
+  subOrgProvisionFailed: 'AUTH_TURNKEY_SUBORG_PROVISION_FAILED',
+} as const;
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
@@ -117,7 +136,7 @@ export async function initiateEmailAuth(
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(normalizedEmail)) {
-    throw new Error('Invalid email format');
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.emailInvalidFormat, 'Invalid email format');
   }
 
   console.log('[email-auth] Initiating email auth');
@@ -143,7 +162,10 @@ export async function initiateEmailAuth(
   const otpId = otpResult.otpId;
 
   if (!otpId) {
-    throw new Error('Failed to initiate OTP - no OTP ID returned');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpInitFailed,
+      'Failed to initiate OTP - no OTP ID returned'
+    );
   }
 
   // Turnkey v6 (ACTIVITY_TYPE_INIT_OTP_V3) returns a signed target-encryption
@@ -151,7 +173,10 @@ export async function initiateEmailAuth(
   const otpEncryptionTargetBundle = otpResult.otpEncryptionTargetBundle;
 
   if (!otpEncryptionTargetBundle) {
-    throw new Error('Failed to initiate OTP - no OTP encryption target bundle returned');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpInitFailed,
+      'Failed to initiate OTP - no OTP encryption target bundle returned'
+    );
   }
 
   console.log('[email-auth] OTP sent');
@@ -239,21 +264,25 @@ export async function verifyEmailAuth(
   const session = storage.get(sessionId);
 
   if (!session) {
-    throw new Error('Invalid or expired session');
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
   }
 
   // Check if session has expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
     storage.delete(sessionId);
-    throw new Error('Session expired. Please request a new code.');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionExpired,
+      'Session expired. Please request a new code.'
+    );
   }
 
   if (!session.otpId) {
-    throw new Error('OTP ID not found in session');
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionCorrupt, 'OTP ID not found in session');
   }
 
   if (!session.otpEncryptionTargetBundle) {
-    throw new Error(
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionCorrupt,
       'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
@@ -263,7 +292,10 @@ export async function verifyEmailAuth(
   // (otpLength: 6, alphanumeric: false), so anything else is definitely
   // wrong. Keep in sync with the initOtp configuration above.
   if (!/^\d{6}$/.test(code)) {
-    throw new Error('Invalid verification code format');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid,
+      'Invalid verification code format'
+    );
   }
 
   console.log('[email-auth] Verifying OTP');
@@ -287,8 +319,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
-    throw new Error(
-      `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed,
+      `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 
@@ -324,15 +358,18 @@ export async function verifyEmailAuth(
     const attempts = (session.otpAttempts ?? 0) + 1;
     if (attempts >= MAX_OTP_ATTEMPTS) {
       storage.delete(sessionId);
-      throw new Error(
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.otpAttemptsExceeded,
         'Too many failed verification attempts. Please request a new code.'
       );
     }
     session.otpAttempts = attempts;
     storage.set(sessionId, session);
 
-    throw new Error(
-      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpVerifyFailed,
+      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 
@@ -355,7 +392,8 @@ export async function verifyEmailAuth(
     // attempt budget and eventually masking this error with a misleading
     // "too many failed attempts".
     storage.delete(sessionId);
-    throw new Error(
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.subOrgProvisionFailed,
       `Email verified, but provisioning the Turnkey sub-organization failed: ${
         error instanceof Error ? error.message : String(error)
       }. Please request a new code and try again.`,

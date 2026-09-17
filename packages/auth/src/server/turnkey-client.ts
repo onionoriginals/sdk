@@ -3,9 +3,21 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
+import { StructuredError } from '@originals/sdk';
 import { normalizeEmail } from '../email.js';
 
 export { normalizeEmail };
+
+/**
+ * Stable error codes for `packages/auth/src/server/turnkey-client.ts` failures.
+ * Part of #747's incremental `StructuredError` conversion of `packages/auth`'s
+ * server seam (the JWT slice was done separately in #756).
+ */
+export const AUTH_TURNKEY_CLIENT_ERROR_CODES = {
+  configMissing: 'AUTH_TURNKEY_CONFIG_MISSING',
+  subOrgLookupFailed: 'AUTH_TURNKEY_SUBORG_LOOKUP_FAILED',
+  subOrgIdMissing: 'AUTH_TURNKEY_SUBORG_ID_MISSING',
+} as const;
 
 export interface TurnkeyClientConfig {
   /** Turnkey API base URL (default: https://api.turnkey.com) */
@@ -27,13 +39,25 @@ export function createTurnkeyClient(config?: Partial<TurnkeyClientConfig>): Turn
   const organizationId = config?.organizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
 
   if (!apiPublicKey) {
-    throw new Error('TURNKEY_API_PUBLIC_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing,
+      'TURNKEY_API_PUBLIC_KEY is required',
+      { variable: 'TURNKEY_API_PUBLIC_KEY' }
+    );
   }
   if (!apiPrivateKey) {
-    throw new Error('TURNKEY_API_PRIVATE_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing,
+      'TURNKEY_API_PRIVATE_KEY is required',
+      { variable: 'TURNKEY_API_PRIVATE_KEY' }
+    );
   }
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing,
+      'TURNKEY_ORGANIZATION_ID is required',
+      { variable: 'TURNKEY_ORGANIZATION_ID' }
+    );
   }
 
   return new Turnkey({
@@ -201,7 +225,11 @@ export async function getOrCreateTurnkeySubOrg(
 ): Promise<string> {
   const organizationId = process.env.TURNKEY_ORGANIZATION_ID;
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing,
+      'TURNKEY_ORGANIZATION_ID is required',
+      { variable: 'TURNKEY_ORGANIZATION_ID' }
+    );
   }
 
   const normalizedEmail = normalizeEmail(email);
@@ -229,7 +257,8 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     // transient failure (network blip, 429, auth misconfig) as "no existing
     // sub-org" would mint a duplicate identity for an existing user.
     if (!isDefinitiveNotFound(error)) {
-      throw new Error(
+      throw new StructuredError(
+        AUTH_TURNKEY_CLIENT_ERROR_CODES.subOrgLookupFailed,
         `Failed to look up existing Turnkey sub-organization: ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -304,7 +333,10 @@ async function getOrCreateTurnkeySubOrgUnlocked(
   const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
 
   if (!subOrgId) {
-    throw new Error('No sub-organization ID returned from Turnkey');
+    throw new StructuredError(
+      AUTH_TURNKEY_CLIENT_ERROR_CODES.subOrgIdMissing,
+      'No sub-organization ID returned from Turnkey'
+    );
   }
 
   return subOrgId;

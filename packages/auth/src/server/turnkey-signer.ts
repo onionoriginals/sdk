@@ -6,10 +6,26 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { ExternalSigner, ExternalVerifier, multikey, signingInput } from '@originals/sdk';
+import {
+  ExternalSigner,
+  ExternalVerifier,
+  multikey,
+  signingInput,
+  StructuredError,
+} from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
+
+/**
+ * Stable error codes for `packages/auth/src/server/turnkey-signer.ts` failures.
+ * Part of #747's incremental `StructuredError` conversion of `packages/auth`'s
+ * server seam (the JWT slice was done separately in #756).
+ */
+export const AUTH_TURNKEY_SIGNER_ERROR_CODES = {
+  signInputInvalid: 'AUTH_TURNKEY_SIGN_INPUT_INVALID',
+  signFailed: 'AUTH_TURNKEY_SIGN_FAILED',
+} as const;
 
 // Configure @noble/ed25519 with required SHA-512 function.
 //
@@ -69,14 +85,21 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
       // return type is unresolved there and must not flow on unchecked.
       const prepared: unknown = await signingInput.didWebvh(input.document, input.proof);
       if (!(prepared instanceof Uint8Array)) {
-        throw new Error('signingInput.didWebvh did not return a Uint8Array');
+        throw new StructuredError(
+          AUTH_TURNKEY_SIGNER_ERROR_CODES.signInputInvalid,
+          'signingInput.didWebvh did not return a Uint8Array'
+        );
       }
       const { signature } = await this.signBytes(prepared);
       return { proofValue: multikey.encodeMultibase(signature) };
     } catch (error) {
       console.error('Error signing with Turnkey:', error);
-      throw new Error(
-        `Failed to sign with Turnkey: ${error instanceof Error ? error.message : String(error)}`
+      // Preserve the original error (e.g. a TurnkeyRequestError's .code/.details)
+      // as `cause` instead of dropping it, unlike this wrap site previously did.
+      throw new StructuredError(
+        AUTH_TURNKEY_SIGNER_ERROR_CODES.signFailed,
+        `Failed to sign with Turnkey: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }

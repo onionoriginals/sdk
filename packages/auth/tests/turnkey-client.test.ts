@@ -4,7 +4,9 @@ import {
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  AUTH_TURNKEY_CLIENT_ERROR_CODES,
 } from '../src/server/turnkey-client';
+import { StructuredError } from '@originals/sdk';
 
 describe('turnkey-client', () => {
   const originalEnv = { ...process.env };
@@ -84,6 +86,21 @@ describe('turnkey-client', () => {
         organizationId: 'org_id',
       });
       expect(client).toBeDefined();
+    });
+
+    test('missing config throws a StructuredError with a stable code (#747)', () => {
+      expect.assertions(3);
+      try {
+        createTurnkeyClient({ apiPrivateKey: 'priv_key', organizationId: 'org_id' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing
+        );
+        expect((error as StructuredError).details).toMatchObject({
+          variable: 'TURNKEY_API_PUBLIC_KEY',
+        });
+      }
     });
   });
 
@@ -289,6 +306,20 @@ describe('turnkey-client', () => {
       );
     });
 
+    test('missing TURNKEY_ORGANIZATION_ID throws a StructuredError with a stable code (#747)', async () => {
+      delete process.env.TURNKEY_ORGANIZATION_ID;
+      const client = createMockClient();
+      expect.assertions(2);
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_CLIENT_ERROR_CODES.configMissing
+        );
+      }
+    });
+
     test('throws when createSubOrganization returns no ID', async () => {
       const client = createMockClient({
         getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
@@ -300,6 +331,25 @@ describe('turnkey-client', () => {
       await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
         'No sub-organization ID returned'
       );
+    });
+
+    test('createSubOrganization returning no ID throws a StructuredError with a stable code (#747)', async () => {
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        createSubOrganization: mock(() =>
+          Promise.resolve({ activity: { result: { createSubOrganizationResultV7: {} } } })
+        ),
+      });
+
+      expect.assertions(2);
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_CLIENT_ERROR_CODES.subOrgIdMissing
+        );
+      }
     });
 
     test('creates sub-org with correct wallet configuration', async () => {
@@ -371,6 +421,24 @@ describe('turnkey-client', () => {
         'Failed to look up existing Turnkey sub-organization'
       );
       expect(createSubOrganization).not.toHaveBeenCalled();
+    });
+
+    test('a transient lookup failure is a StructuredError preserving the original cause (#747)', async () => {
+      const networkError = new Error('Network error');
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.reject(networkError)),
+      });
+
+      expect.assertions(3);
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_CLIENT_ERROR_CODES.subOrgLookupFailed
+        );
+        expect((error as StructuredError).details).toMatchObject({ cause: networkError });
+      }
     });
 
     test('rethrows rate-limit errors from getSubOrgIds', async () => {

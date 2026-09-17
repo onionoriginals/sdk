@@ -6,8 +6,10 @@ import {
   cleanupSession,
   getSession,
   createInMemorySessionStorage,
+  AUTH_EMAIL_ERROR_CODES,
   type SessionStorage,
 } from '../src/server/email-auth';
+import { StructuredError } from '@originals/sdk';
 import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
 
 // Shared OTP target-bundle fixture: a validly-signed (with test keys)
@@ -735,6 +737,181 @@ describe('email-auth', () => {
       });
       expect(getSession('session_1', storage)).toBeUndefined();
       expect(storage.get('session_1')).toBeUndefined();
+    });
+  });
+
+  describe('typed error codes (#747)', () => {
+    async function expectStructuredError(
+      promise: Promise<unknown>,
+      code: string
+    ): Promise<void> {
+      let caught: unknown;
+      try {
+        await promise;
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(StructuredError);
+      expect((caught as StructuredError).code).toBe(code);
+    }
+
+    test('invalid email format is AUTH_EMAIL_INVALID_FORMAT', async () => {
+      const client = createMockTurnkeyClient();
+      await expectStructuredError(
+        initiateEmailAuth('not-an-email', client, storage),
+        AUTH_EMAIL_ERROR_CODES.emailInvalidFormat
+      );
+    });
+
+    test('missing OTP ID from Turnkey is AUTH_OTP_INIT_FAILED', async () => {
+      const client = createMockTurnkeyClient({
+        initOtp: mock(() => Promise.resolve({ otpId: null })),
+      });
+      await expectStructuredError(
+        initiateEmailAuth('user@example.com', client, storage),
+        AUTH_EMAIL_ERROR_CODES.otpInitFailed
+      );
+    });
+
+    test('missing OTP encryption bundle from Turnkey is AUTH_OTP_INIT_FAILED', async () => {
+      const client = createMockTurnkeyClient({
+        initOtp: mock(() => Promise.resolve({ otpId: 'otp_123' })),
+      });
+      await expectStructuredError(
+        initiateEmailAuth('user@example.com', client, storage),
+        AUTH_EMAIL_ERROR_CODES.otpInitFailed
+      );
+    });
+
+    test('unknown session is AUTH_SESSION_INVALID', async () => {
+      const client = createMockTurnkeyClient();
+      await expectStructuredError(
+        verifyEmailAuth('nonexistent_session', '123456', client, storage),
+        AUTH_EMAIL_ERROR_CODES.sessionInvalid
+      );
+    });
+
+    test('expired session is AUTH_SESSION_EXPIRED', async () => {
+      const client = createMockTurnkeyClient();
+      const { sessionId } = await initiateEmailAuth('user@example.com', client, storage);
+      const session = storage.get(sessionId)!;
+      session.timestamp = Date.now() - 16 * 60 * 1000;
+      storage.set(sessionId, session);
+
+      await expectStructuredError(
+        verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions),
+        AUTH_EMAIL_ERROR_CODES.sessionExpired
+      );
+    });
+
+    test('session missing otpId is AUTH_SESSION_CORRUPT', async () => {
+      const client = createMockTurnkeyClient();
+      storage.set('session_no_otp', {
+        email: 'user@example.com',
+        subOrgId: 'sub_123',
+        timestamp: Date.now(),
+        verified: false,
+      });
+
+      await expectStructuredError(
+        verifyEmailAuth('session_no_otp', '123456', client, storage),
+        AUTH_EMAIL_ERROR_CODES.sessionCorrupt
+      );
+    });
+
+    test('session missing the OTP encryption bundle is AUTH_SESSION_CORRUPT', async () => {
+      const client = createMockTurnkeyClient();
+      storage.set('session_no_bundle', {
+        email: 'user@example.com',
+        subOrgId: 'sub_123',
+        otpId: 'otp_123',
+        timestamp: Date.now(),
+        verified: false,
+      });
+
+      await expectStructuredError(
+        verifyEmailAuth('session_no_bundle', '123456', client, storage, verifyOptions),
+        AUTH_EMAIL_ERROR_CODES.sessionCorrupt
+      );
+    });
+
+    test('malformed verification code is AUTH_OTP_CODE_FORMAT_INVALID', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = (await initiateEmailAuth('user@example.com', client, storage)).sessionId;
+      await expectStructuredError(
+        verifyEmailAuth(sessionId, '123', client, storage),
+        AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid
+      );
+    });
+
+    test('an untrusted target bundle signature is AUTH_OTP_ENCRYPTION_FAILED', async () => {
+      const client = createMockTurnkeyClient();
+      const sessionId = (await initiateEmailAuth('user@example.com', client, storage)).sessionId;
+      await expectStructuredError(
+        verifyEmailAuth(sessionId, '123456', client, storage), // no signer override
+        AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed
+      );
+    });
+
+    test('a rejected verifyOtp is AUTH_OTP_VERIFY_FAILED and preserves the cause', async () => {
+      const turnkeyError = new Error('OTP code invalid');
+      const client = createMockTurnkeyClient({
+        verifyOtp: mock(() => Promise.reject(turnkeyError)),
+      });
+      const sessionId = (await initiateEmailAuth('user@example.com', client, storage)).sessionId;
+
+      expect.assertions(3);
+      try {
+        await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_EMAIL_ERROR_CODES.otpVerifyFailed);
+        expect((error as StructuredError).details).toMatchObject({ cause: turnkeyError });
+      }
+    });
+
+    test('exceeding the attempt budget is AUTH_OTP_ATTEMPTS_EXCEEDED', async () => {
+      const client = createMockTurnkeyClient({
+        verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+      });
+      const sessionId = (await initiateEmailAuth('user@example.com', client, storage)).sessionId;
+
+      for (let i = 1; i <= 4; i++) {
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+      }
+
+      await expectStructuredError(
+        verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions),
+        AUTH_EMAIL_ERROR_CODES.otpAttemptsExceeded
+      );
+    });
+
+    test('sub-organization provisioning failure is AUTH_TURNKEY_SUBORG_PROVISION_FAILED', async () => {
+      const provisionError = new Error('Turnkey is down');
+      const client = createMockTurnkeyClient({
+        getSubOrgIds: mock(() => Promise.reject(provisionError)),
+      });
+      const sessionId = (await initiateEmailAuth('user@example.com', client, storage)).sessionId;
+
+      expect.assertions(4);
+      try {
+        await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_EMAIL_ERROR_CODES.subOrgProvisionFailed
+        );
+        // The immediate cause is the lookup's own StructuredError
+        // (AUTH_TURNKEY_SUBORG_LOOKUP_FAILED); the original Turnkey rejection
+        // is preserved one level further down its own cause chain.
+        const lookupError = (error as StructuredError).details?.cause;
+        expect(lookupError).toBeInstanceOf(StructuredError);
+        expect((lookupError as StructuredError).details).toMatchObject({
+          cause: provisionError,
+        });
+      }
     });
   });
 });
