@@ -117,7 +117,10 @@ introduced by this wire change. Versions are derived from accepted updates,
 not trusted from a supplied counter. A change of retrieval URL can retain the
 same byte digest. URLs are signed locators, never authority.
 
-`url`, when present, is an array of 1–16 absolute URLs. Each must parse using
+`url`, when present, is an array of 1–16 absolute URLs, each at most 8,192
+Unicode code points — its own field-specific cap, stricter than (and, unlike
+the byte-counted ceiling below, measured in code points rather than UTF-8
+bytes) the 262,144-byte ceiling other string fields get. Each must parse using
 the WHATWG URL parser with no base, have a scheme matching
 `[A-Za-z][A-Za-z0-9+.-]*:`, contain no ASCII whitespace/control characters or
 backslashes, and use only valid percent escapes. HTTP(S) URLs require `//` and
@@ -273,7 +276,19 @@ invalid in general CBOR. File bytes are outside this subset: they remain raw
 inscription content, or explicit base64 in the separately versioned AssetEnvelope.
 
 Enforce these limits consistently before signing and while reading; they are
-application limits, not substitutes for Bitcoin transaction/fee limits:
+application limits, not substitutes for Bitcoin transaction/fee limits. Every
+row applies simultaneously — each is an independent ceiling, not a guaranteed
+minimum a document is entitled to reach. A document below the entries or
+values ceiling can still exceed a different row (byte size, depth, or a
+field-specific cap such as a resource `url` entry's own 8,192-code-point
+limit above), and being under the 262,144-byte default does not by itself mean
+every string-valued field permits that size. Concretely, the 10,000-entry
+ceiling and the 100,000-JSON-value ceiling are both enforced, and every
+non-trivial entry costs several value nodes (the entry/event/proof wrapper
+objects, each signed field, each container), so a document built from
+maximally-shaped rather than minimal entries reaches the values ceiling
+before it reaches 10,000 entries. Reaching exactly 10,000 entries is not a
+promise independent of what those entries contain:
 
 | Limit | Maximum |
 | --- | --- |
@@ -282,7 +297,7 @@ application limits, not substitutes for Bitcoin transaction/fee limits:
 | Proofs per entry | 8 |
 | Nested containers, counting the root as depth 1 | 64 |
 | JSON values including containers, excluding member names | 100,000 |
-| UTF-8 bytes of any string or member name | 262,144 |
+| UTF-8 bytes of any string or member name, unless a field states a stricter cap (e.g. a resource `url` entry, above) | 262,144 |
 | Resources per operation | 1,024 |
 | URLs per resource | 16 |
 
