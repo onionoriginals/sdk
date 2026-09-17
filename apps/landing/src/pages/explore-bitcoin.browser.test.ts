@@ -44,10 +44,10 @@ beforeAll(async () => {
       'export const OriginalArtwork=()=>null; export const publicationDate=()=>"today";',
     "./original-detail-data":
       'export const parseDidLog=()=>[]; export const digestMultibaseSha256Hex=()=>"hash";',
-    "../sdk/verify-original": `export { evaluateBtcoCheck } from ${JSON.stringify(root + "/sdk/verify-original.ts")}; export const verifyOriginal=async()=>['hash','log','cel'].map(id=>({id,ok:true,detail:'fixture hosted verification'}));`,
+    "../sdk/verify-original": `export { evaluateBtcoCheck } from ${JSON.stringify(root + "/sdk/verify-original.ts")}; export const verifyOriginal=async()=>{if(window.qa.mode==='slow-accepted')await new Promise(r=>setTimeout(r,150));return ['hash','log','cel'].map(id=>({id,ok:true,detail:'fixture hosted verification'}));};`,
     "@originals/sdk/cel": `export const validateDocument=x=>x; export const verifyHistory=()=>({state:{active:true,assetId:'ni:///sha-256;'+ 'A'.repeat(43),controller:'controller',resources:[]}});`,
     "../sdk/public-sat-provider": `export class PublicSatSnapshotProvider { async getSatSnapshot(){if(window.qa.mode==='unavailable')throw Error('fixture unavailable');return {network:'regtest'};} }`,
-    "@originals/sdk": `export const OriginalsSDK={create:()=>({lifecycle:{resolveAssetFromSat:async()=>({status:'accepted',asset:{id:window.qa.mode==='accepted'?'ni:///sha-256;'+'A'.repeat(43):'ni:///sha-256;'+'B'.repeat(42)+'A'},resolution:{state:{controller:'controller',active:true},publications:[{}],chainEvidence:{assurance:'node-validated'}}})}})};`,
+    "@originals/sdk": `export const OriginalsSDK={create:()=>({lifecycle:{resolveAssetFromSat:async()=>{if(window.qa.mode==='slow-accepted')await new Promise(r=>setTimeout(r,500));return {status:'accepted',asset:{id:(window.qa.mode==='accepted'||window.qa.mode==='slow-accepted'||window.qa.mode==='rotated')?'ni:///sha-256;'+'A'.repeat(43):'ni:///sha-256;'+'B'.repeat(42)+'A'},resolution:{state:{controller:window.qa.mode==='rotated'?'rotated-controller':'controller',active:true},publications:[{}],chainEvidence:{assurance:'node-validated'}}};}}})};`,
   };
   const build = await Bun.build({
     entrypoints: [pagePath],
@@ -107,7 +107,10 @@ afterAll(async () => {
   await browser?.close();
   server?.stop(true);
 });
-for (const mode of isolated ? ["unrelated", "unavailable", "accepted"] : []) {
+for (const mode of isolated
+  ? ["unrelated", "unavailable", "accepted", "rotated"]
+  : []) {
+  const readsAsVerified = mode === "accepted" || mode === "rotated";
   browserTest(
     `Bitcoin ${mode} outcome controls the public inscription claim`,
     async () => {
@@ -118,31 +121,68 @@ for (const mode of isolated ? ["unrelated", "unavailable", "accepted"] : []) {
         await page
           .getByRole("heading", { name: "Fixture Original", exact: true })
           .waitFor();
-        const expected =
-          mode === "accepted"
-            ? "1 accepted on-chain publication verified (node-validated) → sat 42"
-            : mode === "unrelated"
-              ? "Accepted Bitcoin history does not bind to this Original"
-              : "Bitcoin publication could not be verified";
+        const expected = readsAsVerified
+          ? "1 accepted on-chain publication verified (node-validated) → sat 42"
+          : mode === "unrelated"
+            ? "Accepted Bitcoin history does not bind to this Original"
+            : "Bitcoin publication could not be verified";
         await page
-          .getByText(
-            mode === "accepted" ? "Bitcoin inscription" : "Satoshi to verify",
-            { exact: true },
-          )
+          .getByText(readsAsVerified ? "Bitcoin inscription" : "Satoshi to verify", {
+            exact: true,
+          })
           .waitFor();
         await page.getByText(expected, { exact: true }).waitFor();
         const verified = await page
           .locator(".explore-verification")
           .getAttribute("data-verified");
-        expect(verified).toBe(String(mode === "accepted"));
+        expect(verified).toBe(String(readsAsVerified));
         expect(
           await page
-            .getByText(
-              mode === "accepted" ? "Satoshi to verify" : "Bitcoin inscription",
-              { exact: true },
-            )
+            .getByText(readsAsVerified ? "Satoshi to verify" : "Bitcoin inscription", {
+              exact: true,
+            })
             .count(),
         ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+}
+if (isolated) {
+  browserTest(
+    "the verified badge stays pending until the Bitcoin check itself resolves",
+    async () => {
+      const page = await browser.newPage();
+      page.setDefaultTimeout(3000);
+      try {
+        await page.goto(server.url + "?mode=slow-accepted");
+        await page
+          .getByRole("heading", { name: "Fixture Original", exact: true })
+          .waitFor();
+        // The fixture-true local hash/log/cel checks resolve after 150ms;
+        // the Bitcoin check resolves after 500ms. Waiting here for a point
+        // in between deterministically lands in the exact window the bug
+        // occupied: local checks already landed, Bitcoin still pending. If
+        // the badge were computed from the local checks alone, it would
+        // already read "verified" at this point.
+        await page.waitForTimeout(300);
+        await page.getByText("Checking the signatures and file…").waitFor();
+        expect(
+          await page.locator(".explore-verification").getAttribute("data-verified"),
+        ).not.toBe("true");
+        // Once the Bitcoin check actually resolves, the badge should flip to
+        // verified — proving the pending state above was not a stuck/broken
+        // badge, just an honestly-incomplete one.
+        await page
+          .getByText(
+            "1 accepted on-chain publication verified (node-validated) → sat 42",
+            { exact: true },
+          )
+          .waitFor();
+        expect(
+          await page.locator(".explore-verification").getAttribute("data-verified"),
+        ).toBe("true");
       } finally {
         await page.close();
       }
