@@ -22,10 +22,14 @@ export class TurnkeySessionExpiredError extends Error {
  * Collect searchable text from an error: its message, its JSON
  * serialization, and the same for every error in its `cause` chain.
  *
- * `JSON.stringify` alone is not enough — for a plain `Error` it yields
- * `"{}"` because `message`/`stack` are non-enumerable, and the wrapped
- * client functions rethrow plain `Error`s around the original
- * `TurnkeyRequestError`.
+ * `JSON.stringify` alone is not enough for two reasons: for a plain `Error`
+ * it yields `"{}"` because `message`/`stack` are non-enumerable (and the
+ * wrapped client functions rethrow plain `Error`s around the original
+ * `TurnkeyRequestError`), and for *any* circular-shaped value — an `Error`
+ * or a plain object, such as a wrapped fetch error with a `cause`/`self`
+ * back-reference — it throws instead of serializing. A `.message` string is
+ * captured up front so that failure never discards a real, otherwise-
+ * readable diagnostic (e.g. an expired-session marker).
  */
 function collectErrorText(error: unknown): string {
   const parts: string[] = [];
@@ -43,14 +47,58 @@ function collectErrorText(error: unknown): string {
       current = current.cause;
     } else {
       try {
+        const message = (current as { message?: unknown }).message;
+        if (typeof message === 'string') {
+          parts.push(message);
+        }
+      } catch {
+        // a `message` getter/Proxy trap threw; fall through to serialization
+      }
+      try {
         parts.push(typeof current === 'string' ? current : JSON.stringify(current) ?? '');
       } catch {
-        // circular structure
+        // circular structure - message (if any) already captured above
       }
       break;
     }
   }
   return parts.join(' ').toLowerCase();
+}
+
+/**
+ * True if `error`, or a error in its `cause` chain, carries a structural
+ * `code` of exactly `16` — the gRPC `UNAUTHENTICATED` code Turnkey uses for
+ * an expired session. This walks the same chain as {@link collectErrorText}
+ * but compares the parsed `code` value itself, not serialized text: a
+ * substring/prefix match (e.g. `errorStr.includes('"code":16')`) would also
+ * match an unrelated code like `160` or `1601`, misclassifying it as
+ * session expiry.
+ */
+function hasExpiredSessionCode(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (
+    current !== null &&
+    typeof current === 'object' &&
+    current !== undefined &&
+    !seen.has(current)
+  ) {
+    seen.add(current);
+    let code: unknown;
+    try {
+      code = (current as { code?: unknown }).code;
+    } catch {
+      code = undefined; // a `code` getter/Proxy trap threw
+    }
+    if (code === 16 || code === '16') {
+      return true;
+    }
+    if (!(current instanceof Error)) {
+      break;
+    }
+    current = (current as Error & { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /**
@@ -67,7 +115,7 @@ export async function withTokenExpiration<T>(
     if (
       errorStr.includes('api_key_expired') ||
       errorStr.includes('expired api key') ||
-      errorStr.includes('"code":16')
+      hasExpiredSessionCode(error)
     ) {
       console.warn('Detected expired API key, calling onExpired');
       if (onExpired) {
