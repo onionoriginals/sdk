@@ -14,7 +14,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { builtinModules } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -113,6 +114,27 @@ function findEagerBuiltins(entry, dist) {
   return violations;
 }
 
+/**
+ * The static scans above can only prove a builtin/`Buffer` reference is
+ * *reachable* in the import graph, not whether it actually fires at
+ * module-evaluation time (see issue #838: a bare top-level `Buffer` reference
+ * inside a dependency, pulled in by a plain static `import`, crashes on
+ * import in any runtime without a global `Buffer` — before any exported
+ * function is ever called). A real dynamic import, in a subprocess with
+ * `Buffer` deleted, checks exactly the thing that matters: does importing
+ * this entry point crash right now, in a Buffer-less runtime.
+ */
+function importsWithoutGlobalBuffer(entryAbsPath) {
+  const href = pathToFileURL(entryAbsPath).href;
+  const code = `delete globalThis.Buffer;
+import(${JSON.stringify(href)}).then(() => process.exit(0), (e) => {
+  console.error(e && e.stack ? e.stack : String(e));
+  process.exit(1);
+});`;
+  const result = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8' });
+  return { ok: result.status === 0, stderr: result.stderr };
+}
+
 let failed = false;
 for (const { dist, entry, browserFirst = false } of GUARDED_ENTRIES) {
   const distAbs = resolve(ROOT, dist);
@@ -130,9 +152,15 @@ for (const { dist, entry, browserFirst = false } of GUARDED_ENTRIES) {
     console.warn(`! ${label} — Buffer global reachable in ${bufferAdvisory.size} module(s) (advisory):`);
     for (const [file] of bufferAdvisory) console.warn(`    ${relative(distAbs, file)}`);
   }
-  if (violations.size === 0 && bufferHits.size === 0) {
+  // Ground truth for every guarded entry, browserFirst or not: does importing
+  // it actually crash right now with no global Buffer? This catches exactly
+  // the class of bug the static scans above cannot (#838) and is gated
+  // regardless of `browserFirst`, since a crash on plain import is never
+  // acceptable for an entry point a browser/edge/Deno consumer can import.
+  const runtimeImport = importsWithoutGlobalBuffer(abs);
+  if (violations.size === 0 && bufferHits.size === 0 && runtimeImport.ok) {
     const note = bufferAdvisory.size > 0 ? ' (Buffer advisory above)' : '';
-    console.log(`✓ ${label} — no eager Node builtins${browserFirst ? ' or Buffer globals' : ''}${note}`);
+    console.log(`✓ ${label} — no eager Node builtins${browserFirst ? ' or Buffer globals' : ''}, imports cleanly with no global Buffer${note}`);
     continue;
   }
   failed = true;
@@ -149,6 +177,10 @@ for (const { dist, entry, browserFirst = false } of GUARDED_ENTRIES) {
       console.error(`    ${relative(distAbs, file)}`);
       console.error(`      via ${chain.join(' -> ')}`);
     }
+  }
+  if (!runtimeImport.ok) {
+    console.error(`✗ ${label} — crashes on import with no global Buffer:`);
+    console.error(runtimeImport.stderr.trim().split('\n').map((l) => `    ${l}`).join('\n'));
   }
 }
 
