@@ -93,6 +93,15 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
       const { signature } = await this.signBytes(prepared);
       return { proofValue: multikey.encodeMultibase(signature) };
     } catch (error) {
+      // The invalid-input guard above already throws a specific, correctly
+      // coded StructuredError; rethrow it as-is instead of collapsing it into
+      // the generic signFailed code below (Greptile).
+      if (
+        error instanceof StructuredError &&
+        error.code === AUTH_TURNKEY_SIGNER_ERROR_CODES.signInputInvalid
+      ) {
+        throw error;
+      }
       console.error('Error signing with Turnkey:', error);
       // Preserve the original error (e.g. a TurnkeyRequestError's .code/.details)
       // as `cause` instead of dropping it, unlike this wrap site previously did.
