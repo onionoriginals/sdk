@@ -322,6 +322,101 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.revealTxHex).toBeUndefined();
   });
 
+  // #777 — a superseded pair can itself have been `confirmed` before a rival
+  // pair reclaimed its outpoint: `supersede()` sets `superseded` without
+  // touching `status`/evidence, so the record keeps reporting `confirmed` on
+  // whatever evidence it had at that point. The `supersededPending` loop's
+  // OWN status lookup (for the superseded record's own commit) is fresh
+  // negative evidence that a deeper reorg has since un-confirmed it, and that
+  // must demote the stale status rather than being silently ignored.
+  test('a superseded pair\'s stale confirmed status is demoted once its own commit stops confirming', async () => {
+    const commit = 'a1'.repeat(32);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+    });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 3, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('reveal_broadcast');
+    expect(stored.superseded).toBe(true);
+    expect(stored.confirmations).toBeUndefined();
+    // Block identity stays sticky across the demotion so a later
+    // reconfirmation can still be compared against it.
+    expect(stored.confirmedBlockHeight).toBe(100);
+    expect(stored.confirmedBlockHash).toBe('a'.repeat(64));
+    expect(inscriptions.find((r) => r.commitTxId === commit)!.status).toBe('reveal_broadcast');
+  });
+
+  test('a concurrent reconfirmation during the status lookup is not clobbered by this pass\'s own stale negative read', async () => {
+    const commit = 'a2'.repeat(32);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 3, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: {
+        getTransactionStatus: async () => {
+          // Simulate a concurrent pass (an overlapping poll, or the
+          // background sweep) writing FRESHER confirmation evidence while
+          // THIS pass's own negative read for the same record is still in
+          // flight.
+          store.setStatus('sub-1', commit, 'confirmed', {
+            confirmations: 5, blockHeight: 100, blockHash: 'a'.repeat(64),
+          });
+          return { confirmed: false };
+        },
+      },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', commit)!;
+    // The concurrent, fresher confirmation must stand: this pass's own
+    // negative read — captured before it knew about it — must not demote a
+    // record that has since been reconfirmed with newer evidence.
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(5);
+  });
+
+  test('a provider outage during the status lookup leaves a superseded confirmed record untouched', async () => {
+    const commit = 'a3'.repeat(32);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'confirmed', superseded: true,
+      confirmations: 3, confirmedBlockHeight: 100, confirmedBlockHash: 'a'.repeat(64),
+    }));
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => { throw new Error('indexer unavailable'); } },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    // A provider outage must preserve the last observed state, exactly as it
+    // does everywhere else in this pass — not demote on the absence of
+    // evidence.
+    const stored = store.get('sub-1', commit)!;
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(3);
+  });
+
   // #677 — the demotion decision must read a FRESH per-record snapshot, not
   // the snapshot taken once at the top of the whole reconciliation pass:
   // that snapshot can already be stale by the time a later record's turn
