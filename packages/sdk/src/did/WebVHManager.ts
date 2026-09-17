@@ -727,7 +727,25 @@ export class WebVHManager {
     if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
       // External signer
       signer = providedSigner;
-      verifier = providedVerifier;
+      // Mirror createDIDWebVH's fallback: an ExternalSigner has no verify(),
+      // so silently leaving verifier undefined makes didwebvh-ts fail deep
+      // inside with "verifier.verify is not a function". Accept the signer
+      // itself as the verifier when it implements verify() (e.g. a Turnkey
+      // dual signer/verifier), and only require a separate externalVerifier
+      // when it does not.
+      if (providedVerifier) {
+        verifier = providedVerifier;
+      } else if (typeof (providedSigner as unknown as { verify?: unknown }).verify === 'function') {
+        verifier = providedSigner as unknown as ExternalVerifier;
+      } else {
+        // Same code/message as identity-operations.ts's resolveVerifier (#720)
+        // for the identical condition, so the two update APIs share one
+        // error contract instead of two for the same failure.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
+          'verifier is required when the provided signer does not implement verify()'
+        );
+      }
     } else {
       // Internal signer with keypair
       const keyPair = providedSigner;
