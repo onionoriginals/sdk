@@ -1,7 +1,0 @@
----
-"@originals/auth": minor
----
-
-`packages/auth/src/server/email-auth.ts`, `turnkey-client.ts`, and `turnkey-signer.ts` now throw `StructuredError` with a stable `.code` instead of a plain `Error`, completing the remainder of #747 (the JWT slice landed separately). New exported codes: `AUTH_EMAIL_ERROR_CODES`, `AUTH_TURNKEY_ERROR_CODES`, `AUTH_TURNKEY_SIGNER_ERROR_CODES`. Every thrown error keeps its exact original message, so existing `catch (e) { ... e.message ... }` callers are unaffected; callers wanting typed discrimination can now branch on `e.code` (`StructuredError` still extends `Error`).
-
-**Behavior fix (not just typing):** `verifyEmailAuth`'s OTP-verification catch block previously charged a transient/network failure calling Turnkey's `verifyOtp` (timeout, 5xx, `ECONNRESET`) against the same `MAX_OTP_ATTEMPTS` budget as a genuinely wrong code, so a Turnkey blip during the 15-minute OTP window could exhaust a legitimate user's attempts and lock them out. A definitive Turnkey rejection (a `TurnkeyRequestError`-shaped error carrying a numeric `code`) now throws `AUTH_OTP_CODE_INCORRECT` and still consumes an attempt; anything without that evidence throws the new `AUTH_OTP_VERIFY_TRANSIENT_FAILURE` instead, does not consume an attempt, and leaves the session alive so the same code can be resubmitted. New exported helper `isOtpVerifyTransientFailure(error)` and `extractTurnkeyErrorCode(error)` (also from `turnkey-client.ts`) let callers detect this distinction.
