@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { StructuredError } from '@originals/sdk';
 import {
   initiateEmailAuth,
   verifyEmailAuth,
@@ -6,9 +7,21 @@ import {
   cleanupSession,
   getSession,
   createInMemorySessionStorage,
+  isOtpVerifyTransientFailure,
+  AUTH_EMAIL_ERROR_CODES,
   type SessionStorage,
 } from '../src/server/email-auth';
 import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
+
+// A rejection Turnkey actually rendered a verdict on (e.g. verifyOtp
+// definitively rejecting a wrong code) always carries a numeric `code`
+// parsed from Turnkey's JSON error body (see `extractTurnkeyErrorCode` in
+// `../src/server/turnkey-client.ts`); gRPC code 3 is INVALID_ARGUMENT, the
+// code Turnkey returns for a rejected OTP. Mirrors that shape so these tests
+// exercise the "definitive rejection" path rather than the transient one.
+function turnkeyRejection(message: string, code = 3): Error & { code: number } {
+  return Object.assign(new Error(message), { code });
+}
 
 // Shared OTP target-bundle fixture: a validly-signed (with test keys)
 // otpEncryptionTargetBundle mirroring what Turnkey v6 initOtp returns.
@@ -303,7 +316,7 @@ describe('email-auth', () => {
       const getSubOrgIds = mock(() => Promise.resolve({ organizationIds: [] }));
       const createSubOrganization = mock(() => Promise.resolve({}));
       const client = createMockTurnkeyClient({
-        verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+        verifyOtp: mock(() => Promise.reject(turnkeyRejection('OTP code invalid'))),
         getSubOrgIds,
         createSubOrganization,
       });
@@ -419,7 +432,10 @@ describe('email-auth', () => {
       expect(verifyOtp).not.toHaveBeenCalled();
     });
 
-    test('throws when verification token not returned', async () => {
+    test('throws a transient-failure error when verification token not returned, without consuming an attempt', async () => {
+      // An unexpected/malformed Turnkey response (no numeric error code) is
+      // not evidence the caller typed a wrong code, so it must not be
+      // charged against MAX_OTP_ATTEMPTS.
       const client = createMockTurnkeyClient({
         verifyOtp: mock(() => Promise.resolve({ verificationToken: null })),
       });
@@ -427,12 +443,13 @@ describe('email-auth', () => {
 
       await expect(
         verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
-      ).rejects.toThrow('Invalid verification code');
+      ).rejects.toThrow('OTP verification could not be completed');
+      expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
     });
 
     test('throws when Turnkey verifyOtp rejects', async () => {
       const client = createMockTurnkeyClient({
-        verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+        verifyOtp: mock(() => Promise.reject(turnkeyRejection('OTP code invalid'))),
       });
       const sessionId = await setupSession(client);
 
@@ -578,7 +595,7 @@ describe('email-auth', () => {
     describe('OTP attempt limiting', () => {
       test('failed attempts are counted in the session', async () => {
         const client = createMockTurnkeyClient({
-          verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+          verifyOtp: mock(() => Promise.reject(turnkeyRejection('OTP code invalid'))),
         });
         const sessionId = await setupSession(client);
 
@@ -595,7 +612,7 @@ describe('email-auth', () => {
 
       test('session is destroyed after 5 failed attempts', async () => {
         const client = createMockTurnkeyClient({
-          verifyOtp: mock(() => Promise.reject(new Error('OTP code invalid'))),
+          verifyOtp: mock(() => Promise.reject(turnkeyRejection('OTP code invalid'))),
         });
         const sessionId = await setupSession(client);
 
@@ -624,7 +641,7 @@ describe('email-auth', () => {
           verifyOtp: mock(() => {
             calls += 1;
             return calls <= 2
-              ? Promise.reject(new Error('OTP code invalid'))
+              ? Promise.reject(turnkeyRejection('OTP code invalid'))
               : Promise.resolve({ verificationToken: 'token_after_retries' });
           }),
         });
@@ -656,6 +673,98 @@ describe('email-auth', () => {
           'Invalid verification code format'
         );
         expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+      });
+
+      test('a wrong code throws a StructuredError with AUTH_OTP_CODE_INCORRECT and consumes an attempt', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(turnkeyRejection('invalid OTP code'))),
+        });
+        const sessionId = await setupSession(client);
+
+        try {
+          await verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions);
+          throw new Error('expected verifyEmailAuth to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect);
+          expect(isOtpVerifyTransientFailure(error)).toBe(false);
+        }
+        expect(storage.get(sessionId)!.otpAttempts).toBe(1);
+      });
+
+      test('a transient failure calling verifyOtp (no numeric Turnkey code) does not consume an attempt', async () => {
+        // A Turnkey blip during the 15-minute OTP window (timeout, 5xx,
+        // ECONNRESET) never evaluates code correctness at all, so it must
+        // not count against MAX_OTP_ATTEMPTS and must be distinguishable
+        // from a genuinely wrong code (#747).
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(new Error('fetch failed: ECONNRESET'))),
+        });
+        const sessionId = await setupSession(client);
+
+        try {
+          await verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions);
+          throw new Error('expected verifyEmailAuth to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(
+            AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure
+          );
+          expect(isOtpVerifyTransientFailure(error)).toBe(true);
+        }
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+
+        // The session survives (was never counted as a failed attempt), so
+        // the same code can still be resubmitted once Turnkey recovers.
+        expect(storage.get(sessionId)).toBeDefined();
+      });
+
+      test('repeated transient failures never exhaust the attempt budget or destroy the session', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(new Error('timeout'))),
+        });
+        const sessionId = await setupSession(client);
+
+        for (let i = 0; i < 10; i++) {
+          await expect(
+            verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+          ).rejects.toThrow('OTP verification could not be completed');
+        }
+
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+        expect(storage.get(sessionId)).toBeDefined();
+      });
+
+      test('a transient failure followed by genuinely wrong codes still enforces the 5-attempt cap', async () => {
+        let calls = 0;
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => {
+            calls += 1;
+            // First call: transient (no code). Remaining calls: definitive
+            // Turnkey rejections.
+            return calls === 1
+              ? Promise.reject(new Error('network blip'))
+              : Promise.reject(turnkeyRejection('invalid OTP code'));
+          }),
+        });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '000000', client, storage, verifyOptions)
+        ).rejects.toThrow('OTP verification could not be completed');
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+
+        for (let i = 1; i <= 4; i++) {
+          await expect(
+            verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+          ).rejects.toThrow('Invalid verification code');
+        }
+        expect(storage.get(sessionId)!.otpAttempts).toBe(4);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Too many failed verification attempts');
+        expect(storage.get(sessionId)).toBeUndefined();
       });
     });
   });

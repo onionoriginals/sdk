@@ -6,10 +6,23 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { ExternalSigner, ExternalVerifier, multikey, signingInput } from '@originals/sdk';
+import {
+  ExternalSigner,
+  ExternalVerifier,
+  multikey,
+  signingInput,
+  StructuredError,
+} from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import * as ed25519 from '@noble/ed25519';
+
+/**
+ * Stable error codes for `TurnkeyWebVHSigner` failures (#747).
+ */
+export const AUTH_TURNKEY_SIGNER_ERROR_CODES = {
+  signFailed: 'AUTH_TURNKEY_SIGN_FAILED',
+} as const;
 
 // Configure @noble/ed25519 with required SHA-512 function.
 //
@@ -75,8 +88,10 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
       return { proofValue: multikey.encodeMultibase(signature) };
     } catch (error) {
       console.error('Error signing with Turnkey:', error);
-      throw new Error(
-        `Failed to sign with Turnkey: ${error instanceof Error ? error.message : String(error)}`
+      throw new StructuredError(
+        AUTH_TURNKEY_SIGNER_ERROR_CODES.signFailed,
+        `Failed to sign with Turnkey: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }

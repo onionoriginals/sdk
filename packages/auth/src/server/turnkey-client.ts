@@ -3,9 +3,21 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
+import { StructuredError } from '@originals/sdk';
 import { normalizeEmail } from '../email.js';
 
 export { normalizeEmail };
+
+/**
+ * Stable error codes for server-side Turnkey client/sub-org failures (#747).
+ */
+export const AUTH_TURNKEY_ERROR_CODES = {
+  configApiPublicKeyMissing: 'AUTH_TURNKEY_CONFIG_API_PUBLIC_KEY_MISSING',
+  configApiPrivateKeyMissing: 'AUTH_TURNKEY_CONFIG_API_PRIVATE_KEY_MISSING',
+  configOrganizationIdMissing: 'AUTH_TURNKEY_CONFIG_ORGANIZATION_ID_MISSING',
+  subOrgLookupFailed: 'AUTH_TURNKEY_SUBORG_LOOKUP_FAILED',
+  subOrgCreateFailed: 'AUTH_TURNKEY_SUBORG_CREATE_FAILED',
+} as const;
 
 export interface TurnkeyClientConfig {
   /** Turnkey API base URL (default: https://api.turnkey.com) */
@@ -27,13 +39,22 @@ export function createTurnkeyClient(config?: Partial<TurnkeyClientConfig>): Turn
   const organizationId = config?.organizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
 
   if (!apiPublicKey) {
-    throw new Error('TURNKEY_API_PUBLIC_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configApiPublicKeyMissing,
+      'TURNKEY_API_PUBLIC_KEY is required'
+    );
   }
   if (!apiPrivateKey) {
-    throw new Error('TURNKEY_API_PRIVATE_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configApiPrivateKeyMissing,
+      'TURNKEY_API_PRIVATE_KEY is required'
+    );
   }
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+      'TURNKEY_ORGANIZATION_ID is required'
+    );
   }
 
   return new Turnkey({
@@ -140,34 +161,49 @@ function getDefaultSubOrgLock(): SubOrgLock {
 }
 
 /**
- * Whether an error from the Turnkey API definitively means the queried
- * resource does not exist (as opposed to a transient/network/auth failure).
- * gRPC status code 5 is NOT_FOUND. Walks the `cause` chain (cycle-safe) in
- * case the original Turnkey error arrives wrapped.
+ * Walks the `cause` chain (cycle-safe) and returns the first numeric `code`
+ * found, or `undefined` if none is present anywhere in the chain.
  *
- * Only the strongly-typed `code === 5` evidence is trusted. `@turnkey/http`'s
- * `TurnkeyRequestError` always carries a numeric `code` parsed from Turnkey's
- * own JSON error body, so a genuine Turnkey not-found response is never
- * missing it; a transport/routing failure (a plain-text 404 from an
- * unrelated host, a proxy error page) throws a plain `Error` with no `code`
- * at all. A message-substring match on "not found"/"does not exist" would
- * therefore accept that unrelated transport error as if it were Turnkey's
- * own not-found response, and this function must never do that: fall
- * through to `createSubOrganization` on such an ambiguous error mints a
- * duplicate identity for an existing user.
+ * `@turnkey/http`'s `TurnkeyRequestError` always carries a numeric `code`
+ * parsed from Turnkey's own JSON error body, so any error Turnkey actually
+ * rendered a verdict on carries one; a transport/routing failure (network
+ * blip, timeout, DNS, a proxy error page, `ECONNRESET`) throws a plain
+ * `Error` with no `code` at all, because the request never reached a point
+ * where Turnkey could respond. Presence of a numeric code is therefore
+ * itself the strongly-typed evidence that Turnkey processed the request,
+ * shared by every call site in this module that needs to distinguish "Turnkey
+ * gave a definitive answer" from "the call never got one" (see
+ * {@link isDefinitiveNotFound} and `email-auth.ts`'s OTP-verification catch,
+ * #747/#819).
  */
-function isDefinitiveNotFound(error: unknown): boolean {
+export function extractTurnkeyErrorCode(error: unknown): number | undefined {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (typeof current === 'object' && current !== null && !seen.has(current)) {
     seen.add(current);
     const { code } = current as { code?: unknown };
-    if (code === 5) {
-      return true;
+    if (typeof code === 'number') {
+      return code;
     }
     current = (current as { cause?: unknown }).cause;
   }
-  return false;
+  return undefined;
+}
+
+/**
+ * Whether an error from the Turnkey API definitively means the queried
+ * resource does not exist (as opposed to a transient/network/auth failure).
+ * gRPC status code 5 is NOT_FOUND.
+ *
+ * Only the strongly-typed `code === 5` evidence is trusted. A
+ * message-substring match on "not found"/"does not exist" would accept an
+ * unrelated transport error as if it were Turnkey's own not-found response,
+ * and this function must never do that: fall through to
+ * `createSubOrganization` on such an ambiguous error mints a duplicate
+ * identity for an existing user.
+ */
+function isDefinitiveNotFound(error: unknown): boolean {
+  return extractTurnkeyErrorCode(error) === 5;
 }
 
 /**
@@ -201,7 +237,10 @@ export async function getOrCreateTurnkeySubOrg(
 ): Promise<string> {
   const organizationId = process.env.TURNKEY_ORGANIZATION_ID;
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+      'TURNKEY_ORGANIZATION_ID is required'
+    );
   }
 
   const normalizedEmail = normalizeEmail(email);
@@ -229,7 +268,8 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     // transient failure (network blip, 429, auth misconfig) as "no existing
     // sub-org" would mint a duplicate identity for an existing user.
     if (!isDefinitiveNotFound(error)) {
-      throw new Error(
+      throw new StructuredError(
+        AUTH_TURNKEY_ERROR_CODES.subOrgLookupFailed,
         `Failed to look up existing Turnkey sub-organization: ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -304,7 +344,10 @@ async function getOrCreateTurnkeySubOrgUnlocked(
   const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
 
   if (!subOrgId) {
-    throw new Error('No sub-organization ID returned from Turnkey');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.subOrgCreateFailed,
+      'No sub-organization ID returned from Turnkey'
+    );
   }
 
   return subOrgId;

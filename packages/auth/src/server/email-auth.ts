@@ -7,9 +7,15 @@ import { randomBytes } from 'node:crypto';
 import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
+import { StructuredError } from '@originals/sdk';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
 import { encryptOtpCode } from '../otp-encryption.js';
-import { getOrCreateTurnkeySubOrg, normalizeEmail, type SubOrgLock } from './turnkey-client.js';
+import {
+  extractTurnkeyErrorCode,
+  getOrCreateTurnkeySubOrg,
+  normalizeEmail,
+  type SubOrgLock,
+} from './turnkey-client.js';
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
@@ -18,6 +24,38 @@ const SESSION_TIMEOUT = 15 * 60 * 1000;
 // Limits local brute-forcing of the 6-digit code instead of relying solely
 // on Turnkey's server-side throttling.
 const MAX_OTP_ATTEMPTS = 5;
+
+/**
+ * Stable error codes for `initiateEmailAuth`/`verifyEmailAuth` failures
+ * (#747). `otpVerifyTransientFailure` is distinct from `otpCodeIncorrect`:
+ * see {@link isOtpVerifyTransientFailure}.
+ */
+export const AUTH_EMAIL_ERROR_CODES = {
+  invalidEmailFormat: 'AUTH_EMAIL_INVALID_FORMAT',
+  otpInitFailed: 'AUTH_OTP_INIT_FAILED',
+  otpInitBundleMissing: 'AUTH_OTP_INIT_BUNDLE_MISSING',
+  sessionInvalid: 'AUTH_SESSION_INVALID',
+  sessionExpired: 'AUTH_SESSION_EXPIRED',
+  sessionStateInvalid: 'AUTH_SESSION_STATE_INVALID',
+  otpCodeFormatInvalid: 'AUTH_OTP_CODE_FORMAT_INVALID',
+  otpEncryptionFailed: 'AUTH_OTP_ENCRYPTION_FAILED',
+  otpCodeIncorrect: 'AUTH_OTP_CODE_INCORRECT',
+  otpVerifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
+  otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
+  subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
+} as const;
+
+/**
+ * True if `error` is a `StructuredError` reporting a transient/ambiguous
+ * failure while calling Turnkey's `verifyOtp` (network blip, timeout, 5xx) —
+ * as opposed to Turnkey definitively rejecting the code
+ * (`otpCodeIncorrect`). A transient failure never consumed part of the
+ * caller's `MAX_OTP_ATTEMPTS` budget, so it is safe (and expected) to retry
+ * with the same code.
+ */
+export function isOtpVerifyTransientFailure(error: unknown): error is StructuredError {
+  return error instanceof StructuredError && error.code === AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure;
+}
 
 /**
  * Session storage interface for pluggable session management
@@ -117,7 +155,7 @@ export async function initiateEmailAuth(
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(normalizedEmail)) {
-    throw new Error('Invalid email format');
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.invalidEmailFormat, 'Invalid email format');
   }
 
   console.log('[email-auth] Initiating email auth');
@@ -143,7 +181,10 @@ export async function initiateEmailAuth(
   const otpId = otpResult.otpId;
 
   if (!otpId) {
-    throw new Error('Failed to initiate OTP - no OTP ID returned');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpInitFailed,
+      'Failed to initiate OTP - no OTP ID returned'
+    );
   }
 
   // Turnkey v6 (ACTIVITY_TYPE_INIT_OTP_V3) returns a signed target-encryption
@@ -151,7 +192,10 @@ export async function initiateEmailAuth(
   const otpEncryptionTargetBundle = otpResult.otpEncryptionTargetBundle;
 
   if (!otpEncryptionTargetBundle) {
-    throw new Error('Failed to initiate OTP - no OTP encryption target bundle returned');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpInitBundleMissing,
+      'Failed to initiate OTP - no OTP encryption target bundle returned'
+    );
   }
 
   console.log('[email-auth] OTP sent');
@@ -239,21 +283,28 @@ export async function verifyEmailAuth(
   const session = storage.get(sessionId);
 
   if (!session) {
-    throw new Error('Invalid or expired session');
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
   }
 
   // Check if session has expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
     storage.delete(sessionId);
-    throw new Error('Session expired. Please request a new code.');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionExpired,
+      'Session expired. Please request a new code.'
+    );
   }
 
   if (!session.otpId) {
-    throw new Error('OTP ID not found in session');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
+      'OTP ID not found in session'
+    );
   }
 
   if (!session.otpEncryptionTargetBundle) {
-    throw new Error(
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
       'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
@@ -263,7 +314,10 @@ export async function verifyEmailAuth(
   // (otpLength: 6, alphanumeric: false), so anything else is definitely
   // wrong. Keep in sync with the initOtp configuration above.
   if (!/^\d{6}$/.test(code)) {
-    throw new Error('Invalid verification code format');
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid,
+      'Invalid verification code format'
+    );
   }
 
   console.log('[email-auth] Verifying OTP');
@@ -287,8 +341,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
-    throw new Error(
-      `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed,
+      `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 
@@ -318,21 +374,44 @@ export async function verifyEmailAuth(
   } catch (error) {
     console.error('❌ OTP verification failed:', error);
 
+    // Only a call Turnkey actually rendered a verdict on may consume part of
+    // the attempt budget. `extractTurnkeyErrorCode` returns a numeric code
+    // only for a genuine `TurnkeyRequestError` (Turnkey evaluated the code
+    // and rejected it); a transient/network failure (timeout, 5xx,
+    // `ECONNRESET`) or an unexpected response shape throws without one,
+    // because the request never reached a point where Turnkey could return
+    // a definitive answer. Charging those against MAX_OTP_ATTEMPTS would let
+    // a Turnkey blip during the 15-minute OTP window exhaust a legitimate
+    // user's budget and lock them out, even though they never typed a wrong
+    // code (#747).
+    if (extractTurnkeyErrorCode(error) === undefined) {
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure,
+        `OTP verification could not be completed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error }
+      );
+    }
+
     // Count the failed attempt; destroy the session once the budget is
     // spent so the otpId cannot be brute-forced for the rest of the
     // 15-minute window.
     const attempts = (session.otpAttempts ?? 0) + 1;
     if (attempts >= MAX_OTP_ATTEMPTS) {
       storage.delete(sessionId);
-      throw new Error(
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.otpAttemptsExceeded,
         'Too many failed verification attempts. Please request a new code.'
       );
     }
     session.otpAttempts = attempts;
     storage.set(sessionId, session);
 
-    throw new Error(
-      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect,
+      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 
@@ -355,7 +434,8 @@ export async function verifyEmailAuth(
     // attempt budget and eventually masking this error with a misleading
     // "too many failed attempts".
     storage.delete(sessionId);
-    throw new Error(
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.subOrgProvisionFailed,
       `Email verified, but provisioning the Turnkey sub-organization failed: ${
         error instanceof Error ? error.message : String(error)
       }. Please request a new code and try again.`,

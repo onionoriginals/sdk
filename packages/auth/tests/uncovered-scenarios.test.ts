@@ -312,7 +312,12 @@ describe('[AUTH-008] verifyEmailAuth – error paths', () => {
 
   test('wrong OTP code (Turnkey rejects it) → throws "Invalid verification code"', async () => {
     const client = createEmailAuthMockClient({
-      verifyOtp: mock(() => Promise.reject(new Error('OTP code incorrect'))),
+      // A numeric `code` mirrors @turnkey/http's TurnkeyRequestError shape,
+      // marking this as a definitive Turnkey rejection rather than a
+      // transient/network failure (#747) — see extractTurnkeyErrorCode.
+      verifyOtp: mock(() =>
+        Promise.reject(Object.assign(new Error('OTP code incorrect'), { code: 3 }))
+      ),
     });
     const sessionId = await setupSession(client);
     await expect(
