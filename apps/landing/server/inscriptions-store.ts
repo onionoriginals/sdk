@@ -636,26 +636,33 @@ export function createInscriptionsStore(opts: {
     // reorg needs to be detected against, permanently disabling that
     // detection until the next read happens to include a value again.
     //
-    // But a NEW hash is a NEW block identity, whether or not this read's
-    // height lookup also succeeded (QuickNode resolves them via separate
-    // RPC calls, so one can fail independently of the other). Pairing that
-    // new hash with the OLD block's still-sticky height would describe an
-    // identity that was never actually observed — worse than an absent
-    // height, since a caller can't tell "unknown" from "verified same as
-    // before". So height is cleared (not left stale) exactly when this
-    // read's hash proves the identity changed but doesn't say to what
-    // height; otherwise (hash unchanged, or this read has no hash opinion
-    // at all) the previous height is exactly as valid as before.
+    // But a NEW hash or a NEW height is a NEW block identity, whether or not
+    // this read's OTHER lookup also succeeded (QuickNode resolves them via
+    // separate RPC calls, so one can fail independently of the other).
+    // Pairing a fresh value for one with the OLD block's still-sticky value
+    // for the other would describe an identity that was never actually
+    // observed together — worse than reporting the other as unknown, since a
+    // caller can't tell "unknown" from "verified same as before". So each
+    // field is cleared (not left stale) exactly when the OTHER field's fresh
+    // reading proves the identity changed but this read has no opinion on
+    // this field; otherwise (unchanged, or this read has no opinion on
+    // either field) the previous value is exactly as valid as before. Both
+    // "changed" flags are computed from the values on entry, before either
+    // field is written, so setting one doesn't affect the other's check.
     if (status === 'confirmed') {
+      const freshHeight = evidence?.blockHeight;
       const freshHash = evidence?.blockHash;
-      const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
-      if (evidence?.blockHeight !== undefined) {
-        rec.confirmedBlockHeight = evidence.blockHeight;
-      } else if (identityChanged) {
+      const heightChanged = freshHeight !== undefined && freshHeight !== rec.confirmedBlockHeight;
+      const hashChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
+      if (freshHeight !== undefined) {
+        rec.confirmedBlockHeight = freshHeight;
+      } else if (hashChanged) {
         rec.confirmedBlockHeight = undefined;
       }
       if (freshHash !== undefined) {
         rec.confirmedBlockHash = freshHash;
+      } else if (heightChanged) {
+        rec.confirmedBlockHash = undefined;
       }
     }
   }
