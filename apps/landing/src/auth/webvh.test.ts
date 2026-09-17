@@ -56,14 +56,14 @@ describe('the DID document publishes two distinct keys', () => {
     const authorshipPub = await ed.getPublicKeyAsync(crypto.getRandomValues(new Uint8Array(32)));
     const authorship = ed25519PublicKeyMultibase(authorshipPub);
 
-    const { didDocument } = await buildUserWebVHDid(signer, {
+    const { did, didDocument } = await buildUserWebVHDid(signer, {
       domain: 'magby.originals.build',
       slug: 'user-abc0123456789a',
       authorshipPublicKeyMultibase: authorship,
     });
 
     const doc = didDocument as {
-      verificationMethod: Array<{ id: string; publicKeyMultibase: string }>;
+      verificationMethod: Array<{ id: string; publicKeyMultibase: string; controller?: string }>;
       authentication: string[];
       assertionMethod: string[];
     };
@@ -73,6 +73,11 @@ describe('the DID document publishes two distinct keys', () => {
     expect(byId('#key-0')!.publicKeyMultibase).toBe(signer.getPublicKeyMultibase());
     expect(byId('#key-1')!.publicKeyMultibase).toBe(authorship);
     expect(byId('#key-0')!.publicKeyMultibase).not.toBe(byId('#key-1')!.publicKeyMultibase);
+
+    // Each verification method's controller must be the minted DID itself,
+    // never the empty-string placeholder this used to bake in (issue #804).
+    expect(byId('#key-0')!.controller).toBe(did);
+    expect(byId('#key-1')!.controller).toBe(did);
 
     expect(doc.authentication).toEqual(['#key-0']);
     expect(doc.assertionMethod).toEqual(['#key-1']);
