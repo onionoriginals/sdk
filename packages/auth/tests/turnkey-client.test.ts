@@ -1,9 +1,13 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { StructuredError } from '@originals/sdk';
 import {
   createTurnkeyClient,
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
+  AUTH_TURNKEY_ERROR_CODES,
 } from '../src/server/turnkey-client';
 
 describe('turnkey-client', () => {
@@ -47,6 +51,18 @@ describe('turnkey-client', () => {
           organizationId: 'org_id',
         })
       ).toThrow('TURNKEY_API_PUBLIC_KEY is required');
+    });
+
+    test('throws a StructuredError with a stable code for a missing config value (#747)', () => {
+      try {
+        createTurnkeyClient({ apiPrivateKey: 'priv_key', organizationId: 'org_id' });
+        throw new Error('expected createTurnkeyClient to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_ERROR_CODES.configApiPublicKeyMissing
+        );
+      }
     });
 
     test('throws when private key missing', () => {
@@ -94,6 +110,44 @@ describe('turnkey-client', () => {
 
     test('leaves already-normalized emails unchanged', () => {
       expect(normalizeEmail('user+tag.name@example.org')).toBe('user+tag.name@example.org');
+    });
+  });
+
+  describe('extractTurnkeyErrorCode', () => {
+    test('returns the numeric code on a TurnkeyRequestError-shaped error', () => {
+      expect(extractTurnkeyErrorCode(Object.assign(new Error('nope'), { code: 5 }))).toBe(5);
+    });
+
+    test('returns undefined for a plain transport/network error with no code', () => {
+      expect(extractTurnkeyErrorCode(new Error('ECONNRESET'))).toBeUndefined();
+    });
+
+    test('walks a wrapped cause chain to find the code', () => {
+      const turnkeyError = Object.assign(new Error('rejected'), { code: 3 });
+      const wrapped = new Error('outer', { cause: turnkeyError });
+      expect(extractTurnkeyErrorCode(wrapped)).toBe(3);
+    });
+
+    test('does not loop forever on a cyclic cause chain', () => {
+      const a: { cause?: unknown } = new Error('a');
+      const b: { cause?: unknown } = new Error('b');
+      (a as Error & { cause?: unknown }).cause = b;
+      (b as Error & { cause?: unknown }).cause = a;
+      expect(extractTurnkeyErrorCode(a)).toBeUndefined();
+    });
+
+    test('returns undefined for non-object input', () => {
+      expect(extractTurnkeyErrorCode('nope')).toBeUndefined();
+      expect(extractTurnkeyErrorCode(null)).toBeUndefined();
+      expect(extractTurnkeyErrorCode(undefined)).toBeUndefined();
+    });
+
+    test('TURNKEY_GRPC_INVALID_ARGUMENT is gRPC code 3', () => {
+      // Pinned to the value confirmed by #819's own repro
+      // ("Turnkey error 3: invalid OTP code"); callers must compare against
+      // this exact code, not merely check a code is present, since other
+      // Turnkey-side failures (auth, rate-limiting) also carry a code.
+      expect(TURNKEY_GRPC_INVALID_ARGUMENT).toBe(3);
     });
   });
 
@@ -300,6 +354,14 @@ describe('turnkey-client', () => {
       await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
         'No sub-organization ID returned'
       );
+
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+        throw new Error('expected getOrCreateTurnkeySubOrg to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_TURNKEY_ERROR_CODES.subOrgCreateFailed);
+      }
     });
 
     test('creates sub-org with correct wallet configuration', async () => {

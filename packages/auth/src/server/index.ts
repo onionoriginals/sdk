@@ -20,6 +20,9 @@ export {
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
+  AUTH_TURNKEY_ERROR_CODES,
   type SubOrgLock,
 } from './turnkey-client.js';
 export {
@@ -28,6 +31,8 @@ export {
   isSessionVerified,
   cleanupSession,
   getSession,
+  isOtpVerifyTransientFailure,
+  AUTH_EMAIL_ERROR_CODES,
   type SessionStorage,
   type VerifyEmailAuthOptions,
   createInMemorySessionStorage,
@@ -44,7 +49,11 @@ export {
   getClearAuthCookieConfig,
 } from './jwt.js';
 export { createAuthMiddleware } from './middleware.js';
-export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer.js';
+export {
+  TurnkeyWebVHSigner,
+  createTurnkeySigner,
+  AUTH_TURNKEY_SIGNER_ERROR_CODES,
+} from './turnkey-signer.js';
 
 
 
