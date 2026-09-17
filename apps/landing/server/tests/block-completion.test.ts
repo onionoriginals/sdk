@@ -1,7 +1,11 @@
 import { expect, test } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startBlockCompletion } from '../block-completion';
-import { createInscriptionCompletionSweep } from '../inscription-completion-sweep';
-import type { InscriptionRecord } from '../inscriptions-store';
+import { createInscriptionReconciler } from '../bitcoin-reconciliation';
+import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
+import { createMoneyLogger } from '../money-log';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 function harness(complete = async () => {}) {
@@ -122,21 +126,38 @@ test('real WebSocket block checks commit confirmation and broadcasts persisted r
   let confirmed = false;
   let checks = 0;
   const pushed: string[] = [];
-  const record = { commitTxId: 'c'.repeat(64), revealTxId: 'd'.repeat(64), revealTxHex: '0200000000', status: 'commit_broadcast' } as InscriptionRecord;
-  const complete = createInscriptionCompletionSweep({
-    store: {
-      pendingRevealBroadcasts: () => ({ pending: record.status === 'commit_broadcast' ? [{ subOrgId: 'creator', record }] : [], unreadable: [] }),
-      trySetStatus: (_sub, _tx, expected, status) => {
-        if (record.status !== expected.status) return false;
-        record.status = status;
-        return true;
-      },
+  const commitTxId = 'c'.repeat(64);
+  const revealTxId = 'd'.repeat(64);
+  // A commit stuck at `commit_broadcast` with its reveal already signed and
+  // persisted is exactly the #545 scenario: nothing left to do but wait for
+  // the commit to confirm, then push the reveal without the creator present.
+  const FIXED_NOW = Date.parse('2026-08-01T00:05:00.000Z');
+  const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'block-completion-')) });
+  store.create('creator', {
+    commitTxId,
+    revealTxId,
+    inscriptionId: `${revealTxId}i0`,
+    signedCommitHex: '02aa',
+    revealTxHex: '0200000000',
+    fundingOutpoints: [`${commitTxId}:0`],
+    changeAddress: 'tb1qexample',
+    status: 'commit_broadcast',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  } as InscriptionRecord);
+  const reconciler = createInscriptionReconciler({
+    store,
+    provider: { getTransactionStatus: async () => { checks++; return { confirmed }; } },
+    broadcastIdempotent: async (txHex) => {
+      if (!txHex) return 'no recovery artifact for this record';
+      pushed.push(txHex);
+      return null;
     },
-    provider: {
-      getTransactionStatus: async () => { checks++; return { confirmed }; },
-      broadcastTransaction: async hex => { pushed.push(hex); return record.revealTxId; },
-    }, moneyLog: () => {},
+    unreadableRecords: () => null,
+    money: createMoneyLogger(() => {}, () => FIXED_NOW),
+    now: () => FIXED_NOW,
   });
+  const complete = async () => { await reconciler.sweepInscriptions(); };
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0,
     fetch(req, server) { if (server.upgrade(req)) return; return new Response('upgrade required', { status: 400 }); },
     websocket: {
@@ -156,7 +177,7 @@ test('real WebSocket block checks commit confirmation and broadcasts persisted r
     expect(pushed).toEqual([]);
     confirmed = true;
     peer!.send(JSON.stringify({ block: { id: 'f'.repeat(64) } }));
-    await until(() => record.status === 'reveal_broadcast');
+    await until(() => store.get('creator', commitTxId)?.status === 'reveal_broadcast');
     expect(checks).toBe(2); expect(pushed).toEqual(['0200000000']); expect(errors).toEqual([]);
   } finally { listener.stop(); await server.stop(true); }
 });

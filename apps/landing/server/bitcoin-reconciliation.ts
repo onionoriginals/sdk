@@ -66,6 +66,15 @@ export interface InscriptionReconcilerDeps {
   recoveryConfirmations?: number;
   /** How long an unconfirmed reveal may sit before the list poll re-pushes it. Default 30 min. */
   revealRebroadcastAfterMs?: number;
+  /**
+   * Distinct sub-org ids `sweepInscriptions` will reconcile in one pass.
+   * Default 25, matching the per-pass candidate budget the retired dedicated
+   * completion sweep (#546) used — a batch of stranded reveals spanning more
+   * distinct users than this still converges, just over additional passes;
+   * this must not silently shrink back to a value that reintroduces #545's
+   * multi-day stranded-funds delay under realistic load. Minimum 1.
+   */
+  sweepBudget?: number;
 }
 
 export interface InscriptionReconciler {
@@ -100,6 +109,9 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
   const RECOVERY_CONFIRMATIONS = typeof requestedConfirmations === 'number' && Number.isInteger(requestedConfirmations)
     ? Math.max(6, requestedConfirmations) : 6;
   const REVEAL_REBROADCAST_AFTER_MS = deps.revealRebroadcastAfterMs ?? 30 * 60_000;
+  const requestedSweepBudget = deps.sweepBudget;
+  const SWEEP_BUDGET = typeof requestedSweepBudget === 'number' && Number.isInteger(requestedSweepBudget)
+    ? Math.max(1, requestedSweepBudget) : 25;
   const { provider, broadcastIdempotent, unreadableRecords, money } = deps;
 
   // Rotating scan-start cursors for the list poll's reconciliation passes.
@@ -120,9 +132,9 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     return c;
   }
 
-  async function reconcileUser(sub: string): Promise<Response> {
+  async function reconcileUser(sub: string, origin: 'interactive' | 'sweep' = 'interactive'): Promise<Response> {
     try {
-      return await reconcileRecords(sub);
+      return await reconcileRecords(sub, origin);
     } catch (error) {
       const unreadable = unreadableRecords(sub, error);
       if (unreadable) return unreadable;
@@ -134,7 +146,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     }
   }
 
-  async function reconcileRecords(sub: string): Promise<Response> {
+  async function reconcileRecords(sub: string, origin: 'interactive' | 'sweep' = 'interactive'): Promise<Response> {
     if (!deps.store) return json({ error: 'inscriptions_unavailable' }, 503);
     const store = deps.store;
     // A torn file must not surface as a bare, unnamed 500: this route IS the
@@ -232,7 +244,16 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       lookups++;
       cursors.stuck++;
       const st = await readStatus(r.commitTxId);
-      if (!st) continue;
+      if (!st) {
+        // Money-logged only for the unattended background sweep (#545/#812):
+        // an interactive poll's lookup failure is already visible to the
+        // user who triggered it, and logging it as a "sweep" decision would
+        // misattribute ordinary interactive traffic as unattended activity.
+        if (origin === 'sweep') {
+          money('inscription_sweep_lookup_failed', { sub, commitTxId: r.commitTxId });
+        }
+        continue;
+      }
       if (!st.confirmed) {
         // #677 — read the FRESH pre-await snapshot (`current`), not the
         // top-of-function one (`r`): by the time this record's turn comes
@@ -240,24 +261,69 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // ran, or a concurrent reconcileUser call for the same user already
         // moved this exact record).
         const lastPush = Date.parse(current.rebroadcastAt ?? current.updatedAt);
-        if (!current.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
+        if (!current.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) {
+          if (origin === 'sweep') {
+            money('inscription_sweep_waiting', { sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId });
+          }
+          continue;
+        }
       }
       store.markRebroadcast(sub, r.commitTxId);
       let atStatus = current.status;
       if (!st.confirmed) {
-        if (await broadcastIdempotent(current.signedCommitHex!)) continue;
+        const commitErr = await broadcastIdempotent(current.signedCommitHex!);
+        if (commitErr) {
+          if (origin === 'sweep') {
+            money('inscription_sweep_push_failed', {
+              sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId, leg: 'commit', reason: commitErr,
+            });
+          }
+          continue;
+        }
         // Guarded write: a concurrent pass (an overlapping poll, or the
         // background sweep) may have already moved this record while the
         // broadcast above was in flight. Only advance it if it is still
         // exactly where this pass last observed it; otherwise stop touching
         // it rather than clobber whatever that other pass decided (#677).
-        if (!store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'commit_broadcast')) continue;
+        if (!store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'commit_broadcast')) {
+          if (origin === 'sweep') {
+            money('inscription_sweep_raced', { sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId });
+          }
+          continue;
+        }
         atStatus = 'commit_broadcast';
         changed = true;
       }
       const revealErr = await broadcastIdempotent(current.revealTxHex);
       if (!revealErr) {
-        if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) changed = true;
+        if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) {
+          changed = true;
+          // A confirmed commit whose reveal was pushed with nobody watching
+          // (#545): the money log is the only record of a server-initiated
+          // spend the affected user never saw happen. Only true for the
+          // background sweep — an interactive poll's own user is watching.
+          if (origin === 'sweep') {
+            money('inscription_sweep_completed', {
+              sub,
+              commitTxId: r.commitTxId,
+              revealTxId: current.revealTxId,
+              inscriptionId: current.inscriptionId,
+            });
+          }
+        } else if (origin === 'sweep') {
+          // The reveal genuinely reached the network, but a concurrent pass
+          // already moved this record before this write landed: not a
+          // failure, but still a decision worth reconstructing later (#694).
+          money('inscription_sweep_raced', { sub, commitTxId: r.commitTxId, revealTxId: current.revealTxId });
+        }
+      } else if (origin === 'sweep') {
+        money('inscription_sweep_push_failed', {
+          sub,
+          commitTxId: r.commitTxId,
+          revealTxId: current.revealTxId,
+          leg: 'reveal',
+          reason: revealErr,
+        });
       }
     }
     for (const r of liveUnconfirmed) {
@@ -449,10 +515,10 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     sweepRunning = true;
     try {
       const { stale, unreadable } = deps.store.sweepStale(0);
-      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, 10);
+      const subs = rotate([...new Set(stale.map((row) => row.subOrgId))].sort(), sweepCursor).slice(0, SWEEP_BUDGET);
       const failures = [...unreadable];
       for (const sub of subs) {
-        try { if (!(await reconcileUser(sub)).ok) failures.push(sub); }
+        try { if (!(await reconcileUser(sub, 'sweep')).ok) failures.push(sub); }
         catch { failures.push(sub); }
       }
       sweepCursor += subs.length;
