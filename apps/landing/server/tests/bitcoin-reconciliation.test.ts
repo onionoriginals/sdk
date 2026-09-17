@@ -586,6 +586,72 @@ describe('createInscriptionReconciler: status transitions', () => {
   });
 });
 
+// #777 — the list mapper's `settled` flag must track `retired` alone, not
+// "confirmations already meets the threshold". A record can carry on-disk
+// `confirmations` at/above the threshold from an earlier poll while its own
+// `retire()` call hasn't run yet — e.g. its turn in the `liveUnconfirmed`
+// category isn't reached this poll because the shared 5-lookup-per-poll
+// budget was spent on other records first. `settled: true` in that state
+// misleads a polling client: `store.retired` is still false and the
+// recovery artifacts (signedCommitHex/revealTxHex) are still on disk.
+describe('createInscriptionReconciler: #777 settled tracks retired, not a stale confirmation count', () => {
+  test('a confirmed record above the threshold whose turn the budget never reaches this poll is NOT reported settled', async () => {
+    const target = 'a'.repeat(64);
+    const { store, reconciler } = harness({
+      // Called for every decoy this poll reaches; never for the target,
+      // since its turn must not come up while the budget is exhausted.
+      txStatus: (txid) => (txid === target ? { confirmed: true, confirmations: 10 } : { confirmed: false }),
+    });
+
+    // Target: already confirmed at/above the default six-confirmation
+    // threshold, but never retired — plausible leftover state from an
+    // earlier poll, no reorg or supersede needed to reach it.
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed', createdAt: '2026-08-01T00:00:00.000Z' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 10, blockHeight: 100, blockHash: 'f'.repeat(64) });
+
+    // 4 stuck decoys (liveStuck) consume the reduced stuck budget (5 minus 1
+    // reserved for the nonempty liveUnconfirmed category = 4).
+    for (let i = 0; i < 4; i++) {
+      const id = String(i).repeat(64);
+      store.create('sub-1', rec({
+        commitTxId: id, status: 'commit_broadcast', createdAt: '2026-08-01T00:00:10.000Z',
+      }));
+    }
+    // 1 newer liveUnconfirmed decoy consumes the 5th and final lookup before
+    // the target's turn (rotation starts at the newest record first).
+    const decoy = 'b'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: decoy, status: 'reveal_broadcast', createdAt: '2026-08-01T00:00:20.000Z' }));
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1') as unknown as {
+      inscriptions: Array<{ commitTxId: string; status: string; settled?: boolean; confirmations?: number }>;
+    };
+    const row = inscriptions.find((r) => r.commitTxId === target)!;
+
+    expect(row.status).toBe('confirmed');
+    expect(row.confirmations).toBe(10); // stale, from before this poll
+    expect(row.settled).toBe(false); // NOT settled — retire() never ran
+    expect(store.get('sub-1', target)?.retired).not.toBe(true);
+    expect(store.get('sub-1', target)?.revealTxHex).toBeDefined(); // recovery artifacts still on disk
+  });
+
+  test('once retire() actually runs for that record, settled flips to true', async () => {
+    const target = 'a'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: true, confirmations: 10 }),
+    });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 10, blockHeight: 100, blockHash: 'f'.repeat(64) });
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1') as unknown as {
+      inscriptions: Array<{ commitTxId: string; settled?: boolean }>;
+    };
+    const row = inscriptions.find((r) => r.commitTxId === target)!;
+
+    expect(row.settled).toBe(true);
+    expect(store.get('sub-1', target)?.retired).toBe(true);
+  });
+});
+
 describe('createInscriptionReconciler: cursor rotation and budget', () => {
   test('a superseded backlog larger than the lookup budget is fully covered across polls', async () => {
     const winner = 'a'.repeat(64);
