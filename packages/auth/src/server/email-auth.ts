@@ -34,23 +34,39 @@ export const OTP_VERIFY_ERROR_CODES = {
 } as const;
 
 /**
- * Whether `error` carries a genuine numeric error code from Turnkey's own
- * JSON error response (a `TurnkeyRequestError`, e.g. code 3 for an invalid
- * OTP) — as opposed to a network/timeout/DNS failure that never reached
- * that point and so never evaluated the submitted code's correctness.
- * `@turnkey/http`'s `request()` only attaches a numeric `.code` when it
- * successfully parsed a JSON error body from Turnkey itself; a transport
- * failure (the `fetch()` call rejecting outright) has no such shape. Walks
- * the `cause` chain (cycle-safe) — same evidence standard as
- * `isDefinitiveNotFound` in turnkey-client.ts.
+ * gRPC status code Turnkey's enclave returns when it evaluated the request
+ * and rejected an argument as invalid — including a wrong OTP code, per the
+ * exact `TurnkeyRequestError` shape reproduced on #747
+ * ("Turnkey error 3: invalid OTP code"). Any *other* numeric code (e.g. 8
+ * RESOURCE_EXHAUSTED for rate limiting, 14 UNAVAILABLE, 16 UNAUTHENTICATED
+ * for an expired API session, 13 INTERNAL) is still a genuine,
+ * Turnkey-issued response, but is evidence of a server-side/operational
+ * condition, not that the submitted code was wrong — treating every
+ * numeric code as "code incorrect" would keep misclassifying exactly the
+ * kind of not-the-user's-fault failure this fix exists to stop penalizing.
  */
-function isDefiniteTurnkeyRejection(error: unknown): boolean {
+const TURNKEY_INVALID_ARGUMENT_CODE = 3;
+
+/**
+ * Whether `error` is a genuine Turnkey rejection of the OTP code itself (gRPC
+ * `INVALID_ARGUMENT`, code 3) — as opposed to a network/timeout/DNS failure
+ * that never reached Turnkey at all, or a different Turnkey-issued error
+ * (rate limiting, an expired session, an internal/unavailable error) that
+ * says nothing about whether the code was right. `@turnkey/http`'s
+ * `request()` only attaches a numeric `.code` when it successfully parsed a
+ * JSON error body from Turnkey itself, so any other numeric code is still
+ * trustworthy evidence — just evidence of something other than a wrong
+ * code, and is treated as uncertain/transient here rather than assumed to
+ * be the user's fault. Walks the `cause` chain (cycle-safe) — same
+ * evidence-only standard as `isDefinitiveNotFound` in turnkey-client.ts.
+ */
+function isDefiniteOtpCodeRejection(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (typeof current === 'object' && current !== null && !seen.has(current)) {
     seen.add(current);
     const { code } = current as { code?: unknown };
-    if (typeof code === 'number') {
+    if (code === TURNKEY_INVALID_ARGUMENT_CODE) {
       return true;
     }
     current = (current as { cause?: unknown }).cause;
@@ -371,7 +387,7 @@ export async function verifyEmailAuth(
     // Treating the former as a wrong guess would consume a legitimate
     // user's attempt budget for something that isn't their fault, and could
     // lock them out during an outage that has nothing to do with their code.
-    if (!isDefiniteTurnkeyRejection(error)) {
+    if (!isDefiniteOtpCodeRejection(error)) {
       throw new StructuredError(
         OTP_VERIFY_ERROR_CODES.verifyTransientFailure,
         `Unable to verify the code right now: ${

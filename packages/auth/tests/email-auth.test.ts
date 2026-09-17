@@ -492,6 +492,30 @@ describe('email-auth', () => {
       expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
     });
 
+    test('a structured Turnkey error unrelated to code correctness (e.g. rate limiting) is treated as transient, not an incorrect code', async () => {
+      // A genuine TurnkeyRequestError with a numeric code OTHER than 3
+      // (INVALID_ARGUMENT) — e.g. 8 RESOURCE_EXHAUSTED for rate limiting, or
+      // 16 UNAUTHENTICATED for an expired API session — says nothing about
+      // whether the submitted code was right. Treating any numeric code as
+      // "wrong code" would still misclassify this as the user's fault.
+      const client = createMockTurnkeyClient({
+        verifyOtp: mock(() => Promise.reject(turnkeyRejection(8, 'rate limit exceeded'))),
+      });
+      const sessionId = await setupSession(client);
+
+      const error = await verifyEmailAuth(
+        sessionId,
+        '123456',
+        client,
+        storage,
+        verifyOptions
+      ).catch((e) => e);
+      expect(error).toBeInstanceOf(StructuredError);
+      expect(error.code).toBe(OTP_VERIFY_ERROR_CODES.verifyTransientFailure);
+      expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+      expect(storage.get(sessionId)).toBeDefined();
+    });
+
     test('a transient failure does not count toward the attempt budget that would otherwise destroy the session', async () => {
       let calls = 0;
       const client = createMockTurnkeyClient({
