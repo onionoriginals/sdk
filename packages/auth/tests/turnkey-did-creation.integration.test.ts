@@ -150,6 +150,16 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       expect(result.didDocument).toBeTruthy();
       expect(typeof result.didDocument).toBe('object');
 
+      // Every verification method's controller must be the minted DID itself,
+      // never the empty-string placeholder createDIDWithTurnkey used to pass
+      // in before the DID existed (issue #804).
+      const doc = result.didDocument as { verificationMethod?: Array<{ controller?: string }> };
+      expect(doc.verificationMethod).toBeTruthy();
+      expect(doc.verificationMethod!.length).toBeGreaterThan(0);
+      for (const vm of doc.verificationMethod!) {
+        expect(vm.controller).toBe(result.did);
+      }
+
       // Log must be present
       expect(result.didLog).toBeTruthy();
     },
