@@ -364,7 +364,8 @@ describe('[AUTH-022] createDIDWithTurnkey', () => {
 
   const BASE_PARAMS = {
     updateKeyAccount: {
-      address: 'key_addr',
+      // Must match updateKeyPublic below (#734 binds address to it).
+      address: FIXTURE_UPDATE_KEY,
       curve: 'CURVE_ED25519' as const,
       path: "m/44'/501'/1'/0'",
       addressFormat: 'ADDRESS_FORMAT_SOLANA',

@@ -320,6 +320,8 @@ function createDIDWithTurnkey(params: {
 }>
 ```
 
+`updateKeyAccount` must be the canonical `did-update` account — `curve: 'CURVE_ED25519'` at the exact derivation path `getKeyByRole(wallets, 'did-update')` returns — and its `address` must correspond to `updateKeyPublic` (the key that will be published as the DID's update-key controller). A mismatch on either check throws `TurnkeyUpdateKeyRoleError` before any Turnkey signing call.
+
 ---
 
 ## Usage Examples

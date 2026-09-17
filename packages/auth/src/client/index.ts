@@ -43,7 +43,11 @@ export {
   type EncryptOtpCodeResult,
 } from '../otp-encryption.js';
 
-export { TurnkeyDIDSigner, createDIDWithTurnkey } from './turnkey-did-signer.js';
+export {
+  TurnkeyDIDSigner,
+  createDIDWithTurnkey,
+  TurnkeyUpdateKeyRoleError,
+} from './turnkey-did-signer.js';
 
 export {
   sendOtp,

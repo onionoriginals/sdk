@@ -1,7 +1,7 @@
 import type { ExternalSigner, ExternalVerifier } from "../types/common.js";
 import type {
   DIDDocument,
-  VerificationMethod,
+  VerificationMethodInput,
   ServiceEndpoint,
 } from "../types/did.js";
 import { StructuredError } from "@originals/cel";
@@ -64,7 +64,7 @@ export interface CreateDIDOriginalOptions {
    * legacy-form updateKeys with pre-rotation is rejected (see nextKeyHashes).
    */
   updateKeys: string[];
-  verificationMethods: VerificationMethod[];
+  verificationMethods: VerificationMethodInput[];
   paths?: string[];
   controller?: string;
   context?: string | string[] | object | object[];
@@ -92,7 +92,7 @@ export interface UpdateDIDOriginalOptions {
   verifier?: ExternalVerifier;
   /** Same format rules as {@link CreateDIDOriginalOptions.updateKeys}. */
   updateKeys?: string[];
-  verificationMethods?: VerificationMethod[];
+  verificationMethods?: VerificationMethodInput[];
   services?: ServiceEndpoint[];
   controller?: string;
   context?: string | string[] | object | object[];
