@@ -675,7 +675,21 @@ export class CredentialManager {
     const digest = await computeCredentialDigest(credential as unknown as Record<string, unknown>, proofBase as unknown as Record<string, unknown>);
     // Sign with the algorithm the private key actually is, not whatever
     // config.defaultKeyType happens to be on this instance.
-    const signer = signerForKeyType(multikey.decodePrivateKey(privateKeyMultibase).type);
+    let decoded: ReturnType<typeof multikey.decodePrivateKey>;
+    try {
+      decoded = multikey.decodePrivateKey(privateKeyMultibase);
+    } catch (e) {
+      // decodePrivateKey throws a raw Error on malformed multibase input;
+      // callers of the public signCredential seam need a stable .code to
+      // branch on (CLAUDE.md: "Use StructuredError ... appropriate to the
+      // public seam"), matching LifecycleManager's INVALID_KEY for the same
+      // failure mode.
+      throw new StructuredError(
+        'INVALID_KEY',
+        `Invalid privateKeyMultibase: ${(e as Error).message}`
+      );
+    }
+    const signer = signerForKeyType(decoded.type);
     const sig = await signer.sign(digest, privateKeyMultibase);
     return encodeBase64UrlMultibase(sig);
   }

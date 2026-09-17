@@ -70,11 +70,18 @@ export function assertEd25519WebVHUpdateKeys(updateKeys: readonly string[] | und
     let type: string;
     try {
       type = multikey.decodePublicKey(key).type;
-    } catch {
-      throw new Error(`did:webvh updateKey is not a valid public multikey: ${key}`);
+    } catch (e) {
+      // Caller-controlled input (createDIDWebVH's externalSigner path, and
+      // every rotation/recovery entry) crossing the public SDK seam (#711):
+      // needs a stable .code, not a raw Error.
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_INVALID',
+        `did:webvh updateKey is not a valid public multikey: ${key} (${(e as Error).message})`
+      );
     }
     if (type !== 'Ed25519') {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_NOT_ED25519',
         `did:webvh only supports Ed25519 keys (resolution verifies DID logs with Ed25519); updateKey uses ${type}`
       );
     }
@@ -340,7 +347,10 @@ export class WebVHManager {
     if (paths && paths.length > 0) {
       for (const segment of paths) {
         if (!this.isValidPathSegment(segment)) {
-          throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+          throw new StructuredError(
+            'WEBVH_INVALID_PATH_SEGMENT',
+            `Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`
+          );
         }
       }
     }
@@ -376,7 +386,10 @@ export class WebVHManager {
     // masked by a "verificationMethods are required" error the caller would hit
     // first only to then discover the combination is unsupported anyway.
     if (prerotation && externalSigner) {
-      throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
+      throw new StructuredError(
+        'WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED',
+        'prerotation is not supported with externalSigner; manage nextKeyHashes externally'
+      );
     }
 
     // keyPair and externalSigner are mutually exclusive (CLAUDE.md gotcha #7).
@@ -393,10 +406,16 @@ export class WebVHManager {
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
-        throw new Error('verificationMethods are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_VERIFICATION_METHODS_REQUIRED',
+          'verificationMethods are required when using externalSigner'
+        );
       }
       if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
-        throw new Error('updateKeys are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_UPDATE_KEYS_REQUIRED',
+          'updateKeys are required when using externalSigner'
+        );
       }
 
 
@@ -409,7 +428,13 @@ export class WebVHManager {
       } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
         verifier = externalSigner as unknown as ExternalVerifier;
       } else {
-        throw new Error(
+        // Same .code as identity-operations.ts's resolveVerifier and
+        // updateDIDWebVH (#720) for the identical condition, so callers can
+        // branch on one error contract for this failure across every DID
+        // API. Message text names this API's own externalSigner/
+        // externalVerifier option names rather than matching verbatim.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
           'externalVerifier is required when the provided externalSigner does not implement verify()'
         );
       }

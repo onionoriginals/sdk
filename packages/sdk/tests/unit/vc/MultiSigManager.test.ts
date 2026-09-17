@@ -14,7 +14,7 @@ import type {
   ExternalSigner,
 } from '../../../src/types';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '@originals/cel';
+import { multikey, StructuredError } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**
@@ -447,6 +447,35 @@ describe('MultiSigManager', () => {
       await expect(
         manager.signCredentialMultiSig(baseVC, { policy, privateKeys })
       ).rejects.toThrow(/issue #306/);
+
+      // #711: the failure must carry a stable .code, not just a matching
+      // message, so callers following the SDK's `catch (e) { if (e.code
+      // === 'X') }` idiom can branch on it.
+      try {
+        await manager.signCredentialMultiSig(baseVC, { policy, privateKeys });
+        throw new Error('expected signCredentialMultiSig to reject');
+      } catch (e) {
+        expect(e instanceof StructuredError).toBe(true);
+        expect((e as StructuredError).code).toBe('MULTISIG_ED25519_REQUIRED');
+      }
+    });
+
+    test('signing with a malformed private key throws a StructuredError with a stable code (#711)', async () => {
+      const vm = `did:key:zBogus#zBogus`;
+      const policy: MultiSigPolicy = {
+        required: 1,
+        total: 1,
+        signerVerificationMethods: [vm],
+      };
+      const privateKeys = new Map([[vm, 'not-a-valid-multibase-key']]);
+
+      try {
+        await manager.signCredentialMultiSig(baseVC, { policy, privateKeys });
+        throw new Error('expected signCredentialMultiSig to reject');
+      } catch (e) {
+        expect(e instanceof StructuredError).toBe(true);
+        expect((e as StructuredError).code).toBe('INVALID_KEY');
+      }
     });
 
     test('verifying a legacy (cryptosuite-less) proof reports a distinguishing error, not "Invalid signature"', async () => {
