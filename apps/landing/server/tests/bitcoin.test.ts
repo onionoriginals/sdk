@@ -6,6 +6,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import {
+  cachedOrdinalLookup,
   classifySpendableUtxos,
   createBitcoinRoutes,
   createExpiringCache,
@@ -582,6 +583,81 @@ describe('classifySpendableUtxos reports what it did not check', () => {
   test('reports zero unchecked when everything fit the budget', async () => {
     const r = await classifySpendableUtxos(many(3), ordinalsSaying(), 25);
     expect(r.unchecked).toBe(0);
+  });
+});
+
+/**
+ * #859 — a "clean" verdict cached forever is exactly the failure mode
+ * `outpointInscriptions`'s fail-closed contract exists to prevent: a
+ * 546-sat inscribed output that looked clean only because ord's indexer
+ * lagged behind the UTXO indexer on the very first query must not stay
+ * spendable-as-fees for the rest of the process's life once the indexer
+ * catches up and would truthfully report the inscription.
+ */
+describe('cachedOrdinalLookup re-verifies a "clean" verdict, never a positive one', () => {
+  const outpoint = { txid: 'a'.repeat(64), vout: 0 };
+
+  test('a stale "clean" answer is re-checked after the TTL and upgraded once the index catches up', async () => {
+    let clock = 0;
+    let calls = 0;
+    const lagging: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        return calls === 1 ? [] : ['abc123i0'];
+      },
+    };
+    const cached = cachedOrdinalLookup(lagging, 5_000, 60_000, () => clock);
+
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(1);
+
+    // Still inside the TTL window: the stale "clean" verdict is reused, not
+    // re-queried — this is the caching behavior the fix must preserve.
+    clock += 30_000;
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(1);
+
+    // Past the TTL: the index is consulted again and the inscription is found.
+    clock += 31_000;
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    expect(calls).toBe(2);
+  });
+
+  test('once an inscription is observed, it is never dropped even long after the clean TTL would have expired', async () => {
+    let clock = 0;
+    let calls = 0;
+    const flaky: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        // A real answer never flips from inscribed back to clean for an
+        // unspent output; this stub deliberately would, so the test proves
+        // the cache — not the source — is what keeps the positive verdict.
+        return calls === 1 ? ['abc123i0'] : [];
+      },
+    };
+    const cached = cachedOrdinalLookup(flaky, 5_000, 1_000, () => clock);
+
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    clock += 10_000; // far past the clean TTL
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    expect(calls).toBe(1);
+  });
+
+  test('a lookup failure is cached as neither clean nor inscribed', async () => {
+    let clock = 0;
+    let calls = 0;
+    const flaky: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        if (calls === 1) throw new Error('add-on unavailable');
+        return [];
+      },
+    };
+    const cached = cachedOrdinalLookup(flaky, 5_000, 60_000, () => clock);
+
+    await expect(cached.outpointInscriptions(outpoint)).rejects.toThrow('add-on unavailable');
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(2);
   });
 });
 
