@@ -150,6 +150,47 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.revealTxHex).toBeUndefined(); // retiring drops the hex
   });
 
+  test('#777 settled mirrors retired, not the raw confirmations depth: a confirmed record the budget has not yet reached is not reported settled', async () => {
+    // Confirmations already at/above the retention threshold — set directly
+    // via setStatus, bypassing the reconciler's own retire() call, exactly
+    // like leftover state from an earlier pass (or budget starvation this
+    // very poll, reproduced below) would leave on disk.
+    const target = '9'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+      recoveryConfirmations: 6,
+    });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed', fundingOutpoints: [`${target}:0`] }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 10, blockHeight: 100, blockHash: 'h'.repeat(64) });
+
+    // 4 unrelated liveStuck decoys plus one liveUnconfirmed decoy exhaust the
+    // per-poll lookup budget (5) before the "confirm" category's single
+    // reserved read reaches `target` — no reorg, no supersede, required.
+    for (let i = 0; i < 4; i++) {
+      const id = `s${i}`.repeat(16);
+      store.create('sub-1', rec({ commitTxId: id, status: 'commit_broadcast', fundingOutpoints: [`${id}:0`] }));
+    }
+    const decoy = 'd'.repeat(64);
+    store.create('sub-1', rec({
+      commitTxId: decoy, status: 'reveal_broadcast', fundingOutpoints: [`${decoy}:0`],
+      createdAt: '2026-08-01T00:00:20.000Z', updatedAt: '2026-08-01T00:00:20.000Z',
+    }));
+
+    const { inscriptions } = (await reconciler.reconcileUser('sub-1').then((res) => res.json())) as {
+      inscriptions: Array<{ commitTxId: string; confirmations?: number; settled?: boolean }>;
+    };
+    const targetEntry = inscriptions.find((r) => r.commitTxId === target)!;
+    const stored = store.get('sub-1', target)!;
+
+    // The store's own retire() never ran for `target` this poll — its
+    // recovery hex is still on disk — so the list mapper must not claim it
+    // is settled just because its stored confirmations already meet the
+    // threshold.
+    expect(stored.retired).toBeUndefined();
+    expect(stored.revealTxHex).toBeDefined();
+    expect(targetEntry.settled).toBe(false);
+  });
+
   test('a superseded pair whose commit confirmed is reinstated and its rival retired', async () => {
     const winner = '4'.repeat(64);
     const rival = '5'.repeat(64);

@@ -441,10 +441,19 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // transactions retained) or settled (recovery artifacts retired once
       // `confirmations` reaches the configured threshold). Absent for every
       // other status — depth/height are current-truth-while-confirmed only.
+      // `settled` must mirror `retired` exactly (#777): the shared per-poll
+      // lookup budget means a record can sit at/above `RECOVERY_CONFIRMATIONS`
+      // for multiple polls before its own turn in the `confirm` cursor
+      // category triggers the actual `store.retire()` call below. Reporting
+      // `settled: true` from the confirmations depth alone — independent of
+      // whether retirement actually ran — claims recovery artifacts are gone
+      // while `signedCommitHex`/`revealTxHex` are still on disk, disagreeing
+      // with the resubmission path (bitcoin.ts), which already keys off
+      // `retired` alone.
       ...(r.status === 'confirmed'
         ? {
             confirmations: r.confirmations,
-            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            settled: r.retired === true,
             ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
             ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
           }
