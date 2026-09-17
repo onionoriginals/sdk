@@ -977,6 +977,68 @@ describe('one fee source for deposit estimate and inscribe (R3)', () => {
     expect(calls.n).toBe(1);
     for (const res of results) expect(res.status).toBe(200);
   });
+
+  test('near-identical raw blocks values that normalize to the same target share one cache entry (#771)', async () => {
+    // QuickNodeProvider.estimateFee normalizes its argument to
+    // Math.max(1, Math.floor(blocks)); the fee cache must key on that same
+    // normalized target, not the raw client value, or each of these bypasses
+    // the 60s cache and issues its own estimator call.
+    const { provider, calls } = feeProvider(() => 5);
+    const r = routesFor(provider);
+
+    for (const blocks of [1, 1.1, 1.9999, -5, 0.5]) {
+      const req = authedReq('/api/btc/fee', { blocks });
+      const res = await r.fee(req, new URL(req.url));
+      expect(res.status).toBe(200);
+      expect((await res.json() as { feeRate: number }).feeRate).toBe(5);
+    }
+    expect(calls.n).toBe(1);
+  });
+
+  test('near-identical raw blocks values share one in-flight request, not one per raw value', async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { provider, calls } = feeProvider(async () => { await gate; return 5; });
+    const r = routesFor(provider);
+
+    const inFlight = [1, 1.1, 1.9999, -5].map((blocks) => {
+      const req = authedReq('/api/btc/fee', { blocks });
+      return r.fee(req, new URL(req.url));
+    });
+    await Promise.resolve();
+    release!();
+    const results = await Promise.all(inFlight);
+
+    expect(calls.n).toBe(1);
+    for (const res of results) {
+      expect(res.status).toBe(200);
+      expect((await res.json() as { feeRate: number }).feeRate).toBe(5);
+    }
+  });
+
+  test('a non-finite blocks value in the request body is rejected before any estimator call', async () => {
+    const { provider, calls } = feeProvider(() => 5);
+    const r = routesFor(provider);
+
+    // 1e400 is valid JSON number syntax that overflows to Infinity.
+    for (const bad of [1e400, -1e400]) {
+      const req = authedReq('/api/btc/fee', { blocks: bad });
+      const res = await r.fee(req, new URL(req.url));
+      expect(res.status).toBe(400);
+      expect((await res.json() as { error: string }).error).toBe('bad_request');
+    }
+    expect(calls.n).toBe(0);
+  });
+
+  test('an expired success entry is actually evicted, not merely shadowed', async () => {
+    let clock = 1_000_000;
+    const cache = createExpiringCache<number, number>(60_000, () => clock);
+    cache.set(1, 5);
+    clock += 61_000;
+    cache.set(2, 7); // an unrelated write's sweep should evict the expired key 1
+    expect(cache.size).toBe(1);
+    expect(cache.get(1)).toBeUndefined();
+  });
 });
 
 // Direct unit coverage for the map `currentFeeRate` uses to bound the
