@@ -202,6 +202,44 @@ for (const id of [
     ).toThrow();
   });
 
+test("verifyHistory rejects the removed expectedDid option instead of silently skipping the identity check", () => {
+  const assetId = verifyHistory({ log: [genesis] }).state.assetId;
+
+  // The current, correct key still performs the identity check.
+  expect(
+    codeOf(() =>
+      verifyHistory({ log: [genesis] }, { expectedAssetId: "did:key:zNotTheRealAssetId" }),
+    ),
+  ).toBe("CEL_IDENTITY");
+  expect(
+    verifyHistory({ log: [genesis] }, { expectedAssetId: assetId }).state.assetId,
+  ).toBe(assetId);
+
+  // The removed key must fail closed, never silently skip the identity check
+  // as if no identity had been requested at all.
+  expect(
+    codeOf(() =>
+      verifyHistory(
+        { log: [genesis] },
+        { expectedDid: assetId } as unknown as { expectedAssetId?: string },
+      ),
+    ),
+  ).toBe("CEL_OPTION_REMOVED");
+
+  // Supplying both must still be rejected - the removed key cannot be
+  // shadowed by also passing the current one.
+  expect(
+    codeOf(() =>
+      verifyHistory(
+        { log: [genesis] },
+        { expectedAssetId: assetId, expectedDid: assetId } as unknown as {
+          expectedAssetId?: string;
+        },
+      ),
+    ),
+  ).toBe("CEL_OPTION_REMOVED");
+});
+
 test("a first-time verifier with no checkpoint gets authenticated-history freshness only", () => {
   const result = verifyHistory({ log: [genesis] });
   expect(result.freshness).toBe("unknown");

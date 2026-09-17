@@ -229,6 +229,11 @@ export function verifyHistory(
     checkpoint?: HistoryCheckpoint;
   } = {},
 ): VerifiedHistory {
+  requireThat(
+    !Object.prototype.hasOwnProperty.call(options, "expectedDid"),
+    "CEL_OPTION_REMOVED",
+    "expectedDid was removed; pass expectedAssetId instead",
+  );
   const document = validateDocument(input),
     prefix = options.prefix,
     checkpoint = options.checkpoint;
