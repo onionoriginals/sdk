@@ -3,6 +3,7 @@ import { describe, test, expect, mock, beforeEach } from 'bun:test';
 import { OriginalsSDK } from '../../previous-sdk';
 import { signAsync, getPublicKeyAsync } from '@noble/ed25519';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
+import { StructuredError } from '@originals/cel';
 
 /**
  * Build a factory for external signers backed by real Ed25519 keys, so
@@ -222,6 +223,18 @@ describe('OriginalsSDK', () => {
         .rejects.toThrow('Invalid Ed25519 public key length: 16');
     });
 
+    test('throws StructuredError with code ED25519_INVALID_KEY_LENGTH for invalid public key length (#720)', async () => {
+      const signature = await signAsync(message, privateKey);
+      const invalidKey = new Uint8Array(16);
+      try {
+        await OriginalsSDK.verifyDIDSignature(signature, message, invalidKey);
+        throw new Error('expected verifyDIDSignature to throw');
+      } catch (e) {
+        expect(e).toBeInstanceOf(StructuredError);
+        expect((e as StructuredError).code).toBe('ED25519_INVALID_KEY_LENGTH');
+      }
+    });
+
     test('returns false on verification error', async () => {
       const invalidSignature = new Uint8Array(32); // Invalid signature
       const result = await OriginalsSDK.verifyDIDSignature(invalidSignature, message, publicKey32);
@@ -249,6 +262,21 @@ describe('OriginalsSDK', () => {
 
       await expect(OriginalsSDK.createOriginal(options))
         .rejects.toThrow('Unsupported Original type: invalid');
+    });
+
+    test('throws StructuredError with code ORIGINAL_TYPE_UNSUPPORTED for unsupported type (#720)', async () => {
+      const options = {
+        type: 'invalid' as any,
+        domain: 'example.com',
+      };
+
+      try {
+        await OriginalsSDK.createOriginal(options);
+        throw new Error('expected createOriginal to throw');
+      } catch (e) {
+        expect(e).toBeInstanceOf(StructuredError);
+        expect((e as StructuredError).code).toBe('ORIGINAL_TYPE_UNSUPPORTED');
+      }
     });
 
     test('createDIDOriginal accepts legacy did:key-prefixed updateKeys (didwebvh-ts 2.8 requires bare multikeys)', async () => {
@@ -363,6 +391,29 @@ describe('OriginalsSDK', () => {
       })).rejects.toThrow(/bare multikey form/);
     });
 
+    test('createDIDOriginal legacy-updateKeys-with-nextKeyHashes rejection is a StructuredError WEBVH_PREROTATION_KEY_FORMAT (#720)', async () => {
+      const { makeSigner } = await makeSignerFactory();
+      const active = await makeSigner();
+
+      try {
+        await OriginalsSDK.createDIDOriginal({
+          type: 'did',
+          domain: 'example.com',
+          signer: active.signer as any,
+          verifier: active.signer as any,
+          updateKeys: [`did:key:${active.keyPair.publicKey}`],
+          nextKeyHashes: ['QmSomeCommittedHash'],
+          verificationMethods: [
+            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: active.keyPair.publicKey },
+          ],
+        });
+        throw new Error('expected createDIDOriginal to throw');
+      } catch (e) {
+        expect(e).toBeInstanceOf(StructuredError);
+        expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_KEY_FORMAT');
+      }
+    });
+
     test('updateDIDOriginal rejects legacy did:key updateKeys combined with nextKeyHashes', async () => {
       const { makeSigner } = await makeSignerFactory();
       const active = await makeSigner();
@@ -398,6 +449,21 @@ describe('OriginalsSDK', () => {
 
       await expect(OriginalsSDK.updateOriginal(options))
         .rejects.toThrow('Unsupported Original type');
+    });
+
+    test('throws StructuredError with code ORIGINAL_TYPE_UNSUPPORTED for unsupported type (#720)', async () => {
+      const options = {
+        type: 'invalid' as any,
+        log: [],
+      };
+
+      try {
+        await OriginalsSDK.updateOriginal(options);
+        throw new Error('expected updateOriginal to throw');
+      } catch (e) {
+        expect(e).toBeInstanceOf(StructuredError);
+        expect((e as StructuredError).code).toBe('ORIGINAL_TYPE_UNSUPPORTED');
+      }
     });
   });
 });
