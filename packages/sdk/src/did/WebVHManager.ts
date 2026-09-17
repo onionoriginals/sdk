@@ -22,6 +22,35 @@ async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeo
 }
 
 /**
+ * Validates a WebVH path segment to prevent directory traversal and reject
+ * non-string input. Shared by `WebVHManager.createDIDWebVH` and any public
+ * seam (e.g. `HostedAssets.prepare`) that needs to validate a caller-supplied
+ * `paths` array before it reaches DID construction.
+ * @param segment - Candidate path segment
+ * @returns true if valid, false otherwise
+ */
+export function isValidWebVHPathSegment(segment: unknown): segment is string {
+  if (typeof segment !== 'string' || !segment || segment === '.' || segment === '..') {
+    return false;
+  }
+
+  // Reject segments containing path separators or other dangerous characters
+  if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
+    return false;
+  }
+
+  // Reject absolute paths (leading separator, or a Windows drive prefix).
+  // Checked inline rather than via node:path so this validator stays usable
+  // without a Node runtime — separators are already rejected above, leaving
+  // only the drive-letter form to catch.
+  if (segment.startsWith('/') || /^[a-zA-Z]:/.test(segment)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Compute the pre-rotation key hash for an update key.
  * Mirrors didwebvh-ts's internal `deriveNextKeyHash`:
  *   SHA-256(utf8(updateKey)) → prepend multihash header [0x12, 0x20] → base58btc encode (no multibase prefix).
@@ -534,25 +563,7 @@ export class WebVHManager {
    * @returns true if valid, false otherwise
    */
   private isValidPathSegment(segment: string): boolean {
-    // Reject empty segments, dots, or segments with path separators
-    if (!segment || segment === '.' || segment === '..') {
-      return false;
-    }
-    
-    // Reject segments containing path separators or other dangerous characters
-    if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
-      return false;
-    }
-    
-    // Reject absolute paths (leading separator, or a Windows drive prefix).
-    // Checked inline rather than via node:path so this validator stays usable
-    // without a Node runtime — separators are already rejected above, leaving
-    // only the drive-letter form to catch.
-    if (segment.startsWith('/') || /^[a-zA-Z]:/.test(segment)) {
-      return false;
-    }
-    
-    return true;
+    return isValidWebVHPathSegment(segment);
   }
 
   /**

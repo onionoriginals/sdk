@@ -17,7 +17,7 @@ import {
   type CelDocument,
   type CelSigner,
 } from "@originals/cel/v3";
-import { WebVHManager } from "../did/WebVHManager.js";
+import { WebVHManager, isValidWebVHPathSegment } from "../did/WebVHManager.js";
 import { Ed25519Verifier } from "../did/Ed25519Verifier.js";
 import type { DIDDocument } from "../types/did.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
@@ -159,6 +159,15 @@ export class HostedAssets {
       return error(
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",
+      );
+    if (
+      options.paths !== undefined &&
+      (!Array.isArray(options.paths) ||
+        options.paths.some((segment) => !isValidWebVHPathSegment(segment)))
+    )
+      return error(
+        "ASSET_WEBVH_PATH",
+        "Supply paths as an array of valid WebVH path segments",
       );
     for (const resource of asset.resources)
       if (!resource.content)
