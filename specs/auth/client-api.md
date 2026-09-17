@@ -119,9 +119,10 @@ to select a specific DID-signing account by its exact role instead.
 
 ### `getKeyByRole(wallets, role)`
 
-Find an account by its canonical role — curve **and** exact derivation
-path, not curve alone. Use this to distinguish the DID assertion-key from
-the update-key.
+Find an account by its canonical role — curve, exact derivation path,
+**and** address format, not curve or path alone. Use this to distinguish
+the DID assertion-key from the update-key, and a repaired account from a
+stale one that shares its curve and path (see below).
 
 ```typescript
 type TurnkeyAccountRole = 'bitcoin-auth' | 'did-assertion' | 'did-update';
@@ -132,15 +133,24 @@ function getKeyByRole(
 ): WalletAccount | null
 ```
 
-| Role | Curve | Path |
-|---|---|---|
-| `bitcoin-auth` | `CURVE_SECP256K1` | `m/44'/0'/0'/0/0` |
-| `did-assertion` | `CURVE_ED25519` | `m/44'/501'/0'/0'` |
-| `did-update` | `CURVE_ED25519` | `m/44'/501'/1'/0'` |
+| Role | Curve | Path | Address format |
+|---|---|---|---|
+| `bitcoin-auth` | `CURVE_SECP256K1` | `m/44'/0'/0'/0/0` | `ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR` |
+| `did-assertion` | `CURVE_ED25519` | `m/44'/501'/0'/0'` | `ADDRESS_FORMAT_SOLANA` |
+| `did-update` | `CURVE_ED25519` | `m/44'/501'/1'/0'` | `ADDRESS_FORMAT_SOLANA` |
 
-Returns `null` if no account exists at that role's exact curve + path —
-it never guesses by returning an arbitrary same-curve account. This table
-is also exported as `TURNKEY_ACCOUNT_ROLES`.
+Returns `null` if no account exists at that role's exact curve + path +
+address format — it never guesses by returning an arbitrary same-curve or
+same-path account. This table is also exported as `TURNKEY_ACCOUNT_ROLES`.
+
+A sub-org created before the Bitcoin auth-key's address-format fix carries a
+`CURVE_SECP256K1` account at the `bitcoin-auth` path with an Ethereum
+address format. Because Turnkey wallet accounts are immutable, repairing
+that sub-org in place adds a **second** account at the identical curve and
+path with the corrected address format — so a repaired wallet can have two
+`CURVE_SECP256K1` accounts sharing a path, distinguishable only by address
+format. `getKeyByRole(wallets, 'bitcoin-auth')` returns the corrected one;
+`getKeyByCurve(wallets, 'CURVE_SECP256K1')` may return either.
 
 ---
 

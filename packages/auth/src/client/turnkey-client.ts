@@ -7,6 +7,13 @@ import { Turnkey } from '@turnkey/sdk-server';
 import { encryptOtpCode } from '../otp-encryption.js';
 import { normalizeEmail } from '../email.js';
 import type { TurnkeyWallet, TurnkeyWalletAccount } from '../types.js';
+import {
+  TURNKEY_ACCOUNT_ROLES,
+  getKeyByRole,
+  type TurnkeyAccountRole,
+} from '../turnkey-roles.js';
+
+export { TURNKEY_ACCOUNT_ROLES, getKeyByRole, type TurnkeyAccountRole };
 
 /**
  * Session expired error for handling token expiration
@@ -356,8 +363,12 @@ export async function fetchWallets(
  * DID-signing account by its exact role instead.
  *
  * Kept for backward compatibility with callers that only need a single
- * account of a given curve (e.g. the Bitcoin auth-key, which is the only
- * `CURVE_SECP256K1` account).
+ * account of a given curve. Note that a wallet repaired per #749 (a stale
+ * pre-#748 Ethereum-formatted Bitcoin auth-key account alongside its
+ * corrected replacement) can have **two** `CURVE_SECP256K1` accounts at the
+ * same path, in which case this function may return either one — use
+ * {@link getKeyByRole}`(wallets, 'bitcoin-auth')` to reliably select the
+ * correctly-formatted account.
  */
 export function getKeyByCurve(
   wallets: TurnkeyWallet[],
@@ -366,81 +377,6 @@ export function getKeyByCurve(
   for (const wallet of wallets) {
     for (const account of wallet.accounts) {
       if (account.curve === curve) {
-        return account;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Canonical roles for the Turnkey accounts this package provisions and
- * depends on. A role is identified by its exact curve **and** derivation
- * path, not curve alone, so that two same-curve accounts (the DID
- * assertion-key and update-key are both `CURVE_ED25519`) can be told apart.
- */
-export type TurnkeyAccountRole = 'bitcoin-auth' | 'did-assertion' | 'did-update';
-
-interface TurnkeyAccountRoleSpec {
-  readonly role: TurnkeyAccountRole;
-  readonly curve: 'CURVE_SECP256K1' | 'CURVE_ED25519';
-  readonly path: string;
-  readonly addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR' | 'ADDRESS_FORMAT_SOLANA';
-}
-
-/**
- * The single source of truth for the wallet layout `createWalletWithAccounts`
- * provisions and `ensureWalletWithAccounts`/`getKeyByRole` depend on:
- * - `bitcoin-auth` — the Bitcoin auth-key (`CURVE_SECP256K1`).
- * - `did-assertion` — the DID assertion-key (`CURVE_ED25519`).
- * - `did-update` — the DID update-key (`CURVE_ED25519`, a distinct path from
- *   `did-assertion` so the two can be resolved independently).
- *
- * Frozen (entries included) so a caller can't mutate the table that every
- * lookup and repair path in this module relies on.
- */
-const TURNKEY_ACCOUNT_ROLE_SPECS: TurnkeyAccountRoleSpec[] = [
-  {
-    role: 'bitcoin-auth',
-    curve: 'CURVE_SECP256K1',
-    path: "m/44'/0'/0'/0/0",
-    addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
-  },
-  {
-    role: 'did-assertion',
-    curve: 'CURVE_ED25519',
-    path: "m/44'/501'/0'/0'",
-    addressFormat: 'ADDRESS_FORMAT_SOLANA',
-  },
-  {
-    role: 'did-update',
-    curve: 'CURVE_ED25519',
-    path: "m/44'/501'/1'/0'",
-    addressFormat: 'ADDRESS_FORMAT_SOLANA',
-  },
-];
-
-export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = Object.freeze(
-  TURNKEY_ACCOUNT_ROLE_SPECS.map((spec) => Object.freeze({ ...spec }))
-);
-
-/**
- * Get a wallet account by its canonical role (curve + exact derivation
- * path), not merely by curve. Use this to fetch the DID assertion-key or
- * update-key specifically — `getKeyByCurve('CURVE_ED25519')` cannot tell
- * them apart, since both share that curve.
- */
-export function getKeyByRole(
-  wallets: TurnkeyWallet[],
-  role: TurnkeyAccountRole
-): TurnkeyWalletAccount | null {
-  const spec = TURNKEY_ACCOUNT_ROLES.find((r) => r.role === role);
-  if (!spec) {
-    return null;
-  }
-  for (const wallet of wallets) {
-    for (const account of wallet.accounts) {
-      if (account.curve === spec.curve && account.path === spec.path) {
         return account;
       }
     }
@@ -517,13 +453,24 @@ export async function ensureWalletWithAccounts(
       const defaultWallet = wallets[0];
       const allAccounts = defaultWallet.accounts;
 
-      // Check for each required role by its exact curve + path, not by
-      // curve count: two accounts can share a curve (both DID-signing
-      // accounts are CURVE_ED25519), so a wallet holding two Ed25519
-      // accounts at the *wrong* paths would otherwise be miscounted as
-      // complete while neither required role is actually provisioned.
+      // Check for each required role by its exact curve + path + address
+      // format, not by curve count or curve+path alone: two accounts can
+      // share a curve (both DID-signing accounts are CURVE_ED25519), so a
+      // wallet holding two Ed25519 accounts at the *wrong* paths would
+      // otherwise be miscounted as complete while neither required role is
+      // actually provisioned. Address format must also match: a sub-org
+      // provisioned before #748's fix has a CURVE_SECP256K1 account at the
+      // bitcoin-auth path with an Ethereum address format, and curve+path
+      // alone would wrongly treat that stale account as satisfying the
+      // bitcoin-auth role (#749).
       const missingRoles = TURNKEY_ACCOUNT_ROLES.filter(
-        (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+        (spec) =>
+          !allAccounts.some(
+            (acc) =>
+              acc.curve === spec.curve &&
+              acc.path === spec.path &&
+              acc.addressFormat === spec.addressFormat
+          )
       );
 
       if (missingRoles.length === 0) {
