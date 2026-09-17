@@ -436,23 +436,52 @@ export function quickNodeOrdinalLookup(opts: {
 }
 
 /**
- * Memoize classification per outpoint. An unspent output's inscription set
- * does not change (it can only change by being spent, which removes it from
- * the UTXO set), so a hit is permanently valid — and without this the 15s
- * deposit poll would pay an add-on call per UTXO per tick. Failures are NOT
- * cached: an outage must not pin a creator's coins as unspendable for the
- * lifetime of the process.
+ * Memoize classification per outpoint. Without this the 15s deposit poll
+ * would pay an add-on call per UTXO per tick.
+ *
+ * The two verdicts are NOT symmetric. Once an outpoint is reported as
+ * carrying an inscription, that fact cannot un-happen while the output stays
+ * unspent (it can only change by being spent, which removes it from the UTXO
+ * set) — a positive hit is cached permanently. An empty/"clean" verdict is
+ * different: it can be the ord indexer lagging behind the UTXO indexer that
+ * feeds this same poll, so an outpoint whose inscription reveal hasn't been
+ * indexed yet reads as clean on the very first query. Caching that verdict
+ * permanently would spend it as fee input forever after, even once the
+ * indexer catches up and would truthfully report the inscription — so a
+ * "clean" verdict is only trusted for `cleanTtlMs` before being re-verified
+ * against the index. Failures are NOT cached either way: an outage must not
+ * pin a creator's coins as unspendable, nor as spendable, for the lifetime of
+ * the process.
  */
-export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): OrdinalLookup {
-  const cache = new Map<string, string[]>();
+export function cachedOrdinalLookup(
+  inner: OrdinalLookup,
+  maxEntries = 5_000,
+  cleanTtlMs = 5 * 60_000,
+  now: () => number = () => Date.now()
+): OrdinalLookup {
+  const inscribed = new Map<string, string[]>();
+  const clean = new Map<string, number>();
   return {
     async outpointInscriptions(outpoint) {
       const key = `${outpoint.txid.toLowerCase()}:${outpoint.vout}`;
-      const hit = cache.get(key);
-      if (hit) return hit;
+
+      const inscribedHit = inscribed.get(key);
+      if (inscribedHit) return inscribedHit;
+
+      const cleanAt = clean.get(key);
+      if (cleanAt !== undefined && now() - cleanAt < cleanTtlMs) return [];
+
       const answer = await inner.outpointInscriptions(outpoint);
-      if (cache.size >= maxEntries) cache.clear();
-      cache.set(key, answer);
+
+      if (answer.length > 0) {
+        if (inscribed.size >= maxEntries) inscribed.clear();
+        inscribed.set(key, answer);
+        clean.delete(key);
+      } else {
+        if (clean.size >= maxEntries) clean.clear();
+        clean.set(key, now());
+      }
+
       return answer;
     },
   };
