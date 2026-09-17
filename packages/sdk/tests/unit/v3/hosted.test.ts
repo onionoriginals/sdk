@@ -72,6 +72,79 @@ test.each(["", "   ", "\t"])(
   },
 );
 
+test("publishToWeb rejects a non-string paths element with ASSET_WEBVH_PATH instead of a raw TypeError (#826)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: [123] as unknown as string[],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+});
+
+test.each([".", "..", "a/b", "a\\b", "/abs"])(
+  "publishToWeb rejects an invalid paths segment (%j) with ASSET_WEBVH_PATH instead of a raw Error (#826)",
+  async (segment) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, {
+        domain: "example.com",
+        paths: [segment],
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+  },
+);
+
+test("publishToWeb rejects a non-array paths value instead of silently minting a per-character path (#826)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: "not-an-array" as unknown as string[],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+});
+
+test("publishToWeb accepts a well-formed custom paths array (#826 control case)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["custom", "slug"],
+  });
+  expect(published.did).toContain(":example.com:custom:slug");
+});
+
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),
     sdk = OriginalsSDK.create({ signer, storageAdapter: store });
