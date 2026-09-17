@@ -335,6 +335,13 @@ function candidateAuthenticatedContinuation(
   body: { bytes: Uint8Array; metadata: Uint8Array | null },
   history: VerifiedHistory,
 ): boolean {
+  // Deactivation is unconditionally terminal (specs/originals-cel-v3-authority.md):
+  // no operation, supported or not, can ever extend a deactivated history. Without
+  // this check, the original controller's still-valid key could sign a genuine
+  // dataReference candidate over the deactivated head and permanently flip
+  // resolution to unsupported-capability, discarding the already-accepted
+  // deactivated state instead of returning it.
+  if (!history.state.active) return false;
   let raw;
   try {
     raw =

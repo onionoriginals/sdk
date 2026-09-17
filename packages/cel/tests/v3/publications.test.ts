@@ -1049,6 +1049,98 @@ test("resolveSat ignores an unauthenticated CCG dataReference candidate that mer
   });
 });
 
+// #846: deactivation is unconditionally terminal (specs/originals-cel-v3-authority.md) —
+// no operation, supported or not, can ever extend a deactivated history. A retired
+// controller's still-valid key can still produce a genuinely authenticated dataReference
+// candidate over the deactivated head; that must remain ignorable (like any other
+// candidate that provably cannot be a valid continuation) so the already-accepted
+// deactivated state is returned as `accepted`, rather than the entire sat permanently
+// failing closed with `unsupported-capability` and discarding it.
+test("resolveSat ignores a genuinely controller-authenticated CCG dataReference candidate that extends an already-deactivated head, rather than blocking resolution (#846)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const deactivateEvent = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "deactivate",
+      data: { profile: "originals/cel/3", deactivatedAt: "2026-09-11T00:00:03Z" },
+    },
+  };
+  const deactivate = await signEvent(deactivateEvent, A);
+  const afterDeactivate = verifyHistory({ log: [deactivate] }, { prefix: afterBtco });
+  expect(afterDeactivate.state.active).toBe(false);
+  const dataReferenceEvent = {
+    previousEvent: afterDeactivate.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const dataReferenceEntry = {
+    event: dataReferenceEvent,
+    proof: [await signRawEvent(dataReferenceEvent, A)],
+  };
+  const tip = { height: 202, hash: "0".repeat(64) };
+  const deactivatePublication: SatSnapshot["publications"][number] = {
+    id: "d".repeat(64) + "i0",
+    revealTxid: "d".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 201, blockHash: "e".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [deactivate] }, "json"),
+      metadata: null,
+    },
+  };
+  const dataReferencePublication: SatSnapshot["publications"][number] = {
+    id: "f".repeat(64) + "i0",
+    revealTxid: "f".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 202, blockHash: "0".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [dataReferenceEntry] }, "json"),
+      metadata: null,
+    },
+  };
+  const result = resolveSat({
+    ...emptySnapshot(),
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    blocks: [
+      ...emptySnapshot().blocks,
+      { height: 201, hash: "e".repeat(64), txids: ["d".repeat(64)] },
+      { height: 202, hash: tip.hash, txids: ["f".repeat(64)] },
+    ],
+    publications: [
+      publicationAt(log, resourceA, "text/plain"),
+      deactivatePublication,
+      dataReferencePublication,
+    ],
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterDeactivate.state.head);
+  expect(result.state.active).toBe(false);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "f".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
 // A candidate can be validly signed and still not be authenticated: a signature from any
 // key other than the sat's current controller must remain ignorable, exactly like an
 // empty/missing proof, never treated as an uninspectable capability block.
