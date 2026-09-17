@@ -818,7 +818,11 @@ export function createBitcoinRoutes(deps: {
   // multiple of the observed rate, so a signer cannot relabel skimmed change
   // as "fee" without tripping it.
   const MAX_FEE_RATE_TOLERANCE_MULTIPLIER = 10;
-  const feeCache = new Map<number, { at: number; rate: number }>();
+  // Keyed by the NORMALIZED target (see below), not the raw client value, so
+  // it actually caches/evicts (#771) instead of growing one entry per
+  // never-repeated raw `blocks` and immortally, since a plain Map is never
+  // swept.
+  const feeCache = createExpiringCache<number, number>(FEE_CACHE_MS, now);
   const feeInFlight = new Map<number, Promise<number>>();
   // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
   // caller sending many distinct values could otherwise grow a plain failure
@@ -829,17 +833,26 @@ export function createBitcoinRoutes(deps: {
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
-    const cached = feeCache.get(blocks);
-    if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
-    const pending = feeInFlight.get(blocks);
+    if (!Number.isFinite(blocks)) {
+      throw new Error(`Fee estimate target must be a finite number (got ${blocks}).`);
+    }
+    // Normalize to the exact target QuickNodeProvider.estimateFee requests
+    // (Math.max(1, Math.floor(blocks))) BEFORE any cache lookup (#771).
+    // Otherwise near-identical raw values (1, 1.1, 1.9999, -5, ...) that all
+    // resolve to the same upstream call each get their own cache entry and
+    // in-flight slot, defeating both the 60s cache and single-flight dedupe.
+    const target = Math.max(1, Math.floor(blocks));
+    const cached = feeCache.get(target);
+    if (cached !== undefined) return cached;
+    const pending = feeInFlight.get(target);
     if (pending) return pending;
-    const failedMessage = feeFailureCache.get(blocks);
+    const failedMessage = feeFailureCache.get(target);
     if (failedMessage !== undefined) {
       throw new Error(failedMessage);
     }
     const run = (async () => {
       try {
-        const estimated = await provider.estimateFee(blocks);
+        const estimated = await provider.estimateFee(target);
         if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
           throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
         }
@@ -847,20 +860,20 @@ export function createBitcoinRoutes(deps: {
         if (rate > MAX_FEE_RATE_SAT_VB) {
           throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
         }
-        feeCache.set(blocks, { at: now(), rate });
-        feeFailureCache.delete(blocks);
+        feeCache.set(target, rate);
+        feeFailureCache.delete(target);
         return rate;
       } catch (e) {
-        feeFailureCache.set(blocks, (e as Error).message);
+        feeFailureCache.set(target, (e as Error).message);
         throw e;
       }
     })();
-    feeInFlight.set(blocks, run);
+    feeInFlight.set(target, run);
     // Clear the slot AFTER it is set — an estimator that throws synchronously
     // (config validated before any promise) would otherwise leave its rejected
     // promise parked here and re-serve that failure to every later poll. The
     // identity check keeps a settled run from evicting a newer one.
-    const clear = () => { if (feeInFlight.get(blocks) === run) feeInFlight.delete(blocks); };
+    const clear = () => { if (feeInFlight.get(target) === run) feeInFlight.delete(target); };
     run.then(clear, clear);
     return run;
   }
@@ -949,6 +962,9 @@ export function createBitcoinRoutes(deps: {
     const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const { blocks } = (await req.json().catch(() => ({}))) as { blocks?: number };
+    if (blocks !== undefined && (typeof blocks !== 'number' || !Number.isFinite(blocks))) {
+      return json({ error: 'bad_request' }, 400);
+    }
     try {
       // Same estimator (and same cache) the deposit quote was sized from —
       // the rate the creator is told to fund and the rate the inscription is
