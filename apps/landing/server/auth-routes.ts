@@ -93,16 +93,24 @@ export function createAuthRoutes(deps: {
       const cookie = serializeCookie(getAuthCookieConfig(token, { secure: true }));
       // Surface the Turnkey verificationToken + the P-256 pubkey it is bound to
       // so the browser can run OTP_LOGIN and install its own session credential
-      // (Track B, testnet4 signing). The token is client-bound — useless without
-      // the browser-held P-256 private key — so returning it is safe. The
-      // httpOnly session JWT cookie is UNCHANGED.
+      // (Track B, testnet4 signing) — but only when THIS request supplied a
+      // client-held publicKey. The token is then bound to a key the caller
+      // already holds, so returning it is safe. When no client publicKey was
+      // supplied, verifyEmailAuth falls back to a server-generated ephemeral
+      // keypair and returns its privateKey instead of ours doing so (#708):
+      // that private key must never transit this HTTP response, so a caller
+      // on that path gets cookie-auth only, not a verificationToken/publicKey
+      // it has no usable private key to complete OTP_LOGIN with. The httpOnly
+      // session JWT cookie is UNCHANGED either way.
+      const otpLogin = publicKey
+        ? { verificationToken: result.verificationToken, publicKey: result.publicKey }
+        : {};
       return json(
         {
           verified: true,
           email: result.email,
           subOrgId: result.subOrgId,
-          verificationToken: result.verificationToken,
-          publicKey: result.publicKey,
+          ...otpLogin,
         },
         200,
         { 'Set-Cookie': cookie }
