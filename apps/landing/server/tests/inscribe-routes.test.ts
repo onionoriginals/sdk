@@ -991,10 +991,13 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
   /**
    * F1 — the terminal deadlock. A commit that broadcast fine can still be
    * EVICTED from every mempool by a fee spike, and with no reveal child there
-   * is no CPFP to pull it back. It will never confirm, so the list poll's
-   * liveStuck pass (gated on a confirmed commit) never fires, and the reveal
-   * is rejected for missing inputs forever. Without re-pushing the commit the
-   * creator's confirmed UTXO is unusable through the app for good.
+   * is no CPFP to pull it back. It will never confirm on its own, so the
+   * list poll's `liveStuck` pass can't take its immediate path (complete the
+   * persisted reveal once THAT commit is observed confirmed) — but the same
+   * `liveStuck` pass also re-pushes an evicted commit itself once
+   * `REVEAL_REBROADCAST_AFTER_MS` (default 30 minutes) has passed since the
+   * last push, so it does eventually self-heal this exact deadlock. This
+   * manual retry recovers it immediately instead of waiting for that window.
    */
   test('a commit evicted from the mempool is RE-PUSHED before the reveal retry', async () => {
     const pair = buildPair();
@@ -1027,6 +1030,50 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
     // The commit went out a SECOND time — that is what un-bricks the UTXO.
     expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+  });
+
+  // #793 — the same F1 guard must fire even when the record's move from
+  // 'signed' to 'commit_broadcast' happens WITHIN this same call. The guard
+  // used to read the call's original `rec` snapshot (still 'signed'), never
+  // the freshened status this same call had just written, so the re-push
+  // never fired and the reveal was left un-retried.
+  test('F1 fires when the commit first broadcasts within the SAME rebroadcast call (#793)', async () => {
+    const pair = buildPair();
+    let revealAttempts = 0;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.revealTxHex) {
+          revealAttempts++;
+          if (revealAttempts === 1) throw new Error('bad-txns-inputs-missingorspent');
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    // The record was never previously broadcast — e.g. a browser tab died
+    // before the first attempt — so it starts at 'signed', not
+    // 'commit_broadcast' from an earlier call.
+    h.store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:0`],
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+    // The commit broadcast once to get to 'commit_broadcast', then again
+    // when F1's re-push fired for the failed first reveal attempt.
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+    expect(revealAttempts).toBe(2);
   });
 
   test('manual retry restores both evicted transactions from a previously broadcast pair after restart', async () => {
