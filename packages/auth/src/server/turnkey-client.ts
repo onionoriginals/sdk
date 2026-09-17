@@ -17,6 +17,7 @@ export const AUTH_TURNKEY_ERROR_CODES = {
   configOrganizationIdMissing: 'AUTH_TURNKEY_CONFIG_ORGANIZATION_ID_MISSING',
   subOrgLookupFailed: 'AUTH_TURNKEY_SUBORG_LOOKUP_FAILED',
   subOrgCreateFailed: 'AUTH_TURNKEY_SUBORG_CREATE_FAILED',
+  walletLookupFailed: 'AUTH_TURNKEY_WALLET_LOOKUP_FAILED',
 } as const;
 
 export interface TurnkeyClientConfig {
@@ -232,10 +233,19 @@ function isDefinitiveNotFound(error: unknown): boolean {
  *   not-found — transient/API errors are rethrown;
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
+ * - a failure checking whether that wallet exists is rethrown, never
+ *   swallowed into a false "wallet present" success (#805) — unlike the
+ *   sub-org lookup, this check has no legitimate not-found case to
+ *   distinguish, since a genuinely walletless sub-org is a successful empty
+ *   `{ wallets: [] }` response;
  * - an existing sub-org whose wallet(s) are missing one or more required
- *   account roles (bitcoin-auth, did-assertion, did-update) gets the
- *   missing role(s) added **in place**, on one deterministic wallet, rather
- *   than being silently left incomplete;
+ *   account roles (bitcoin-auth, did-assertion, did-update) — including a
+ *   wallet that still carries a stale, pre-#748 Ethereum-formatted Bitcoin
+ *   auth-key account, since a role is identified by curve + path + address
+ *   format, not curve + path alone (#749) — gets the missing role(s) added
+ *   **in place**, on one deterministic wallet, rather than being silently
+ *   left incomplete or replaced. Turnkey accounts are immutable, so a
+ *   repaired role is added alongside a stale one rather than overwriting it;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
  *   selection is deterministic so every login resolves the same identity;
  * - the lookup-then-create sequence is serialized per normalized email via
@@ -310,7 +320,14 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     }
     const existingSubOrgId = [...subOrgIds].sort()[0];
 
-    // Ensure the sub-org has a wallet; repair in place if not.
+    // Ensure the sub-org has a wallet; repair in place if not. Unlike the
+    // sub-org lookup above, `getWallets` has no legitimate not-found case to
+    // distinguish: a sub-org with no wallet is a normal, successful
+    // `{ wallets: [] }` response. So any thrown error here (network blip,
+    // timeout, rate limit) must propagate rather than be treated as "a
+    // wallet exists, nothing to repair" — silently swallowing it would
+    // report this login as successful without ever having established that
+    // the wallet exists or is complete (#805).
     let wallets: Array<{ walletId?: string }>;
     try {
       const walletsCheck = await turnkeyClient.apiClient().getWallets({
@@ -318,8 +335,13 @@ async function getOrCreateTurnkeySubOrgUnlocked(
       });
       wallets = walletsCheck.wallets || [];
     } catch (walletCheckErr) {
-      console.error('[auth] Could not check wallets in existing sub-org:', walletCheckErr);
-      return existingSubOrgId;
+      throw new StructuredError(
+        AUTH_TURNKEY_ERROR_CODES.walletLookupFailed,
+        `Failed to check wallets in existing Turnkey sub-organization: ${
+          walletCheckErr instanceof Error ? walletCheckErr.message : String(walletCheckErr)
+        }`,
+        { cause: walletCheckErr }
+      );
     }
 
     if (wallets.length === 0) {
@@ -346,7 +368,7 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     // is unknown, so this fails soft and skips repair for this login rather
     // than risk inferring a role absent from incomplete data and creating a
     // duplicate account for a role that already exists in an unread wallet.
-    const allAccounts: Array<{ curve: string; path: string }> = [];
+    const allAccounts: Array<{ curve: string; path: string; addressFormat: string }> = [];
     for (const wallet of wallets) {
       if (!wallet.walletId) {
         continue;
@@ -366,8 +388,23 @@ async function getOrCreateTurnkeySubOrgUnlocked(
       }
     }
 
+    // Match on curve + path + addressFormat, not curve + path alone: a
+    // sub-org provisioned before #748's fix has a CURVE_SECP256K1 account at
+    // the Bitcoin auth-key path with the old Ethereum address format. That
+    // account shares its curve and path with the corrected P2TR spec, so a
+    // curve+path-only comparison would treat the role as already present and
+    // skip repairing it, permanently stranding the account that
+    // `ensureWalletWithAccounts`/`getKeyByRole` actually require (#749).
+    // Turnkey accounts are immutable, so the corrected account is added
+    // alongside the stale one rather than replacing it.
     const missingAccounts = DEFAULT_WALLET_ACCOUNTS.filter(
-      (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+      (spec) =>
+        !allAccounts.some(
+          (acc) =>
+            acc.curve === spec.curve &&
+            acc.path === spec.path &&
+            acc.addressFormat === spec.addressFormat
+        )
     );
 
     const targetWalletId = wallets[0]?.walletId;
@@ -405,7 +442,12 @@ async function getOrCreateTurnkeySubOrgUnlocked(
           const recheckAccounts = recheck.accounts || [];
           stillMissing = missingAccounts.filter(
             (spec) =>
-              !recheckAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+              !recheckAccounts.some(
+                (acc) =>
+                  acc.curve === spec.curve &&
+                  acc.path === spec.path &&
+                  acc.addressFormat === spec.addressFormat
+              )
           );
         } catch {
           // The re-check itself failed - fall through and propagate the
