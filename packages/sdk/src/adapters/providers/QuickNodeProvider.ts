@@ -282,7 +282,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * words almost never decode to valid UTF-8, while genuinely base64-encoded
    * text content always does. Binary content types are always base64.
    */
-  private decodeContent(result: unknown, contentType?: string): Buffer {
+  private decodeContent(result: unknown, contentType?: string): Uint8Array {
     let raw: unknown = result;
     if (raw && typeof raw === 'object') {
       const obj = raw as Record<string, unknown>;
@@ -322,7 +322,12 @@ export class QuickNodeProvider implements OrdinalsProvider {
         `QuickNodeProvider: inscription content exceeds ${this.maxContentBytes} bytes`
       );
     }
-    return buf;
+    // Public byte interfaces use Uint8Array (CLAUDE.md): a Node Buffer is a
+    // Uint8Array subclass but overrides observable behavior (e.g.
+    // JSON.stringify serializes it as {type:"Buffer",data:[...]}), so it must
+    // not leak through OrdinalsProvider.getInscriptionById()/SatSnapshotReader
+    // fields typed Uint8Array. Copy into a plain Uint8Array at the boundary.
+    return Uint8Array.from(buf);
   }
 
   private static isTextContentType(contentType?: string): boolean {
@@ -400,7 +405,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     // only. Cap the JSON-RPC body at the base64 expansion of the content cap
     // so legitimately large inscriptions aren't rejected by the JSON cap.
     const contentJsonCap = Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024;
-    let content: Buffer;
+    let content: Uint8Array;
     try {
       const contentResult = await this.rpcCall<unknown>('ord_getContent', [id], contentJsonCap);
       content = this.decodeContent(contentResult, info.content_type || info.effective_content_type);

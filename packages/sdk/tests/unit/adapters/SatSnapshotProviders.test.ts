@@ -179,6 +179,14 @@ test('QuickNode snapshots refuse an unavailable raw metadata capability', async 
   await expect(provider.getSatSnapshot('123')).rejects.toThrow(/Method not found/i);
 });
 
+test('QuickNode RPC content path returns a plain Uint8Array, not a Buffer (#796)', async () => {
+  const { provider } = fixture('quicknode', {});
+  const snapshot = await provider.getSatSnapshot('123');
+  const bytes = (snapshot.publications[0].body as { bytes: Uint8Array }).bytes;
+  expect(bytes).toBeInstanceOf(Uint8Array);
+  expect(Buffer.isBuffer(bytes)).toBe(false);
+});
+
 test('QuickNode accepts its documented literal UTF-8 content wrapper without guessing base64', async () => {
   const content = new TextEncoder().encode('test');
   const { provider } = fixture('quicknode', { encoding: 'utf8', wrapContent: true, content, info: { content_type: 'text/plain', content_length: 4 } });
