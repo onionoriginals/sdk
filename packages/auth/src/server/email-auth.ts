@@ -59,13 +59,18 @@ export function isOtpVerifyTransientFailure(error: unknown): error is Structured
 }
 
 /**
- * Session storage interface for pluggable session management
+ * Session storage interface for pluggable session management.
+ *
+ * Every method may return synchronously or return a `Promise` — all call
+ * sites in this module `await` the result either way, so a network-backed
+ * store (Redis, a database) can be plugged in directly, as recommended by
+ * {@link createInMemorySessionStorage}'s production warning (#684).
  */
 export interface SessionStorage {
-  get(sessionId: string): EmailAuthSession | undefined;
-  set(sessionId: string, session: EmailAuthSession): void;
-  delete(sessionId: string): void;
-  cleanup(): void;
+  get(sessionId: string): EmailAuthSession | undefined | Promise<EmailAuthSession | undefined>;
+  set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
+  delete(sessionId: string): void | Promise<void>;
+  cleanup(): void | Promise<void>;
 }
 
 /**
@@ -96,8 +101,12 @@ export function createInMemorySessionStorage(): SessionStorage {
 
   return {
     get: (sessionId: string) => sessions.get(sessionId),
-    set: (sessionId: string, session: EmailAuthSession) => sessions.set(sessionId, session),
-    delete: (sessionId: string) => sessions.delete(sessionId),
+    set: (sessionId: string, session: EmailAuthSession) => {
+      sessions.set(sessionId, session);
+    },
+    delete: (sessionId: string) => {
+      sessions.delete(sessionId);
+    },
     cleanup: () => {
       clearInterval(cleanupInterval);
       sessions.clear();
@@ -204,7 +213,7 @@ export async function initiateEmailAuth(
   // Create auth session. subOrgId is intentionally absent until the email
   // is verified (see verifyEmailAuth).
   const sessionId = generateSessionId();
-  storage.set(sessionId, {
+  await storage.set(sessionId, {
     email: normalizedEmail,
     otpId,
     otpEncryptionTargetBundle,
@@ -281,7 +290,7 @@ export async function verifyEmailAuth(
   options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const session = await storage.get(sessionId);
 
   if (!session) {
     throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
@@ -289,7 +298,7 @@ export async function verifyEmailAuth(
 
   // Check if session has expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.sessionExpired,
       'Session expired. Please request a new code.'
@@ -401,14 +410,14 @@ export async function verifyEmailAuth(
     // 15-minute window.
     const attempts = (session.otpAttempts ?? 0) + 1;
     if (attempts >= MAX_OTP_ATTEMPTS) {
-      storage.delete(sessionId);
+      await storage.delete(sessionId);
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpAttemptsExceeded,
         'Too many failed verification attempts. Please request a new code.'
       );
     }
     session.otpAttempts = attempts;
-    storage.set(sessionId, session);
+    await storage.set(sessionId, session);
 
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect,
@@ -435,7 +444,7 @@ export async function verifyEmailAuth(
     // make retries re-submit the consumed otpId to Turnkey, burning the
     // attempt budget and eventually masking this error with a misleading
     // "too many failed attempts".
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.subOrgProvisionFailed,
       `Email verified, but provisioning the Turnkey sub-organization failed: ${
@@ -448,7 +457,7 @@ export async function verifyEmailAuth(
   // Mark session as verified
   session.verified = true;
   session.subOrgId = subOrgId;
-  storage.set(sessionId, session);
+  await storage.set(sessionId, session);
 
   return {
     verified: true,
@@ -463,17 +472,17 @@ export async function verifyEmailAuth(
 /**
  * Check if a session is verified
  */
-export function isSessionVerified(
+export async function isSessionVerified(
   sessionId: string,
   sessionStorage?: SessionStorage
-): boolean {
+): Promise<boolean> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const session = await storage.get(sessionId);
 
   if (!session) return false;
 
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     return false;
   }
 
@@ -483,12 +492,12 @@ export function isSessionVerified(
 /**
  * Clean up a session after successful login
  */
-export function cleanupSession(
+export async function cleanupSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): void {
+): Promise<void> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  storage.delete(sessionId);
+  await storage.delete(sessionId);
 }
 
 /**
@@ -497,18 +506,18 @@ export function cleanupSession(
  * Note: `subOrgId` is only present on sessions that have completed
  * verification — initiation no longer provisions the sub-organization.
  */
-export function getSession(
+export async function getSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): EmailAuthSession | undefined {
+): Promise<EmailAuthSession | undefined> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const session = await storage.get(sessionId);
 
   if (!session) return undefined;
 
   // Check if expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     return undefined;
   }
 
