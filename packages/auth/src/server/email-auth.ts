@@ -7,9 +7,56 @@ import { randomBytes } from 'node:crypto';
 import { Turnkey } from '@turnkey/sdk-server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
+import { StructuredError } from '@originals/sdk';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
 import { encryptOtpCode } from '../otp-encryption.js';
 import { getOrCreateTurnkeySubOrg, normalizeEmail, type SubOrgLock } from './turnkey-client.js';
+
+/**
+ * Stable error codes thrown by {@link verifyEmailAuth} for the three ways a
+ * `verifyOtp` call can fail. Kept distinct (#747) so a caller can tell "the
+ * user typed the wrong code" apart from "Turnkey couldn't be reached" —
+ * conditions that used to collapse into one indistinguishable `Error` and
+ * both consumed the same attempt budget, even though only the first is
+ * actually the caller's fault.
+ */
+export const OTP_VERIFY_ERROR_CODES = {
+  /** Turnkey's enclave evaluated the submitted code and rejected it. */
+  codeIncorrect: 'AUTH_OTP_CODE_INCORRECT',
+  /**
+   * `verifyOtp` failed without Turnkey ever evaluating the code (a
+   * network/timeout/DNS failure, or an unexpected response shape). Does not
+   * consume the attempt budget.
+   */
+  verifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
+  /** {@link MAX_OTP_ATTEMPTS} incorrect-code attempts spent; session destroyed. */
+  attemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
+} as const;
+
+/**
+ * Whether `error` carries a genuine numeric error code from Turnkey's own
+ * JSON error response (a `TurnkeyRequestError`, e.g. code 3 for an invalid
+ * OTP) — as opposed to a network/timeout/DNS failure that never reached
+ * that point and so never evaluated the submitted code's correctness.
+ * `@turnkey/http`'s `request()` only attaches a numeric `.code` when it
+ * successfully parsed a JSON error body from Turnkey itself; a transport
+ * failure (the `fetch()` call rejecting outright) has no such shape. Walks
+ * the `cause` chain (cycle-safe) — same evidence standard as
+ * `isDefinitiveNotFound` in turnkey-client.ts.
+ */
+function isDefiniteTurnkeyRejection(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === 'object' && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const { code } = current as { code?: unknown };
+    if (typeof code === 'number') {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
@@ -318,21 +365,40 @@ export async function verifyEmailAuth(
   } catch (error) {
     console.error('❌ OTP verification failed:', error);
 
+    // Code correctness was never evaluated for a transient/network failure
+    // (timeout, 5xx, DNS blip, ECONNRESET, an unexpected response shape,
+    // etc.) — only a genuine Turnkey rejection is proof the code was wrong.
+    // Treating the former as a wrong guess would consume a legitimate
+    // user's attempt budget for something that isn't their fault, and could
+    // lock them out during an outage that has nothing to do with their code.
+    if (!isDefiniteTurnkeyRejection(error)) {
+      throw new StructuredError(
+        OTP_VERIFY_ERROR_CODES.verifyTransientFailure,
+        `Unable to verify the code right now: ${
+          error instanceof Error ? error.message : String(error)
+        }. Please try again.`,
+        { cause: error }
+      );
+    }
+
     // Count the failed attempt; destroy the session once the budget is
     // spent so the otpId cannot be brute-forced for the rest of the
     // 15-minute window.
     const attempts = (session.otpAttempts ?? 0) + 1;
     if (attempts >= MAX_OTP_ATTEMPTS) {
       storage.delete(sessionId);
-      throw new Error(
+      throw new StructuredError(
+        OTP_VERIFY_ERROR_CODES.attemptsExceeded,
         'Too many failed verification attempts. Please request a new code.'
       );
     }
     session.otpAttempts = attempts;
     storage.set(sessionId, session);
 
-    throw new Error(
-      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`
+    throw new StructuredError(
+      OTP_VERIFY_ERROR_CODES.codeIncorrect,
+      `Invalid verification code: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 

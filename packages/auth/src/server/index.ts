@@ -31,6 +31,7 @@ export {
   type SessionStorage,
   type VerifyEmailAuthOptions,
   createInMemorySessionStorage,
+  OTP_VERIFY_ERROR_CODES,
 } from './email-auth.js';
 export {
   encryptOtpCode,
