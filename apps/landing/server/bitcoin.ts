@@ -2085,8 +2085,42 @@ export function createBitcoinRoutes(deps: {
       // Not stranded — the reveal is persisted and the sweep completes it —
       // but it IS an incomplete money-path transition, so it is on the record.
       money('inscribe_failed', { sub, commitTxId, revealTxId, reason: 'reveal_broadcast_failed', detail: revealErr });
-      money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'commit_broadcast' });
-      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'commit_broadcast' });
+      // #865 — a brand-new pair (preBroadcastStatus 'signed') genuinely
+      // belongs at 'commit_broadcast' here: nothing else could have broadcast
+      // its reveal before this call. But a RESUBMISSION of a pair that was
+      // already at 'reveal_broadcast' before this request (preBroadcastStatus
+      // 'reveal_broadcast') had its reveal broadcast successfully on a prior
+      // attempt — the CAS above only moved it back to 'commit_broadcast' to
+      // make this redundant reveal re-push idempotent-safe. When that re-push
+      // then fails with anything other than "already known" (recognized
+      // errors never reach here), the record must not be left worse off than
+      // it already was: restore it to the state it was actually in, mirroring
+      // /rebroadcast's own non-persisting failure response.
+      let reportedStatus: InscriptionStatus = 'commit_broadcast';
+      // TypeScript's control-flow narrowing doesn't see `preBroadcastStatus`'s
+      // reassignment inside the `withSubLock` closure above, so it still
+      // treats this read as the declaration's literal initializer ('signed')
+      // — the assertion reflects the real runtime type without changing it.
+      if ((preBroadcastStatus as InscriptionStatus) === 'reveal_broadcast') {
+        if (store.trySetStatus(sub, commitTxId, { status: 'commit_broadcast', retired: false, superseded: false }, 'reveal_broadcast')) {
+          reportedStatus = 'reveal_broadcast';
+        } else {
+          // Moved again concurrently (e.g. reconciliation already completed
+          // or confirmed it) — report that fresher state, not a stale guess.
+          let moved: InscriptionRecord | null;
+          try {
+            moved = store.get(sub, commitTxId);
+          } catch (e) {
+            const unreadable = unreadableRecords(sub, e);
+            if (unreadable) return unreadable;
+            throw e;
+          }
+          if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
+          reportedStatus = moved?.status ?? 'commit_broadcast';
+        }
+      }
+      money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: reportedStatus });
+      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: reportedStatus });
     }
     // Same guard for the second transition: the reveal broadcast above is
     // itself another await reconciliation can act across.
