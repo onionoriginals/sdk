@@ -153,6 +153,16 @@ export class OriginalsSDK {
         "SDK_NETWORK",
         "Bitcoin and WebVH network selections disagree",
       );
+    requireAsset(
+      storageAdapter === undefined ||
+        (typeof storageAdapter === "object" &&
+          storageAdapter !== null &&
+          (typeof (storageAdapter as { put?: unknown }).put === "function" ||
+            typeof (storageAdapter as { putObject?: unknown }).putObject ===
+              "function")),
+      "SDK_STORAGE_ADAPTER",
+      "storageAdapter must be an object implementing put() or putObject()",
+    );
     const hostedStorage: StorageAdapter | undefined = !storageAdapter
       ? undefined
       : "putObject" in storageAdapter
@@ -167,7 +177,13 @@ export class OriginalsSDK {
           };
     this.config = {
       ...utilities,
-      ...(storageAdapter && "put" in storageAdapter ? { storageAdapter } : {}),
+      // Forward whichever shape the caller configured — legacy put()/get()
+      // or canonical putObject()/getObject()/exists() — so duck-typed
+      // consumers (LifecycleManager, DIDManager) that already support both
+      // shapes actually receive the adapter instead of seeing it as unset.
+      ...(storageAdapter
+        ? { storageAdapter: storageAdapter as ManagerConfig["storageAdapter"] }
+        : {}),
       network,
       webvhNetwork,
       defaultKeyType: utilities.defaultKeyType ?? "Ed25519",
