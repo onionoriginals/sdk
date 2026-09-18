@@ -130,6 +130,22 @@ function location(did: string) {
     prefix: url.pathname.slice(1, -"did.jsonl".length),
   };
 }
+/**
+ * Compares a republish call's `paths` against the segments already bound in
+ * `prefix` (from `location()`, always trailing-slash-terminated, or the
+ * `.well-known/` default for an empty path). Segments in `prefix` are
+ * percent-encoded per `parseAssetAlias`'s canonical WebVH path spelling;
+ * decoding them back is what lets a caller replay the exact same raw
+ * `paths` array used on the original publish.
+ */
+function sameHostedPath(prefix: string, paths: string[]): boolean {
+  const existing =
+    prefix === ".well-known/" ? [] : prefix.slice(0, -1).split("/").map(decodeURIComponent);
+  return (
+    paths.length === existing.length &&
+    paths.every((segment, i) => segment === existing[i])
+  );
+}
 const error = (code: string, message: string): never => {
   throw new CelError("invalid", code, message);
 };
@@ -178,7 +194,7 @@ export class HostedAssets {
     const state = verifyHistory(envelope.eventLog).state;
     if (state.layer === "webvh") {
       const { domain, prefix } = location(state.alias);
-      if (domain !== options.domain || options.paths)
+      if (domain !== options.domain || (options.paths && !sameHostedPath(prefix, options.paths)))
         return error(
           "ASSET_WEBVH_BINDING",
           "An existing hosted identity keeps its permanent domain and path",

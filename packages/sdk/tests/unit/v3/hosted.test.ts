@@ -100,6 +100,84 @@ test("republishing updated resource bytes retains the same hosted identity and a
   expect(loaded.verification.verified).toBe(true);
 });
 
+// #813: `paths` was compared by truthiness, not equality, so replaying the
+// exact same WebPublicationOptions (a natural retry pattern) on a republish
+// was always rejected as ASSET_WEBVH_BINDING whenever `paths` was supplied.
+test("republishing with the exact same explicit paths used on the original publish succeeds (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const paths = ["custom", "slug-123"];
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths,
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: ["custom", "slug-123"],
+  });
+  expect(second.did).toBe(first.did);
+  const loaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.resolveAssetFromWeb(first.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test("republishing with a different explicit paths array is still rejected with ASSET_WEBVH_BINDING (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["custom", "slug-123"],
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const failure = await sdk.lifecycle
+    .publishToWeb(first.asset, {
+      domain: "example.com",
+      paths: ["different", "slug"],
+    })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(CelError);
+  expect((failure as CelError).code).toBe("ASSET_WEBVH_BINDING");
+});
+
+test("republishing with the same well-known (empty) explicit paths array succeeds (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  expect(first.did).toBe("did:webvh:" + first.did.split(":")[2] + ":example.com");
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  expect(second.did).toBe(first.did);
+});
+
 test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
   const store = storage();
   const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
