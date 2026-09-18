@@ -685,7 +685,9 @@ export function resolveSat(
       !hash(position.blockHash)
     )
       return failure("incomplete", "Missing confirmed creation position");
-    const id = /^([0-9a-f]{64})i(0|[1-9]\d*)$/.exec(publication.id);
+    const id = /^([0-9a-f]{64})i(0|[1-9]\d*)$/.exec(
+      normalizeInscriptionId(publication.id),
+    );
     if (
       !id ||
       id[1] !== normalizeTxid(publication.revealTxid) ||

@@ -644,6 +644,43 @@ test("rejects a malformed (non-64-hex) revealTxid rather than coercing it into m
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("accepts a confirmed publication whose id differs only in hex case from revealTxid (#857)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target
+        ? {
+            ...p,
+            id: p.id.replace(
+              /^([0-9a-f]{64})(i\d+)$/,
+              (_match, txid: string, suffix: string) =>
+                txid.toUpperCase() + suffix,
+            ),
+          }
+        : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("accepted");
+});
+
+test("rejects an id that disagrees with revealTxid/position even after case normalization (#857)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, id: "f".repeat(64) + "i0" } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
   const snapshot = observations(fixtures.cases[0]);
   snapshot.publications.push({ ...snapshot.publications[0], confirmed: false });
