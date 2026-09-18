@@ -584,6 +584,44 @@ describe('createInscriptionReconciler: status transitions', () => {
     await listOf(reconciler, 'sub-1');
     expect(broadcastCalls).toEqual(['02aa', '02bb']);
   });
+
+  // #777 (second next-steps comment) — the list mapper's `settled` field
+  // used to be `r.retired === true || (r.confirmations ?? 0) >= threshold`,
+  // an OR that reports `settled: true` purely from stale on-disk
+  // `confirmations` even when `retire()` never ran for this record (e.g. its
+  // turn hasn't come up yet under the shared per-poll lookup budget). That
+  // disagreed with the resubmission endpoint (`bitcoin.ts`), which already
+  // uses the strict `rec.retired === true` check. Exhaust the budget with
+  // decoys so the target's confirmed-and-at-threshold record is never
+  // reached this poll (no `retire()` call), then assert the list still
+  // reports `settled: false` in lockstep with `store.get(...).retired`.
+  test('settled tracks retired, not on-disk confirmations reaching the threshold on their own', async () => {
+    const { store, reconciler } = harness({ recoveryConfirmations: 6 });
+    // Four `commit_broadcast` decoys spend the whole `liveStuck` share of
+    // the shared 5-lookup budget.
+    for (let i = 0; i < 4; i++) {
+      const id = `${i}`.repeat(64);
+      store.create('sub-1', rec({ commitTxId: id, status: 'commit_broadcast', createdAt: '2026-08-01T00:00:00.000Z' }));
+    }
+    // Already confirmed, at the recovery threshold, but never retired —
+    // plausible leftover state from an earlier poll.
+    const target = 'a'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed', createdAt: '2026-08-01T00:00:10.000Z' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 6, blockHeight: 100, blockHash: 'H'.repeat(64) });
+    // A newer `liveUnconfirmed` record whose rotated turn comes before the
+    // target's and spends the budget's fifth and final lookup.
+    const decoy = 'b'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: decoy, status: 'reveal_broadcast', createdAt: '2026-08-01T00:00:20.000Z' }));
+
+    const res = await reconciler.reconcileUser('sub-1');
+    const body = (await res.json()) as { inscriptions: Array<{ commitTxId: string; settled?: boolean }> };
+    const entry = body.inscriptions.find((r) => r.commitTxId === target)!;
+
+    const stored = store.get('sub-1', target)!;
+    expect(stored.retired).toBeFalsy();
+    expect(stored.confirmations).toBe(6); // budget-starved: never reached this poll
+    expect(entry.settled).toBe(false);
+  });
 });
 
 describe('createInscriptionReconciler: cursor rotation and budget', () => {

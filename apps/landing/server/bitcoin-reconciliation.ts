@@ -441,10 +441,16 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // transactions retained) or settled (recovery artifacts retired once
       // `confirmations` reaches the configured threshold). Absent for every
       // other status — depth/height are current-truth-while-confirmed only.
+      // `retired` is the authoritative signal (matches the resubmission path's
+      // `settled: rec.retired === true` in bitcoin.ts) — a record's own
+      // on-disk `confirmations` can reach the threshold on an earlier pass
+      // while the rotating reconciliation budget hasn't yet reached its
+      // `retire()` call, so deriving `settled` from confirmations here would
+      // disagree with that other endpoint for the same record (#777).
       ...(r.status === 'confirmed'
         ? {
             confirmations: r.confirmations,
-            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            settled: r.retired === true,
             ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
             ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
           }
