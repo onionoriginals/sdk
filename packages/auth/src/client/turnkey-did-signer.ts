@@ -5,7 +5,7 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, encoding, signingInput } from '@originals/sdk';
+import { OriginalsSDK, canonicalDidKeyVm, encoding, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
 import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
@@ -100,10 +100,15 @@ export class TurnkeyDIDSigner {
   }
 
   /**
-   * Get the verification method ID for this signer
+   * Get the verification method ID for this signer.
+   *
+   * Must include the `#{fragment}` (canonical `did:key:{mb}#{mb}` form, #872):
+   * `documentLoader.resolveDID`'s did:key fast path only fires when a
+   * fragment is present, so a bare `did:key:{mb}` here signs a credential
+   * or MultiSig contribution that can never be verified.
    */
   getVerificationMethodId(): string {
-    return `did:key:${this.publicKeyMultibase}`;
+    return canonicalDidKeyVm(this.publicKeyMultibase);
   }
 
   /**
