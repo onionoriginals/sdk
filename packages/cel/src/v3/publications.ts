@@ -858,9 +858,25 @@ export function resolveSat(
       if (!(error instanceof CelError)) throw error;
       // CEL_WEBVH_IDNA can only be thrown from inside apply()'s migrate handling,
       // after verifyEntry and the CEL_CHAIN head-extension/authority checks have
-      // already authenticated the entry — unlike the two CCG codes below, no
-      // separate authentication step is needed here.
-      if (error.status === "unsupported" && error.code === "CEL_WEBVH_IDNA")
+      // run — but those checks only authenticate the entry against *some*
+      // controller, not necessarily this Original's controller. apply() derives
+      // `expectedController` from the supplied `prefix`'s own state when one is
+      // given; with no `prefix` (history undefined, no boundary selected yet), it
+      // falls back to the candidate's own self-declared `create` controller. A
+      // candidate is therefore only a genuine, authority-bearing continuation of
+      // *this* sat's already-accepted history once `history` is defined — before
+      // that, "authenticated" means nothing more than "signed by whatever key its
+      // own attacker-authored genesis entry declares," which anyone can produce
+      // for an entirely unrelated, self-signed history. Gating on `history !==
+      // undefined` keeps this consistent with the CEL_DATA_REFERENCE guard below:
+      // a pre-boundary candidate remains exactly as ignorable as any other
+      // invalid one, instead of letting an unrelated party permanently poison
+      // resolution of the real Original.
+      if (
+        error.status === "unsupported" &&
+        error.code === "CEL_WEBVH_IDNA" &&
+        history !== undefined
+      )
         return failure("unsupported-capability", error.code);
       if (
         error.status === "unsupported" &&
