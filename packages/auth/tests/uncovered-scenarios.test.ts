@@ -789,7 +789,11 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     expect(typeof result).toBe('boolean');
   });
 
-  test('getVerificationMethodId → returns "did:key:<publicKeyMultibase>"', () => {
+  // REGRESSION (#872): a bare `did:key:<mb>` with no `#<mb>` fragment can
+  // never be resolved by documentLoader.resolveDID's did:key fast path, so a
+  // credential or MultiSig contribution signed through this ID could never
+  // verify. The canonical form is `did:key:<mb>#<mb>`.
+  test('getVerificationMethodId → returns "did:key:<publicKeyMultibase>#<publicKeyMultibase>"', () => {
     const client = makeDIDSignerClient();
     const signer = new TurnkeyDIDSigner(
       client,
@@ -799,7 +803,7 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     );
 
     const vmId = signer.getVerificationMethodId();
-    expect(vmId).toBe(`did:key:${FIXTURE_PUBKEY_MULTIBASE}`);
+    expect(vmId).toBe(`did:key:${FIXTURE_PUBKEY_MULTIBASE}#${FIXTURE_PUBKEY_MULTIBASE}`);
   });
 
   test('sign with expired session error → throws TurnkeySessionExpiredError', async () => {
