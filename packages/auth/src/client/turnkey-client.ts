@@ -425,6 +425,14 @@ export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = Object.f
 );
 
 /**
+ * Bounded retry window `ensureWalletWithAccounts` uses to confirm a
+ * just-repaired account role is actually visible before returning, since a
+ * write is not always readable on the very next request.
+ */
+const WALLET_REPAIR_MAX_ATTEMPTS = 5;
+const WALLET_REPAIR_RETRY_DELAY_MS = 500;
+
+/**
  * Get a wallet account by its canonical role (curve + exact derivation
  * path), not merely by curve. Use this to fetch the DID assertion-key or
  * update-key specifically — `getKeyByCurve('CURVE_ED25519')` cannot tell
@@ -545,7 +553,36 @@ export async function ensureWalletWithAccounts(
           organizationId: subOrgId,
         });
 
-        wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+        // A freshly created account is not always visible on the very next
+        // read (eventual consistency). Poll with a bounded number of
+        // retries instead of trusting a single immediate re-read, and fail
+        // loudly if a role this function just tried to repair is still
+        // missing once the window elapses - silently returning as if the
+        // repair succeeded would let a caller proceed with a partial key
+        // set, and a caller that retries on that silent success risks
+        // creating a duplicate account for a role whose write simply
+        // hadn't propagated yet.
+        let stillMissingRoles = missingRoles;
+        for (let attempt = 0; attempt < WALLET_REPAIR_MAX_ATTEMPTS; attempt++) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, WALLET_REPAIR_RETRY_DELAY_MS));
+          }
+          wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+          const refreshedAccounts = wallets.flatMap((w) => w.accounts);
+          stillMissingRoles = missingRoles.filter(
+            (spec) => !refreshedAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+          );
+          if (stillMissingRoles.length === 0) {
+            break;
+          }
+        }
+
+        if (stillMissingRoles.length > 0) {
+          throw new Error(
+            `Repaired account role(s) still not visible after ${WALLET_REPAIR_MAX_ATTEMPTS} attempts: ` +
+              stillMissingRoles.map((spec) => spec.role).join(', ')
+          );
+        }
       }
 
       return wallets;

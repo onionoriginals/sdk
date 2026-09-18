@@ -664,6 +664,64 @@ describe('[AUTH-023] ensureWalletWithAccounts', () => {
     );
     expect(wallets[0].accounts).toHaveLength(3);
   });
+
+  describe('post-repair visibility (#898)', () => {
+    const incompleteAccounts = [
+      {
+        address: 'addr_secp',
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+      },
+    ];
+
+    test('a repaired role not yet visible on the immediate re-read is caught by retrying', async () => {
+      const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+      // 1st read: initial completeness check (missing 2 Ed25519 roles).
+      // 2nd read: first post-repair re-read - the write hasn't propagated yet.
+      // 3rd read: second post-repair re-read - now visible.
+      const getWalletAccounts = mock()
+        .mockResolvedValueOnce({ accounts: incompleteAccounts })
+        .mockResolvedValueOnce({ accounts: incompleteAccounts })
+        .mockResolvedValueOnce({ accounts: fullAccounts });
+
+      const client = makeEnsureClient({
+        getWalletsResponses: [
+          () => Promise.resolve({ wallets: [{ walletId: 'w_lag', walletName: 'default-wallet' }] }),
+        ],
+        getWalletAccounts,
+        createWalletAccounts,
+      });
+
+      const wallets = await ensureWalletWithAccounts(client, 'sub_org_123');
+
+      expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+      expect(getWalletAccounts).toHaveBeenCalledTimes(3);
+      expect(wallets[0].accounts).toHaveLength(3);
+    }, 10000);
+
+    test('a repaired role still missing after the retry window throws instead of silently returning incomplete', async () => {
+      const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+      // Every read - the initial check and every post-repair retry - sees
+      // the same incomplete set: the repaired roles never become visible.
+      const getWalletAccounts = mock(() => Promise.resolve({ accounts: incompleteAccounts }));
+
+      const client = makeEnsureClient({
+        getWalletsResponses: [
+          () => Promise.resolve({ wallets: [{ walletId: 'w_stuck', walletName: 'default-wallet' }] }),
+        ],
+        getWalletAccounts,
+        createWalletAccounts,
+      });
+
+      await expect(ensureWalletWithAccounts(client, 'sub_org_123')).rejects.toThrow(
+        /still not visible/
+      );
+      expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+      // Initial check + 5 bounded retries, no more.
+      expect(getWalletAccounts).toHaveBeenCalledTimes(6);
+    }, 10000);
+  });
 });
 
 // ─── AUTH-028: TurnkeyDIDSigner ───────────────────────────────────────────────
