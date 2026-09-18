@@ -1274,9 +1274,10 @@ export function createBitcoinRoutes(deps: {
     //
     // Capped at MAX_PENDING_FEE_LOOKUPS reads: this route is polled every 15s
     // against a rate-limited indexer, and an unbounded fan-out here would
-    // spend a creator's poll budget on an advisory. Beyond the cap the advice
-    // is drawn from the ones we did read, which can only understate the
-    // problem, never invent one.
+    // spend a creator's poll budget on an advisory. Beyond the cap there is
+    // no advice at all (see sawThemAll below) rather than one drawn only from
+    // the txids we happened to read — a partial view could name the wrong
+    // payment as the slowest one.
     let pendingDeposit:
       | { txid: string; feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
       | null = null;
