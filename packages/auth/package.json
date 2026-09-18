@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "bunx tsc && bunx tsc-alias",
+    "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-client-api.ts",
     "test": "bun test tests/",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""
