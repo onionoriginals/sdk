@@ -193,12 +193,37 @@ export class CredentialManager {
     };
   }
 
+  /**
+   * `privateKeyMultibase` is optional (issue #824): when omitted, the
+   * configured `config.keyStore` is probed for `verificationMethod`'s private
+   * key, so a caller that already registered the signing key with the
+   * keyStore (e.g. via `lifecycle`/`did` key generation) does not have to
+   * thread it through every call site by hand. Throws `CREDENTIAL_SIGNING_KEY_REQUIRED`
+   * when neither an explicit key nor a keyStore hit is available.
+   */
   async signCredential(
     credential: VerifiableCredential,
-    privateKeyMultibase: string,
-    verificationMethod: string
+    privateKeyMultibase?: string,
+    verificationMethod?: string
   ): Promise<VerifiableCredential> {
     return this.tracked('credential.sign', async () => {
+    if (!verificationMethod) {
+      throw new StructuredError(
+        'CREDENTIAL_VERIFICATION_METHOD_REQUIRED',
+        'signCredential requires a verificationMethod identifying the signing key.'
+      );
+    }
+    const resolvedPrivateKeyMultibase =
+      privateKeyMultibase ?? (await this.config.keyStore?.getPrivateKey(verificationMethod)) ?? undefined;
+    if (!resolvedPrivateKeyMultibase) {
+      throw new StructuredError(
+        'CREDENTIAL_SIGNING_KEY_REQUIRED',
+        `No private key was supplied for ${verificationMethod}, and none was found in the ` +
+        'configured keyStore. Pass privateKeyMultibase explicitly, or configure config.keyStore ' +
+        'with a key registered for this verification method.'
+      );
+    }
+    privateKeyMultibase = resolvedPrivateKeyMultibase;
     if (typeof verificationMethod === 'string' && verificationMethod.startsWith('did:')) {
       try {
         const loader = createDocumentLoader(this.didManager);
