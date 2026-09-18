@@ -469,6 +469,56 @@ describe('POST /api/btc/inscribe', () => {
     expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(rebuilt.commitTxId);
   });
 
+  test('#874: resubmitting a superseded-but-never-broadcast pair reinstates it instead of leaving the outpoint with zero live records', async () => {
+    const pair = buildPair();
+    const rebuilt = buildRebuiltPair(pair, 22_000);
+    let failPairCommit = true;
+    let failRebuiltCommit = true;
+    const { routes, store, broadcasts } = harness({
+      broadcast: async (txHex) => {
+        if (failPairCommit && txHex === pair.signedCommitHex) throw new Error('min relay fee not met');
+        if (failRebuiltCommit && txHex === rebuilt.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+
+    // 1) Submit the original pair; its commit broadcast fails ambiguously →
+    //    stays 'signed', never actually reaches the network.
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    // 2) Submit a rebuilt rival over the same outpoint; ITS commit broadcast
+    //    also fails ambiguously (a realistic bad-fee-climate case) — it
+    //    supersedes the original but never itself becomes live.
+    expect((await post(routes, rebuilt)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.superseded).toBe(true);
+    expect(store.get('sub-1', rebuilt.commitTxId)!.status).toBe('signed');
+    expect(store.get('sub-1', rebuilt.commitTxId)!.superseded).toBeUndefined();
+
+    // 3) Resubmit the ORIGINAL pair's exact bytes again; this time its
+    //    commit broadcast succeeds for real.
+    failPairCommit = false;
+    const broadcastsBefore = broadcasts.length;
+    const res = await post(routes, pair);
+    const body = (await res.json()) as { status: string; commitTxId: string };
+
+    // The commit really was broadcast to the network this time...
+    expect(broadcasts.slice(broadcastsBefore)).toContain(pair.signedCommitHex);
+    // ...so the response and the store must report the pair as live, not the
+    // stale 'signed' status with the outpoint left dangling (the bug: a CAS
+    // guard silently no-ops when the resubmitted record's own stale
+    // `superseded: true` is never cleared).
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('reveal_broadcast');
+    const reinstated = store.get('sub-1', pair.commitTxId)!;
+    expect(reinstated.status).toBe('reveal_broadcast');
+    expect(reinstated.superseded).toBeUndefined();
+    // The rival that lost stays superseded — exactly one live record for the
+    // outpoint, never zero.
+    expect(store.get('sub-1', rebuilt.commitTxId)!.superseded).toBe(true);
+    expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(pair.commitTxId);
+  });
+
   test('superseding is REFUSED when the old commit is already confirmed on-chain (ambiguous broadcast that landed)', async () => {
     const pair = buildPair();
     const { routes, store } = harness({
