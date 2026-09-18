@@ -252,6 +252,10 @@ export class DIDManager {
       services,
     });
 
+    if (!options?.externalSigner) {
+      await this.persistGeneratedIdentityKey(result.did, result.didDocument, result.keyPair);
+    }
+
     return {
       did: result.did,
       didDocument: result.didDocument,
@@ -756,7 +760,47 @@ export class DIDManager {
     // The caller must name the host; an omitted domain throws rather than
     // defaulting to a *.originals.build network nobody serves (#531).
     const domain = requireWebVHDomain(options.domain);
-    return this.getWebVHManager().createDIDWebVH({ ...options, domain });
+    const result = await this.getWebVHManager().createDIDWebVH({ ...options, domain });
+    if (!options.externalSigner) {
+      await this.persistGeneratedIdentityKey(result.did, result.didDocument, result.keyPair);
+    }
+    return result;
+  }
+
+  /**
+   * Issue #824: `config.keyStore` is otherwise never read by the default SDK's
+   * identity utilities. When a did:webvh signing key was generated locally (no
+   * `externalSigner`), persist it into the configured keyStore so later
+   * `signCredential`/other identity operations can locate it without the
+   * caller threading the raw key pair through every call site by hand —
+   * mirroring the pattern the CEL asset lifecycle already uses for a freshly
+   * minted controller key. Registered under both the did:webvh signing VM id
+   * and its did:key form, since callers may reference either. Best-effort: a
+   * keyStore write failure only degrades key persistence (the caller-returned
+   * `keyPair` remains available to persist manually) — it must not undo an
+   * already-minted DID.
+   */
+  private async persistGeneratedIdentityKey(
+    did: string,
+    didDocument: DIDDocument,
+    keyPair?: KeyPair,
+  ): Promise<void> {
+    if (!keyPair || !this.config.keyStore) return;
+    const signingVm = didDocument.verificationMethod?.[0]?.id;
+    const signingVmId = signingVm
+      ? (signingVm.startsWith('did:') ? signingVm : `${did}${signingVm}`)
+      : `${did}#key-0`;
+    try {
+      await this.config.keyStore.setPrivateKey(signingVmId, keyPair.privateKey);
+      await this.config.keyStore.setPrivateKey(
+        `did:key:${keyPair.publicKey}#${keyPair.publicKey}`,
+        keyPair.privateKey,
+      );
+    } catch (err) {
+      if (this.config.enableLogging) {
+        console.error('Failed to persist generated identity key to keyStore:', err);
+      }
+    }
   }
 
   /**
