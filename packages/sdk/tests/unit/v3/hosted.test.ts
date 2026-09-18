@@ -642,3 +642,25 @@ test('LocalStorageAdapter with originDomain completes publishToWeb and cold reso
     fsSync.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('publishToWeb with a paths segment requiring percent-encoding succeeds and produces a DID CEL can parse (#810)', async () => {
+  const store = new HostedMemoryStorageAdapter();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'image/png', content: new Uint8Array([1, 2]) },
+  ]);
+  // "hello!world" passes WebVHManager's isValidPathSegment (no '.', '..', '/',
+  // '\\', '\0', not absolute) but is not itself a valid did:webvh path
+  // component; it must be canonically percent-encoded, not passed through raw.
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: 'example.com',
+    paths: ['hello!world'],
+  });
+  expect(published.status).toBe('published');
+  expect(published.did).toContain(':example.com:hello%21world');
+
+  const fresh = OriginalsSDK.create({ storageAdapter: store });
+  const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.asset.id).toBe(asset.id);
+  expect(loaded.verification.verified).toBe(true);
+});

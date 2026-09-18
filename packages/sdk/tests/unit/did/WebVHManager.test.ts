@@ -397,6 +397,28 @@ describe('WebVHManager', () => {
       expect(result.logPath).toBeDefined();
       expect(result.logPath!.startsWith(tempDir)).toBe(true);
     }, 10000);
+
+    test('percent-encodes path segments requiring escaping, producing a DID CEL can parse back (issue #810)', async () => {
+      const result = await manager.createDIDWebVH({
+        domain: 'example.com',
+        paths: ['hello!world', 'my asset', 'my@asset', 'my+asset'],
+        outputDir: tempDir,
+      });
+
+      // isValidPathSegment accepts these raw segments (no '.', '..', separators,
+      // or absolute-path prefix), but a raw '!'/' '/'@'/'+' is not itself a valid
+      // did:webvh path component, so the DID must carry the canonical
+      // percent-encoded spelling, not the caller's literal segment.
+      expect(result.did).toBe(
+        `did:webvh:${result.did.split(':')[2]}:example.com:hello%21world:my%20asset:my%40asset:my%2Basset`,
+      );
+
+      // The resulting DID must round-trip through CEL's own asset-alias parser
+      // instead of failing its allow-list with "Invalid WebVH path component".
+      const { parseAssetAlias } = await import('@originals/cel/v3');
+      const alias = parseAssetAlias(result.did);
+      expect(alias.layer).toBe('webvh');
+    }, 10000);
   });
 
   describe('integration with didwebvh-ts', () => {
