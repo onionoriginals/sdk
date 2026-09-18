@@ -584,6 +584,113 @@ describe('createInscriptionReconciler: status transitions', () => {
     await listOf(reconciler, 'sub-1');
     expect(broadcastCalls).toEqual(['02aa', '02bb']);
   });
+
+  // #742 — the write-skip must compare against the EFFECTIVE post-`applyStatus`
+  // block identity, not the raw provider fields: `blockHeight` is resolved via
+  // a separate best-effort RPC (`QuickNodeProvider.getTransactionStatus`) and
+  // can legitimately come back omitted on any given poll even though nothing
+  // about the confirmed record actually changed.
+  describe('a confirmed record with an unchanged effective block identity is not rewritten (#742)', () => {
+    function pollingHarness(
+      responses: Array<{ confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }>,
+      now?: () => number
+    ) {
+      const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-writestorm-')), now });
+      let poll = 0;
+      const provider: ReconciliationProvider = {
+        async getTransactionStatus() {
+          const res = responses[Math.min(poll, responses.length - 1)];
+          poll++;
+          return res;
+        },
+      };
+      const reconciler = createInscriptionReconciler({
+        store, provider, broadcastIdempotent: async () => null, unreadableRecords: () => null,
+        money: silentMoney, now, recoveryConfirmations: 6,
+      });
+      return { store, reconciler };
+    }
+
+    test('an omitted blockHeight on an otherwise-unchanged poll performs no write', async () => {
+      const commit = '7'.repeat(64);
+      const hash = 'a'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: hash },
+        { confirmed: true, confirmations: 2, blockHash: hash }, // blockHeight omitted
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll2 = store.get('sub-1', commit)!;
+
+      expect(afterPoll2.updatedAt).toBe(afterPoll1);
+      expect(afterPoll2.confirmedBlockHeight).toBe(100);
+      expect(afterPoll2.confirmedBlockHash).toBe(hash);
+    });
+
+    test('repeated omitted-height polls perform no repeated write', async () => {
+      const commit = '8'.repeat(64);
+      const hash = 'b'.repeat(64);
+      let clock = 0;
+      const { store, reconciler } = pollingHarness(
+        [
+          { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+        ],
+        () => clock
+      );
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast', updatedAt: new Date(0).toISOString() }));
+
+      await listOf(reconciler, 'sub-1'); // establishes the sticky height/hash
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      for (let i = 0; i < 4; i++) {
+        clock += 15_000;
+        await listOf(reconciler, 'sub-1');
+      }
+
+      expect(store.get('sub-1', commit)!.updatedAt).toBe(afterPoll1);
+    });
+
+    test('a changed hash with an omitted height performs exactly one write and clears the stale height', async () => {
+      const commit = '9'.repeat(64);
+      const oldHash = 'c'.repeat(64);
+      const newHash = 'd'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: oldHash },
+        { confirmed: true, confirmations: 2, blockHash: newHash }, // new identity, no height supplied
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      await listOf(reconciler, 'sub-1');
+
+      const stored = store.get('sub-1', commit)!;
+      expect(stored.confirmedBlockHash).toBe(newHash);
+      expect(stored.confirmedBlockHeight).toBeUndefined();
+    });
+
+    test('a hash omitted entirely (older/no-hash provider) with unchanged height performs no write', async () => {
+      const commit = 'a'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100 },
+        { confirmed: true, confirmations: 2, blockHeight: 100 }, // no hash on either poll
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      await listOf(reconciler, 'sub-1');
+      expect(store.get('sub-1', commit)!.updatedAt).toBe(afterPoll1);
+    });
+  });
 });
 
 describe('createInscriptionReconciler: cursor rotation and budget', () => {

@@ -324,12 +324,22 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // Skip the write once depth/height/hash/status all already match:
         // this is the steady state for a record sitting well below the
         // settlement threshold that keeps being re-polled while other work
-        // is pending.
+        // is pending. Height/hash are STICKY across an omitted field (see
+        // `applyStatus`), so compare against the EFFECTIVE post-apply values
+        // a write would actually produce, not the raw provider fields — a
+        // transiently-omitted `blockHeight` (QuickNode's secondary RPC is
+        // best-effort; see `QuickNodeProvider.getTransactionStatus`) must not
+        // read as "changed" when applying it would leave the stored identity
+        // untouched.
+        const identityChanged = st.blockHash !== undefined && st.blockHash !== current.confirmedBlockHash;
+        const effectiveBlockHeight =
+          st.blockHeight !== undefined ? st.blockHeight : identityChanged ? undefined : current.confirmedBlockHeight;
+        const effectiveBlockHash = st.blockHash !== undefined ? st.blockHash : current.confirmedBlockHash;
         const needsWrite =
           current.status !== 'confirmed' ||
           current.confirmations !== st.confirmations ||
-          current.confirmedBlockHeight !== st.blockHeight ||
-          current.confirmedBlockHash !== st.blockHash;
+          current.confirmedBlockHeight !== effectiveBlockHeight ||
+          current.confirmedBlockHash !== effectiveBlockHash;
         // Guarded write (#677/#694): only apply if the record's
         // status/retired/superseded AND its confirmation evidence are still
         // exactly where this pass last observed them. The evidence fields
