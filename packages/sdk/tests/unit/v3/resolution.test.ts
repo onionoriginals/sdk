@@ -847,10 +847,46 @@ test("does not cross-check ownership against an independent source observing a d
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
-  // Enumeration is still corroborated (an older tip's ids are a safe subset to compare),
-  // but ownership from a different tip must not be able to confer cross-checked, even
+  // Enumeration is still corroborated (an older tip's ids are the same real
+  // set to compare, per the coverage check in resolveSat), but ownership
+  // from a different tip must not be able to confer cross-checked, even
   // though its value happens to equal the primary snapshot's.
   expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+// #907: a second index that is honestly, self-consistently behind the
+// primary's tip has not indexed the sat's inscription(s) yet, so it reports
+// an empty (but internally healthy/complete/stable) enumeration. That must
+// not be able to earn "cross-checked" by trivially never disagreeing with
+// the primary — it never actually observed anything to corroborate with.
+test("a stale-but-honest independent index reporting zero publications does not earn cross-checked", async () => {
+  const { snapshot } = await boundary();
+  const olderTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const staleIndependent: SatSnapshot = {
+    ...structuredClone(snapshot),
+    tipBefore: olderTip,
+    tipAfter: olderTip,
+    indexTip: olderTip,
+    enumerationComplete: true,
+    indexHealthy: true,
+    publications: [],
+  };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "stale-index",
+      provider: { getSatSnapshot: async () => staleIndependent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+  expect(result.resolution.enumerationSource).toBeUndefined();
+  // A snapshot at this fabricated older tip has no live ownership to begin
+  // with (no real chain behind it), so this also exercises the pre-existing
+  // tip gate on the ownership half of the same cross-check.
   expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
 });
 
