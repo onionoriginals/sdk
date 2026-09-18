@@ -271,20 +271,26 @@ export class AssetResolver {
               chainEvidence,
             ) as SatResolution,
           };
-        independentEnumeration = {
-          source: this.independentEnumeration.label,
-          inscriptionIds: independentSnapshot.publications.map((p) => p.id),
-          // Ownership is a snapshot of current state, not an append-only list
-          // like enumeration: comparing it across two different chain tips is
-          // meaningless (a lagging source's honestly-stale owner could equal
-          // a dishonest primary's misreported "current" owner at a later
-          // tip). Only forward it when both observations describe the same
-          // tip; otherwise this cross-check silently sits out this round
-          // rather than fail resolution just for one source lagging.
-          ...(sameChainTip(independentSnapshot.tipBefore, snapshot.tipBefore)
-            ? { ownership: independentSnapshot.ownership }
-            : {}),
-        };
+        // A self-consistent independent snapshot can still be honestly behind
+        // the primary's tip: it has indexed no further than its own chain
+        // view, marked that view "complete", and truthfully reports whatever
+        // it has seen so far — which can be an empty or partial publication
+        // list for a sat the primary already resolved further ahead. Such a
+        // list trivially never contains anything "absent from the primary
+        // snapshot", so without a tip check a lagging (or dishonest) source
+        // could earn full corroboration by having observed nothing at all.
+        // Require the independent source to describe the same chain tip as
+        // the primary before either cross-check can apply, mirroring the
+        // ownership-only gate this used to be: a lagging source's report
+        // simply sits out this round rather than failing resolution or
+        // being credited as corroboration it never performed.
+        if (sameChainTip(independentSnapshot.tipBefore, snapshot.tipBefore)) {
+          independentEnumeration = {
+            source: this.independentEnumeration.label,
+            inscriptionIds: independentSnapshot.publications.map((p) => p.id),
+            ownership: independentSnapshot.ownership,
+          };
+        }
       }
       // Validate the snapshot's own structure/chain-position claims locally
       // before spending an external RPC round trip on it: a snapshot that
