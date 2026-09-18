@@ -1947,6 +1947,15 @@ export function createBitcoinRoutes(deps: {
     // never re-derived after the lock releases, since that is exactly the
     // window reconciliation can move the record in.
     let preBroadcastStatus: InscriptionStatus = 'signed';
+    // Set when this exact commitTxId is itself a previously-superseded record
+    // (a rebuilt rival won its outpoint on an earlier attempt, then that rival
+    // was itself superseded or vanished, freeing the outpoint back up). #874:
+    // `store.create` below is a no-op for an existing commitTxId, so nothing
+    // else ever clears a stale `superseded: true` off THIS record — it must be
+    // reinstated explicitly once this resubmission is about to become the live
+    // record for the outpoint, mirroring `reclaimOutpoint`'s paired
+    // supersede/reinstate pattern in bitcoin-reconciliation.ts.
+    let resubmittedWasSuperseded = false;
 
     // Read the rivals, judge them, supersede and persist WITHOUT yielding to
     // another submission from this user in between (C5): the guard reads state
@@ -1970,6 +1979,7 @@ export function createBitcoinRoutes(deps: {
           return settledResubmissionResponse(recorded);
         }
         if (recorded) preBroadcastStatus = recorded.status;
+        resubmittedWasSuperseded = recorded?.superseded === true;
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
@@ -2030,6 +2040,16 @@ export function createBitcoinRoutes(deps: {
         }
         if (current.length === 1) store.supersede(sub, current[0].commitTxId);
       }
+
+      // #874: this resubmission is about to become (or remain) the live
+      // record for the outpoint — any rival sharing it was just superseded
+      // (or is already gone) above. If THIS record itself was left
+      // `superseded: true` by an earlier round (a since-superseded/vanished
+      // rival had won in the meantime), clear that stale flag now so the
+      // outpoint doesn't end up with zero live records once this pair
+      // broadcasts. `store.create` below cannot do this — it is a no-op for
+      // an already-persisted commitTxId.
+      if (resubmittedWasSuperseded) store.reinstate(sub, commitTxId);
 
       // Every invariant held: this pair is about to spend a stranger's real
       // BTC, so it is on the record before it goes anywhere (R29).
