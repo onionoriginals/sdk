@@ -134,6 +134,17 @@ const error = (code: string, message: string): never => {
   throw new CelError("invalid", code, message);
 };
 
+// Codes the SDK's own shipped storage adapters throw when a configuration
+// mismatch makes the write deterministically impossible (e.g. LocalStorageAdapter's
+// originDomain guard), never a transient condition. Unlike an arbitrary custom
+// adapter's own StructuredError — whose transience this SDK cannot know, so it
+// stays wrapped as retryable below — retrying the identical prepared publication
+// against the same misconfigured first-party adapter can never succeed.
+const DETERMINISTIC_STORAGE_ERROR_CODES = new Set([
+  "STORAGE_DOMAIN_MISMATCH",
+  "STORAGE_PATH_TRAVERSAL",
+]);
+
 /** Hosted discovery with independently verified method and asset histories, using explicit storage. */
 export class HostedAssets {
   constructor(
@@ -336,14 +347,21 @@ export class HostedAssets {
       // error class it happens to be: the adapter contract places no
       // restriction on what putObject() may throw, so even a custom
       // adapter's own StructuredError for a transient condition must still
-      // be wrapped with the recoverable `details.publication`. Only this
-      // function's own deterministic checks (below) bypass that wrapping.
+      // be wrapped with the recoverable `details.publication`. This function's
+      // own deterministic checks (below), plus a known-deterministic code from
+      // one of the SDK's own shipped adapters (DETERMINISTIC_STORAGE_ERROR_CODES),
+      // are the only exceptions that bypass that wrapping.
       let url: string;
       try {
         url = await this.storage.putObject(domain, path, content, {
           contentType,
         });
       } catch (cause) {
+        if (
+          cause instanceof StructuredError &&
+          DETERMINISTIC_STORAGE_ERROR_CODES.has(cause.code)
+        )
+          throw cause;
         throw new StructuredError(
           "ASSET_WEB_PUBLISH_INCOMPLETE",
           "Hosted publication incomplete; retry this same prepared publication",

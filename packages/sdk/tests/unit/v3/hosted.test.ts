@@ -1,5 +1,8 @@
 import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { OriginalsSDK } from "../../../src/index.js";
 import { CelError, createLocalSigner, assetDigest } from "@originals/cel/v3";
 import { StructuredError } from "@originals/cel";
@@ -333,6 +336,45 @@ test("a wrong adapter-returned storage URL propagates as ASSET_STORAGE_URL, not 
   expect(failure).toBeInstanceOf(Error);
   expect((failure as { code?: string }).code).toBe("ASSET_STORAGE_URL");
   expect((failure as Error).message).not.toContain("retry this same");
+});
+
+// #903: LocalStorageAdapter's own STORAGE_DOMAIN_MISMATCH rejection is a
+// deterministic configuration error, not a transient storage round trip —
+// retrying the identical prepared publication against the same
+// originDomain-mismatched adapter can never succeed, so it must not carry
+// the retryable ASSET_WEB_PUBLISH_INCOMPLETE shape.
+test("LocalStorageAdapter's originDomain mismatch propagates as STORAGE_DOMAIN_MISMATCH, not a retryable publish failure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hosted-domain-mismatch-"));
+  const store = new LocalStorageAdapter({
+    baseDir: dir,
+    baseUrl: "https://correct.example.com",
+    originDomain: "correct.example.com",
+  });
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: "wrong.example.com" })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("STORAGE_DOMAIN_MISMATCH");
+  expect((failure as Error).message).not.toContain("retry this same");
+  expect(
+    (failure as { details?: { publication?: unknown } }).details?.publication,
+  ).toBeUndefined();
+
+  // Retrying the exact same prepared publication against the same
+  // misconfigured adapter fails identically, not just once.
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: "wrong.example.com",
+  });
+  const secondFailure = await sdk.lifecycle
+    .publishPreparedToWeb(prepared)
+    .catch((err) => err);
+  expect((secondFailure as { code?: string }).code).toBe(
+    "STORAGE_DOMAIN_MISMATCH",
+  );
 });
 
 test("publication refuses an omitted domain before invoking custody or storage", async () => {
