@@ -4,6 +4,7 @@ import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '@originals/cel';
+import { encodeWebVHPathSegment } from '@originals/cel/v3';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**
@@ -336,14 +337,18 @@ export class WebVHManager {
       services,
     } = options;
 
-    // Validate path segments before creating DID to prevent directory traversal
-    if (paths && paths.length > 0) {
-      for (const segment of paths) {
-        if (!this.isValidPathSegment(segment)) {
-          throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
-        }
+    // Validate path segments before creating DID to prevent directory traversal,
+    // then canonically percent-encode each one the same way CEL's parseAssetAlias
+    // requires when reading a did:webvh path segment back (issue #810). Passing
+    // an unencoded segment containing e.g. '!', '@', '+', or a space through
+    // verbatim mints a DID that fails CEL's allow-list on the very first
+    // publish, even though it passed isValidPathSegment's traversal check here.
+    const canonicalPaths = paths.map((segment) => {
+      if (!this.isValidPathSegment(segment)) {
+        throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
       }
-    }
+      return encodeWebVHPathSegment(segment);
+    });
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -488,7 +493,7 @@ export class WebVHManager {
         'https://www.w3.org/ns/did/v1',
         'https://w3id.org/security/multikey/v1'
       ],
-      paths,
+      paths: canonicalPaths,
       portable,
       authentication: [signingVmId],
       assertionMethod: [signingVmId],

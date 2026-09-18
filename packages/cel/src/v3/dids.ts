@@ -15,6 +15,32 @@ export type AssetAlias =
       methodBinding: "unverified";
     }
   | { layer: "btco"; did: string; network: BitcoinNetwork; sat: string };
+
+/**
+ * Canonically percent-encode a decoded WebVH path segment for the HTTPS log
+ * path spelling: `encodeURIComponent`, then force-escape the sub-delims
+ * `encodeURIComponent` itself leaves literal (`!'()*`). RFC 3986 leaves the
+ * unreserved `~` untouched, so this spelling does too.
+ */
+export function encodeWebVHHttpPathSegment(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  );
+}
+
+/**
+ * Canonically percent-encode a decoded WebVH path segment for the DID
+ * method-specific-id spelling. Same as {@link encodeWebVHHttpPathSegment}
+ * except DID Core's `idchar` excludes a literal `~`, so it must read back as
+ * `%7E`. Authoring code (e.g. `WebVHManager.createDIDWebVH`) uses this so a
+ * caller-supplied path segment survives a canonical did:webvh round-trip
+ * instead of failing {@link parseAssetAlias}'s allow-list on first publish.
+ */
+export function encodeWebVHPathSegment(value: string): string {
+  return encodeWebVHHttpPathSegment(value).replace(/~/g, "%7E");
+}
+
 /** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
  * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
  * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
@@ -153,11 +179,8 @@ export function parseAssetAlias(did: unknown): AssetAlias {
       "CEL_DID",
       "Invalid decoded WebVH path",
     );
-    const httpEncoded = encodeURIComponent(value).replace(
-      /[!'()*]/g,
-      (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
-    );
-    const didEncoded = httpEncoded.replace(/~/g, "%7E");
+    const httpEncoded = encodeWebVHHttpPathSegment(value);
+    const didEncoded = encodeWebVHPathSegment(value);
     requireThat(
       didEncoded === segment,
       "CEL_DID",
