@@ -5,6 +5,7 @@
  * ```typescript
  * import {
  *   createAuthMiddleware,
+ *   createOptionalAuthMiddleware,
  *   initiateEmailAuth,
  *   verifyEmailAuth,
  *   signToken,
@@ -48,7 +49,7 @@ export {
   getAuthCookieConfig,
   getClearAuthCookieConfig,
 } from './jwt.js';
-export { createAuthMiddleware } from './middleware.js';
+export { createAuthMiddleware, createOptionalAuthMiddleware } from './middleware.js';
 export {
   TurnkeyWebVHSigner,
   createTurnkeySigner,
