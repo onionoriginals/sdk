@@ -554,13 +554,23 @@ export function resolveSat(
     const known = new Set(
       snapshot.publications.map((p) => normalizeInscriptionId(p.id)),
     );
+    const reported = new Set(inscriptionIds.map(normalizeInscriptionId));
     if (inscriptionIds.some((id) => !known.has(normalizeInscriptionId(id))))
       return failure(
         "inconsistent-evidence",
         "Independent enumeration source reports an inscription absent from the primary snapshot",
       );
-    enumerationAssurance = "cross-checked";
-    enumerationSource = source;
+    // A strictly smaller independent list never "disagrees" with the primary,
+    // so without also requiring it to cover everything the primary knows, an
+    // empty (or partial) report — the honest, expected shape from a second
+    // index that legitimately has not indexed this far yet — would trivially
+    // earn full corroboration for having observed nothing at all. Only credit
+    // "cross-checked" when the independent source's report and the primary's
+    // are the same set, not merely when the independent's is a subset of it.
+    if ([...known].every((id) => reported.has(id))) {
+      enumerationAssurance = "cross-checked";
+      enumerationSource = source;
+    }
     if (ownership !== undefined) {
       if (
         !ownership ||

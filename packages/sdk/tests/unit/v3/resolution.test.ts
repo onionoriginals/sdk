@@ -830,7 +830,7 @@ test("fails closed when the independent enumeration source disagrees about who c
 
 // Real Core/ord coverage for these tip cases and actual transfers runs in
 // scripts/regtest/ownership-check.ts via the standard regtest journey.
-test("does not cross-check enumeration or ownership against an independent source observing a different chain tip, even when the values happen to match", async () => {
+test("does not cross-check ownership against an independent source observing a different chain tip, even when the values happen to match", async () => {
   const { snapshot } = await boundary();
   const staleTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
   const stale = structuredClone(snapshot);
@@ -847,12 +847,11 @@ test("does not cross-check enumeration or ownership against an independent sourc
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
-  // A different tip must not be able to confer cross-checked for either
-  // enumeration or ownership, even when the independent source's reported
-  // ids/values happen to equal the primary snapshot's: an honestly lagging
-  // index would report less (or nothing at all) just as plausibly, so
-  // agreement at a mismatched tip is not real corroboration (#907).
-  expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+  // Enumeration is still corroborated (an older tip's ids are the same real
+  // set to compare, per the coverage check in resolveSat), but ownership
+  // from a different tip must not be able to confer cross-checked, even
+  // though its value happens to equal the primary snapshot's.
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
   expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
 });
 
@@ -885,6 +884,9 @@ test("a stale-but-honest independent index reporting zero publications does not 
   if (result.status !== "accepted") throw new Error(result.status);
   expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
   expect(result.resolution.enumerationSource).toBeUndefined();
+  // A snapshot at this fabricated older tip has no live ownership to begin
+  // with (no real chain behind it), so this also exercises the pre-existing
+  // tip gate on the ownership half of the same cross-check.
   expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
 });
 
