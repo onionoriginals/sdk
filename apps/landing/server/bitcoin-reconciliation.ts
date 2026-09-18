@@ -216,7 +216,31 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       lookups++;
       cursors.superseded++;
       const st = await readStatus(r.commitTxId);
-      if (!st?.confirmed) continue;
+      if (!st) continue; // provider outage — preserve last observed state
+      if (!st.confirmed) {
+        // #777 — a superseded pair can still reach `status: 'confirmed'`
+        // before a rival reclaims its outpoint (`supersede()` only sets
+        // `superseded`; it never touches status or confirmation evidence).
+        // If a deeper reorg later invalidates THIS pair's own commit, this
+        // pass's own status lookup above is already the freshest negative
+        // evidence of that — demote instead of leaving the stale `confirmed`
+        // status (and the `settled: true` it implies) to report forever.
+        // Unlike the `liveUnconfirmed` demotion below (#677), this pair
+        // already lost the outpoint race: the write keeps `superseded: true`
+        // so a negative read here never reclaims or reinstates it, only
+        // clears its stale confirmation evidence.
+        if (current.status === 'confirmed') {
+          if (store.trySetStatus(sub, r.commitTxId, {
+            status: 'confirmed', retired: false, superseded: true,
+            confirmations: current.confirmations,
+            confirmedBlockHeight: current.confirmedBlockHeight,
+            confirmedBlockHash: current.confirmedBlockHash,
+          }, 'reveal_broadcast')) {
+            changed = true;
+          }
+        }
+        continue;
+      }
       // #758 — re-check after the status-lookup await: a concurrent pass (an
       // overlapping poll, or the background sweep) may already have retired
       // or un-superseded this record while this one was waiting on the
@@ -441,10 +465,19 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // transactions retained) or settled (recovery artifacts retired once
       // `confirmations` reaches the configured threshold). Absent for every
       // other status — depth/height are current-truth-while-confirmed only.
+      // #777: `settled` must track `retired` alone, matching the
+      // resubmission path's `settled: rec.retired === true` (bitcoin.ts).
+      // `reconcileRecords` spends a shared per-poll lookup budget rotated
+      // across categories, so a record whose on-disk `confirmations` already
+      // meets the threshold (from an earlier pass, or stale evidence) can
+      // have its `retire()` turn deferred to a later poll — reporting
+      // `settled: true` from the confirmations depth alone would disagree
+      // with `store.get(...).retired` (and the resubmission path) for that
+      // exact record while its recovery hex is still on disk.
       ...(r.status === 'confirmed'
         ? {
             confirmations: r.confirmations,
-            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            settled: r.retired === true,
             ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
             ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
           }
