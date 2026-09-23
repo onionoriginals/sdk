@@ -13,6 +13,7 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
+import { StructuredError } from '@originals/sdk';
 import { serializeCookie } from '../cookies';
 import { createBitcoinRoutes, isAlreadyKnownTxError, type OrdinalLookup } from '../bitcoin';
 import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
@@ -1443,6 +1444,29 @@ describe('isAlreadyKnownTxError', () => {
     expect(isAlreadyKnownTxError(new Error('socket connection already closed'))).toBe(false);
     expect(isAlreadyKnownTxError(new Error('429: rate limit already exceeded'))).toBe(false);
     expect(isAlreadyKnownTxError(new Error('request already aborted'))).toBe(false);
+  });
+
+  // Regression for #889: Bitcoin Core 28.0 rewrote RPC -27's message from
+  // "Transaction already in block chain" to "Transaction outputs already in
+  // utxo set" (bitcoin/bitcoin#30212). This repo's own regtest evidence runs
+  // Core 31.1, so the pre-28.0 string alone silently stopped matching.
+  test("matches Bitcoin Core >= 28.0's rewritten RPC -27 wording", () => {
+    expect(isAlreadyKnownTxError(new Error('Transaction outputs already in utxo set'))).toBe(true);
+    expect(isAlreadyKnownTxError(
+      new Error('QuickNodeProvider: sendrawtransaction RPC error: Transaction outputs already in utxo set')
+    )).toBe(true);
+  });
+
+  test('matches on the RPC -27 code even when the message wording is unrecognized', () => {
+    // A StructuredError carrying details.rpcCode === -27 (as QuickNodeProvider
+    // throws) must match regardless of the exact prose Core used, since that
+    // prose is not stable across Core versions.
+    expect(isAlreadyKnownTxError(
+      new StructuredError('QUICKNODE_RPC_ERROR', 'some future wording Core has never used before', { rpcCode: -27 })
+    )).toBe(true);
+    expect(isAlreadyKnownTxError(
+      new StructuredError('QUICKNODE_RPC_ERROR', 'bad-txns-inputs-missingorspent', { rpcCode: -25 })
+    )).toBe(false);
   });
 });
 
