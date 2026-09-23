@@ -430,11 +430,15 @@ export async function updateDIDOriginal(
   let did: string;
   if (result.did) {
     did = result.did;
-  } else if (result.log && result.log.length > 0) {
+  } else if (
+    result.log &&
+    result.log.length > 0 &&
+    (result.log[result.log.length - 1]?.state as unknown as DIDDocument | undefined)?.id
+  ) {
     // Extract DID from the document in the log
     const latestDoc = result.log[result.log.length - 1]?.state as unknown as
-      DIDDocument | undefined;
-    did = latestDoc?.id || "";
+      DIDDocument;
+    did = latestDoc.id;
   } else {
     throw new Error("Cannot determine DID from update result");
   }
