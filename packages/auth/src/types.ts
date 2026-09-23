@@ -74,6 +74,13 @@ export interface EmailAuthSession {
    * session is destroyed once the attempt budget is exhausted.
    */
   otpAttempts?: number;
+  /**
+   * Set synchronously while a `verifyEmailAuth` call for this session is
+   * in flight, so a concurrent call for the same `sessionId` is rejected
+   * before it can reach Turnkey's `verifyOtp` and consume part of the
+   * `MAX_OTP_ATTEMPTS` budget outside the reactive post-failure count.
+   */
+  verifying?: boolean;
 }
 
 /**

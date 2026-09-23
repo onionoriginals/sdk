@@ -44,6 +44,7 @@ export const AUTH_EMAIL_ERROR_CODES = {
   otpVerifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
   otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
   subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
+  otpVerifyInProgress: 'AUTH_OTP_VERIFY_IN_PROGRESS',
 } as const;
 
 /**
@@ -321,6 +322,24 @@ export async function verifyEmailAuth(
     );
   }
 
+  // Single-use-in-flight claim (#819): everything above this point runs
+  // synchronously with no intervening `await`, so whichever concurrent
+  // `verifyEmailAuth` call for this sessionId reaches here first observes
+  // `verifying: false` and claims it in the same synchronous step; every
+  // other concurrent call for the same session then sees `verifying: true`
+  // and is rejected here, before it can reach Turnkey's `verifyOtp` or
+  // consume part of the reactive `MAX_OTP_ATTEMPTS` budget below. Without
+  // this claim, a burst of concurrent guesses could all cross into
+  // Turnkey before any of them recorded a failed attempt.
+  if (session.verifying) {
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
+      'A verification attempt for this session is already in progress'
+    );
+  }
+  session.verifying = true;
+  storage.set(sessionId, session);
+
   console.log('[email-auth] Verifying OTP');
 
   // Encrypt the OTP code (plus a client public key) to the target encryption
@@ -342,6 +361,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
+    // Release the claim so a corrected retry isn't permanently blocked by
+    // its own prior in-flight guard.
+    session.verifying = false;
+    storage.set(sessionId, session);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed,
       `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`,
@@ -387,6 +410,11 @@ export async function verifyEmailAuth(
     // OTP window exhaust a legitimate user's budget and lock them out, even
     // though they never typed a wrong code (#747/#819).
     if (extractTurnkeyErrorCode(error) !== TURNKEY_GRPC_INVALID_ARGUMENT) {
+      // Release the claim: this failure carries no evidence about the
+      // code itself, so a retry (including a concurrent one already
+      // waiting) must be allowed to proceed.
+      session.verifying = false;
+      storage.set(sessionId, session);
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure,
         `OTP verification could not be completed: ${
@@ -408,6 +436,8 @@ export async function verifyEmailAuth(
       );
     }
     session.otpAttempts = attempts;
+    // Release the claim so a corrected retry can proceed.
+    session.verifying = false;
     storage.set(sessionId, session);
 
     throw new StructuredError(
@@ -447,6 +477,7 @@ export async function verifyEmailAuth(
 
   // Mark session as verified
   session.verified = true;
+  session.verifying = false;
   session.subOrgId = subOrgId;
   storage.set(sessionId, session);
 

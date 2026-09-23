@@ -793,6 +793,157 @@ describe('email-auth', () => {
         expect(storage.get(sessionId)).toBeUndefined();
       });
     });
+
+    describe('single-use in-flight verification claim (#819)', () => {
+      test('a burst of 15 concurrent guesses crosses into Turnkey at most once', async () => {
+        // MAX_OTP_ATTEMPTS was only ever charged reactively, after a
+        // verifyOtp rejection came back. A burst of concurrent guesses for
+        // the same session could all reach Turnkey before the first one's
+        // rejection was recorded, bypassing the local brute-force cap
+        // entirely. This gates verifyOtp behind a controllable promise so
+        // every concurrent call's synchronous claim check runs before any
+        // of them is allowed to resolve, proving the cap is enforced by the
+        // claim itself rather than by timing.
+        let verifyOtpCalls = 0;
+        let releaseTurnkey: (() => void) | undefined;
+        const turnkeyGate = new Promise<void>((resolve) => {
+          releaseTurnkey = resolve;
+        });
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(async () => {
+            verifyOtpCalls += 1;
+            await turnkeyGate;
+            throw turnkeyRejection('OTP code invalid');
+          }),
+        });
+        const sessionId = await setupSession(client);
+
+        const attempts = Array.from({ length: 15 }, (_, i) =>
+          verifyEmailAuth(
+            sessionId,
+            String(i).padStart(6, '0'),
+            client,
+            storage,
+            verifyOptions
+          ).catch((error) => error)
+        );
+        // Resolved unconditionally: whichever single call actually reaches
+        // verifyOtp will unblock once it awaits this gate, whether that
+        // happens before or after this line runs.
+        releaseTurnkey!();
+
+        const results = await Promise.all(attempts);
+
+        expect(verifyOtpCalls).toBe(1);
+
+        const inProgress = results.filter(
+          (r) =>
+            r instanceof StructuredError &&
+            r.code === AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress
+        );
+        const incorrect = results.filter(
+          (r) =>
+            r instanceof StructuredError && r.code === AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect
+        );
+
+        expect(incorrect.length).toBe(1);
+        expect(inProgress.length).toBe(14);
+        // Only the one call that actually crossed into Turnkey is charged
+        // against the budget; the 14 rejected-as-in-progress guesses never
+        // reached verifyOtp and never counted.
+        expect(storage.get(sessionId)!.otpAttempts).toBe(1);
+      });
+
+      test('the claim is released after a failed attempt, so a later attempt is not blocked as in-progress', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(turnkeyRejection('OTP code invalid'))),
+        });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        try {
+          await verifyEmailAuth(sessionId, '222222', client, storage, verifyOptions);
+          throw new Error('expected verifyEmailAuth to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect);
+        }
+      });
+
+      test('the claim is released after a transient failure, so a retry is not blocked as in-progress', async () => {
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => Promise.reject(new Error('fetch failed: ECONNRESET'))),
+        });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('OTP verification could not be completed');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        // The retry reaches Turnkey again (not rejected as in-progress).
+        const verifyOtp = client.apiClient().verifyOtp as ReturnType<typeof mock>;
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('OTP verification could not be completed');
+        expect(verifyOtp).toHaveBeenCalledTimes(2);
+      });
+
+      test('the claim is released after an encryption failure, so a corrected retry is not blocked as in-progress', async () => {
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token' }));
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        // No signer override: the bundle's signature is untrusted, so this
+        // fails during encryption, before Turnkey is ever called.
+        await expect(verifyEmailAuth(sessionId, '123456', client, storage)).rejects.toThrow(
+          'Failed to encrypt OTP code'
+        );
+        expect(verifyOtp).not.toHaveBeenCalled();
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        // A subsequent call (with the test signer override) is not blocked
+        // as in-progress by the failed call's claim.
+        const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+        expect(result.verified).toBe(true);
+      });
+
+      test('a concurrent call while verification is genuinely in flight is rejected as in-progress, not as a wrong code', async () => {
+        let releaseTurnkey: (() => void) | undefined;
+        const turnkeyGate = new Promise<{ verificationToken: string }>((resolve) => {
+          releaseTurnkey = () => resolve({ verificationToken: 'token_after_gate' });
+        });
+        const client = createMockTurnkeyClient({
+          verifyOtp: mock(() => turnkeyGate),
+        });
+        const sessionId = await setupSession(client);
+
+        const first = verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+        // The first call's synchronous claim has already run (no await
+        // before it), so this second, concurrent call for the same session
+        // observes `verifying: true` immediately.
+        try {
+          await verifyEmailAuth(sessionId, '654321', client, storage, verifyOptions);
+          throw new Error('expected the concurrent call to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(
+            AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress
+          );
+        }
+        // The rejected concurrent call never touched the attempt budget.
+        expect(storage.get(sessionId)!.otpAttempts).toBeUndefined();
+
+        releaseTurnkey!();
+        const result = await first;
+        expect(result.verified).toBe(true);
+      });
+    });
   });
 
   describe('isSessionVerified', () => {
