@@ -128,7 +128,8 @@ function assertBareUpdateKeysForPrerotation(
   if (!nextKeyHashes || nextKeyHashes.length === 0 || !updateKeys) return;
   const legacy = updateKeys.filter((k) => k !== normalizeUpdateKey(k));
   if (legacy.length > 0) {
-    throw new Error(
+    throw new StructuredError(
+      "WEBVH_PREROTATION_KEY_FORMAT",
       'Pre-rotation (nextKeyHashes) requires updateKeys in bare multikey form ("z6Mk..."), ' +
         `but got legacy did:key form: ${legacy.join(", ")}. nextKeyHashes commit to the exact ` +
         "updateKey string and cannot be normalized after hashing — pass bare multikeys and " +
@@ -181,7 +182,8 @@ export async function prepareDIDDataForSigning(
 
   // Runtime validation
   if (typeof prepareDataForSigning !== "function") {
-    throw new Error(
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
       "Failed to load didwebvh-ts: prepareDataForSigning is not a function",
     );
   }
@@ -213,7 +215,8 @@ export async function verifyDIDSignature(
   // secp256k1 key. Stripping one byte and verifying against the remainder
   // verified against garbage — reject instead of guessing (issue #352).
   if (publicKey.length !== 32) {
-    throw new Error(
+    throw new StructuredError(
+      "ED25519_INVALID_KEY_LENGTH",
       `Invalid Ed25519 public key length: ${publicKey.length} (expected 32 bytes)`,
     );
   }
@@ -245,7 +248,10 @@ export async function createOriginal(
       return createDIDOriginal(options);
     default:
       // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-      throw new Error(`Unsupported Original type: ${options.type}`);
+      throw new StructuredError(
+        "ORIGINAL_TYPE_UNSUPPORTED",
+        `Unsupported Original type: ${options.type}`,
+      );
   }
 }
 
@@ -276,7 +282,10 @@ export async function createDIDOriginal(
 
   // Runtime validation
   if (typeof createDID !== "function") {
-    throw new Error("Failed to load didwebvh-ts: createDID is not a function");
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
+      "Failed to load didwebvh-ts: createDID is not a function",
+    );
   }
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
@@ -350,7 +359,8 @@ export async function updateOriginal(
       return updateDIDOriginal(options);
     default: {
       const unsupported = options as unknown as { type: unknown };
-      throw new Error(
+      throw new StructuredError(
+        "ORIGINAL_TYPE_UNSUPPORTED",
         `Unsupported Original type: ${String(unsupported.type)}`,
       );
     }
@@ -381,7 +391,10 @@ export async function updateDIDOriginal(
 
   // Runtime validation
   if (typeof updateDID !== "function") {
-    throw new Error("Failed to load didwebvh-ts: updateDID is not a function");
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
+      "Failed to load didwebvh-ts: updateDID is not a function",
+    );
   }
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
@@ -436,7 +449,10 @@ export async function updateDIDOriginal(
       DIDDocument | undefined;
     did = latestDoc?.id || "";
   } else {
-    throw new Error("Cannot determine DID from update result");
+    throw new StructuredError(
+      "WEBVH_UPDATE_DID_UNRESOLVED",
+      "Cannot determine DID from update result",
+    );
   }
 
   return {
