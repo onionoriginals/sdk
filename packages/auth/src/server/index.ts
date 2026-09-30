@@ -48,6 +48,8 @@ export {
   verifyToken,
   getAuthCookieConfig,
   getClearAuthCookieConfig,
+  isAuthTokenCredentialError,
+  AUTH_JWT_ERROR_CODES,
 } from './jwt.js';
 export { createAuthMiddleware, createOptionalAuthMiddleware } from './middleware.js';
 export {

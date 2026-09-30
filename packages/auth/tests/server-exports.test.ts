@@ -14,4 +14,13 @@ describe('@originals/auth/server public exports', () => {
   test('createOptionalAuthMiddleware is reachable from the public entry point', () => {
     expect(typeof serverEntry.createOptionalAuthMiddleware).toBe('function');
   });
+
+  test('exports the typed JWT error helpers used to classify middleware failures (#729, #747)', () => {
+    expect(typeof serverEntry.isAuthTokenCredentialError).toBe('function');
+    expect(serverEntry.AUTH_JWT_ERROR_CODES.tokenInvalid).toBe('AUTH_TOKEN_INVALID');
+    expect(serverEntry.AUTH_JWT_ERROR_CODES.tokenExpired).toBe('AUTH_TOKEN_EXPIRED');
+    expect(serverEntry.AUTH_JWT_ERROR_CODES.tokenMissingSubject).toBe('AUTH_TOKEN_MISSING_SUBJECT');
+    expect(serverEntry.AUTH_JWT_ERROR_CODES.configMissingSecret).toBe('AUTH_JWT_CONFIG_SECRET_MISSING');
+    expect(serverEntry.AUTH_JWT_ERROR_CODES.configWeakSecret).toBe('AUTH_JWT_CONFIG_SECRET_WEAK');
+  });
 });

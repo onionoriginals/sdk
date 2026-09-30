@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { createAuthMiddleware, createOptionalAuthMiddleware } from '../src/server/middleware';
 import { signToken } from '../src/server/jwt';
+import { StructuredError } from '@originals/sdk';
 import type { Request, Response, NextFunction } from 'express';
 
 const TEST_SECRET = 'test-jwt-secret-that-is-long-enough-for-hs256';
@@ -211,6 +212,92 @@ describe('middleware', () => {
 
       expect(res._status).toBe(401);
     });
+
+    describe('operational/config failures are not reported as 401 (#729, #747)', () => {
+      test('propagates a getUserByTurnkeyId rejection via next(error) instead of a 401', async () => {
+        const token = signToken('sub_org_123', 'user@example.com', undefined, {
+          secret: TEST_SECRET,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+        const dbError = new Error('database unavailable');
+
+        const middleware = createAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.reject(dbError)),
+          jwtSecret: TEST_SECRET,
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect(res._status).toBe(0);
+        expect(next).toHaveBeenCalledWith(dbError);
+      });
+
+      test('propagates a createUser rejection via next(error) instead of a 401', async () => {
+        const token = signToken('sub_org_456', 'new@example.com', undefined, {
+          secret: TEST_SECRET,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+        const provisionError = new Error('failed to provision user');
+
+        const middleware = createAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.resolve(null)),
+          createUser: mock(() => Promise.reject(provisionError)),
+          jwtSecret: TEST_SECRET,
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect(res._status).toBe(0);
+        expect(next).toHaveBeenCalledWith(provisionError);
+      });
+
+      test('propagates a getUserByTurnkeyId rejection whose code collides with an AUTH_TOKEN_* code, not a 401 (Greptile)', async () => {
+        // A caller-supplied callback rejecting with a StructuredError whose
+        // `code` happens to match one of our own credential-error codes must
+        // still be treated as operational, since it never came from
+        // verifyToken() — classification is scoped by call site, not by
+        // matching `code` alone.
+        const token = signToken('sub_org_123', 'user@example.com', undefined, {
+          secret: TEST_SECRET,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+        const collidingError = new StructuredError('AUTH_TOKEN_EXPIRED', 'unrelated DB failure');
+
+        const middleware = createAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.reject(collidingError)),
+          jwtSecret: TEST_SECRET,
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect(res._status).toBe(0);
+        expect(next).toHaveBeenCalledWith(collidingError);
+      });
+
+      test('propagates a missing JWT secret config error via next(error) instead of a 401', async () => {
+        const req = createMockReq({ auth_token: 'irrelevant.token.value' });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+
+        const middleware = createAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.resolve(null)),
+          // No jwtSecret and no JWT_SECRET env var (cleared in beforeEach).
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect(res._status).toBe(0);
+        expect(next).toHaveBeenCalledTimes(1);
+        const [calledWith] = next.mock.calls[0] as [unknown];
+        expect((calledWith as { code?: string }).code).toBe('AUTH_JWT_CONFIG_SECRET_MISSING');
+      });
+    });
   });
 
   describe('createOptionalAuthMiddleware', () => {
@@ -318,6 +405,66 @@ describe('middleware', () => {
       await middleware(req, res, next as NextFunction);
 
       expect(next).toHaveBeenCalled();
+    });
+
+    describe('operational/config failures are not swallowed as anonymous (#729, #747)', () => {
+      test('propagates a getUserByTurnkeyId rejection via next(error) instead of continuing anonymously', async () => {
+        const token = signToken('sub_org_123', 'user@example.com', undefined, {
+          secret: TEST_SECRET,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+        const dbError = new Error('database unavailable');
+
+        const middleware = createOptionalAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.reject(dbError)),
+          jwtSecret: TEST_SECRET,
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect((req as any).user).toBeUndefined();
+        expect(next).toHaveBeenCalledWith(dbError);
+      });
+
+      test('propagates a getUserByTurnkeyId rejection whose code collides with an AUTH_TOKEN_* code, not anonymous continuation (Greptile)', async () => {
+        const token = signToken('sub_org_123', 'user@example.com', undefined, {
+          secret: TEST_SECRET,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+        const collidingError = new StructuredError('AUTH_TOKEN_INVALID', 'unrelated DB failure');
+
+        const middleware = createOptionalAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.reject(collidingError)),
+          jwtSecret: TEST_SECRET,
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect((req as any).user).toBeUndefined();
+        expect(next).toHaveBeenCalledWith(collidingError);
+      });
+
+      test('propagates a missing JWT secret config error via next(error) instead of continuing anonymously', async () => {
+        const req = createMockReq({ auth_token: 'irrelevant.token.value' });
+        const res = createMockRes();
+        const next = mock((_err?: unknown) => {});
+
+        const middleware = createOptionalAuthMiddleware({
+          getUserByTurnkeyId: mock(() => Promise.resolve(null)),
+          // No jwtSecret and no JWT_SECRET env var (cleared in beforeEach).
+        });
+
+        await middleware(req, res, next as NextFunction);
+
+        expect((req as any).user).toBeUndefined();
+        expect(next).toHaveBeenCalledTimes(1);
+        const [calledWith] = next.mock.calls[0] as [unknown];
+        expect((calledWith as { code?: string }).code).toBe('AUTH_JWT_CONFIG_SECRET_MISSING');
+      });
     });
   });
 });
