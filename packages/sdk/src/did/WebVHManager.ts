@@ -348,7 +348,7 @@ export class WebVHManager {
       for (const segment of paths) {
         if (!this.isValidPathSegment(segment)) {
           throw new StructuredError(
-            'WEBVH_INVALID_PATH_SEGMENT',
+            'WEBVH_PATH_SEGMENT_INVALID',
             `Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`
           );
         }
@@ -802,7 +802,7 @@ export class WebVHManager {
 
     // Validate the returned DID document
     if (!this.isDIDDocument(result.doc)) {
-      throw new StructuredError('WEBVH_INVALID_RESULT_DOCUMENT', 'Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     // Save the updated log if output directory is provided
@@ -1235,7 +1235,7 @@ export class WebVHManager {
     });
 
     if (!this.isDIDDocument(result.doc)) {
-      throw new StructuredError('WEBVH_INVALID_RESULT_DOCUMENT', 'Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     return { didDocument: result.doc, log: result.log };
@@ -1340,7 +1340,7 @@ export class WebVHManager {
     });
 
     if (!this.isDIDDocument(result.doc)) {
-      throw new StructuredError('WEBVH_INVALID_RESULT_DOCUMENT', 'Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     return { didDocument: result.doc, log: result.log };

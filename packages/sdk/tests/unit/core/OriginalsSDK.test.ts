@@ -223,7 +223,7 @@ describe('OriginalsSDK', () => {
         .rejects.toThrow('Invalid Ed25519 public key length: 16');
     });
 
-    test('throws StructuredError with code ED25519_INVALID_KEY_LENGTH for invalid public key length (#720)', async () => {
+    test('throws StructuredError with code ED25519_KEY_LENGTH_INVALID for invalid public key length (#720)', async () => {
       const signature = await signAsync(message, privateKey);
       const invalidKey = new Uint8Array(16);
       try {
@@ -231,7 +231,7 @@ describe('OriginalsSDK', () => {
         throw new Error('expected verifyDIDSignature to throw');
       } catch (e) {
         expect(e).toBeInstanceOf(StructuredError);
-        expect((e as StructuredError).code).toBe('ED25519_INVALID_KEY_LENGTH');
+        expect((e as StructuredError).code).toBe('ED25519_KEY_LENGTH_INVALID');
       }
     });
 
@@ -391,7 +391,7 @@ describe('OriginalsSDK', () => {
       })).rejects.toThrow(/bare multikey form/);
     });
 
-    test('createDIDOriginal legacy-updateKeys-with-nextKeyHashes rejection is a StructuredError WEBVH_PREROTATION_KEY_FORMAT (#720)', async () => {
+    test('createDIDOriginal legacy-updateKeys-with-nextKeyHashes rejection is a StructuredError WEBVH_PREROTATION_KEY_FORMAT_INVALID (#720)', async () => {
       const { makeSigner } = await makeSignerFactory();
       const active = await makeSigner();
 
@@ -410,7 +410,7 @@ describe('OriginalsSDK', () => {
         throw new Error('expected createDIDOriginal to throw');
       } catch (e) {
         expect(e).toBeInstanceOf(StructuredError);
-        expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_KEY_FORMAT');
+        expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_KEY_FORMAT_INVALID');
       }
     });
 

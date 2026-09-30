@@ -170,7 +170,7 @@ describe('DIDManager.createDIDWebVH path-segment validation (delegated to WebVHM
       throw new Error('expected createDIDWebVH to throw');
     } catch (err) {
       expect(err).toBeInstanceOf(StructuredError);
-      expect((err as StructuredError).code).toBe('WEBVH_INVALID_PATH_SEGMENT');
+      expect((err as StructuredError).code).toBe('WEBVH_PATH_SEGMENT_INVALID');
     }
   }, 15000);
 });

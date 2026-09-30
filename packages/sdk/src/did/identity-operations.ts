@@ -129,7 +129,7 @@ function assertBareUpdateKeysForPrerotation(
   const legacy = updateKeys.filter((k) => k !== normalizeUpdateKey(k));
   if (legacy.length > 0) {
     throw new StructuredError(
-      "WEBVH_PREROTATION_KEY_FORMAT",
+      "WEBVH_PREROTATION_KEY_FORMAT_INVALID",
       'Pre-rotation (nextKeyHashes) requires updateKeys in bare multikey form ("z6Mk..."), ' +
         `but got legacy did:key form: ${legacy.join(", ")}. nextKeyHashes commit to the exact ` +
         "updateKey string and cannot be normalized after hashing — pass bare multikeys and " +
@@ -216,7 +216,7 @@ export async function verifyDIDSignature(
   // verified against garbage — reject instead of guessing (issue #352).
   if (publicKey.length !== 32) {
     throw new StructuredError(
-      "ED25519_INVALID_KEY_LENGTH",
+      "ED25519_KEY_LENGTH_INVALID",
       `Invalid Ed25519 public key length: ${publicKey.length} (expected 32 bytes)`,
     );
   }
