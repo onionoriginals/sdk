@@ -1,8 +1,32 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { WebVHManager } from '../../../src/did/WebVHManager';
+import { WebVHManager, isValidWebVHPathSegment } from '../../../src/did/WebVHManager';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+describe('isValidWebVHPathSegment (#826)', () => {
+  test.each(['custom', 'slug', 'a-b_c.d'])(
+    'accepts a well-formed segment (%j)',
+    (segment) => {
+      expect(isValidWebVHPathSegment(segment)).toBe(true);
+    },
+  );
+
+  test.each(['', '.', '..', 'a/b', 'a\\b', '/abs', 'C:\\windows'])(
+    'rejects a malformed/invalid string segment (%j)',
+    (segment) => {
+      expect(isValidWebVHPathSegment(segment)).toBe(false);
+    },
+  );
+
+  test('rejects non-string segment types', () => {
+    expect(isValidWebVHPathSegment(123)).toBe(false);
+    expect(isValidWebVHPathSegment(null)).toBe(false);
+    expect(isValidWebVHPathSegment(undefined)).toBe(false);
+    expect(isValidWebVHPathSegment({})).toBe(false);
+    expect(isValidWebVHPathSegment([])).toBe(false);
+  });
+});
 
 describe('WebVHManager', () => {
   let manager: WebVHManager;

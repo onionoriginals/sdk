@@ -17,7 +17,7 @@ import {
   type CelDocument,
   type CelSigner,
 } from "@originals/cel/v3";
-import { WebVHManager } from "../did/WebVHManager.js";
+import { WebVHManager, isValidWebVHPathSegment } from "../did/WebVHManager.js";
 import { Ed25519Verifier } from "../did/Ed25519Verifier.js";
 import { validateAndNormalizeDomain } from "../lifecycle/domainUtils.js";
 import type { DIDDocument } from "../types/did.js";
@@ -167,6 +167,15 @@ export class HostedAssets {
         err instanceof Error ? err.message : "Invalid WebVH domain",
       );
     }
+    if (
+      options.paths !== undefined &&
+      (!Array.isArray(options.paths) ||
+        options.paths.some((segment) => !isValidWebVHPathSegment(segment)))
+    )
+      return error(
+        "ASSET_WEBVH_PATH",
+        "Supply paths as an array of valid WebVH path segments",
+      );
     if (
       !["cel", "webvh"].includes(asset.state.layer) ||
       (asset.state.layer === "cel" && !asset.state.active) ||
