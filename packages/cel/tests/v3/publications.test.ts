@@ -445,14 +445,43 @@ test("rejects a non-string independent enumeration source label", () => {
   expect(result.status).toBe("incomplete");
 });
 
-test("a fewer-inscriptions independent source still cross-checks (it just corroborates less)", () => {
+// #907: a strictly smaller independent report never contains anything
+// "absent from the primary snapshot" — that check alone is trivially
+// satisfied by an empty list, which is exactly the honest, expected shape
+// from a second index that legitimately has not indexed this far yet. That
+// must not be able to earn "cross-checked" for corroborating nothing; the
+// independent source must report the primary's full known set to be
+// credited with actually having cross-checked it.
+test("a fewer-inscriptions independent source does not cross-check (it corroborated less than everything)", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
     independentEnumeration: { source: "lagging-index", inscriptionIds: [] },
   });
   expect(result.status).toBe("accepted");
-  if (result.status === "accepted")
-    expect(result.enumerationAssurance).toBe("cross-checked");
+  if (result.status === "accepted") {
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+    expect(result.enumerationSource).toBeUndefined();
+  }
+});
+
+test("a partially-covering independent source (missing one of several known ids) does not cross-check", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "holder-can-publish-controller-authorized-bytes",
+  )!;
+  const snapshot = observations(scenario);
+  const knownIds = snapshot.publications.map((p) => p.id);
+  expect(knownIds.length).toBeGreaterThan(1);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "lagging-index",
+      inscriptionIds: knownIds.slice(1),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+    expect(result.enumerationSource).toBeUndefined();
+  }
 });
 
 test("fails closed when an independent source reports an inscription the primary snapshot omitted", () => {
