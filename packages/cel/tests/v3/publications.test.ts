@@ -1417,6 +1417,89 @@ test("resolveSat reports unsupported-capability when a genuinely controller-sign
   expect(result.reason).toBe("CEL_DATA_REFERENCE");
 });
 
+// #888: CEL_WEBVH_IDNA can only be thrown from inside apply()'s migrate handling, after
+// verifyEntry/CEL_CHAIN/CEL_AUTHORITY have run — but with no `prefix` (no boundary selected
+// yet), `expectedController` falls back to the candidate's own self-declared `create`
+// controller, so those checks only prove the candidate is internally self-consistent, not
+// that it is authorized by this sat's real Original. An unrelated party's own self-signed
+// history — not a boundary, and not extending anything, since no boundary exists yet — must
+// remain exactly as ignorable as any other invalid pre-boundary candidate, never able to
+// permanently poison resolution of the real Original once it happens to be inscribed first.
+test("resolveSat ignores a stranger's self-signed webvh migration with an invalid IDNA domain that predates any accepted boundary, rather than blocking resolution (#888)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log: boundaryLog, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+
+  const stranger = createLocalSigner("Ed25519", new Uint8Array(32).fill(9));
+  const strangerGenesis = await signEvent(
+    {
+      operation: {
+        type: "create",
+        data: {
+          profile: "originals/cel/3",
+          controller: stranger.controller,
+          createdAt: "2026-09-11T00:00:00Z",
+          nonce: createNonce(),
+          resources: [],
+        },
+      },
+    },
+    stranger,
+  );
+  const strangerInitial = verifyHistory({ log: [strangerGenesis] });
+  const strangerMigrate = await signEvent(
+    {
+      previousEvent: strangerInitial.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: strangerInitial.state.assetId,
+          to: `did:webvh:${scid}:xn--e1afmkfd.example:378`,
+          layer: "webvh",
+          migratedAt: "2026-09-11T00:00:01Z",
+        },
+      },
+    },
+    stranger,
+  );
+  const strangerPublication: SatSnapshot["publications"][number] = {
+    id: "a".repeat(64) + "i0",
+    revealTxid: "a".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: {
+      height: 199,
+      blockHash: "9".repeat(64),
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [strangerGenesis, strangerMigrate] }, "json"),
+      metadata: null,
+    },
+  };
+  const genuinePublication = publicationAt(boundaryLog, resourceA, "text/plain");
+  const result = resolveSat({
+    ...emptySnapshot(),
+    blocks: [
+      { height: 199, hash: "9".repeat(64), txids: ["a".repeat(64)] },
+      ...emptySnapshot().blocks,
+    ],
+    publications: [strangerPublication, genuinePublication],
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "a".repeat(64) + "i0",
+    code: "CEL_WEBVH_IDNA",
+  });
+});
+
 // previousLog is always ignorable, even when its wrapped log is genuinely signed by the
 // current controller: unlike dataReference (embedded inside the signed operation) or
 // CEL_WEBVH_IDNA (reachable only after full signature authentication), the previousLog
