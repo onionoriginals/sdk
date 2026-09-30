@@ -20,9 +20,10 @@ export type AssetAlias =
  * Canonically percent-encode a decoded WebVH path segment for the HTTPS log
  * path spelling: `encodeURIComponent`, then force-escape the sub-delims
  * `encodeURIComponent` itself leaves literal (`!'()*`). RFC 3986 leaves the
- * unreserved `~` untouched, so this spelling does too.
+ * unreserved `~` untouched, so this spelling does too. Module-private: the
+ * DID spelling below is the only one authoring code needs.
  */
-export function encodeWebVHHttpPathSegment(value: string): string {
+function encodeWebVHHttpPathSegment(value: string): string {
   return encodeURIComponent(value).replace(
     /[!'()*]/g,
     (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
@@ -31,11 +32,13 @@ export function encodeWebVHHttpPathSegment(value: string): string {
 
 /**
  * Canonically percent-encode a decoded WebVH path segment for the DID
- * method-specific-id spelling. Same as {@link encodeWebVHHttpPathSegment}
- * except DID Core's `idchar` excludes a literal `~`, so it must read back as
- * `%7E`. Authoring code (e.g. `WebVHManager.createDIDWebVH`) uses this so a
- * caller-supplied path segment survives a canonical did:webvh round-trip
- * instead of failing {@link parseAssetAlias}'s allow-list on first publish.
+ * method-specific-id spelling: the HTTPS spelling above, except DID Core's
+ * `idchar` excludes a literal `~`, so it must read back as `%7E`. Authoring
+ * code (e.g. `WebVHManager.createDIDWebVH`) uses this so a caller-supplied
+ * DECODED path segment survives a canonical did:webvh round-trip instead of
+ * failing {@link parseAssetAlias}'s allow-list on first publish. Input is
+ * always the decoded segment: a pre-encoded `hello%21world` is encoded again
+ * (`hello%2521world`).
  */
 export function encodeWebVHPathSegment(value: string): string {
   return encodeWebVHHttpPathSegment(value).replace(/~/g, "%7E");
