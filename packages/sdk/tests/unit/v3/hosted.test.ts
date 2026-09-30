@@ -994,6 +994,27 @@ test.each([".", "..", "a/b", "a\\b", "/abs"])(
   },
 );
 
+test("publishToWeb rejects paths: ['.well-known'] with ASSET_WEBVH_PATH_RESERVED (collides with the no-path default)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: [".well-known"],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH_RESERVED");
+  // Nothing was written where the default publication would live.
+  expect(await store.getObject("example.com", ".well-known/did.jsonl")).toBeNull();
+});
+
 test("publishToWeb rejects a non-array paths value instead of silently minting a per-character path (#826)", async () => {
   const store = storage();
   const sdk = OriginalsSDK.create({ signer, storageAdapter: store });

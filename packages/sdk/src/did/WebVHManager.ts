@@ -23,6 +23,17 @@ async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeo
 }
 
 /**
+ * True when a `paths` array would host its log where the no-path default
+ * already lives: `[".well-known", ...]` resolves under `/.well-known/`, so
+ * `[".well-known"]` and `[]` both name `/.well-known/did.jsonl`. Reserved at
+ * every authoring seam so two DIDs never share one log file.
+ */
+export function isReservedWebVHPath(paths: readonly unknown[] | undefined): boolean {
+  const first = paths?.[0];
+  return typeof first === 'string' && first.toLowerCase() === '.well-known';
+}
+
+/**
  * Validates a WebVH path segment to prevent directory traversal and reject
  * non-string input. Shared by `WebVHManager.createDIDWebVH` and any public
  * seam (e.g. `HostedAssets.prepare`) that needs to validate a caller-supplied
@@ -388,6 +399,12 @@ export class WebVHManager {
       }
       return encodeWebVHPathSegment(segment);
     });
+    if (isReservedWebVHPath(paths)) {
+      throw new StructuredError(
+        'WEBVH_PATH_RESERVED',
+        'The .well-known path segment is reserved: paths: [".well-known"] would host its log at /.well-known/did.jsonl, the same location as paths: []. Omit paths to publish there.'
+      );
+    }
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {

@@ -175,6 +175,31 @@ describe('DIDManager.createDIDWebVH path-segment validation (delegated to WebVHM
   }, 15000);
 });
 
+describe('WebVHManager.createDIDWebVH reserves the .well-known path', () => {
+  // paths: ['.well-known'] and paths: [] both resolve to
+  // https://<domain>/.well-known/did.jsonl — two DIDs must never share one log.
+  test.each([['.well-known'], ['.WELL-KNOWN'], ['.well-known', 'x']])(
+    'paths %j throws WEBVH_PATH_RESERVED',
+    async (...paths) => {
+      const manager = new WebVHManager();
+      try {
+        await manager.createDIDWebVH({ domain: 'example.com', paths });
+        throw new Error('expected createDIDWebVH to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(StructuredError);
+        expect((err as StructuredError).code).toBe('WEBVH_PATH_RESERVED');
+      }
+    },
+    15000,
+  );
+
+  test('a segment merely containing .well-known is not reserved', async () => {
+    const manager = new WebVHManager();
+    const result = await manager.createDIDWebVH({ domain: 'example.com', paths: ['x', '.well-known'] });
+    expect(result.did).toContain(':x:.well-known');
+  }, 15000);
+});
+
 describe('WebVHManager.createDIDWebVH externalSigner validation (#711)', () => {
   test('prerotation with externalSigner throws WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED', async () => {
     const km = new KeyManager();
