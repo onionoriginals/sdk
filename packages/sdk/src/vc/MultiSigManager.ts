@@ -18,7 +18,7 @@ import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager, type DataIntegrityProof } from './cryptosuites/eddsa.js';
-import { multikey } from '@originals/cel';
+import { multikey, StructuredError } from '@originals/cel';
 import { describeMultiSigProofFailure } from './multiSigProofFormat.js';
 
 /**
@@ -598,12 +598,17 @@ export class MultiSigManager {
     try {
       keyType = multikey.decodePrivateKey(privateKeyMultibase).type;
     } catch (e) {
-      throw new Error(
+      // Same public-seam contract as LifecycleManager/CredentialManager's
+      // INVALID_KEY: a caller catching by .code must see the same code for
+      // the same underlying failure (a malformed multibase private key).
+      throw new StructuredError(
+        'INVALID_KEY',
         `Multi-sig signer key for ${verificationMethod} is not a valid Multikey private key: ${(e as Error).message}`
       );
     }
     if (keyType !== 'Ed25519') {
-      throw new Error(
+      throw new StructuredError(
+        'MULTISIG_ED25519_REQUIRED',
         `Multi-sig signing requires an Ed25519 signer key; the key for ${verificationMethod} is ${keyType}. ` +
         `eddsa-rdfc-2022 is the only Data Integrity cryptosuite implemented (no ECDSA suite yet — see issue #306).`
       );
