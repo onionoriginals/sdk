@@ -44,6 +44,8 @@ export const AUTH_EMAIL_ERROR_CODES = {
   otpVerifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
   otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
   subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
+  sessionAlreadyVerified: 'AUTH_SESSION_ALREADY_VERIFIED',
+  otpVerifyInProgress: 'AUTH_OTP_VERIFY_IN_PROGRESS',
 } as const;
 
 /**
@@ -71,6 +73,31 @@ export interface SessionStorage {
   set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
   delete(sessionId: string): void | Promise<void>;
   cleanup(): void | Promise<void>;
+  /**
+   * Optional atomic verification claim, used by {@link verifyEmailAuth} to
+   * close its single-use/concurrency guard (#710, #819) across multiple
+   * processes sharing one store.
+   *
+   * Implementations backed by shared storage (Redis, a database) SHOULD
+   * provide this, backed by a real conditional write — e.g. a Redis
+   * `WATCH`/`MULTI` or Lua script, or a SQL `UPDATE ... WHERE verifying =
+   * false AND verified = false`. It must atomically check that the session
+   * exists and is neither `verified` nor already `verifying`, and if so mark
+   * it `verifying: true` in that same operation, returning `true` only to
+   * the one caller that won the claim.
+   *
+   * `get`/`set` alone cannot do this safely for a shared store: two
+   * processes can each call `get`, both observe `verifying: false`, and both
+   * then `set` — there is no atomicity between the two calls. May return a
+   * `Promise` for stores that require network I/O.
+   *
+   * When omitted, {@link verifyEmailAuth} falls back to a plain
+   * get-then-set claim that is only safe for a synchronous, in-process store
+   * whose `get` returns the live session object — the default
+   * {@link createInMemorySessionStorage} implements the claim anyway. An
+   * async store (any `get` that returns a `Promise`) MUST implement this.
+   */
+  claimForVerification?(sessionId: string): boolean | Promise<boolean>;
 }
 
 /**
@@ -79,7 +106,11 @@ export interface SessionStorage {
  * **Production warning**: This store is ephemeral — sessions are lost on
  * process restart and are not shared across multiple instances. For
  * production deployments, pass a persistent {@link SessionStorage}
- * implementation backed by Redis, a database, or another shared store.
+ * implementation backed by Redis, a database, or another shared store, and
+ * implement {@link SessionStorage.claimForVerification} on it so
+ * {@link verifyEmailAuth}'s single-use guard stays atomic across instances —
+ * without it, two instances racing on the same session can both pass the
+ * guard.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -106,6 +137,17 @@ export function createInMemorySessionStorage(): SessionStorage {
     },
     delete: (sessionId: string) => {
       sessions.delete(sessionId);
+    },
+    // Trivially atomic: this store is a single process's Map, and every
+    // operation here runs synchronously with no intervening `await`.
+    claimForVerification: (sessionId: string) => {
+      const session = sessions.get(sessionId);
+      if (!session || session.verified || session.verifying) {
+        return false;
+      }
+      session.verifying = true;
+      sessions.set(sessionId, session);
+      return true;
     },
     cleanup: () => {
       clearInterval(cleanupInterval);
@@ -281,6 +323,12 @@ export interface VerifyEmailAuthOptions {
  * Failed verification attempts are counted per session; after
  * {@link MAX_OTP_ATTEMPTS} failures the session is destroyed and the user
  * must request a new code.
+ *
+ * A session claim (#710, #819) rejects a second call on an already-verified
+ * session and serializes concurrent calls racing the same unverified
+ * session, so at most one guess per session is ever in flight to Turnkey at
+ * a time — a burst of concurrent wrong-code guesses cannot race past
+ * {@link MAX_OTP_ATTEMPTS}.
  */
 export async function verifyEmailAuth(
   sessionId: string,
@@ -330,6 +378,55 @@ export async function verifyEmailAuth(
     );
   }
 
+  // Single-use / concurrency guard (#710, #819): claim the session before
+  // doing anything else that could be replayed or raced. Without
+  // `claimForVerification`, the fallback below flips `verifying` on the
+  // session object synchronously (before its own `await storage.set`), which
+  // is only atomic for a sync in-process store whose `get` hands back the
+  // live object; the default store implements the claim, and any async or
+  // shared store must implement it with a real conditional write.
+  if (storage.claimForVerification) {
+    const claimed = await storage.claimForVerification(sessionId);
+    if (!claimed) {
+      // Re-fetch for a precise error: the rejected claim alone doesn't say
+      // *why* — the session could since have been deleted (expiry cleanup,
+      // or an exhausted-attempts destroy racing us), not just already
+      // verified or already in progress.
+      const current = await storage.get(sessionId);
+      if (!current) {
+        throw new StructuredError(
+          AUTH_EMAIL_ERROR_CODES.sessionInvalid,
+          'Invalid or expired session'
+        );
+      }
+      if (current.verified) {
+        throw new StructuredError(
+          AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified,
+          'This session has already been verified. Please log in or request a new code.'
+        );
+      }
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
+        'A verification is already in progress for this session. Please wait for it to complete.'
+      );
+    }
+  } else {
+    if (session.verified) {
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified,
+        'This session has already been verified. Please log in or request a new code.'
+      );
+    }
+    if (session.verifying) {
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
+        'A verification is already in progress for this session. Please wait for it to complete.'
+      );
+    }
+    session.verifying = true;
+    await storage.set(sessionId, session);
+  }
+
   console.log('[email-auth] Verifying OTP');
 
   // Encrypt the OTP code (plus a client public key) to the target encryption
@@ -351,6 +448,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
+    // Release the claim: this attempt never reached Turnkey, so the session
+    // is still eligible for a retry.
+    session.verifying = false;
+    await storage.set(sessionId, session);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed,
       `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`,
@@ -396,6 +497,10 @@ export async function verifyEmailAuth(
     // OTP window exhaust a legitimate user's budget and lock them out, even
     // though they never typed a wrong code (#747/#819).
     if (extractTurnkeyErrorCode(error) !== TURNKEY_GRPC_INVALID_ARGUMENT) {
+      // Release the claim: a transient failure never evaluated the code, so
+      // the session remains eligible for the same code to be resubmitted.
+      session.verifying = false;
+      await storage.set(sessionId, session);
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure,
         `OTP verification could not be completed: ${
@@ -417,6 +522,8 @@ export async function verifyEmailAuth(
       );
     }
     session.otpAttempts = attempts;
+    // Release the claim so a corrected code can be retried.
+    session.verifying = false;
     await storage.set(sessionId, session);
 
     throw new StructuredError(
@@ -456,6 +563,7 @@ export async function verifyEmailAuth(
 
   // Mark session as verified
   session.verified = true;
+  session.verifying = false;
   session.subOrgId = subOrgId;
   await storage.set(sessionId, session);
 
