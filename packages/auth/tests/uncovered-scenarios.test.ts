@@ -377,7 +377,7 @@ describe('[AUTH-012] In-memory storage auto-cleanup interval', () => {
     expect(storage.get('session_b')).toBeUndefined();
   });
 
-  test('lazy eviction of expired sessions works via getSession() from email-auth', () => {
+  test('lazy eviction of expired sessions works via getSession() from email-auth', async () => {
     // getSession() (not storage.get()) performs lazy eviction on access.
     // Verify that an expired session is evicted and undefined is returned.
     const { getSession } = require('../src/server/email-auth');
@@ -393,7 +393,7 @@ describe('[AUTH-012] In-memory storage auto-cleanup interval', () => {
     expect(storage.get('expired_id')).toBeDefined();
 
     // getSession() enforces expiry and removes the session
-    const result = getSession('expired_id', storage);
+    const result = await getSession('expired_id', storage);
     expect(result).toBeUndefined();
     // Session is now gone from the underlying store too
     expect(storage.get('expired_id')).toBeUndefined();

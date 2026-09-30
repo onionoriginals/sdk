@@ -162,12 +162,17 @@ const result = await initiateEmailAuth(email, turnkey, redisStorage);
 
 ### Session Storage Interface
 
+Every method may return synchronously or return a `Promise` — the server
+module `await`s the result either way, so a network-backed store like
+`createRedisSessionStorage` above can implement `get`/`set` as real async
+Redis calls.
+
 ```typescript
 interface SessionStorage {
-  get(sessionId: string): EmailAuthSession | undefined;
-  set(sessionId: string, session: EmailAuthSession): void;
-  delete(sessionId: string): void;
-  cleanup(): void;
+  get(sessionId: string): EmailAuthSession | undefined | Promise<EmailAuthSession | undefined>;
+  set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
+  delete(sessionId: string): void | Promise<void>;
+  cleanup(): void | Promise<void>;
 }
 ```
 
