@@ -199,10 +199,14 @@ export async function buildUserWebVHDid(
     // Identity key ONLY: `updateKeys` is authority over the DID log itself,
     // which the per-Original authorship key must never hold.
     updateKeys: [signer.getVerificationMethodId()],
+    // `controller` is intentionally omitted: didwebvh-ts fills it in with the
+    // DID being minted, since the DID isn't known until creation completes
+    // (issue #804). An empty string here would be baked into the document
+    // verbatim instead.
     verificationMethods: [
-      { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase },
+      { id: '#key-0', type: 'Multikey', publicKeyMultibase },
       ...(authorship
-        ? [{ id: '#key-1', type: 'Multikey' as const, controller: '', publicKeyMultibase: authorship }]
+        ? [{ id: '#key-1', type: 'Multikey' as const, publicKeyMultibase: authorship }]
         : []),
     ],
     paths: [opts.slug],

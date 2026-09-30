@@ -169,17 +169,19 @@ export async function createDIDWithTurnkey(params: {
     signer,
     verifier: signer,
     updateKeys: [signer.getVerificationMethodId()],
+    // `controller` is intentionally omitted: didwebvh-ts fills it in with the
+    // DID being minted, since the DID isn't known until creation completes
+    // (issue #804). An empty string here would be baked into the document
+    // verbatim instead.
     verificationMethods: [
       {
         id: '#key-0',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: authKeyPublic,
       },
       {
         id: '#key-1',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: assertionKeyPublic,
       },
     ],

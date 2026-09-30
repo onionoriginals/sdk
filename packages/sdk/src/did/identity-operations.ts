@@ -50,6 +50,17 @@ export interface OriginalResult {
   meta: DIDResolutionMeta;
 }
 
+/**
+ * A verification method as supplied to createDIDOriginal/updateDIDOriginal.
+ * `controller` may be omitted: didwebvh-ts fills it in with the DID being
+ * minted/updated. The returned DIDDocument's VerificationMethod.controller
+ * remains required — this input shape only relaxes what a caller must
+ * already know before the DID exists (issue #804).
+ */
+export type VerificationMethodInput = Omit<VerificationMethod, "controller"> & {
+  controller?: string;
+};
+
 // DID-based Original creation options
 export interface CreateDIDOriginalOptions {
   type: "did";
@@ -64,7 +75,7 @@ export interface CreateDIDOriginalOptions {
    * legacy-form updateKeys with pre-rotation is rejected (see nextKeyHashes).
    */
   updateKeys: string[];
-  verificationMethods: VerificationMethod[];
+  verificationMethods: VerificationMethodInput[];
   paths?: string[];
   controller?: string;
   context?: string | string[] | object | object[];
@@ -92,7 +103,7 @@ export interface UpdateDIDOriginalOptions {
   verifier?: ExternalVerifier;
   /** Same format rules as {@link CreateDIDOriginalOptions.updateKeys}. */
   updateKeys?: string[];
-  verificationMethods?: VerificationMethod[];
+  verificationMethods?: VerificationMethodInput[];
   services?: ServiceEndpoint[];
   controller?: string;
   context?: string | string[] | object | object[];
