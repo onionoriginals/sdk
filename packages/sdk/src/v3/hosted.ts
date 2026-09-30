@@ -19,6 +19,7 @@ import {
 } from "@originals/cel/v3";
 import { WebVHManager } from "../did/WebVHManager.js";
 import { Ed25519Verifier } from "../did/Ed25519Verifier.js";
+import { validateAndNormalizeDomain } from "../lifecycle/domainUtils.js";
 import type { DIDDocument } from "../types/did.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
@@ -160,6 +161,21 @@ export class HostedAssets {
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",
       );
+    // Canonicalize (trim + lowercase + host/port validation) once, up front,
+    // and use this value for both DID construction and any binding
+    // comparison below. Comparing/minting from the caller's raw string let a
+    // mixed-case domain fail deep inside CEL history verification with a
+    // confusing CEL_DID error (#722) and let a differently-cased republish
+    // reject a same-host domain outright (#761).
+    let domain: string;
+    try {
+      domain = validateAndNormalizeDomain(options.domain);
+    } catch (err) {
+      return error(
+        "INVALID_DOMAIN",
+        err instanceof Error ? err.message : "Invalid WebVH domain",
+      );
+    }
     for (const resource of asset.resources)
       if (!resource.content)
         return error(
@@ -177,13 +193,13 @@ export class HostedAssets {
     const envelope = asset.serialize();
     const state = verifyHistory(envelope.eventLog).state;
     if (state.layer === "webvh") {
-      const { domain, prefix } = location(state.alias);
-      if (domain !== options.domain || options.paths)
+      const { domain: existingDomain, prefix } = location(state.alias);
+      if (existingDomain !== domain || options.paths)
         return error(
           "ASSET_WEBVH_BINDING",
           "An existing hosted identity keeps its permanent domain and path",
         );
-      const method = await this.storage.getObject(domain, prefix + "did.jsonl");
+      const method = await this.storage.getObject(existingDomain, prefix + "did.jsonl");
       if (!method)
         return error(
           "ASSET_WEB_UNAVAILABLE",
@@ -213,7 +229,7 @@ export class HostedAssets {
     const key = methodSigner.controller.slice(8);
     const { prepareDataForSigning } = await import("didwebvh-ts");
     const web = await new WebVHManager().createDIDWebVH({
-      domain: options.domain,
+      domain,
       paths,
       alsoKnownAs: [asset.id],
       externalSigner: {

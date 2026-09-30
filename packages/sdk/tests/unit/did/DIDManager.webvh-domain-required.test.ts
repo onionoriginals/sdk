@@ -71,6 +71,38 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
     expect(result.did).toMatch(/^did:webvh:/);
     expect(result.did).toContain('example.com');
   }, 15000);
+
+  // #764: a padded-but-nonblank domain must not mint a DID with embedded
+  // whitespace — requireWebVHDomain now canonicalizes (trim/lowercase) via
+  // validateAndNormalizeDomain rather than only checking for blank input.
+  test('a padded domain is trimmed rather than minting whitespace into the DID (#764)', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    const result = await manager.createDIDWebVH({ domain: '  example.com  ', paths: ['user', 'alice'] });
+    expect(result.did).toContain(':example.com:');
+    expect(result.did).not.toContain(' ');
+  }, 15000);
+
+  // #722: a mixed-case domain is a valid hostname and must be normalized,
+  // not merely accepted verbatim (which would later fail deep in CEL history
+  // verification instead of at this seam).
+  test('a mixed-case domain is lowercased rather than passed through verbatim (#722)', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    const result = await manager.createDIDWebVH({ domain: 'Example.COM', paths: ['user', 'alice'] });
+    expect(result.did).toContain(':example.com:');
+    expect(result.did).not.toContain('Example.COM');
+  }, 15000);
+
+  test('a malformed nonblank domain fails at this seam with a domain-specific error', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    let thrown: unknown;
+    try {
+      await manager.createDIDWebVH({ domain: 'not a domain', paths: ['user', 'alice'] });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(StructuredError);
+    expect((thrown as StructuredError).code).toBe('INVALID_DOMAIN');
+  });
 });
 
 describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
@@ -104,6 +136,17 @@ describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('custom.example.com');
     expect(webDoc.id).not.toContain('pichu.originals.build');
+  }, 15000);
+
+  // #764/#722: migrateToDIDWebVH already trimmed/lowercased its own domain
+  // (it is not affected by the underlying bug), but it now shares the exact
+  // validateAndNormalizeDomain primitive instead of a hand-rolled duplicate.
+  test('a padded, mixed-case domain is canonicalized rather than embedding whitespace', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc(), '  Custom.Example.COM  ')).didDocument;
+    expect(webDoc.id).toContain(':custom.example.com:');
+    expect(webDoc.id).not.toContain(' ');
+    expect(webDoc.id).not.toContain('Custom.Example.COM');
   }, 15000);
 });
 
