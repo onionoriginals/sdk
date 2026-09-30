@@ -34,7 +34,7 @@ export interface OriginalsSDKOptions
   extends
     Omit<
       Partial<ManagerConfig>,
-      "signer" | "onAppendFailure" | "inscribeConfirm" | "storageAdapter"
+      "signer" | "onAppendFailure" | "inscribeConfirm" | "storageAdapter" | "keyStore"
     >,
     LocalConfig {
   satProvider?: SatProvider;
@@ -79,6 +79,14 @@ export class OriginalsSDK {
 
   constructor(options: OriginalsSDKOptions = {}) {
     const input = record(options);
+    // `keyStore` was accepted on the default SDK but read by nothing it wires
+    // (only the legacy lifecycle ever used it), so a caller relying on it for
+    // custody minted assets it could not sign. Removed in 4.0; use `signer`.
+    requireAsset(
+      !Object.prototype.hasOwnProperty.call(input, "keyStore"),
+      "SDK_OPTION_REMOVED",
+      "keyStore was removed from the default SDK; pass { signer } for custody",
+    );
     fields(
       input,
       [],
@@ -87,7 +95,6 @@ export class OriginalsSDK {
         "chainValidator",
         "signer",
         "onAppendFailure",
-        "keyStore",
         "network",
         "bitcoinRpcUrl",
         "defaultKeyType",
