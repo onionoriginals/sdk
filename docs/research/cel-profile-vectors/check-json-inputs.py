@@ -14,6 +14,14 @@ def unique_members(pairs):
 def check(value):
     if isinstance(value, str):
         value.encode('utf-8', errors='strict')
+    elif type(value) is int:
+        # json.loads parses a plain integer literal as an exact, arbitrary
+        # precision Python int with no fraction/exponent, unlike JS Number();
+        # mirror the production parser's binary64 exactness check so this
+        # oracle rejects the same out-of-range literals (see #727).
+        as_double = float(value)
+        if not math.isfinite(as_double) or int(as_double) != value:
+            raise ValueError('integer literal not exactly representable in binary64')
     elif isinstance(value, float) and not math.isfinite(value):
         raise ValueError('nonfinite number')
     elif isinstance(value, dict):

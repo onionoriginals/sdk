@@ -36,6 +36,26 @@
       "expected": "rejected"
     },
     {
+      "id": "exact-large-integer",
+      "source": "{\"x\":2305843009213693952}",
+      "expected": "accepted"
+    },
+    {
+      "id": "inexact-large-integer",
+      "source": "{\"x\":9007199254740993}",
+      "expected": "rejected"
+    },
+    {
+      "id": "large-exponent-float-exempt-from-integer-exactness",
+      "source": "{\"x\":1E30}",
+      "expected": "accepted"
+    },
+    {
+      "id": "ordinary-fraction-rounds-without-rejection",
+      "source": "{\"x\":0.1}",
+      "expected": "accepted"
+    },
+    {
       "id": "multiple-json-documents",
       "source": "{}{}",
       "expected": "rejected"

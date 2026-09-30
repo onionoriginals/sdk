@@ -20,6 +20,34 @@ for (const vector of inputs.cbor)
     else expect(() => decodeValue(bytes, "cbor")).toThrow();
   });
 
+test("JSON parsing rejects an integer literal that isn't exactly representable in binary64, like CBOR does", () => {
+  // 2 ** 61, exactly representable, accepted identically to the CBOR vector.
+  expect(decodeValue('{"a":2305843009213693952}', "json")).toEqual({
+    a: 2305843009213693952,
+  });
+  // One past 2 ** 61, still round-trips through Number() to the same double
+  // as the exact value above, so it must be rejected rather than silently
+  // rounded to a different wire document's value.
+  expect(() => decodeValue('{"a":2305843009213693953}', "json")).toThrow();
+  // 2 ** 53 + 1: the smallest inexact integer, must reject just like CBOR's
+  // "inexact-large-integer" vector rejects the equivalent CBOR encoding.
+  expect(() => decodeValue('{"a":9007199254740993}', "json")).toThrow();
+  // Ordinary fractional values still round through IEEE 754 division as
+  // before; this is not an integer literal and must not be rejected.
+  expect(decodeValue('{"a":0.1}', "json")).toEqual({ a: 0.1 });
+  // A number written with an exponent is not a plain decimal integer
+  // literal, so it is exempt from the exactness check, matching RFC 8785
+  // JCS number handling (e.g. the "rfc8785-number-format" known answer,
+  // which accepts 1E30 without exact-representability enforcement).
+  expect(decodeValue('{"a":1e30}', "json")).toEqual({ a: 1e30 });
+});
+
+test("mutating a signed wire document's exact integer to an inexact one is rejected before it can canonicalize identically", () => {
+  const exact = decodeValue('{"a":9007199254740992}', "json");
+  expect(canonicalizeValue(exact)).toBe('{"a":9007199254740992}');
+  expect(() => decodeValue('{"a":9007199254740993}', "json")).toThrow();
+});
+
 test("deterministic CBOR uses integers for exact integral binary64 values beyond the safe range", () => {
   expect(Buffer.from(encodeValue({ a: 2 ** 61 }, "cbor")).toString("hex")).toBe(
     "a161611b2000000000000000",
