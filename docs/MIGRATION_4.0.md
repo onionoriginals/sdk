@@ -141,11 +141,125 @@ inscription content/media type against a validating Bitcoin node). The
 accepted result's `enumerationAssurance`, `ownershipAssurance`, and
 `contentAssurance` read `"cross-checked"` only when the corresponding source
 was configured and agreed; otherwise `"provider-asserted"`, unchanged from
-today. `trajectoryAssurance` is always `"not-independently-derived"` —
+today. For enumeration, "agreed" means the independent index's reported ids
+fully cover the primary snapshot's known publications for that sat, not
+merely that it reported nothing extra (#909): an index that is honestly
+behind the primary leaves assurance at `"provider-asserted"` for that round
+without failing resolution. `trajectoryAssurance` is always `"not-independently-derived"` —
 `ownership` remains a point-in-time snapshot, never a derivation of the
 sat's historical transfer path. See
 [docs/release/4.0.0-public-api.md](release/4.0.0-public-api.md) for the full
 export list.
+
+## Validation failures are typed errors with stable codes
+
+Caller-input validation at the public DID, credential and hosted-publication
+seams used to throw a bare `Error`. It now throws `StructuredError` (from
+`@originals/sdk`) with a stable `.code` on the identity/credential utilities
+(`createDIDWebVH`, `updateDIDWebVH`, `rotateDIDWebVHKeys`, `createDIDOriginal`,
+`updateDIDOriginal`, `signCredential`, `signCredentialMultiSig`), and the
+existing `CelError` `invalid` contract on `publishToWeb`. Message text is
+unchanged, so `toThrow(/Invalid path segment/)`-style assertions keep passing;
+prefer branching on `.code`. `updateDIDOriginal` also now throws
+`WEBVH_UPDATE_DID_UNRESOLVED` where it used to return `did: ""`.
+
+The full table is in
+[docs/release/4.0.0-public-api.md](release/4.0.0-public-api.md#changed-validation-failures-throw-structurederror-with-stable-codes-786-828-914-756).
+Codes follow `NAMESPACE_NOUN_STATE` (`WEBVH_UPDATE_KEY_INVALID`,
+`WEBVH_PATH_SEGMENT_INVALID`, `WEBVH_RESULT_DOCUMENT_INVALID`,
+`ED25519_KEY_LENGTH_INVALID`); no pre-release spelling of these codes
+(`WEBVH_INVALID_PATH_SEGMENT`, `WEBVH_UPDATE_KEY_INVALID_MULTIKEY`) shipped.
+
+## did:webvh domains are canonicalized; `paths` are decoded segments
+
+Every authoring seam (`createDIDWebVH`, `migrateToDIDWebVH`,
+`createDIDOriginal`/`updateDIDOriginal`, `publishToWeb`) now trims and
+lower-cases the supplied domain and validates it as a host before minting a
+DID or comparing it against an existing hosted binding. `Example.COM` and
+`example.com` are one host on republish, and a string that is not a host
+fails at the seam with `INVALID_DOMAIN` instead of surfacing later as
+`CEL_DID`. If you stored the raw string you passed, compare against the
+canonical form (`URL#host`) or re-read the DID.
+
+`paths` values are the decoded, human-readable segments. The SDK validates
+each one (`ASSET_WEBVH_PATH` / `WEBVH_PATH_SEGMENT_INVALID`) and then
+percent-encodes it into the DID the way `parseAssetAlias` reads it back —
+`hello world` → `hello%20world`, `~` → `%7E`. Do not pre-encode: a segment
+supplied as `hello%21world` is encoded again (`hello%2521world`). The encoder
+is exported as `encodeWebVHPathSegment` from `@originals/sdk/cel`. A first
+segment of `.well-known` is reserved (`WEBVH_PATH_RESERVED` /
+`ASSET_WEBVH_PATH_RESERVED`) because it would share `/.well-known/did.jsonl`
+with the no-path default. A republish that names the same decoded `paths` as
+the original publication is accepted (previously any explicit `paths` on
+republish failed `ASSET_WEBVH_BINDING`).
+
+## `keyStore` is removed from the default SDK options
+
+`OriginalsSDK.create({ keyStore })` now throws `SDK_OPTION_REMOVED`. The
+option was accepted and validated but nothing the default SDK wires read it,
+so custody configured this way minted assets that could not be signed.
+Configure a `CelSigner` via `signer` (`createLocalSigner(...)` or your own
+custody) instead; `KeyStore` and `signerFromKeyStore` remain exported for the
+retained legacy lifecycle only.
+
+## `@originals/auth` 4.0.0
+
+- **`SessionStorage` is async-capable.** `get`/`set`/`delete`/`cleanup` may
+  return a `Promise`, and the package awaits them. `isSessionVerified`,
+  `getSession` and `cleanupSession` are now `async`: add `await` at every call
+  site or you will receive a `Promise` where you had a value.
+  `createInMemorySessionStorage` is unaffected.
+- **`verifyEmailAuth` claims the session first.** A replay on a verified
+  session fails `AUTH_SESSION_ALREADY_VERIFIED`; a concurrent call on the same
+  unverified session fails `AUTH_OTP_VERIFY_IN_PROGRESS`. A shared,
+  multi-instance store — and any store whose `get` returns a `Promise` — must
+  implement the new optional `SessionStorage.claimForVerification(sessionId)`
+  with a conditional write so the claim is atomic across processes.
+- **JWT failures are classified.** `verifyToken` throws `StructuredError` with
+  `AUTH_TOKEN_INVALID` / `AUTH_TOKEN_EXPIRED` / `AUTH_TOKEN_MISSING_SUBJECT`
+  (bad token) or `AUTH_JWT_CONFIG_SECRET_MISSING` /
+  `AUTH_JWT_CONFIG_SECRET_WEAK` (misconfigured server). `createAuthMiddleware`
+  and `createOptionalAuthMiddleware` forward config failures and
+  `getUserByTurnkeyId`/`createUser` rejections to `next(error)`; a bad token
+  still answers 401 (or continues anonymously). Register an Express error
+  handler if you did not have one. `isAuthTokenCredentialError` distinguishes
+  the two classes.
+- `TurnkeyDIDSigner.getVerificationMethodId()` now returns
+  `did:key:{mb}#{mb}`; credentials signed through it verify.
+- `createDIDWithTurnkey` no longer writes `controller: ''` into verification
+  methods; new DID documents carry the DID itself.
+
+## Coming from 3.0.0-next.x or 2.x
+
+The 3.0.0-next pre-releases and 2.x used the previous-format lifecycle. If
+you are upgrading from one of those rather than from 3.0.0, the CEL 3 asset
+API differs in these ways; a consumer moving from 3.0.0-next.1 hit each one:
+
+1. **Custody is an explicit `CelSigner`.** Creation without a configured or
+   per-call `signer` fails `NO_CUSTODY`. `keyStore` never selected an asset
+   controller on the CEL 3 SDK and is now rejected outright (above); there is
+   no `controller: 'ephemeral'` option — every asset has a real controller
+   from genesis.
+2. **Resources are `{ id, mediaType, content, url? }`.** `content` is
+   `Uint8Array` or a UTF-8 string; the SDK computes digests. Later versions
+   come from `asset.addResourceVersion(id, bytes, mediaType)`, never from a
+   caller-supplied version number.
+3. **The envelope is version 4** — `{ format: 'originals/asset', version: 4,
+   assetId, eventLog: { log: [...] }, resources, unverified? }`. Read the log
+   through `asset.celLog.log` / `envelope.eventLog.log`, not a top-level
+   array.
+4. **Mutations return a `MutationResult`** — `{ status: 'signed', head }`, or
+   `{ status: 'skipped', reason: 'NO_SIGNING_KEY', localResourceId? }` under an
+   explicit `onAppendFailure: 'skip'`. Nothing returns the mutated asset;
+   read `asset.state` afterwards.
+5. **Pre-CEL-3 logs are not readable by the default SDK.** `loadAsset`
+   accepts version-3 and version-4 envelopes carrying `originals/cel/3`
+   history only; a 2.x / 3.0.0-next log has no supported upgrade path. Mint a
+   new genesis with the CEL 3 SDK (a new asset identity) and keep the old
+   archive for provenance; `@originals/cel/legacy` exists to read or verify
+   the old format, not to convert it.
+6. **Identity is `ni:///sha-256;…`**, not `did:cel:` — see the top of this
+   guide.
 
 ## Previous-format CEL writers move to `@originals/cel/legacy`
 
