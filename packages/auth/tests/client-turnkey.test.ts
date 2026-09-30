@@ -87,6 +87,52 @@ describe('client/turnkey-client', () => {
       ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
     });
 
+    // REGRESSION (#800): `code: 16` must be an exact structural match, not a
+    // serialized-text substring/prefix — `160`/`1601` are unrelated codes
+    // (e.g. RESOURCE_EXHAUSTED-shaped) and must propagate unchanged.
+    test('does not misclassify code 160 as expiry (numeric prefix of 16)', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: 160, message: 'quota exceeded, not an auth issue' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    test('does not misclassify code 1601 as expiry (numeric prefix of 16)', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: 1601, message: 'unrelated failure' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    test('does not misclassify a stringified code "160" as expiry', async () => {
+      const onExpired = mock(() => {});
+      const nonExpiryError = { code: '160', message: 'quota exceeded' };
+      await expect(
+        withTokenExpiration(() => Promise.reject(nonExpiryError), onExpired)
+      ).rejects.toBe(nonExpiryError);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    // Control: an exact code 16 nested in the cause chain (distinct from the
+    // top-level cause-chain test below, which uses a differently-shaped
+    // wrapper) is still detected once the prefix match is gone.
+    test('still detects an exact code 16 nested under an unrelated-coded wrapper', async () => {
+      const original = Object.assign(new Error('unauthenticated'), { code: 16 });
+      const wrapped = Object.assign(new Error('request failed'), {
+        code: 160, // the wrapper itself carries an unrelated numeric-prefix code
+        cause: original,
+      });
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(wrapped), onExpired)
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+      expect(onExpired).toHaveBeenCalledTimes(1);
+    });
+
     test('calls onExpired callback for expired keys', async () => {
       const onExpired = mock(() => {});
       const expiredError = { code: 'api_key_expired' };
@@ -132,6 +178,56 @@ describe('client/turnkey-client', () => {
       const b = new Error('other failure', { cause: a });
       (a as Error & { cause?: unknown }).cause = b;
       await expect(withTokenExpiration(() => Promise.reject(b))).rejects.toBe(b);
+    });
+
+    // REGRESSION (#696): a plain (non-Error) circular-shaped rejection — the
+    // common shape for a wrapped fetch error — must still be classified by
+    // its `.message`, not lost when JSON.stringify throws on the cycle.
+    test('detects expiry from a circular plain-object rejection via its message', async () => {
+      const circularExpired: Record<string, unknown> = {
+        code: 5,
+        message: 'api_key_expired',
+      };
+      circularExpired.self = circularExpired;
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(circularExpired), onExpired)
+      ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+      expect(onExpired).toHaveBeenCalledTimes(1);
+    });
+
+    test('propagates a circular plain-object non-expiry rejection unchanged', async () => {
+      const circularOther: Record<string, unknown> = {
+        code: 5,
+        message: 'some turnkey failure',
+      };
+      circularOther.self = circularOther;
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(circularOther), onExpired)
+      ).rejects.toBe(circularOther);
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    // REGRESSION (#696 follow-up): a rejection whose `message` accessor
+    // itself throws (a throwing getter or Proxy trap) must not escape
+    // collectErrorText's classification — that would recreate the exact
+    // error-masking bug this change removes, just via a different property.
+    test('propagates the original rejection when reading its `message` throws', async () => {
+      const throwingMessage = {
+        code: 5,
+        get message(): string {
+          throw new Error('message getter exploded');
+        },
+      };
+
+      const onExpired = mock(() => {});
+      await expect(
+        withTokenExpiration(() => Promise.reject(throwingMessage), onExpired)
+      ).rejects.toBe(throwingMessage);
+      expect(onExpired).not.toHaveBeenCalled();
     });
   });
 
