@@ -1,4 +1,4 @@
-import type { SatSnapshot } from '@originals/cel/v3';
+import { normalizeTxid, type SatSnapshot } from '@originals/cel/v3';
 import { StructuredError } from '@originals/cel';
 import { base64 } from '@scure/base';
 import { readResponseBodyCapped } from '../adapters/response-body-limit.js';
@@ -36,6 +36,12 @@ const positive = (value: number | undefined, fallback: number) =>
   value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : fallback;
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+// Block/tx hashes carry no casing contract of their own: Bitcoin Core's RPC
+// and a configured SatProvider can each report the same hash in different,
+// individually valid hex letter case (see #844). Normalize both sides with
+// the same rule used for txid comparisons elsewhere before comparing, so
+// agreeing evidence in different casing isn't treated as a disagreement.
+const hex = (value: unknown): string => (typeof value === 'string' ? normalizeTxid(value) : String(value));
 
 /**
  * Cross-check active tip, block hashes and complete ordered transaction lists with
@@ -80,16 +86,16 @@ export function createBitcoinCoreChainValidator(options: BitcoinCoreChainValidat
     const checkTip = async (tip: SatSnapshot['tipBefore']) => {
       const info = object(await rpc('getblockchaininfo', []));
       if (!tip || typeof info.chain !== 'string' || networks[info.chain] !== snapshot.network ||
-          info.blocks !== tip.height || info.bestblockhash !== tip.hash) throw disagreement();
+          info.blocks !== tip.height || hex(info.bestblockhash) !== hex(tip.hash)) throw disagreement();
     };
     const validate = async () => {
       await checkTip(snapshot.tipBefore);
       for (const block of snapshot.blocks) {
         const hash = await rpc('getblockhash', [block.height]);
-        if (hash !== block.hash) throw disagreement();
+        if (hex(hash) !== hex(block.hash)) throw disagreement();
         const observed = object(await rpc('getblock', [hash, 1]));
-        if (observed.hash !== block.hash || observed.height !== block.height || !Array.isArray(observed.tx) ||
-            observed.tx.length !== block.txids.length || observed.tx.some((id, i) => id !== block.txids[i])) throw disagreement();
+        if (hex(observed.hash) !== hex(block.hash) || observed.height !== block.height || !Array.isArray(observed.tx) ||
+            observed.tx.length !== block.txids.length || observed.tx.some((id, i) => hex(id) !== hex(block.txids[i]))) throw disagreement();
       }
       await checkTip(snapshot.tipAfter);
       return { source: endpoint.origin };
