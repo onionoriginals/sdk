@@ -213,7 +213,14 @@ export class AssetResolver {
           ) as SatResolution,
         };
       let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
-      if (this.chainValidator) {
+      // A snapshot whose own tipBefore/tipAfter disagree already reports a chain
+      // movement mid-observation: resolveSat below classifies that as the ordinary,
+      // bounded-retry "chain-changed" status with no validator involved. Consulting
+      // the validator anyway re-checks the (already-stale) tipBefore against the
+      // node's current tip, which a real independent validator legitimately rejects
+      // as a disagreement — turning this benign, self-healing race into a hard
+      // "incomplete" failure instead of the documented retry.
+      if (this.chainValidator && sameChainTip(snapshot.tipBefore, snapshot.tipAfter)) {
         // The validator is selected by application configuration, never by snapshot
         // fields or an advertised provider method. A detached copy protects the
         // exact view subsequently resolved from mutation during asynchronous checks.
