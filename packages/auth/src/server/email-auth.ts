@@ -89,7 +89,8 @@ export interface SessionStorage {
    * `get`/`set` alone cannot do this safely for a shared store: two
    * processes can each call `get`, both observe `verifying: false`, and both
    * then `set` — there is no atomicity between the two calls. May return a
-   * `Promise` for stores that require network I/O.
+   * `Promise` for stores that require network I/O. After a successful claim,
+   * {@link verifyEmailAuth} re-reads the session, so `get` may return a copy.
    *
    * When omitted, {@link verifyEmailAuth} falls back to a plain
    * get-then-set claim that is only safe for a synchronous, in-process store
@@ -338,7 +339,7 @@ export async function verifyEmailAuth(
   options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = await storage.get(sessionId);
+  let session = await storage.get(sessionId);
 
   if (!session) {
     throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
@@ -350,20 +351,6 @@ export async function verifyEmailAuth(
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.sessionExpired,
       'Session expired. Please request a new code.'
-    );
-  }
-
-  if (!session.otpId) {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
-      'OTP ID not found in session'
-    );
-  }
-
-  if (!session.otpEncryptionTargetBundle) {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
-      'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
 
@@ -410,6 +397,19 @@ export async function verifyEmailAuth(
         'A verification is already in progress for this session. Please wait for it to complete.'
       );
     }
+    // Reload under the claim: the pre-claim read may predate a racing call's persisted otpAttempts.
+    const fresh = await storage.get(sessionId);
+    if (!fresh) {
+      throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
+    }
+    if (Date.now() - fresh.timestamp > SESSION_TIMEOUT) {
+      await storage.delete(sessionId);
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.sessionExpired,
+        'Session expired. Please request a new code.'
+      );
+    }
+    session = fresh;
   } else {
     if (session.verified) {
       throw new StructuredError(
@@ -425,6 +425,23 @@ export async function verifyEmailAuth(
     }
     session.verifying = true;
     await storage.set(sessionId, session);
+  }
+
+  // Checked on the claimed snapshot; a session missing these can never verify.
+  if (!session.otpId) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
+      'OTP ID not found in session'
+    );
+  }
+
+  if (!session.otpEncryptionTargetBundle) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
+      'OTP encryption target bundle not found in session. Please request a new code.'
+    );
   }
 
   console.log('[email-auth] Verifying OTP');
