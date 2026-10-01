@@ -164,6 +164,55 @@ test("publishToWeb still rejects a republish naming a different host as ASSET_WE
   expect((thrown as CelError).code).toBe("ASSET_WEBVH_BINDING");
 });
 
+test.each([
+  ["example.com:443", ":example.com:"],
+  ["example.com:08080", ":example.com%3A8080:"],
+])(
+  "publishToWeb republishes with the same explicit port spelling (%j) and mints the URL#host DID",
+  async (domain, didHost) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    const first = await sdk.lifecycle.publishToWeb(asset, { domain });
+    expect(first.did).toContain(didHost);
+    await first.asset.addResourceVersion("art", new Uint8Array([2]), "image/png");
+    const second = await sdk.lifecycle.publishToWeb(first.asset, { domain });
+    expect(second.did).toBe(first.did);
+    const loaded = await sdk.lifecycle.resolveAssetFromWeb(second.did);
+    expect(loaded.verification.verified).toBe(true);
+  },
+);
+
+test.each(["localhost:3000", "localhost", "127.0.0.1", "10.0.0.1:8080"])(
+  "publishToWeb rejects non-DNS host %j at the seam with INVALID_DOMAIN and writes nothing",
+  async (domain) => {
+    const inner = storage();
+    let writes = 0;
+    const store: StorageAdapter = {
+      ...inner,
+      putObject: (...args) => {
+        writes++;
+        return inner.putObject(...args);
+      },
+    };
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, { domain });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("INVALID_DOMAIN");
+    expect(writes).toBe(0);
+  },
+);
+
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),
     sdk = OriginalsSDK.create({ signer, storageAdapter: store });

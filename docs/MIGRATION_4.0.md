@@ -173,13 +173,30 @@ Codes follow `NAMESPACE_NOUN_STATE` (`WEBVH_UPDATE_KEY_INVALID`,
 ## did:webvh domains are canonicalized; `paths` are decoded segments
 
 Every authoring seam (`createDIDWebVH`, `migrateToDIDWebVH`,
-`createDIDOriginal`/`updateDIDOriginal`, `publishToWeb`) now trims and
-lower-cases the supplied domain and validates it as a host before minting a
-DID or comparing it against an existing hosted binding. `Example.COM` and
-`example.com` are one host on republish, and a string that is not a host
-fails at the seam with `INVALID_DOMAIN` instead of surfacing later as
-`CEL_DID`. If you stored the raw string you passed, compare against the
-canonical form (`URL#host`) or re-read the DID.
+`createDIDOriginal`/`updateDIDOriginal`, `publishToWeb`) now passes the
+supplied domain through CEL's `canonicalizeWebVHDomain` (exported from
+`@originals/sdk/cel`) before minting a DID or comparing it against an existing
+hosted binding. It trims, lower-cases and returns the `URL#host` spelling: the
+default `:443` is dropped and port leading zeros are removed, so
+`example.com:443` mints the same portless DID as `example.com` and republishing
+with `example.com:443` or `example.com:08080` matches the first publication.
+`Example.COM` and `example.com` are one host on republish. Rejections happen at
+the seam, before signing:
+
+- Asset publication (`publishToWeb`) needs a fully qualified DNS host[:port].
+  `localhost`, IP addresses, single-label hosts and malformed ports fail
+  `INVALID_DOMAIN`; punycode/Unicode hosts fail `CEL_WEBVH_IDNA` (status
+  `unsupported`), all as `CelError`.
+- Identity seams also admit `localhost[:port]` for development. **Single-label
+  hosts (`intranet`, `web:3000`) and IP addresses are now rejected by
+  `createDIDWebVH`, `createDIDOriginal` and `updateDIDOriginal`** with
+  `INVALID_DOMAIN` (IPs always failed there, uncoded, inside didwebvh-ts);
+  punycode hosts fail `CEL_WEBVH_IDNA`. These are `CelError`s, which extend
+  `StructuredError`; a blank domain still throws `StructuredError`
+  `WEBVH_DOMAIN_REQUIRED`.
+
+If you stored the raw string you passed, compare against the canonical form
+(`URL#host`) or re-read the DID.
 
 `paths` values are the decoded, human-readable segments, checked by one CEL
 rule at every authoring seam (`createDIDWebVH`, `migrateToDIDWebVH`,

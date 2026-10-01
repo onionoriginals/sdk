@@ -10,6 +10,7 @@ import {
   parseAssetAlias,
   assetDigest,
   canonicalWebVHPaths,
+  canonicalizeWebVHDomain,
   sameAssetIdentity,
   parseDocument,
   signEvent,
@@ -20,7 +21,6 @@ import {
 } from "@originals/cel/v3";
 import { WebVHManager } from "../did/WebVHManager.js";
 import { Ed25519Verifier } from "../did/Ed25519Verifier.js";
-import { validateAndNormalizeDomain } from "../lifecycle/domainUtils.js";
 import type { DIDDocument } from "../types/did.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import { OriginalsAsset } from "./OriginalsAsset.js";
@@ -180,21 +180,8 @@ export class HostedAssets {
         "WEBVH_DOMAIN_REQUIRED",
         "Supply the permanent WebVH domain",
       );
-    // Canonicalize (trim + lowercase + host/port validation) once, up front,
-    // and use this value for both DID construction and any binding
-    // comparison below. Comparing/minting from the caller's raw string let a
-    // mixed-case domain fail deep inside CEL history verification with a
-    // confusing CEL_DID error (#722) and let a differently-cased republish
-    // reject a same-host domain outright (#761).
-    let domain: string;
-    try {
-      domain = validateAndNormalizeDomain(options.domain);
-    } catch (err) {
-      return error(
-        "INVALID_DOMAIN",
-        err instanceof Error ? err.message : "Invalid WebVH domain",
-      );
-    }
+    // One canonical URL#host value for minting, storage and the binding comparison (#722, #761).
+    const domain = canonicalizeWebVHDomain(options.domain);
     if (options.paths !== undefined) {
       const paths = canonicalWebVHPaths(options.paths);
       if (!paths.ok && paths.reason === "reserved")

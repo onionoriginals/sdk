@@ -77,6 +77,56 @@ export function canonicalWebVHPaths(
   return { ok: true, segments: paths.map(encodeWebVHPathSegment) };
 }
 
+/** Host checks shared by `parseAssetAlias` and `canonicalizeWebVHDomain`; `code` names the failing seam. */
+function assertWebVHDnsHost(host: string, code: string): void {
+  // Unicode IDNA2008 method validation needs its own implementation, not WHATWG's UTS-46 substitute.
+  if ([...host].some((c) => c.charCodeAt(0) > 127) || /(^|\.)xn--/i.test(host))
+    throw new CelError(
+      "unsupported",
+      "CEL_WEBVH_IDNA",
+      "WebVH IDNA2008 validation is not available in this core",
+    );
+  requireThat(
+    host.length <= 253 &&
+      host.includes(".") &&
+      host
+        .split(".")
+        .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)),
+    code,
+    "Expected canonical fully qualified DNS name",
+  );
+  let parsed: URL;
+  try {
+    parsed = new URL("https://" + host);
+  } catch {
+    throw new CelError("invalid", code, "Invalid WebVH DNS host");
+  }
+  // URL equality also rejects WHATWG IPv4 shorthands such as `1.2.3`.
+  requireThat(
+    parsed.hostname === host && !/^\d+\.\d+\.\d+\.\d+$/.test(host),
+    code,
+    "WebVH requires DNS, not an IP address",
+  );
+}
+
+/** Trim, lowercase and validate an authoring-input WebVH host[:port]; returns the WHATWG `URL#host` spelling (default :443 dropped, port leading zeros removed). */
+export function canonicalizeWebVHDomain(
+  domain: string,
+  options: { allowLocalhost?: boolean } = {},
+): string {
+  const match = /^([^:]*)(?::(\d{1,5}))?$/.exec(String(domain).trim().toLowerCase());
+  const port = match?.[2] === undefined ? 443 : +match[2];
+  requireThat(
+    match && port >= 1 && port <= 65535,
+    "INVALID_DOMAIN",
+    `Invalid WebVH domain: ${JSON.stringify(domain)} is not host[:port] with a port of 1-65535`,
+  );
+  const host = match[1];
+  if (!(options.allowLocalhost && host === "localhost"))
+    assertWebVHDnsHost(host, "INVALID_DOMAIN");
+  return port === 443 ? host : `${host}:${port}`;
+}
+
 /** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
  * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
  * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
@@ -146,45 +196,16 @@ export function parseAssetAlias(did: unknown): AssetAlias {
   } catch {
     throw new CelError("invalid", "CEL_DID", "Invalid WebVH domain encoding");
   }
-  // Unicode IDNA2008 method validation needs its own implementation, not WHATWG's UTS-46 substitute.
-  if (
-    [...decoded].some((c) => c.charCodeAt(0) > 127) ||
-    /(^|\.)xn--/i.test(decoded)
-  )
-    throw new CelError(
-      "unsupported",
-      "CEL_WEBVH_IDNA",
-      "WebVH IDNA2008 validation is not available in this core",
-    );
-  const match = /^([^:]+)(?::([1-9]\d{0,4}))?$/.exec(decoded);
+  const [host, ...port] = decoded.split(":");
+  assertWebVHDnsHost(host, "CEL_DID");
   requireThat(
-    match && (!match[2] || +match[2] <= 65535),
+    port.length === 0 ||
+      (port.length === 1 && /^[1-9]\d{0,4}$/.test(port[0]) && +port[0] <= 65535),
     "CEL_DID",
     "Invalid WebVH port",
   );
-  const host = match[1];
   requireThat(
-    host.length <= 253 &&
-      host.includes(".") &&
-      host
-        .split(".")
-        .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)),
-    "CEL_DID",
-    "Expected canonical fully qualified DNS name",
-  );
-  let parsed: URL;
-  try {
-    parsed = new URL("https://" + decoded);
-  } catch {
-    throw new CelError("invalid", "CEL_DID", "Invalid WebVH DNS host");
-  }
-  requireThat(
-    parsed.hostname === host && !/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname),
-    "CEL_DID",
-    "WebVH requires DNS, not an IP address",
-  );
-  requireThat(
-    domain === host + (match[2] ? "%3A" + match[2] : ""),
+    domain === host + (port.length ? "%3A" + port[0] : ""),
     "CEL_DID",
     "Noncanonical WebVH domain spelling",
   );

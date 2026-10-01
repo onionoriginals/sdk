@@ -19,11 +19,11 @@ import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '
 import { resolveDidCel, DID_CEL_PREFIX } from '@originals/cel';
 import { parseEventLogJson } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
+import { canonicalizeWebVHDomain } from '@originals/cel/v3';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import { validateAndNormalizeDomain } from '../lifecycle/domainUtils.js';
 
 /** A carried-over verification method annotated with the single relationship
  * (purpose) it should assume in the migrated did:webvh document. */
@@ -101,14 +101,9 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * must fail loudly rather than mint a DID at a host nobody serves (#531). The
  * configured webvhNetwork tier deliberately does NOT supply a default here.
  *
- * A non-blank domain is also canonicalized (trimmed, lowercased, host/port
- * validated) via {@link validateAndNormalizeDomain} — the same primitive the
- * legacy lifecycle manager uses — so every did:webvh authoring path builds
- * its identifier from one normalized value instead of the caller's raw
- * string. Without this, a padded or mixed-case-but-otherwise-valid domain
- * used to mint an unresolvable DID containing raw whitespace or fail much
- * later with a confusing CEL_DID error instead of a domain-specific one
- * (#722, #761, #764).
+ * A non-blank domain is canonicalized by CEL's `canonicalizeWebVHDomain`
+ * (identity policy: a DNS host or `localhost`, `URL#host` spelling), which
+ * throws a `CelError` (a `StructuredError`) `INVALID_DOMAIN` otherwise.
  */
 export function requireWebVHDomain(domain: string | undefined): string {
   if (typeof domain !== 'string' || domain.trim().length === 0) {
@@ -119,7 +114,7 @@ export function requireWebVHDomain(domain: string | undefined): string {
       'networks are not served, and a did:webvh domain is permanent once published.'
     );
   }
-  return validateAndNormalizeDomain(domain);
+  return canonicalizeWebVHDomain(domain, { allowLocalhost: true });
 }
 
 export class DIDManager {

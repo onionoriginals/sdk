@@ -109,6 +109,55 @@ describe('#678 — createDIDOriginal refuses to guess/mint at a blank domain', (
   }, 20000);
 });
 
+describe('createDIDOriginal/updateDIDOriginal apply the CEL WebVH domain canonicalizer', () => {
+  test('createDIDOriginal rejects 127.0.0.1 with INVALID_DOMAIN before signing', async () => {
+    const { signer, keyPair } = await makeSigner();
+    let signs = 0;
+    const counting = { ...signer, sign: (input: Parameters<typeof signer.sign>[0]) => (signs++, signer.sign(input)) };
+    let thrown: unknown;
+    try {
+      await createDIDOriginal({
+        type: 'did',
+        domain: '127.0.0.1',
+        signer: counting as any,
+        verifier: counting as any,
+        updateKeys: [keyPair.publicKey],
+        verificationMethods: [
+          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        ],
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(StructuredError);
+    expect((thrown as StructuredError).code).toBe('INVALID_DOMAIN');
+    expect(signs).toBe(0);
+  });
+
+  test('updateDIDOriginal domain move to example.com:443 mints the portless DID', async () => {
+    const { signer, keyPair } = await makeSigner();
+    const created = await createDIDOriginal({
+      type: 'did',
+      domain: 'example.com',
+      signer: signer as any,
+      verifier: signer as any,
+      updateKeys: [keyPair.publicKey],
+      portable: true,
+      verificationMethods: [
+        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+      ],
+    });
+    const updated = await updateDIDOriginal({
+      type: 'did',
+      log: created.log,
+      signer: signer as any,
+      verifier: signer as any,
+      domain: 'moved.example.com:443',
+    });
+    expect(updated.did).toMatch(/:moved\.example\.com$/);
+  }, 20000);
+});
+
 describe('#678 — updateDIDOriginal refuses to guess/mint or silently drop a domain move', () => {
   test.each(['   ', '\t', ''])(
     'throws WEBVH_DOMAIN_REQUIRED for domain=%j instead of minting garbage or silently no-oping the move',
