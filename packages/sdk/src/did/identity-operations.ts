@@ -10,6 +10,7 @@ import { requireWebVHDomain } from "./DIDManager.js";
 import {
   normalizeUpdateKey,
   assertEd25519WebVHUpdateKeys,
+  requireWebVHPaths,
 } from "./WebVHManager.js";
 
 // Type for DID log (from didwebvh-ts)
@@ -304,6 +305,7 @@ export async function createDIDOriginal(
   // A blank/whitespace-only domain must fail loudly here, before any signing
   // work — never mint a permanent did:webvh at a host nobody serves (#531, #678).
   const domain = requireWebVHDomain(options.domain);
+  const paths = requireWebVHPaths(options.paths ?? []);
 
   // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
   // accept legacy "did:key:..." input and normalize first, then validate —
@@ -319,7 +321,7 @@ export async function createDIDOriginal(
     domain,
     signer: options.signer,
     verifier: resolveVerifier(options.signer, options.verifier),
-    paths: options.paths,
+    paths,
     updateKeys,
     verificationMethods: options.verificationMethods,
     context: options.context || [

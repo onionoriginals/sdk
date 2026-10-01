@@ -181,17 +181,26 @@ fails at the seam with `INVALID_DOMAIN` instead of surfacing later as
 `CEL_DID`. If you stored the raw string you passed, compare against the
 canonical form (`URL#host`) or re-read the DID.
 
-`paths` values are the decoded, human-readable segments. The SDK validates
-each one (`ASSET_WEBVH_PATH` / `WEBVH_PATH_SEGMENT_INVALID`) and then
-percent-encodes it into the DID the way `parseAssetAlias` reads it back —
-`hello world` → `hello%20world`, `~` → `%7E`. Do not pre-encode: a segment
-supplied as `hello%21world` is encoded again (`hello%2521world`). The encoder
-is exported as `encodeWebVHPathSegment` from `@originals/sdk/cel`. A first
-segment of `.well-known` is reserved (`WEBVH_PATH_RESERVED` /
+`paths` values are the decoded, human-readable segments, checked by one CEL
+rule at every authoring seam (`createDIDWebVH`, `migrateToDIDWebVH`,
+`createDIDOriginal` and so `@originals/auth`'s `createDIDWithTurnkey` slug,
+`publishToWeb`): `paths` must be an array; each segment is a non-empty string,
+not `.` or `..`, with no `/`, `\`, NUL, or leading/trailing whitespace, and is
+well-formed UTF-16. A failure is `ASSET_WEBVH_PATH` (hosted) or
+`WEBVH_PATH_SEGMENT_INVALID` (identity), raised before signing. Each segment is
+then percent-encoded into the DID the way `parseAssetAlias` reads it back —
+`hello world` → `hello%20world`, `~` → `%7E`, and `a:b` stays one segment
+(`a%3Ab`). `createDIDOriginal` now encodes too; it previously passed segments
+through verbatim. Do not pre-encode: a segment supplied as `hello%21world` is
+encoded again (`hello%2521world`). The rule is exported from
+`@originals/sdk/cel` as `isWebVHPathSegment` and `canonicalWebVHPaths`, the
+encoder as `encodeWebVHPathSegment`. A first segment of `.well-known` (any
+case) is reserved at authoring seams (`WEBVH_PATH_RESERVED` /
 `ASSET_WEBVH_PATH_RESERVED`) because it would share `/.well-known/did.jsonl`
-with the no-path default. A republish that names the same decoded `paths` as
-the original publication is accepted (previously any explicit `paths` on
-republish failed `ASSET_WEBVH_BINDING`).
+with the no-path default; readers still accept existing `.well-known` DIDs. A
+republish that names the same decoded `paths` as the original publication is
+accepted (previously any explicit `paths` on republish failed
+`ASSET_WEBVH_BINDING`).
 
 ## `keyStore` is removed from the default SDK options
 

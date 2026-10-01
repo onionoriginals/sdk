@@ -232,6 +232,33 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
   );
 
   test(
+    "slug '.well-known' is rejected with WEBVH_PATH_RESERVED before signing",
+    async () => {
+      const spy = { count: 0 };
+      const update = await generateKeypair();
+      await expect(
+        createDIDWithTurnkey({
+          turnkeyClient: makeRealSigningClient(update.privateKeyBytes, spy),
+          updateKeyAccount: {
+            address: 'key_addr',
+            curve: 'CURVE_ED25519',
+            path: "m/44'/501'/1'/0'",
+            addressFormat: 'ADDRESS_FORMAT_SOLANA',
+          },
+          subOrgId: 'sub_org_test',
+          authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
+          assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+          updateKeyPublic: update.publicKeyMultibase,
+          domain: 'example.com',
+          slug: '.well-known',
+        })
+      ).rejects.toMatchObject({ code: 'WEBVH_PATH_RESERVED' });
+      expect(spy.count).toBe(0);
+    },
+    10_000
+  );
+
+  test(
     'expired session during DID creation fires onExpired and throws TurnkeySessionExpiredError',
     async () => {
       // Does not need a real key — throws before signing succeeds

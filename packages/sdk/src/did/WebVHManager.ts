@@ -4,7 +4,7 @@ import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '@originals/cel';
-import { encodeWebVHPathSegment } from '@originals/cel/v3';
+import { canonicalWebVHPaths, isWebVHPathSegment } from '@originals/cel/v3';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**
@@ -23,43 +23,21 @@ async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeo
 }
 
 /**
- * True when a `paths` array would host its log where the no-path default
- * already lives: `[".well-known", ...]` resolves under `/.well-known/`, so
- * `[".well-known"]` and `[]` both name `/.well-known/did.jsonl`. Reserved at
- * every authoring seam so two DIDs never share one log file.
+ * Validate and DID-encode caller-supplied decoded `paths` with the CEL rule,
+ * as `StructuredError`s for the identity seams.
  */
-export function isReservedWebVHPath(paths: readonly unknown[] | undefined): boolean {
-  const first = paths?.[0];
-  return typeof first === 'string' && first.toLowerCase() === '.well-known';
-}
-
-/**
- * Validates a WebVH path segment to prevent directory traversal and reject
- * non-string input. Shared by `WebVHManager.createDIDWebVH` and any public
- * seam (e.g. `HostedAssets.prepare`) that needs to validate a caller-supplied
- * `paths` array before it reaches DID construction.
- * @param segment - Candidate path segment
- * @returns true if valid, false otherwise
- */
-export function isValidWebVHPathSegment(segment: unknown): segment is string {
-  if (typeof segment !== 'string' || !segment || segment === '.' || segment === '..') {
-    return false;
-  }
-
-  // Reject segments containing path separators or other dangerous characters
-  if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
-    return false;
-  }
-
-  // Reject absolute paths (leading separator, or a Windows drive prefix).
-  // Checked inline rather than via node:path so this validator stays usable
-  // without a Node runtime — separators are already rejected above, leaving
-  // only the drive-letter form to catch.
-  if (segment.startsWith('/') || /^[a-zA-Z]:/.test(segment)) {
-    return false;
-  }
-
-  return true;
+export function requireWebVHPaths(paths: unknown): string[] {
+  const result = canonicalWebVHPaths(paths);
+  if (result.ok) return result.segments;
+  if (result.reason === 'reserved')
+    throw new StructuredError(
+      'WEBVH_PATH_RESERVED',
+      'The .well-known path segment is reserved: paths: [".well-known"] would host its log at /.well-known/did.jsonl, the same location as paths: []. Omit paths to publish there.'
+    );
+  throw new StructuredError(
+    'WEBVH_PATH_SEGMENT_INVALID',
+    `Invalid path segment in DID paths: supply an array of non-empty decoded segments, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`
+  );
 }
 
 /**
@@ -384,27 +362,7 @@ export class WebVHManager {
       services,
     } = options;
 
-    // Validate path segments before creating DID to prevent directory traversal,
-    // then canonically percent-encode each one the same way CEL's parseAssetAlias
-    // requires when reading a did:webvh path segment back (issue #810). Passing
-    // an unencoded segment containing e.g. '!', '@', '+', or a space through
-    // verbatim mints a DID that fails CEL's allow-list on the very first
-    // publish, even though it passed isValidPathSegment's traversal check here.
-    const canonicalPaths = paths.map((segment) => {
-      if (!this.isValidPathSegment(segment)) {
-        throw new StructuredError(
-          'WEBVH_PATH_SEGMENT_INVALID',
-          `Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`
-        );
-      }
-      return encodeWebVHPathSegment(segment);
-    });
-    if (isReservedWebVHPath(paths)) {
-      throw new StructuredError(
-        'WEBVH_PATH_RESERVED',
-        'The .well-known path segment is reserved: paths: [".well-known"] would host its log at /.well-known/did.jsonl, the same location as paths: []. Omit paths to publish there.'
-      );
-    }
+    const canonicalPaths = requireWebVHPaths(paths);
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -605,15 +563,6 @@ export class WebVHManager {
   }
 
   /**
-   * Validates a path segment to prevent directory traversal attacks
-   * @param segment - Path segment to validate
-   * @returns true if valid, false otherwise
-   */
-  private isValidPathSegment(segment: string): boolean {
-    return isValidWebVHPathSegment(segment);
-  }
-
-  /**
    * Type guard to validate a DID document structure
    * @param doc - Object to validate
    * @returns true if the object is a valid DIDDocument
@@ -665,8 +614,14 @@ export class WebVHManager {
 
     // Validate all path segments to prevent directory traversal
     for (const segment of pathParts) {
-      if (!this.isValidPathSegment(segment)) {
-        throw new StructuredError('WEBVH_PATH_SEGMENT_INVALID', `Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+      let decoded: string | undefined;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        // malformed escape: left undefined, rejected below
+      }
+      if (!isWebVHPathSegment(decoded)) {
+        throw new StructuredError('WEBVH_PATH_SEGMENT_INVALID', `Invalid path segment in DID: "${segment}". Path segments must decode to a non-empty segment, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`);
       }
     }
 
@@ -681,7 +636,7 @@ export class WebVHManager {
       .replace(/[^a-z0-9._-]/g, '_');
 
     // Validate the sanitized domain (reject '..' and other dangerous patterns)
-    if (!this.isValidPathSegment(safeDomain)) {
+    if (!isWebVHPathSegment(safeDomain)) {
       throw new StructuredError('WEBVH_DOMAIN_SEGMENT_INVALID', `Invalid domain segment in DID: "${rawDomain}"`);
     }
 

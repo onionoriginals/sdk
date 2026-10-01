@@ -9,6 +9,7 @@ import {
   encodeDocument,
   parseAssetAlias,
   assetDigest,
+  canonicalWebVHPaths,
   sameAssetIdentity,
   parseDocument,
   signEvent,
@@ -17,7 +18,7 @@ import {
   type CelDocument,
   type CelSigner,
 } from "@originals/cel/v3";
-import { WebVHManager, isValidWebVHPathSegment, isReservedWebVHPath } from "../did/WebVHManager.js";
+import { WebVHManager } from "../did/WebVHManager.js";
 import { Ed25519Verifier } from "../did/Ed25519Verifier.js";
 import { validateAndNormalizeDomain } from "../lifecycle/domainUtils.js";
 import type { DIDDocument } from "../types/did.js";
@@ -194,22 +195,19 @@ export class HostedAssets {
         err instanceof Error ? err.message : "Invalid WebVH domain",
       );
     }
-    if (
-      options.paths !== undefined &&
-      (!Array.isArray(options.paths) ||
-        options.paths.some((segment) => !isValidWebVHPathSegment(segment)))
-    )
-      return error(
-        "ASSET_WEBVH_PATH",
-        "Supply paths as an array of valid WebVH path segments",
-      );
-    // paths: [".well-known"] hosts its log at /.well-known/did.jsonl, the same
-    // location as paths: [] — two distinct DIDs would share one log file.
-    if (isReservedWebVHPath(options.paths))
-      return error(
-        "ASSET_WEBVH_PATH_RESERVED",
-        "The .well-known path segment is reserved; omit paths to host at /.well-known/did.jsonl",
-      );
+    if (options.paths !== undefined) {
+      const paths = canonicalWebVHPaths(options.paths);
+      if (!paths.ok && paths.reason === "reserved")
+        return error(
+          "ASSET_WEBVH_PATH_RESERVED",
+          "The .well-known path segment is reserved; omit paths to host at /.well-known/did.jsonl",
+        );
+      if (!paths.ok)
+        return error(
+          "ASSET_WEBVH_PATH",
+          "Supply paths as an array of valid WebVH path segments",
+        );
+    }
     if (
       !["cel", "webvh"].includes(asset.state.layer) ||
       (asset.state.layer === "cel" && !asset.state.active) ||

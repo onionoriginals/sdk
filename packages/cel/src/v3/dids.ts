@@ -44,6 +44,39 @@ export function encodeWebVHPathSegment(value: string): string {
   return encodeWebVHHttpPathSegment(value).replace(/~/g, "%7E");
 }
 
+/** A decoded WebVH path segment `parseAssetAlias` reads back: non-empty, not `.`/`..`, no `/`, `\`, NUL, no edge whitespace, well-formed UTF-16. */
+export function isWebVHPathSegment(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value === "." ||
+    value === ".." ||
+    /[/\\\0]/.test(value) ||
+    value.trim() !== value
+  )
+    return false;
+  try {
+    encodeURIComponent(value); // throws on a lone surrogate
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Authoring only: validate decoded `paths`, reserve a leading `.well-known` (case-insensitive), return DID-spelling segments. */
+export function canonicalWebVHPaths(
+  paths: unknown,
+):
+  | { ok: true; segments: string[] }
+  | { ok: false; reason: "invalid" | "reserved" } {
+  if (!Array.isArray(paths) || !paths.every(isWebVHPathSegment))
+    return { ok: false, reason: "invalid" };
+  // [".well-known"] would host its log where the no-path DID's lives.
+  if (paths[0]?.toLowerCase() === ".well-known")
+    return { ok: false, reason: "reserved" };
+  return { ok: true, segments: paths.map(encodeWebVHPathSegment) };
+}
+
 /** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
  * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
  * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
@@ -172,13 +205,7 @@ export function parseAssetAlias(did: unknown): AssetAlias {
       throw new CelError("invalid", "CEL_DID", "Invalid WebVH path encoding");
     }
     requireThat(
-      value &&
-        value !== "." &&
-        value !== ".." &&
-        !value.includes("/") &&
-        !value.includes("\\") &&
-        !value.includes("\0") &&
-        value.trim() === value,
+      isWebVHPathSegment(value),
       "CEL_DID",
       "Invalid decoded WebVH path",
     );

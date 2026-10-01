@@ -972,7 +972,7 @@ test("publishToWeb rejects a non-string paths element with ASSET_WEBVH_PATH inst
   expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
 });
 
-test.each([".", "..", "a/b", "a\\b", "/abs"])(
+test.each([".", "..", "a/b", "a\\b", "/abs", " hello", "hello ", "   ", "\thello", "a\ud800"])(
   "publishToWeb rejects an invalid paths segment (%j) with ASSET_WEBVH_PATH instead of a raw Error (#826)",
   async (segment) => {
     const store = storage();
@@ -993,6 +993,21 @@ test.each([".", "..", "a/b", "a\\b", "/abs"])(
     expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
   },
 );
+
+test("publishToWeb accepts a colon inside one segment", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["a:b"],
+  });
+  expect(published.did).toEndWith(":example.com:a%3Ab");
+  const loaded = await OriginalsSDK.create({ storageAdapter: store }).lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+});
 
 test("publishToWeb rejects paths: ['.well-known'] with ASSET_WEBVH_PATH_RESERVED (collides with the no-path default)", async () => {
   const store = storage();

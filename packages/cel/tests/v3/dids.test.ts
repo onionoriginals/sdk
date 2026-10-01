@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { parseAssetAlias, verifyHistory, CelError } from "../../src/v3/index.js";
+import {
+  parseAssetAlias,
+  verifyHistory,
+  CelError,
+  encodeWebVHPathSegment,
+  isWebVHPathSegment,
+  canonicalWebVHPaths,
+} from "../../src/v3/index.js";
 import authority from "../../../../docs/research/cel-core-vectors/histories.json";
 import symbolic from "../../../../docs/research/cel-authority-vectors/histories.json";
 
@@ -91,4 +98,54 @@ test("URL parser failures become structured invalid-DID results", () => {
       expect((error as CelError).status).toBe("invalid");
     }
   }
+});
+
+const PATH_CANDIDATES = [
+  " hello", "hello ", "   ", "\thello", "hello\u00a0", "\ufeffx", "", ".", "..", "...",
+  "a/b", "a\\b", "a\0b", "hello world", "café", "x~y", "a:b", "C:foo", "C:\\win",
+  ".well-known", "%41", "😀", "a\ud800",
+];
+
+test("isWebVHPathSegment agrees with parseAssetAlias on every candidate", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  const reads = (value: string) => {
+    try {
+      parseAssetAlias(`did:webvh:${scid}:example.com:${encodeWebVHPathSegment(value)}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const value of PATH_CANDIDATES)
+    expect([value, isWebVHPathSegment(value)]).toEqual([value, reads(value)]);
+  expect(isWebVHPathSegment(123)).toBe(false);
+});
+
+test("canonicalWebVHPaths encodes decoded segments in DID spelling", () => {
+  expect(canonicalWebVHPaths(["hello world", "x~y", "a:b"])).toEqual({
+    ok: true,
+    segments: ["hello%20world", "x%7Ey", "a%3Ab"],
+  });
+  expect(canonicalWebVHPaths([])).toEqual({ ok: true, segments: [] });
+});
+
+test("canonicalWebVHPaths rejects non-arrays, non-strings and invalid segments", () => {
+  for (const paths of ["abc", [123], [" hello"], ["ok", ".."], [""], ["a\ud800"], undefined])
+    expect(canonicalWebVHPaths(paths)).toEqual({ ok: false, reason: "invalid" });
+});
+
+test("canonicalWebVHPaths reserves only a leading .well-known, case-insensitively", () => {
+  for (const first of [".well-known", ".WELL-KNOWN", ".Well-Known"])
+    expect(canonicalWebVHPaths([first, "x"])).toEqual({ ok: false, reason: "reserved" });
+  expect(canonicalWebVHPaths(["users", ".well-known"])).toEqual({
+    ok: true,
+    segments: ["users", ".well-known"],
+  });
+});
+
+test("parseAssetAlias still reads a .well-known path DID", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  expect(parseAssetAlias(`did:webvh:${scid}:example.com:.well-known`)).toMatchObject({
+    logUrl: "https://example.com/.well-known/did.jsonl",
+  });
 });

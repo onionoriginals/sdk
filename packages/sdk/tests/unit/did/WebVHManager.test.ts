@@ -1,32 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { WebVHManager, isValidWebVHPathSegment } from '../../../src/did/WebVHManager';
+import { WebVHManager } from '../../../src/did/WebVHManager';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-
-describe('isValidWebVHPathSegment (#826)', () => {
-  test.each(['custom', 'slug', 'a-b_c.d'])(
-    'accepts a well-formed segment (%j)',
-    (segment) => {
-      expect(isValidWebVHPathSegment(segment)).toBe(true);
-    },
-  );
-
-  test.each(['', '.', '..', 'a/b', 'a\\b', '/abs', 'C:\\windows'])(
-    'rejects a malformed/invalid string segment (%j)',
-    (segment) => {
-      expect(isValidWebVHPathSegment(segment)).toBe(false);
-    },
-  );
-
-  test('rejects non-string segment types', () => {
-    expect(isValidWebVHPathSegment(123)).toBe(false);
-    expect(isValidWebVHPathSegment(null)).toBe(false);
-    expect(isValidWebVHPathSegment(undefined)).toBe(false);
-    expect(isValidWebVHPathSegment({})).toBe(false);
-    expect(isValidWebVHPathSegment([])).toBe(false);
-  });
-});
 
 describe('WebVHManager', () => {
   let manager: WebVHManager;
@@ -389,6 +365,22 @@ describe('WebVHManager', () => {
         })
       ).rejects.toThrow('Invalid path segment in DID');
     }, 10000);
+
+    test.each([' hello', 'hello ', '   ', '\thello'])(
+      'rejects edge whitespace (%j) with WEBVH_PATH_SEGMENT_INVALID, not a didwebvh-ts Error',
+      async (segment) => {
+        await expect(
+          manager.createDIDWebVH({ domain: 'example.com', paths: [segment] })
+        ).rejects.toMatchObject({ code: 'WEBVH_PATH_SEGMENT_INVALID' });
+      },
+      10000,
+    );
+
+    test('rejects a non-array paths value with WEBVH_PATH_SEGMENT_INVALID', async () => {
+      await expect(
+        manager.createDIDWebVH({ domain: 'example.com', paths: 'abc' as unknown as string[] })
+      ).rejects.toMatchObject({ code: 'WEBVH_PATH_SEGMENT_INVALID' });
+    });
 
     test('accepts valid alphanumeric path segments', async () => {
       const result = await manager.createDIDWebVH({
