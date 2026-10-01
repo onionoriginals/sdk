@@ -1039,37 +1039,30 @@ describe('email-auth', () => {
         expect(verifyOtp).toHaveBeenCalledTimes(1);
       });
 
-      test('falls back to the get-then-set claim when the storage has no claimForVerification', async () => {
-        // A minimal custom SessionStorage that intentionally omits
-        // claimForVerification, to exercise the pre-existing fallback path.
+      test('rejects a storage without claimForVerification before reaching Turnkey', async () => {
+        // A plain-JS store written against the pre-4.0 four-method shape: without an
+        // atomic claim, concurrent guesses would race past MAX_OTP_ATTEMPTS.
         const sessions = new Map<string, EmailAuthSession>();
-        const plainStorage: SessionStorage = {
-          get: (sessionId) => sessions.get(sessionId),
-          set: (sessionId, session) => {
-            sessions.set(sessionId, session);
+        const plainStorage = {
+          get: async (sessionId: string) => structuredClone(sessions.get(sessionId)),
+          set: async (sessionId: string, session: EmailAuthSession) => {
+            sessions.set(sessionId, structuredClone(session));
           },
-          delete: (sessionId) => {
+          delete: async (sessionId: string) => {
             sessions.delete(sessionId);
           },
           cleanup: () => sessions.clear(),
-        };
-        expect(plainStorage.claimForVerification).toBeUndefined();
+        } as unknown as SessionStorage;
 
-        const client = createMockTurnkeyClient();
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client = createMockTurnkeyClient({ verifyOtp });
         const initResult = await initiateEmailAuth('user@example.com', client, plainStorage);
-
-        const first = await verifyEmailAuth(
-          initResult.sessionId,
-          '123456',
-          client,
-          plainStorage,
-          verifyOptions
-        );
-        expect(first.verified).toBe(true);
 
         await expect(
           verifyEmailAuth(initResult.sessionId, '123456', client, plainStorage, verifyOptions)
-        ).rejects.toThrow('already been verified');
+        ).rejects.toMatchObject({ code: AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired });
+        expect(verifyOtp).not.toHaveBeenCalled();
+        expect(sessions.get(initResult.sessionId)!.verifying).toBeUndefined();
       });
     });
   });
@@ -1168,6 +1161,12 @@ describe('email-auth', () => {
         },
         cleanup: async () => {
           sessions.clear();
+        },
+        claimForVerification: async (sessionId: string) => {
+          const session = sessions.get(sessionId);
+          if (!session || session.verified || session.verifying) return false;
+          session.verifying = true;
+          return true;
         },
       };
     }

@@ -46,6 +46,7 @@ export const AUTH_EMAIL_ERROR_CODES = {
   subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
   sessionAlreadyVerified: 'AUTH_SESSION_ALREADY_VERIFIED',
   otpVerifyInProgress: 'AUTH_OTP_VERIFY_IN_PROGRESS',
+  sessionStorageClaimRequired: 'AUTH_SESSION_STORAGE_CLAIM_REQUIRED',
 } as const;
 
 /**
@@ -74,12 +75,12 @@ export interface SessionStorage {
   delete(sessionId: string): void | Promise<void>;
   cleanup(): void | Promise<void>;
   /**
-   * Optional atomic verification claim, used by {@link verifyEmailAuth} to
-   * close its single-use/concurrency guard (#710, #819) across multiple
-   * processes sharing one store.
+   * Atomic verification claim, used by {@link verifyEmailAuth} to close its
+   * single-use/concurrency guard (#710, #819) across multiple processes
+   * sharing one store.
    *
-   * Implementations backed by shared storage (Redis, a database) SHOULD
-   * provide this, backed by a real conditional write — e.g. a Redis
+   * Implementations backed by shared storage (Redis, a database) must back
+   * this with a real conditional write — e.g. a Redis
    * `WATCH`/`MULTI` or Lua script, or a SQL `UPDATE ... WHERE verifying =
    * false AND verified = false`. It must atomically check that the session
    * exists and is neither `verified` nor already `verifying`, and if so mark
@@ -92,13 +93,11 @@ export interface SessionStorage {
    * `Promise` for stores that require network I/O. After a successful claim,
    * {@link verifyEmailAuth} re-reads the session, so `get` may return a copy.
    *
-   * When omitted, {@link verifyEmailAuth} falls back to a plain
-   * get-then-set claim that is only safe for a synchronous, in-process store
-   * whose `get` returns the live session object — the default
-   * {@link createInMemorySessionStorage} implements the claim anyway. An
-   * async store (any `get` that returns a `Promise`) MUST implement this.
+   * Required: {@link verifyEmailAuth} rejects a store without it
+   * (`AUTH_SESSION_STORAGE_CLAIM_REQUIRED`) rather than fall back to a
+   * non-atomic get-then-set.
    */
-  claimForVerification?(sessionId: string): boolean | Promise<boolean>;
+  claimForVerification(sessionId: string): boolean | Promise<boolean>;
 }
 
 /**
@@ -339,6 +338,13 @@ export async function verifyEmailAuth(
   options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
+  // Fail closed for untyped callers: a get-then-set claim races across instances (#819).
+  if (typeof storage.claimForVerification !== 'function') {
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired,
+      'SessionStorage must implement claimForVerification (an atomic conditional write).'
+    );
+  }
   let session = await storage.get(sessionId);
 
   if (!session) {
@@ -366,66 +372,44 @@ export async function verifyEmailAuth(
   }
 
   // Single-use / concurrency guard (#710, #819): claim the session before
-  // doing anything else that could be replayed or raced. Without
-  // `claimForVerification`, the fallback below flips `verifying` on the
-  // session object synchronously (before its own `await storage.set`), which
-  // is only atomic for a sync in-process store whose `get` hands back the
-  // live object; the default store implements the claim, and any async or
-  // shared store must implement it with a real conditional write.
-  if (storage.claimForVerification) {
-    const claimed = await storage.claimForVerification(sessionId);
-    if (!claimed) {
-      // Re-fetch for a precise error: the rejected claim alone doesn't say
-      // *why* — the session could since have been deleted (expiry cleanup,
-      // or an exhausted-attempts destroy racing us), not just already
-      // verified or already in progress.
-      const current = await storage.get(sessionId);
-      if (!current) {
-        throw new StructuredError(
-          AUTH_EMAIL_ERROR_CODES.sessionInvalid,
-          'Invalid or expired session'
-        );
-      }
-      if (current.verified) {
-        throw new StructuredError(
-          AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified,
-          'This session has already been verified. Please log in or request a new code.'
-        );
-      }
+  // doing anything else that could be replayed or raced.
+  const claimed = await storage.claimForVerification(sessionId);
+  if (!claimed) {
+    // Re-fetch for a precise error: the rejected claim alone doesn't say
+    // *why* — the session could since have been deleted (expiry cleanup,
+    // or an exhausted-attempts destroy racing us), not just already
+    // verified or already in progress.
+    const current = await storage.get(sessionId);
+    if (!current) {
       throw new StructuredError(
-        AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
-        'A verification is already in progress for this session. Please wait for it to complete.'
+        AUTH_EMAIL_ERROR_CODES.sessionInvalid,
+        'Invalid or expired session'
       );
     }
-    // Reload under the claim: the pre-claim read may predate a racing call's persisted otpAttempts.
-    const fresh = await storage.get(sessionId);
-    if (!fresh) {
-      throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
-    }
-    if (Date.now() - fresh.timestamp > SESSION_TIMEOUT) {
-      await storage.delete(sessionId);
-      throw new StructuredError(
-        AUTH_EMAIL_ERROR_CODES.sessionExpired,
-        'Session expired. Please request a new code.'
-      );
-    }
-    session = fresh;
-  } else {
-    if (session.verified) {
+    if (current.verified) {
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified,
         'This session has already been verified. Please log in or request a new code.'
       );
     }
-    if (session.verifying) {
-      throw new StructuredError(
-        AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
-        'A verification is already in progress for this session. Please wait for it to complete.'
-      );
-    }
-    session.verifying = true;
-    await storage.set(sessionId, session);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
+      'A verification is already in progress for this session. Please wait for it to complete.'
+    );
   }
+  // Reload under the claim: the pre-claim read may predate a racing call's persisted otpAttempts.
+  const fresh = await storage.get(sessionId);
+  if (!fresh) {
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
+  }
+  if (Date.now() - fresh.timestamp > SESSION_TIMEOUT) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionExpired,
+      'Session expired. Please request a new code.'
+    );
+  }
+  session = fresh;
 
   // Checked on the claimed snapshot; a session missing these can never verify.
   if (!session.otpId) {

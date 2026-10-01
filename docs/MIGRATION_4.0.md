@@ -212,9 +212,11 @@ retained legacy lifecycle only.
 - **`verifyEmailAuth` claims the session first.** A replay on a verified
   session fails `AUTH_SESSION_ALREADY_VERIFIED`; a concurrent call on the same
   unverified session fails `AUTH_OTP_VERIFY_IN_PROGRESS`. A shared,
-  multi-instance store — and any store whose `get` returns a `Promise` — must
-  implement the new optional `SessionStorage.claimForVerification(sessionId)`
-  with a conditional write so the claim is atomic across processes.
+  multi-instance store must implement the new, required
+  `SessionStorage.claimForVerification(sessionId)` with a conditional write so
+  the claim is atomic across processes. A custom store without it is rejected
+  with `AUTH_SESSION_STORAGE_CLAIM_REQUIRED`; `createInMemorySessionStorage`
+  already implements it.
 - **JWT failures are classified.** `verifyToken` throws `StructuredError` with
   `AUTH_TOKEN_INVALID` / `AUTH_TOKEN_EXPIRED` / `AUTH_TOKEN_MISSING_SUBJECT`
   (bad token) or `AUTH_JWT_CONFIG_SECRET_MISSING` /

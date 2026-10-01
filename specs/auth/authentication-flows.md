@@ -164,8 +164,8 @@ const result = await initiateEmailAuth(email, turnkey, redisStorage);
 
 Every method may return synchronously or return a `Promise` — the server
 module `await`s the result either way, so a network-backed store like
-`createRedisSessionStorage` above can implement `get`/`set` as real async
-Redis calls.
+`createRedisSessionStorage` above can implement its methods as real async
+Redis calls — including the atomic `claimForVerification` below.
 
 ```typescript
 interface SessionStorage {
@@ -173,8 +173,18 @@ interface SessionStorage {
   set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
   delete(sessionId: string): void | Promise<void>;
   cleanup(): void | Promise<void>;
+  // Atomically: if the session exists and is neither `verified` nor
+  // `verifying`, set `verifying: true` and return true; otherwise false.
+  claimForVerification(sessionId: string): boolean | Promise<boolean>;
 }
 ```
+
+`claimForVerification` is required. `verifyEmailAuth` rejects a store without
+it (`AUTH_SESSION_STORAGE_CLAIM_REQUIRED`). A shared store must back it with a
+real conditional write (a Redis Lua script or `WATCH`/`MULTI`, or SQL
+`UPDATE … SET verifying = true WHERE id = ? AND verifying = false AND verified = false`);
+a separate `get` then `set` lets two instances both win. After a successful
+claim `verifyEmailAuth` re-reads the session, so `get` may return a copy.
 
 ---
 
