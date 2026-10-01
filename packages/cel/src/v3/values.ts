@@ -164,8 +164,8 @@ export function decodeUtf8(input: Uint8Array): string {
 
 // A JSON number token with no fraction or exponent is a plain decimal
 // integer literal. It must name its binary64 exactly, or be that binary64's
-// RFC 8785 spelling (JCS writes 2**61 as "2305843009213694000"); anything
-// else silently rounds. Fraction/exponent tokens (e.g. "1e30") are exempt.
+// RFC 8785 spelling (JCS writes 2**61 as "2305843009213694000"); any other
+// literal would round silently. Fraction/exponent tokens (e.g. "1e30") are exempt.
 const integerLiteral = /^-?(?:0|[1-9]\d*)$/;
 
 // Parse object members before JSON.parse could discard duplicate decoded names.

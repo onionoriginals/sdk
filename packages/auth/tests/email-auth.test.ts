@@ -977,7 +977,7 @@ describe('email-auth', () => {
         };
       }
 
-      test('uses claimForVerification instead of the get-then-set fallback when provided', async () => {
+      test('calls the storage\'s claimForVerification', async () => {
         const external = createExternalAtomicStorage();
         const claimForVerification = mock(external.claimForVerification!);
         external.claimForVerification = claimForVerification;
@@ -1054,15 +1054,27 @@ describe('email-auth', () => {
           cleanup: () => sessions.clear(),
         } as unknown as SessionStorage;
 
+        const initOtp = mock(() => Promise.resolve({ otpId: 'otp_123' }));
         const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
-        const client = createMockTurnkeyClient({ verifyOtp });
-        const initResult = await initiateEmailAuth('user@example.com', client, plainStorage);
-
+        const client = createMockTurnkeyClient({ initOtp, verifyOtp });
+        // Rejected before an OTP email goes out, not on the first verify.
         await expect(
-          verifyEmailAuth(initResult.sessionId, '123456', client, plainStorage, verifyOptions)
+          initiateEmailAuth('user@example.com', client, plainStorage)
+        ).rejects.toMatchObject({ code: AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired });
+        expect(initOtp).not.toHaveBeenCalled();
+
+        sessions.set('session_1', {
+          email: 'user@example.com',
+          otpId: 'otp_123',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+          timestamp: Date.now(),
+          verified: false,
+        });
+        await expect(
+          verifyEmailAuth('session_1', '123456', client, plainStorage, verifyOptions)
         ).rejects.toMatchObject({ code: AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired });
         expect(verifyOtp).not.toHaveBeenCalled();
-        expect(sessions.get(initResult.sessionId)!.verifying).toBeUndefined();
+        expect(sessions.get('session_1')!.verifying).toBeUndefined();
       });
     });
   });

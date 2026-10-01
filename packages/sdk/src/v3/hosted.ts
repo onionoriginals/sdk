@@ -192,7 +192,7 @@ export class HostedAssets {
       if (!paths.ok)
         return error(
           "ASSET_WEBVH_PATH",
-          "Supply paths as an array of valid WebVH path segments",
+          `Supply paths as an array of valid WebVH path segments${paths.index === undefined ? "" : ` (paths[${paths.index}] is invalid)`}`,
         );
     }
     if (

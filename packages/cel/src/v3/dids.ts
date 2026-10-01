@@ -68,19 +68,27 @@ export function canonicalWebVHPaths(
   paths: unknown,
 ):
   | { ok: true; segments: string[] }
-  | { ok: false; reason: "invalid" | "reserved" } {
-  if (!Array.isArray(paths) || !paths.every(isWebVHPathSegment))
-    return { ok: false, reason: "invalid" };
+  | { ok: false; reason: "invalid"; index?: number }
+  | { ok: false; reason: "reserved" } {
+  if (!Array.isArray(paths)) return { ok: false, reason: "invalid" };
+  // Array.from turns holes into undefined; Array#every would skip them.
+  const segments: unknown[] = Array.from(paths);
+  const index = segments.findIndex((segment) => !isWebVHPathSegment(segment));
+  if (index !== -1) return { ok: false, reason: "invalid", index };
+  const valid = segments as string[];
   // [".well-known"] would host its log where the no-path DID's lives.
-  if (paths[0]?.toLowerCase() === ".well-known")
+  if (valid[0]?.toLowerCase() === ".well-known")
     return { ok: false, reason: "reserved" };
-  return { ok: true, segments: paths.map(encodeWebVHPathSegment) };
+  return { ok: true, segments: valid.map(encodeWebVHPathSegment) };
 }
 
 /** Host checks shared by `parseAssetAlias` and `canonicalizeWebVHDomain`; `code` names the failing seam. */
-function assertWebVHDnsHost(host: string, code: string): void {
+function assertWebVHDnsHost(host: string, code: string, allowPunycode = false): void {
   // Unicode IDNA2008 method validation needs its own implementation, not WHATWG's UTS-46 substitute.
-  if ([...host].some((c) => c.charCodeAt(0) > 127) || /(^|\.)xn--/i.test(host))
+  if (
+    [...host].some((c) => c.charCodeAt(0) > 127) ||
+    (!allowPunycode && /(^|\.)xn--/i.test(host))
+  )
     throw new CelError(
       "unsupported",
       "CEL_WEBVH_IDNA",
@@ -109,12 +117,15 @@ function assertWebVHDnsHost(host: string, code: string): void {
   );
 }
 
-/** Trim, lowercase and validate an authoring-input WebVH host[:port]; returns the WHATWG `URL#host` spelling (default :443 dropped, port leading zeros removed). */
+/** Trim, lowercase and validate an authoring-input WebVH host[:port]; returns the WHATWG `URL#host` spelling (default :443 dropped, port leading zeros removed).
+ * `identity` admits `localhost` and punycode hosts: identity DIDs never pass `parseAssetAlias`'s IDNA limit. */
 export function canonicalizeWebVHDomain(
   domain: string,
-  options: { allowLocalhost?: boolean } = {},
+  options: { identity?: boolean } = {},
 ): string {
-  const match = /^([^:]*)(?::(\d{1,5}))?$/.exec(String(domain).trim().toLowerCase());
+  // ASCII-only lowercase: String#toLowerCase folds U+212A KELVIN SIGN into "k".
+  const lowered = String(domain).trim().replace(/[A-Z]+/g, (s) => s.toLowerCase());
+  const match = /^([^:]*)(?::(\d+))?$/.exec(lowered);
   const port = match?.[2] === undefined ? 443 : +match[2];
   requireThat(
     match && port >= 1 && port <= 65535,
@@ -122,8 +133,8 @@ export function canonicalizeWebVHDomain(
     `Invalid WebVH domain: ${JSON.stringify(domain)} is not host[:port] with a port of 1-65535`,
   );
   const host = match[1];
-  if (!(options.allowLocalhost && host === "localhost"))
-    assertWebVHDnsHost(host, "INVALID_DOMAIN");
+  if (!(options.identity && host === "localhost"))
+    assertWebVHDnsHost(host, "INVALID_DOMAIN", options.identity);
   return port === 443 ? host : `${host}:${port}`;
 }
 

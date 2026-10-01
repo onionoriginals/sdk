@@ -102,7 +102,7 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * configured webvhNetwork tier deliberately does NOT supply a default here.
  *
  * A non-blank domain is canonicalized by CEL's `canonicalizeWebVHDomain`
- * (identity policy: a DNS host or `localhost`, `URL#host` spelling), which
+ * (identity policy: a DNS host, punycode host or `localhost`, `URL#host` spelling), which
  * throws a `CelError` (a `StructuredError`) `INVALID_DOMAIN` otherwise.
  */
 export function requireWebVHDomain(domain: string | undefined): string {
@@ -114,7 +114,7 @@ export function requireWebVHDomain(domain: string | undefined): string {
       'networks are not served, and a did:webvh domain is permanent once published.'
     );
   }
-  return canonicalizeWebVHDomain(domain, { allowLocalhost: true });
+  return canonicalizeWebVHDomain(domain, { identity: true });
 }
 
 export class DIDManager {

@@ -131,8 +131,23 @@ test("canonicalWebVHPaths encodes decoded segments in DID spelling", () => {
 });
 
 test("canonicalWebVHPaths rejects non-arrays, non-strings and invalid segments", () => {
-  for (const paths of ["abc", [123], [" hello"], ["ok", ".."], [""], ["a\ud800"], undefined])
+  for (const paths of ["abc", undefined])
     expect(canonicalWebVHPaths(paths)).toEqual({ ok: false, reason: "invalid" });
+  for (const [paths, index] of [
+    [[123], 0],
+    [[" hello"], 0],
+    [["ok", ".."], 1],
+    [[""], 0],
+    [["a\ud800"], 0],
+  ] as const)
+    expect(canonicalWebVHPaths(paths)).toEqual({ ok: false, reason: "invalid", index });
+});
+
+test("canonicalWebVHPaths rejects a hole in a sparse paths array", () => {
+  // Array#every skips holes; a hole would otherwise mint an empty DID segment.
+  // eslint-disable-next-line no-sparse-arrays
+  expect(canonicalWebVHPaths([, "a"])).toEqual({ ok: false, reason: "invalid", index: 0 });
+  expect(canonicalWebVHPaths(new Array(1))).toEqual({ ok: false, reason: "invalid", index: 0 });
 });
 
 test("canonicalWebVHPaths reserves only a leading .well-known, case-insensitively", () => {
@@ -194,16 +209,40 @@ test("canonicalizeWebVHDomain rejects non-DNS hosts with INVALID_DOMAIN", () => 
     ]);
 });
 
-test("canonicalizeWebVHDomain allowLocalhost admits only localhost[:port]", () => {
-  const opts = { allowLocalhost: true };
+test("canonicalizeWebVHDomain identity policy admits localhost[:port] and punycode hosts", () => {
+  const opts = { identity: true };
   expect(canonicalizeWebVHDomain("localhost", opts)).toBe("localhost");
   expect(canonicalizeWebVHDomain("LOCALHOST:3000", opts)).toBe("localhost:3000");
   expect(canonicalizeWebVHDomain("example.com:443", opts)).toBe("example.com");
+  // Identity DIDs never pass parseAssetAlias, so its IDNA limit doesn't apply.
+  expect(canonicalizeWebVHDomain("XN--bcher-kva.example", opts)).toBe("xn--bcher-kva.example");
   for (const domain of ["127.0.0.1", "intranet", "localhost:0", "localhost.:3000"])
     expect(celCode(() => canonicalizeWebVHDomain(domain, opts))).toEqual([
       "invalid",
       "INVALID_DOMAIN",
     ]);
+  expect(celCode(() => canonicalizeWebVHDomain("bücher.example", opts))).toEqual([
+    "unsupported",
+    "CEL_WEBVH_IDNA",
+  ]);
+});
+
+test("canonicalizeWebVHDomain lowercases ASCII only, so a Unicode letter can't fold into a DNS name", () => {
+  // U+212A KELVIN SIGN lowercases to ASCII "k" under String#toLowerCase.
+  for (const opts of [{}, { identity: true }])
+    expect(celCode(() => canonicalizeWebVHDomain("exam\u212Ale.com", opts))).toEqual([
+      "unsupported",
+      "CEL_WEBVH_IDNA",
+    ]);
+});
+
+test("canonicalizeWebVHDomain strips any number of port leading zeros", () => {
+  expect(canonicalizeWebVHDomain("example.com:0000000443")).toBe("example.com");
+  expect(canonicalizeWebVHDomain("example.com:0008080")).toBe("example.com:8080");
+  expect(celCode(() => canonicalizeWebVHDomain("example.com:99999999999999999999"))).toEqual([
+    "invalid",
+    "INVALID_DOMAIN",
+  ]);
 });
 
 test("every asset-canonical domain round-trips through parseAssetAlias", () => {

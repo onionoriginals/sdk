@@ -34,9 +34,10 @@ export function requireWebVHPaths(paths: unknown): string[] {
       'WEBVH_PATH_RESERVED',
       'The .well-known path segment is reserved: paths: [".well-known"] would host its log at /.well-known/did.jsonl, the same location as paths: []. Omit paths to publish there.'
     );
+  const at = result.index === undefined ? '' : ` paths[${result.index}] is invalid;`;
   throw new StructuredError(
     'WEBVH_PATH_SEGMENT_INVALID',
-    `Invalid path segment in DID paths: supply an array of non-empty decoded segments, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`
+    `Invalid path segment in DID paths:${at} supply an array of non-empty decoded segments, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`
   );
 }
 

@@ -55,10 +55,14 @@ test("JSON reads back every large integral value the JCS writer emits, matching 
   expect(() => decodeValue('{"a":2305843009213694001}', "json")).toThrow();
 });
 
-test("mutating a signed wire document's exact integer to an inexact one is rejected before it can canonicalize identically", () => {
+test("2**53 + 1 can't stand in for a signed 2**53; exact and JCS spellings of one binary64 share an identity", () => {
   const exact = decodeValue('{"a":9007199254740992}', "json");
   expect(canonicalizeValue(exact)).toBe('{"a":9007199254740992}');
   expect(() => decodeValue('{"a":9007199254740993}', "json")).toThrow();
+  // Accepted trade-off: both spellings name 2**61 and canonicalize identically.
+  expect(canonicalizeValue(decodeValue('{"a":2305843009213693952}', "json"))).toBe(
+    canonicalizeValue(decodeValue('{"a":2305843009213694000}', "json")),
+  );
 });
 
 test("deterministic CBOR uses integers for exact integral binary64 values beyond the safe range", () => {

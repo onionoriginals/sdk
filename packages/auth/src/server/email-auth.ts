@@ -106,11 +106,9 @@ export interface SessionStorage {
  * **Production warning**: This store is ephemeral — sessions are lost on
  * process restart and are not shared across multiple instances. For
  * production deployments, pass a persistent {@link SessionStorage}
- * implementation backed by Redis, a database, or another shared store, and
- * implement {@link SessionStorage.claimForVerification} on it so
- * {@link verifyEmailAuth}'s single-use guard stays atomic across instances —
- * without it, two instances racing on the same session can both pass the
- * guard.
+ * implementation backed by Redis, a database, or another shared store, whose
+ * {@link SessionStorage.claimForVerification} is a real conditional write so
+ * {@link verifyEmailAuth}'s single-use guard stays atomic across instances.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -179,6 +177,17 @@ function generateSessionId(): string {
   return `session_${randomBytes(24).toString('base64url')}`;
 }
 
+// Fail closed for untyped callers: a get-then-set claim races across instances (#819).
+function requireClaimableStorage(storage: SessionStorage): SessionStorage {
+  if (typeof storage.claimForVerification !== 'function') {
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired,
+      'SessionStorage must implement claimForVerification (an atomic conditional write).'
+    );
+  }
+  return storage;
+}
+
 /**
  * Initiate email authentication using Turnkey OTP
  * Sends a 6-digit OTP code to the user's email
@@ -198,7 +207,7 @@ export async function initiateEmailAuth(
   turnkeyClient: Turnkey,
   sessionStorage?: SessionStorage
 ): Promise<InitiateAuthResult> {
-  const storage = sessionStorage ?? getDefaultSessionStorage();
+  const storage = requireClaimableStorage(sessionStorage ?? getDefaultSessionStorage());
 
   // Normalize before validation and all Turnkey calls so the same mailbox
   // always maps to the same identity (Alice@x.com === alice@x.com).
@@ -337,14 +346,7 @@ export async function verifyEmailAuth(
   sessionStorage?: SessionStorage,
   options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
-  const storage = sessionStorage ?? getDefaultSessionStorage();
-  // Fail closed for untyped callers: a get-then-set claim races across instances (#819).
-  if (typeof storage.claimForVerification !== 'function') {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired,
-      'SessionStorage must implement claimForVerification (an atomic conditional write).'
-    );
-  }
+  const storage = requireClaimableStorage(sessionStorage ?? getDefaultSessionStorage());
   let session = await storage.get(sessionId);
 
   if (!session) {

@@ -187,11 +187,12 @@ the seam, before signing:
   `localhost`, IP addresses, single-label hosts and malformed ports fail
   `INVALID_DOMAIN`; punycode/Unicode hosts fail `CEL_WEBVH_IDNA` (status
   `unsupported`), all as `CelError`.
-- Identity seams also admit `localhost[:port]` for development. **Single-label
+- Identity seams also admit `localhost[:port]` for development and ASCII
+  punycode (`xn--`) hosts. **Single-label
   hosts (`intranet`, `web:3000`) and IP addresses are now rejected by
   `createDIDWebVH`, `createDIDOriginal` and `updateDIDOriginal`** with
   `INVALID_DOMAIN` (IPs always failed there, uncoded, inside didwebvh-ts);
-  punycode hosts fail `CEL_WEBVH_IDNA`. These are `CelError`s, which extend
+  raw Unicode hosts fail `CEL_WEBVH_IDNA`. These are `CelError`s, which extend
   `StructuredError`; a blank domain still throws `StructuredError`
   `WEBVH_DOMAIN_REQUIRED`.
 

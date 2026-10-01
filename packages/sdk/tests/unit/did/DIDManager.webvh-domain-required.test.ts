@@ -135,6 +135,20 @@ describe('createDIDWebVH applies the CEL WebVH domain canonicalizer', () => {
     expect(webDoc.id).toContain(':localhost%3A8080:');
   }, 15000);
 
+  test('createDIDWebVH accepts a punycode host for an identity DID', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    expect((await manager.createDIDWebVH({ domain: 'XN--bcher-kva.example' })).did).toMatch(
+      /:xn--bcher-kva\.example$/
+    );
+  }, 15000);
+
+  test('createDIDWebVH names the failing path segment', async () => {
+    const manager = new DIDManager({ ...baseConfig });
+    await expect(
+      manager.createDIDWebVH({ domain: 'example.com', paths: ['ok', ' bad'] })
+    ).rejects.toThrow('paths[1]');
+  });
+
   test.each(['intranet', 'web:3000'])(
     'createDIDWebVH rejects single-label host %j with INVALID_DOMAIN',
     async (domain) => {
