@@ -1,5 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { signToken, verifyToken, getAuthCookieConfig, getClearAuthCookieConfig } from '../src/server/jwt';
+import {
+  signToken,
+  verifyToken,
+  getAuthCookieConfig,
+  getClearAuthCookieConfig,
+  isAuthTokenCredentialError,
+  AUTH_JWT_ERROR_CODES,
+} from '../src/server/jwt';
+import { StructuredError } from '@originals/sdk';
+import jwtLib from 'jsonwebtoken';
 
 const TEST_SECRET = 'test-jwt-secret-that-is-long-enough-for-hs256';
 
@@ -219,6 +228,75 @@ describe('jwt', () => {
       });
       const payload = verifyToken(token, { secret: exactly32 });
       expect(payload.sub).toBe('sub_org_123');
+    });
+  });
+
+  describe('typed error codes (#729, #747)', () => {
+    test('verifyToken throws a StructuredError with AUTH_TOKEN_EXPIRED for an expired token', () => {
+      const token = signToken('sub_org_123', 'user@example.com', undefined, {
+        secret: TEST_SECRET,
+        expiresIn: -1,
+      });
+      expect.assertions(3);
+      try {
+        verifyToken(token, { secret: TEST_SECRET });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_JWT_ERROR_CODES.tokenExpired);
+        expect(isAuthTokenCredentialError(error)).toBe(true);
+      }
+    });
+
+    test('verifyToken throws a StructuredError with AUTH_TOKEN_INVALID for a malformed token', () => {
+      expect.assertions(3);
+      try {
+        verifyToken('invalid.token.here', { secret: TEST_SECRET });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_JWT_ERROR_CODES.tokenInvalid);
+        expect(isAuthTokenCredentialError(error)).toBe(true);
+      }
+    });
+
+    test('verifyToken throws AUTH_TOKEN_MISSING_SUBJECT for a token with no sub claim', () => {
+      const now = Math.floor(Date.now() / 1000);
+      const forged = jwtLib.sign(
+        { email: 'nosub@example.com', iat: now },
+        TEST_SECRET,
+        { issuer: 'originals-auth', audience: 'originals-api', expiresIn: 60 }
+      );
+      expect.assertions(3);
+      try {
+        verifyToken(forged, { secret: TEST_SECRET });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_JWT_ERROR_CODES.tokenMissingSubject);
+        expect(isAuthTokenCredentialError(error)).toBe(true);
+      }
+    });
+
+    test('getJwtSecret failures are StructuredErrors, not credential errors', () => {
+      expect.assertions(6);
+      try {
+        signToken('sub_org_123', 'user@example.com');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_JWT_ERROR_CODES.configMissingSecret);
+        expect(isAuthTokenCredentialError(error)).toBe(false);
+      }
+      try {
+        signToken('sub_org_123', 'user@example.com', undefined, { secret: 'too-short' });
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_JWT_ERROR_CODES.configWeakSecret);
+        expect(isAuthTokenCredentialError(error)).toBe(false);
+      }
+    });
+
+    test('isAuthTokenCredentialError rejects non-StructuredError values', () => {
+      expect(isAuthTokenCredentialError(new Error('plain'))).toBe(false);
+      expect(isAuthTokenCredentialError('AUTH_TOKEN_INVALID')).toBe(false);
+      expect(isAuthTokenCredentialError(undefined)).toBe(false);
     });
   });
 

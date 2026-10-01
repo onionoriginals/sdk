@@ -81,7 +81,7 @@ Get session data without modifying it.
 function getSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): EmailAuthSession | undefined
+): Promise<EmailAuthSession | undefined>
 ```
 
 ---
@@ -94,7 +94,7 @@ Check if a session has been verified.
 function isSessionVerified(
   sessionId: string,
   sessionStorage?: SessionStorage
-): boolean
+): Promise<boolean>
 ```
 
 ---
@@ -107,7 +107,7 @@ Remove a session after successful login.
 function cleanupSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): void
+): Promise<void>
 ```
 
 ---
@@ -119,6 +119,35 @@ Create default in-memory session storage with auto-cleanup.
 ```typescript
 function createInMemorySessionStorage(): SessionStorage
 ```
+
+---
+
+### `SessionStorage`
+
+Pluggable session store. Every method may return synchronously or return a
+`Promise` — all of `initiateEmailAuth`/`verifyEmailAuth`/`getSession`/
+`isSessionVerified`/`cleanupSession` `await` the result either way, so a
+network-backed store (Redis, a database) can be passed directly instead of
+`createInMemorySessionStorage`'s ephemeral, single-process default.
+
+```typescript
+interface SessionStorage {
+  get(sessionId: string): EmailAuthSession | undefined | Promise<EmailAuthSession | undefined>;
+  set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
+  delete(sessionId: string): void | Promise<void>;
+  cleanup(): void | Promise<void>;
+  // Atomically: if the session exists and is neither `verified` nor
+  // `verifying`, set `verifying: true` and return true; otherwise false.
+  claimForVerification(sessionId: string): boolean | Promise<boolean>;
+}
+```
+
+`claimForVerification` is required. `verifyEmailAuth` rejects a store without
+it (`AUTH_SESSION_STORAGE_CLAIM_REQUIRED`). A shared store must back it with a
+real conditional write (a Redis Lua script or `WATCH`/`MULTI`, or SQL
+`UPDATE … SET verifying = true WHERE id = ? AND verifying = false AND verified = false`);
+a separate `get` then `set` lets two instances both win. After a successful
+claim `verifyEmailAuth` re-reads the session, so `get` may return a copy.
 
 ---
 

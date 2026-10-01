@@ -12,6 +12,7 @@ import {
   type SessionStorage,
 } from '../src/server/email-auth';
 import { createOtpTargetBundle, decryptOtpBundle } from './helpers/otp-test-utils';
+import type { EmailAuthSession } from '../src/types';
 
 // A rejection Turnkey actually rendered a verdict on (e.g. verifyOtp
 // definitively rejecting a wrong code) always carries a numeric `code`
@@ -792,61 +793,344 @@ describe('email-auth', () => {
         ).rejects.toThrow('Too many failed verification attempts');
         expect(storage.get(sessionId)).toBeUndefined();
       });
+
+      test('a burst of concurrent wrong-code guesses only lets one through to Turnkey (#819)', async () => {
+        // The single-use claim (#710) serializes concurrent verification
+        // attempts for one session: only the claim winner ever dispatches to
+        // Turnkey, so a burst of concurrent guesses can't race past the
+        // MAX_OTP_ATTEMPTS backstop the way a purely reactive (count-after-
+        // failure) check could.
+        let calls = 0;
+        const verifyOtp = mock(async () => {
+          calls += 1;
+          // Real network latency: every concurrent request is in flight
+          // simultaneously for a while before any of them resolves, so a
+          // TOCTOU gap would show up here if one existed.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          throw turnkeyRejection('invalid OTP code');
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const N = 15; // far more than MAX_OTP_ATTEMPTS = 5
+        const codes = Array.from({ length: N }, (_, i) => String(100000 + i));
+        const results = await Promise.allSettled(
+          codes.map((code) => verifyEmailAuth(sessionId, code, client, storage, verifyOptions))
+        );
+
+        // At most one guess ever crosses the Turnkey boundary during the
+        // race; every other concurrent call is rejected locally as
+        // already-in-progress before it can dispatch.
+        expect(calls).toBe(1);
+        expect(results.every((r) => r.status === 'rejected')).toBe(true);
+        expect(storage.get(sessionId)!.otpAttempts).toBe(1);
+      });
+    });
+
+    describe('single-use / concurrency guard (#710, #819)', () => {
+      test('a second call on an already-verified session is rejected without minting a new token', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const first = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+        expect(first.verified).toBe(true);
+        expect(first.verificationToken).toBe('token-1');
+
+        try {
+          await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+          throw new Error('expected verifyEmailAuth to reject');
+        } catch (error) {
+          expect(error).toBeInstanceOf(StructuredError);
+          expect((error as StructuredError).code).toBe(
+            AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified
+          );
+        }
+
+        // Turnkey must not have been asked to verify the (already-consumed)
+        // OTP a second time, and no second token was minted.
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+      });
+
+      test('two concurrent calls on the same session mint at most one token', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        const results = await Promise.allSettled([
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions),
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions),
+        ]);
+
+        const fulfilled = results.filter((r) => r.status === 'fulfilled');
+        const rejected = results.filter((r) => r.status === 'rejected');
+
+        // Exactly one of the two concurrent calls succeeds; the other is
+        // rejected as already-in-progress, and Turnkey's verifyOtp (which
+        // consumes the one-time otpId) is only invoked once.
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect(((rejected[0] as PromiseRejectedResult).reason as StructuredError).code).toBe(
+          AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress
+        );
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+
+        const session = storage.get(sessionId)!;
+        expect(session.verified).toBe(true);
+        expect(session.verifying).toBe(false);
+      });
+
+      test('the claim is released after a failed verifyOtp attempt so a corrected code can retry', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return calls === 1
+            ? Promise.reject(turnkeyRejection('OTP code invalid'))
+            : Promise.resolve({ verificationToken: 'token_ok' });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '111111', client, storage, verifyOptions)
+        ).rejects.toThrow('Invalid verification code');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        const result = await verifyEmailAuth(sessionId, '222222', client, storage, verifyOptions);
+        expect(result.verified).toBe(true);
+        expect(result.verificationToken).toBe('token_ok');
+      });
+
+      test('the claim is released after a transient verifyOtp failure so the same code can be resubmitted', async () => {
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return calls === 1
+            ? Promise.reject(new Error('fetch failed: ECONNRESET'))
+            : Promise.resolve({ verificationToken: 'token_ok' });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        await expect(
+          verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions)
+        ).rejects.toThrow('OTP verification could not be completed');
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+        expect(result.verified).toBe(true);
+      });
+
+      test('the claim is released after a failed encryption attempt so a retry with a valid override can proceed', async () => {
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_ok' }));
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const sessionId = await setupSession(client);
+
+        // No signer override: the bundle's signature is untrusted, so
+        // encryptOtpCode throws before Turnkey is ever called.
+        await expect(verifyEmailAuth(sessionId, '123456', client, storage)).rejects.toThrow(
+          'Failed to encrypt OTP code'
+        );
+        expect(storage.get(sessionId)!.verifying).toBe(false);
+
+        const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+        expect(result.verified).toBe(true);
+      });
+    });
+
+    describe('claimForVerification (cross-instance atomic claim)', () => {
+      function createExternalAtomicStorage(): SessionStorage & {
+        sessions: Map<string, EmailAuthSession>;
+      } {
+        const sessions = new Map<string, EmailAuthSession>();
+        return {
+          sessions,
+          get: (sessionId: string) => sessions.get(sessionId),
+          set: (sessionId: string, session: EmailAuthSession) => {
+            sessions.set(sessionId, session);
+          },
+          delete: (sessionId: string) => {
+            sessions.delete(sessionId);
+          },
+          cleanup: () => sessions.clear(),
+          // Simulates a real shared store's atomic conditional write (e.g. a
+          // Redis Lua script or a `WHERE verifying = false` SQL update):
+          // resolved asynchronously, and the check-and-set happens as one
+          // indivisible step rather than as separate get/set calls.
+          claimForVerification: async (sessionId: string) => {
+            const session = sessions.get(sessionId);
+            if (!session || session.verified || session.verifying) {
+              return false;
+            }
+            session.verifying = true;
+            sessions.set(sessionId, session);
+            return true;
+          },
+        };
+      }
+
+      test('calls the storage\'s claimForVerification', async () => {
+        const external = createExternalAtomicStorage();
+        const claimForVerification = mock(external.claimForVerification!);
+        external.claimForVerification = claimForVerification;
+
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        const result = await verifyEmailAuth(
+          initResult.sessionId,
+          '123456',
+          client,
+          external,
+          verifyOptions
+        );
+        expect(result.verified).toBe(true);
+        expect(claimForVerification).toHaveBeenCalledWith(initResult.sessionId);
+      });
+
+      test('a claim rejected because the session was concurrently deleted is reported as invalid/expired, not "in progress"', async () => {
+        const external = createExternalAtomicStorage();
+        const client = createMockTurnkeyClient();
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        // Simulate another concurrent path (expiry cleanup, an exhausted
+        // attempt budget on a racing call) deleting the session out from
+        // under a claim that's already in flight.
+        const originalClaim = external.claimForVerification!;
+        external.claimForVerification = async (sessionId: string) => {
+          external.sessions.delete(sessionId);
+          return originalClaim(sessionId);
+        };
+
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client2 = createMockTurnkeyClient({ verifyOtp });
+
+        await expect(
+          verifyEmailAuth(initResult.sessionId, '123456', client2, external, verifyOptions)
+        ).rejects.toThrow('Invalid or expired session');
+        expect(verifyOtp).not.toHaveBeenCalled();
+      });
+
+      test('two concurrent calls against a shared atomic store: exactly one wins the claim', async () => {
+        const external = createExternalAtomicStorage();
+        let calls = 0;
+        const verifyOtp = mock(() => {
+          calls += 1;
+          return Promise.resolve({ verificationToken: `token-${calls}` });
+        });
+        const client = createMockTurnkeyClient({ verifyOtp });
+        const initResult = await initiateEmailAuth('user@example.com', client, external);
+
+        const results = await Promise.allSettled([
+          verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions),
+          verifyEmailAuth(initResult.sessionId, '123456', client, external, verifyOptions),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+        expect(verifyOtp).toHaveBeenCalledTimes(1);
+      });
+
+      test('rejects a storage without claimForVerification before reaching Turnkey', async () => {
+        // A plain-JS store written against the pre-4.0 four-method shape: without an
+        // atomic claim, concurrent guesses would race past MAX_OTP_ATTEMPTS.
+        const sessions = new Map<string, EmailAuthSession>();
+        const plainStorage = {
+          get: async (sessionId: string) => structuredClone(sessions.get(sessionId)),
+          set: async (sessionId: string, session: EmailAuthSession) => {
+            sessions.set(sessionId, structuredClone(session));
+          },
+          delete: async (sessionId: string) => {
+            sessions.delete(sessionId);
+          },
+          cleanup: () => sessions.clear(),
+        } as unknown as SessionStorage;
+
+        const initOtp = mock(() => Promise.resolve({ otpId: 'otp_123' }));
+        const verifyOtp = mock(() => Promise.resolve({ verificationToken: 'token_abc' }));
+        const client = createMockTurnkeyClient({ initOtp, verifyOtp });
+        // Rejected before an OTP email goes out, not on the first verify.
+        await expect(
+          initiateEmailAuth('user@example.com', client, plainStorage)
+        ).rejects.toMatchObject({ code: AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired });
+        expect(initOtp).not.toHaveBeenCalled();
+
+        sessions.set('session_1', {
+          email: 'user@example.com',
+          otpId: 'otp_123',
+          otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+          timestamp: Date.now(),
+          verified: false,
+        });
+        await expect(
+          verifyEmailAuth('session_1', '123456', client, plainStorage, verifyOptions)
+        ).rejects.toMatchObject({ code: AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired });
+        expect(verifyOtp).not.toHaveBeenCalled();
+        expect(sessions.get('session_1')!.verifying).toBeUndefined();
+      });
     });
   });
 
   describe('isSessionVerified', () => {
-    test('returns false for nonexistent session', () => {
-      expect(isSessionVerified('nonexistent', storage)).toBe(false);
+    test('returns false for nonexistent session', async () => {
+      expect(await isSessionVerified('nonexistent', storage)).toBe(false);
     });
 
-    test('returns false for unverified session', () => {
+    test('returns false for unverified session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: false,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(false);
+      expect(await isSessionVerified('session_1', storage)).toBe(false);
     });
 
-    test('returns true for verified session', () => {
+    test('returns true for verified session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: true,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(true);
+      expect(await isSessionVerified('session_1', storage)).toBe(true);
     });
 
-    test('returns false and cleans up expired session', () => {
+    test('returns false and cleans up expired session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now() - 16 * 60 * 1000,
         verified: true,
       });
-      expect(isSessionVerified('session_1', storage)).toBe(false);
+      expect(await isSessionVerified('session_1', storage)).toBe(false);
       expect(storage.get('session_1')).toBeUndefined();
     });
   });
 
   describe('cleanupSession', () => {
-    test('removes session from storage', () => {
+    test('removes session from storage', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now(),
         verified: true,
       });
-      cleanupSession('session_1', storage);
+      await cleanupSession('session_1', storage);
       expect(storage.get('session_1')).toBeUndefined();
     });
 
-    test('does not throw for nonexistent session', () => {
-      expect(() => cleanupSession('nonexistent', storage)).not.toThrow();
+    test('does not throw for nonexistent session', async () => {
+      await expect(cleanupSession('nonexistent', storage)).resolves.toBeUndefined();
     });
   });
 
   describe('getSession', () => {
-    test('returns session data', () => {
+    test('returns session data', async () => {
       const session = {
         email: 'user@example.com',
         subOrgId: 'sub_123',
@@ -855,21 +1139,82 @@ describe('email-auth', () => {
         verified: false,
       };
       storage.set('session_1', session);
-      expect(getSession('session_1', storage)).toEqual(session);
+      expect(await getSession('session_1', storage)).toEqual(session);
     });
 
-    test('returns undefined for nonexistent session', () => {
-      expect(getSession('nonexistent', storage)).toBeUndefined();
+    test('returns undefined for nonexistent session', async () => {
+      expect(await getSession('nonexistent', storage)).toBeUndefined();
     });
 
-    test('returns undefined and cleans up expired session', () => {
+    test('returns undefined and cleans up expired session', async () => {
       storage.set('session_1', {
         email: 'user@example.com',
         timestamp: Date.now() - 16 * 60 * 1000,
         verified: false,
       });
-      expect(getSession('session_1', storage)).toBeUndefined();
+      expect(await getSession('session_1', storage)).toBeUndefined();
       expect(storage.get('session_1')).toBeUndefined();
+    });
+  });
+
+  describe('async SessionStorage (#684)', () => {
+    // A store whose get/set/delete return Promises, matching what a real
+    // Redis/DB-backed SessionStorage looks like (createInMemorySessionStorage
+    // itself stays synchronous, but the interface must support this).
+    function createAsyncSessionStorage(): SessionStorage {
+      const sessions = new Map<string, ReturnType<typeof storage.get>>();
+      return {
+        get: async (sessionId: string) => sessions.get(sessionId) as any,
+        set: async (sessionId: string, session: any) => {
+          sessions.set(sessionId, session);
+        },
+        delete: async (sessionId: string) => {
+          sessions.delete(sessionId);
+        },
+        cleanup: async () => {
+          sessions.clear();
+        },
+        claimForVerification: async (sessionId: string) => {
+          const session = sessions.get(sessionId);
+          if (!session || session.verified || session.verifying) return false;
+          session.verifying = true;
+          return true;
+        },
+      };
+    }
+
+    test('verifyEmailAuth reads a session from an async store instead of treating it as missing', async () => {
+      const asyncStorage = createAsyncSessionStorage();
+      await asyncStorage.set('session_1', {
+        email: 'user@example.com',
+        otpId: 'otp_123',
+        otpEncryptionTargetBundle: otpFixture.otpEncryptionTargetBundle,
+        timestamp: Date.now(),
+        verified: false,
+      });
+
+      const client = createMockTurnkeyClient();
+      await expect(
+        verifyEmailAuth('session_1', '123456', client, asyncStorage, verifyOptions)
+      ).resolves.toMatchObject({ verified: true });
+    });
+
+    test('getSession/isSessionVerified/cleanupSession all await an async store', async () => {
+      const asyncStorage = createAsyncSessionStorage();
+      await asyncStorage.set('session_1', {
+        email: 'user@example.com',
+        timestamp: Date.now(),
+        verified: true,
+      });
+
+      expect(await getSession('session_1', asyncStorage)).toMatchObject({
+        email: 'user@example.com',
+        verified: true,
+      });
+      expect(await isSessionVerified('session_1', asyncStorage)).toBe(true);
+
+      await cleanupSession('session_1', asyncStorage);
+      expect(await getSession('session_1', asyncStorage)).toBeUndefined();
     });
   });
 });

@@ -282,6 +282,11 @@ export function normalizeTxid(txid: string): string {
  * genuinely extends `head` under `controller`: same check `apply()` would perform, applied
  * directly to a single raw event/proof pair that itself may never pass full `eventShape`
  * validation (a recognized-but-unsupported CCG shape). Never throws.
+ *
+ * Every supplied proof must validate and belong to `controller`: per
+ * specs/originals-cel-v3-profile.md's proof-array rule, one valid proof does not excuse
+ * another invalid or unsupported proof in the same array, mirroring `verifyEntry`'s
+ * all-or-nothing behavior in the real fold path.
  */
 function entryExtendsUnderController(
   entry: { event: JsonValue; proof: JsonValue },
@@ -299,26 +304,26 @@ function entryExtendsUnderController(
     try {
       proof = validateProof(candidate);
     } catch {
-      continue;
+      return false;
     }
     const proofController = proof.verificationMethod.split("#")[0];
-    if (proofController !== controller) continue;
+    if (proofController !== controller) return false;
     const { proofValue, ...configuration } = proof;
     try {
       if (
-        verifyJcsSignature(
+        !verifyJcsSignature(
           event,
           configuration,
           decodeBase58(proofValue),
           proofController,
         )
       )
-        return true;
+        return false;
     } catch {
-      continue;
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 /**
@@ -554,13 +559,23 @@ export function resolveSat(
     const known = new Set(
       snapshot.publications.map((p) => normalizeInscriptionId(p.id)),
     );
+    const reported = new Set(inscriptionIds.map(normalizeInscriptionId));
     if (inscriptionIds.some((id) => !known.has(normalizeInscriptionId(id))))
       return failure(
         "inconsistent-evidence",
         "Independent enumeration source reports an inscription absent from the primary snapshot",
       );
-    enumerationAssurance = "cross-checked";
-    enumerationSource = source;
+    // A strictly smaller independent list never "disagrees" with the primary,
+    // so without also requiring it to cover everything the primary knows, an
+    // empty (or partial) report — the honest, expected shape from a second
+    // index that legitimately has not indexed this far yet — would trivially
+    // earn full corroboration for having observed nothing at all. Only credit
+    // "cross-checked" when the independent source's report and the primary's
+    // are the same set, not merely when the independent's is a subset of it.
+    if ([...known].every((id) => reported.has(id))) {
+      enumerationAssurance = "cross-checked";
+      enumerationSource = source;
+    }
     if (ownership !== undefined) {
       if (
         !ownership ||
@@ -685,7 +700,9 @@ export function resolveSat(
       !hash(position.blockHash)
     )
       return failure("incomplete", "Missing confirmed creation position");
-    const id = /^([0-9a-f]{64})i(0|[1-9]\d*)$/.exec(publication.id);
+    const id = /^([0-9a-f]{64})i(0|[1-9]\d*)$/.exec(
+      normalizeInscriptionId(publication.id),
+    );
     if (
       !id ||
       id[1] !== normalizeTxid(publication.revealTxid) ||
@@ -858,9 +875,25 @@ export function resolveSat(
       if (!(error instanceof CelError)) throw error;
       // CEL_WEBVH_IDNA can only be thrown from inside apply()'s migrate handling,
       // after verifyEntry and the CEL_CHAIN head-extension/authority checks have
-      // already authenticated the entry — unlike the two CCG codes below, no
-      // separate authentication step is needed here.
-      if (error.status === "unsupported" && error.code === "CEL_WEBVH_IDNA")
+      // run — but those checks only authenticate the entry against *some*
+      // controller, not necessarily this Original's controller. apply() derives
+      // `expectedController` from the supplied `prefix`'s own state when one is
+      // given; with no `prefix` (history undefined, no boundary selected yet), it
+      // falls back to the candidate's own self-declared `create` controller. A
+      // candidate is therefore only a genuine, authority-bearing continuation of
+      // *this* sat's already-accepted history once `history` is defined — before
+      // that, "authenticated" means nothing more than "signed by whatever key its
+      // own attacker-authored genesis entry declares," which anyone can produce
+      // for an entirely unrelated, self-signed history. Gating on `history !==
+      // undefined` keeps this consistent with the CEL_DATA_REFERENCE guard below:
+      // a pre-boundary candidate remains exactly as ignorable as any other
+      // invalid one, instead of letting an unrelated party permanently poison
+      // resolution of the real Original.
+      if (
+        error.status === "unsupported" &&
+        error.code === "CEL_WEBVH_IDNA" &&
+        history !== undefined
+      )
         return failure("unsupported-capability", error.code);
       if (
         error.status === "unsupported" &&

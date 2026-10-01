@@ -67,7 +67,7 @@ it and independently verifies signatures using Node/OpenSSL. The separate W3C
 literal-vector checks establish that the reference primitives match published
 suite examples, rather than only agreeing with themselves.
 
-`transport-inputs.json` adds nine JSON parser cases and sixteen CBOR subset cases.
+`transport-inputs.json` adds fifteen JSON parser cases and sixteen CBOR subset cases.
 Python independently checks duplicate decoded JSON names and invalid Unicode.
 CBOR checking inspects original string bytes with fatal UTF-8 decoding before
 cborg conversion. cborg's default text decoder replaces invalid UTF-8; its

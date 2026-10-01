@@ -20,6 +20,51 @@ for (const vector of inputs.cbor)
     else expect(() => decodeValue(bytes, "cbor")).toThrow();
   });
 
+test("JSON parsing rejects an integer literal that isn't exactly representable in binary64, like CBOR does", () => {
+  // 2 ** 61, exactly representable, accepted identically to the CBOR vector.
+  expect(decodeValue('{"a":2305843009213693952}', "json")).toEqual({
+    a: 2305843009213693952,
+  });
+  // One past 2 ** 61, still round-trips through Number() to the same double
+  // as the exact value above, so it must be rejected rather than silently
+  // rounded to a different wire document's value.
+  expect(() => decodeValue('{"a":2305843009213693953}', "json")).toThrow();
+  // 2 ** 53 + 1: the smallest inexact integer, must reject just like CBOR's
+  // "inexact-large-integer" vector rejects the equivalent CBOR encoding.
+  expect(() => decodeValue('{"a":9007199254740993}', "json")).toThrow();
+  // Ordinary fractional values still round through IEEE 754 division as
+  // before; this is not an integer literal and must not be rejected.
+  expect(decodeValue('{"a":0.1}', "json")).toEqual({ a: 0.1 });
+  // A number written with an exponent is not a plain decimal integer
+  // literal, so it is exempt from the exactness check, matching RFC 8785
+  // JCS number handling (e.g. the "rfc8785-number-format" known answer,
+  // which accepts 1E30 without exact-representability enforcement).
+  expect(decodeValue('{"a":1e30}', "json")).toEqual({ a: 1e30 });
+});
+
+test("JSON reads back every large integral value the JCS writer emits, matching CBOR", () => {
+  // JCS writes binary64 values in [2**53, 1e21) as their shortest round-trip
+  // decimal (2**61 -> "2305843009213694000"), not their exact digits.
+  for (const n of [2 ** 61, 2 ** 66, -(2 ** 60) * 3, 123456789012345680000]) {
+    const json = encodeValue({ n }, "json");
+    expect(decodeValue(json, "json")).toEqual({ n });
+    expect(decodeValue(encodeValue({ n }, "cbor"), "cbor")).toEqual({ n });
+  }
+  expect(decodeValue('{"a":2305843009213694000}', "json")).toEqual({ a: 2 ** 61 });
+  // Neither exact nor the JCS spelling of the double it rounds to.
+  expect(() => decodeValue('{"a":2305843009213694001}', "json")).toThrow();
+});
+
+test("2**53 + 1 can't stand in for a signed 2**53; exact and JCS spellings of one binary64 share an identity", () => {
+  const exact = decodeValue('{"a":9007199254740992}', "json");
+  expect(canonicalizeValue(exact)).toBe('{"a":9007199254740992}');
+  expect(() => decodeValue('{"a":9007199254740993}', "json")).toThrow();
+  // Accepted trade-off: both spellings name 2**61 and canonicalize identically.
+  expect(canonicalizeValue(decodeValue('{"a":2305843009213693952}', "json"))).toBe(
+    canonicalizeValue(decodeValue('{"a":2305843009213694000}', "json")),
+  );
+});
+
 test("deterministic CBOR uses integers for exact integral binary64 values beyond the safe range", () => {
   expect(Buffer.from(encodeValue({ a: 2 ** 61 }, "cbor")).toString("hex")).toBe(
     "a161611b2000000000000000",

@@ -148,6 +148,14 @@ import { deriveAssetId, normalizeAssetId, normalizeSatpoint, assetDigest, parseA
 import { deriveDid } from '@originals/sdk/cel';
 // @ts-expect-error Renamed to parseAssetAlias; the historical name no longer resolves.
 import { parseAssetDid } from '@originals/sdk/cel';
+import { isWebVHPathSegment, canonicalWebVHPaths, canonicalizeWebVHDomain } from '@originals/sdk/cel';
+const webvhDomain: string = canonicalizeWebVHDomain('example.com', { identity: true });
+void webvhDomain;
+const webvhPaths = canonicalWebVHPaths(['hello world']);
+const webvhSegments: string[] = webvhPaths.ok ? webvhPaths.segments : [];
+const webvhSegmentOk: boolean = isWebVHPathSegment('hello');
+void webvhSegments;
+void webvhSegmentOk;
 const currentEnvelope: AssetEnvelope = parseAssetEnvelope(envelope);
 const inspected: AssetEnvelopeInspection = inspectAssetEnvelope(envelope);
 const inspectedEnvelope: AssetEnvelope = inspected.envelope;

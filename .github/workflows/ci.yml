@@ -121,6 +121,13 @@ jobs:
         working-directory: packages/sdk
         run: bun run typecheck:public
 
+      # Catches the #716 class of defect: a documented example's positional
+      # signature (e.g. a required subOrgId argument) silently drifting out
+      # of sync with the real implementation.
+      - name: Verify auth public client API matches documented signatures
+        working-directory: packages/auth
+        run: bun run typecheck:public
+
       # Node-only features must load their modules lazily so browser/edge
       # consumers can still import the package. One static `import 'node:fs'`
       # in the graph breaks that for everyone and is invisible until bundling.

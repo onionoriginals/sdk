@@ -44,6 +44,9 @@ export const AUTH_EMAIL_ERROR_CODES = {
   otpVerifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
   otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
   subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
+  sessionAlreadyVerified: 'AUTH_SESSION_ALREADY_VERIFIED',
+  otpVerifyInProgress: 'AUTH_OTP_VERIFY_IN_PROGRESS',
+  sessionStorageClaimRequired: 'AUTH_SESSION_STORAGE_CLAIM_REQUIRED',
 } as const;
 
 /**
@@ -59,13 +62,42 @@ export function isOtpVerifyTransientFailure(error: unknown): error is Structured
 }
 
 /**
- * Session storage interface for pluggable session management
+ * Session storage interface for pluggable session management.
+ *
+ * Every method may return synchronously or return a `Promise` — all call
+ * sites in this module `await` the result either way, so a network-backed
+ * store (Redis, a database) can be plugged in directly, as recommended by
+ * {@link createInMemorySessionStorage}'s production warning (#684).
  */
 export interface SessionStorage {
-  get(sessionId: string): EmailAuthSession | undefined;
-  set(sessionId: string, session: EmailAuthSession): void;
-  delete(sessionId: string): void;
-  cleanup(): void;
+  get(sessionId: string): EmailAuthSession | undefined | Promise<EmailAuthSession | undefined>;
+  set(sessionId: string, session: EmailAuthSession): void | Promise<void>;
+  delete(sessionId: string): void | Promise<void>;
+  cleanup(): void | Promise<void>;
+  /**
+   * Atomic verification claim, used by {@link verifyEmailAuth} to close its
+   * single-use/concurrency guard (#710, #819) across multiple processes
+   * sharing one store.
+   *
+   * Implementations backed by shared storage (Redis, a database) must back
+   * this with a real conditional write — e.g. a Redis
+   * `WATCH`/`MULTI` or Lua script, or a SQL `UPDATE ... WHERE verifying =
+   * false AND verified = false`. It must atomically check that the session
+   * exists and is neither `verified` nor already `verifying`, and if so mark
+   * it `verifying: true` in that same operation, returning `true` only to
+   * the one caller that won the claim.
+   *
+   * `get`/`set` alone cannot do this safely for a shared store: two
+   * processes can each call `get`, both observe `verifying: false`, and both
+   * then `set` — there is no atomicity between the two calls. May return a
+   * `Promise` for stores that require network I/O. After a successful claim,
+   * {@link verifyEmailAuth} re-reads the session, so `get` may return a copy.
+   *
+   * Required: {@link verifyEmailAuth} rejects a store without it
+   * (`AUTH_SESSION_STORAGE_CLAIM_REQUIRED`) rather than fall back to a
+   * non-atomic get-then-set.
+   */
+  claimForVerification(sessionId: string): boolean | Promise<boolean>;
 }
 
 /**
@@ -74,7 +106,9 @@ export interface SessionStorage {
  * **Production warning**: This store is ephemeral — sessions are lost on
  * process restart and are not shared across multiple instances. For
  * production deployments, pass a persistent {@link SessionStorage}
- * implementation backed by Redis, a database, or another shared store.
+ * implementation backed by Redis, a database, or another shared store, whose
+ * {@link SessionStorage.claimForVerification} is a real conditional write so
+ * {@link verifyEmailAuth}'s single-use guard stays atomic across instances.
  */
 export function createInMemorySessionStorage(): SessionStorage {
   const sessions = new Map<string, EmailAuthSession>();
@@ -96,8 +130,23 @@ export function createInMemorySessionStorage(): SessionStorage {
 
   return {
     get: (sessionId: string) => sessions.get(sessionId),
-    set: (sessionId: string, session: EmailAuthSession) => sessions.set(sessionId, session),
-    delete: (sessionId: string) => sessions.delete(sessionId),
+    set: (sessionId: string, session: EmailAuthSession) => {
+      sessions.set(sessionId, session);
+    },
+    delete: (sessionId: string) => {
+      sessions.delete(sessionId);
+    },
+    // Trivially atomic: this store is a single process's Map, and every
+    // operation here runs synchronously with no intervening `await`.
+    claimForVerification: (sessionId: string) => {
+      const session = sessions.get(sessionId);
+      if (!session || session.verified || session.verifying) {
+        return false;
+      }
+      session.verifying = true;
+      sessions.set(sessionId, session);
+      return true;
+    },
     cleanup: () => {
       clearInterval(cleanupInterval);
       sessions.clear();
@@ -128,6 +177,17 @@ function generateSessionId(): string {
   return `session_${randomBytes(24).toString('base64url')}`;
 }
 
+// Fail closed for untyped callers: a get-then-set claim races across instances (#819).
+function requireClaimableStorage(storage: SessionStorage): SessionStorage {
+  if (typeof storage.claimForVerification !== 'function') {
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStorageClaimRequired,
+      'SessionStorage must implement claimForVerification (an atomic conditional write).'
+    );
+  }
+  return storage;
+}
+
 /**
  * Initiate email authentication using Turnkey OTP
  * Sends a 6-digit OTP code to the user's email
@@ -147,7 +207,7 @@ export async function initiateEmailAuth(
   turnkeyClient: Turnkey,
   sessionStorage?: SessionStorage
 ): Promise<InitiateAuthResult> {
-  const storage = sessionStorage ?? getDefaultSessionStorage();
+  const storage = requireClaimableStorage(sessionStorage ?? getDefaultSessionStorage());
 
   // Normalize before validation and all Turnkey calls so the same mailbox
   // always maps to the same identity (Alice@x.com === alice@x.com).
@@ -204,7 +264,7 @@ export async function initiateEmailAuth(
   // Create auth session. subOrgId is intentionally absent until the email
   // is verified (see verifyEmailAuth).
   const sessionId = generateSessionId();
-  storage.set(sessionId, {
+  await storage.set(sessionId, {
     email: normalizedEmail,
     otpId,
     otpEncryptionTargetBundle,
@@ -272,6 +332,12 @@ export interface VerifyEmailAuthOptions {
  * Failed verification attempts are counted per session; after
  * {@link MAX_OTP_ATTEMPTS} failures the session is destroyed and the user
  * must request a new code.
+ *
+ * A session claim (#710, #819) rejects a second call on an already-verified
+ * session and serializes concurrent calls racing the same unverified
+ * session, so at most one guess per session is ever in flight to Turnkey at
+ * a time — a burst of concurrent wrong-code guesses cannot race past
+ * {@link MAX_OTP_ATTEMPTS}.
  */
 export async function verifyEmailAuth(
   sessionId: string,
@@ -280,8 +346,8 @@ export async function verifyEmailAuth(
   sessionStorage?: SessionStorage,
   options?: VerifyEmailAuthOptions
 ): Promise<VerifyAuthResult> {
-  const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const storage = requireClaimableStorage(sessionStorage ?? getDefaultSessionStorage());
+  let session = await storage.get(sessionId);
 
   if (!session) {
     throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
@@ -289,24 +355,10 @@ export async function verifyEmailAuth(
 
   // Check if session has expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.sessionExpired,
       'Session expired. Please request a new code.'
-    );
-  }
-
-  if (!session.otpId) {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
-      'OTP ID not found in session'
-    );
-  }
-
-  if (!session.otpEncryptionTargetBundle) {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
-      'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
 
@@ -318,6 +370,63 @@ export async function verifyEmailAuth(
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid,
       'Invalid verification code format'
+    );
+  }
+
+  // Single-use / concurrency guard (#710, #819): claim the session before
+  // doing anything else that could be replayed or raced.
+  const claimed = await storage.claimForVerification(sessionId);
+  if (!claimed) {
+    // Re-fetch for a precise error: the rejected claim alone doesn't say
+    // *why* — the session could since have been deleted (expiry cleanup,
+    // or an exhausted-attempts destroy racing us), not just already
+    // verified or already in progress.
+    const current = await storage.get(sessionId);
+    if (!current) {
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.sessionInvalid,
+        'Invalid or expired session'
+      );
+    }
+    if (current.verified) {
+      throw new StructuredError(
+        AUTH_EMAIL_ERROR_CODES.sessionAlreadyVerified,
+        'This session has already been verified. Please log in or request a new code.'
+      );
+    }
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpVerifyInProgress,
+      'A verification is already in progress for this session. Please wait for it to complete.'
+    );
+  }
+  // Reload under the claim: the pre-claim read may predate a racing call's persisted otpAttempts.
+  const fresh = await storage.get(sessionId);
+  if (!fresh) {
+    throw new StructuredError(AUTH_EMAIL_ERROR_CODES.sessionInvalid, 'Invalid or expired session');
+  }
+  if (Date.now() - fresh.timestamp > SESSION_TIMEOUT) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionExpired,
+      'Session expired. Please request a new code.'
+    );
+  }
+  session = fresh;
+
+  // Checked on the claimed snapshot; a session missing these can never verify.
+  if (!session.otpId) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
+      'OTP ID not found in session'
+    );
+  }
+
+  if (!session.otpEncryptionTargetBundle) {
+    await storage.delete(sessionId);
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.sessionStateInvalid,
+      'OTP encryption target bundle not found in session. Please request a new code.'
     );
   }
 
@@ -342,6 +451,10 @@ export async function verifyEmailAuth(
     }));
   } catch (error) {
     console.error('❌ Failed to encrypt OTP code:', error);
+    // Release the claim: this attempt never reached Turnkey, so the session
+    // is still eligible for a retry.
+    session.verifying = false;
+    await storage.set(sessionId, session);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpEncryptionFailed,
       `Failed to encrypt OTP code: ${error instanceof Error ? error.message : String(error)}`,
@@ -387,6 +500,10 @@ export async function verifyEmailAuth(
     // OTP window exhaust a legitimate user's budget and lock them out, even
     // though they never typed a wrong code (#747/#819).
     if (extractTurnkeyErrorCode(error) !== TURNKEY_GRPC_INVALID_ARGUMENT) {
+      // Release the claim: a transient failure never evaluated the code, so
+      // the session remains eligible for the same code to be resubmitted.
+      session.verifying = false;
+      await storage.set(sessionId, session);
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpVerifyTransientFailure,
         `OTP verification could not be completed: ${
@@ -401,14 +518,16 @@ export async function verifyEmailAuth(
     // 15-minute window.
     const attempts = (session.otpAttempts ?? 0) + 1;
     if (attempts >= MAX_OTP_ATTEMPTS) {
-      storage.delete(sessionId);
+      await storage.delete(sessionId);
       throw new StructuredError(
         AUTH_EMAIL_ERROR_CODES.otpAttemptsExceeded,
         'Too many failed verification attempts. Please request a new code.'
       );
     }
     session.otpAttempts = attempts;
-    storage.set(sessionId, session);
+    // Release the claim so a corrected code can be retried.
+    session.verifying = false;
+    await storage.set(sessionId, session);
 
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.otpCodeIncorrect,
@@ -435,7 +554,7 @@ export async function verifyEmailAuth(
     // make retries re-submit the consumed otpId to Turnkey, burning the
     // attempt budget and eventually masking this error with a misleading
     // "too many failed attempts".
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     throw new StructuredError(
       AUTH_EMAIL_ERROR_CODES.subOrgProvisionFailed,
       `Email verified, but provisioning the Turnkey sub-organization failed: ${
@@ -447,8 +566,9 @@ export async function verifyEmailAuth(
 
   // Mark session as verified
   session.verified = true;
+  session.verifying = false;
   session.subOrgId = subOrgId;
-  storage.set(sessionId, session);
+  await storage.set(sessionId, session);
 
   return {
     verified: true,
@@ -463,17 +583,17 @@ export async function verifyEmailAuth(
 /**
  * Check if a session is verified
  */
-export function isSessionVerified(
+export async function isSessionVerified(
   sessionId: string,
   sessionStorage?: SessionStorage
-): boolean {
+): Promise<boolean> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const session = await storage.get(sessionId);
 
   if (!session) return false;
 
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     return false;
   }
 
@@ -483,12 +603,12 @@ export function isSessionVerified(
 /**
  * Clean up a session after successful login
  */
-export function cleanupSession(
+export async function cleanupSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): void {
+): Promise<void> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  storage.delete(sessionId);
+  await storage.delete(sessionId);
 }
 
 /**
@@ -497,18 +617,18 @@ export function cleanupSession(
  * Note: `subOrgId` is only present on sessions that have completed
  * verification — initiation no longer provisions the sub-organization.
  */
-export function getSession(
+export async function getSession(
   sessionId: string,
   sessionStorage?: SessionStorage
-): EmailAuthSession | undefined {
+): Promise<EmailAuthSession | undefined> {
   const storage = sessionStorage ?? getDefaultSessionStorage();
-  const session = storage.get(sessionId);
+  const session = await storage.get(sessionId);
 
   if (!session) return undefined;
 
   // Check if expired
   if (Date.now() - session.timestamp > SESSION_TIMEOUT) {
-    storage.delete(sessionId);
+    await storage.delete(sessionId);
     return undefined;
   }
 

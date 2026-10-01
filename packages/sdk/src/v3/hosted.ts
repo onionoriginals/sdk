@@ -9,6 +9,8 @@ import {
   encodeDocument,
   parseAssetAlias,
   assetDigest,
+  canonicalWebVHPaths,
+  canonicalizeWebVHDomain,
   sameAssetIdentity,
   parseDocument,
   signEvent,
@@ -130,9 +132,36 @@ function location(did: string) {
     prefix: url.pathname.slice(1, -"did.jsonl".length),
   };
 }
+/**
+ * Compares a republish call's `paths` against the segments already bound in
+ * `prefix` (from `location()`, always trailing-slash-terminated, or the
+ * `.well-known/` default for an empty path). Segments in `prefix` are
+ * percent-encoded per `parseAssetAlias`'s canonical WebVH path spelling;
+ * decoding them back is what lets a caller replay the exact same raw
+ * `paths` array used on the original publish.
+ */
+function sameHostedPath(prefix: string, paths: string[]): boolean {
+  const existing =
+    prefix === ".well-known/" ? [] : prefix.slice(0, -1).split("/").map(decodeURIComponent);
+  return (
+    paths.length === existing.length &&
+    paths.every((segment, i) => segment === existing[i])
+  );
+}
 const error = (code: string, message: string): never => {
   throw new CelError("invalid", code, message);
 };
+
+// Codes the SDK's own shipped storage adapters throw when a configuration
+// mismatch makes the write deterministically impossible (e.g. LocalStorageAdapter's
+// originDomain guard), never a transient condition. Unlike an arbitrary custom
+// adapter's own StructuredError — whose transience this SDK cannot know, so it
+// stays wrapped as retryable below — retrying the identical prepared publication
+// against the same misconfigured first-party adapter can never succeed.
+const DETERMINISTIC_STORAGE_ERROR_CODES = new Set([
+  "STORAGE_DOMAIN_MISMATCH",
+  "STORAGE_PATH_TRAVERSAL",
+]);
 
 /** Hosted discovery with independently verified method and asset histories, using explicit storage. */
 export class HostedAssets {
@@ -146,6 +175,26 @@ export class HostedAssets {
     asset: OriginalsAsset,
     options: WebPublicationOptions,
   ): Promise<PreparedWebPublication> {
+    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
+      return error(
+        "WEBVH_DOMAIN_REQUIRED",
+        "Supply the permanent WebVH domain",
+      );
+    // One canonical URL#host value for minting, storage and the binding comparison (#722, #761).
+    const domain = canonicalizeWebVHDomain(options.domain);
+    if (options.paths !== undefined) {
+      const paths = canonicalWebVHPaths(options.paths);
+      if (!paths.ok && paths.reason === "reserved")
+        return error(
+          "ASSET_WEBVH_PATH_RESERVED",
+          "The .well-known path segment is reserved; omit paths to host at /.well-known/did.jsonl",
+        );
+      if (!paths.ok)
+        return error(
+          "ASSET_WEBVH_PATH",
+          `Supply paths as an array of valid WebVH path segments${paths.index === undefined ? "" : ` (paths[${paths.index}] is invalid)`}`,
+        );
+    }
     if (
       !["cel", "webvh"].includes(asset.state.layer) ||
       (asset.state.layer === "cel" && !asset.state.active) ||
@@ -154,11 +203,6 @@ export class HostedAssets {
       return error(
         "ASSET_WEB_STATE",
         "Publish an active local asset with no unsigned drafts",
-      );
-    if (typeof options?.domain !== "string" || options.domain.trim().length === 0)
-      return error(
-        "WEBVH_DOMAIN_REQUIRED",
-        "Supply the permanent WebVH domain",
       );
     for (const resource of asset.resources)
       if (!resource.content)
@@ -177,13 +221,14 @@ export class HostedAssets {
     const envelope = asset.serialize();
     const state = verifyHistory(envelope.eventLog).state;
     if (state.layer === "webvh") {
-      const { domain, prefix } = location(state.alias);
-      if (domain !== options.domain || options.paths)
+      const { domain: existingDomain, prefix } = location(state.alias);
+      // Compare the canonicalized domain (#768), never the caller's raw string.
+      if (existingDomain !== domain || (options.paths && !sameHostedPath(prefix, options.paths)))
         return error(
           "ASSET_WEBVH_BINDING",
           "An existing hosted identity keeps its permanent domain and path",
         );
-      const method = await this.storage.getObject(domain, prefix + "did.jsonl");
+      const method = await this.storage.getObject(existingDomain, prefix + "did.jsonl");
       if (!method)
         return error(
           "ASSET_WEB_UNAVAILABLE",
@@ -213,7 +258,7 @@ export class HostedAssets {
     const key = methodSigner.controller.slice(8);
     const { prepareDataForSigning } = await import("didwebvh-ts");
     const web = await new WebVHManager().createDIDWebVH({
-      domain: options.domain,
+      domain,
       paths,
       alsoKnownAs: [asset.id],
       externalSigner: {
@@ -336,14 +381,21 @@ export class HostedAssets {
       // error class it happens to be: the adapter contract places no
       // restriction on what putObject() may throw, so even a custom
       // adapter's own StructuredError for a transient condition must still
-      // be wrapped with the recoverable `details.publication`. Only this
-      // function's own deterministic checks (below) bypass that wrapping.
+      // be wrapped with the recoverable `details.publication`. This function's
+      // own deterministic checks (below), plus a known-deterministic code from
+      // one of the SDK's own shipped adapters (DETERMINISTIC_STORAGE_ERROR_CODES),
+      // are the only exceptions that bypass that wrapping.
       let url: string;
       try {
         url = await this.storage.putObject(domain, path, content, {
           contentType,
         });
       } catch (cause) {
+        if (
+          cause instanceof StructuredError &&
+          DETERMINISTIC_STORAGE_ERROR_CODES.has(cause.code)
+        )
+          throw cause;
         throw new StructuredError(
           "ASSET_WEB_PUBLISH_INCOMPLETE",
           "Hosted publication incomplete; retry this same prepared publication",

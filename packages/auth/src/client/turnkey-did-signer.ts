@@ -5,10 +5,10 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, encoding, signingInput } from '@originals/sdk';
+import { OriginalsSDK, canonicalDidKeyVm, encoding, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
-import { TurnkeySessionExpiredError, withTokenExpiration } from './turnkey-client.js';
+import { withTokenExpiration } from './turnkey-client.js';
 
 interface SigningInput {
   document: Record<string, unknown>;
@@ -61,7 +61,7 @@ export class TurnkeyDIDSigner {
         return { proofValue: encoding.multibase.encode(signature, 'base58btc') };
       } catch (error) {
         console.error('[TurnkeyDIDSigner] Error signing with Turnkey:', error);
-        throw this.asExpiryError(error);
+        throw error;
       }
     }, this.onExpired);
   }
@@ -73,37 +73,24 @@ export class TurnkeyDIDSigner {
    */
   async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {
     return withTokenExpiration(async () => {
-      try {
-        const signature = await turnkeySignBytes(
-          { turnkeyClient: this.turnkeyClient, organizationId: this.subOrgId, signWith: this.signWith },
-          data
-        );
-        return { signature };
-      } catch (error) {
-        throw this.asExpiryError(error);
-      }
+      const signature = await turnkeySignBytes(
+        { turnkeyClient: this.turnkeyClient, organizationId: this.subOrgId, signWith: this.signWith },
+        data
+      );
+      return { signature };
     }, this.onExpired);
   }
 
-  /** Turnkey reports an expired session as a generic error; surface it typed. */
-  private asExpiryError(error: unknown): unknown {
-    const errorStr = JSON.stringify(error);
-    if (
-      errorStr.toLowerCase().includes('api_key_expired') ||
-      errorStr.toLowerCase().includes('expired api key') ||
-      errorStr.toLowerCase().includes('"code":16')
-    ) {
-      this.onExpired?.();
-      return new TurnkeySessionExpiredError();
-    }
-    return error;
-  }
-
   /**
-   * Get the verification method ID for this signer
+   * Get the verification method ID for this signer.
+   *
+   * Must include the `#{fragment}` (canonical `did:key:{mb}#{mb}` form, #872):
+   * `documentLoader.resolveDID`'s did:key fast path only fires when a
+   * fragment is present, so a bare `did:key:{mb}` here signs a credential
+   * or MultiSig contribution that can never be verified.
    */
   getVerificationMethodId(): string {
-    return `did:key:${this.publicKeyMultibase}`;
+    return canonicalDidKeyVm(this.publicKeyMultibase);
   }
 
   /**
@@ -169,17 +156,19 @@ export async function createDIDWithTurnkey(params: {
     signer,
     verifier: signer,
     updateKeys: [signer.getVerificationMethodId()],
+    // `controller` is intentionally omitted: didwebvh-ts fills it in with the
+    // DID being minted, since the DID isn't known until creation completes
+    // (issue #804). An empty string here would be baked into the document
+    // verbatim instead.
     verificationMethods: [
       {
         id: '#key-0',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: authKeyPublic,
       },
       {
         id: '#key-1',
         type: 'Multikey',
-        controller: '',
         publicKeyMultibase: assertionKeyPublic,
       },
     ],

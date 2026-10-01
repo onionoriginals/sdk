@@ -254,6 +254,15 @@ derived by the reader, never a stored Data Integrity proof in the log.
 JSON is UTF-8 containing one complete document, optionally with JSON whitespace.
 Reject a byte-order mark and trailing non-whitespace input. Writers emit compact
 JCS JSON for reproducible files; readers need not require canonical presentation.
+A JSON number token with no fraction or exponent is a plain decimal integer
+literal. It must convert to a finite binary64 value that it either names
+exactly or is the RFC 8785 serialization of (JCS writes `2**61` as
+`2305843009213694000`, which by RFC 8785 definition names that binary64).
+Reject any other integer literal with `CEL_NUMBER`. This keeps every value a
+JCS writer emits readable; a binary64 in [2^53, 1e21) may therefore be read
+from two spellings, which decode to the same value and the same JCS identity.
+Tokens with a fraction or exponent are ordinary floating-point literals and
+keep RFC 8785 JCS number handling.
 
 CBOR metadata is the same document with **text map keys**, without numeric-key
 abbreviations. Writers use RFC 8949 core deterministic encoding, normalize
@@ -264,8 +273,9 @@ definite-length alternate map order/number widths if the decoded value is
 unchanged. Reject duplicate text keys before a Map/object loses them, non-text
 keys, tags, byte strings, undefined/simple values other than false/true/null,
 nonfinite floats, invalid UTF-8, indefinite lengths, and trailing CBOR items.
-An integer must convert exactly to a finite binary64 value (otherwise reject;
-never round a CBOR integer silently). Floats are finite binary64 JSON values.
+A CBOR integer must convert exactly to a finite binary64 value (otherwise
+reject; never round a CBOR integer silently). CBOR has no JCS spelling, so
+only the exact form applies. Floats are finite binary64 JSON values.
 Always apply JCS to the decoded event, never hash CBOR bytes for its identity.
 
 This is an application CBOR subset, not a claim that rejected constructs are
