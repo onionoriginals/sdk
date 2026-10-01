@@ -188,8 +188,8 @@ export function decodeCbor(input) {
 // to the nearest representable binary64 value instead of raising an error,
 // the same parity gap the hand-rolled CEL parser had (see decodeCbor's
 // "inexact CBOR integer" check above for the CBOR-side equivalent). Scan the
-// raw text for integer literal tokens outside strings and assert each
-// round-trips exactly through Number(); a token with a fraction or exponent
+// raw text for integer literal tokens outside strings and assert each is
+// exact or the RFC 8785 spelling of its Number() value; a token with a fraction or exponent
 // (e.g. "1e30") is an ordinary float with no exactness guarantee under
 // RFC 8785 JCS and is intentionally exempt.
 export function checkJsonIntegerFidelity(text) {
@@ -197,6 +197,6 @@ export function checkJsonIntegerFidelity(text) {
   for (const token of text.match(scanner) ?? []) {
     if (token[0] === '"' || !/^-?(?:0|[1-9]\d*)$/.test(token)) continue;
     const value = Number(token);
-    assert.ok(Number.isFinite(value) && BigInt(value) === BigInt(token), 'inexact JSON integer: ' + token);
+    assert.ok(Number.isFinite(value) && (BigInt(value) === BigInt(token) || String(value) === token), 'inexact JSON integer: ' + token);
   }
 }

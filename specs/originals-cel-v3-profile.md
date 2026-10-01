@@ -255,9 +255,11 @@ JSON is UTF-8 containing one complete document, optionally with JSON whitespace.
 Reject a byte-order mark and trailing non-whitespace input. Writers emit compact
 JCS JSON for reproducible files; readers need not require canonical presentation.
 A JSON number token with no fraction or exponent is a plain decimal integer
-literal and must convert exactly to a finite binary64 value (otherwise reject
-with `CEL_NUMBER`; never round an integer literal silently), the same exactness
-rule applied to CBOR integers below. Tokens with a fraction or exponent are
+literal. It must convert to a finite binary64 value that it either names
+exactly or is the RFC 8785 serialization of (JCS writes `2**61` as
+`2305843009213694000`); otherwise reject with `CEL_NUMBER` and never round an
+integer literal silently. This keeps every value a JCS writer emits readable,
+consistent with the exactness rule applied to CBOR integers below. Tokens with a fraction or exponent are
 ordinary floating-point literals and keep RFC 8785 JCS number handling.
 
 CBOR metadata is the same document with **text map keys**, without numeric-key

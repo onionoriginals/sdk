@@ -46,6 +46,16 @@
       "expected": "rejected"
     },
     {
+      "id": "jcs-spelled-large-integer",
+      "source": "{\"x\":2305843009213694000}",
+      "expected": "accepted"
+    },
+    {
+      "id": "inexact-non-jcs-large-integer",
+      "source": "{\"x\":2305843009213694001}",
+      "expected": "rejected"
+    },
+    {
       "id": "large-exponent-float-exempt-from-integer-exactness",
       "source": "{\"x\":1E30}",
       "expected": "accepted"

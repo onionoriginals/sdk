@@ -42,6 +42,19 @@ test("JSON parsing rejects an integer literal that isn't exactly representable i
   expect(decodeValue('{"a":1e30}', "json")).toEqual({ a: 1e30 });
 });
 
+test("JSON reads back every large integral value the JCS writer emits, matching CBOR", () => {
+  // JCS writes binary64 values in [2**53, 1e21) as their shortest round-trip
+  // decimal (2**61 -> "2305843009213694000"), not their exact digits.
+  for (const n of [2 ** 61, 2 ** 66, -(2 ** 60) * 3, 123456789012345680000]) {
+    const json = encodeValue({ n }, "json");
+    expect(decodeValue(json, "json")).toEqual({ n });
+    expect(decodeValue(encodeValue({ n }, "cbor"), "cbor")).toEqual({ n });
+  }
+  expect(decodeValue('{"a":2305843009213694000}', "json")).toEqual({ a: 2 ** 61 });
+  // Neither exact nor the JCS spelling of the double it rounds to.
+  expect(() => decodeValue('{"a":2305843009213694001}', "json")).toThrow();
+});
+
 test("mutating a signed wire document's exact integer to an inexact one is rejected before it can canonicalize identically", () => {
   const exact = decodeValue('{"a":9007199254740992}', "json");
   expect(canonicalizeValue(exact)).toBe('{"a":9007199254740992}');
