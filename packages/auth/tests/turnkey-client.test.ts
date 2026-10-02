@@ -1,3 +1,4 @@
+import { Turnkey } from '@turnkey/sdk-server';
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { StructuredError } from '@originals/sdk';
 import {
@@ -208,6 +209,108 @@ describe('turnkey-client', () => {
 
     beforeEach(() => {
       process.env.TURNKEY_ORGANIZATION_ID = 'parent_org_123';
+    });
+
+    describe('parent organization selection (#890)', () => {
+      function configuredClient(organizationId: string, external = false) {
+        const client = external
+          ? new Turnkey({
+              apiBaseUrl: 'https://api.turnkey.com',
+              apiPublicKey: 'test-public-key',
+              apiPrivateKey: 'test-private-key',
+              defaultOrganizationId: organizationId,
+            })
+          : createTurnkeyClient({
+              apiPublicKey: 'test-public-key',
+              apiPrivateKey: 'test-private-key',
+              organizationId,
+            });
+        const mocked = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        });
+        const api = mocked.apiClient();
+        client.apiClient = () => api;
+        return { client, api };
+      }
+
+      async function expectParent(
+        client: Turnkey,
+        api: ReturnType<Turnkey['apiClient']>,
+        organizationId: string
+      ) {
+        expect(await getOrCreateTurnkeySubOrg('user@example.com', client)).toBe('new_sub_org');
+        expect(api.getSubOrgIds).toHaveBeenLastCalledWith({
+          organizationId,
+          filterType: 'EMAIL',
+          filterValue: 'user@example.com',
+        });
+        expect(api.createSubOrganization).toHaveBeenLastCalledWith(
+          expect.objectContaining({ organizationId })
+        );
+      }
+
+      test('uses explicit client config for lookup and creation with no environment', async () => {
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        const { client, api } = configuredClient('explicit-parent');
+        await expectParent(client, api, 'explicit-parent');
+      });
+
+      test('prefers explicit config to a conflicting environment', async () => {
+        const { client, api } = configuredClient('explicit-parent');
+        await expectParent(client, api, 'explicit-parent');
+      });
+
+      test('keeps multiple clients isolated across environment changes', async () => {
+        const first = configuredClient('first-parent');
+        const second = configuredClient('second-parent');
+        process.env.TURNKEY_ORGANIZATION_ID = 'unrelated-parent';
+        await Promise.all([
+          expectParent(first.client, first.api, 'first-parent'),
+          expectParent(second.client, second.api, 'second-parent'),
+        ]);
+        await expectParent(first.client, first.api, 'first-parent');
+      });
+
+      test('uses the default organization of an externally constructed Turnkey client', async () => {
+        const { client, api } = configuredClient('external-parent', true);
+        await expectParent(client, api, 'external-parent');
+      });
+
+      test('retains the organization resolved from environment when the client was created', async () => {
+        process.env.TURNKEY_API_PUBLIC_KEY = 'test-public-key';
+        process.env.TURNKEY_API_PRIVATE_KEY = 'test-private-key';
+        const client = createTurnkeyClient();
+        const { api } = configuredClient('unused-parent');
+        client.apiClient = () => api;
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        await expectParent(client, api, 'parent_org_123');
+      });
+
+      test('falls back to environment for legacy clients without config', async () => {
+        const { api } = configuredClient('unused-parent');
+        const client = { apiClient: () => api } as unknown as Turnkey;
+        await expectParent(client, api, 'parent_org_123');
+      });
+
+      test('rejects an empty configured organization instead of silently using another parent', async () => {
+        const { client, api } = configuredClient('', true);
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toMatchObject({
+          code: AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+        });
+        expect(api.getSubOrgIds).not.toHaveBeenCalled();
+        expect(api.createSubOrganization).not.toHaveBeenCalled();
+      });
+
+      test('fails before API calls when neither client nor environment has an organization', async () => {
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        const { api } = configuredClient('unused-parent');
+        const client = { apiClient: () => api } as unknown as Turnkey;
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toMatchObject({
+          code: AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+        });
+        expect(api.getSubOrgIds).not.toHaveBeenCalled();
+        expect(api.createSubOrganization).not.toHaveBeenCalled();
+      });
     });
 
     test('returns existing sub-org when found with wallet', async () => {
