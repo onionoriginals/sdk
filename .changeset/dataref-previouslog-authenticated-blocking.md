@@ -19,14 +19,13 @@ the offending entry (signature, chain linkage and controller authority,
 including any rotation among them) and the offending entry's own signature
 against the resulting controller, before it may block resolution; otherwise
 the candidate remains exactly as ignorable as any other invalid one, and the
-already-accepted history is reported normally. `CEL_WEBVH_IDNA` is
-unaffected: it can only be thrown after the entry's signature and controller
-authority have already been authenticated inside `apply()`.
+already-accepted history is reported normally. `CEL_WEBVH_IDNA` blocks
+resolution only after a boundary has been accepted; unrelated pre-boundary
+candidates remain ignorable, as described in the IDNA fix below.
 
 `CEL_PREVIOUS_LOG` is always treated as ignorable, and is deliberately not
 given the same authenticated-blocking treatment as `dataReference`: unlike
-`dataReference` (embedded inside the signed operation) or `CEL_WEBVH_IDNA`
-(reachable only after full signature authentication), the `previousLog`
+`dataReference` (embedded inside the signed operation), the `previousLog`
 wrapper is a document-level construct that sits entirely outside any signed
 event, and its own proof has no CCG-specified target. Authenticating only
 the *wrapped* log would not establish that the controller authorized the
