@@ -3,6 +3,7 @@
  * Coordinates validation, checkpoints, rollbacks, state tracking, and audit logging
  */
 
+import { StructuredError } from '@originals/cel';
 import {
   MigrationOptions,
   MigrationResult,
@@ -859,15 +860,9 @@ export class MigrationManager {
     code: string,
     message: string,
     migrationId?: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    details?: any
-  ): Error & { type: MigrationErrorType; code: string } {
-    const error = new Error(message) as any;
-    error.type = type;
-    error.code = code;
-    error.migrationId = migrationId;
-    error.details = details;
-    return error;
+    details?: Record<string, unknown>
+  ): StructuredError & { type: MigrationErrorType; migrationId?: string } {
+    return Object.assign(new StructuredError(code, message, details), { type, migrationId });
   }
 
   /**

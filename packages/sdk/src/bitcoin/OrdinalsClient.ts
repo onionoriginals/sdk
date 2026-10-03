@@ -14,6 +14,18 @@ const DEFAULT_MAX_INSCRIPTIONS_PER_SAT = 100;
 /** Content downloads per batch when resolving a satoshi's inscriptions. */
 const SAT_RESOLVE_BATCH_SIZE = 8;
 
+function causeDetails(cause: unknown): { causeMessage: string; causeName: string } {
+  return {
+    causeMessage: cause instanceof Error ? cause.message : String(cause),
+    causeName: cause instanceof Error ? cause.name : typeof cause
+  };
+}
+
+function throwFetchFailure(cause: unknown): never {
+  const details = causeDetails(cause);
+  throw new StructuredError('ORD_FETCH_FAILED', details.causeMessage, details);
+}
+
 export interface OrdinalsClientOptions {
   /** Per-request timeout in milliseconds. */
   timeoutMs?: number;
@@ -41,17 +53,19 @@ function resolveSameOrigin(candidate: string, baseUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(candidate, baseUrl);
-  } catch {
-    throw new Error(`OrdinalsClient: malformed content_url '${candidate}'`);
+  } catch (cause) {
+    throw new StructuredError('ORD_SSRF_BLOCKED', `OrdinalsClient: malformed content_url '${candidate}'`, causeDetails(cause));
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(
+    throw new StructuredError(
+      'ORD_SSRF_BLOCKED',
       `OrdinalsClient: refusing non-http(s) content_url scheme '${parsed.protocol}' (possible SSRF)`
     );
   }
   const baseOrigin = new URL(baseUrl).origin;
   if (parsed.origin !== baseOrigin) {
-    throw new Error(
+    throw new StructuredError(
+      'ORD_SSRF_BLOCKED',
       `OrdinalsClient: refusing to fetch content_url from origin ${parsed.origin}, ` +
       `which differs from the configured endpoint origin ${baseOrigin} (possible SSRF)`
     );
@@ -60,10 +74,10 @@ function resolveSameOrigin(candidate: string, baseUrl: string): string {
 }
 
 /** Early reject via the Content-Length header when the server declares one. */
-function assertContentLengthWithin(res: { headers?: { get?: (name: string) => string | null } }, maxBytes: number): void {
+function assertContentLengthWithin(res: { headers?: { get?: (name: string) => string | null } }, maxBytes: number, code: string): void {
   const lenHeader = res.headers?.get?.('content-length');
   if (lenHeader && Number(lenHeader) > maxBytes) {
-    throw new Error(`OrdinalsClient: response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
+    throw new StructuredError(code, `OrdinalsClient: response exceeds ${maxBytes} bytes (Content-Length ${lenHeader})`);
   }
 }
 
@@ -182,12 +196,12 @@ export class OrdinalsClient {
       String(info.content_url || `${this.rpcUrl}/content/${identifier}`),
       this.rpcUrl
     );
-    const contentRes = await fetch(contentUrl, this.fetchInit());
-    if (!contentRes.ok) throw new Error(`Failed to fetch inscription content: ${contentRes.status}`);
-    assertContentLengthWithin(contentRes, this.maxContentBytes);
+    const contentRes = await fetch(contentUrl, this.fetchInit()).catch(throwFetchFailure);
+    if (!contentRes.ok) throw new StructuredError('ORD_FETCH_FAILED', `Failed to fetch inscription content: ${contentRes.status}`);
+    assertContentLengthWithin(contentRes, this.maxContentBytes, 'ORD_CONTENT_TOO_LARGE');
     const contentArrayBuf = await contentRes.arrayBuffer();
     if (contentArrayBuf.byteLength > this.maxContentBytes) {
-      throw new Error(`OrdinalsClient: inscription content exceeds ${this.maxContentBytes} bytes`);
+      throw new StructuredError('ORD_CONTENT_TOO_LARGE', `OrdinalsClient: inscription content exceeds ${this.maxContentBytes} bytes`);
     }
     const content = new Uint8Array(contentArrayBuf);
 
@@ -226,7 +240,7 @@ export class OrdinalsClient {
     if (!res.ok) {
       return null;
     }
-    assertContentLengthWithin(res, this.maxJsonBytes);
+    assertContentLengthWithin(res, this.maxJsonBytes, 'ORD_JSON_TOO_LARGE');
     // Materialize bytes when possible so the cap counts BYTES: text.length
     // counts UTF-16 code units, so multi-byte content could consume up to 4x
     // the cap when a malicious indexer omits/understates Content-Length.
@@ -262,16 +276,16 @@ export class OrdinalsClient {
     const url = `${this.rpcUrl.replace(/\/$/, '')}${path}`;
     // The JSON response is as attacker-controllable as the content fetch:
     // refuse redirects, bound the request time, and cap the accepted size.
-    const res = await fetch(url, this.fetchInit({ headers: { 'Accept': 'application/json' } }));
+    const res = await fetch(url, this.fetchInit({ headers: { 'Accept': 'application/json' } })).catch(throwFetchFailure);
     if (!res.ok) return null;
-    assertContentLengthWithin(res, this.maxJsonBytes);
+    assertContentLengthWithin(res, this.maxJsonBytes, 'ORD_JSON_TOO_LARGE');
     let body: any;
     if (typeof (res as { arrayBuffer?: unknown }).arrayBuffer === 'function') {
       // Materialize the bytes so the cap holds even when the server omits or
       // understates Content-Length.
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (bytes.byteLength > this.maxJsonBytes) {
-        throw new Error(`OrdinalsClient: JSON response exceeds ${this.maxJsonBytes} bytes`);
+        throw new StructuredError('ORD_JSON_TOO_LARGE', `OrdinalsClient: JSON response exceeds ${this.maxJsonBytes} bytes`);
       }
       body = JSON.parse(new TextDecoder().decode(bytes));
     } else {
@@ -283,4 +297,3 @@ export class OrdinalsClient {
     return (body && typeof body === 'object' && 'data' in body) ? body.data : body;
   }
 }
-
