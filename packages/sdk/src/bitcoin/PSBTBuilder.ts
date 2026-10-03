@@ -1,4 +1,5 @@
 import type { Utxo } from '../types/bitcoin.js';
+import { StructuredError } from '@originals/cel';
 import {
   isSegwitScriptPubKey,
   isProtectedUtxo,
@@ -146,18 +147,22 @@ export class PSBTBuilder {
       ],
       fee
     };
-    // Base64 encode via Node when available; fallback to btoa if present
+    // Encode UTF-8 bytes in both Node and browsers (btoa only accepts binary strings).
     const json = JSON.stringify(payload);
     let psbtBase64: string;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const B: any = (global as any).Buffer;
-      psbtBase64 = B ? B.from(json, 'utf8').toString('base64') : (global as any).btoa(json);
+      if (typeof globalThis.Buffer !== 'undefined') {
+        psbtBase64 = globalThis.Buffer.from(json, 'utf8').toString('base64');
+      } else {
+        const bytes = new TextEncoder().encode(json);
+        let binary = '';
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        psbtBase64 = globalThis.btoa(binary);
+      }
     } catch {
-      psbtBase64 = `psbt:${json}`;
+      throw new StructuredError('PSBT_ENCODING_FAILED', 'Failed to base64-encode PSBT payload');
     }
 
     return { psbtBase64, selectedUtxos: selected, fee, changeOutput };
   }
 }
-
