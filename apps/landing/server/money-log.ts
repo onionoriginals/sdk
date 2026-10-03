@@ -65,14 +65,23 @@ export type MoneySink = (line: string) => void;
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
 const EMAILISH_KEY = /(^|_)e?mail(_|$)/i;
 
+function isEmailishKey(key: string): boolean {
+  // Keep the original case-insensitive snake_case check, including mixed-case
+  // spellings. Split camel/PascalCase and acronym boundaries into components
+  // (customerEmail, EMAILAddress), without matching substrings like mailbox.
+  const components = key
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  return EMAILISH_KEY.test(key) || EMAILISH_KEY.test(components);
+}
+
 /**
- * Redact anything that could carry an email. Both halves matter: a key named
- * `email` is an obvious leak, but so is a sub-org id field that a future
- * caller fills with a login handle.
+ * Redact email/mail-named fields even when they carry a non-email login handle,
+ * and email-shaped values even when a caller puts them in an operational field.
  */
 function safeValue(key: string, value: unknown): string | number | boolean | undefined {
   if (value === undefined || value === null) return undefined;
-  if (EMAILISH_KEY.test(key)) return '[redacted]';
+  if (isEmailishKey(key)) return '[redacted]';
   if (typeof value === 'string' && EMAIL_RE.test(value)) return '[redacted]';
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   return String(value);
