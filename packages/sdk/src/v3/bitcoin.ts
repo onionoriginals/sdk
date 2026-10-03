@@ -224,6 +224,16 @@ export class BitcoinPublications {
       buildContent: async (sat) => {
         const { snapshot, resolution } = await this.resolver.observe(sat);
         if (
+          snapshot &&
+          state.layer === "webvh" &&
+          resolution.status === "accepted" &&
+          resolution.state.assetId !== state.assetId
+        )
+          invalid(
+            "ASSET_SAT_OCCUPIED",
+            "The identity sat already carries a different Original's accepted boundary; select an unoccupied sat",
+          );
+        if (
           !snapshot ||
           (state.layer === "webvh"
             ? resolution.status !== "not-found"
