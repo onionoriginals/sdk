@@ -504,8 +504,12 @@ export function getKeyByRole(
   return null;
 }
 
+const WALLET_VISIBILITY_MAX_ATTEMPTS = 3;
+const WALLET_VISIBILITY_INITIAL_DELAY_MS = 500;
+
 /**
- * Create a wallet with the required accounts for DID creation
+ * Create a wallet with the required accounts for DID creation.
+ * Poll for visibility with bounded backoff after creation succeeds.
  */
 export async function createWalletWithAccounts(
   turnkeyClient: Turnkey,
@@ -513,6 +517,7 @@ export async function createWalletWithAccounts(
   onExpired?: () => void
 ): Promise<TurnkeyWallet> {
   return withTokenExpiration(async () => {
+    let walletId: string;
     try {
       const response = await turnkeyClient.apiClient().createWallet({
         walletName: 'default-wallet',
@@ -525,22 +530,10 @@ export async function createWalletWithAccounts(
         organizationId: subOrgId,
       });
 
-      const walletId = response.walletId;
+      walletId = response.walletId;
       if (!walletId) {
         throw new Error('No wallet ID returned from createWallet');
       }
-
-      // Wait for wallet to be created, then fetch it
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      const wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
-      const createdWallet = wallets.find((w) => w.walletId === walletId);
-
-      if (!createdWallet) {
-        throw new Error('Failed to fetch created wallet');
-      }
-
-      return createdWallet;
     } catch (error) {
       console.error('Error creating wallet:', error);
       throw new Error(
@@ -548,6 +541,26 @@ export async function createWalletWithAccounts(
         { cause: error }
       );
     }
+
+    // Retry only successful reads that omit this wallet, never creation or
+    // failed reads. Wait 500ms, 1s, then 2s (3.5s total, plus API latency).
+    // Keep this outside the creation catch: the wallet already exists, and
+    // fetchWallets must preserve backend errors and typed session expiry.
+    for (let attempt = 0; attempt < WALLET_VISIBILITY_MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, WALLET_VISIBILITY_INITIAL_DELAY_MS * 2 ** attempt)
+      );
+      const wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+      const createdWallet = wallets.find((w) => w.walletId === walletId);
+      if (createdWallet) {
+        return createdWallet;
+      }
+    }
+
+    throw new Error(
+      `Wallet ${walletId} was created successfully but is still not visible after ` +
+        `${WALLET_VISIBILITY_MAX_ATTEMPTS} attempts. Fetch wallets again before creating another wallet.`
+    );
   }, onExpired);
 }
 
