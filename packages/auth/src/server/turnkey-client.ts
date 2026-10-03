@@ -254,7 +254,10 @@ export async function getOrCreateTurnkeySubOrg(
   turnkeyClient: Turnkey,
   lock: SubOrgLock = getDefaultSubOrgLock()
 ): Promise<string> {
-  const organizationId = process.env.TURNKEY_ORGANIZATION_ID;
+  // Use the same parent as the client's other requests, including OTP. The
+  // environment remains a fallback for legacy injected clients without config.
+  const organizationId =
+    turnkeyClient.config?.defaultOrganizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
   if (!organizationId) {
     throw new StructuredError(
       AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
@@ -430,6 +433,7 @@ async function getOrCreateTurnkeySubOrgUnlocked(
 
   // Create sub-organization with wallet containing required keys
   const result = await turnkeyClient.apiClient().createSubOrganization({
+    organizationId,
     subOrganizationName: subOrgName,
     rootUsers: [
       {
