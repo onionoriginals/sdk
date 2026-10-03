@@ -134,7 +134,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     // primitive outside baseDir.
     const relative = path.relative(base, fullPath);
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error(`Invalid object path: resolves outside the storage directory: ${objectPath}`);
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid object path: resolves outside the storage directory: ${objectPath}`);
     }
     return fullPath;
   }
