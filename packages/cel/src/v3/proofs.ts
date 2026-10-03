@@ -2,7 +2,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { p256, p384 } from "@noble/curves/nist.js";
 import { base58, base64urlnopad } from "@scure/base";
 import { randomBytes } from "@noble/hashes/utils.js";
-import { canonicalizeValue } from "./values.js";
+import { canonicalizeValue, copyValue } from "./values.js";
 import { CelError, requireThat } from "./errors.js";
 import {
   ALGORITHMS,
@@ -10,7 +10,12 @@ import {
   decodeController,
   hashJson,
 } from "./primitives.js";
-import { validateEntry, validateEvent } from "./profile.js";
+import {
+  validateEntry,
+  validateEvent,
+  deriveScid,
+  SCID_PLACEHOLDER,
+} from "./profile.js";
 import type {
   ControllerProof,
   CelEvent,
@@ -147,7 +152,24 @@ export async function signEvent(
   signer: CelSigner,
   options: { created?: string } = {},
 ): Promise<CelEntry & { proof: ControllerProof[] }> {
-  const event: CelEvent = validateEvent(input);
+  const value = copyValue(input);
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    value.operation &&
+    typeof value.operation === "object" &&
+    !Array.isArray(value.operation) &&
+    value.operation.type === "create" &&
+    (!Object.prototype.hasOwnProperty.call(value, "previousEvent") ||
+      value.previousEvent === SCID_PLACEHOLDER)
+  ) {
+    value.previousEvent = deriveScid({
+      ...value,
+      previousEvent: SCID_PLACEHOLDER,
+    });
+  }
+  const event: CelEvent = validateEvent(value);
   const controller = signer.controller,
     algorithm = signer.algorithm;
   const key = decodeController(controller);

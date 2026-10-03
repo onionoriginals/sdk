@@ -1,7 +1,7 @@
-import { assetIdFromDigest, normalizeAssetId, sameAssetIdentity } from "./identity.js";
+import { normalizeAssetId, sameAssetIdentity } from "./identity.js";
 import { freeze, type DeepReadonly } from "./immutable.js";
 import { CelError, requireThat } from "./errors.js";
-import { validateDocument } from "./profile.js";
+import { validateDocument, deriveAssetId } from "./profile.js";
 import { verifyEntry } from "./proofs.js";
 import { copyValue, type JsonObject } from "./values.js";
 import { parseAssetAlias } from "./dids.js";
@@ -9,7 +9,7 @@ import type { CelDocument, Resource } from "./types.js";
 
 export type { DeepReadonly } from "./immutable.js";
 export interface AssetState {
-  /** Stable RFC 6920 name of the genesis event; not a DID. */
+  /** Stable RFC 6920 name of the genesis commitment; not a DID. */
   assetId: string;
   alias: string;
   aliases: string[];
@@ -42,7 +42,8 @@ export interface VerifiedHistory {
    * extended by this result. `"externally-anchored"` is reserved for witness/anchoring
    * evidence outside this function's scope.
    */
-  readonly freshness: "unknown" | "checkpoint-consistent" | "externally-anchored";
+  readonly freshness:
+    "unknown" | "checkpoint-consistent" | "externally-anchored";
   readonly state: DeepReadonly<AssetState>;
 }
 const verified = new WeakSet<VerifiedHistory>();
@@ -59,7 +60,9 @@ export interface HistoryCheckpoint {
 }
 
 /** Extract a portable checkpoint from an authenticated result, for the caller to persist. */
-export function checkpointFromHistory(history: VerifiedHistory): HistoryCheckpoint {
+export function checkpointFromHistory(
+  history: VerifiedHistory,
+): HistoryCheckpoint {
   return {
     assetId: history.state.assetId,
     head: history.state.head,
@@ -107,7 +110,7 @@ function apply(
         "History must start with create",
       );
       const data = operation.data;
-      const assetId = assetIdFromDigest(proof.digest);
+      const assetId = deriveAssetId(entry.event);
       state = {
         assetId,
         alias: assetId,
@@ -185,7 +188,8 @@ function apply(
         parseAssetAlias(data.from);
         requireThat(
           (data.from === state.alias ||
-            (state.layer === "cel" && sameAssetIdentity(data.from, state.assetId))) &&
+            (state.layer === "cel" &&
+              sameAssetIdentity(data.from, state.assetId))) &&
             data.layer === destination.layer &&
             data.layer ===
               (state.layer === "cel"
@@ -331,15 +335,21 @@ export function verifyHistory(
   const checkpointRequested = checkpoint !== undefined;
   // Only collected when a checkpoint is presented, to prove equal-or-extends against it
   // from entries this call actually authenticated, never from the checkpoint's own say-so.
-  const observedHeads = checkpointRequested ? new Map<number, string>() : undefined;
+  const observedHeads = checkpointRequested
+    ? new Map<number, string>()
+    : undefined;
   const state = apply(
     document,
     prefix,
-    observedHeads && ((entryCount, head) => observedHeads.set(entryCount, head)),
+    observedHeads &&
+      ((entryCount, head) => observedHeads.set(entryCount, head)),
   );
   if (options.expectedAssetId !== undefined)
-    requireThat(normalizeAssetId(options.expectedAssetId) === state.assetId,
-      "CEL_IDENTITY", "Requested identity differs from derived genesis");
+    requireThat(
+      normalizeAssetId(options.expectedAssetId) === state.assetId,
+      "CEL_IDENTITY",
+      "Requested identity differs from derived genesis",
+    );
   let freshness: VerifiedHistory["freshness"] = "unknown";
   if (checkpointRequested) {
     requireThat(

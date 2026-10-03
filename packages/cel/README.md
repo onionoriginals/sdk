@@ -14,8 +14,8 @@ const result = verifyHistory(document);
 ```
 
 An Original records signed claims about files and their versions.
-`result.state.assetId` is the canonical `ni:///sha-256;…` URI of the JCS genesis
-event. `deriveAssetId`, `normalizeAssetId`, `assetDigest`, `sameAssetIdentity` and
+`result.state.assetId` is the canonical `ni:///sha-256;…` URI wrapping the genesis SCID. New genesis events carry this commitment in
+`previousEvent`; see [SCID derivation and compatibility](./V3.md#asset-identity). `deriveAssetId`, `normalizeAssetId`, `assetDigest`, `sameAssetIdentity` and
 `assetIdFromDigest` support derivation and comparison with strict historical
 Originals 3 aliases. `state.didCel` and `deriveDid`, once deprecated compatibility
 surfaces, are removed from this SDK 4 / CEL 2 surface. Originals uses generic CCG
