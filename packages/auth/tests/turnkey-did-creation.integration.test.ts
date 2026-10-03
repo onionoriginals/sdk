@@ -19,11 +19,11 @@
  *       s = last 32 bytes of the Ed25519 signature (hex).
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, spyOn } from 'bun:test';
 // Import the SDK first — its noble-init module configures @noble/ed25519's
 // hashes.sha512 before any crypto operations run, so we don't need to
 // configure it ourselves.
-import { CredentialManager, DIDManager, Verifier, encoding } from '@originals/sdk';
+import { CredentialManager, DIDManager, OriginalsSDK, StructuredError, Verifier, encoding } from '@originals/sdk';
 import * as ed25519Module from '@noble/ed25519';
 import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
 import { TurnkeySessionExpiredError } from '../src/client/turnkey-client';
@@ -112,6 +112,53 @@ function makeRealSigningClient(
 // ---------------------------------------------------------------------------
 
 describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair', () => {
+  test.each([
+    ['secp256k1', 'CURVE_SECP256K1'],
+    ['unknown curve', 'CURVE_UNKNOWN'],
+    ['empty curve', ''],
+    ['missing curve', undefined],
+    ['null curve', null],
+    ['non-string curve', 25519],
+  ])('rejects %s before SDK creation or Turnkey access (#734)', async (_label, curve) => {
+    const update = await generateKeypair();
+    const signingCalls = { count: 0 };
+    const turnkeyClient = makeRealSigningClient(update.privateKeyBytes, signingCalls);
+    const apiClient = spyOn(turnkeyClient, 'apiClient');
+    const createDID = spyOn(OriginalsSDK, 'createDIDOriginal');
+    const account = {
+      address: 'key_addr_update',
+      path: "m/44'/501'/1'/0'",
+      addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      ...(curve === undefined ? {} : { curve }),
+    };
+
+    try {
+      // Keep the real key and signer valid: only the declared curve is wrong.
+      // The cast models malformed JavaScript/JSON input without widening the API.
+      const result = createDIDWithTurnkey({
+        turnkeyClient,
+        updateKeyAccount: account as Parameters<typeof createDIDWithTurnkey>[0]['updateKeyAccount'],
+        subOrgId: 'sub_org_curve_test',
+        authKeyPublic: update.publicKeyMultibase,
+        assertionKeyPublic: update.publicKeyMultibase,
+        updateKeyPublic: update.publicKeyMultibase,
+        domain: 'example.com',
+        slug: 'curve-test',
+      });
+      await expect(result).rejects.toBeInstanceOf(StructuredError);
+      await expect(result).rejects.toMatchObject({
+        code: 'TURNKEY_UPDATE_KEY_CURVE_INVALID',
+        message: expect.stringContaining('Select a Turnkey account with curve CURVE_ED25519'),
+      });
+      expect(createDID).not.toHaveBeenCalled();
+      expect(apiClient).not.toHaveBeenCalled();
+      expect(signingCalls.count).toBe(0);
+    } finally {
+      createDID.mockRestore();
+      apiClient.mockRestore();
+    }
+  });
+
   test(
     'happy path: returns { did, didDocument, didLog } with a valid did: identifier',
     async () => {
