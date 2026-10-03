@@ -7,6 +7,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { inscribeOnSat, prepareInscriptionOnSat, resumeInscriptionOnSat, submitPreparedInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat';
 import type { InscriptionRecoveryStore } from '../../../src/bitcoin/inscription-recovery';
 import { getScureNetwork } from '../../../src/bitcoin/transactions/commit';
+import { StructuredError } from '@originals/cel';
 
 const key = new Uint8Array(32).fill(1);
 const payment = btc.p2wpkh(secp256k1.getPublicKey(key), getScureNetwork('regtest'));
@@ -156,6 +157,33 @@ describe('signed inscription recovery', () => {
   it('treats an "already known" duplicate-broadcast rejection as success, not a failure', async () => withStore(async (directory) => {
     const params = parameters();
     params.provider.broadcastTransaction = async () => { throw new Error('txn-already-in-mempool'); };
+    params.provider.getTransactionStatus = async () => ({ confirmed: false });
+    const result = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(result.broadcast).toBe('reveal_broadcast');
+    expect(result.error).toBeUndefined();
+  }));
+
+  // Regression for #889: Bitcoin Core 28.0 rewrote RPC -27's message from
+  // "Transaction already in block chain" to "Transaction outputs already in
+  // utxo set" (bitcoin/bitcoin#30212), which this repo's own regtest evidence
+  // (Core 31.1) only ever emits -- the pre-28.0 string alone silently stopped
+  // matching and left an already-mined reveal stuck.
+  it('treats Core >= 28.0\'s rewritten "already known" wording as success too', async () => withStore(async (directory) => {
+    const params = parameters();
+    params.provider.broadcastTransaction = async () => {
+      throw new Error('QuickNodeProvider: sendrawtransaction RPC error: Transaction outputs already in utxo set');
+    };
+    params.provider.getTransactionStatus = async () => ({ confirmed: false });
+    const result = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
+    expect(result.broadcast).toBe('reveal_broadcast');
+    expect(result.error).toBeUndefined();
+  }));
+
+  it('treats an RPC -27 StructuredError as success regardless of message wording', async () => withStore(async (directory) => {
+    const params = parameters();
+    params.provider.broadcastTransaction = async () => {
+      throw new StructuredError('QUICKNODE_RPC_ERROR', 'some future wording Core has never used before', { rpcCode: -27 });
+    };
     params.provider.getTransactionStatus = async () => ({ confirmed: false });
     const result = await inscribeOnSat({ ...params, recoveryStore: diskStore(directory) });
     expect(result.broadcast).toBe('reveal_broadcast');

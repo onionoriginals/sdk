@@ -15,7 +15,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
-import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal } from '@originals/sdk';
+import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal, StructuredError } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
@@ -609,6 +609,9 @@ export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 // inscriptions burn the creator's fee and our QuickNode bandwidth.
 const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
 
+/** Bitcoin Core's RPC -27 ("already in chain/mempool"), independent of wording. */
+const RPC_TRANSACTION_ALREADY_IN_CHAIN = -27;
+
 /**
  * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
  * the network. Matched as a closed set rather than a bare /already/: a
@@ -616,20 +619,27 @@ const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
  * already closed") would otherwise count as a successful broadcast, and a
  * falsely-advanced record can park real funds — a reveal marked broadcast
  * that never went out is only rescued by the much slower staleness sweep.
+ * Kept as a string fallback for providers that don't surface an RPC code;
+ * `isAlreadyKnownTxError` below checks the RPC -27 code first since Core's
+ * own wording for it has changed across versions (see the entries below).
  */
 const ALREADY_KNOWN_TX_ERRORS = [
   'txn-already-in-mempool',
   'txn-already-known',
-  'transaction already in block chain', // RPC -27
+  'transaction already in block chain', // RPC -27, Bitcoin Core < 28.0
   'transaction already in mempool',
+  'transaction outputs already in utxo set', // RPC -27, Bitcoin Core >= 28.0 (bitcoin/bitcoin#30212)
 ];
 
 /**
  * True when a broadcast rejection means the transaction is ALREADY on the
  * network — success for our idempotent retry purposes. A conflicting-spend
- * rejection ("txn-mempool-conflict") is NOT a match.
+ * rejection ("txn-mempool-conflict") is NOT a match. Checks the RPC error
+ * code first (stable across Bitcoin Core versions) before falling back to
+ * prose matching, since Core 28.0 rewrote RPC -27's message text.
  */
 export function isAlreadyKnownTxError(e: unknown): boolean {
+  if (e instanceof StructuredError && e.details?.rpcCode === RPC_TRANSACTION_ALREADY_IN_CHAIN) return true;
   const msg = ((e as Error)?.message ?? '').toLowerCase();
   return ALREADY_KNOWN_TX_ERRORS.some((known) => msg.includes(known));
 }
@@ -1295,9 +1305,10 @@ export function createBitcoinRoutes(deps: {
     //
     // Capped at MAX_PENDING_FEE_LOOKUPS reads: this route is polled every 15s
     // against a rate-limited indexer, and an unbounded fan-out here would
-    // spend a creator's poll budget on an advisory. Beyond the cap the advice
-    // is drawn from the ones we did read, which can only understate the
-    // problem, never invent one.
+    // spend a creator's poll budget on an advisory. Beyond the cap there is
+    // no advice at all (see sawThemAll below) rather than one drawn only from
+    // the txids we happened to read — a partial view could name the wrong
+    // payment as the slowest one.
     let pendingDeposit:
       | { txid: string; feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
       | null = null;
@@ -1968,6 +1979,15 @@ export function createBitcoinRoutes(deps: {
     // never re-derived after the lock releases, since that is exactly the
     // window reconciliation can move the record in.
     let preBroadcastStatus: InscriptionStatus = 'signed';
+    // Set when this exact commitTxId is itself a previously-superseded record
+    // (a rebuilt rival won its outpoint on an earlier attempt, then that rival
+    // was itself superseded or vanished, freeing the outpoint back up). #874:
+    // `store.create` below is a no-op for an existing commitTxId, so nothing
+    // else ever clears a stale `superseded: true` off THIS record — it must be
+    // reinstated explicitly once this resubmission is about to become the live
+    // record for the outpoint, mirroring `reclaimOutpoint`'s paired
+    // supersede/reinstate pattern in bitcoin-reconciliation.ts.
+    let resubmittedWasSuperseded = false;
 
     // Read the rivals, judge them, supersede and persist WITHOUT yielding to
     // another submission from this user in between (C5): the guard reads state
@@ -1991,6 +2011,7 @@ export function createBitcoinRoutes(deps: {
           return settledResubmissionResponse(recorded);
         }
         if (recorded) preBroadcastStatus = recorded.status;
+        resubmittedWasSuperseded = recorded?.superseded === true;
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
@@ -2051,6 +2072,16 @@ export function createBitcoinRoutes(deps: {
         }
         if (current.length === 1) store.supersede(sub, current[0].commitTxId);
       }
+
+      // #874: this resubmission is about to become (or remain) the live
+      // record for the outpoint — any rival sharing it was just superseded
+      // (or is already gone) above. If THIS record itself was left
+      // `superseded: true` by an earlier round (a since-superseded/vanished
+      // rival had won in the meantime), clear that stale flag now so the
+      // outpoint doesn't end up with zero live records once this pair
+      // broadcasts. `store.create` below cannot do this — it is a no-op for
+      // an already-persisted commitTxId.
+      if (resubmittedWasSuperseded) store.reinstate(sub, commitTxId);
 
       // Every invariant held: this pair is about to spend a stranger's real
       // BTC, so it is on the record before it goes anywhere (R29).
