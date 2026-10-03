@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "fault": "commit-response-lost",
+  "error": "waitFor: Timeout 45000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('inscribed ✓', { exact: true }) to be visible\u001b[22m\n\n    at /private/tmp/sdk-gate-06d54/apps/landing/scripts/regtest-browser.ts:268:58\n    at processTicksAndRejections (native:7:39)",
+  "dataDir": "/tmp/sdk-gate-06d54/.gate-run/originals-regtest-LhpnFW",
+  "externalRequests": [],
+  "browserErrors": []
+}

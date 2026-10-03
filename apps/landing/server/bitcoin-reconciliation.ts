@@ -168,7 +168,6 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     // cursor picks where the scan starts, so even a backlog larger than the
     // whole budget is fully covered across successive polls — no record can
     // sit permanently behind the budget.
-    let changed = false;
     const newestFirst = [...records].reverse();
     // A superseded pair whose outpoint already carries a CONFIRMED record is
     // terminally dead — its commit double-spends a confirmed tx and can never
@@ -186,7 +185,6 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     for (const r of newestFirst) {
       if (r.superseded && !r.retired && r.revealTxHex && isDead(r)) {
         store.retire(sub, r.commitTxId);
-        changed = true;
       }
     }
     const supersededPending = rotate(
@@ -242,14 +240,12 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // so a negative read here never reclaims or reinstates it, only
         // clears its stale confirmation evidence.
         if (current.status === 'confirmed') {
-          if (store.trySetStatus(sub, r.commitTxId, {
+          store.trySetStatus(sub, r.commitTxId, {
             status: 'confirmed', retired: false, superseded: true,
             confirmations: current.confirmations,
             confirmedBlockHeight: current.confirmedBlockHeight,
             confirmedBlockHash: current.confirmedBlockHash,
-          }, 'reveal_broadcast')) {
-            changed = true;
-          }
+          }, 'reveal_broadcast');
         }
         continue;
       }
@@ -263,7 +259,6 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // stored reveal. A failed write stops this pass before another side effect.
       reclaimOutpoint(store, sub, r);
       store.markRebroadcast(sub, r.commitTxId);
-      changed = true;
       // `reclaimOutpoint` clears `superseded` via `reinstate`, so the fresh
       // post-reclaim snapshot — not `current`/`beforeReclaim` — is the state a
       // concurrent pass must still match for the guarded write below.
@@ -341,12 +336,10 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
           continue;
         }
         atStatus = 'commit_broadcast';
-        changed = true;
       }
       const revealErr = await broadcastIdempotent(current.revealTxHex);
       if (!revealErr) {
         if (store.trySetStatus(sub, r.commitTxId, { status: atStatus, retired: false, superseded: false }, 'reveal_broadcast')) {
-          changed = true;
           // A confirmed commit whose reveal was pushed with nobody watching
           // (#545): the money log is the only record of a server-initiated
           // spend the affected user never saw happen. Only true for the
@@ -455,7 +448,6 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
               { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash }
             )
           : true;
-        if (needsWrite && applied) changed = true;
         if (applied && (st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) {
           // Guarded retire: re-verify against the record's CURRENT on-disk
           // state immediately before retiring, rather than trusting the
@@ -480,7 +472,7 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
                 confirmedBlockHash: postWrite.confirmedBlockHash,
               }
             : undefined;
-          if (retireExpected && store.tryRetire(sub, r.commitTxId, retireExpected)) changed = true;
+          if (retireExpected) store.tryRetire(sub, r.commitTxId, retireExpected);
         }
         continue;
       }
@@ -501,7 +493,6 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
           confirmedBlockHeight: current.confirmedBlockHeight,
           confirmedBlockHash: current.confirmedBlockHash,
         }, 'reveal_broadcast')) {
-          changed = true;
           store.markRebroadcast(sub, r.commitTxId);
           if (current.signedCommitHex) await broadcastIdempotent(current.signedCommitHex);
           if (current.revealTxHex) await broadcastIdempotent(current.revealTxHex);
@@ -520,14 +511,15 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         await broadcastIdempotent(current.revealTxHex);
       }
     }
-    if (changed) {
-      try {
-        records = store.list(sub);
-      } catch (e) {
-        const unreadable = unreadableRecords(sub, e);
-        if (unreadable) return unreadable;
-        throw e;
-      }
+    // Another poll or sweep may have won a guarded update during any of
+    // our provider reads, even if this pass needed no writes of its own.
+    // Project the durable result rather than the initial worklist snapshot.
+    try {
+      records = store.list(sub);
+    } catch (e) {
+      const unreadable = unreadableRecords(sub, e);
+      if (unreadable) return unreadable;
+      throw e;
     }
     const inscriptions = records.map((r) => {
       const outpoints = outpointsOf(r);

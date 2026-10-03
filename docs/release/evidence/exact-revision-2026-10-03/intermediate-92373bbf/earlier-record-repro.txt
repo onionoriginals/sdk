@@ -1,0 +1,39 @@
+bun test v1.3.5 (1e86cebd)
+
+apps/landing/server/tests/bitcoin-reconciliation.test.ts:
+1464 |     expect(store.get('sub-1', target)!.status).toBe('confirmed');
+1465 |     releaseEarlier(status);
+1466 |     const response = await pending;
+1467 |     expect(response.status).toBe(200);
+1468 |     const row = (await response.json()).inscriptions.find((record: { commitTxId: string }) => record.commitTxId === target);
+1469 |     expect(row).toMatchObject({ commitTxId: target, status: 'confirmed', confirmations: 1, settled: false });
+                       ^
+error: expect(received).toMatchObject(expected)
+
+@@ -2,5 +2,11 @@
+    "commitTxId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+-   "confirmations": 1,
+-   "settled": false,
+-   "status": "confirmed",
++   "createdAt": "2026-08-01T00:00:00.000Z",
++   "fundingOutpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0",
++   "fundingOutpoints": [
++     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0",
++   ],
++   "inscriptionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0",
++   "revealTxId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaar0",
++   "status": "reveal_broadcast",
++   "updatedAt": "2026-08-01T00:00:00.000Z",
+  }
+
+- Expected  - 3
++ Received  + 9
+
+      at <anonymous> (/private/tmp/sdk-gate-06d54/apps/landing/server/tests/bitcoin-reconciliation.test.ts:1469:17)
+(fail) concurrent inscription list responses > a confirmation won during an earlier record lookup is returned even when this pass needs no writes [4.73ms]
+
+ 0 pass
+ 60 filtered out
+ 1 fail
+ 5 expect() calls
+Ran 1 test across 1 file. [47.00ms]

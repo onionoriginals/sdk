@@ -1,0 +1,242 @@
+{
+  "result": "pass",
+  "format": "originals/cel/3",
+  "chain": "regtest",
+  "fault": "none",
+  "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+  "ord": "ord 0.29.0",
+  "did": "did:btco:reg:9998999718",
+  "ownershipObservations": [
+    {
+      "stage": "matching-tip-before-transfer",
+      "primaryTip": {
+        "height": 112,
+        "hash": "3aef262156401a6ec06e7c8e72b42f64eb3d36078ce93dc263794453cb8cf82a"
+      },
+      "independentTip": {
+        "height": 112,
+        "hash": "3aef262156401a6ec06e7c8e72b42f64eb3d36078ce93dc263794453cb8cf82a"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "lagging-tip-same-owner",
+      "primaryTip": {
+        "height": 113,
+        "hash": "6f2ff441d49a75ec65d56cc773dbf0e1185495c4633d4a49a17b51c0f1d44bc8"
+      },
+      "independentTip": {
+        "height": 112,
+        "hash": "3aef262156401a6ec06e7c8e72b42f64eb3d36078ce93dc263794453cb8cf82a"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "same-height-different-hash",
+      "primaryTip": {
+        "height": 113,
+        "hash": "6f2ff441d49a75ec65d56cc773dbf0e1185495c4633d4a49a17b51c0f1d44bc8"
+      },
+      "independentTip": {
+        "height": 113,
+        "hash": "74ce17a48d9d8ab0466dfd57940b96c62a10dab388d682edb97fd542a5719421"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "fork-rejoined",
+      "primaryTip": {
+        "height": 114,
+        "hash": "08b5a0176d3a10110b7e73a93d642a4fbaec70128c33603e712efc9ad7fb4b8d"
+      },
+      "independentTip": {
+        "height": 114,
+        "hash": "08b5a0176d3a10110b7e73a93d642a4fbaec70128c33603e712efc9ad7fb4b8d"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "sale-lagging-index",
+      "primaryTip": {
+        "height": 116,
+        "hash": "057368e7824f544592efafbf517ec4fc4f0254c35fb14ee24dd8bbd0c1b2ad98"
+      },
+      "independentTip": {
+        "height": 114,
+        "hash": "08b5a0176d3a10110b7e73a93d642a4fbaec70128c33603e712efc9ad7fb4b8d"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qpphycyramyvy84qvfkdd0rjhupchyk8wue8t9c",
+        "satpoint": "4d71c81e1d35ceb6c1b4f80e70496b2bc8f7626af38b3d477f13723ed1bfdafe:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3a:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "sale-indexes-agree",
+      "primaryTip": {
+        "height": 116,
+        "hash": "057368e7824f544592efafbf517ec4fc4f0254c35fb14ee24dd8bbd0c1b2ad98"
+      },
+      "independentTip": {
+        "height": 116,
+        "hash": "057368e7824f544592efafbf517ec4fc4f0254c35fb14ee24dd8bbd0c1b2ad98"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qpphycyramyvy84qvfkdd0rjhupchyk8wue8t9c",
+        "satpoint": "4d71c81e1d35ceb6c1b4f80e70496b2bc8f7626af38b3d477f13723ed1bfdafe:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qpphycyramyvy84qvfkdd0rjhupchyk8wue8t9c",
+        "satpoint": "4d71c81e1d35ceb6c1b4f80e70496b2bc8f7626af38b3d477f13723ed1bfdafe:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "reacquisition-lagging-index",
+      "primaryTip": {
+        "height": 118,
+        "hash": "468739cfefae098da22dd56e7f47bf1cd5f49847b550390af798e43a9cf9fe86"
+      },
+      "independentTip": {
+        "height": 116,
+        "hash": "057368e7824f544592efafbf517ec4fc4f0254c35fb14ee24dd8bbd0c1b2ad98"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qpphycyramyvy84qvfkdd0rjhupchyk8wue8t9c",
+        "satpoint": "4d71c81e1d35ceb6c1b4f80e70496b2bc8f7626af38b3d477f13723ed1bfdafe:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "reacquisition-indexes-agree",
+      "primaryTip": {
+        "height": 118,
+        "hash": "468739cfefae098da22dd56e7f47bf1cd5f49847b550390af798e43a9cf9fe86"
+      },
+      "independentTip": {
+        "height": 118,
+        "hash": "468739cfefae098da22dd56e7f47bf1cd5f49847b550390af798e43a9cf9fe86"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "independent-restart",
+      "primaryTip": {
+        "height": 118,
+        "hash": "468739cfefae098da22dd56e7f47bf1cd5f49847b550390af798e43a9cf9fe86"
+      },
+      "independentTip": {
+        "height": 118,
+        "hash": "468739cfefae098da22dd56e7f47bf1cd5f49847b550390af798e43a9cf9fe86"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qke545qsl0wvaqd0p5fnp6pnqzcuapmgp2dshqc",
+        "satpoint": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    }
+  ],
+  "webDid": "did:webvh:QmQB8b3ZsvYj3accX11ApwVJTGXxJRxPrKvs7eBtzaLrM5:regtest.localhost%3A55090:published:anonymous:uEiCkSpJGeSFdmG_Vvve2z33wRCw6nIkBC1-v_tBe4PqJVg",
+  "commitTxId": "f9458829846af473eb62d65e6dfbf51c4b19ca1c0a32f9a02ad001ec8af82fc4",
+  "revealTxId": "404fd85d45931511f0d743f1dc88d92ab3a41fc2443ad9c27756f07bed65795e",
+  "inscriptionId": "404fd85d45931511f0d743f1dc88d92ab3a41fc2443ad9c27756f07bed65795ei0",
+  "publications": [
+    "404fd85d45931511f0d743f1dc88d92ab3a41fc2443ad9c27756f07bed65795ei0",
+    "9e2dc2ffb88d8a06e1446cee8e427c87c7d853c3cd1d94e551b5f64bcdc21a3ai0",
+    "505fcb04a5ba7717d0aa77743e58cc76132e0a54702160b83f4aa2985534ac27i0",
+    "e0c1b99ad0490af87f44d142aadc8c83e083157ae0a6c82a9a2308ece88aad7ei0"
+  ],
+  "saleTxid": "4d71c81e1d35ceb6c1b4f80e70496b2bc8f7626af38b3d477f13723ed1bfdafe",
+  "reacquisitionTxid": "3dee13120a4616e949178a0233f14b36e1349b04271e3d333deebaae8f4eb759",
+  "buyerAddress": "bcrt1qpphycyramyvy84qvfkdd0rjhupchyk8wue8t9c",
+  "orphanedRotationBlock": "702f7d1b4d27f042e4955d49cc64211b6f77831fbbc23f3f363f89b8f21f3889",
+  "orphanedBlock": "2744e22f229f67e3a9459c93caf735a52b6390d0e66b19eb434a36fd60a5b068",
+  "activeTip": "181a0add7747217bfcfb8b043ee3ece87546b7187a90616e0e4356c7626cc2fe",
+  "pngBytes": 68,
+  "pngHash": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+  "dataDir": "/tmp/sdk-gate-06d54/.gate-run/originals-regtest-s8XuAn",
+  "finalHead": "uEiCEgbhe5NiYfvC4zq7axQh3MwABk_d2pBisDR2DvN9pZQ",
+  "checks": [
+    "explicit HTTPS WebVH method and CEL publication",
+    "cold hosted PNG bytes",
+    "HTTP deposit/fee/sat/prevtx",
+    "zero-broadcast preparation",
+    "raw PNG plus full boundary CBOR",
+    "persist exact signed pair before broadcast",
+    "route/store recreation from disk",
+    "selected sat preserved",
+    "orphaned boundary rejected after real reorg",
+    "reconfirmation",
+    "cold sat bytes and DID authority",
+    "CEL 3 JSON reload",
+    "six-confirmation retention horizon",
+    "cold accepted-head delta",
+    "one-publication rotation plus new-controller update",
+    "retired controller rejected",
+    "orphaned rotation restores prior controller",
+    "independent Core/ord ownership at matching tips",
+    "lagging and same-height forked tips never upgrade ownership",
+    "sale and reacquisition corroborated after real index catch-up",
+    "ownership and DID metadata survive independent restart",
+    "unavailable independent index fails closed",
+    "real sat sale and reacquisition preserve CEL head and authority",
+    "closed-browser recovery sweep",
+    "new-resource raw media delta",
+    "historical and current resource bytes",
+    "log-only deactivation",
+    "deactivated DID metadata"
+  ],
+  "signer": "disposable local Bitcoin key through TurnkeySatSigner; disposable CEL keys; no Turnkey service call"
+}

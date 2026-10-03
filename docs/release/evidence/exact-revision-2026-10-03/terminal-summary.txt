@@ -1,0 +1,129 @@
+Fresh terminal summaries at 68f9d599db867356502effb9da9d2b5d745c96e1
+Full logs remain in local task scratch; digests are in summary.json.
+
+$ bun run test
+exit: 0
+@originals/cel:test:  1361 pass
+@originals/cel:test:  0 fail
+@originals/cel:test:  3845 expect() calls
+@originals/cel:test: Ran 1361 tests across 57 files. [10.71s]
+@originals/sdk:test:  197 pass
+@originals/sdk:test:  91 skip
+@originals/sdk:test:  0 fail
+@originals/sdk:test:  1168 expect() calls
+@originals/sdk:test: Ran 288 tests across 32 files. [12.30s]
+@originals/auth:test:  467 pass
+@originals/auth:test:  3 skip
+@originals/auth:test:  0 fail
+@originals/auth:test:  1249 expect() calls
+@originals/auth:test: Ran 470 tests across 17 files. [18.47s]
+@originals/sdk:test:  3196 pass
+@originals/sdk:test:  154 skip
+@originals/sdk:test:  0 fail
+@originals/sdk:test:  49836 expect() calls
+@originals/sdk:test: Ran 3350 tests across 206 files. [72.08s]
+@originals/sdk:test:  209 pass
+@originals/sdk:test:  0 fail
+@originals/sdk:test:  415 expect() calls
+@originals/sdk:test: Ran 209 tests across 20 files. [3.78s]
+@originals/sdk:test:  18 pass
+@originals/sdk:test:  0 fail
+@originals/sdk:test:  20 expect() calls
+@originals/sdk:test: Ran 18 tests across 1 file. [36.03s]
+@originals/sdk:test:  73 pass
+@originals/sdk:test:  2 skip
+@originals/sdk:test:  0 fail
+@originals/sdk:test:  1364 expect() calls
+@originals/sdk:test: Ran 75 tests across 8 files. [2.48s]
+
+$ bun run lint
+exit: 0
+@originals/cel:lint: ✖ 6 problems (0 errors, 6 warnings)
+@originals/sdk:lint: ✖ 268 problems (0 errors, 268 warnings)
+
+$ bun run typecheck
+exit: 0
+$ turbo run typecheck --filter='./packages/*'
+• turbo 2.10.4
+
+   • Packages in scope: @originals/auth, @originals/cel, @originals/sdk
+   • Running typecheck in 3 packages
+   • Remote caching disabled, using shared worktree cache
+
+@originals/cel:typecheck: cache bypass, force executing 6c1dced3b3c5d014
+@originals/cel:build: cache hit, replaying logs 4f62a9f47d8f736a
+@originals/cel:build: $ tsc
+@originals/sdk:typecheck: cache bypass, force executing 3ece4bcb173a8efc
+@originals/sdk:build: cache hit, replaying logs 561116c7f13c62fa
+@originals/sdk:build: $ tsc
+@originals/cel:typecheck: $ tsc --noEmit -p .
+@originals/sdk:typecheck: $ tsc --noEmit -p .
+
+ Tasks:    4 successful, 4 total
+Cached:    2 cached, 4 total
+  Time:    1.009s
+
+
+$ bun run --cwd packages/sdk typecheck:public
+exit: 0
+$ tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-cel3.ts
+
+$ bun run --cwd packages/auth typecheck:public
+exit: 0
+$ tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-client-api.ts
+
+$ bun run verify:esm
+exit: 0
+$ node scripts/verify-esm.mjs
+✓ 26 exported entry point(s) import cleanly under Node
+
+ESM verification passed: every exported entry point imports cleanly under Node via the exports maps.
+
+$ bun run verify:browser
+exit: 0
+$ node scripts/check-browser-safety.mjs
+! packages/sdk/dist/index.js — Buffer global reachable in 7 module(s) (advisory):
+    bitcoin/providers/SignetProvider.js
+    adapters/providers/QuickNodeProvider.js
+    bitcoin/inscribe-on-sat.js
+    bitcoin/inscription-recovery.js
+    v3/content-validation.js
+    v3/bitcoin.js
+    bitcoin/transactions/commit.js
+✓ packages/sdk/dist/index.js — no eager Node builtins, imports cleanly with no global Buffer (Buffer advisory above)
+! packages/sdk/dist/lifecycle/LifecycleManager.js — Buffer global reachable in 3 module(s) (advisory):
+    bitcoin/inscribe-on-sat.js
+    bitcoin/transactions/commit.js
+    bitcoin/inscription-recovery.js
+✓ packages/sdk/dist/lifecycle/LifecycleManager.js — no eager Node builtins, imports cleanly with no global Buffer (Buffer advisory above)
+✓ packages/sdk/dist/lifecycle/OriginalsAsset.js — no eager Node builtins, imports cleanly with no global Buffer
+✓ packages/sdk/dist/cel/index.js — no eager Node builtins, imports cleanly with no global Buffer
+! packages/sdk/dist/v3/index.js — Buffer global reachable in 1 module(s) (advisory):
+    v3/content-validation.js
+✓ packages/sdk/dist/v3/index.js — no eager Node builtins, imports cleanly with no global Buffer (Buffer advisory above)
+✓ packages/sdk/dist/testing/index.js — no eager Node builtins, imports cleanly with no global Buffer
+✓ packages/sdk/dist/types/public.js — no eager Node builtins, imports cleanly with no global Buffer
+✓ packages/sdk/dist/asset-envelope.js — no eager Node builtins or Buffer globals, imports cleanly with no global Buffer
+✓ packages/cel/dist/index.js — no eager Node builtins or Buffer globals, imports cleanly with no global Buffer
+✓ packages/auth/dist/index.js — no eager Node builtins or Buffer globals, imports cleanly with no global Buffer
+✓ packages/auth/dist/client/index.js — no eager Node builtins or Buffer globals, imports cleanly with no global Buffer
+
+Browser-safety check passed: every guarded entry point is free of eager Node builtins.
+
+$ bun run --cwd apps/landing typecheck
+exit: 0
+$ tsc --noEmit
+
+$ bun run --cwd apps/landing typecheck:server
+exit: 0
+$ tsc --noEmit -p tsconfig.server.json
+
+$ bun run --cwd apps/landing build
+exit: 0
+
+$ bun run --cwd apps/landing test
+exit: 0
+ 1287 pass
+ 0 fail
+ 6634 expect() calls
+Ran 1287 tests across 105 files. [69.96s]
