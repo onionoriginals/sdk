@@ -1,3 +1,4 @@
+import { generateP256KeyPair } from '@turnkey/crypto';
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { StructuredError } from '@originals/sdk';
 import {
@@ -573,7 +574,7 @@ describe('email-auth', () => {
       const client = createMockTurnkeyClient({ verifyOtp });
       const sessionId = await setupSession(client);
 
-      const clientPublicKey = '02' + 'ab'.repeat(32);
+      const clientPublicKey = generateP256KeyPair().publicKey;
       const result = await verifyEmailAuth(sessionId, '123456', client, storage, {
         ...verifyOptions,
         publicKey: clientPublicKey,
