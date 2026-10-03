@@ -202,45 +202,48 @@ describe('[AUTH-005] Auth middleware – error paths', () => {
     }
   });
 
-  test('getUserByTurnkeyId throws → 401 "Invalid or expired token"', async () => {
+  // A valid JWT with an operational lookup failure is not a bad credential:
+  // it must reach Express error handling via next(error), not a fabricated
+  // 401 (#729, #747) — a DB outage must not read as "everyone's logged out".
+  test('getUserByTurnkeyId throws → propagates via next(error), not a 401', async () => {
     const token = signToken('sub_org_123', 'user@example.com', undefined, {
       secret: TEST_SECRET,
     });
     const req = createMockReq({ auth_token: token });
     const res = createMockRes();
-    const next = mock(() => {});
+    const next = mock((_err?: unknown) => {});
+    const dbError = new Error('DB connection failed');
 
     const middleware = createAuthMiddleware({
-      getUserByTurnkeyId: mock(() => Promise.reject(new Error('DB connection failed'))),
+      getUserByTurnkeyId: mock(() => Promise.reject(dbError)),
       jwtSecret: TEST_SECRET,
     });
 
     await middleware(req, res, next as NextFunction);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res._status).toBe(401);
-    expect(res._json).toEqual({ error: 'Invalid or expired token' });
+    expect(res._status).toBe(0);
+    expect(next).toHaveBeenCalledWith(dbError);
   });
 
-  test('createUser throws → 401 with "Invalid or expired token"', async () => {
+  test('createUser throws → propagates via next(error), not a 401', async () => {
     const token = signToken('sub_org_456', 'new@example.com', undefined, {
       secret: TEST_SECRET,
     });
     const req = createMockReq({ auth_token: token });
     const res = createMockRes();
-    const next = mock(() => {});
+    const next = mock((_err?: unknown) => {});
+    const provisionError = new Error('User creation failed');
 
     const middleware = createAuthMiddleware({
       getUserByTurnkeyId: mock(() => Promise.resolve(null)),
-      createUser: mock(() => Promise.reject(new Error('User creation failed'))),
+      createUser: mock(() => Promise.reject(provisionError)),
       jwtSecret: TEST_SECRET,
     });
 
     await middleware(req, res, next as NextFunction);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res._status).toBe(401);
-    expect(res._json).toEqual({ error: 'Invalid or expired token' });
+    expect(res._status).toBe(0);
+    expect(next).toHaveBeenCalledWith(provisionError);
   });
 });
 
@@ -312,7 +315,12 @@ describe('[AUTH-008] verifyEmailAuth – error paths', () => {
 
   test('wrong OTP code (Turnkey rejects it) → throws "Invalid verification code"', async () => {
     const client = createEmailAuthMockClient({
-      verifyOtp: mock(() => Promise.reject(new Error('OTP code incorrect'))),
+      // A numeric `code` mirrors @turnkey/http's TurnkeyRequestError shape,
+      // marking this as a definitive Turnkey rejection rather than a
+      // transient/network failure (#747) — see extractTurnkeyErrorCode.
+      verifyOtp: mock(() =>
+        Promise.reject(Object.assign(new Error('OTP code incorrect'), { code: 3 }))
+      ),
     });
     const sessionId = await setupSession(client);
     await expect(
@@ -372,7 +380,7 @@ describe('[AUTH-012] In-memory storage auto-cleanup interval', () => {
     expect(storage.get('session_b')).toBeUndefined();
   });
 
-  test('lazy eviction of expired sessions works via getSession() from email-auth', () => {
+  test('lazy eviction of expired sessions works via getSession() from email-auth', async () => {
     // getSession() (not storage.get()) performs lazy eviction on access.
     // Verify that an expired session is evicted and undefined is returned.
     const { getSession } = require('../src/server/email-auth');
@@ -388,7 +396,7 @@ describe('[AUTH-012] In-memory storage auto-cleanup interval', () => {
     expect(storage.get('expired_id')).toBeDefined();
 
     // getSession() enforces expiry and removes the session
-    const result = getSession('expired_id', storage);
+    const result = await getSession('expired_id', storage);
     expect(result).toBeUndefined();
     // Session is now gone from the underlying store too
     expect(storage.get('expired_id')).toBeUndefined();
@@ -659,6 +667,64 @@ describe('[AUTH-023] ensureWalletWithAccounts', () => {
     );
     expect(wallets[0].accounts).toHaveLength(3);
   });
+
+  describe('post-repair visibility (#898)', () => {
+    const incompleteAccounts = [
+      {
+        address: 'addr_secp',
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+      },
+    ];
+
+    test('a repaired role not yet visible on the immediate re-read is caught by retrying', async () => {
+      const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+      // 1st read: initial completeness check (missing 2 Ed25519 roles).
+      // 2nd read: first post-repair re-read - the write hasn't propagated yet.
+      // 3rd read: second post-repair re-read - now visible.
+      const getWalletAccounts = mock()
+        .mockResolvedValueOnce({ accounts: incompleteAccounts })
+        .mockResolvedValueOnce({ accounts: incompleteAccounts })
+        .mockResolvedValueOnce({ accounts: fullAccounts });
+
+      const client = makeEnsureClient({
+        getWalletsResponses: [
+          () => Promise.resolve({ wallets: [{ walletId: 'w_lag', walletName: 'default-wallet' }] }),
+        ],
+        getWalletAccounts,
+        createWalletAccounts,
+      });
+
+      const wallets = await ensureWalletWithAccounts(client, 'sub_org_123');
+
+      expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+      expect(getWalletAccounts).toHaveBeenCalledTimes(3);
+      expect(wallets[0].accounts).toHaveLength(3);
+    }, 10000);
+
+    test('a repaired role still missing after the retry window throws instead of silently returning incomplete', async () => {
+      const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+      // Every read - the initial check and every post-repair retry - sees
+      // the same incomplete set: the repaired roles never become visible.
+      const getWalletAccounts = mock(() => Promise.resolve({ accounts: incompleteAccounts }));
+
+      const client = makeEnsureClient({
+        getWalletsResponses: [
+          () => Promise.resolve({ wallets: [{ walletId: 'w_stuck', walletName: 'default-wallet' }] }),
+        ],
+        getWalletAccounts,
+        createWalletAccounts,
+      });
+
+      await expect(ensureWalletWithAccounts(client, 'sub_org_123')).rejects.toThrow(
+        /still not visible/
+      );
+      expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+      // Initial check + 5 bounded retries, no more.
+      expect(getWalletAccounts).toHaveBeenCalledTimes(6);
+    }, 10000);
+  });
 });
 
 // ─── AUTH-028: TurnkeyDIDSigner ───────────────────────────────────────────────
@@ -784,7 +850,11 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     expect(typeof result).toBe('boolean');
   });
 
-  test('getVerificationMethodId → returns "did:key:<publicKeyMultibase>"', () => {
+  // REGRESSION (#872): a bare `did:key:<mb>` with no `#<mb>` fragment can
+  // never be resolved by documentLoader.resolveDID's did:key fast path, so a
+  // credential or MultiSig contribution signed through this ID could never
+  // verify. The canonical form is `did:key:<mb>#<mb>`.
+  test('getVerificationMethodId → returns "did:key:<publicKeyMultibase>#<publicKeyMultibase>"', () => {
     const client = makeDIDSignerClient();
     const signer = new TurnkeyDIDSigner(
       client,
@@ -794,7 +864,7 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     );
 
     const vmId = signer.getVerificationMethodId();
-    expect(vmId).toBe(`did:key:${FIXTURE_PUBKEY_MULTIBASE}`);
+    expect(vmId).toBe(`did:key:${FIXTURE_PUBKEY_MULTIBASE}#${FIXTURE_PUBKEY_MULTIBASE}`);
   });
 
   test('sign with expired session error → throws TurnkeySessionExpiredError', async () => {
@@ -839,6 +909,97 @@ describe('[AUTH-028] TurnkeyDIDSigner', () => {
     ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
 
     expect(onExpired).toHaveBeenCalled();
+  });
+
+  // REGRESSION (#696): a circular-shaped rejection (a common shape for
+  // wrapped fetch errors) used to make the signer's own `JSON.stringify`-based
+  // expiry check throw an unrelated TypeError, masking the real error and
+  // silently defeating expiry detection. `sign`/`signBytes` now rely solely
+  // on `withTokenExpiration`'s guarded classification.
+  test('sign with a circular-shaped expired-session error → still throws TurnkeySessionExpiredError, not a TypeError', async () => {
+    const circularExpired: Record<string, unknown> = {
+      code: 5,
+      message: 'api_key_expired',
+    };
+    circularExpired.self = circularExpired; // circular reference
+
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(circularExpired)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+  });
+
+  test('sign with a circular-shaped non-expiry error → propagates the original error unchanged, onExpired not called', async () => {
+    const circularOther: Record<string, unknown> = {
+      code: 5,
+      message: 'some turnkey failure',
+    };
+    circularOther.self = circularOther; // circular reference
+
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(circularOther)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBe(circularOther);
+
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  // sign() wraps signBytes() in its own withTokenExpiration, so a genuine
+  // expiry detected inside signBytes must not be re-classified (and
+  // onExpired re-invoked) a second time as it propagates through sign()'s
+  // own wrapper.
+  test('sign with expired session → onExpired is called exactly once, not once per wrapper layer', async () => {
+    const expiredError = { code: 'api_key_expired', message: 'api_key_expired' };
+    const client = makeDIDSignerClient({
+      signRawPayload: mock(() => Promise.reject(expiredError)),
+    });
+    const onExpired = mock(() => {});
+    const signer = new TurnkeyDIDSigner(
+      client,
+      'key_id_abc',
+      'sub_org_123',
+      FIXTURE_PUBKEY_MULTIBASE,
+      onExpired
+    );
+
+    await expect(
+      signer.sign({
+        document: { id: 'did:webvh:example.com:user' },
+        proof: { type: 'DataIntegrityProof' },
+      })
+    ).rejects.toBeInstanceOf(TurnkeySessionExpiredError);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import {
+  CelError,
   createLocalSigner,
+  jcsSigningMessage,
   signEvent,
   verifyEntry,
+  verifyJcsSignature,
   type Algorithm,
 } from "../../src/v3/index.js";
 import corpus from "../../../../docs/research/cel-profile-vectors/profile-documents.json";
@@ -67,3 +70,78 @@ test("an unsupported signer or failed signer cannot produce an unsigned successf
     }),
   ).rejects.toThrow();
 });
+
+test("jcsSigningMessage, createLocalSigner, and signEvent report the same FailureStatus for an unsupported algorithm (#700)", async () => {
+  const catchStatus = (fn: () => unknown) => {
+    try {
+      fn();
+      throw new Error("expected throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CelError);
+      return (e as CelError).status;
+    }
+  };
+
+  const fromMessage = catchStatus(() =>
+    jcsSigningMessage({}, {}, "secp256k1" as Algorithm),
+  );
+  const fromLocalSigner = catchStatus(() =>
+    createLocalSigner("secp256k1" as Algorithm, new Uint8Array(32).fill(7)),
+  );
+
+  expect(fromMessage).toBe("unsupported");
+  expect(fromLocalSigner).toBe("unsupported");
+  expect(fromMessage).toBe(fromLocalSigner);
+
+  const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
+  await expect(
+    signEvent(corpus.accepted[0].document.log[0].event, {
+      ...signer,
+      algorithm: "secp256k1" as Algorithm,
+    }),
+  ).rejects.toMatchObject({ status: "unsupported", code: "CEL_ALGORITHM" });
+});
+
+for (const [algorithm, secretSize, size] of [
+  ["Ed25519", 32, 64],
+  ["P-256", 32, 64],
+  ["P-384", 48, 96],
+] as const)
+  test(`verifyJcsSignature rejects a wrong-length ${algorithm} signature as a CelError instead of throwing a raw RangeError (#725)`, () => {
+    const signer = createLocalSigner(algorithm, new Uint8Array(secretSize).fill(9));
+    const document = corpus.accepted[0].document.log[0].event;
+    const configuration = {
+      type: "DataIntegrityProof",
+      cryptosuite: "unused",
+      verificationMethod: `${signer.controller}#key`,
+      proofPurpose: "assertionMethod",
+      created: "2026-09-05T00:00:00.000Z",
+    };
+
+    for (const wrongLength of [size - 1, size + 1, 0]) {
+      let threw: unknown;
+      try {
+        verifyJcsSignature(
+          document,
+          configuration,
+          new Uint8Array(wrongLength),
+          signer.controller,
+        );
+      } catch (e) {
+        threw = e;
+      }
+      expect(threw).toBeInstanceOf(CelError);
+      expect(threw).toMatchObject({ status: "invalid", code: "CEL_SIGNATURE" });
+    }
+
+    // A correctly-shaped but cryptographically wrong signature still just
+    // returns false rather than throwing.
+    expect(
+      verifyJcsSignature(
+        document,
+        configuration,
+        new Uint8Array(size).fill(1),
+        signer.controller,
+      ),
+    ).toBe(false);
+  });

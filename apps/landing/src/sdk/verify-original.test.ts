@@ -46,7 +46,7 @@ describe('native hosted verification', () => {
       resourceAvailability: [],
     } as unknown as AssetResolution;
   }
-  test('a btco check bound to THIS asset id and controller passes; an accepted-but-unrelated sat fails', async () => {
+  test('a btco check bound to THIS asset id passes; an accepted-but-unrelated sat fails', async () => {
     const input = await fixture();
     const { state } = verifyHistory(input.celLog);
     const bound = await verifyOriginal({
@@ -62,12 +62,20 @@ describe('native hosted verification', () => {
       btcoResolution: acceptedResolution('ni:///sha-256;unrelated', state.controller),
     });
     expect(wrongAsset.find((c) => c.id === 'btco')!.ok).toBe(false);
-    const wrongController = await verifyOriginal({
+  });
+  test('a legitimate post-anchor controller rotation still passes the btco check (#782)', async () => {
+    // Rotation retires the outgoing key (CLAUDE.md) — it is not evidence the
+    // Bitcoin binding broke. The frozen webvh-hosted controller at migration
+    // time must not be compared against the current on-sat controller.
+    const input = await fixture();
+    const { state } = verifyHistory(input.celLog);
+    const rotated = await verifyOriginal({
       ...input,
       sat: '1250000000',
-      btcoResolution: acceptedResolution(state.assetId, 'did:key:zUnrelatedController'),
+      btcoResolution: acceptedResolution(state.assetId, 'did:key:zRotatedController'),
     });
-    expect(wrongController.find((c) => c.id === 'btco')!.ok).toBe(false);
+    expect(rotated.find((c) => c.id === 'btco')!.ok).toBe(true);
+    expect(rotated.every((c) => c.ok)).toBe(true);
   });
   test('a deactivated on-chain history cannot verify an active hosted Original', async () => {
     const input = await fixture();

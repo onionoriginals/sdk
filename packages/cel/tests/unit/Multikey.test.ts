@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import {
+  type MultikeyType,
   multikey,
   validateMultikeyFormat,
   MULTICODEC_ED25519_PUB_HEADER,
@@ -19,6 +20,54 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(b, a.length);
   return out;
 }
+
+describe('runtime key types (issue #849)', () => {
+  const invalidTypes: unknown[] = [
+    'P384', '', 'constructor', 'toString', '__proto__', 'hasOwnProperty',
+    undefined, null, 0, false, Symbol('Ed25519'), {}, ['Ed25519'],
+    { toString: () => 'Ed25519' }, Object.create(null)
+  ];
+
+  for (const [index, invalidType] of invalidTypes.entries()) {
+    // Model dynamic JavaScript callers that bypass the TypeScript union.
+    const type = invalidType as MultikeyType;
+    const key = new Uint8Array(32).fill(1);
+    const publicKey = multikey.encodePublicKey(key, 'Ed25519');
+    const privateKey = multikey.encodePrivateKey(key, 'Ed25519');
+    for (const [name, operation] of Object.entries({
+      encodePublicKey: () => multikey.encodePublicKey(key, type),
+      encodePrivateKey: () => multikey.encodePrivateKey(key, type),
+      validatePublicKey: () => validateMultikeyFormat(publicKey, type, false),
+      validatePrivateKey: () => validateMultikeyFormat(privateKey, type, true)
+    })) {
+      test(`${name} rejects unsupported runtime type ${index}`, () => {
+        expect(operation).toThrow('Unsupported key type');
+      });
+    }
+  }
+
+  const supportedTypes = [
+    { type: 'Ed25519', length: 32, publicHeader: [0xed, 0x01], privateHeader: [0x80, 0x26] },
+    { type: 'Secp256k1', length: 33, publicHeader: [0xe7, 0x01], privateHeader: [0x81, 0x26] },
+    { type: 'Bls12381G2', length: 96, publicHeader: [0xeb, 0x01], privateHeader: [0x8a, 0x26] },
+    { type: 'P256', length: 33, publicHeader: [0x80, 0x24], privateHeader: [0x86, 0x26] }
+  ] as const;
+
+  for (const { type, length, publicHeader, privateHeader } of supportedTypes) {
+    test(`preserves ${type} public/private wire bytes and roundtrips`, () => {
+      const publicKey = Uint8Array.from({ length }, (_, i) => i + 1);
+      const privateKey = Uint8Array.from({ length: 32 }, (_, i) => i + 2);
+      const publicEncoded = multikey.encodePublicKey(publicKey, type);
+      const privateEncoded = multikey.encodePrivateKey(privateKey, type);
+      expect(publicEncoded).toBe('z' + base58.encode(concatBytes(new Uint8Array(publicHeader), publicKey)));
+      expect(privateEncoded).toBe('z' + base58.encode(concatBytes(new Uint8Array(privateHeader), privateKey)));
+      expect(multikey.decodePublicKey(publicEncoded)).toEqual({ key: publicKey, type });
+      expect(multikey.decodePrivateKey(privateEncoded)).toEqual({ key: privateKey, type });
+      expect(() => validateMultikeyFormat(publicEncoded, type, false)).not.toThrow();
+      expect(() => validateMultikeyFormat(privateEncoded, type, true)).not.toThrow();
+    });
+  }
+});
 
 describe('Multikey encode/decode', () => {
   const edPub = new Uint8Array(32).map((_, i) => (i + 1) & 0xff);

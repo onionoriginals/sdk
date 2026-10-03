@@ -49,6 +49,41 @@ import type { AuthUser, TokenPayload, TurnkeyWallet } from '@originals/auth/type
 
 Import client utilities from `@originals/auth/client` (not the package root) to avoid pulling server code into browser bundles. Turnkey API keys are server-only: initialize Turnkey with `createTurnkeyClient` from `@originals/auth/server` — there is no client-side Turnkey initializer.
 
+## Authentication middleware
+
+Both `createAuthMiddleware` and `createOptionalAuthMiddleware` accept `issuer`
+and `audience` options. Set them to the same values used by `signToken`:
+
+```typescript
+import { signToken, createAuthMiddleware, createOptionalAuthMiddleware } from '@originals/auth/server';
+
+const claims = { issuer: 'my-app', audience: 'my-app-api' };
+const token = signToken(user.turnkeySubOrgId, user.email, undefined, {
+  secret: process.env.JWT_SECRET,
+  ...claims,
+});
+const options = {
+  jwtSecret: process.env.JWT_SECRET,
+  ...claims,
+  getUserByTurnkeyId: async (id: string) => db.users.findByTurnkeyId(id),
+};
+const requireUser = createAuthMiddleware(options);
+const optionalUser = createOptionalAuthMiddleware(options);
+```
+
+Omitted options preserve the defaults: issuer `originals-auth`, audience
+`originals-api`, and cookie name `auth_token`. Configure cookie parsing before
+these middleware functions. Issuer/audience mismatches, invalid tokens, and
+expired tokens produce a 401 with required authentication and continue without
+populating `req.user` with optional authentication. Optional authentication also
+continues anonymously when the cookie or matching user is absent.
+
+JWT configuration errors and user lookup failures reach Express error handling
+through `next(error)`; optional authentication does not hide backend failures as
+anonymous traffic. Successful authentication populates `req.user` and calls
+`next()` once. Errors thrown by the consumer's `next` callback propagate without
+calling it again.
+
 ## Security notes
 
 **Rate-limit the send-OTP endpoint.** `initiateEmailAuth` sends an email on every call. The endpoint exposing it MUST enforce rate limits (per IP and per target email) — Turnkey's per-user throttle does not protect arbitrary recipient addresses from an attacker who varies the email. Turnkey sub-organizations and wallets are only provisioned after the OTP is verified, so unverified requests create no billable resources, but unthrottled requests still spam arbitrary inboxes.

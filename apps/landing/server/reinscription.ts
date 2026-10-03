@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 import { OriginalsSDK, parseDocument, verifyHistory, digestBytes, type OrdinalsProvider } from '@originals/sdk';
+import { normalizeInscriptionId, normalizeSatpoint } from '@originals/sdk/cel';
 
 /** Recognize only the single, unambiguous inscription envelope emitted by the CEL 3 writer. */
 function readPublication(reveal: btc.Transaction) {
@@ -51,12 +52,12 @@ export async function isAuthorizedReinscription(input: {
     const sdk = OriginalsSDK.create({ network: input.network, ordinalsProvider: input.provider });
     const accepted = await sdk.lifecycle.resolveAssetFromSat(sat);
     if (accepted.status !== 'accepted' || accepted.resolution.pending.length ||
-        accepted.resolution.ownership.satpoint !== `${input.identity.txid.toLowerCase()}:${input.identity.vout}:0` ||
+        normalizeSatpoint(accepted.resolution.ownership.satpoint) !== normalizeSatpoint(`${input.identity.txid}:${input.identity.vout}:0`) ||
         accepted.resolution.ownership.owner !== input.address ||
         publication.document.log[0]?.event.previousEvent !== accepted.asset.state.head) return false;
-    const sameSatIds = new Set([...accepted.resolution.publications.map(publication => publication.inscriptionId), ...accepted.resolution.diagnostics.map(diagnostic => diagnostic.inscriptionId)]);
+    const sameSatIds = new Set([...accepted.resolution.publications.map(publication => publication.inscriptionId), ...accepted.resolution.diagnostics.map(diagnostic => diagnostic.inscriptionId)].map(normalizeInscriptionId));
     const inputIds = await input.inscriptionIds();
-    if (!inputIds.length || inputIds.some(id => !sameSatIds.has(id))) return false;
+    if (!inputIds.length || inputIds.some(id => !sameSatIds.has(normalizeInscriptionId(id)))) return false;
     const verified = verifyHistory({ log: [...accepted.asset.celLog.log, ...publication.document.log] }, { expectedAssetId: accepted.asset.id });
     if (verified.state.alias !== accepted.asset.state.alias || verified.state.entryCount <= accepted.asset.state.entryCount) return false;
     if (publication.media && !verified.state.resources.some(resource => resource.mediaType === publication.contentType && resource.digestMultibase === digestBytes(publication.content))) return false;

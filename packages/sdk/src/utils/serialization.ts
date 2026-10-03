@@ -1,4 +1,3 @@
-import jsonld from 'jsonld';
 import { DIDDocument, VerifiableCredential } from '../types/index.js';
 import { validateDIDDocument, validateCredential } from './validation.js';
 
@@ -100,11 +99,15 @@ export async function canonicalizeDocument(
   options: { documentLoader?: DocumentLoader } = {}
 ): Promise<string> {
   try {
-    // Type assertion needed due to jsonld library's loose typing
+    // jsonld is heavy and Node-leaning (it pulls in undici, which references
+    // the bare `Buffer` global at module-evaluation time — see issue #838).
+    // Load it only when a document is actually canonicalized, so importing
+    // this module (and everything that re-exports it, incl. the SDK's main
+    // entry) doesn't crash in a runtime without a global Buffer.
     interface JsonLdModule {
       canonize: (doc: unknown, options: Record<string, unknown>) => Promise<string>;
     }
-    const jsonldTyped = jsonld as unknown as JsonLdModule;
+    const jsonldTyped = ((await import('jsonld')).default as unknown) as JsonLdModule;
     const result = await jsonldTyped.canonize(doc, {
       algorithm: 'URDNA2015',
       format: 'application/n-quads',

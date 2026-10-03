@@ -5,7 +5,7 @@ import { VerifiableCredential, CredentialSubject, Proof } from '../../../src/typ
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
 import { p256 } from '@noble/curves/nist.js';
-import { multikey } from '@originals/cel';
+import { multikey, StructuredError } from '@originals/cel';
 
 describe('CredentialManager', () => {
   const sdk = OriginalsSDK.create();
@@ -622,5 +622,30 @@ describe('CredentialManager.getSigner default case when config keyType undefined
     const pk = new Uint8Array(33).fill(2);
     const signed = await cm.signCredential(vc, multikey.encodePrivateKey(sk, 'Secp256k1'), multikey.encodePublicKey(pk, 'Secp256k1'));
     expect(signed.proof).toBeDefined();
+  });
+});
+
+describe('CredentialManager.signCredential malformed key (#711)', () => {
+  test('a malformed privateKeyMultibase throws a StructuredError with a stable code, not a raw Error', async () => {
+    const cm = new CredentialManager({ network: 'mainnet' } as any, new DIDManager({ network: 'mainnet' } as any as never));
+    const vc: any = {
+      '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
+      type: ['VerifiableCredential'],
+      issuer: 'did:ex',
+      issuanceDate: new Date().toISOString(),
+      credentialSubject: {},
+    };
+
+    try {
+      // Not a valid multibase-encoded private key: falls through the DID
+      // verification-method path (verificationMethod doesn't start with
+      // 'did:') straight into the legacy signer's generateProofValue, which
+      // used to let multikey.decodePrivateKey's raw Error escape unwrapped.
+      await cm.signCredential(vc, 'not-a-valid-multibase-key', 'legacy-vm');
+      throw new Error('expected signCredential to reject');
+    } catch (e) {
+      expect(e instanceof StructuredError).toBe(true);
+      expect((e as StructuredError).code).toBe('INVALID_KEY');
+    }
   });
 });

@@ -27,7 +27,7 @@
     "dev": "turbo run dev --filter='./packages/*'",
     "check": "turbo run check --filter='./packages/*'",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && node scripts/sync-release-lockfile.mjs",
     "release": "changeset publish",
     "regtest": "bun scripts/regtest/run.ts",
     "regtest:browser": "bun scripts/regtest/run.ts --browser",

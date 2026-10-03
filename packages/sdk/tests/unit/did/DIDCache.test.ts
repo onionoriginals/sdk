@@ -3,7 +3,6 @@ import { DIDCache, type DIDCacheStorage, type DIDCacheEntry } from '../../../src
 import { MetricsCollector } from '../../../src/utils/MetricsCollector';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import type { DIDDocument } from '../../../src/types';
-import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const makeDIDDoc = (id: string): DIDDocument => ({
   '@context': ['https://www.w3.org/ns/did/v1'],
@@ -420,7 +419,7 @@ describe('DIDCache', () => {
 
       const sat = '700001';
       const did = `did:btco:${sat}`;
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+      const sdk = OriginalsSDK.create({
         network: 'mainnet',
         ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)),
         didCache: {

@@ -4,6 +4,7 @@ import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '@originals/cel';
+import { canonicalWebVHPaths, isWebVHPathSegment } from '@originals/cel/v3';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**
@@ -19,6 +20,25 @@ async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeo
     [fs, path] = await Promise.all([import('fs'), import('path')]);
   }
   return { fs, path };
+}
+
+/**
+ * Validate and DID-encode caller-supplied decoded `paths` with the CEL rule,
+ * as `StructuredError`s for the identity seams.
+ */
+export function requireWebVHPaths(paths: unknown): string[] {
+  const result = canonicalWebVHPaths(paths);
+  if (result.ok) return result.segments;
+  if (result.reason === 'reserved')
+    throw new StructuredError(
+      'WEBVH_PATH_RESERVED',
+      'The .well-known path segment is reserved: paths: [".well-known"] would host its log at /.well-known/did.jsonl, the same location as paths: []. Omit paths to publish there.'
+    );
+  const at = result.index === undefined ? '' : ` paths[${result.index}] is invalid;`;
+  throw new StructuredError(
+    'WEBVH_PATH_SEGMENT_INVALID',
+    `Invalid path segment in DID paths:${at} supply an array of non-empty decoded segments, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`
+  );
 }
 
 /**
@@ -70,11 +90,18 @@ export function assertEd25519WebVHUpdateKeys(updateKeys: readonly string[] | und
     let type: string;
     try {
       type = multikey.decodePublicKey(key).type;
-    } catch {
-      throw new Error(`did:webvh updateKey is not a valid public multikey: ${key}`);
+    } catch (e) {
+      // Caller-controlled input (createDIDWebVH's externalSigner path, and
+      // every rotation/recovery entry) crossing the public SDK seam (#711):
+      // needs a stable .code, not a raw Error.
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_INVALID',
+        `did:webvh updateKey is not a valid public multikey: ${key} (${(e as Error).message})`
+      );
     }
     if (type !== 'Ed25519') {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_UPDATE_KEY_NOT_ED25519',
         `did:webvh only supports Ed25519 keys (resolution verifies DID logs with Ed25519); updateKey uses ${type}`
       );
     }
@@ -336,14 +363,7 @@ export class WebVHManager {
       services,
     } = options;
 
-    // Validate path segments before creating DID to prevent directory traversal
-    if (paths && paths.length > 0) {
-      for (const segment of paths) {
-        if (!this.isValidPathSegment(segment)) {
-          throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
-        }
-      }
-    }
+    const canonicalPaths = requireWebVHPaths(paths);
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -376,7 +396,10 @@ export class WebVHManager {
     // masked by a "verificationMethods are required" error the caller would hit
     // first only to then discover the combination is unsupported anyway.
     if (prerotation && externalSigner) {
-      throw new Error('prerotation is not supported with externalSigner; manage nextKeyHashes externally');
+      throw new StructuredError(
+        'WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED',
+        'prerotation is not supported with externalSigner; manage nextKeyHashes externally'
+      );
     }
 
     // keyPair and externalSigner are mutually exclusive (CLAUDE.md gotcha #7).
@@ -393,10 +416,16 @@ export class WebVHManager {
     // Use external signer if provided (e.g., Turnkey integration)
     if (externalSigner) {
       if (!providedVerificationMethods || providedVerificationMethods.length === 0) {
-        throw new Error('verificationMethods are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_VERIFICATION_METHODS_REQUIRED',
+          'verificationMethods are required when using externalSigner'
+        );
       }
       if (!providedUpdateKeys || providedUpdateKeys.length === 0) {
-        throw new Error('updateKeys are required when using externalSigner');
+        throw new StructuredError(
+          'WEBVH_UPDATE_KEYS_REQUIRED',
+          'updateKeys are required when using externalSigner'
+        );
       }
 
 
@@ -409,7 +438,13 @@ export class WebVHManager {
       } else if (typeof (externalSigner as unknown as { verify?: unknown }).verify === 'function') {
         verifier = externalSigner as unknown as ExternalVerifier;
       } else {
-        throw new Error(
+        // Same .code as identity-operations.ts's resolveVerifier and
+        // updateDIDWebVH (#720) for the identical condition, so callers can
+        // branch on one error contract for this failure across every DID
+        // API. Message text names this API's own externalSigner/
+        // externalVerifier option names rather than matching verbatim.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
           'externalVerifier is required when the provided externalSigner does not implement verify()'
         );
       }
@@ -488,7 +523,7 @@ export class WebVHManager {
         'https://www.w3.org/ns/did/v1',
         'https://w3id.org/security/multikey/v1'
       ],
-      paths,
+      paths: canonicalPaths,
       portable,
       authentication: [signingVmId],
       assertionMethod: [signingVmId],
@@ -526,33 +561,6 @@ export class WebVHManager {
       logPath,
       ...(nextKeyPairForPrerotation ? { nextKeyPair: nextKeyPairForPrerotation } : {}),
     };
-  }
-
-  /**
-   * Validates a path segment to prevent directory traversal attacks
-   * @param segment - Path segment to validate
-   * @returns true if valid, false otherwise
-   */
-  private isValidPathSegment(segment: string): boolean {
-    // Reject empty segments, dots, or segments with path separators
-    if (!segment || segment === '.' || segment === '..') {
-      return false;
-    }
-    
-    // Reject segments containing path separators or other dangerous characters
-    if (segment.includes('/') || segment.includes('\\') || segment.includes('\0')) {
-      return false;
-    }
-    
-    // Reject absolute paths (leading separator, or a Windows drive prefix).
-    // Checked inline rather than via node:path so this validator stays usable
-    // without a Node runtime — separators are already rejected above, leaving
-    // only the drive-letter form to catch.
-    if (segment.startsWith('/') || /^[a-zA-Z]:/.test(segment)) {
-      return false;
-    }
-    
-    return true;
   }
 
   /**
@@ -594,12 +602,12 @@ export class WebVHManager {
     // filed logs under the (lowercased) SCID and made them unhostable (issue #246).
     const didParts = did.split(':');
     if (didParts.length < 4 || didParts[0] !== 'did' || didParts[1] !== 'webvh') {
-      throw new Error('Invalid did:webvh format: expected did:webvh:{SCID}:{domain}[:paths]');
+      throw new StructuredError('WEBVH_DID_FORMAT_INVALID', 'Invalid did:webvh format: expected did:webvh:{SCID}:{domain}[:paths]');
     }
 
     const scid = didParts[2];
     if (!scid) {
-      throw new Error('Invalid did:webvh format: missing SCID');
+      throw new StructuredError('WEBVH_DID_FORMAT_INVALID', 'Invalid did:webvh format: missing SCID');
     }
 
     // Extract path parts (everything after the domain)
@@ -607,8 +615,14 @@ export class WebVHManager {
 
     // Validate all path segments to prevent directory traversal
     for (const segment of pathParts) {
-      if (!this.isValidPathSegment(segment)) {
-        throw new Error(`Invalid path segment in DID: "${segment}". Path segments cannot contain '.', '..', path separators, or be absolute paths.`);
+      let decoded: string | undefined;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        // malformed escape: left undefined, rejected below
+      }
+      if (!isWebVHPathSegment(decoded)) {
+        throw new StructuredError('WEBVH_PATH_SEGMENT_INVALID', `Invalid path segment in DID: "${segment}". Path segments must decode to a non-empty segment, not "." or "..", with no "/", "\\", NUL, or leading/trailing whitespace.`);
       }
     }
 
@@ -623,8 +637,8 @@ export class WebVHManager {
       .replace(/[^a-z0-9._-]/g, '_');
 
     // Validate the sanitized domain (reject '..' and other dangerous patterns)
-    if (!this.isValidPathSegment(safeDomain)) {
-      throw new Error(`Invalid domain segment in DID: "${rawDomain}"`);
+    if (!isWebVHPathSegment(safeDomain)) {
+      throw new StructuredError('WEBVH_DOMAIN_SEGMENT_INVALID', `Invalid domain segment in DID: "${rawDomain}"`);
     }
 
     // Lay files out to mirror the did:webvh resolution URL so hosting the
@@ -643,7 +657,7 @@ export class WebVHManager {
     const resolvedPath = path.resolve(didPath);
     const relativePath = path.relative(resolvedBaseDir, resolvedPath);
     if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-      throw new Error('Invalid DID path: resolved path is outside base directory');
+      throw new StructuredError('WEBVH_PATH_OUTSIDE_BASE_DIR', 'Invalid DID path: resolved path is outside base directory');
     }
 
     // Create directories if they don't exist
@@ -696,7 +710,8 @@ export class WebVHManager {
     // resolution, so refuse rather than silently corrupt the log. Document
     // updates on pre-rotation DIDs must go through the pre-rotation rotation path.
     if (this.logHasPendingPrerotation(currentLog)) {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_PREROTATION_UNSUPPORTED',
         'updateDIDWebVH does not support DIDs on a pre-rotation chain (the latest log entry ' +
         'commits nextKeyHashes). Such DIDs require rotating to the pre-committed key for every ' +
         'new entry; use rotateDIDWebVHKeys with prerotation:true instead.'
@@ -717,7 +732,7 @@ export class WebVHManager {
     const { updateDID } = mod;
 
     if (typeof updateDID !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+      throw new StructuredError('WEBVH_MODULE_LOAD_FAILED', 'Failed to load didwebvh-ts: invalid module exports');
     }
 
     let signer: Signer | ExternalSigner;
@@ -727,7 +742,25 @@ export class WebVHManager {
     if ('sign' in providedSigner && 'getVerificationMethodId' in providedSigner) {
       // External signer
       signer = providedSigner;
-      verifier = providedVerifier;
+      // Mirror createDIDWebVH's fallback: an ExternalSigner has no verify(),
+      // so silently leaving verifier undefined makes didwebvh-ts fail deep
+      // inside with "verifier.verify is not a function". Accept the signer
+      // itself as the verifier when it implements verify() (e.g. a Turnkey
+      // dual signer/verifier), and only require a separate externalVerifier
+      // when it does not.
+      if (providedVerifier) {
+        verifier = providedVerifier;
+      } else if (typeof (providedSigner as unknown as { verify?: unknown }).verify === 'function') {
+        verifier = providedSigner as unknown as ExternalVerifier;
+      } else {
+        // Same code/message as identity-operations.ts's resolveVerifier (#720)
+        // for the identical condition, so the two update APIs share one
+        // error contract instead of two for the same failure.
+        throw new StructuredError(
+          'WEBVH_VERIFIER_REQUIRED',
+          'verifier is required when the provided signer does not implement verify()'
+        );
+      }
     } else {
       // Internal signer with keypair
       const keyPair = providedSigner;
@@ -776,7 +809,7 @@ export class WebVHManager {
 
     // Validate the returned DID document
     if (!this.isDIDDocument(result.doc)) {
-      throw new Error('Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     // Save the updated log if output directory is provided
@@ -821,7 +854,8 @@ export class WebVHManager {
       // rather than auto-switching, because `currentKeyPair` has different
       // semantics in pre-rotation mode (it must be the pre-committed next key).
       if (this.logHasPendingPrerotation(currentLog)) {
-        throw new Error(
+        throw new StructuredError(
+          'WEBVH_PREROTATION_REQUIRED',
           'This DID is on a pre-rotation chain (the latest log entry commits nextKeyHashes). ' +
           'Call rotateDIDWebVHKeys with prerotation:true and pass the pre-committed nextKeyPair ' +
           '(returned by the previous create/rotate) as currentKeyPair. A non-pre-rotation ' +
@@ -1172,7 +1206,7 @@ export class WebVHManager {
     };
     const { updateDID } = mod;
     if (typeof updateDID !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+      throw new StructuredError('WEBVH_MODULE_LOAD_FAILED', 'Failed to load didwebvh-ts: invalid module exports');
     }
 
     // createDIDWebVH enforces Ed25519 updateKeys; without the same assertion
@@ -1208,7 +1242,7 @@ export class WebVHManager {
     });
 
     if (!this.isDIDDocument(result.doc)) {
-      throw new Error('Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     return { didDocument: result.doc, log: result.log };
@@ -1247,26 +1281,28 @@ export class WebVHManager {
     };
     const { updateDID } = mod;
     if (typeof updateDID !== 'function') {
-      throw new Error('Failed to load didwebvh-ts: invalid module exports');
+      throw new StructuredError('WEBVH_MODULE_LOAD_FAILED', 'Failed to load didwebvh-ts: invalid module exports');
     }
 
     // Enforce the pre-rotation invariant at SDK level:
     // The activeKeyPair's hash must appear in the previous entry's nextKeyHashes.
     // (didwebvh-ts only checks this during log resolution, not at updateDID time.)
     if (currentLog.length === 0) {
-      throw new Error('Cannot perform pre-rotation on an empty DID log');
+      throw new StructuredError('WEBVH_PREROTATION_EMPTY_LOG', 'Cannot perform pre-rotation on an empty DID log');
     }
     const lastEntry = currentLog[currentLog.length - 1];
     const prevNextKeyHashes = (lastEntry.parameters as { nextKeyHashes?: string[] }).nextKeyHashes ?? [];
     if (prevNextKeyHashes.length === 0) {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_PREROTATION_NOT_COMMITTED',
         'Pre-rotation rotation requires the current log to have nextKeyHashes committed. ' +
         'The DID was not created with prerotation:true or the chain is broken.'
       );
     }
     const activeKeyHash = computeNextKeyHash(activeKeyPair.publicKey);
     if (!prevNextKeyHashes.includes(activeKeyHash)) {
-      throw new Error(
+      throw new StructuredError(
+        'WEBVH_PREROTATION_KEY_MISMATCH',
         `Pre-rotation violation: currentKeyPair hash (${activeKeyHash}) is not in the ` +
         `previous entry's nextKeyHashes (${prevNextKeyHashes.join(', ')}). ` +
         'Pass the nextKeyPair returned from the previous create/rotate call.'
@@ -1311,7 +1347,7 @@ export class WebVHManager {
     });
 
     if (!this.isDIDDocument(result.doc)) {
-      throw new Error('Invalid DID document returned from updateDID');
+      throw new StructuredError('WEBVH_RESULT_DOCUMENT_INVALID', 'Invalid DID document returned from updateDID');
     }
 
     return { didDocument: result.doc, log: result.log };

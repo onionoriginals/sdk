@@ -3,6 +3,7 @@ import type { ChainValidator } from "./chain-validation.js";
 import type { HostedAssets, HostedEvidence } from "./hosted.js";
 import {
   CelError,
+  normalizeTxid,
   parseAssetAlias,
   parseDocument,
   resolveSat,
@@ -129,11 +130,15 @@ const validChainTip = (tip: unknown): tip is SatSnapshot["tipBefore"] => {
     Number.isSafeInteger(t.height) &&
     (t.height as number) >= 0 &&
     typeof t.hash === "string" &&
-    /^[0-9a-f]{64}$/.test(t.hash)
+    /^[0-9a-f]{64}$/i.test(t.hash)
   );
 };
+// Block hashes carry no casing contract of their own (see #844); normalize
+// with the same 64-hex-char rule as a reveal txid before comparing, so two
+// sources reporting the identical tip in different hex letter case still
+// agree rather than falsely disagreeing.
 const sameChainTip = (a: SatSnapshot["tipBefore"], b: SatSnapshot["tipBefore"]) =>
-  a.height === b.height && a.hash === b.hash;
+  a.height === b.height && normalizeTxid(a.hash) === normalizeTxid(b.hash);
 /**
  * A second source can only corroborate enumeration completeness if its own
  * observation was itself complete, healthy and stable. An independent
@@ -213,7 +218,14 @@ export class AssetResolver {
           ) as SatResolution,
         };
       let chainEvidence: Readonly<ChainEvidence> = { assurance: "provider-asserted" };
-      if (this.chainValidator) {
+      // A snapshot whose own tipBefore/tipAfter disagree already reports a chain
+      // movement mid-observation: resolveSat below classifies that as the ordinary,
+      // bounded-retry "chain-changed" status with no validator involved. Consulting
+      // the validator anyway re-checks the (already-stale) tipBefore against the
+      // node's current tip, which a real independent validator legitimately rejects
+      // as a disagreement — turning this benign, self-healing race into a hard
+      // "incomplete" failure instead of the documented retry.
+      if (this.chainValidator && sameChainTip(snapshot.tipBefore, snapshot.tipAfter)) {
         // The validator is selected by application configuration, never by snapshot
         // fields or an advertised provider method. A detached copy protects the
         // exact view subsequently resolved from mutation during asynchronous checks.

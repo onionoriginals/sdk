@@ -61,6 +61,19 @@ test('default budget accommodates a legitimate snapshot with many distinct publi
   expect(result).toEqual({ source: 'http://localhost:18443' });
   expect(calls).toHaveLength(102);
 });
+test('agrees with Core reporting the identical tip, block and txids in a different hex case (#844)', async () => {
+  const upperHash = hash.toUpperCase(), upperTx = tx.toUpperCase();
+  const mock = core(method => ({
+    getblockchaininfo: { chain: 'regtest', blocks: 1, bestblockhash: upperHash },
+    getblockhash: upperHash,
+    getblock: { height: 1, hash: upperHash, tx: [upperTx] },
+  } as Record<string, unknown>)[method]);
+  await expect(createBitcoinCoreChainValidator({ ...options, fetchImpl: mock.fetchImpl })(snapshot)).resolves.toEqual({ source: 'http://localhost:18443' });
+});
+test('still rejects a genuinely different hash despite normalization (#844)', async () => {
+  const mock = core(method => method === 'getblockhash' ? 'C'.repeat(64) : undefined);
+  await expect(createBitcoinCoreChainValidator({ ...options, fetchImpl: mock.fetchImpl })(snapshot)).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+});
 test('rejects URL credentials and sanitizes transport errors', async () => {
   expect(() => createBitcoinCoreChainValidator({ endpoint: 'http://user:secret@localhost' })).toThrow();
   const fetchImpl = (async () => { throw new Error('user:secret'); }) as typeof fetch;

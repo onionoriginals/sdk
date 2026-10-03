@@ -13,6 +13,7 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
+import { StructuredError } from '@originals/sdk';
 import { serializeCookie } from '../cookies';
 import { createBitcoinRoutes, isAlreadyKnownTxError, type OrdinalLookup } from '../bitcoin';
 import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
@@ -469,6 +470,56 @@ describe('POST /api/btc/inscribe', () => {
     expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(rebuilt.commitTxId);
   });
 
+  test('#874: resubmitting a superseded-but-never-broadcast pair reinstates it instead of leaving the outpoint with zero live records', async () => {
+    const pair = buildPair();
+    const rebuilt = buildRebuiltPair(pair, 22_000);
+    let failPairCommit = true;
+    let failRebuiltCommit = true;
+    const { routes, store, broadcasts } = harness({
+      broadcast: async (txHex) => {
+        if (failPairCommit && txHex === pair.signedCommitHex) throw new Error('min relay fee not met');
+        if (failRebuiltCommit && txHex === rebuilt.signedCommitHex) throw new Error('min relay fee not met');
+        return 'f'.repeat(64);
+      },
+    });
+
+    // 1) Submit the original pair; its commit broadcast fails ambiguously →
+    //    stays 'signed', never actually reaches the network.
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    // 2) Submit a rebuilt rival over the same outpoint; ITS commit broadcast
+    //    also fails ambiguously (a realistic bad-fee-climate case) — it
+    //    supersedes the original but never itself becomes live.
+    expect((await post(routes, rebuilt)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.superseded).toBe(true);
+    expect(store.get('sub-1', rebuilt.commitTxId)!.status).toBe('signed');
+    expect(store.get('sub-1', rebuilt.commitTxId)!.superseded).toBeUndefined();
+
+    // 3) Resubmit the ORIGINAL pair's exact bytes again; this time its
+    //    commit broadcast succeeds for real.
+    failPairCommit = false;
+    const broadcastsBefore = broadcasts.length;
+    const res = await post(routes, pair);
+    const body = (await res.json()) as { status: string; commitTxId: string };
+
+    // The commit really was broadcast to the network this time...
+    expect(broadcasts.slice(broadcastsBefore)).toContain(pair.signedCommitHex);
+    // ...so the response and the store must report the pair as live, not the
+    // stale 'signed' status with the outpoint left dangling (the bug: a CAS
+    // guard silently no-ops when the resubmitted record's own stale
+    // `superseded: true` is never cleared).
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('reveal_broadcast');
+    const reinstated = store.get('sub-1', pair.commitTxId)!;
+    expect(reinstated.status).toBe('reveal_broadcast');
+    expect(reinstated.superseded).toBeUndefined();
+    // The rival that lost stays superseded — exactly one live record for the
+    // outpoint, never zero.
+    expect(store.get('sub-1', rebuilt.commitTxId)!.superseded).toBe(true);
+    expect(store.findByOutpoint('sub-1', `${pair.fundingUtxo.txid}:0`)!.commitTxId).toBe(pair.commitTxId);
+  });
+
   test('superseding is REFUSED when the old commit is already confirmed on-chain (ambiguous broadcast that landed)', async () => {
     const pair = buildPair();
     const { routes, store } = harness({
@@ -492,6 +543,54 @@ describe('POST /api/btc/inscribe', () => {
     const old = store.get('sub-1', pair.commitTxId)!;
     expect(old.status).toBe('commit_broadcast');
     expect(old.superseded).toBeUndefined();
+  });
+
+  test('#762: a rival confirmed by a CONCURRENT pass during this check\'s own status lookup is not clobbered back to commit_broadcast', async () => {
+    const pair = buildPair();
+    // Declared before harness() so the provider mock (constructed inside it)
+    // can close over the same store instance it later returns.
+    let store!: ReturnType<typeof harness>['store'];
+    const h = harness({
+      // The commit "fails" at broadcast time but actually reached the network…
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) throw new Error('connection reset mid-response');
+        return 'f'.repeat(64);
+      },
+      // A concurrent reconciliation pass confirms the SAME rival, with real
+      // evidence, at the exact moment this handler's own
+      // provider.getTransactionStatus(existing.commitTxId) call resolves —
+      // i.e. after `existing.status === 'signed'` was already checked, but
+      // before this handler acts on the (now-stale) "not yet confirmed"
+      // premise. This is the race #762 reports.
+      txStatus: (txid) => {
+        if (txid === pair.commitTxId) {
+          store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 6,
+            blockHeight: 800_000,
+            blockHash: 'ab'.repeat(32),
+          });
+        }
+        return { confirmed: true, confirmations: 6, blockHeight: 800_000, blockHash: 'ab'.repeat(32) };
+      },
+    });
+    store = h.store;
+    const routes = h.routes;
+
+    expect((await post(routes, pair)).status).toBe(502);
+    expect(store.get('sub-1', pair.commitTxId)!.status).toBe('signed');
+
+    const rebuilt = buildRebuiltPair(pair, 23_000);
+    const res = await post(routes, rebuilt);
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('outpoint_pending');
+    // The concurrent pass's fresher 'confirmed' status and evidence must
+    // survive this handler's own (now-guarded) write, not be silently
+    // downgraded back to 'commit_broadcast' with confirmations wiped.
+    const old = store.get('sub-1', pair.commitTxId)!;
+    expect(old.status).toBe('confirmed');
+    expect(old.confirmations).toBe(6);
+    expect(old.confirmedBlockHeight).toBe(800_000);
   });
 
   test('malformed submissions do not consume the per-user inscribe cap', async () => {
@@ -991,10 +1090,13 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
   /**
    * F1 — the terminal deadlock. A commit that broadcast fine can still be
    * EVICTED from every mempool by a fee spike, and with no reveal child there
-   * is no CPFP to pull it back. It will never confirm, so the list poll's
-   * liveStuck pass (gated on a confirmed commit) never fires, and the reveal
-   * is rejected for missing inputs forever. Without re-pushing the commit the
-   * creator's confirmed UTXO is unusable through the app for good.
+   * is no CPFP to pull it back. It will never confirm on its own, so the
+   * list poll's `liveStuck` pass can't take its immediate path (complete the
+   * persisted reveal once THAT commit is observed confirmed) — but the same
+   * `liveStuck` pass also re-pushes an evicted commit itself once
+   * `REVEAL_REBROADCAST_AFTER_MS` (default 30 minutes) has passed since the
+   * last push, so it does eventually self-heal this exact deadlock. This
+   * manual retry recovers it immediately instead of waiting for that window.
    */
   test('a commit evicted from the mempool is RE-PUSHED before the reveal retry', async () => {
     const pair = buildPair();
@@ -1027,6 +1129,50 @@ describe('POST /api/btc/inscribe/rebroadcast', () => {
     expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
     // The commit went out a SECOND time — that is what un-bricks the UTXO.
     expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+  });
+
+  // #793 — the same F1 guard must fire even when the record's move from
+  // 'signed' to 'commit_broadcast' happens WITHIN this same call. The guard
+  // used to read the call's original `rec` snapshot (still 'signed'), never
+  // the freshened status this same call had just written, so the re-push
+  // never fired and the reveal was left un-retried.
+  test('F1 fires when the commit first broadcasts within the SAME rebroadcast call (#793)', async () => {
+    const pair = buildPair();
+    let revealAttempts = 0;
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.revealTxHex) {
+          revealAttempts++;
+          if (revealAttempts === 1) throw new Error('bad-txns-inputs-missingorspent');
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    // The record was never previously broadcast — e.g. a browser tab died
+    // before the first attempt — so it starts at 'signed', not
+    // 'commit_broadcast' from an earlier call.
+    h.store.create('sub-1', {
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      signedCommitHex: pair.signedCommitHex,
+      revealTxHex: pair.revealTxHex,
+      fundingOutpoints: [`${pair.fundingUtxo.txid}:0`],
+      changeAddress: USER_ADDRESS,
+      status: 'signed',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    const req = authedReq('/api/btc/inscribe/rebroadcast', { commitTxId: pair.commitTxId });
+    const res = await h.routes.inscribeRebroadcast(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('reveal_broadcast');
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('reveal_broadcast');
+    // The commit broadcast once to get to 'commit_broadcast', then again
+    // when F1's re-push fired for the failed first reveal attempt.
+    expect(h.broadcasts.filter((x) => x === pair.signedCommitHex)).toHaveLength(2);
+    expect(revealAttempts).toBe(2);
   });
 
   test('manual retry restores both evicted transactions from a previously broadcast pair after restart', async () => {
@@ -1396,6 +1542,29 @@ describe('isAlreadyKnownTxError', () => {
     expect(isAlreadyKnownTxError(new Error('429: rate limit already exceeded'))).toBe(false);
     expect(isAlreadyKnownTxError(new Error('request already aborted'))).toBe(false);
   });
+
+  // Regression for #889: Bitcoin Core 28.0 rewrote RPC -27's message from
+  // "Transaction already in block chain" to "Transaction outputs already in
+  // utxo set" (bitcoin/bitcoin#30212). This repo's own regtest evidence runs
+  // Core 31.1, so the pre-28.0 string alone silently stopped matching.
+  test("matches Bitcoin Core >= 28.0's rewritten RPC -27 wording", () => {
+    expect(isAlreadyKnownTxError(new Error('Transaction outputs already in utxo set'))).toBe(true);
+    expect(isAlreadyKnownTxError(
+      new Error('QuickNodeProvider: sendrawtransaction RPC error: Transaction outputs already in utxo set')
+    )).toBe(true);
+  });
+
+  test('matches on the RPC -27 code even when the message wording is unrecognized', () => {
+    // A StructuredError carrying details.rpcCode === -27 (as QuickNodeProvider
+    // throws) must match regardless of the exact prose Core used, since that
+    // prose is not stable across Core versions.
+    expect(isAlreadyKnownTxError(
+      new StructuredError('QUICKNODE_RPC_ERROR', 'some future wording Core has never used before', { rpcCode: -27 })
+    )).toBe(true);
+    expect(isAlreadyKnownTxError(
+      new StructuredError('QUICKNODE_RPC_ERROR', 'bad-txns-inputs-missingorspent', { rpcCode: -25 })
+    )).toBe(false);
+  });
 });
 
 describe('evicted-reveal recovery', () => {
@@ -1738,6 +1907,148 @@ describe('terminal records', () => {
     expect(res.status).toBe(409);
     expect((await res.json() as { error: string }).error).toBe('signed_pair_mismatch');
     expect(h.broadcasts).toEqual([]);
+  });
+
+  // #755 — a `confirmed` record that has NOT yet crossed the six-confirmation
+  // retention floor (so `retired` is still unset) is legitimate settled state,
+  // not something a retry may push back through broadcast/setStatus. The
+  // pre-lock guard above only checked `.retired`; this is the case it missed.
+  test('resubmitting a CONFIRMED-but-not-yet-retired pair returns its current settlement, unchanged', async () => {
+    const h = harness();
+    const pair = buildPair();
+    await post(h.routes, pair);
+    h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+      confirmations: 2, blockHeight: 100, blockHash: 'b'.repeat(64),
+    });
+    const before = h.store.get('sub-1', pair.commitTxId);
+    const broadcastsBeforeRetry = [...h.broadcasts];
+
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false, // below the retention floor — must not be reported as settled
+      confirmations: 2,
+      confirmedBlockHeight: 100,
+      confirmedBlockHash: 'b'.repeat(64),
+    });
+    // Zero broadcasts, zero mutation: the record is byte-for-byte the same
+    // confirmed-but-unsettled row it was before the retry.
+    expect(h.broadcasts).toEqual(broadcastsBeforeRetry);
+    expect(h.store.get('sub-1', pair.commitTxId)).toEqual(before);
+  });
+
+  // #755 — the in-lock recheck must catch a confirmation (not just a
+  // confirm-and-retire) that lands between this resubmission's pre-lock read
+  // and its lock recheck, while an earlier attempt's ordinal check is still
+  // awaiting a provider.
+  test('a record CONFIRMED (but not retired) by reconciliation mid-request still returns its settlement, not a regression', async () => {
+    const pair = buildPair();
+    let ordinalCalls = 0;
+    const h = harness({
+      ordinals: {
+        outpointInscriptions: async () => {
+          ordinalCalls++;
+          if (ordinalCalls === 2) {
+            h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+              confirmations: 3, blockHeight: 900_000, blockHash: 'd'.repeat(64),
+            });
+          }
+          return [];
+        },
+      },
+    });
+    await post(h.routes, pair); // ordinalCalls === 1: the original submission
+    const res = await post(h.routes, pair); // ordinalCalls === 2: races the confirmation
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 3,
+      confirmedBlockHeight: 900_000,
+      confirmedBlockHash: 'd'.repeat(64),
+    });
+    expect(h.store.get('sub-1', pair.commitTxId)!.status).toBe('confirmed');
+  });
+
+  // #755 — a pre-lock/in-lock guard alone is not race-complete: both broadcast
+  // calls below are awaited, so reconciliation can confirm this exact record
+  // WHILE the commit broadcast is in flight. The guarded post-broadcast write
+  // must detect that and report the settlement instead of clobbering it with
+  // an unconditional 'commit_broadcast' write.
+  test('a confirmation landing during the commit broadcast is not clobbered by the guarded status write', async () => {
+    const pair = buildPair();
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.signedCommitHex) {
+          h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 4, blockHeight: 800_000, blockHash: 'c'.repeat(64),
+          });
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 4,
+      confirmedBlockHeight: 800_000,
+      confirmedBlockHash: 'c'.repeat(64),
+    });
+    // The reveal was never broadcast: the guard stopped before that call.
+    expect(h.broadcasts).toEqual([pair.signedCommitHex]);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.status).toBe('confirmed');
+    expect(rec.confirmations).toBe(4);
+  });
+
+  // #755 — same race, one step later: confirmation lands during the reveal
+  // broadcast, after the guarded commit_broadcast write already succeeded.
+  test('a confirmation landing during the reveal broadcast is not clobbered by the guarded status write', async () => {
+    const pair = buildPair();
+    const h = harness({
+      broadcast: async (txHex) => {
+        if (txHex === pair.revealTxHex) {
+          h.store.setStatus('sub-1', pair.commitTxId, 'confirmed', {
+            confirmations: 1, blockHeight: 800_001, blockHash: 'e'.repeat(64),
+          });
+        }
+        return 'f'.repeat(64);
+      },
+    });
+    const res = await post(h.routes, pair);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      commitTxId: pair.commitTxId,
+      revealTxId: pair.revealTxId,
+      inscriptionId: `${pair.revealTxId}i0`,
+      status: 'confirmed',
+      settled: false,
+      confirmations: 1,
+      confirmedBlockHeight: 800_001,
+      confirmedBlockHash: 'e'.repeat(64),
+    });
+    // Both transactions DID reach the network — only the trailing status
+    // write is guarded — so both broadcasts happened exactly once.
+    expect(h.broadcasts).toEqual([pair.signedCommitHex, pair.revealTxHex]);
+    const rec = h.store.get('sub-1', pair.commitTxId)!;
+    expect(rec.status).toBe('confirmed');
+    expect(rec.confirmations).toBe(1);
   });
 });
 
@@ -2537,7 +2848,7 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
     expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   });
 
-  test('a failed status write after delivery remains an explicit failure and restart retries the durable pair', async () => {
+  test('a failed status write after delivery remains explicit and restart retries the durable pair after backoff', async () => {
     const h = harness({ txStatus: { confirmed: true, confirmations: 1 } });
     const pair = seed(h, 90, 'commit_broadcast');
     // #677 — this record advances through the guarded `trySetStatus`, not
@@ -2547,15 +2858,28 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
     h.store.trySetStatus = () => { throw new Error('simulated disk full after delivery'); };
     const response = await poll(h);
     expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe('inscription_reconciliation_failed');
     expect(h.broadcasts).toEqual([pair.revealTxHex]);
     const saved = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
     expect(saved.status).toBe('commit_broadcast');
     expect(saved.rebroadcastAt).toBeDefined();
+    expect(saved.signedCommitHex).toBe(pair.signedCommitHex);
     expect(saved.revealTxHex).toBe(pair.revealTxHex);
     const restarted = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
     expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(restarted.broadcasts).toEqual([]);
+    expect(createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)).toEqual(saved);
+
+    // Expire the durable retry window in this disposable, single-record journal.
+    const expiredAt = new Date(Date.now() - 31 * 60_000).toISOString();
+    writeFileSync(join(h.dataDir, 'inscriptions', 'sub-1.json'), JSON.stringify([{ ...saved, rebroadcastAt: expiredAt }]));
+    expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
     expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
-    expect(restarted.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+    const recovered = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
+    expect(recovered.status).toBe('reveal_broadcast');
+    expect(Date.parse(recovered.rebroadcastAt!)).toBeGreaterThan(Date.parse(expiredAt));
+    expect(recovered.signedCommitHex).toBe(pair.signedCommitHex);
+    expect(recovered.revealTxHex).toBe(pair.revealTxHex);
   });
 });
 

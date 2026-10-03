@@ -8,7 +8,17 @@ export interface GetObjectResult {
 }
 
 export interface StorageAdapter {
-  // Writes content at a path under a logical domain root and returns a public URL
+  // Writes content at a path under a logical domain root and returns a public URL.
+  //
+  // The returned URL is a locator this adapter can itself read back through
+  // getObject/exists — it is NOT automatically the WebVH permanent hosted URL.
+  // HostedAssets.publish() (packages/sdk/src/v3/hosted.ts) requires this to
+  // equal exactly `https://${domain}/${path}` for a hosted publish to
+  // succeed; an adapter whose locator uses another scheme (e.g.
+  // MemoryStorageAdapter's `mem://`) or a different path shape is a valid
+  // general-purpose StorageAdapter but cannot satisfy hosted publication
+  // without wrapping (see HostedMemoryStorageAdapter, and
+  // LocalStorageAdapterOptions.originDomain) — see issue #780.
   putObject(domain: string, path: string, content: Uint8Array | string, options?: PutOptions): Promise<string>;
 
   // Reads content from a path under a domain root
@@ -38,5 +48,29 @@ export interface StorageAdapter {
 export interface LocalStorageAdapterOptions {
   baseDir: string;
   baseUrl?: string;
+  /**
+   * Domain-origin mode for a single-tenant local host (issue #780). When set,
+   * `baseUrl` is treated as exactly this domain's public origin: the returned
+   * URL is `${baseUrl}/${path}` with no repeated domain path segment (the
+   * default multi-tenant behavior appends `${domain}` under `baseUrl`, which
+   * duplicates the domain when `baseUrl` already points at that domain's own
+   * origin). Every `putObject`/`getObject`/`exists`/`listObjects` call must
+   * then use this configured domain or its canonical URL host spelling, or
+   * the call throws `STORAGE_DOMAIN_MISMATCH`
+   * rather than silently mapping a different domain's files onto this
+   * adapter's one advertised origin. Files are also stored directly under
+   * `baseDir` with no per-domain subdirectory (unlike the default
+   * multi-tenant layout), so the physical layout matches the URL: pointing
+   * any static file server's document root at `baseDir` serves exactly the
+   * paths this adapter advertises. `originDomain` must be a bare host with an
+   * optional port (e.g. `localhost:3000`). If `baseUrl` is supplied, it must
+   * match that HTTPS origin, optionally ending in `/`, with no credentials,
+   * path, query or fragment. Invalid configuration throws
+   * `STORAGE_INVALID_ORIGIN` in the constructor, including when `baseUrl` is
+   * omitted. Returned URLs use the canonical origin: HTTPS port 443 is omitted,
+   * other ports are preserved, and host case/port leading zeros are normalized.
+   * The configured domain and canonical host both route to the same baseDir;
+   * other domains or ports still throw `STORAGE_DOMAIN_MISMATCH`.
+   */
+  originDomain?: string;
 }
-

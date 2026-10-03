@@ -69,6 +69,22 @@ export async function turnkeySignBytes(
   // both are prefixed, corrupting the hex decode.
   const cleanR = r.startsWith('0x') ? r.slice(2) : r;
   const cleanS = s.startsWith('0x') ? s.slice(2) : s;
+
+  // Validate the r/s boundary BEFORE concatenating, not just the aggregate
+  // length after: a short r and a correspondingly long s (or vice versa)
+  // still totals 64 bytes, so checking only the combined length would
+  // silently accept bytes that do not represent the (r, s) pair Turnkey
+  // actually returned (issue #688).
+  if (cleanR.length !== 64) {
+    throw new Error(
+      `Invalid Ed25519 signature r component length: ${cleanR.length} hex chars (expected 64, i.e. 32 bytes)`
+    );
+  }
+  if (cleanS.length !== 64) {
+    throw new Error(
+      `Invalid Ed25519 signature s component length: ${cleanS.length} hex chars (expected 64, i.e. 32 bytes)`
+    );
+  }
   const signature = hexToBytes(cleanR + cleanS);
 
   // Ed25519 signatures are exactly 64 bytes (32-byte r + 32-byte s). Never

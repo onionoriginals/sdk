@@ -1,9 +1,15 @@
 import { fetchPublicReachabilityCheck } from '../../../src/v3/hosted.js';
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { OriginalsSDK } from "../../../src/index.js";
 import { CelError, createLocalSigner, assetDigest } from "@originals/cel/v3";
 import { StructuredError } from "@originals/cel";
 import type { StorageAdapter } from "../../../src/storage/StorageAdapter.js";
+import { HostedMemoryStorageAdapter } from "../../../src/storage/HostedMemoryStorageAdapter.js";
+import { LocalStorageAdapter } from "../../../src/storage/LocalStorageAdapter.js";
+import { MemoryStorageAdapter } from "../../../src/storage/MemoryStorageAdapter.js";
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(21));
 function storage(): StorageAdapter {
   const files = new Map<
@@ -69,6 +75,144 @@ test.each(["", "   ", "\t"])(
   },
 );
 
+// #722: a mixed-case domain is a perfectly valid, commonly-typed hostname —
+// DNS is case-insensitive — but the raw string used to fail deep inside CEL
+// history verification with a confusing CEL_DID error instead of publishing.
+test("publishToWeb normalizes a mixed-case first-publish domain instead of failing with CEL_DID (#722)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "Example.COM",
+  });
+  expect(published.did).toContain(":example.com:");
+  expect(published.did).not.toContain("Example.COM");
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+// #764: padded-but-nonblank input must not mint a DID with embedded
+// whitespace — it is canonicalized (trimmed) the same as case is normalized.
+test("publishToWeb trims a padded first-publish domain instead of embedding whitespace in the DID (#764)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "  example.com  ",
+  });
+  expect(published.did).toContain(":example.com:");
+  expect(published.did).not.toContain(" ");
+  expect(published.did).not.toContain("%20");
+});
+
+// #764 (malformed, nonblank): a domain that is not a usable host once
+// trimmed must fail at this seam with a domain-specific error, not mint a
+// broken DID and not surface an unrelated low-level failure later.
+test("publishToWeb rejects a malformed nonblank domain at the hosted seam instead of minting a broken DID", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, { domain: "not a domain" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("INVALID_DOMAIN");
+});
+
+// #761: republishing to the same host must succeed regardless of the
+// caller's letter case, since the existing hosted identity's stored domain
+// is always the lower-cased `URL#host` form.
+test("publishToWeb accepts a differently-cased but equivalent domain on republish (#761)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  await first.asset.addResourceVersion("art", new Uint8Array([2]), "image/png");
+  const second = await sdk.lifecycle.publishToWeb(first.asset, { domain: "Example.com" });
+  expect(second.did).toBe(first.did);
+  const loaded = await sdk.lifecycle.resolveAssetFromWeb(second.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+// #761 (still enforced): a republish naming a genuinely different host must
+// still be rejected — normalization must not weaken the permanent-binding check.
+test("publishToWeb still rejects a republish naming a different host as ASSET_WEBVH_BINDING", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(first.asset, { domain: "other.example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_BINDING");
+});
+
+test.each([
+  ["example.com:443", ":example.com:"],
+  ["example.com:08080", ":example.com%3A8080:"],
+])(
+  "publishToWeb republishes with the same explicit port spelling (%j) and mints the URL#host DID",
+  async (domain, didHost) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    const first = await sdk.lifecycle.publishToWeb(asset, { domain });
+    expect(first.did).toContain(didHost);
+    await first.asset.addResourceVersion("art", new Uint8Array([2]), "image/png");
+    const second = await sdk.lifecycle.publishToWeb(first.asset, { domain });
+    expect(second.did).toBe(first.did);
+    const loaded = await sdk.lifecycle.resolveAssetFromWeb(second.did);
+    expect(loaded.verification.verified).toBe(true);
+  },
+);
+
+test.each(["localhost:3000", "localhost", "127.0.0.1", "10.0.0.1:8080"])(
+  "publishToWeb rejects non-DNS host %j at the seam with INVALID_DOMAIN and writes nothing",
+  async (domain) => {
+    const inner = storage();
+    let writes = 0;
+    const store: StorageAdapter = {
+      ...inner,
+      putObject: (...args) => {
+        writes++;
+        return inner.putObject(...args);
+      },
+    };
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, { domain });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("INVALID_DOMAIN");
+    expect(writes).toBe(0);
+  },
+);
+
 test("republishing updated resource bytes retains the same hosted identity and all historical versions", async () => {
   const store = storage(),
     sdk = OriginalsSDK.create({ signer, storageAdapter: store });
@@ -95,6 +239,84 @@ test("republishing updated resource bytes retains the same hosted identity and a
     [3, 4],
   ]);
   expect(loaded.verification.verified).toBe(true);
+});
+
+// #813: `paths` was compared by truthiness, not equality, so replaying the
+// exact same WebPublicationOptions (a natural retry pattern) on a republish
+// was always rejected as ASSET_WEBVH_BINDING whenever `paths` was supplied.
+test("republishing with the exact same explicit paths used on the original publish succeeds (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const paths = ["custom", "slug-123"];
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths,
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: ["custom", "slug-123"],
+  });
+  expect(second.did).toBe(first.did);
+  const loaded = await OriginalsSDK.create({
+    storageAdapter: store,
+  }).lifecycle.resolveAssetFromWeb(first.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test("republishing with a different explicit paths array is still rejected with ASSET_WEBVH_BINDING (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["custom", "slug-123"],
+  });
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const failure = await sdk.lifecycle
+    .publishToWeb(first.asset, {
+      domain: "example.com",
+      paths: ["different", "slug"],
+    })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(CelError);
+  expect((failure as CelError).code).toBe("ASSET_WEBVH_BINDING");
+});
+
+test("republishing with the same well-known (empty) explicit paths array succeeds (#813)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1, 2]) },
+  ]);
+  const first = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  expect(first.did).toBe("did:webvh:" + first.did.split(":")[2] + ":example.com");
+  await first.asset.addResourceVersion(
+    "art",
+    new Uint8Array([3, 4]),
+    "image/png",
+  );
+  const second = await sdk.lifecycle.publishToWeb(first.asset, {
+    domain: "example.com",
+    paths: [],
+  });
+  expect(second.did).toBe(first.did);
 });
 
 test("republishing after rotating the controller to P-256 succeeds without a separate Ed25519 webvhSigner", async () => {
@@ -332,6 +554,45 @@ test("a wrong adapter-returned storage URL propagates as ASSET_STORAGE_URL, not 
   expect((failure as Error).message).not.toContain("retry this same");
 });
 
+// #903: LocalStorageAdapter's own STORAGE_DOMAIN_MISMATCH rejection is a
+// deterministic configuration error, not a transient storage round trip —
+// retrying the identical prepared publication against the same
+// originDomain-mismatched adapter can never succeed, so it must not carry
+// the retryable ASSET_WEB_PUBLISH_INCOMPLETE shape.
+test("LocalStorageAdapter's originDomain mismatch propagates as STORAGE_DOMAIN_MISMATCH, not a retryable publish failure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hosted-domain-mismatch-"));
+  const store = new LocalStorageAdapter({
+    baseDir: dir,
+    baseUrl: "https://correct.example.com",
+    originDomain: "correct.example.com",
+  });
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: "wrong.example.com" })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe("STORAGE_DOMAIN_MISMATCH");
+  expect((failure as Error).message).not.toContain("retry this same");
+  expect(
+    (failure as { details?: { publication?: unknown } }).details?.publication,
+  ).toBeUndefined();
+
+  // Retrying the exact same prepared publication against the same
+  // misconfigured adapter fails identically, not just once.
+  const prepared = await sdk.lifecycle.prepareWebPublication(asset, {
+    domain: "wrong.example.com",
+  });
+  const secondFailure = await sdk.lifecycle
+    .publishPreparedToWeb(prepared)
+    .catch((err) => err);
+  expect((secondFailure as { code?: string }).code).toBe(
+    "STORAGE_DOMAIN_MISMATCH",
+  );
+});
+
 test("publication refuses an omitted domain before invoking custody or storage", async () => {
   const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
   const asset = await sdk.lifecycle.createAsset([]);
@@ -345,6 +606,85 @@ test("publication refuses an omitted domain before invoking custody or storage",
     (await sdk.lifecycle.resolveAssetFromWeb(published.did)).verification
       .verified,
   ).toBe(true);
+});
+
+// #798: a missing/blank domain must throw WEBVH_DOMAIN_REQUIRED even when the
+// asset is also in an invalid state for hosted publication, not the
+// ASSET_WEB_STATE that state-validity alone would produce.
+test("an omitted domain on a deactivated (invalid-state) asset still throws WEBVH_DOMAIN_REQUIRED (#798)", async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([]);
+  await asset.deactivate("retired");
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {} as never);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+});
+
+test("a valid domain on a deactivated (invalid-state) asset still throws ASSET_WEB_STATE (#798 control)", async () => {
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: storage() });
+  const asset = await sdk.lifecycle.createAsset([]);
+  await asset.deactivate("retired");
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEB_STATE");
+});
+
+test("an omitted domain on an asset with an unsigned local draft still throws WEBVH_DOMAIN_REQUIRED (#798)", async () => {
+  const store = storage();
+  const created = await OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+  }).lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const reader = OriginalsSDK.create({ storageAdapter: store });
+  const asset = (await reader.lifecycle.loadAsset(created.serialize())).asset;
+  await asset.addResourceVersion("art", "draft", "text/plain", {
+    onAppendFailure: "skip",
+  });
+  expect(asset.localResources.length).toBeGreaterThan(0);
+  let thrown: unknown;
+  try {
+    await reader.lifecycle.publishToWeb(asset, {} as never);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("WEBVH_DOMAIN_REQUIRED");
+});
+
+test("a valid domain on an asset with an unsigned local draft still throws ASSET_WEB_STATE (#798 control)", async () => {
+  const store = storage();
+  const created = await OriginalsSDK.create({
+    signer,
+    storageAdapter: store,
+  }).lifecycle.createAsset([
+    { id: "art", mediaType: "text/plain", content: "v1" },
+  ]);
+  const reader = OriginalsSDK.create({ storageAdapter: store });
+  const asset = (await reader.lifecycle.loadAsset(created.serialize())).asset;
+  await asset.addResourceVersion("art", "draft", "text/plain", {
+    onAppendFailure: "skip",
+  });
+  expect(asset.localResources.length).toBeGreaterThan(0);
+  let thrown: unknown;
+  try {
+    await reader.lifecycle.publishToWeb(asset, { domain: "example.com" });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEB_STATE");
 });
 
 test('equal resource bytes with different signed media types round-trip without colliding transport metadata', async () => {
@@ -575,4 +915,198 @@ test('the public checker omits credentials and cached responses and refuses redi
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// Regression for #780: neither shipped reference StorageAdapter could complete
+// a hosted publish, because MemoryStorageAdapter's `mem://` locator and
+// LocalStorageAdapter's default multi-tenant `baseUrl` both fail hosted.ts's
+// exact `https://${domain}/${path}` check. These tests exercise the actual
+// shipped adapters (not the inline `storage()` mock above) through
+// publishToWeb + resolveAssetFromWeb end to end.
+
+test('MemoryStorageAdapter cannot complete a hosted publish (documents the still-real mem:// mismatch)', async () => {
+  MemoryStorageAdapter.clear();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: new MemoryStorageAdapter() });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'text/plain', content: 'v1' },
+  ]);
+  const failure = await sdk.lifecycle
+    .publishToWeb(asset, { domain: 'example.com' })
+    .catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as { code?: string }).code).toBe('ASSET_STORAGE_URL');
+});
+
+test('HostedMemoryStorageAdapter completes publishToWeb and cold resolveAssetFromWeb end to end (#780)', async () => {
+  const store = new HostedMemoryStorageAdapter();
+  const png = new Uint8Array([137, 80, 78, 71, 0, 255]);
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'image/png', content: png },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+  expect(published.status).toBe('published');
+  expect(published.asset.state.layer).toBe('webvh');
+
+  const fresh = OriginalsSDK.create({ storageAdapter: store });
+  const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.asset.id).toBe(asset.id);
+  expect(loaded.asset.resources[0].content).toEqual(png);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test('LocalStorageAdapter with originDomain completes publishToWeb and cold resolveAssetFromWeb end to end (#780)', async () => {
+  const fsSync = await import('fs');
+  const os = await import('os');
+  const path = await import('path');
+  const tempDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'hosted-local-origin-'));
+  try {
+    const store = new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'example.com' });
+    const png = new Uint8Array([1, 2, 3, 4]);
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: 'art', mediaType: 'image/png', content: png },
+    ]);
+    const published = await sdk.lifecycle.publishToWeb(asset, { domain: 'example.com' });
+    expect(published.status).toBe('published');
+
+    const fresh = OriginalsSDK.create({ storageAdapter: store });
+    const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+    expect(loaded.asset.id).toBe(asset.id);
+    expect(loaded.asset.resources[0].content).toEqual(png);
+    expect(loaded.verification.verified).toBe(true);
+  } finally {
+    fsSync.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('publishToWeb with a paths segment requiring percent-encoding succeeds and produces a DID CEL can parse (#810)', async () => {
+  const store = new HostedMemoryStorageAdapter();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: 'art', mediaType: 'image/png', content: new Uint8Array([1, 2]) },
+  ]);
+  // "hello!world" passes WebVHManager's isValidPathSegment (no '.', '..', '/',
+  // '\\', '\0', not absolute) but is not itself a valid did:webvh path
+  // component; it must be canonically percent-encoded, not passed through raw.
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: 'example.com',
+    paths: ['hello!world'],
+  });
+  expect(published.status).toBe('published');
+  expect(published.did).toContain(':example.com:hello%21world');
+
+  const fresh = OriginalsSDK.create({ storageAdapter: store });
+  const loaded = await fresh.lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.asset.id).toBe(asset.id);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test("publishToWeb rejects a non-string paths element with ASSET_WEBVH_PATH instead of a raw TypeError (#826)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: [123] as unknown as string[],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+});
+
+test.each([".", "..", "a/b", "a\\b", "/abs", " hello", "hello ", "   ", "\thello", "a\ud800"])(
+  "publishToWeb rejects an invalid paths segment (%j) with ASSET_WEBVH_PATH instead of a raw Error (#826)",
+  async (segment) => {
+    const store = storage();
+    const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+    const asset = await sdk.lifecycle.createAsset([
+      { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+    ]);
+    let thrown: unknown;
+    try {
+      await sdk.lifecycle.publishToWeb(asset, {
+        domain: "example.com",
+        paths: [segment],
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(CelError);
+    expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+  },
+);
+
+test("publishToWeb accepts a colon inside one segment", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["a:b"],
+  });
+  expect(published.did).toEndWith(":example.com:a%3Ab");
+  const loaded = await OriginalsSDK.create({ storageAdapter: store }).lifecycle.resolveAssetFromWeb(published.did);
+  expect(loaded.verification.verified).toBe(true);
+});
+
+test("publishToWeb rejects paths: ['.well-known'] with ASSET_WEBVH_PATH_RESERVED (collides with the no-path default)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: [".well-known"],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH_RESERVED");
+  // Nothing was written where the default publication would live.
+  expect(await store.getObject("example.com", ".well-known/did.jsonl")).toBeNull();
+});
+
+test("publishToWeb rejects a non-array paths value instead of silently minting a per-character path (#826)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  let thrown: unknown;
+  try {
+    await sdk.lifecycle.publishToWeb(asset, {
+      domain: "example.com",
+      paths: "not-an-array" as unknown as string[],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(CelError);
+  expect((thrown as CelError).code).toBe("ASSET_WEBVH_PATH");
+});
+
+test("publishToWeb accepts a well-formed custom paths array (#826 control case)", async () => {
+  const store = storage();
+  const sdk = OriginalsSDK.create({ signer, storageAdapter: store });
+  const asset = await sdk.lifecycle.createAsset([
+    { id: "art", mediaType: "image/png", content: new Uint8Array([1]) },
+  ]);
+  const published = await sdk.lifecycle.publishToWeb(asset, {
+    domain: "example.com",
+    paths: ["custom", "slug"],
+  });
+  expect(published.did).toContain(":example.com:custom:slug");
 });
