@@ -22,12 +22,14 @@ create --file PATH --media-type TYPE --algorithm Ed25519|P-256|P-384 --key PATH
   version-4 asset envelope with base64 media. Existing output files are refused.
 
 verify --asset PATH
-  Verify a complete local asset envelope, including all historical media bytes.
+  Authenticate local history and all historical media bytes at any layer; no drafts.
+  Exit zero means localVerification.verified, not hosted/Bitcoin acceptance.
+  Overall verified remains false for webvh/btco; network evidence is unverified.
 verify --log PATH [--format json|cbor]
   Authenticate CEL controller history only; this does not verify resource bytes,
   WebVH publication, Bitcoin acceptance, current ownership, or global uniqueness.
 inspect --asset PATH | --log PATH [--format json|cbor]
-  Inspect authenticated state; incomplete envelopes are explicitly qualified.
+  Add top-level authenticated state; incomplete envelopes are explicitly qualified.
 
 --help  Show help.  --version  Show the installed package version.
 Network publication and resolution are not available in this CLI yet.
@@ -149,11 +151,25 @@ export async function main(
       );
       const { asset, verification } =
         await OriginalsSDK.create().lifecycle.loadAsset(source, {
-          allowPartial: command === "inspect",
+          // Authenticate supplied history/bytes without requiring network evidence.
+          allowPartial: true,
         });
+      const localVerification = {
+        scope: "controller-history-and-bytes",
+        verified:
+          verification.resources === "verified" &&
+          verification.unverifiedLocalResources === 0,
+      };
+      if (command === "verify" && !localVerification.verified)
+        throw new CelError(
+          "invalid",
+          "ASSET_LOAD_VERIFICATION_FAILED",
+          "Local verification requires all historical resource bytes and no unsigned local drafts",
+        );
       console.log(
         JSON.stringify({
           ...verification,
+          localVerification,
           ...(command === "inspect" ? { state: asset.state } : {}),
         }),
       );
@@ -172,6 +188,7 @@ export async function main(
           verified: false,
           scope: "controller-history",
           resources: "unchecked",
+          ...(command === "inspect" ? { state: history.state } : {}),
         }),
       );
     }
