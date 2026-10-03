@@ -14,7 +14,7 @@ const result = verifyHistory(document);
 ```
 
 An Original records signed claims about files and their versions.
-`result.state.assetId` is the canonical `ni:///sha-256;…` URI wrapping the genesis SCID. New genesis events carry this commitment in
+`result.state.assetId` is the `did:cel:<SCID>` identifier. Former `ni:` IDs remain readable. New genesis events carry this commitment in
 `previousEvent`; see [SCID derivation and compatibility](./V3.md#asset-identity). `deriveAssetId`, `normalizeAssetId`, `assetDigest`, `sameAssetIdentity` and
 `assetIdFromDigest` support derivation and comparison with strict historical
 Originals 3 aliases. `state.didCel` and `deriveDid`, once deprecated compatibility

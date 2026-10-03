@@ -9,7 +9,7 @@ import type { CelDocument, Resource } from "./types.js";
 
 export type { DeepReadonly } from "./immutable.js";
 export interface AssetState {
-  /** Stable RFC 6920 name of the genesis commitment; not a DID. */
+  /** Stable did:cel identifier of the genesis commitment. */
   assetId: string;
   alias: string;
   aliases: string[];

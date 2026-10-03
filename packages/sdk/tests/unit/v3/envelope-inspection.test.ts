@@ -59,7 +59,8 @@ test("internal decode retains strict container parsing without authenticating or
   expect(result.assetId).toBe(expectedId);
   expect("decodeEnvelope" in offline).toBe(false);
   expect(() => internal.decodeEnvelope({ ...prepared.asset, assetId: expectedId })).toThrow();
-  expect(() => internal.decodeEnvelope({ ...result, assetId: prepared.asset.assetDid })).toThrow();
+  expect(internal.decodeEnvelope({ ...result, assetId: prepared.asset.assetDid }).assetId).toBe(expectedId);
+  expect(() => internal.decodeEnvelope({ ...result, assetDid: prepared.asset.assetDid })).toThrow();
   expect(() => internal.decodeEnvelope(JSON.stringify(prepared.asset).replace('"version":3', '"version":3,"version":3'))).toThrow();
   expect(() => internal.decodeEnvelope({ ...result, resources: [{ ...result.resources[0], content: { encoding: "base64", data: "invalid!" } }] })).toThrow();
 });

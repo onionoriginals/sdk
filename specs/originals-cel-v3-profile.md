@@ -12,7 +12,7 @@ the Bitcoin shape, and [controller authority and inscription ordering](originals
 specifies the fold. Wire/proof acceptance alone is not asset verification.
 The design-time [reference corpus](../docs/research/cel-profile-vectors/README.md)
 retains its original expected values; current compatibility rules preserve their
-signed events while deriving the canonical `ni` asset identity.
+signed events while deriving the `did:cel:` asset identity.
 
 ## References and conformance
 
@@ -47,15 +47,16 @@ mechanism, extension, or retrieval protocol.
 An Originals document is a JSON object with exactly one member, `log`, containing
 1–10,000 entries. Each entry has exactly `event` and `proof`.
 
-- `event` has `operation` and, except at creation, `previousEvent`.
+- `event` has `operation` and `previousEvent` (optional only for legacy genesis).
 - `operation` has exactly `type` and `data` for this application profile.
   `type` is `create`, `update`, `rotateKey`, `deactivate`, or `migrate`.
 - `data` is an object matching the operation schema below. Every operation signs
   `profile: "originals/cel/3"`; a different or missing profile is unsupported.
 - `proof` is either one proof object or an array of 1–8 proof objects. Writers
   emit an array. Array order has no authority or threshold meaning.
-- A `create` event omits `previousEvent`; all other events require it. Null and
-  empty-string alternatives are invalid. No other event-level members occur.
+- New `create` events carry the SCID in `previousEvent`; legacy genesis without
+  it remains readable. Every subsequent event requires its parent event digest.
+  Null and empty-string alternatives are invalid. No other event-level members occur.
 
 Unknown structural/application members are rejected, never stripped or promoted
 into authority fields. Arbitrary application JSON belongs inside `metadata`.
@@ -97,8 +98,8 @@ Creation `nonce` is unpadded base64url of exactly 16 bytes, with no multibase
 prefix. Writers use fresh cryptographically random bytes for each intended new
 asset; fixed values are for fixtures only. This distinguishes otherwise
 identical creations. Readers check encoding, not unverifiable randomness.
-Creation does not contain a declared asset identity: the canonical `ni` asset
-identifier is always derived from genesis.
+Creation carries a SCID in top-level `previousEvent`. Readers independently
+recompute its genesis commitment before deriving the `did:cel:` asset identifier.
 
 `name` and `reason` are strings. `metadata` is a JSON object. In an update,
 supplied `name`/`metadata` replace the respective value in full; omitted fields
@@ -151,7 +152,7 @@ number; no numeric satoshi value or separate contradictory network is signed.
 The boundary entry signs the selected sat before transaction construction;
 transaction id, inscription id, height and block hash are derived afterwards.
 The permitted journey remains local CEL → WebVH → Bitcoin. New local aliases
-use `ni`; historical Originals 3 `did:cel` migration sources remain readable
+use `did:cel:`; historical `ni:` migration sources remain readable
 when their complete genesis commitment matches. Signed values are never rewritten.
 
 ## Canonical values and identity
@@ -176,7 +177,10 @@ For a validated event E:
 ```text
 B(E) = UTF8(JCS(E))
 D(E) = "u" + base64url_unpadded(0x12 || 0x20 || SHA256(B(E)))
-assetId = "ni:///sha-256;" + base64url_unpadded(SHA256(B(genesis.event)))
+template = genesis.event with top-level previousEvent = "{SCID}"
+SCID = D(template)
+genesis.event.previousEvent = SCID
+assetId = "did:cel:" + SCID
 next.event.previousEvent = D(previous.event)
 ```
 
@@ -187,9 +191,11 @@ expression with raw file bytes in place of B(E). Proofs, JSON whitespace,
 CBOR encodings and transport wrappers do not affect event identity. All validated
 event members do. A requested asset identity must match the derived genesis
 identifier; no `data.did` or other legacy discriminator bypasses that comparison.
-The `ni` suffix uses only the 32 raw hash bytes, without multibase/multihash
-headers. Its strict syntax, compatibility aliases and envelope-version rules
-are normative in [Originals asset identity](originals-asset-identity.md).
+The SCID commits to the complete genesis template, substituting only its top-level
+`previousEvent`. The final event digest includes the substituted SCID. Legacy
+genesis without `previousEvent` retains `D(genesis.event)` as its commitment.
+Strict identity syntax, `ni:` compatibility and envelope-version rules are
+normative in [Originals asset identity](originals-asset-identity.md).
 
 ## Controller proofs
 

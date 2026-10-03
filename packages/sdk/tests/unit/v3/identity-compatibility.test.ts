@@ -55,3 +55,21 @@ test('published SDK 3 Bitcoin wrapper submits the original signed pair without c
   expect(result.asset.resources[0].content).toEqual(new Uint8Array([0,255,128,7]));
   expect(JSON.stringify(oldPair)).toBe(before);
 });
+
+test('signed ni publication remains readable without changing its genesis, migration or WebVH binding', async () => {
+  const { default: preparedNi } = await import('../../fixtures/identity/ni-web-publication.json');
+  const { HostedMemoryStorageAdapter } = await import('../../../src/storage/HostedMemoryStorageAdapter.js');
+  const storageAdapter = new HostedMemoryStorageAdapter();
+  const before = JSON.stringify(preparedNi);
+  expect(preparedNi.asset.assetId).toStartWith('ni:///sha-256;');
+  const published = await OriginalsSDK.create({ storageAdapter }).lifecycle.publishPreparedToWeb(preparedNi);
+  const fresh = await OriginalsSDK.create({ storageAdapter }).lifecycle.resolveAssetFromWeb(published.did);
+  expect(fresh.verification.verified).toBe(true);
+  expect(fresh.asset.id).toBe(normalizeAssetId(preparedNi.asset.assetId));
+  expect(fresh.asset.id).toStartWith('did:cel:u');
+  expect(fresh.asset.state.aliases).toContain(preparedNi.asset.assetId);
+  expect(fresh.asset.serialize().assetId).toBe(fresh.asset.id);
+  expect(fresh.asset.resources[0].content).toEqual(new TextEncoder().encode('retained ni history'));
+  expect(canonicalizeValue(fresh.asset.celLog)).toBe(canonicalizeValue(preparedNi.asset.eventLog));
+  expect(JSON.stringify(preparedNi)).toBe(before);
+});

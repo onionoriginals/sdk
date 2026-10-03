@@ -2,7 +2,7 @@
 
 SDK 3.0.0 is already published. This checkout prepares the next major versions:
 `@originals/sdk` 4 and `@originals/cel` 2. This guide is not a publication notice.
-The public identity string and SDK envelope fields change, so this update is
+New genesis identity commitments and SDK envelope fields change, so this update is
 not patch-compatible. The `originals/cel/3` signed representation and `/v3`
 subpath names remain unchanged.
 
@@ -15,18 +15,18 @@ genesis commitment from DID-method identity.
 
 | SDK 3 | SDK 4 |
 | --- | --- |
-| `asset.id` is `did:cel:<genesis-multihash>` | `asset.id` is `ni:///sha-256;<raw-genesis-commitment-hash>` |
+| `asset.id` is `did:cel:<genesis-multihash>` | `asset.id` is `did:cel:<SCID>` for new genesis |
 | `state.didCel` is the primary genesis identifier | Use `state.assetId`; `state.didCel` is removed |
-| Initial `state.alias` is the Originals `did:cel` spelling | Initial `state.alias` is canonical `ni`; hosted/Bitcoin aliases continue to change on migration |
+| Initial `state.alias` is the Originals `did:cel` spelling | Initial `state.alias` is `did:cel:<SCID>`; hosted/Bitcoin aliases continue to change on migration |
 | Envelope `version: 3`, `assetDid` | Envelope `version: 4`, `assetId` |
 | `deriveDid(genesisEvent)` | `deriveAssetId(genesisEvent)`; `deriveDid` is removed |
 | `expectedDid` verification option | `expectedAssetId`; `expectedDid` is removed |
 | `parseAssetDid(alias)` returning `{ method: 'cel' \| 'webvh' \| 'btco' }` | `parseAssetAlias(alias)` returning `{ layer: 'cel' \| 'webvh' \| 'btco' }` |
 
-The new URI is defined by [RFC 6920](https://www.rfc-editor.org/rfc/rfc6920).
-For new Originals it carries the raw SHA-256 digest of the genesis SCID as
-canonical unpadded base64url. The suffix omits the multibase/multihash header.
-No authority host, query or fragment is accepted. Existing signed histories
+The public identifier uses `did:cel:<SCID>`. The SCID suffix is CEL's full
+SHA-256 multihash encoded as `u` base64url multibase. The interim RFC 6920
+`ni:///sha-256;…` spelling remains readable and normalizes to `did:cel:`.
+No query or fragment is accepted. Existing signed histories
 retain their original event hashes, links, signatures and identity commitments.
 
 New genesis events have `previousEvent` containing their SCID. Derivation hashes
@@ -59,8 +59,8 @@ const unchangedGenesisMultihash = assetDigest(canonical);
 const savedSdk4Envelope = asset.serialize(); // version: 4, assetId: canonical
 ```
 
-`normalizeAssetId` accepts only canonical `ni` or the exact historical Originals
-3 alias form. A successful conversion validates an identifier's encoding; it
+`normalizeAssetId` accepts `did:cel:` with CEL's canonical multihash or the
+former canonical `ni:` spelling and returns `did:cel:`. A successful conversion validates an identifier's encoding; it
 must still be bound to authenticated genesis when loading an asset. It does
 not convert arbitrary CCG method DIDs or establish a WebVH/Bitcoin binding.
 `sameAssetIdentity` returns false for malformed or unrelated identities.
@@ -71,7 +71,7 @@ legacy history. Standalone integrations import these APIs from `@originals/cel/v
 
 `loadAsset` and `parseAssetEnvelope` retain a strict SDK 3 envelope reader.
 Version 3 requires historical `assetDid: 'did:cel:…'`; version 4 requires
-canonical `assetId: 'ni:///sha-256;…'`. Both authenticate the same CEL 3 history
+`assetId: 'did:cel:…'` (also accepting existing `ni:` IDs). Both authenticate the same CEL 3 history
 and reject a genesis mismatch. A container cannot mix these fields or add
 unknown fields. Successful reads normalize the container to version 4.
 Full loads also check resource attachments and publication evidence; partial
@@ -85,13 +85,10 @@ bindings, prepared records and Bitcoin histories remain readable through
 validated compatibility handling. Existing assets need no new genesis,
 re-signing or reinscription. A new genesis would create a different asset.
 
-`state.aliases` begins with canonical `ni` and can retain a historical Originals
-3 alias encountered in authenticated signed migration history. Do not assume
+`state.aliases` begins with `did:cel:` and can retain a historical `ni:` alias
+encountered in authenticated signed migration history. Do not assume
 the old spelling always occurs at a fixed array index. There is no dedicated
-`state.didCel` field or `deriveDid` helper on this surface; when a fresh
-genesis's historical spelling is genuinely needed (for example, to look up
-storage recorded before this identity correction), reconstruct it explicitly
-as `"did:cel:" + assetDigest(state.assetId)`.
+`state.didCel` field or `deriveDid` helper on this surface; the public identity remains `state.assetId`, now using the `did:cel:` spelling.
 
 ## Update identity expectations and labels
 
@@ -105,8 +102,7 @@ identity.
 `parseAssetDid` is renamed `parseAssetAlias`. It accepts `ni` under
 `layer: 'cel'`, naming the Originals lifecycle stage rather than a DID method
 (the previous `method` discriminator implied one). It still accepts the
-historical `did:cel:` spelling when reading authenticated signed history; it
-is not offered as new migration/authoring input. Prefer “asset identity” or
+former `ni:` spelling when reading authenticated signed history. Prefer “asset identity” or
 “Local CEL” in user interfaces.
 
 Originals uses the generic CCG CEL application profile and standard JCS proof
@@ -301,7 +297,7 @@ API differs in these ways; a consumer moving from 3.0.0-next.1 hit each one:
    new genesis with the CEL 3 SDK (a new asset identity) and keep the old
    archive for provenance; `@originals/cel/legacy` exists to read or verify
    the old format, not to convert it.
-6. **Identity is `ni:///sha-256;…`**, not `did:cel:` — see the top of this
+6. **Identity is `did:cel:<SCID>`**; former `ni:` IDs remain readable — see the top of this
    guide.
 
 ## Previous-format CEL writers move to `@originals/cel/legacy`

@@ -20,7 +20,7 @@ describe('honesty labels', () => {
     });
     await engine.create('Test Piece', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect(summaries.length).toBe(1);
-    expect(summaries[0]).toContain('ni:///sha-256;');
+    expect(summaries[0]).toContain('did:cel:u');
     expect(summaries[0]).not.toContain('did:peer identity');
   });
 });

@@ -21,35 +21,37 @@ is historical and does not define a current DID method.
 
 ## Canonical identity
 
-Originals uses the Named Information URI scheme defined by
-[RFC 6920, section 3](https://www.rfc-editor.org/rfc/rfc6920#section-3).
-This application's canonical form selects the full SHA-256 digest, an empty
-authority, and no query or fragment:
+Originals uses `did:cel:<SCID>` as its public history identifier. The suffix is
+the full SHA-256 multihash encoded with CEL's existing `u` base64url multibase.
+For new histories:
 
 ```text
 B(E) = UTF8(JCS(E))
-H(E) = SHA256(B(E))
-assetId = "ni:///sha-256;" + base64url_unpadded(H(genesis.event))
-D(E) = "u" + base64url_unpadded(0x12 || 0x20 || H(E))
+D(E) = "u" + base64url_unpadded(0x12 || 0x20 || SHA256(B(E)))
+template = genesis.event with top-level previousEvent = "{SCID}"
+SCID = D(template)
+genesis.event.previousEvent = SCID
+assetId = "did:cel:" + SCID
 next.event.previousEvent = D(previous.event)
 ```
 
 `genesis.event` MUST be a validated `create` event in the selected profile.
-JCS is RFC 8785, applied to the complete event object, never the containing
-entry, proof, transport bytes, resource bytes, or SDK envelope. The URI suffix
-MUST decode to exactly 32 bytes and round-trip to identical unpadded base64url.
-Padding, noncanonical trailing bits, other algorithms, truncation, authority
-hosts, percent-encoded alternatives, queries and fragments MUST be rejected as
-Originals asset identities. This is a restricted application form of `ni`, not
-a claim that all other RFC 6920 forms are invalid URIs.
+Creation and verification substitute only its top-level `previousEvent`; no
+other fields are excluded, and application strings are never substituted.
+JCS applies to the complete event object, never the containing entry, proof,
+transport bytes, resource bytes, or SDK envelope. Verification MUST independently
+recompute the commitment and compare it with the expected and embedded SCID.
+Signing and event hashing use the final published event after substitution;
+the SCID is not the final genesis event digest.
 
-The `ni` suffix is the raw digest: it MUST NOT contain the multibase `u` prefix
-or the two multihash header bytes. Existing event/resource multihashes and
-`previousEvent` commitments retain their exact encoding. Proofs and encoding
-presentation do not select identity; any change to a genesis event value does.
+The suffix MUST decode to `0x12 0x20` followed by exactly 32 bytes and round-trip
+to identical `u` base64url multibase. Padding, noncanonical trailing bits, other
+algorithms, truncation, percent-encoded alternatives, queries and fragments are
+rejected. Discovery locations are not commitment inputs; URLs deliberately
+included in immutable genesis application state remain committed.
 
-`asset.id` and verifier `state.assetId` MUST return this canonical URI. Before
-publication, `state.alias` and the first member of `state.aliases` use it too.
+`asset.id` and verifier `state.assetId` MUST return this canonical identifier.
+Before publication, `state.alias` and the first member of `state.aliases` use it.
 WebVH and Bitcoin publication establish additional aliases for retrieval and
 acceptance. They do not replace the canonical `assetId` or alter genesis.
 This choice introduces no DID method, DID document, generic `ni` resolver,
@@ -57,16 +59,17 @@ heartbeat, witness protocol, or new controller authority.
 
 ## Historical Originals 3 identifiers
 
-SDK 3 used `"did:cel:" + D(genesis.event)` for this same commitment. Here that
-string is an **Originals 3 compatibility alias**, not an implementation of the
-[CCG DID method at revision `7626f0acb5f0a203eac61d59c5dc7bfa3319c56c`](https://github.com/w3c-ccg/did-cel-spec/blob/7626f0acb5f0a203eac61d59c5dc7bfa3319c56c/index.html). The former Originals prefix cannot be treated as evidence of
-standards conformance or generic DID resolution.
+SDK 3 genesis events without `previousEvent` retain the commitment
+`D(genesis.event)` and their `did:cel:` identity. Readers MUST NOT insert a SCID
+into such signed events. The interim `ni:///sha-256;…` form contains the same
+32-byte raw commitment hash, without multibase or multihash headers, encoded as
+canonical unpadded base64url with no host, query or fragment. Readers accept
+that strict spelling and normalize it to `did:cel:` after checking the complete
+digest. A prefix match, truncated digest, unrelated WebVH/Bitcoin alias, or
+arbitrary DID MUST NOT count as equivalent identity.
 
-Readers MAY accept that exact historical form only after validating its
-canonical SHA-256 multihash and binding it to authenticated CEL 3 genesis.
-Comparison with a canonical `ni` identifier MUST compare the complete digest.
-A prefix match, truncated digest, unrelated WebVH/Bitcoin alias, or arbitrary
-DID MUST NOT count as equivalent identity.
+This spelling names an Originals history; it does not implement a separate
+CCG DID-method resolver or imply conformance to every feature of that method.
 
 Already signed migration `from` values and WebVH `alsoKnownAs` bindings may
 contain the historical spelling. Readers MUST preserve those signed values and
@@ -83,18 +86,17 @@ are unchanged; holding a sat grants no controller-write authority.
 
 | Surface | Contract |
 | --- | --- |
-| `deriveAssetId(genesisEvent)` | Validate a creation event and derive its canonical `ni` URI. |
-| `assetIdFromDigest(eventMultihash)` | Validate an existing canonical event multihash and encode its raw hash as `ni`. |
-| `assetDigest(identity)` | Recover the canonical event multihash from `ni` or the historical Originals 3 alias. |
-| `normalizeAssetId(identity)` | Validate either permitted identity spelling and return canonical `ni`. |
+| `deriveAssetId(genesisEvent)` | Validate a creation event and derive its `did:cel:` identifier. |
+| `assetIdFromDigest(scid)` | Validate a canonical commitment multihash and prepend `did:cel:`. |
+| `assetDigest(identity)` | Recover the commitment multihash from `did:cel:` or the former `ni:` spelling. |
+| `normalizeAssetId(identity)` | Validate either permitted identity spelling and return `did:cel:`. |
 | `sameAssetIdentity(left, right)` | Compare complete validated genesis commitments; return false for invalid identities. |
-| `parseAssetAlias(alias)` | Alias/publication parser (renamed from `parseAssetDid`); `ni` uses the `layer: 'cel'` discriminator, naming the Originals lifecycle stage, not DID-method conformance. |
+| `parseAssetAlias(alias)` | Alias/publication parser (renamed from `parseAssetDid`); `did:cel:` and `ni:` use the `layer: 'cel'` discriminator, naming the Originals lifecycle stage, not DID-method conformance. |
 
 `deriveDid(genesisEvent)` and `state.didCel`, once deprecated Originals 3
-compatibility surfaces, are removed from the CEL 2 / SDK 4 API. A fresh
-genesis's historical spelling, when genuinely needed, is reconstructed as
-`"did:cel:" + assetDigest(state.assetId)`; a spelling signed into real
-migration history remains readable through `state.aliases`.
+compatibility surfaces, remain removed from the CEL 2 / SDK 4 API. The selected
+public names are still `deriveAssetId` and `state.assetId`. A spelling signed
+into migration history remains readable through `state.aliases`.
 
 These helpers are available through `@originals/cel/v3` and
 `@originals/sdk/cel`. The `/v3` subpath and `originals/cel/3` profile identify
@@ -112,7 +114,8 @@ New SDK envelopes MUST use:
 ```
 
 Readers retain a strict version-3 path with `assetDid` in the historical
-`did:cel:` form, and a strict version-4 path with canonical `assetId`. Fields
+`did:cel:` form, and a strict version-4 path with `assetId` accepting either `did:cel:` or the
+former `ni:` spelling. New writes use `did:cel:`. Fields
 from the other version, unknown fields and malformed identities fail closed.
 The read path authenticates unchanged signed history, binds its genesis to the
 container identity, and returns the normalized version-4 container. Serialization

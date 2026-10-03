@@ -456,11 +456,7 @@
             }
           },
           "then": {
-            "not": {
-              "required": [
-                "previousEvent"
-              ]
-            }
+            "description": "Genesis previousEvent is a verified SCID; absence is retained for signed legacy genesis."
           },
           "else": {
             "required": [

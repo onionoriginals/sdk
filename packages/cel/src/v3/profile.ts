@@ -241,10 +241,11 @@ function eventShape(value: JsonValue, scidTemplate = false): void {
         string(data.from, 8192);
         string(data.to, 8192);
         time(data.migratedAt);
+        // Retain signed ni migration sources, but require their strict encoding.
+        if (data.from.startsWith("ni:")) normalizeAssetId(data.from);
         requireThat(
           (/^did:(cel|webvh):[^\s]+$/.test(data.from) ||
-            (data.from.startsWith("ni:///sha-256;") &&
-              normalizeAssetId(data.from) === data.from)) &&
+            data.from.startsWith("ni:///sha-256;")) &&
             (data.layer === "webvh" || data.layer === "btco") &&
             data.to.startsWith("did:" + data.layer + ":"),
           "CEL_MIGRATION",
@@ -461,7 +462,7 @@ export function verifyScid(input: unknown, expectedScid: unknown): boolean {
   }
 }
 
-/** Derive the RFC 6920 name of the genesis SCID (legacy events retain their original identity). */
+/** Derive the did:cel name of the genesis SCID (legacy events retain their original identity). */
 export function deriveAssetId(input: unknown): string {
   const event = validateEvent(input);
   requireThat(

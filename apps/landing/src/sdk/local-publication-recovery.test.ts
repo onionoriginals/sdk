@@ -229,7 +229,7 @@ test('saved SDK 3 publication keys remain visible only for the owning account an
   const recoveries = localPublicationRecoveries('sub-1');
   expect(recoveries).toHaveLength(1);
   expect(recoveries[0].key).toBe(key);
-  expect(recoveries[0].assetId).toStartWith('ni:///sha-256;');
+  expect(recoveries[0].assetId).toStartWith('did:cel:u');
   expect(localPublicationRecoveries('other-account')).toEqual([]);
   localStorage.removeItem(key);
   localStorage.setItem(key + 'unrelated', saved);

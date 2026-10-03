@@ -353,9 +353,12 @@ export function decodeEnvelope(input: unknown): AssetEnvelope {
     ["unverified"],
   );
   const identity = value.version === 3 ? value.assetDid : value.assetId;
-  requireAsset(typeof identity === "string" &&
-    identity.startsWith(value.version === 3 ? "did:cel:" : "ni:///sha-256;"),
-    "ASSET_ENVELOPE", "Envelope identity must match its declared version");
+  requireAsset(
+    typeof identity === "string" &&
+      (value.version === 4 || identity.startsWith("did:cel:")),
+    "ASSET_ENVELOPE",
+    "Envelope identity must match its declared version",
+  );
   const assetId = normalizeAssetId(identity);
   const budget = new AttachmentBudget();
   const eventLog = validateDocument(value.eventLog);

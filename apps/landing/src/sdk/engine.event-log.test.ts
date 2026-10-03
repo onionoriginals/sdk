@@ -51,8 +51,8 @@ describe('event log', () => {
     // The payload is the SDK event, so the id in it IS the asset's ni identity.
     const payload = created!.payload as { asset: { id: string } };
     expect(payload.asset.id).toBe(state.did);
-    expect(payload.asset.id.startsWith('ni:///sha-256;')).toBe(true);
-    expect(created!.summary).toContain('ni:///sha-256;');
+    expect(payload.asset.id.startsWith('did:cel:u')).toBe(true);
+    expect(created!.summary).toContain('did:cel:u');
   });
 
   test('events accumulate in emission order and are not replayed to late subscribers', async () => {
