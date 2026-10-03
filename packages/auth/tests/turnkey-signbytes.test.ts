@@ -129,6 +129,10 @@ describe('turnkeySignBytes', () => {
   });
 
   test('rejects a signature that is not 64 bytes rather than truncating', async () => {
+    // Both components are short here, so the per-component r/s check (added
+    // for issue #688) now catches this before the aggregate-length check
+    // would even run — it reports the r component specifically rather than
+    // just "the total isn't 64".
     const short = {
       apiClient: () => ({
         signRawPayload: async () => ({
@@ -138,7 +142,50 @@ describe('turnkeySignBytes', () => {
     } as unknown as Turnkey;
     await expect(
       turnkeySignBytes({ turnkeyClient: short, organizationId: 'o', signWith: 'a' }, new Uint8Array(1))
-    ).rejects.toThrow(/Invalid Ed25519 signature length: 2/);
+    ).rejects.toThrow(/Invalid Ed25519 signature r component length: 2 hex chars \(expected 64, i\.e\. 32 bytes\)/);
+  });
+
+  test('rejects a wrong r/s split even when the concatenated total is 64 bytes (issue #688)', async () => {
+    // r is one byte short (31 bytes / 62 hex chars), s is one byte long
+    // (33 bytes / 66 hex chars) — the aggregate is still exactly 64 bytes,
+    // so only checking `signature.length !== 64` would silently accept this.
+    const misaligned = {
+      apiClient: () => ({
+        signRawPayload: async () => ({
+          activity: {
+            result: {
+              signRawPayloadResult: { r: 'aa'.repeat(31), s: 'bb'.repeat(33) },
+            },
+          },
+        }),
+      }),
+    } as unknown as Turnkey;
+    await expect(
+      turnkeySignBytes(
+        { turnkeyClient: misaligned, organizationId: 'o', signWith: 'a' },
+        new Uint8Array(1)
+      )
+    ).rejects.toThrow(/Invalid Ed25519 signature r component length: 62 hex chars \(expected 64, i\.e\. 32 bytes\)/);
+  });
+
+  test('rejects a short s component even when r is correctly sized', async () => {
+    const misaligned = {
+      apiClient: () => ({
+        signRawPayload: async () => ({
+          activity: {
+            result: {
+              signRawPayloadResult: { r: 'aa'.repeat(32), s: 'bb'.repeat(31) },
+            },
+          },
+        }),
+      }),
+    } as unknown as Turnkey;
+    await expect(
+      turnkeySignBytes(
+        { turnkeyClient: misaligned, organizationId: 'o', signWith: 'a' },
+        new Uint8Array(1)
+      )
+    ).rejects.toThrow(/Invalid Ed25519 signature s component length: 62 hex chars \(expected 64, i\.e\. 32 bytes\)/);
   });
 });
 

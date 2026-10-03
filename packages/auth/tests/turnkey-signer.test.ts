@@ -93,7 +93,10 @@ describe('turnkey-signer', () => {
     test('sign rejects a 65-byte signature instead of silently truncating it', async () => {
       // 32-byte r + 33-byte s = 65 bytes total. A valid Ed25519 signature is
       // exactly 64 bytes; the server signer must reject (not truncate) this,
-      // matching the client-side TurnkeyDIDSigner behaviour.
+      // matching the client-side TurnkeyDIDSigner behaviour. The per-component
+      // r/s boundary check (issue #688) catches the oversized s component
+      // before the aggregate-length check would, so the message now names s
+      // specifically rather than just reporting the total.
       const r = '00'.repeat(32);
       const s = '11'.repeat(33);
       const mockClient = {
@@ -123,7 +126,7 @@ describe('turnkey-signer', () => {
           document: { id: 'did:example:123' },
           proof: { type: 'DataIntegrityProof' },
         })
-      ).rejects.toThrow(/65 \(expected 64 bytes\)/);
+      ).rejects.toThrow(/Invalid Ed25519 signature s component length: 66 hex chars \(expected 64, i\.e\. 32 bytes\)/);
     });
 
     test('sign produces a proofValue for a valid 64-byte signature', async () => {
