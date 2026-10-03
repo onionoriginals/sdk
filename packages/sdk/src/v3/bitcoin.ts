@@ -448,10 +448,19 @@ export class BitcoinPublications {
           "Delta does not match its Bitcoin prefix and full proposed asset",
         );
     }
-    const reveal = btc.Transaction.fromRaw(
-      Buffer.from(input.transactions.revealTxHex, "hex"),
-      { allowUnknownInputs: true, allowUnknownOutputs: true },
-    );
+    let reveal: btc.Transaction;
+    try {
+      reveal = btc.Transaction.fromRaw(
+        Buffer.from(input.transactions.revealTxHex, "hex"),
+        { allowUnknownInputs: true, allowUnknownOutputs: true },
+      );
+    } catch (cause) {
+      if (cause instanceof CelError) throw cause;
+      return invalid(
+        "ASSET_BITCOIN_PUBLICATION",
+        "Prepared reveal transaction could not be parsed",
+      );
+    }
     const witness = reveal.getInput(0).finalScriptWitness;
     if (!witness || witness.length !== 3)
       invalid(
