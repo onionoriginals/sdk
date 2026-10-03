@@ -24,11 +24,12 @@ export function jcsSigningMessage(
   configuration: unknown,
   algorithm: Algorithm,
 ): Uint8Array {
-  requireThat(
-    Object.prototype.hasOwnProperty.call(ALGORITHMS, algorithm),
-    "CEL_ALGORITHM",
-    "Unsupported signing algorithm",
-  );
+  if (!Object.prototype.hasOwnProperty.call(ALGORITHMS, algorithm))
+    throw new CelError(
+      "unsupported",
+      "CEL_ALGORITHM",
+      "Unsupported signing algorithm",
+    );
   const hash = ALGORITHMS[algorithm].hash,
     utf8 = new TextEncoder();
   return Uint8Array.from([
@@ -44,8 +45,14 @@ export function verifyJcsSignature(
   signature: Uint8Array,
   controller: string,
 ): boolean {
-  const key = decodeController(controller),
-    bytes = jcsSigningMessage(document, configuration, key.algorithm);
+  const key = decodeController(controller);
+  requireThat(
+    signature instanceof Uint8Array &&
+      signature.length === ALGORITHMS[key.algorithm].signature,
+    "CEL_SIGNATURE",
+    "Invalid signature length",
+  );
+  const bytes = jcsSigningMessage(document, configuration, key.algorithm);
   return key.algorithm === "Ed25519"
     ? ed25519.verify(signature, bytes, key.publicKey, { zip215: false })
     : (key.algorithm === "P-256" ? p256 : p384).verify(

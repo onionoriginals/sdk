@@ -19,11 +19,11 @@
  *       s = last 32 bytes of the Ed25519 signature (hex).
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, spyOn } from 'bun:test';
 // Import the SDK first — its noble-init module configures @noble/ed25519's
 // hashes.sha512 before any crypto operations run, so we don't need to
 // configure it ourselves.
-import { encoding } from '@originals/sdk';
+import { CredentialManager, DIDManager, OriginalsSDK, StructuredError, Verifier, encoding } from '@originals/sdk';
 import * as ed25519Module from '@noble/ed25519';
 import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
 import { TurnkeySessionExpiredError } from '../src/client/turnkey-client';
@@ -112,6 +112,53 @@ function makeRealSigningClient(
 // ---------------------------------------------------------------------------
 
 describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair', () => {
+  test.each([
+    ['secp256k1', 'CURVE_SECP256K1'],
+    ['unknown curve', 'CURVE_UNKNOWN'],
+    ['empty curve', ''],
+    ['missing curve', undefined],
+    ['null curve', null],
+    ['non-string curve', 25519],
+  ])('rejects %s before SDK creation or Turnkey access (#734)', async (_label, curve) => {
+    const update = await generateKeypair();
+    const signingCalls = { count: 0 };
+    const turnkeyClient = makeRealSigningClient(update.privateKeyBytes, signingCalls);
+    const apiClient = spyOn(turnkeyClient, 'apiClient');
+    const createDID = spyOn(OriginalsSDK, 'createDIDOriginal');
+    const account = {
+      address: 'key_addr_update',
+      path: "m/44'/501'/1'/0'",
+      addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      ...(curve === undefined ? {} : { curve }),
+    };
+
+    try {
+      // Keep the real key and signer valid: only the declared curve is wrong.
+      // The cast models malformed JavaScript/JSON input without widening the API.
+      const result = createDIDWithTurnkey({
+        turnkeyClient,
+        updateKeyAccount: account as Parameters<typeof createDIDWithTurnkey>[0]['updateKeyAccount'],
+        subOrgId: 'sub_org_curve_test',
+        authKeyPublic: update.publicKeyMultibase,
+        assertionKeyPublic: update.publicKeyMultibase,
+        updateKeyPublic: update.publicKeyMultibase,
+        domain: 'example.com',
+        slug: 'curve-test',
+      });
+      await expect(result).rejects.toBeInstanceOf(StructuredError);
+      await expect(result).rejects.toMatchObject({
+        code: 'TURNKEY_UPDATE_KEY_CURVE_INVALID',
+        message: expect.stringContaining('Select a Turnkey account with curve CURVE_ED25519'),
+      });
+      expect(createDID).not.toHaveBeenCalled();
+      expect(apiClient).not.toHaveBeenCalled();
+      expect(signingCalls.count).toBe(0);
+    } finally {
+      createDID.mockRestore();
+      apiClient.mockRestore();
+    }
+  });
+
   test(
     'happy path: returns { did, didDocument, didLog } with a valid did: identifier',
     async () => {
@@ -149,6 +196,16 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       // DID document must be a non-null object
       expect(result.didDocument).toBeTruthy();
       expect(typeof result.didDocument).toBe('object');
+
+      // Every verification method's controller must be the minted DID itself,
+      // never the empty-string placeholder createDIDWithTurnkey used to pass
+      // in before the DID existed (issue #804).
+      const doc = result.didDocument as { verificationMethod?: Array<{ controller?: string }> };
+      expect(doc.verificationMethod).toBeTruthy();
+      expect(doc.verificationMethod!.length).toBeGreaterThan(0);
+      for (const vm of doc.verificationMethod!) {
+        expect(vm.controller).toBe(result.did);
+      }
 
       // Log must be present
       expect(result.didLog).toBeTruthy();
@@ -222,6 +279,33 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
   );
 
   test(
+    "slug '.well-known' is rejected with WEBVH_PATH_RESERVED before signing",
+    async () => {
+      const spy = { count: 0 };
+      const update = await generateKeypair();
+      await expect(
+        createDIDWithTurnkey({
+          turnkeyClient: makeRealSigningClient(update.privateKeyBytes, spy),
+          updateKeyAccount: {
+            address: 'key_addr',
+            curve: 'CURVE_ED25519',
+            path: "m/44'/501'/1'/0'",
+            addressFormat: 'ADDRESS_FORMAT_SOLANA',
+          },
+          subOrgId: 'sub_org_test',
+          authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
+          assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+          updateKeyPublic: update.publicKeyMultibase,
+          domain: 'example.com',
+          slug: '.well-known',
+        })
+      ).rejects.toMatchObject({ code: 'WEBVH_PATH_RESERVED' });
+      expect(spy.count).toBe(0);
+    },
+    10_000
+  );
+
+  test(
     'expired session during DID creation fires onExpired and throws TurnkeySessionExpiredError',
     async () => {
       // Does not need a real key — throws before signing succeeds
@@ -258,5 +342,78 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       expect(onExpiredCalled).toBe(true);
     },
     10_000
+  );
+});
+
+// ---------------------------------------------------------------------------
+// REGRESSION (#872): a credential signed via TurnkeyDIDSigner as an
+// ExternalSigner must actually verify with the SDK's own Verifier.
+//
+// getVerificationMethodId() previously returned a bare `did:key:{mb}` with no
+// `#{fragment}`. CredentialManager.signCredentialWithExternalSigner stamps
+// that value verbatim onto proof.verificationMethod, and the SDK's
+// documentLoader.resolveDID only takes its offline did:key fast path when a
+// fragment is present — so the credential signed successfully but could
+// never be verified. This exercises the full sign -> verify round trip
+// end-to-end (not just the string returned by getVerificationMethodId).
+// ---------------------------------------------------------------------------
+
+describe('[#872-REGRESSION] TurnkeyDIDSigner as ExternalSigner — credential round trip', () => {
+  const defaultConfig = {
+    network: 'regtest',
+    defaultKeyType: 'Ed25519',
+    enableLogging: false,
+  } as const;
+
+  test(
+    'a credential signed through TurnkeyDIDSigner.getVerificationMethodId() verifies with the SDK Verifier',
+    async () => {
+      const { privateKeyBytes, publicKeyMultibase } = await generateKeypair();
+      const turnkeyClient = makeRealSigningClient(privateKeyBytes);
+
+      const signer = new TurnkeyDIDSigner(
+        turnkeyClient,
+        'key_addr_update',
+        'sub_org_872_test',
+        publicKeyMultibase
+      );
+
+      // The verification method must resolve on its own (did:key + fragment),
+      // so the issuer is the bare DID it controls.
+      const issuerDid = signer.getVerificationMethodId().split('#')[0];
+      expect(issuerDid).toBe(`did:key:${publicKeyMultibase}`);
+
+      const didManager = new DIDManager(defaultConfig as never);
+      const credentialManager = new CredentialManager(defaultConfig as never, didManager);
+      const verifier = new Verifier(didManager);
+
+      const unsigned = {
+        '@context': ['https://www.w3.org/ns/credentials/v2', 'https://originals.build/context'],
+        type: ['VerifiableCredential', 'ResourceCreated'],
+        issuer: issuerDid,
+        validFrom: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:peer:subject',
+          resourceId: 'res-872',
+          resourceType: 'text',
+          creator: issuerDid,
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      const signed = await credentialManager.signCredentialWithExternalSigner(
+        unsigned as never,
+        signer
+      );
+
+      const proof = signed.proof as { verificationMethod?: string };
+      // The stamped verification method must carry the fragment.
+      expect(proof.verificationMethod).toBe(`${issuerDid}#${publicKeyMultibase}`);
+
+      const result = await verifier.verifyCredential(signed);
+      expect(result.errors).toEqual([]);
+      expect(result.verified).toBe(true);
+    },
+    15_000
   );
 });

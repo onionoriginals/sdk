@@ -40,6 +40,13 @@ function mockRpcError(method: string, error: { code?: number; message: string })
   routes.push({ match: (r) => r.method === method, respond: () => ({ body: { jsonrpc: '2.0', id: 1, result: null, error } }) });
 }
 
+// Content is a public Uint8Array-typed field (issue #796): decode with
+// TextDecoder, not Buffer#toString, so these tests don't rely on the
+// Buffer-specific behavior they are meant to guard against.
+function decodeUtf8(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
 beforeEach(() => {
   requests = [];
   routes = [];
@@ -93,7 +100,9 @@ describe('getInscriptionById', () => {
     const result = await provider().getInscriptionById(INSCRIPTION_ID);
     expect(result).not.toBeNull();
     expect(result!.inscriptionId).toBe(INSCRIPTION_ID);
-    expect(result!.content.toString('utf8')).toBe('hello');
+    expect(decodeUtf8(result!.content)).toBe('hello');
+    expect(result!.content).toBeInstanceOf(Uint8Array);
+    expect(Buffer.isBuffer(result!.content)).toBe(false);
     expect(result!.contentType).toBe('text/plain;charset=utf-8');
     expect(result!.txid).toBe(TXID);
     expect(result!.vout).toBe(0);
@@ -119,14 +128,14 @@ describe('getInscriptionById', () => {
     // UTF-8 — for a text-typed inscription it must be kept as the literal string.
     mockRpc('ord_getContent', 'text');
     const result = await provider().getInscriptionById(INSCRIPTION_ID);
-    expect(result!.content.toString('utf8')).toBe('text');
+    expect(decodeUtf8(result!.content)).toBe('text');
   });
 
   test('base64-decodes text content when the decoded bytes are valid UTF-8', async () => {
     mockRpc('ord_getInscription', { id: INSCRIPTION_ID, sat: 1, satpoint: `${TXID}:0:0`, content_type: 'text/plain' });
     mockRpc('ord_getContent', Buffer.from('hello world', 'utf8').toString('base64'));
     const result = await provider().getInscriptionById(INSCRIPTION_ID);
-    expect(result!.content.toString('utf8')).toBe('hello world');
+    expect(decodeUtf8(result!.content)).toBe('hello world');
   });
 
   test('always base64-decodes binary content types, even short strings', async () => {
@@ -153,7 +162,7 @@ describe('getInscriptionById', () => {
     // '{"p":"x"}' is not valid base64 (contains '{', '"', ':')
     mockRpc('ord_getContent', '{"p":"x"}');
     const result = await provider().getInscriptionById(INSCRIPTION_ID);
-    expect(result!.content.toString('utf8')).toBe('{"p":"x"}');
+    expect(decodeUtf8(result!.content)).toBe('{"p":"x"}');
   });
 
   test('unwraps object-shaped content results', async () => {
@@ -504,7 +513,7 @@ describe('QuickNodeProvider hardening (issue #350)', () => {
       mockRpc('ord_getContent', 'aGVsbG8h');
       const provider = new QuickNodeProvider({ endpoint: ENDPOINT, contentEncoding: 'utf8' });
       const result = await provider.getInscriptionById(INSCRIPTION_ID);
-      expect(result!.content.toString('utf8')).toBe('aGVsbG8h');
+      expect(decodeUtf8(result!.content)).toBe('aGVsbG8h');
     });
   });
 

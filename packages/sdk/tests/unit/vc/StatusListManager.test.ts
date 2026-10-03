@@ -1,7 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { StatusListManager, parseStatusListIndex } from '../../../src/vc/StatusListManager';
 import type { BitstringStatusListEntry, BitstringStatusListSubject } from '../../../src/types';
-import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 describe('parseStatusListIndex', () => {
   test('parses canonical non-negative integer strings', () => {
@@ -713,7 +712,7 @@ describe('StatusListManager', () => {
 
     test('verifyCredentialWithStatus detects revoked credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification so the test focuses on
       // bit-level status detection (trust checks have dedicated tests).
       // verifyCredentialWithStatus checks signature via verifyCredentialSignature
@@ -770,7 +769,7 @@ describe('StatusListManager', () => {
       // credential verified as not-revoked. Wrapping the identical entry in an
       // array must produce the identical (revoked) outcome as the singleton.
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -809,7 +808,7 @@ describe('StatusListManager', () => {
       // supported (not-revoked) entry and one unsupported entry must still
       // fail, not silently pass because the supported entry alone looked fine.
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -848,7 +847,7 @@ describe('StatusListManager', () => {
       // `.type` property access in the status-evaluation loop — it must fail
       // the credential closed with a clear error instead.
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -881,7 +880,7 @@ describe('StatusListManager', () => {
       // status list credentials must let every entry be checked against the
       // list it actually names, not just the first/only one supplied.
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -930,7 +929,7 @@ describe('StatusListManager', () => {
 
     test('#592 verifyCredentialWithStatus fails closed on an entry whose list was not among the supplied lists', async () => {
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -964,7 +963,7 @@ describe('StatusListManager', () => {
 
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
       const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification (see note above).
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -1041,7 +1040,7 @@ describe('StatusListManager', () => {
       const { OriginalsSDK } = await import('../../../src');
       const { multikey } = await import('@originals/cel');
       const ed = await import('@noble/ed25519');
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
 
       const sk = ed.utils.randomSecretKey();
       const pk = await ed.getPublicKeyAsync(sk);
@@ -1120,7 +1119,7 @@ describe('StatusListManager', () => {
 describe('status list credential trust checks (issue #238)', () => {
   test('verifyCredentialWithStatus rejects a fabricated status list (revocation bypass attempt)', async () => {
     const { OriginalsSDK } = await import('../../../src');
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
     // Main credential signature is treated as valid so the status-path checks
     // are isolated. verifyCredentialWithStatus checks signature via
     // verifyCredentialSignature, the explicitly-named signature-only entry

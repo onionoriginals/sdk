@@ -5,6 +5,7 @@
  * ```typescript
  * import {
  *   createAuthMiddleware,
+ *   createOptionalAuthMiddleware,
  *   initiateEmailAuth,
  *   verifyEmailAuth,
  *   signToken,
@@ -20,6 +21,9 @@ export {
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
+  AUTH_TURNKEY_ERROR_CODES,
   type SubOrgLock,
 } from './turnkey-client.js';
 export {
@@ -28,6 +32,8 @@ export {
   isSessionVerified,
   cleanupSession,
   getSession,
+  isOtpVerifyTransientFailure,
+  AUTH_EMAIL_ERROR_CODES,
   type SessionStorage,
   type VerifyEmailAuthOptions,
   createInMemorySessionStorage,
@@ -42,9 +48,15 @@ export {
   verifyToken,
   getAuthCookieConfig,
   getClearAuthCookieConfig,
+  isAuthTokenCredentialError,
+  AUTH_JWT_ERROR_CODES,
 } from './jwt.js';
-export { createAuthMiddleware } from './middleware.js';
-export { TurnkeyWebVHSigner, createTurnkeySigner } from './turnkey-signer.js';
+export { createAuthMiddleware, createOptionalAuthMiddleware } from './middleware.js';
+export {
+  TurnkeyWebVHSigner,
+  createTurnkeySigner,
+  AUTH_TURNKEY_SIGNER_ERROR_CODES,
+} from './turnkey-signer.js';
 
 
 

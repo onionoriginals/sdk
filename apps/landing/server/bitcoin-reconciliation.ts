@@ -216,32 +216,81 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       lookups++;
       cursors.superseded++;
       const st = await readStatus(r.commitTxId);
-      if (!st?.confirmed) continue;
+      if (!st) continue; // provider outage — preserve last observed state
+      if (!st.confirmed) {
+        // #777 — a superseded pair can still reach `status: 'confirmed'`
+        // before a rival reclaims its outpoint (`supersede()` only sets
+        // `superseded`; it never touches status or confirmation evidence).
+        // If a deeper reorg later invalidates THIS pair's own commit, this
+        // pass's own status lookup above is already the freshest negative
+        // evidence of that — demote instead of leaving the stale `confirmed`
+        // status (and the `settled: true` it implies) to report forever.
+        // Unlike the `liveUnconfirmed` demotion below (#677), this pair
+        // already lost the outpoint race: the write keeps `superseded: true`
+        // so a negative read here never reclaims or reinstates it, only
+        // clears its stale confirmation evidence.
+        if (current.status === 'confirmed') {
+          if (store.trySetStatus(sub, r.commitTxId, {
+            status: 'confirmed', retired: false, superseded: true,
+            confirmations: current.confirmations,
+            confirmedBlockHeight: current.confirmedBlockHeight,
+            confirmedBlockHash: current.confirmedBlockHash,
+          }, 'reveal_broadcast')) {
+            changed = true;
+          }
+        }
+        continue;
+      }
+      // #758 — re-check after the status-lookup await: a concurrent pass (an
+      // overlapping poll, or the background sweep) may already have retired
+      // or un-superseded this record while this one was waiting on the
+      // provider.
+      const beforeReclaim = store.get(sub, r.commitTxId);
+      if (!beforeReclaim || !beforeReclaim.superseded || beforeReclaim.retired) continue;
       // Reclaim and journal the attempt durably before sending the exact
       // stored reveal. A failed write stops this pass before another side effect.
       reclaimOutpoint(store, sub, r);
       store.markRebroadcast(sub, r.commitTxId);
-      const revealErr = await broadcastIdempotent(r.revealTxHex);
-      store.setStatus(sub, r.commitTxId, revealErr ? 'commit_broadcast' : 'reveal_broadcast');
       changed = true;
+      // `reclaimOutpoint` clears `superseded` via `reinstate`, so the fresh
+      // post-reclaim snapshot — not `current`/`beforeReclaim` — is the state a
+      // concurrent pass must still match for the guarded write below.
+      const postReclaim = store.get(sub, r.commitTxId);
+      if (!postReclaim) continue;
+      const revealErr = await broadcastIdempotent(r.revealTxHex);
+      // Guarded write: a concurrent pass may already have moved this record
+      // (confirmed it, retired it, or reclaimed it again) while the reveal
+      // broadcast above was in flight. Only advance it if it is still exactly
+      // where this pass left it after the reclaim; otherwise stop touching it
+      // rather than clobber whatever that other pass decided (#758, mirroring
+      // the #677 guard already used below for `liveStuck`/`liveUnconfirmed`).
+      store.trySetStatus(
+        sub, r.commitTxId,
+        { status: postReclaim.status, retired: false, superseded: false },
+        revealErr ? 'commit_broadcast' : 'reveal_broadcast'
+      );
     }
     for (const r of liveStuck) {
       if (lookups >= stuckLimit) break;
-      const current = store.get(sub, r.commitTxId);
+      let current = store.get(sub, r.commitTxId);
       if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.stuck++;
       const st = await readStatus(r.commitTxId);
       if (!st) continue;
-      if (!st.confirmed) {
-        // #677 — read the FRESH pre-await snapshot (`current`), not the
-        // top-of-function one (`r`): by the time this record's turn comes
-        // up, `r` can be arbitrarily stale (other records' awaits already
-        // ran, or a concurrent reconcileUser call for the same user already
-        // moved this exact record).
-        const lastPush = Date.parse(current.rebroadcastAt ?? current.updatedAt);
-        if (!current.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
-      }
+      // An overlapping poll may have attempted or completed this pair while
+      // the status lookup was in flight. Check the durable attempt clock and
+      // eligibility again, with no await before journaling our own attempt.
+      current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired ||
+          (current.status !== 'signed' && current.status !== 'commit_broadcast')) continue;
+      // A confirmed commit with no journaled attempt can recover immediately.
+      // Prior attempts (including unconfirmed/manual retries) keep their full
+      // window even after confirmation (#861). updatedAt is only a fallback
+      // for the existing unconfirmed-commit retry policy.
+      const lastPush = current.rebroadcastAt ?? (st.confirmed ? undefined : current.updatedAt);
+      if (lastPush !== undefined && now() - Date.parse(lastPush) < REVEAL_REBROADCAST_AFTER_MS) continue;
+      if (!st.confirmed && !current.signedCommitHex) continue;
       store.markRebroadcast(sub, r.commitTxId);
       let atStatus = current.status;
       if (!st.confirmed) {
@@ -303,12 +352,22 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
         // Skip the write once depth/height/hash/status all already match:
         // this is the steady state for a record sitting well below the
         // settlement threshold that keeps being re-polled while other work
-        // is pending.
+        // is pending. Height/hash are STICKY across an omitted field (see
+        // `applyStatus`), so compare against the EFFECTIVE post-apply values
+        // a write would actually produce, not the raw provider fields — a
+        // transiently-omitted `blockHeight` (QuickNode's secondary RPC is
+        // best-effort; see `QuickNodeProvider.getTransactionStatus`) must not
+        // read as "changed" when applying it would leave the stored identity
+        // untouched.
+        const identityChanged = st.blockHash !== undefined && st.blockHash !== current.confirmedBlockHash;
+        const effectiveBlockHeight =
+          st.blockHeight !== undefined ? st.blockHeight : identityChanged ? undefined : current.confirmedBlockHeight;
+        const effectiveBlockHash = st.blockHash !== undefined ? st.blockHash : current.confirmedBlockHash;
         const needsWrite =
           current.status !== 'confirmed' ||
           current.confirmations !== st.confirmations ||
-          current.confirmedBlockHeight !== st.blockHeight ||
-          current.confirmedBlockHash !== st.blockHash;
+          current.confirmedBlockHeight !== effectiveBlockHeight ||
+          current.confirmedBlockHash !== effectiveBlockHash;
         // Guarded write (#677/#694): only apply if the record's
         // status/retired/superseded AND its confirmation evidence are still
         // exactly where this pass last observed them. The evidence fields
@@ -420,10 +479,19 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
       // transactions retained) or settled (recovery artifacts retired once
       // `confirmations` reaches the configured threshold). Absent for every
       // other status — depth/height are current-truth-while-confirmed only.
+      // #777: `settled` must track `retired` alone, matching the
+      // resubmission path's `settled: rec.retired === true` (bitcoin.ts).
+      // `reconcileRecords` spends a shared per-poll lookup budget rotated
+      // across categories, so a record whose on-disk `confirmations` already
+      // meets the threshold (from an earlier pass, or stale evidence) can
+      // have its `retire()` turn deferred to a later poll — reporting
+      // `settled: true` from the confirmations depth alone would disagree
+      // with `store.get(...).retired` (and the resubmission path) for that
+      // exact record while its recovery hex is still on disk.
       ...(r.status === 'confirmed'
         ? {
             confirmations: r.confirmations,
-            settled: r.retired === true || (r.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS,
+            settled: r.retired === true,
             ...(r.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: r.confirmedBlockHeight } : {}),
             ...(r.confirmedBlockHash !== undefined ? { confirmedBlockHash: r.confirmedBlockHash } : {}),
           }
