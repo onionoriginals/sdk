@@ -2727,7 +2727,7 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
     expect(h.store.get('sub-1', pair.commitTxId)?.revealTxHex).toBe(pair.revealTxHex);
   });
 
-  test('a failed status write after delivery remains an explicit failure and restart retries the durable pair', async () => {
+  test('a failed status write after delivery remains explicit and restart retries the durable pair after backoff', async () => {
     const h = harness({ txStatus: { confirmed: true, confirmations: 1 } });
     const pair = seed(h, 90, 'commit_broadcast');
     // #677 — this record advances through the guarded `trySetStatus`, not
@@ -2737,15 +2737,28 @@ describe('bounded durable reconciliation across recovery categories (#496)', () 
     h.store.trySetStatus = () => { throw new Error('simulated disk full after delivery'); };
     const response = await poll(h);
     expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe('inscription_reconciliation_failed');
     expect(h.broadcasts).toEqual([pair.revealTxHex]);
     const saved = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
     expect(saved.status).toBe('commit_broadcast');
     expect(saved.rebroadcastAt).toBeDefined();
+    expect(saved.signedCommitHex).toBe(pair.signedCommitHex);
     expect(saved.revealTxHex).toBe(pair.revealTxHex);
     const restarted = harness({ dataDir: h.dataDir, txStatus: { confirmed: true, confirmations: 1 } });
     expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
+    expect(restarted.broadcasts).toEqual([]);
+    expect(createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)).toEqual(saved);
+
+    // Expire the durable retry window in this disposable, single-record journal.
+    const expiredAt = new Date(Date.now() - 31 * 60_000).toISOString();
+    writeFileSync(join(h.dataDir, 'inscriptions', 'sub-1.json'), JSON.stringify([{ ...saved, rebroadcastAt: expiredAt }]));
+    expect((await restarted.routes.sweepInscriptions()).unreadable).toEqual([]);
     expect(restarted.broadcasts).toEqual([pair.revealTxHex]);
-    expect(restarted.store.get('sub-1', pair.commitTxId)?.status).toBe('reveal_broadcast');
+    const recovered = createInscriptionsStore({ dataDir: h.dataDir }).get('sub-1', pair.commitTxId)!;
+    expect(recovered.status).toBe('reveal_broadcast');
+    expect(Date.parse(recovered.rebroadcastAt!)).toBeGreaterThan(Date.parse(expiredAt));
+    expect(recovered.signedCommitHex).toBe(pair.signedCommitHex);
+    expect(recovered.revealTxHex).toBe(pair.revealTxHex);
   });
 });
 
