@@ -29,6 +29,22 @@ export const ALGORITHMS = Object.freeze({
     hash: sha384,
   },
 } as const);
+
+// Multicodec headers for did:key types this codebase recognizes elsewhere
+// (see packages/cel/src/crypto/Multikey.ts's MULTICODEC_SECP256K1_PUB_HEADER
+// and MULTICODEC_BLS12381_G2_PUB_HEADER) but that are not members of this
+// profile's supported ALGORITHMS. A did:key using one of these codecs is a
+// well-formed, recognized CCG key type -- just outside what this
+// application verifies -- so decodeController must report it "unsupported",
+// not "invalid" (issue #721; same invalid/unsupported taxonomy as #700).
+const RECOGNIZED_OUT_OF_PROFILE_CODECS: ReadonlyArray<{
+  codec: readonly [number, number];
+  length: number;
+}> = [
+  { codec: [0xe7, 0x01], length: 33 }, // secp256k1
+  { codec: [0xeb, 0x01], length: 96 }, // bls12_381-g2
+];
+
 export function decodeBase58(value: string): Uint8Array {
   requireThat(
     /^z[1-9A-HJ-NP-Za-km-z]+$/.test(value),
@@ -109,6 +125,20 @@ export function decodeController(controller: unknown): {
       spec.codec.every((b, i) => encoded[i] === b)
     );
   });
+  if (!algorithm) {
+    const recognized = RECOGNIZED_OUT_OF_PROFILE_CODECS.some(
+      (c) =>
+        encoded.length === c.length + 2 &&
+        c.codec.every((b, i) => encoded[i] === b),
+    );
+    if (recognized) {
+      throw new CelError(
+        "unsupported",
+        "CEL_CONTROLLER",
+        "Recognized public-key codec is outside this profile's supported algorithms",
+      );
+    }
+  }
   requireThat(
     algorithm,
     "CEL_CONTROLLER",

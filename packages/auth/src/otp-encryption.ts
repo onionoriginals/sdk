@@ -15,7 +15,51 @@
  * verifies the enclave signature on the target bundle before encrypting.
  */
 
-import { encryptOtpCodeToBundle, generateP256KeyPair } from '@turnkey/crypto';
+import { StructuredError } from '@originals/sdk';
+import {
+  compressRawPublicKey,
+  encryptOtpCodeToBundle,
+  generateP256KeyPair,
+  uncompressRawPublicKey,
+} from '@turnkey/crypto';
+import { hexToBytes } from '@noble/hashes/utils.js';
+import { AUTH_EMAIL_ERROR_CODES } from './error-codes.js';
+
+/** Validate untrusted OTP inputs before encryption or session claiming. */
+export function validateOtpInputs(otpCode: unknown, publicKey: unknown): void {
+  // Keep in sync with initOtp's otpLength: 6, alphanumeric: false.
+  if (typeof otpCode !== 'string' || !/^\d{6}$/.test(otpCode)) {
+    throw new StructuredError(
+      AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid,
+      'Invalid verification code format'
+    );
+  }
+
+  // Only an omitted key allows server-side key generation.
+  if (publicKey === undefined) return;
+  if (
+    typeof publicKey === 'string' &&
+    /^(?:0[23][0-9a-f]{64}|04[0-9a-f]{128})$/i.test(publicKey)
+  ) {
+    try {
+      // Validate curve membership as well as SEC1 encoding, without changing
+      // the caller's encoding or including key material in errors.
+      const bytes = hexToBytes(publicKey);
+      const uncompressed = uncompressRawPublicKey(
+        bytes.length === 33 ? bytes : compressRawPublicKey(bytes)
+      );
+      if (bytes.length === 33 || bytes.every((byte, index) => byte === uncompressed[index])) {
+        return;
+      }
+    } catch {
+      // Report the same input error for invalid points and invalid encodings.
+    }
+  }
+  throw new StructuredError(
+    AUTH_EMAIL_ERROR_CODES.otpPublicKeyInvalid,
+    'Invalid OTP public key'
+  );
+}
 
 /**
  * Parameters for {@link encryptOtpCode}.
@@ -29,8 +73,8 @@ export interface EncryptOtpCodeParams {
    */
   otpEncryptionTargetBundle: string;
   /**
-   * Optional compressed P-256 public key (hex) to embed in the encrypted
-   * bundle. When omitted, an ephemeral P-256 key pair is generated and its
+   * Optional compressed or uncompressed P-256 public key (hex) to embed in
+   * the encrypted bundle. When omitted, an ephemeral key pair is generated and its
    * private key is returned so the caller can complete a subsequent
    * `otpLogin` bound to the same key.
    */
@@ -49,7 +93,7 @@ export interface EncryptOtpCodeParams {
 export interface EncryptOtpCodeResult {
   /** The encrypted OTP bundle to pass as `encryptedOtpBundle` to `verifyOtp`. */
   encryptedOtpBundle: string;
-  /** Compressed P-256 public key (hex) embedded in the encrypted bundle. */
+  /** Compressed or uncompressed P-256 public key (hex) embedded in the encrypted bundle. */
   publicKey: string;
   /**
    * Private key (hex) for the ephemeral key pair, present only when the key
@@ -72,6 +116,8 @@ export async function encryptOtpCode(
 ): Promise<EncryptOtpCodeResult> {
   const { otpCode, otpEncryptionTargetBundle, dangerouslyOverrideSignerPublicKey } = params;
 
+  validateOtpInputs(otpCode, params.publicKey);
+
   if (!otpEncryptionTargetBundle) {
     throw new Error(
       'Missing otpEncryptionTargetBundle - Turnkey v6 initOtp must return a target encryption bundle'
@@ -81,7 +127,7 @@ export async function encryptOtpCode(
   let publicKey = params.publicKey;
   let privateKey: string | undefined;
 
-  if (!publicKey) {
+  if (publicKey === undefined) {
     const keyPair = generateP256KeyPair();
     publicKey = keyPair.publicKey;
     privateKey = keyPair.privateKey;

@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { parseAssetAlias, verifyHistory, CelError } from "../../src/v3/index.js";
+import {
+  parseAssetAlias,
+  verifyHistory,
+  CelError,
+  encodeWebVHPathSegment,
+  isWebVHPathSegment,
+  canonicalWebVHPaths,
+  canonicalizeWebVHDomain,
+} from "../../src/v3/index.js";
 import authority from "../../../../docs/research/cel-core-vectors/histories.json";
 import symbolic from "../../../../docs/research/cel-authority-vectors/histories.json";
 
@@ -90,5 +98,159 @@ test("URL parser failures become structured invalid-DID results", () => {
       expect(error).toBeInstanceOf(CelError);
       expect((error as CelError).status).toBe("invalid");
     }
+  }
+});
+
+const PATH_CANDIDATES = [
+  " hello", "hello ", "   ", "\thello", "hello\u00a0", "\ufeffx", "", ".", "..", "...",
+  "a/b", "a\\b", "a\0b", "hello world", "café", "x~y", "a:b", "C:foo", "C:\\win",
+  ".well-known", "%41", "😀", "a\ud800",
+];
+
+test("isWebVHPathSegment agrees with parseAssetAlias on every candidate", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  const reads = (value: string) => {
+    try {
+      parseAssetAlias(`did:webvh:${scid}:example.com:${encodeWebVHPathSegment(value)}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const value of PATH_CANDIDATES)
+    expect([value, isWebVHPathSegment(value)]).toEqual([value, reads(value)]);
+  expect(isWebVHPathSegment(123)).toBe(false);
+});
+
+test("canonicalWebVHPaths encodes decoded segments in DID spelling", () => {
+  expect(canonicalWebVHPaths(["hello world", "x~y", "a:b"])).toEqual({
+    ok: true,
+    segments: ["hello%20world", "x%7Ey", "a%3Ab"],
+  });
+  expect(canonicalWebVHPaths([])).toEqual({ ok: true, segments: [] });
+});
+
+test("canonicalWebVHPaths rejects non-arrays, non-strings and invalid segments", () => {
+  for (const paths of ["abc", undefined])
+    expect(canonicalWebVHPaths(paths)).toEqual({ ok: false, reason: "invalid" });
+  for (const [paths, index] of [
+    [[123], 0],
+    [[" hello"], 0],
+    [["ok", ".."], 1],
+    [[""], 0],
+    [["a\ud800"], 0],
+  ] as const)
+    expect(canonicalWebVHPaths(paths)).toEqual({ ok: false, reason: "invalid", index });
+});
+
+test("canonicalWebVHPaths rejects a hole in a sparse paths array", () => {
+  // Array#every skips holes; a hole would otherwise mint an empty DID segment.
+  // eslint-disable-next-line no-sparse-arrays
+  expect(canonicalWebVHPaths([, "a"])).toEqual({ ok: false, reason: "invalid", index: 0 });
+  expect(canonicalWebVHPaths(new Array(1))).toEqual({ ok: false, reason: "invalid", index: 0 });
+});
+
+test("canonicalWebVHPaths reserves only a leading .well-known, case-insensitively", () => {
+  for (const first of [".well-known", ".WELL-KNOWN", ".Well-Known"])
+    expect(canonicalWebVHPaths([first, "x"])).toEqual({ ok: false, reason: "reserved" });
+  expect(canonicalWebVHPaths(["users", ".well-known"])).toEqual({
+    ok: true,
+    segments: ["users", ".well-known"],
+  });
+});
+
+test("parseAssetAlias still reads a .well-known path DID", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  expect(parseAssetAlias(`did:webvh:${scid}:example.com:.well-known`)).toMatchObject({
+    logUrl: "https://example.com/.well-known/did.jsonl",
+  });
+});
+
+const CANONICAL_DOMAINS: [string, string][] = [
+  ["example.com", "example.com"],
+  ["example.com:443", "example.com"],
+  ["example.com:08080", "example.com:8080"],
+  [" Example.COM:8080 ", "example.com:8080"],
+  ["sub.example.co.uk:65535", "sub.example.co.uk:65535"],
+];
+
+function celCode(fn: () => unknown): [string, string] | undefined {
+  try {
+    fn();
+  } catch (error) {
+    expect(error).toBeInstanceOf(CelError);
+    return [(error as CelError).status, (error as CelError).code];
+  }
+  return undefined;
+}
+
+test("canonicalizeWebVHDomain returns the URL#host spelling", () => {
+  for (const [input, expected] of CANONICAL_DOMAINS) {
+    const out = canonicalizeWebVHDomain(input);
+    expect([input, out]).toEqual([input, expected]);
+    expect(new URL("https://" + out).host).toBe(out);
+  }
+});
+
+test("canonicalizeWebVHDomain rejects non-DNS hosts with INVALID_DOMAIN", () => {
+  for (const domain of [
+    "localhost", "localhost:3000", "127.0.0.1", "10.0.0.1:8080", "1.2.3", "example.0x10",
+    "intranet", "web:3000", "example.com.", "-a.com", "a_b.com", "example.com:0",
+    "example.com:65536", "example.com:", "example.com:80:1", "example.com/x", "",
+  ])
+    expect([domain, celCode(() => canonicalizeWebVHDomain(domain))]).toEqual([
+      domain,
+      ["invalid", "INVALID_DOMAIN"],
+    ]);
+  for (const domain of ["xn--bcher-kva.example", "bücher.example"])
+    expect(celCode(() => canonicalizeWebVHDomain(domain))).toEqual([
+      "unsupported",
+      "CEL_WEBVH_IDNA",
+    ]);
+});
+
+test("canonicalizeWebVHDomain identity policy admits localhost[:port] and punycode hosts", () => {
+  const opts = { identity: true };
+  expect(canonicalizeWebVHDomain("localhost", opts)).toBe("localhost");
+  expect(canonicalizeWebVHDomain("LOCALHOST:3000", opts)).toBe("localhost:3000");
+  expect(canonicalizeWebVHDomain("example.com:443", opts)).toBe("example.com");
+  // Identity DIDs never pass parseAssetAlias, so its IDNA limit doesn't apply.
+  expect(canonicalizeWebVHDomain("XN--bcher-kva.example", opts)).toBe("xn--bcher-kva.example");
+  for (const domain of ["127.0.0.1", "intranet", "localhost:0", "localhost.:3000"])
+    expect(celCode(() => canonicalizeWebVHDomain(domain, opts))).toEqual([
+      "invalid",
+      "INVALID_DOMAIN",
+    ]);
+  expect(celCode(() => canonicalizeWebVHDomain("bücher.example", opts))).toEqual([
+    "unsupported",
+    "CEL_WEBVH_IDNA",
+  ]);
+});
+
+test("canonicalizeWebVHDomain lowercases ASCII only, so a Unicode letter can't fold into a DNS name", () => {
+  // U+212A KELVIN SIGN lowercases to ASCII "k" under String#toLowerCase.
+  for (const opts of [{}, { identity: true }])
+    expect(celCode(() => canonicalizeWebVHDomain("exam\u212Ale.com", opts))).toEqual([
+      "unsupported",
+      "CEL_WEBVH_IDNA",
+    ]);
+});
+
+test("canonicalizeWebVHDomain strips any number of port leading zeros", () => {
+  expect(canonicalizeWebVHDomain("example.com:0000000443")).toBe("example.com");
+  expect(canonicalizeWebVHDomain("example.com:0008080")).toBe("example.com:8080");
+  expect(celCode(() => canonicalizeWebVHDomain("example.com:99999999999999999999"))).toEqual([
+    "invalid",
+    "INVALID_DOMAIN",
+  ]);
+});
+
+test("every asset-canonical domain round-trips through parseAssetAlias", () => {
+  const scid = authority.entries.W.event.operation.data.to.split(":")[2];
+  for (const [input] of CANONICAL_DOMAINS) {
+    const out = canonicalizeWebVHDomain(input);
+    const alias = parseAssetAlias(`did:webvh:${scid}:${out.replace(":", "%3A")}`);
+    if (alias.layer !== "webvh") throw new Error("expected a webvh alias");
+    expect(new URL(alias.logUrl).host).toBe(out);
   }
 });

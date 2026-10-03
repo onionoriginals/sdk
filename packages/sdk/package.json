@@ -49,7 +49,7 @@
     }
   },
   "scripts": {
-    "build": "tsc && tsc-alias",
+    "build": "tsc",
     "typecheck": "tsc --noEmit -p .",
     "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-cel3.ts",
     "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
@@ -106,7 +106,6 @@
     "bun-types": "^1.3.1",
     "eslint": "^10.6.0",
     "prettier": "^3.0.0",
-    "tsc-alias": "^1.8.16",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0"
   },

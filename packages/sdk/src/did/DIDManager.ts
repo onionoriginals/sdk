@@ -19,6 +19,7 @@ import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '
 import { resolveDidCel, DID_CEL_PREFIX } from '@originals/cel';
 import { parseEventLogJson } from '@originals/cel';
 import { createDidManagerKeyResolver } from '@originals/cel';
+import { canonicalizeWebVHDomain } from '@originals/cel/v3';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
@@ -99,17 +100,21 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * and a did:webvh domain is permanent once published — so an omitted domain
  * must fail loudly rather than mint a DID at a host nobody serves (#531). The
  * configured webvhNetwork tier deliberately does NOT supply a default here.
+ *
+ * A non-blank domain is canonicalized by CEL's `canonicalizeWebVHDomain`
+ * (identity policy: a DNS host, punycode host or `localhost`, `URL#host` spelling), which
+ * throws a `CelError` (a `StructuredError`) `INVALID_DOMAIN` otherwise.
  */
 export function requireWebVHDomain(domain: string | undefined): string {
-  if (typeof domain === 'string' && domain.trim().length > 0) {
-    return domain;
+  if (typeof domain !== 'string' || domain.trim().length === 0) {
+    throw new StructuredError(
+      'WEBVH_DOMAIN_REQUIRED',
+      'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
+      '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
+      'networks are not served, and a did:webvh domain is permanent once published.'
+    );
   }
-  throw new StructuredError(
-    'WEBVH_DOMAIN_REQUIRED',
-    'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
-    '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
-    'networks are not served, and a did:webvh domain is permanent once published.'
-  );
+  return canonicalizeWebVHDomain(domain, { identity: true });
 }
 
 export class DIDManager {
@@ -173,31 +178,10 @@ export class DIDManager {
     return this.track('did.migrateToDIDWebVH', async () => {
     // The caller must name the host; an omitted domain throws rather than
     // defaulting to a *.originals.build network nobody serves (#531).
-    const targetDomain = requireWebVHDomain(domain);
-
-    // Flexible domain validation - allow development domains with ports
-    const normalized = String(targetDomain || '').trim().toLowerCase();
-    
-    // Split domain and port if present
-    const [domainPart, portPart] = normalized.split(':');
-    
-    // Validate port if present
-    if (portPart && (!/^\d+$/.test(portPart) || parseInt(portPart) < 1 || parseInt(portPart) > 65535)) {
-      throw new Error(`Invalid domain: ${domain} - invalid port`);
-    }
-    
-    // Allow localhost and IP addresses for development
-    const isLocalhost = domainPart === 'localhost';
-    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(domainPart);
-    
-    if (!isLocalhost && !isIP) {
-      // For non-localhost domains, require proper domain format
-      const label = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-      const domainRegex = new RegExp(`^(?=.{1,253}$)(?:${label})(?:\\.(?:${label}))+?$`, 'i');
-      if (!domainRegex.test(domainPart)) {
-        throw new Error('Invalid domain');
-      }
-    }
+    // requireWebVHDomain also canonicalizes (trim + lowercase + host/port
+    // validation), so `normalized` below is already the exact value to mint
+    // the did:webvh identifier from (#722, #761, #764).
+    const normalized = requireWebVHDomain(domain);
 
     // Stable slug derived from the source DID's last segment. The slug becomes
     // both a did:webvh path segment and a directory name in saveDIDLog, so it

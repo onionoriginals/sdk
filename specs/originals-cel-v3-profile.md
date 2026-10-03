@@ -117,7 +117,10 @@ introduced by this wire change. Versions are derived from accepted updates,
 not trusted from a supplied counter. A change of retrieval URL can retain the
 same byte digest. URLs are signed locators, never authority.
 
-`url`, when present, is an array of 1–16 absolute URLs. Each must parse using
+`url`, when present, is an array of 1–16 absolute URLs, each at most 8,192
+Unicode code points — its own field-specific cap, stricter than (and, unlike
+the byte-counted ceiling below, measured in code points rather than UTF-8
+bytes) the 262,144-byte ceiling other string fields get. Each must parse using
 the WHATWG URL parser with no base, have a scheme matching
 `[A-Za-z][A-Za-z0-9+.-]*:`, contain no ASCII whitespace/control characters or
 backslashes, and use only valid percent escapes. HTTP(S) URLs require `//` and
@@ -254,6 +257,15 @@ derived by the reader, never a stored Data Integrity proof in the log.
 JSON is UTF-8 containing one complete document, optionally with JSON whitespace.
 Reject a byte-order mark and trailing non-whitespace input. Writers emit compact
 JCS JSON for reproducible files; readers need not require canonical presentation.
+A JSON number token with no fraction or exponent is a plain decimal integer
+literal. It must convert to a finite binary64 value that it either names
+exactly or is the RFC 8785 serialization of (JCS writes `2**61` as
+`2305843009213694000`, which by RFC 8785 definition names that binary64).
+Reject any other integer literal with `CEL_NUMBER`. This keeps every value a
+JCS writer emits readable; a binary64 in [2^53, 1e21) may therefore be read
+from two spellings, which decode to the same value and the same JCS identity.
+Tokens with a fraction or exponent are ordinary floating-point literals and
+keep RFC 8785 JCS number handling.
 
 CBOR metadata is the same document with **text map keys**, without numeric-key
 abbreviations. Writers use RFC 8949 core deterministic encoding, normalize
@@ -264,8 +276,9 @@ definite-length alternate map order/number widths if the decoded value is
 unchanged. Reject duplicate text keys before a Map/object loses them, non-text
 keys, tags, byte strings, undefined/simple values other than false/true/null,
 nonfinite floats, invalid UTF-8, indefinite lengths, and trailing CBOR items.
-An integer must convert exactly to a finite binary64 value (otherwise reject;
-never round a CBOR integer silently). Floats are finite binary64 JSON values.
+A CBOR integer must convert exactly to a finite binary64 value (otherwise
+reject; never round a CBOR integer silently). CBOR has no JCS spelling, so
+only the exact form applies. Floats are finite binary64 JSON values.
 Always apply JCS to the decoded event, never hash CBOR bytes for its identity.
 
 This is an application CBOR subset, not a claim that rejected constructs are
@@ -273,7 +286,19 @@ invalid in general CBOR. File bytes are outside this subset: they remain raw
 inscription content, or explicit base64 in the separately versioned AssetEnvelope.
 
 Enforce these limits consistently before signing and while reading; they are
-application limits, not substitutes for Bitcoin transaction/fee limits:
+application limits, not substitutes for Bitcoin transaction/fee limits. Every
+row applies simultaneously — each is an independent ceiling, not a guaranteed
+minimum a document is entitled to reach. A document below the entries or
+values ceiling can still exceed a different row (byte size, depth, or a
+field-specific cap such as a resource `url` entry's own 8,192-code-point
+limit above), and being under the 262,144-byte default does not by itself mean
+every string-valued field permits that size. Concretely, the 10,000-entry
+ceiling and the 100,000-JSON-value ceiling are both enforced, and every
+non-trivial entry costs several value nodes (the entry/event/proof wrapper
+objects, each signed field, each container), so a document built from
+maximally-shaped rather than minimal entries reaches the values ceiling
+before it reaches 10,000 entries. Reaching exactly 10,000 entries is not a
+promise independent of what those entries contain:
 
 | Limit | Maximum |
 | --- | --- |
@@ -282,7 +307,7 @@ application limits, not substitutes for Bitcoin transaction/fee limits:
 | Proofs per entry | 8 |
 | Nested containers, counting the root as depth 1 | 64 |
 | JSON values including containers, excluding member names | 100,000 |
-| UTF-8 bytes of any string or member name | 262,144 |
+| UTF-8 bytes of any string or member name, unless a field states a stricter cap (e.g. a resource `url` entry, above) | 262,144 |
 | Resources per operation | 1,024 |
 | URLs per resource | 16 |
 

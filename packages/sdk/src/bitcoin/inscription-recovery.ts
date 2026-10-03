@@ -140,6 +140,9 @@ async function isCurrentlyConfirmed(provider: OrdinalsProvider, txid: string): P
   catch { return false; }
 }
 
+/** Bitcoin Core's RPC -27 ("already in chain/mempool"), independent of wording. */
+const RPC_TRANSACTION_ALREADY_IN_CHAIN = -27;
+
 /**
  * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
  * the network. Matched as a closed set rather than a bare /already/: a
@@ -148,15 +151,20 @@ async function isCurrentlyConfirmed(provider: OrdinalsProvider, txid: string): P
  * apps/landing/server/bitcoin.ts's isAlreadyKnownTxError for the same reason:
  * a duplicate-broadcast rejection of the identical signed bytes is positive
  * evidence the transaction is already out there, not a failed broadcast.
+ * Kept as a string fallback for providers that don't surface an RPC code;
+ * `isAlreadyKnownTxError` below checks the RPC -27 code first since Core's
+ * own wording for it has changed across versions (see the entries below).
  */
 const ALREADY_KNOWN_TX_ERRORS = [
   'txn-already-in-mempool',
   'txn-already-known',
-  'transaction already in block chain', // RPC -27
+  'transaction already in block chain', // RPC -27, Bitcoin Core < 28.0
   'transaction already in mempool',
+  'transaction outputs already in utxo set', // RPC -27, Bitcoin Core >= 28.0 (bitcoin/bitcoin#30212)
 ];
 
 function isAlreadyKnownTxError(error: unknown): boolean {
+  if (error instanceof StructuredError && error.details?.rpcCode === RPC_TRANSACTION_ALREADY_IN_CHAIN) return true;
   const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').toLowerCase();
   return ALREADY_KNOWN_TX_ERRORS.some((known) => message.includes(known));
 }

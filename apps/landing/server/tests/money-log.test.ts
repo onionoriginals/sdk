@@ -115,6 +115,42 @@ describe('the log line itself', () => {
     const log = createMoneyLogger(() => { throw new Error('log drain down'); });
     expect(() => log('inscribe_attempted', { sub: 'sub-1' })).not.toThrow();
   });
+
+  test.each([
+    'email', 'mail', 'EMAIL', 'eMaIl', 'user_email', 'USER_MAIL', 'user_email_handle',
+    'customerEmail', 'userMail', 'emailAddress', 'mailHandle', 'CustomerEmail',
+    'customerEmailHandle', 'customerMailHandle', 'customerEMAIL', 'customerMAIL',
+    'customerEMAILHandle', 'EMAILAddress', 'billing2Email', 'user_emailAddress',
+  ])('redacts login handles by the email/mail component in %s', (key) => {
+    const cap = capture();
+    cap.log('deposit_seen', { [key]: 'jdoe-login-handle', sub: 'suborg_123' });
+    expect(cap.events()[0][key]).toBe('[redacted]');
+    expect(cap.events()[0].sub).toBe('suborg_123');
+    expect(cap.lines[0]).not.toContain('jdoe-login-handle');
+  });
+
+  test('preserves operational fields and words that merely contain mail', () => {
+    const fields = {
+      sub: 'suborg_123', subOrgId: 'suborg_123', commitTxId: 'a'.repeat(64),
+      revealTxId: 'b'.repeat(64), address: ADDRESS, network: 'mainnet',
+      reason: 'reveal_broadcast_failed', confirmedSats: 40_000, settled: false,
+      mailbox: 'queue-1', mailer: 'worker-1', voicemail: 'disabled',
+      retail: 'channel', chainmail: 'asset-kind', emailish: 'classification',
+      customerEmailing: 'disabled', userMailbox: 'queue-2',
+    };
+    const cap = capture();
+    cap.log('deposit_seen', fields);
+    expect(cap.events()[0]).toMatchObject(fields);
+  });
+
+  test('still redacts email-shaped values in operational fields and omits undefined', () => {
+    const cap = capture();
+    cap.log('deposit_seen', { subOrgId: EMAIL, reason: `rejected for ${EMAIL}`, customerEmail: undefined });
+    expect(cap.events()[0].subOrgId).toBe('[redacted]');
+    expect(cap.events()[0].reason).toBe('[redacted]');
+    expect(cap.events()[0]).not.toHaveProperty('customerEmail');
+    expect(cap.lines[0]).not.toContain(EMAIL);
+  });
 });
 
 describe('deposit-path transitions (R29)', () => {

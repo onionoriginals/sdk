@@ -44,6 +44,10 @@ export interface AuthMiddlewareOptions {
   cookieName?: string;
   /** JWT secret (default: process.env.JWT_SECRET) */
   jwtSecret?: string;
+  /** Expected JWT issuer; must match signToken (default: 'originals-auth'). */
+  issuer?: string;
+  /** Expected JWT audience; must match signToken (default: 'originals-api'). */
+  audience?: string;
 }
 
 /**
@@ -69,6 +73,16 @@ export interface EmailAuthSession {
   timestamp: number;
   /** Whether the session has been verified */
   verified: boolean;
+  /**
+   * Set while a `verifyEmailAuth` call for this session is in flight, from
+   * before the first `await` until the call either succeeds or releases the
+   * claim on a failure that leaves the session retryable. Rejects a second
+   * call — sequential (on an already-verified session, #710) or concurrent
+   * (racing the same unverified session, #819) — from re-submitting the
+   * same OTP to Turnkey and, in the sequential case, minting a second,
+   * independent verification token.
+   */
+  verifying?: boolean;
   /**
    * Number of failed OTP verification attempts for this session. The
    * session is destroyed once the attempt budget is exhausted.
