@@ -9,3 +9,7 @@ Read existing `ni:` IDs in version-4 envelopes and signed migration/WebVH
 bindings, normalizing the public ID without rewriting signed data. Version-3
 envelopes retain their did-only contract. Envelope fields and versions do not
 change, and removed legacy API names are not restored.
+
+The landing app also discovers retained ni-keyed publication records and restores
+ni-keyed anonymous authorship backups using their original authenticated-data
+binding. Existing ciphertext and signed artifacts are not rewritten.

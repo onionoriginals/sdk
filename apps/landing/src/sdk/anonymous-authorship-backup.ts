@@ -1,3 +1,5 @@
+import { assetDigest } from "@originals/sdk/cel";
+import { base64urlnopad } from "@scure/base";
 import { getOrCreateWrappingKey, hasDurableKeyStore } from "./keystore";
 
 const LOCAL_BACKUP_FORMAT = "originals/local-authorship-key-backup";
@@ -97,7 +99,22 @@ export async function restoreAnonymousAuthorshipKey(
   assetId: string,
   storage: Storage = localStorage,
 ): Promise<{ secretKey: Uint8Array; controller: string } | null> {
-  const raw = storage.getItem(anonymousAuthorshipStorageKey(assetId));
+  let storedAssetId = assetId;
+  let raw = storage.getItem(anonymousAuthorshipStorageKey(storedAssetId));
+  if (!raw) {
+    try {
+      const digest = assetDigest(assetId);
+      storedAssetId = assetId.startsWith("ni:")
+        ? "did:cel:" + digest
+        : "ni:///sha-256;" +
+          base64urlnopad.encode(
+            base64urlnopad.decode(digest.slice(1)).subarray(2),
+          );
+      raw = storage.getItem(anonymousAuthorshipStorageKey(storedAssetId));
+    } catch {
+      return null;
+    }
+  }
   if (!raw) return null;
   try {
     const backup = JSON.parse(raw) as LocalAuthorshipBackup;
@@ -111,7 +128,8 @@ export async function restoreAnonymousAuthorshipKey(
       {
         name: "AES-GCM",
         iv: asBufferSource(fromBase64(backup.ivBase64)),
-        additionalData: bindingContext(assetId, backup.controller),
+        // Authenticate the exact ID originally used to encrypt this record.
+        additionalData: bindingContext(storedAssetId, backup.controller),
       },
       wrappingKey,
       asBufferSource(fromBase64(backup.ciphertextBase64)),

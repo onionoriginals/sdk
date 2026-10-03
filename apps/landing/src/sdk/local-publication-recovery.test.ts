@@ -260,3 +260,19 @@ test("recovery discovery verifies every retained proof once and rejects substitu
   localStorage.setItem(key, JSON.stringify(mismatch));
   expect(localPublicationRecoveries("sub-1")).toEqual([]);
 });
+
+test('saved ni publication keys remain visible for the same verified history and account', async () => {
+  host = installCel3Host('sub-1');
+  const { default: prepared } = await import('../../../../packages/sdk/tests/fixtures/identity/ni-web-publication.json');
+  const key = `originals:web-publication:sub-1:${prepared.asset.assetId}`;
+  const saved = JSON.stringify(prepared);
+  localStorage.setItem(key, saved);
+  const [recovery] = localPublicationRecoveries('sub-1');
+  expect(recovery.key).toBe(key);
+  expect(recovery.assetId).toBe('did:cel:' + prepared.asset.eventLog.log[0].event.previousEvent);
+  expect(localPublicationRecoveries('other-account')).toEqual([]);
+  expect(localStorage.getItem(key)).toBe(saved);
+  localStorage.removeItem(key);
+  localStorage.setItem(key + 'unrelated', saved);
+  expect(localPublicationRecoveries('sub-1')).toEqual([]);
+});

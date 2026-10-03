@@ -259,3 +259,31 @@ describe('the transparent local backup this browser writes on publish', () => {
     expect(restored).not.toBeNull();
   });
 });
+
+test('ni-keyed anonymous backup restores through did:cel without weakening its original AAD binding', async () => {
+  const host = installCel3Host();
+  try {
+    const { persistAnonymousAuthorshipKey, restoreAnonymousAuthorshipKey } = await import('./anonymous-authorship-backup');
+    const { default: prepared } = await import('../../../../packages/sdk/tests/fixtures/identity/ni-web-publication.json');
+    const ni = prepared.asset.assetId;
+    const did = 'did:cel:' + prepared.asset.eventLog.log[0].event.previousEvent;
+    const secret = new Uint8Array(32).fill(18);
+    const controller = createLocalSigner('Ed25519', secret).controller;
+    await persistAnonymousAuthorshipKey(ni, secret, controller);
+    const key = anonymousAuthorshipStorageKey(ni);
+    const saved = localStorage.getItem(key)!;
+    expect(await restoreAnonymousAuthorshipKey(did)).toEqual({ secretKey: secret, controller });
+    expect(localStorage.getItem(key)).toBe(saved);
+    // Copying old ciphertext into the new slot must not bypass its exact AAD.
+    localStorage.setItem(anonymousAuthorshipStorageKey(did), saved);
+    expect(await restoreAnonymousAuthorshipKey(did)).toBeNull();
+    localStorage.removeItem(anonymousAuthorshipStorageKey(did));
+    const unrelated = 'ni:///sha-256;' + 'A'.repeat(43);
+    localStorage.setItem(anonymousAuthorshipStorageKey(unrelated), saved);
+    expect(await restoreAnonymousAuthorshipKey(unrelated)).toBeNull();
+    const tampered = JSON.parse(saved);
+    tampered.controller = createLocalSigner('Ed25519', new Uint8Array(32).fill(17)).controller;
+    localStorage.setItem(key, JSON.stringify(tampered));
+    expect(await restoreAnonymousAuthorshipKey(did)).toBeNull();
+  } finally { host.restore(); }
+});
