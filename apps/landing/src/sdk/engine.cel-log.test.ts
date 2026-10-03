@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { assetDigest } from '@originals/sdk/cel';
 import { DemoEngine } from './engine';
 import { createWebvhHostStore } from '../../server/webvh-host';
 import { installLocalStorage } from './cel3-test-helpers';
@@ -51,15 +52,15 @@ describe('CEL exposed to the demo', () => {
     restoreStorage();
   });
 
-  test('create yields a genesis entry: signed, and with no parent', async () => {
+  test('create yields a signed genesis entry carrying its history SCID', async () => {
     const engine = new DemoEngine();
     await engine.create('Chain Test', 'Artwork', SVG);
-    const { celLog } = engine.snapshot();
+    const { celLog, did } = engine.snapshot();
 
     expect(celLog.length).toBe(1);
     expect(celLog[0].type).toBe('create');
-    // Genesis is the only entry that may omit previousEvent.
-    expect(celLog[0].previousEvent).toBeUndefined();
+    // Genesis previousEvent commits to history identity, not a parent event.
+    expect(celLog[0].previousEvent).toBe(assetDigest(did));
     expect(celLog[0].proof[0]?.proofValue).toBeTruthy();
   });
 
