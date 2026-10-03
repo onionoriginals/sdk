@@ -152,6 +152,20 @@ const error = (code: string, message: string): never => {
   throw new CelError("invalid", code, message);
 };
 
+function parseMethodLog(content: Uint8Array): unknown[] {
+  try {
+    return decodeUtf8(content)
+      .trim()
+      .split("\n")
+      .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
+  } catch (cause) {
+    // Invalid method bytes are a binding failure; retain limits and other
+    // failure categories rather than relabeling every decoder failure.
+    if (!(cause instanceof CelError) || cause.status !== "invalid") throw cause;
+    return error("ASSET_WEBVH_BINDING", "WebVH method history could not be parsed");
+  }
+}
+
 // Codes the SDK's own shipped storage adapters throw when a configuration
 // mismatch makes the write deterministically impossible (e.g. LocalStorageAdapter's
 // originDomain guard), never a transient condition. Unlike an arbitrary custom
@@ -234,10 +248,7 @@ export class HostedAssets {
           "ASSET_WEB_UNAVAILABLE",
           "Existing WebVH method history is unavailable",
         );
-      const didLog = decodeUtf8(method.content)
-        .trim()
-        .split("\n")
-        .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
+      const didLog = parseMethodLog(method.content);
       await this.method(state.alias, didLog, state.assetId);
       return {
         format: "originals/web-publication",
@@ -312,10 +323,16 @@ export class HostedAssets {
     expectedAssetId: string,
   ): Promise<DIDDocument> {
     const { resolveDIDFromLog } = await import("didwebvh-ts");
-    const resolved = await resolveDIDFromLog(
-      log as Parameters<typeof resolveDIDFromLog>[0],
-      { verifier: new Ed25519Verifier() },
-    );
+    let resolved: Awaited<ReturnType<typeof resolveDIDFromLog>>;
+    try {
+      resolved = await resolveDIDFromLog(
+        log as Parameters<typeof resolveDIDFromLog>[0],
+        { verifier: new Ed25519Verifier() },
+      );
+    } catch (cause) {
+      if (cause instanceof CelError) throw cause;
+      return error("ASSET_WEBVH_BINDING", "WebVH method history could not be verified");
+    }
     const doc = resolved.doc as unknown as DIDDocument;
     if (
       resolved.did !== did ||
@@ -503,10 +520,7 @@ export class HostedAssets {
         "ASSET_WEBVH_BINDING",
         "Hosted CEL does not contain the requested alias",
       );
-    const log = decodeUtf8(method.content)
-      .trim()
-      .split("\n")
-      .map((line) => decodeValue(new TextEncoder().encode(line), "json"));
+    const log = parseMethodLog(method.content);
     const didDocument = await this.method(did, log, history.state.assetId);
     const resources = [];
     let total = 0;
@@ -515,11 +529,11 @@ export class HostedAssets {
         domain,
         prefix + "resources/" + resource.digestMultibase,
       );
-      if (!body)
-        return error(
-          "ASSET_RESOURCE_MISSING",
-          "Hosted historical resource is unavailable",
-        );
+      // Missing bytes affect resource coverage, not the authenticated hosted
+      // head. Keep their signed descriptors; verification reports missing
+      // attachments, and Bitcoin preparation requires its selected inline bytes.
+      // Returned bytes still undergo digest/reference matching below.
+      if (!body) continue;
       total += body.content.length;
       byteBudget(total);
       // The signed descriptor owns media interpretation. Transport metadata

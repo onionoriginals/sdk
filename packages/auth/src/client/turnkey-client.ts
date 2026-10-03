@@ -473,6 +473,14 @@ export const TURNKEY_ACCOUNT_ROLES: readonly TurnkeyAccountRoleSpec[] = Object.f
 );
 
 /**
+ * Bounded retry window `ensureWalletWithAccounts` uses to confirm a
+ * just-repaired account role is actually visible before returning, since a
+ * write is not always readable on the very next request.
+ */
+const WALLET_REPAIR_MAX_ATTEMPTS = 5;
+const WALLET_REPAIR_RETRY_DELAY_MS = 500;
+
+/**
  * Get a wallet account by its canonical role (curve + exact derivation
  * path), not merely by curve. Use this to fetch the DID assertion-key or
  * update-key specifically — `getKeyByCurve('CURVE_ED25519')` cannot tell
@@ -496,8 +504,12 @@ export function getKeyByRole(
   return null;
 }
 
+const WALLET_VISIBILITY_MAX_ATTEMPTS = 3;
+const WALLET_VISIBILITY_INITIAL_DELAY_MS = 500;
+
 /**
- * Create a wallet with the required accounts for DID creation
+ * Create a wallet with the required accounts for DID creation.
+ * Poll for visibility with bounded backoff after creation succeeds.
  */
 export async function createWalletWithAccounts(
   turnkeyClient: Turnkey,
@@ -505,6 +517,7 @@ export async function createWalletWithAccounts(
   onExpired?: () => void
 ): Promise<TurnkeyWallet> {
   return withTokenExpiration(async () => {
+    let walletId: string;
     try {
       const response = await turnkeyClient.apiClient().createWallet({
         walletName: 'default-wallet',
@@ -517,22 +530,10 @@ export async function createWalletWithAccounts(
         organizationId: subOrgId,
       });
 
-      const walletId = response.walletId;
+      walletId = response.walletId;
       if (!walletId) {
         throw new Error('No wallet ID returned from createWallet');
       }
-
-      // Wait for wallet to be created, then fetch it
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      const wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
-      const createdWallet = wallets.find((w) => w.walletId === walletId);
-
-      if (!createdWallet) {
-        throw new Error('Failed to fetch created wallet');
-      }
-
-      return createdWallet;
     } catch (error) {
       console.error('Error creating wallet:', error);
       throw new Error(
@@ -540,6 +541,26 @@ export async function createWalletWithAccounts(
         { cause: error }
       );
     }
+
+    // Retry only successful reads that omit this wallet, never creation or
+    // failed reads. Wait 500ms, 1s, then 2s (3.5s total, plus API latency).
+    // Keep this outside the creation catch: the wallet already exists, and
+    // fetchWallets must preserve backend errors and typed session expiry.
+    for (let attempt = 0; attempt < WALLET_VISIBILITY_MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, WALLET_VISIBILITY_INITIAL_DELAY_MS * 2 ** attempt)
+      );
+      const wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+      const createdWallet = wallets.find((w) => w.walletId === walletId);
+      if (createdWallet) {
+        return createdWallet;
+      }
+    }
+
+    throw new Error(
+      `Wallet ${walletId} was created successfully but is still not visible after ` +
+        `${WALLET_VISIBILITY_MAX_ATTEMPTS} attempts. Fetch wallets again before creating another wallet.`
+    );
   }, onExpired);
 }
 
@@ -563,13 +584,18 @@ export async function ensureWalletWithAccounts(
       }
 
       const defaultWallet = wallets[0];
-      const allAccounts = defaultWallet.accounts;
 
       // Check for each required role by its exact curve + path, not by
       // curve count: two accounts can share a curve (both DID-signing
       // accounts are CURVE_ED25519), so a wallet holding two Ed25519
       // accounts at the *wrong* paths would otherwise be miscounted as
       // complete while neither required role is actually provisioned.
+      //
+      // Scan every wallet in the sub-org, not just wallets[0]: a role that
+      // already exists in a different wallet must not be recreated here,
+      // mirroring how getKeyByRole resolves roles sub-org-wide rather than
+      // per-wallet.
+      const allAccounts = wallets.flatMap((w) => w.accounts);
       const missingRoles = TURNKEY_ACCOUNT_ROLES.filter(
         (spec) => !allAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
       );
@@ -593,7 +619,36 @@ export async function ensureWalletWithAccounts(
           organizationId: subOrgId,
         });
 
-        wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+        // A freshly created account is not always visible on the very next
+        // read (eventual consistency). Poll with a bounded number of
+        // retries instead of trusting a single immediate re-read, and fail
+        // loudly if a role this function just tried to repair is still
+        // missing once the window elapses - silently returning as if the
+        // repair succeeded would let a caller proceed with a partial key
+        // set, and a caller that retries on that silent success risks
+        // creating a duplicate account for a role whose write simply
+        // hadn't propagated yet.
+        let stillMissingRoles = missingRoles;
+        for (let attempt = 0; attempt < WALLET_REPAIR_MAX_ATTEMPTS; attempt++) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, WALLET_REPAIR_RETRY_DELAY_MS));
+          }
+          wallets = await fetchWallets(turnkeyClient, subOrgId, onExpired);
+          const refreshedAccounts = wallets.flatMap((w) => w.accounts);
+          stillMissingRoles = missingRoles.filter(
+            (spec) => !refreshedAccounts.some((acc) => acc.curve === spec.curve && acc.path === spec.path)
+          );
+          if (stillMissingRoles.length === 0) {
+            break;
+          }
+        }
+
+        if (stillMissingRoles.length > 0) {
+          throw new Error(
+            `Repaired account role(s) still not visible after ${WALLET_REPAIR_MAX_ATTEMPTS} attempts: ` +
+              stillMissingRoles.map((spec) => spec.role).join(', ')
+          );
+        }
       }
 
       return wallets;

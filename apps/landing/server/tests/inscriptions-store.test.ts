@@ -382,56 +382,6 @@ describe('deposit bindings and the cross-user reader', () => {
   });
 });
 
-/**
- * The cross-user walk behind the completion sweep (#545). It returns the reveal
- * HEX, not a pointer — the caller broadcasts it — so what it includes and what
- * it withholds is a money decision, not a convenience.
- */
-describe('pendingRevealBroadcasts', () => {
-  const dir = () => mkdtempSync(join(tmpdir(), 'is-pending-'));
-
-  test('returns a commit_broadcast record that still holds its reveal', () => {
-    const store = createInscriptionsStore({ dataDir: dir() });
-    store.create('sub-1', rec({ status: 'commit_broadcast' }));
-
-    const { pending, unreadable } = store.pendingRevealBroadcasts();
-    expect(unreadable).toEqual([]);
-    expect(pending.length).toBe(1);
-    expect(pending[0].subOrgId).toBe('sub-1');
-    expect(pending[0].record.revealTxHex).toBe('02bb');
-  });
-
-  test('skips a SUPERSEDED record: a live rebuilt pair owns its outpoint', () => {
-    const store = createInscriptionsStore({ dataDir: dir() });
-    store.create('sub-1', rec({ status: 'commit_broadcast' }));
-    store.supersede('sub-1', 'c'.repeat(64));
-    // Pushing a superseded pair's reveal would race the pair that replaced it.
-    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
-  });
-
-  test('skips every status but commit_broadcast', () => {
-    for (const status of ['signed', 'reveal_broadcast', 'confirmed']) {
-      const store = createInscriptionsStore({ dataDir: dir() });
-      store.create('sub-1', rec({ status: status as never }));
-      expect(store.pendingRevealBroadcasts().pending).toEqual([]);
-    }
-  });
-
-  test('skips a record with no reveal artifact — there is nothing to push', () => {
-    const store = createInscriptionsStore({ dataDir: dir() });
-    store.create('sub-1', rec({ status: 'commit_broadcast', revealTxHex: undefined }));
-    expect(store.pendingRevealBroadcasts().pending).toEqual([]);
-  });
-
-  test('walks every user, not just one', () => {
-    const store = createInscriptionsStore({ dataDir: dir() });
-    store.create('sub-1', rec({ status: 'commit_broadcast' }));
-    store.create('sub-2', rec({ status: 'commit_broadcast', commitTxId: 'd'.repeat(64) }));
-
-    const subs = store.pendingRevealBroadcasts().pending.map((p) => p.subOrgId).sort();
-    expect(subs).toEqual(['sub-1', 'sub-2']);
-  });
-});
 
 test('a NEW hash with no height CLEARS the stale height rather than pairing it with the wrong block', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'is-height-'));
@@ -452,6 +402,26 @@ test('a NEW hash with no height CLEARS the stale height rather than pairing it w
   expect(reloaded.confirmations).toBe(2);
   expect(reloaded.confirmedBlockHash).toBe('b'.repeat(64));
   expect(reloaded.confirmedBlockHeight).toBeUndefined();
+});
+
+test('#825: a NEW height with no hash CLEARS the stale hash rather than pairing it with the wrong block', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-hash-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+
+  // This read's height PROVES the identity changed (a reconfirmation at a
+  // new height, with the hash lookup failing independently of the height —
+  // the exact mirror image of the "NEW hash with no height" case above).
+  // Keeping the OLD hash would pair it with a height it was never actually
+  // observed at, and would misreport a later same-height read as a reorg
+  // (identical heights, unrelated stale hash) even though nothing reorged.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHeight: 105 });
+  const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
+  expect(reloaded.confirmations).toBe(2);
+  expect(reloaded.confirmedBlockHeight).toBe(105);
+  expect(reloaded.confirmedBlockHash).toBeUndefined();
 });
 
 test('an evidence-less read (same or absent hash) keeps the prior height — nothing proves the identity changed', () => {

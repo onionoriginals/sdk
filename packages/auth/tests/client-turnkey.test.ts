@@ -1,3 +1,4 @@
+import { generateP256KeyPair } from '@turnkey/crypto';
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import {
   TurnkeySessionExpiredError,
@@ -413,6 +414,7 @@ describe('client/turnkey-client', () => {
     });
 
     test('uses a caller-provided public key when supplied', async () => {
+      const clientPublicKey = generateP256KeyPair().publicKey;
       const client = createMockClient();
       const result = await completeOtp(
         client,
@@ -420,9 +422,9 @@ describe('client/turnkey-client', () => {
         '654321',
         'sub_org_abc',
         otpFixture.otpEncryptionTargetBundle,
-        { ...completeOtpOptions, publicKey: '02' + 'ab'.repeat(32) }
+        { ...completeOtpOptions, publicKey: clientPublicKey }
       );
-      expect(result.publicKey).toBe('02' + 'ab'.repeat(32));
+      expect(result.publicKey).toBe(clientPublicKey);
       expect(result.privateKey).toBeUndefined();
     });
 

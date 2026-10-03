@@ -224,6 +224,16 @@ export class BitcoinPublications {
       buildContent: async (sat) => {
         const { snapshot, resolution } = await this.resolver.observe(sat);
         if (
+          snapshot &&
+          state.layer === "webvh" &&
+          resolution.status === "accepted" &&
+          resolution.state.assetId !== state.assetId
+        )
+          invalid(
+            "ASSET_SAT_OCCUPIED",
+            "The identity sat already carries a different Original's accepted boundary; select an unoccupied sat",
+          );
+        if (
           !snapshot ||
           (state.layer === "webvh"
             ? resolution.status !== "not-found"
@@ -448,10 +458,24 @@ export class BitcoinPublications {
           "Delta does not match its Bitcoin prefix and full proposed asset",
         );
     }
-    const reveal = btc.Transaction.fromRaw(
-      Buffer.from(input.transactions.revealTxHex, "hex"),
-      { allowUnknownInputs: true, allowUnknownOutputs: true },
-    );
+    let reveal: btc.Transaction;
+    try {
+      reveal = btc.Transaction.fromRaw(
+        Buffer.from(input.transactions.revealTxHex, "hex"),
+        { allowUnknownInputs: true, allowUnknownOutputs: true },
+      );
+    } catch (cause) {
+      if (cause instanceof CelError) throw cause;
+      return invalid(
+        "ASSET_BITCOIN_PUBLICATION",
+        "Prepared reveal transaction could not be parsed",
+      );
+    }
+    if (reveal.inputsLength === 0)
+      invalid(
+        "ASSET_BITCOIN_PUBLICATION",
+        "Prepared reveal transaction has no inputs",
+      );
     const witness = reveal.getInput(0).finalScriptWitness;
     if (!witness || witness.length !== 3)
       invalid(

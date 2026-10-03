@@ -192,13 +192,15 @@ export class SignetProvider implements OrdinalsProvider {
       );
     }
     if (!this.bitcoinRpcUrl) {
-      throw new Error(
+      throw new StructuredError(
+        'ORD_RPC_NOT_CONFIGURED',
         'createInscription requires a funded signet wallet. ' +
         'Configure SignetProvider with bitcoinRpcUrl and ensure `ord wallet` is set up. ' +
         'See docs/SIGNET_SETUP.md for instructions.'
       );
     }
-    throw new Error(
+    throw new StructuredError(
+      'ORD_PROVIDER_UNSUPPORTED',
       'Programmatic inscription creation is not yet supported. ' +
       'Use the `ord wallet inscribe` CLI command to create inscriptions on signet.'
     );
@@ -211,13 +213,15 @@ export class SignetProvider implements OrdinalsProvider {
     _options?: { feeRate?: number }
   ): Promise<never> {
     if (!this.bitcoinRpcUrl) {
-      throw new Error(
+      throw new StructuredError(
+        'ORD_RPC_NOT_CONFIGURED',
         'transferInscription requires a funded signet wallet. ' +
         'Configure SignetProvider with bitcoinRpcUrl and ensure `ord wallet` is set up. ' +
         'See docs/SIGNET_SETUP.md for instructions.'
       );
     }
-    throw new Error(
+    throw new StructuredError(
+      'ORD_PROVIDER_UNSUPPORTED',
       'Programmatic inscription transfer is not yet supported. ' +
       'Use the `ord wallet send` CLI command to transfer inscriptions on signet.'
     );

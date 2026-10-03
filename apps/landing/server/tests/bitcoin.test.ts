@@ -6,6 +6,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
 import {
+  cachedOrdinalLookup,
   classifySpendableUtxos,
   createBitcoinRoutes,
   createExpiringCache,
@@ -282,6 +283,78 @@ describe('GET /api/btc/deposit (creator-pays)', () => {
     const noApi = createBitcoinRoutes({ jwtSecret: JWT, provider: fakeProvider() });
     const req = depositReq(MAINNET_ADDRESS);
     expect((await noApi.deposit(req, new URL(req.url))).status).toBe(503);
+  });
+
+  /**
+   * #807 — every one of the capped MAX_PENDING_FEE_LOOKUPS reads can succeed
+   * and pendingDeposit still stays null when there are MORE unconfirmed
+   * txids than the cap: sawThemAll compares against the full unconfirmed
+   * count, not the capped one, on purpose (see the route's own comment).
+   * Naming a "slowest" pending payment from a partial read risks pointing a
+   * creator's fee bump at the wrong transaction, which is worse than saying
+   * nothing — so this is the intended behavior, not the #807 regression, and
+   * this test pins it so it cannot silently flip back.
+   */
+  test('more unconfirmed txids than the lookup cap: no pendingDeposit, even with every capped read priced', async () => {
+    const unconfirmedTxids = [1, 2, 3, 4].map((n) => `${n}`.repeat(64));
+    const utxos = unconfirmedTxids.map((txid, i) => ({
+      txid,
+      vout: 0,
+      value: 15_000,
+      status: { confirmed: false },
+    }));
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/utxo')) {
+        return new Response(JSON.stringify(utxos), { status: 200 });
+      }
+      // Every one of the capped /tx/<txid> reads succeeds and is priced.
+      return new Response(JSON.stringify({ fee: 165, weight: 656, vin: [{ sequence: 0xffffffff }] }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    const r = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet' as const,
+      depositApi: 'https://mempool.example/api',
+      ordinals: ordinalsSaying(),
+      fetchImpl,
+    });
+    const req = depositReq(MAINNET_ADDRESS);
+    const res = await r.deposit(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pendingDeposit: unknown; unconfirmedSats: number };
+    expect(body.unconfirmedSats).toBe(15_000 * unconfirmedTxids.length);
+    expect(body.pendingDeposit).toBeNull();
+  });
+
+  test('at or under the lookup cap: pendingDeposit is populated once every read is priced', async () => {
+    const unconfirmedTxids = [1, 2, 3].map((n) => `${n}`.repeat(64));
+    const utxos = unconfirmedTxids.map((txid) => ({ txid, vout: 0, value: 15_000, status: { confirmed: false } }));
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/utxo')) {
+        return new Response(JSON.stringify(utxos), { status: 200 });
+      }
+      return new Response(JSON.stringify({ fee: 165, weight: 656, vin: [{ sequence: 0xffffffff }] }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    const r = createBitcoinRoutes({
+      jwtSecret: JWT,
+      provider: fakeProvider(),
+      network: 'mainnet' as const,
+      depositApi: 'https://mempool.example/api',
+      ordinals: ordinalsSaying(),
+      fetchImpl,
+    });
+    const req = depositReq(MAINNET_ADDRESS);
+    const res = await r.deposit(req, new URL(req.url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pendingDeposit: { txid: string } | null };
+    expect(body.pendingDeposit).not.toBeNull();
+    expect(unconfirmedTxids).toContain(body.pendingDeposit!.txid);
   });
 });
 
@@ -582,6 +655,81 @@ describe('classifySpendableUtxos reports what it did not check', () => {
   test('reports zero unchecked when everything fit the budget', async () => {
     const r = await classifySpendableUtxos(many(3), ordinalsSaying(), 25);
     expect(r.unchecked).toBe(0);
+  });
+});
+
+/**
+ * #859 — a "clean" verdict cached forever is exactly the failure mode
+ * `outpointInscriptions`'s fail-closed contract exists to prevent: a
+ * 546-sat inscribed output that looked clean only because ord's indexer
+ * lagged behind the UTXO indexer on the very first query must not stay
+ * spendable-as-fees for the rest of the process's life once the indexer
+ * catches up and would truthfully report the inscription.
+ */
+describe('cachedOrdinalLookup re-verifies a "clean" verdict, never a positive one', () => {
+  const outpoint = { txid: 'a'.repeat(64), vout: 0 };
+
+  test('a stale "clean" answer is re-checked after the TTL and upgraded once the index catches up', async () => {
+    let clock = 0;
+    let calls = 0;
+    const lagging: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        return calls === 1 ? [] : ['abc123i0'];
+      },
+    };
+    const cached = cachedOrdinalLookup(lagging, 5_000, 60_000, () => clock);
+
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(1);
+
+    // Still inside the TTL window: the stale "clean" verdict is reused, not
+    // re-queried — this is the caching behavior the fix must preserve.
+    clock += 30_000;
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(1);
+
+    // Past the TTL: the index is consulted again and the inscription is found.
+    clock += 31_000;
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    expect(calls).toBe(2);
+  });
+
+  test('once an inscription is observed, it is never dropped even long after the clean TTL would have expired', async () => {
+    let clock = 0;
+    let calls = 0;
+    const flaky: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        // A real answer never flips from inscribed back to clean for an
+        // unspent output; this stub deliberately would, so the test proves
+        // the cache — not the source — is what keeps the positive verdict.
+        return calls === 1 ? ['abc123i0'] : [];
+      },
+    };
+    const cached = cachedOrdinalLookup(flaky, 5_000, 1_000, () => clock);
+
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    clock += 10_000; // far past the clean TTL
+    expect(await cached.outpointInscriptions(outpoint)).toEqual(['abc123i0']);
+    expect(calls).toBe(1);
+  });
+
+  test('a lookup failure is cached as neither clean nor inscribed', async () => {
+    let clock = 0;
+    let calls = 0;
+    const flaky: OrdinalLookup = {
+      async outpointInscriptions() {
+        calls++;
+        if (calls === 1) throw new Error('add-on unavailable');
+        return [];
+      },
+    };
+    const cached = cachedOrdinalLookup(flaky, 5_000, 60_000, () => clock);
+
+    await expect(cached.outpointInscriptions(outpoint)).rejects.toThrow('add-on unavailable');
+    expect(await cached.outpointInscriptions(outpoint)).toEqual([]);
+    expect(calls).toBe(2);
   });
 });
 

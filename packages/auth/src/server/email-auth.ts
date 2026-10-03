@@ -9,7 +9,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { StructuredError } from '@originals/sdk';
 import type { EmailAuthSession, InitiateAuthResult, VerifyAuthResult } from '../types.js';
-import { encryptOtpCode } from '../otp-encryption.js';
+import { encryptOtpCode, validateOtpInputs } from '../otp-encryption.js';
+import { AUTH_EMAIL_ERROR_CODES } from '../error-codes.js';
 import {
   extractTurnkeyErrorCode,
   getOrCreateTurnkeySubOrg,
@@ -18,6 +19,8 @@ import {
   type SubOrgLock,
 } from './turnkey-client.js';
 
+export { AUTH_EMAIL_ERROR_CODES } from '../error-codes.js';
+
 // Session timeout (15 minutes to match Turnkey OTP)
 const SESSION_TIMEOUT = 15 * 60 * 1000;
 
@@ -25,29 +28,6 @@ const SESSION_TIMEOUT = 15 * 60 * 1000;
 // Limits local brute-forcing of the 6-digit code instead of relying solely
 // on Turnkey's server-side throttling.
 const MAX_OTP_ATTEMPTS = 5;
-
-/**
- * Stable error codes for `initiateEmailAuth`/`verifyEmailAuth` failures
- * (#747). `otpVerifyTransientFailure` is distinct from `otpCodeIncorrect`:
- * see {@link isOtpVerifyTransientFailure}.
- */
-export const AUTH_EMAIL_ERROR_CODES = {
-  invalidEmailFormat: 'AUTH_EMAIL_INVALID_FORMAT',
-  otpInitFailed: 'AUTH_OTP_INIT_FAILED',
-  otpInitBundleMissing: 'AUTH_OTP_INIT_BUNDLE_MISSING',
-  sessionInvalid: 'AUTH_SESSION_INVALID',
-  sessionExpired: 'AUTH_SESSION_EXPIRED',
-  sessionStateInvalid: 'AUTH_SESSION_STATE_INVALID',
-  otpCodeFormatInvalid: 'AUTH_OTP_CODE_FORMAT_INVALID',
-  otpEncryptionFailed: 'AUTH_OTP_ENCRYPTION_FAILED',
-  otpCodeIncorrect: 'AUTH_OTP_CODE_INCORRECT',
-  otpVerifyTransientFailure: 'AUTH_OTP_VERIFY_TRANSIENT_FAILURE',
-  otpAttemptsExceeded: 'AUTH_OTP_ATTEMPTS_EXCEEDED',
-  subOrgProvisionFailed: 'AUTH_SUBORG_PROVISION_FAILED',
-  sessionAlreadyVerified: 'AUTH_SESSION_ALREADY_VERIFIED',
-  otpVerifyInProgress: 'AUTH_OTP_VERIFY_IN_PROGRESS',
-  sessionStorageClaimRequired: 'AUTH_SESSION_STORAGE_CLAIM_REQUIRED',
-} as const;
 
 /**
  * True if `error` is a `StructuredError` reporting a transient/ambiguous
@@ -283,8 +263,8 @@ export async function initiateEmailAuth(
  */
 export interface VerifyEmailAuthOptions {
   /**
-   * Compressed P-256 public key (hex) supplied by the client, to which the
-   * Turnkey verification token will be bound. When provided, the matching
+   * Compressed or uncompressed P-256 public key (hex) supplied by the client.
+   * The Turnkey verification token is bound to it. When provided, the matching
    * private key never leaves the client: the verify result contains no
    * `privateKey`, so nothing sensitive transits the HTTP response.
    *
@@ -362,16 +342,8 @@ export async function verifyEmailAuth(
     );
   }
 
-  // Reject malformed codes before hitting Turnkey (and before they consume
-  // an attempt): initiateEmailAuth always requests a 6-digit numeric OTP
-  // (otpLength: 6, alphanumeric: false), so anything else is definitely
-  // wrong. Keep in sync with the initOtp configuration above.
-  if (!/^\d{6}$/.test(code)) {
-    throw new StructuredError(
-      AUTH_EMAIL_ERROR_CODES.otpCodeFormatInvalid,
-      'Invalid verification code format'
-    );
-  }
+  // Reject malformed inputs before claiming the session or consuming an attempt.
+  validateOtpInputs(code, options?.publicKey);
 
   // Single-use / concurrency guard (#710, #819): claim the session before
   // doing anything else that could be replayed or raced.

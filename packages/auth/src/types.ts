@@ -44,6 +44,10 @@ export interface AuthMiddlewareOptions {
   cookieName?: string;
   /** JWT secret (default: process.env.JWT_SECRET) */
   jwtSecret?: string;
+  /** Expected JWT issuer; must match signToken (default: 'originals-auth'). */
+  issuer?: string;
+  /** Expected JWT audience; must match signToken (default: 'originals-api'). */
+  audience?: string;
 }
 
 /**

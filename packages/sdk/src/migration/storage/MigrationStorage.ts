@@ -18,7 +18,7 @@
  * without widening the public StorageAdapter interface.
  */
 
-import { OriginalsConfig } from '../../types/index.js';
+import type { OriginalsConfig } from '../../types/index.js';
 
 /**
  * Logical domain under which all migration-internal objects are stored.
@@ -27,16 +27,20 @@ import { OriginalsConfig } from '../../types/index.js';
  */
 export const MIGRATION_STORAGE_DOMAIN = 'originals-migration';
 
+// Buffer.toString('utf8') preserves a leading BOM; TextDecoder strips it by default.
+const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+const utf8Encoder = new TextEncoder();
+
 /**
  * Normalize the possible shapes a storage adapter may return
  * (GetObjectResult, Buffer/Uint8Array, or a raw string) to utf8 text.
  */
 export function storedDataToString(data: unknown): string {
   if (typeof data === 'string') return data;
-  if (data instanceof Uint8Array) return Buffer.from(data).toString('utf8');
-  const content = (data as { content?: Buffer | Uint8Array | string }).content;
+  if (data instanceof Uint8Array) return utf8Decoder.decode(data);
+  const content = (data as { content?: Uint8Array | string }).content;
   if (typeof content === 'string') return content;
-  if (content instanceof Uint8Array) return Buffer.from(content).toString('utf8');
+  if (content instanceof Uint8Array) return utf8Decoder.decode(content);
   throw new Error('Unsupported storage adapter result shape');
 }
 
@@ -58,7 +62,7 @@ interface CanonicalAdapterShape {
 }
 
 interface LegacyAdapterShape {
-  put?: (key: string, data: Buffer | string, options?: { contentType?: string }) => Promise<unknown>;
+  put?: (key: string, data: Uint8Array | string, options?: { contentType?: string }) => Promise<unknown>;
   get?: (key: string) => Promise<unknown>;
   delete?: (key: string) => Promise<unknown>;
   list?: (prefix: string) => Promise<string[]>;
@@ -126,7 +130,10 @@ export function resolveMigrationStorage(config: OriginalsConfig): MigrationStora
         });
         return;
       }
-      await legacy.put!(key, Buffer.from(text, 'utf8'), { contentType: 'application/json' });
+      const bytes = utf8Encoder.encode(text);
+      // Existing Node adapters may depend on Buffer methods such as toString('utf8').
+      const content = typeof Buffer === 'undefined' ? bytes : Buffer.from(bytes);
+      await legacy.put!(key, content, { contentType: 'application/json' });
     },
 
     async getText(key: string): Promise<string | null> {

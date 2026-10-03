@@ -726,15 +726,23 @@ export function resolveSat(
         "Reveal txid is not at the observed block position",
       );
     const contentDigest = digestBytes(publication.body.bytes);
-    const fingerprint = canonicalizeValue({
-      position,
-      type: publication.body.mediaType,
-      content: contentDigest,
-      metadata:
-        publication.body.metadata === null
-          ? null
-          : digestBytes(publication.body.metadata),
-    });
+    let fingerprint: string;
+    try {
+      fingerprint = canonicalizeValue({
+        position,
+        type: publication.body.mediaType,
+        content: contentDigest,
+        metadata:
+          publication.body.metadata === null
+            ? null
+            : digestBytes(publication.body.metadata),
+      });
+    } catch {
+      // Provider objects can carry non-JSON extras even when the required
+      // position fields are valid. Unusable observation evidence is a failed
+      // resolution, not ignorable inscription content or an uncaught error.
+      return failure("incomplete", "Publication observation is not JSON-safe");
+    }
     const existing = seen.get(publication.id);
     if (existing !== undefined) {
       if (existing !== fingerprint)

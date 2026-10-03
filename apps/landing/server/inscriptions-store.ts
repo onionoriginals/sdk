@@ -207,9 +207,10 @@ export interface InscriptionsStore {
   ): void;
   /**
    * Guarded status transition for a caller that read the record, then
-   * AWAITED a network call, then decided a new status (#677, #694): both
-   * `bitcoin-reconciliation.ts` and `inscription-completion-sweep.ts` take a
-   * snapshot, spend real time on a provider round trip, and only then write —
+   * AWAITED a network call, then decided a new status (#677, #694):
+   * `bitcoin-reconciliation.ts`'s interactive and background reconciliation
+   * passes both take a snapshot, spend real time on a provider round trip,
+   * and only then write —
    * during which a concurrent reconciliation pass for the same record (an
    * overlapping poll, or the background sweep) can already have moved it.
    * Writing the old decision back at that point would silently clobber the
@@ -281,23 +282,6 @@ export interface InscriptionsStore {
    * silently accumulate. Read-only; acting on them stays with the per-user
    * rebroadcast route.
    */
-  /**
-   * Every record across ALL users that is waiting on a reveal broadcast:
-   * status `commit_broadcast`, a persisted reveal, not superseded.
-   *
-   * Exists so the server can finish an inscription without a browser tab
-   * (#545). The per-user list poll already does this, but it only runs when a
-   * creator is looking — so a confirmed commit whose creator closed the tab is
-   * spent money and no inscription until they happen to return.
-   *
-   * Returns the reveal hex: the caller broadcasts it, so it needs the artifact,
-   * not just a pointer to it. Unreadable files are reported, never swallowed —
-   * that file holds the only copy of a signed reveal.
-   */
-  pendingRevealBroadcasts(): {
-    pending: Array<{ subOrgId: string; record: InscriptionRecord }>;
-    unreadable: string[];
-  };
   sweepStale(olderThanMs: number): {
     stale: Array<{
       subOrgId: string;
@@ -636,26 +620,33 @@ export function createInscriptionsStore(opts: {
     // reorg needs to be detected against, permanently disabling that
     // detection until the next read happens to include a value again.
     //
-    // But a NEW hash is a NEW block identity, whether or not this read's
-    // height lookup also succeeded (QuickNode resolves them via separate
-    // RPC calls, so one can fail independently of the other). Pairing that
-    // new hash with the OLD block's still-sticky height would describe an
-    // identity that was never actually observed — worse than an absent
-    // height, since a caller can't tell "unknown" from "verified same as
-    // before". So height is cleared (not left stale) exactly when this
-    // read's hash proves the identity changed but doesn't say to what
-    // height; otherwise (hash unchanged, or this read has no hash opinion
-    // at all) the previous height is exactly as valid as before.
+    // But a NEW hash or a NEW height is a NEW block identity, whether or not
+    // this read's OTHER lookup also succeeded (QuickNode resolves them via
+    // separate RPC calls, so one can fail independently of the other).
+    // Pairing a fresh value for one with the OLD block's still-sticky value
+    // for the other would describe an identity that was never actually
+    // observed together — worse than reporting the other as unknown, since a
+    // caller can't tell "unknown" from "verified same as before". So each
+    // field is cleared (not left stale) exactly when the OTHER field's fresh
+    // reading proves the identity changed but this read has no opinion on
+    // this field; otherwise (unchanged, or this read has no opinion on
+    // either field) the previous value is exactly as valid as before. Both
+    // "changed" flags are computed from the values on entry, before either
+    // field is written, so setting one doesn't affect the other's check.
     if (status === 'confirmed') {
+      const freshHeight = evidence?.blockHeight;
       const freshHash = evidence?.blockHash;
-      const identityChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
-      if (evidence?.blockHeight !== undefined) {
-        rec.confirmedBlockHeight = evidence.blockHeight;
-      } else if (identityChanged) {
+      const heightChanged = freshHeight !== undefined && freshHeight !== rec.confirmedBlockHeight;
+      const hashChanged = freshHash !== undefined && freshHash !== rec.confirmedBlockHash;
+      if (freshHeight !== undefined) {
+        rec.confirmedBlockHeight = freshHeight;
+      } else if (hashChanged) {
         rec.confirmedBlockHeight = undefined;
       }
       if (freshHash !== undefined) {
         rec.confirmedBlockHash = freshHash;
+      } else if (heightChanged) {
+        rec.confirmedBlockHash = undefined;
       }
     }
   }
@@ -753,35 +744,6 @@ export function createInscriptionsStore(opts: {
     findByOutpoints(subOrgId, outpoints) {
       const wanted = new Set(outpoints);
       return readAll(subOrgId).filter((r) => !r.superseded && outpointsOf(r).some((o) => wanted.has(o)));
-    },
-    pendingRevealBroadcasts() {
-      const dir = join(opts.dataDir, 'inscriptions');
-      const unreadable: string[] = [];
-      const pending: Array<{ subOrgId: string; record: InscriptionRecord }> = [];
-      if (!existsSync(dir)) return { pending, unreadable };
-      for (const file of readdirSync(dir)) {
-        if (!file.endsWith('.json')) continue;
-        const subOrgId = file.slice(0, -'.json'.length);
-        let recs: InscriptionRecord[];
-        try {
-          const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as unknown;
-          if (!Array.isArray(parsed)) throw new Error('RECORDS_UNREADABLE');
-          recs = parsed as InscriptionRecord[];
-        } catch {
-          unreadable.push(subOrgId);
-          continue;
-        }
-        for (const r of recs) {
-          // Superseded pairs are excluded: a live rebuilt pair owns their
-          // funding outpoint, and pushing theirs would race it. The list poll
-          // reinstates those on evidence; this sweep does not adjudicate.
-          if (r.superseded) continue;
-          if (r.status !== 'commit_broadcast') continue;
-          if (!r.revealTxHex) continue;
-          pending.push({ subOrgId, record: r });
-        }
-      }
-      return { pending, unreadable };
     },
     sweepStale(olderThanMs) {
       const dir = join(opts.dataDir, 'inscriptions');

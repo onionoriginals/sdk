@@ -122,6 +122,191 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(broadcastCalls).toEqual(['02bb']); // only the reveal, not a re-push of the commit
   });
 
+  test('the background sweep completing a stuck reveal logs it to the money log (#812)', async () => {
+    const commit = '1a'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    // Only the background sweep is "nobody watching" (#545); go through it,
+    // not the interactive reconcileUser path, so the event is attributed
+    // correctly.
+    await reconciler.sweepInscriptions();
+
+    const completed = moneyEvents.find((m) => m.event === 'inscription_sweep_completed');
+    expect(completed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+  });
+
+  test('the background sweep also logs a failed push to the money log, not swallowed', async () => {
+    const commit = '1b'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async () => 'bad-txns-inputs-missingorspent',
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_push_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit, reason: 'bad-txns-inputs-missingorspent' });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast');
+  });
+
+  test('an interactive poll completing the same stuck reveal is NOT mislabeled as an unattended sweep', async () => {
+    // Greptile flagged this as a real bug in an earlier revision: the
+    // interactive GET /api/btc/inscribe poll shares reconcileRecords with
+    // the background sweep, so without an origin distinction, a user
+    // watching their own screen would be logged as "nobody watching".
+    const commit = '1c'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    const res = await reconciler.reconcileUser('sub-1'); // the interactive path, no origin argument
+    expect(res.status).toBe(200);
+    expect(store.get('sub-1', commit)!.status).toBe('reveal_broadcast'); // still completed…
+    expect(moneyEvents.filter((m) => m.event.startsWith('inscription_sweep_'))).toEqual([]); // …but not sweep-attributed
+  });
+
+  test('the background sweep logs a deliberate no-op wait, not just completions and failures', async () => {
+    const commit = '1d'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast', updatedAt: new Date(SWEEP_NOW).toISOString() }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW, // well within REVEAL_REBROADCAST_AFTER_MS of updatedAt above
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const waiting = moneyEvents.find((m) => m.event === 'inscription_sweep_waiting');
+    expect(waiting?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast'); // untouched, deliberately
+  });
+
+  test('the background sweep logs a lookup failure rather than silently skipping it', async () => {
+    const commit = '1e'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => { throw new Error('indexer unavailable'); } },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_lookup_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+  });
+
+  test('the background sweep logs a failed commit rebroadcast, not just reveal pushes', async () => {
+    const commit = '1f'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    // Past the rebroadcast window and still unconfirmed: the loop attempts to
+    // re-push the commit first, and that push fails.
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'commit_broadcast',
+      updatedAt: new Date(SWEEP_NOW - 60 * 60_000).toISOString(),
+    }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      broadcastIdempotent: async () => 'bad-txns-inputs-missingorspent',
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW,
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const failed = moneyEvents.find((m) => m.event === 'inscription_sweep_push_failed');
+    expect(failed?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit, leg: 'commit' });
+    expect(store.get('sub-1', commit)!.status).toBe('commit_broadcast'); // untouched
+  });
+
+  test('the background sweep logs a race when a concurrent pass wins the commit_broadcast transition', async () => {
+    const commit = '2a'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({
+      commitTxId: commit, status: 'signed',
+      updatedAt: new Date(SWEEP_NOW - 60 * 60_000).toISOString(),
+    }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: false }) },
+      // A concurrent pass moves the record out from under this one between
+      // the commit broadcast and this pass's own guarded write (#677/#694).
+      broadcastIdempotent: async (txHex) => {
+        if (txHex === '02aa') store.setStatus('sub-1', commit, 'reveal_broadcast');
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+      now: () => SWEEP_NOW,
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const raced = moneyEvents.find((m) => m.event === 'inscription_sweep_raced');
+    expect(raced?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(store.get('sub-1', commit)!.status).toBe('reveal_broadcast'); // the concurrent pass's result stands
+  });
+
+  test('the background sweep logs a race when a concurrent pass wins the reveal_broadcast transition', async () => {
+    const commit = '2b'.repeat(32);
+    const moneyEvents: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit, status: 'commit_broadcast' }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      // A concurrent pass retires the record between this pass's reveal push
+      // and its own guarded write.
+      broadcastIdempotent: async (txHex) => {
+        if (txHex === '02bb') store.setStatus('sub-1', commit, 'confirmed', { confirmations: 6 });
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: (event, fields) => { moneyEvents.push({ event, fields }); },
+    });
+
+    await reconciler.sweepInscriptions();
+
+    const raced = moneyEvents.find((m) => m.event === 'inscription_sweep_raced');
+    expect(raced?.fields).toMatchObject({ sub: 'sub-1', commitTxId: commit });
+    expect(moneyEvents.some((m) => m.event === 'inscription_sweep_completed')).toBe(false);
+  });
+
   test('a confirmed reveal below the recovery horizon stays confirmed, not retired', async () => {
     const commit = '2'.repeat(64);
     const { store, reconciler } = harness({
@@ -148,6 +333,55 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.status).toBe('confirmed');
     expect(stored.retired).toBe(true);
     expect(stored.revealTxHex).toBeUndefined(); // retiring drops the hex
+  });
+
+  // #777 — `settled` must track `retired` alone, matching the resubmission
+  // path's `settled: rec.retired === true`, not the raw confirmations depth.
+  // `reconcileRecords` spends a shared per-poll lookup budget rotated across
+  // categories, so a `confirmed` record whose on-disk `confirmations` already
+  // meets the recovery threshold can have its own `retire()` turn deferred
+  // to a later poll — no reorg or `supersede()` required to reach that state.
+  test('settled tracks retired, not the raw confirmations depth: a confirmed record the shared lookup budget has not reached this poll is not reported settled', async () => {
+    const target = 'e'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+      recoveryConfirmations: 6,
+      now: () => Date.parse('2026-08-01T00:00:30.000Z'),
+    });
+    // Four `commit_broadcast` decoys exhaust the shared per-poll lookup
+    // budget's `stuck` share before the `confirm` category is reached.
+    for (let i = 0; i < 4; i++) {
+      const id = `s${i}`.padEnd(64, '0');
+      store.create('sub-1', rec({
+        commitTxId: id, status: 'commit_broadcast',
+        createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z',
+      }));
+    }
+    // Target: already confirmed at/above the recovery threshold, but never
+    // retired — plausible leftover state, no reorg/supersede needed.
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed', createdAt: '2026-08-01T00:00:10.000Z' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 10, blockHeight: 100, blockHash: 'f'.repeat(64) });
+    // A newer `reveal_broadcast` record consumes the single reserved
+    // `confirm`-category lookup this poll, so `target`'s own turn is never
+    // reached.
+    const decoy = 'd'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: decoy, status: 'reveal_broadcast', createdAt: '2026-08-01T00:00:20.000Z' }));
+
+    const res = await reconciler.reconcileUser('sub-1');
+    const { inscriptions } = (await res.json()) as {
+      inscriptions: Array<{ commitTxId: string; settled?: boolean }>;
+    };
+    const targetEntry = inscriptions.find((r) => r.commitTxId === target)!;
+    expect(targetEntry.settled).toBe(false);
+    expect(store.get('sub-1', target)!.retired).toBeUndefined();
+    expect(store.get('sub-1', target)!.revealTxHex).toBeDefined();
+
+    // Once `retire()` actually runs for this record, `settled` agrees —
+    // matching `bitcoin.ts`'s resubmission path for the exact same record.
+    store.retire('sub-1', target);
+    const after = await reconciler.reconcileUser('sub-1');
+    const afterBody = (await after.json()) as { inscriptions: Array<{ commitTxId: string; settled?: boolean }> };
+    expect(afterBody.inscriptions.find((r) => r.commitTxId === target)!.settled).toBe(true);
   });
 
   test('a superseded pair whose commit confirmed is reinstated and its rival retired', async () => {
@@ -320,6 +554,99 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.retired).toBe(true);
     expect(stored.status).toBe('signed');
     expect(stored.revealTxHex).toBeUndefined();
+  });
+
+  // #777 — the `supersededPending` pass only ever handled POSITIVE evidence
+  // on a superseded record's own commit (reclaim once it confirms); a
+  // negative read was a silent no-op (`if (!st?.confirmed) continue`), so a
+  // record that reached `status: 'confirmed'` and was later superseded by a
+  // rival kept reporting `confirmed`/`settled: true` forever, even after its
+  // own commit stopped confirming (a deeper reorg than the one that
+  // superseded it). These regressions pin the negative-evidence demotion
+  // that closes that gap, mirroring the #677 guard already covering
+  // `liveUnconfirmed` below, but keeping `superseded: true` since this pair
+  // already lost the outpoint race.
+
+  test("a superseded pair's stale confirmed status is demoted once its own commit stops confirming", async () => {
+    const target = '6'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+    });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 3, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+    const entry = inscriptions.find((r) => r.commitTxId === target)!;
+    expect(entry.status).toBe('reveal_broadcast');
+    expect(entry.superseded).toBe(true);
+    const stored = store.get('sub-1', target)!;
+    expect(stored.confirmations).toBeUndefined(); // cleared on the demotion
+    // Block identity stays sticky so a later reconfirmation can still be
+    // compared against it.
+    expect(stored.confirmedBlockHeight).toBe(100);
+    expect(stored.confirmedBlockHash).toBe('a'.repeat(64));
+  });
+
+  test("a provider outage while checking a superseded confirmed pair's commit preserves its last observed state", async () => {
+    const target = '7'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 4, blockHeight: 50, blockHash: 'b'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => { throw new Error('provider down'); } },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', target)!;
+    expect(stored.status).toBe('confirmed'); // not demoted on a mere outage
+    expect(stored.confirmations).toBe(4);
+    expect(stored.superseded).toBe(true);
+  });
+
+  test("a concurrent reconfirmation landing during the status lookup is not clobbered by this pass's own stale negative read", async () => {
+    const target = '8'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 2, blockHeight: 10, blockHash: 'c'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: {
+        getTransactionStatus: async () => {
+          // A concurrent pass (an overlapping poll, or the background sweep)
+          // writes fresher confirmation evidence while THIS pass's own
+          // status lookup for the same commit is still in flight.
+          store.setStatus('sub-1', target, 'confirmed', {
+            confirmations: 5, blockHeight: 20, blockHash: 'd'.repeat(64),
+          });
+          return { confirmed: false };
+        },
+      },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', target)!;
+    // The concurrent pass's fresher confirmation must stand: this pass's own
+    // negative read, taken before that write landed, must not demote it.
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(5);
+    expect(stored.confirmedBlockHeight).toBe(20);
+    expect(stored.superseded).toBe(true);
   });
 
   // #677 — the demotion decision must read a FRESH per-record snapshot, not
@@ -584,6 +911,314 @@ describe('createInscriptionReconciler: status transitions', () => {
     await listOf(reconciler, 'sub-1');
     expect(broadcastCalls).toEqual(['02aa', '02bb']);
   });
+
+  // #742 — the write-skip must compare against the EFFECTIVE post-`applyStatus`
+  // block identity, not the raw provider fields: `blockHeight` is resolved via
+  // a separate best-effort RPC (`QuickNodeProvider.getTransactionStatus`) and
+  // can legitimately come back omitted on any given poll even though nothing
+  // about the confirmed record actually changed.
+  describe('a confirmed record with an unchanged effective block identity is not rewritten (#742)', () => {
+    function pollingHarness(
+      responses: Array<{ confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string }>,
+      now?: () => number
+    ) {
+      const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-writestorm-')), now });
+      let poll = 0;
+      const provider: ReconciliationProvider = {
+        async getTransactionStatus() {
+          const res = responses[Math.min(poll, responses.length - 1)];
+          poll++;
+          return res;
+        },
+      };
+      const reconciler = createInscriptionReconciler({
+        store, provider, broadcastIdempotent: async () => null, unreadableRecords: () => null,
+        money: silentMoney, now, recoveryConfirmations: 6,
+      });
+      return { store, reconciler };
+    }
+
+    test('an omitted blockHeight on an otherwise-unchanged poll performs no write', async () => {
+      const commit = '7'.repeat(64);
+      const hash = 'a'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: hash },
+        { confirmed: true, confirmations: 2, blockHash: hash }, // blockHeight omitted
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll2 = store.get('sub-1', commit)!;
+
+      expect(afterPoll2.updatedAt).toBe(afterPoll1);
+      expect(afterPoll2.confirmedBlockHeight).toBe(100);
+      expect(afterPoll2.confirmedBlockHash).toBe(hash);
+    });
+
+    test('repeated omitted-height polls perform no repeated write', async () => {
+      const commit = '8'.repeat(64);
+      const hash = 'b'.repeat(64);
+      let clock = 0;
+      const { store, reconciler } = pollingHarness(
+        [
+          { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+          { confirmed: true, confirmations: 2, blockHash: hash },
+        ],
+        () => clock
+      );
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast', updatedAt: new Date(0).toISOString() }));
+
+      await listOf(reconciler, 'sub-1'); // establishes the sticky height/hash
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      for (let i = 0; i < 4; i++) {
+        clock += 15_000;
+        await listOf(reconciler, 'sub-1');
+      }
+
+      expect(store.get('sub-1', commit)!.updatedAt).toBe(afterPoll1);
+    });
+
+    test('a changed hash with an omitted height performs exactly one write and clears the stale height', async () => {
+      const commit = '9'.repeat(64);
+      const oldHash = 'c'.repeat(64);
+      const newHash = 'd'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100, blockHash: oldHash },
+        { confirmed: true, confirmations: 2, blockHash: newHash }, // new identity, no height supplied
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      await listOf(reconciler, 'sub-1');
+
+      const stored = store.get('sub-1', commit)!;
+      expect(stored.confirmedBlockHash).toBe(newHash);
+      expect(stored.confirmedBlockHeight).toBeUndefined();
+    });
+
+    test('a hash omitted entirely (older/no-hash provider) with unchanged height performs no write', async () => {
+      const commit = 'a'.repeat(64);
+      const { store, reconciler } = pollingHarness([
+        { confirmed: true, confirmations: 2, blockHeight: 100 },
+        { confirmed: true, confirmations: 2, blockHeight: 100 }, // no hash on either poll
+      ]);
+      store.create('sub-1', rec({ commitTxId: commit, status: 'reveal_broadcast' }));
+
+      await listOf(reconciler, 'sub-1');
+      const afterPoll1 = store.get('sub-1', commit)!.updatedAt;
+
+      await listOf(reconciler, 'sub-1');
+      expect(store.get('sub-1', commit)!.updatedAt).toBe(afterPoll1);
+    });
+  });
+});
+
+describe('createInscriptionReconciler: confirmed-commit retry throttle (#861)', () => {
+  for (const status of ['signed', 'commit_broadcast'] as const) {
+    test(`${status}: first attempt is immediate, rejected retries respect the boundary and recover`, async () => {
+      let clock = 0;
+      let rejected = true;
+      const commit = '9'.repeat(64);
+      const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')), now: () => clock });
+      const calls: string[] = [];
+      const deps = {
+        store,
+        provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+        broadcastIdempotent: async (hex: string | undefined) => {
+          calls.push(hex!);
+          return rejected ? 'rejected' : null;
+        },
+        unreadableRecords: () => null,
+        money: silentMoney,
+        now: () => clock,
+        revealRebroadcastAfterMs: 1000,
+      };
+      let reconciler = createInscriptionReconciler(deps);
+      store.create('sub-1', rec({ commitTxId: commit, status, updatedAt: new Date(clock).toISOString() }));
+      expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+      expect(calls).toEqual(['02bb']);
+      expect(store.get('sub-1', commit)!.status).toBe(status);
+      expect(store.get('sub-1', commit)!.rebroadcastAt).toBe(new Date(0).toISOString());
+      // Recreating the reconciler must preserve the durable backoff.
+      reconciler = createInscriptionReconciler(deps);
+      for (clock of [0, 1, 999]) await reconciler.reconcileUser('sub-1');
+      expect(calls).toEqual(['02bb']);
+      clock = 1000;
+      await reconciler.reconcileUser('sub-1');
+      expect(calls).toEqual(['02bb', '02bb']);
+      expect(store.get('sub-1', commit)!.updatedAt).toBe(new Date(0).toISOString());
+      expect(store.get('sub-1', commit)!.revealTxHex).toBe('02bb');
+      clock = 1999;
+      await reconciler.reconcileUser('sub-1');
+      expect(calls).toHaveLength(2);
+      rejected = false;
+      clock = 2000;
+      await reconciler.reconcileUser('sub-1');
+      expect(calls).toEqual(['02bb', '02bb', '02bb']);
+      expect(store.get('sub-1', commit)!.status).toBe('reveal_broadcast');
+    });
+  }
+
+  test('commit confirmation preserves an unconfirmed attempt window and retries at the boundary', async () => {
+    let clock = 1000;
+    let confirmed = false;
+    const commit = '9'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')), now: () => clock });
+    store.create('sub-1', rec({ commitTxId: commit, updatedAt: new Date(0).toISOString() }));
+    const calls: string[] = [];
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed }) },
+      broadcastIdempotent: async (hex) => {
+        calls.push(hex!);
+        return hex === '02bb' && !confirmed ? 'rejected' : null;
+      },
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => clock,
+      revealRebroadcastAfterMs: 1000,
+    });
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+    expect(calls).toEqual(['02aa', '02bb']);
+    const attempted = store.get('sub-1', commit)!;
+    expect(attempted.status).toBe('commit_broadcast');
+    expect(attempted.rebroadcastAt).toBe(new Date(1000).toISOString());
+
+    confirmed = true;
+    for (clock of [1001, 1999]) {
+      expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+      expect(calls).toEqual(['02aa', '02bb']);
+      expect(store.get('sub-1', commit)).toEqual(attempted);
+    }
+    clock = 2000;
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+    expect(calls).toEqual(['02aa', '02bb', '02bb']);
+    expect(store.get('sub-1', commit)).toMatchObject({
+      status: 'reveal_broadcast',
+      rebroadcastAt: new Date(2000).toISOString(),
+      signedCommitHex: '02aa',
+      revealTxHex: '02bb',
+    });
+  });
+
+  test('overlapping status lookups share the persisted retry window', async () => {
+    const commit = '9'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')), now: () => 0 });
+    store.create('sub-1', rec({ commitTxId: commit }));
+    const pending: Array<(status: { confirmed: boolean }) => void> = [];
+    let calls = 0;
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: () => new Promise((resolve) => pending.push(resolve)) },
+      broadcastIdempotent: async () => { calls++; return 'rejected'; },
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+      revealRebroadcastAfterMs: 1000,
+    });
+    const first = reconciler.reconcileUser('sub-1');
+    const second = reconciler.reconcileUser('sub-1');
+    expect(pending).toHaveLength(2);
+    pending[0]({ confirmed: true });
+    await first;
+    pending[1]({ confirmed: true });
+    await second;
+    expect(calls).toBe(1);
+  });
+
+  test('successful reveal cannot overwrite a concurrent confirmation', async () => {
+    const commit = '9'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')), now: () => 0 });
+    store.create('sub-1', rec({ commitTxId: commit }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async () => {
+        store.setStatus('sub-1', commit, 'confirmed', { confirmations: 6 });
+        store.retire('sub-1', commit);
+        return null;
+      },
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+    expect(store.get('sub-1', commit)!.status).toBe('confirmed');
+    expect(store.get('sub-1', commit)!.retired).toBe(true);
+  });
+
+  for (const transition of ['confirmed', 'superseded', 'retired'] as const) {
+    test(`a concurrent ${transition} record is skipped after the commit lookup`, async () => {
+      const commit = '9'.repeat(64);
+      const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+      store.create('sub-1', rec({ commitTxId: commit }));
+      let calls = 0;
+      const reconciler = createInscriptionReconciler({
+        store,
+        provider: { getTransactionStatus: async () => {
+          if (transition === 'confirmed') store.setStatus('sub-1', commit, 'confirmed', { confirmations: 1 });
+          else if (transition === 'superseded') store.supersede('sub-1', commit);
+          else store.retire('sub-1', commit);
+          return { confirmed: true };
+        } },
+        broadcastIdempotent: async () => { calls++; return null; },
+        unreadableRecords: () => null,
+        money: silentMoney,
+      });
+      expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+      expect(calls).toBe(0);
+      expect(store.get('sub-1', commit)!.rebroadcastAt).toBeUndefined();
+    });
+  }
+
+  test('a thrown broadcast failure is journaled and throttled too', async () => {
+    let clock = 0;
+    let calls = 0;
+    const commit = '9'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')), now: () => clock });
+    store.create('sub-1', rec({ commitTxId: commit }));
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async () => { calls++; throw new Error('connection lost'); },
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => clock,
+      revealRebroadcastAfterMs: 1000,
+    });
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(503);
+    clock = 999;
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
+    expect(calls).toBe(1);
+    clock = 1000;
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(503);
+    expect(calls).toBe(2);
+    expect(store.get('sub-1', commit)!.revealTxHex).toBe('02bb');
+  });
+
+  test('a failed attempt timestamp write prevents broadcasting', async () => {
+    const commit = '9'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: commit }));
+    let calls = 0;
+    const reconciler = createInscriptionReconciler({
+      store: { ...store, markRebroadcast: () => { throw new Error('disk unavailable'); } },
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async () => { calls++; return null; },
+      unreadableRecords: () => null,
+      money: silentMoney,
+    });
+    expect((await reconciler.reconcileUser('sub-1')).status).toBe(503);
+    expect(calls).toBe(0);
+    expect(store.get('sub-1', commit)!.rebroadcastAt).toBeUndefined();
+  });
 });
 
 describe('createInscriptionReconciler: cursor rotation and budget', () => {
@@ -680,6 +1315,61 @@ describe('createInscriptionReconciler: sweepInscriptions', () => {
     expect(store.get('sub-2', '8'.repeat(64))!.retired).toBe(true);
   });
 
+  test('one pass completes more than 10 distinct stranded users (#812)', async () => {
+    // The retired dedicated completion sweep (#546) budgeted 25 candidates
+    // network-wide; the generalized sweep that replaced it in production
+    // used to cap at 10 distinct sub-orgs per pass, so a batch of stranded
+    // reveals spanning more than 10 users left the rest stuck for another
+    // hour+block cycle. The default budget must clear a batch this size in
+    // one pass.
+    const moneyEvents: string[] = [];
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    const subs = Array.from({ length: 15 }, (_, i) => `sub-${i}`);
+    subs.forEach((sub, i) => {
+      store.create(sub, rec({ commitTxId: i.toString(16).padStart(64, '0'), status: 'commit_broadcast' }));
+    });
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: (event) => { moneyEvents.push(event); },
+      now: () => SWEEP_NOW,
+    });
+
+    const result = await reconciler.sweepInscriptions();
+
+    expect(result.processed).toBe(15);
+    for (const sub of subs) expect(store.list(sub)[0].status).toBe('reveal_broadcast');
+    // Every unattended reveal push is reconstructable from the money log alone.
+    expect(moneyEvents.filter((e) => e === 'inscription_sweep_completed').length).toBe(15);
+  });
+
+  test('a smaller configured budget still converges over successive passes', async () => {
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    const subs = Array.from({ length: 3 }, (_, i) => `sub-${i}`);
+    subs.forEach((sub, i) => {
+      store.create(sub, rec({ commitTxId: i.toString(16).padStart(64, '0'), status: 'commit_broadcast' }));
+    });
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => ({ confirmed: true }) },
+      broadcastIdempotent: async (txHex) => (txHex ? null : 'no recovery artifact for this record'),
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => SWEEP_NOW,
+      sweepBudget: 2,
+    });
+
+    const first = await reconciler.sweepInscriptions();
+    expect(first.processed).toBe(2); // bounded by the configured budget, not the backlog size
+    const stillStuckAfterFirst = subs.filter((sub) => store.list(sub)[0].status === 'commit_broadcast').length;
+    expect(stillStuckAfterFirst).toBe(1); // one user's turn hasn't come up yet, not stranded
+
+    await reconciler.sweepInscriptions(); // the rotating cursor reaches the remaining user next pass
+    for (const sub of subs) expect(store.list(sub)[0].status).not.toBe('commit_broadcast');
+  });
+
   test('a sweep already running is a no-op rather than a concurrent second pass', async () => {
     let resolveStatus!: (v: { confirmed: boolean }) => void;
     const gate = new Promise<{ confirmed: boolean }>((resolve) => {
@@ -714,4 +1404,69 @@ test.each([1, 0, -1, NaN, Infinity, 1.5])('direct factory keeps the six-confirma
   expect((await reconciler.reconcileUser('sub-1')).status).toBe(200);
   expect(store.get('sub-1', commitTxId)?.retired).not.toBe(true);
   expect(store.get('sub-1', commitTxId)?.signedCommitHex).toBe('02aa');
+});
+
+
+describe('concurrent inscription list responses', () => {
+  test('a losing confirmation CAS returns the persisted winner instead of its initial snapshot', async () => {
+    const { store } = harness();
+    const commitTxId = 'f'.repeat(64);
+    store.create('sub-1', rec({ commitTxId, status: 'reveal_broadcast' }));
+    const reads: Array<(status: { confirmed: boolean; confirmations: number }) => void> = [];
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: () => new Promise(resolve => reads.push(resolve)) },
+      broadcastIdempotent: async () => { throw new Error('Confirmed pairs must not rebroadcast'); },
+      unreadableRecords: () => null,
+      money: silentMoney,
+    });
+    // Both public list requests snapshot reveal_broadcast before either node
+    // observation completes. The first persists confirmation while the second
+    // is suspended in its provider read, making the second's CAS lose.
+    const first = reconciler.reconcileUser('sub-1');
+    const second = reconciler.reconcileUser('sub-1');
+    expect(reads).toHaveLength(2);
+    reads[0]({ confirmed: true, confirmations: 1 });
+    const firstResponse = await first;
+    expect(firstResponse.status).toBe(200);
+    expect((await firstResponse.json()).inscriptions[0].status).toBe('confirmed');
+    reads[1]({ confirmed: true, confirmations: 1 });
+    const secondResponse = await second;
+    expect(secondResponse.status).toBe(200);
+    const winner = store.get('sub-1', commitTxId)!;
+    expect(winner.status).toBe('confirmed');
+    expect((await secondResponse.json()).inscriptions[0]).toMatchObject({
+      commitTxId, status: winner.status, confirmations: 1, settled: false,
+    });
+    expect(winner.signedCommitHex).toBe('02aa');
+    expect(winner.revealTxHex).toBe('02bb');
+  });
+
+  test('a confirmation won during an earlier record lookup is returned even when this pass needs no writes', async () => {
+    const { store } = harness();
+    const target = 'a'.repeat(64);
+    const earlier = 'b'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: target, status: 'reveal_broadcast' }));
+    store.create('sub-1', rec({ commitTxId: earlier, status: 'confirmed', confirmations: 1 }));
+    let releaseEarlier!: (status: { confirmed: boolean; confirmations: number }) => void;
+    const status = { confirmed: true, confirmations: 1 };
+    const makeReconciler = (provider: ReconciliationProvider) => createInscriptionReconciler({
+      store, provider,
+      broadcastIdempotent: async () => { throw new Error('Confirmed pairs must not rebroadcast'); },
+      unreadableRecords: () => null, money: silentMoney,
+    });
+    const paused = makeReconciler({ getTransactionStatus: txid => txid === rec({ commitTxId: earlier }).revealTxId
+      ? new Promise(resolve => { releaseEarlier = resolve; }) : Promise.resolve(status) });
+    const winner = makeReconciler({ getTransactionStatus: async () => status });
+    const pending = paused.reconcileUser('sub-1');
+    expect(releaseEarlier).toBeFunction();
+    expect((await winner.reconcileUser('sub-1')).status).toBe(200);
+    expect(store.get('sub-1', target)!.status).toBe('confirmed');
+    releaseEarlier(status);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    const row = (await response.json()).inscriptions.find((record: { commitTxId: string }) => record.commitTxId === target);
+    expect(row).toMatchObject({ commitTxId: target, status: 'confirmed', confirmations: 1, settled: false });
+  });
+
 });

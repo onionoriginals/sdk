@@ -66,7 +66,7 @@ jobs:
         run: bun run test
 
       - name: Release workflow contract
-        run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs
+        run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs scripts/sync-release-lockfile.test.mjs
 
   coverage:
     name: Coverage meets thresholds
@@ -132,7 +132,9 @@ jobs:
       # consumers can still import the package. One static `import 'node:fs'`
       # in the graph breaks that for everyone and is invisible until bundling.
       - name: Verify browser-facing entry points have no eager Node builtins
-        run: node scripts/check-browser-safety.mjs
+        run: |
+          node --test scripts/check-browser-safety.test.mjs
+          node scripts/check-browser-safety.mjs
 
   landing:
     name: Landing app typechecks, tests and builds

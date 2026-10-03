@@ -1,0 +1,39 @@
+bun test v1.3.5 (1e86cebd)
+
+apps/landing/server/tests/bitcoin-reconciliation.test.ts:
+1433 |     reads[1]({ confirmed: true, confirmations: 1 });
+1434 |     const secondResponse = await second;
+1435 |     expect(secondResponse.status).toBe(200);
+1436 |     const winner = store.get('sub-1', commitTxId)!;
+1437 |     expect(winner.status).toBe('confirmed');
+1438 |     expect((await secondResponse.json()).inscriptions[0]).toMatchObject({
+                                                                 ^
+error: expect(received).toMatchObject(expected)
+
+@@ -2,5 +2,11 @@
+    "commitTxId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+-   "confirmations": 1,
+-   "settled": false,
+-   "status": "confirmed",
++   "createdAt": "2026-08-01T00:00:00.000Z",
++   "fundingOutpoint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:0",
++   "fundingOutpoints": [
++     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:0",
++   ],
++   "inscriptionId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffi0",
++   "revealTxId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffr0",
++   "status": "reveal_broadcast",
++   "updatedAt": "2026-08-01T00:00:00.000Z",
+  }
+
+- Expected  - 3
++ Received  + 9
+
+      at <anonymous> (/private/tmp/sdk-gate-06d54/apps/landing/server/tests/bitcoin-reconciliation.test.ts:1438:59)
+(fail) concurrent inscription list responses > a losing confirmation CAS returns the persisted winner instead of its initial snapshot [5.47ms]
+
+ 0 pass
+ 59 filtered out
+ 1 fail
+ 6 expect() calls
+Ran 1 test across 1 file. [51.00ms]

@@ -1852,3 +1852,20 @@ test("resolveSat ignores an unrelated CCG dataReference candidate that does not 
     code: "CEL_DATA_REFERENCE",
   });
 });
+
+for (const [label, extra] of [
+  ["bigint", 5n],
+  ["date", new Date(0)],
+  ["class instance", new (class ProviderValue { value = 5; })()],
+  ["cycle", (() => { const value: { self?: unknown } = {}; value.self = value; return value; })()],
+] as const) {
+  test(`non-JSON ${label} in a creation position returns incomplete evidence without throwing (#848)`, () => {
+    const snapshot = observations(fixtures.cases[0]);
+    expect(resolveSat(snapshot).status).toBe("accepted");
+    Object.assign(snapshot.publications[0].creation!, { providerValue: extra });
+    const result = resolveSat(snapshot);
+    expect(result.status).toBe("incomplete");
+    expect("state" in result).toBe(false);
+    expect("history" in result).toBe(false);
+  });
+}

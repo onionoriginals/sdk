@@ -35,52 +35,55 @@ export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
   private baseUrl?: string;
   private originDomain?: string;
+  private canonicalOriginDomain?: string;
 
   constructor(options: LocalStorageAdapterOptions) {
     this.baseDir = options.baseDir;
     this.baseUrl = options.baseUrl;
     this.originDomain = options.originDomain;
-    if (this.originDomain !== undefined && this.baseUrl !== undefined) {
-      this.validateOriginBaseUrl(this.baseUrl, this.originDomain);
+    if (this.originDomain !== undefined) {
+      const origin = this.validateOriginBaseUrl(this.baseUrl, this.originDomain);
+      this.baseUrl = origin.origin;
+      this.canonicalOriginDomain = origin.host;
     }
   }
 
   /**
-   * originDomain mode's toUrl() treats `baseUrl` as this domain's literal
-   * canonical origin (issue #780 review). A mismatched scheme/host, a port,
-   * a path prefix, or a query/fragment would silently write objects under a
-   * URL hosted publication's exact `https://${domain}/${path}` check can
-   * never accept — validate eagerly, before any storage write, instead of
-   * failing late at publish time.
+   * Validate the raw origin shape before URL parsing can erase credentials,
+   * dot segments, empty query/fragment markers, backslashes or whitespace.
+   * Compare canonical origins so matching ports work and HTTPS :443 is omitted
+   * from advertised URLs, just as in hosted publication's domain canonicalizer.
    */
-  private validateOriginBaseUrl(baseUrl: string, originDomain: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(baseUrl);
-    } catch {
-      throw new StructuredError(
-        'STORAGE_INVALID_ORIGIN',
-        `LocalStorageAdapter originDomain mode requires a valid URL for baseUrl, got "${baseUrl}".`
-      );
+  private validateOriginBaseUrl(baseUrl: string | undefined, originDomain: string): URL {
+    const invalidOrigin = () => new StructuredError(
+      'STORAGE_INVALID_ORIGIN',
+      'LocalStorageAdapter originDomain mode requires a bare host[:port] and a matching HTTPS baseUrl (no credentials, path, query or fragment).'
+    );
+    const parseOrigin = (value: string): URL => {
+      if (!/^https:\/\/(?:[a-zA-Z0-9.-]+|\[[0-9a-fA-F:.]+\])(?::[0-9]+)?\/?$/.test(value)) {
+        throw invalidOrigin();
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw invalidOrigin();
+      }
+      if (/^\.+$/.test(parsed.hostname) || parsed.port === '0') throw invalidOrigin();
+      return parsed;
+    };
+    // Unlike baseUrl, originDomain is a routing key, never a slash-ended URL.
+    if (originDomain.includes('/')) throw invalidOrigin();
+    const expected = parseOrigin(`https://${originDomain}`);
+    if (baseUrl !== undefined && parseOrigin(baseUrl).origin !== expected.origin) {
+      throw invalidOrigin();
     }
-    if (
-      parsed.protocol !== 'https:' ||
-      parsed.hostname !== originDomain ||
-      parsed.port !== '' ||
-      (parsed.pathname !== '/' && parsed.pathname !== '') ||
-      parsed.search !== '' ||
-      parsed.hash !== ''
-    ) {
-      throw new StructuredError(
-        'STORAGE_INVALID_ORIGIN',
-        `LocalStorageAdapter originDomain mode requires baseUrl to be exactly "https://${originDomain}" (no port, path, query or fragment — hosted publication can never accept anything else), got "${baseUrl}".`
-      );
-    }
+    return expected;
   }
 
-  /** In originDomain mode, every call must target that exact domain (see LocalStorageAdapterOptions.originDomain). */
+  /** Calls must target the configured domain or its canonical host spelling. */
   private checkOriginDomain(domain: string): void {
-    if (this.originDomain !== undefined && domain !== this.originDomain) {
+    if (this.originDomain !== undefined && domain !== this.originDomain && domain !== this.canonicalOriginDomain) {
       throw new StructuredError(
         'STORAGE_DOMAIN_MISMATCH',
         `LocalStorageAdapter is configured for originDomain "${this.originDomain}" and cannot serve "${domain}" from the same advertised origin.`
@@ -131,7 +134,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     // primitive outside baseDir.
     const relative = path.relative(base, fullPath);
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error(`Invalid object path: resolves outside the storage directory: ${objectPath}`);
+      throw new StructuredError('STORAGE_PATH_TRAVERSAL', `Invalid object path: resolves outside the storage directory: ${objectPath}`);
     }
     return fullPath;
   }
@@ -235,4 +238,3 @@ export class LocalStorageAdapter implements StorageAdapter {
     return results;
   }
 }
-

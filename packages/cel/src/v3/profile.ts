@@ -339,13 +339,21 @@ export function validateEntry(input: unknown): CelEntry {
 /** Validate the new profile exclusively. Legacy wrappers are never translated. */
 export function validateDocument(input: unknown): CelDocument {
   const value = object(copyValue(input));
+  fields(value, ["log"], ["previousLog"]);
+  requireThat(
+    Array.isArray(value.log) &&
+      value.log.length >= 1 &&
+      value.log.length <= 10000,
+    "CEL_LOG",
+    "Expected 1–10000 entries",
+  );
   if (Object.prototype.hasOwnProperty.call(value, "previousLog")) {
-    fields(value, ["log", "previousLog"]);
     const previous = object(value.previousLog);
     fields(previous, ["digestMultibase", "proof"], ["mediaType", "url"]);
     const { proof: _proof, ...ref } = previous;
     reference(ref);
-    validateDocument({ log: value.log });
+    // Recognize the CCG wrapper before applying Originals entry rules: chunked
+    // logs are unsupported regardless of whether their entries fit this profile.
     const p = Array.isArray(previous.proof) ? previous.proof : [previous.proof];
     requireThat(
       p.length > 0,
@@ -379,14 +387,6 @@ export function validateDocument(input: unknown): CelDocument {
       "CCG previousLog is outside the Originals profile",
     );
   }
-  fields(value, ["log"]);
-  requireThat(
-    Array.isArray(value.log) &&
-      value.log.length >= 1 &&
-      value.log.length <= 10000,
-    "CEL_LOG",
-    "Expected 1–10000 entries",
-  );
   value.log.forEach(entryShape);
   return value as unknown as CelDocument;
 }

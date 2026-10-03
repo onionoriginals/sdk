@@ -1,0 +1,341 @@
+{
+  "mode": "mock",
+  "network": "mainnet",
+  "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+  "signing": "local-key",
+  "payload": {
+    "filename": "input.png",
+    "contentType": "image/png",
+    "bytes": 68,
+    "sha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15"
+  },
+  "asset": {
+    "assetId": "ni:///sha-256;ikxeuSzLoMy_nPN7mgI0i0GwoKhTVxxvI95qTTRrEds",
+    "didWebvh": "did:webvh:Qmcejr1ybRZ7AkPffAR4AHMWypEhqU8H727Vb2KsTYw14m:originals.build:published:anonymous:uEiCKTF65LMugzL-c83uaAjSLQbCgqFNXHG8j3mpNNGsR2w",
+    "contentBytesHint": 3657
+  },
+  "fee": {
+    "rawEstimateSatVb": 5,
+    "routeRateSatVb": 5,
+    "bufferMultiplier": 1.5,
+    "quotedCostSats": 10461,
+    "rederivedQuoteSats": 10461
+  },
+  "deposit": {
+    "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+    "network": "mainnet",
+    "confirmedUtxos": [
+      {
+        "txid": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d",
+        "vout": 0,
+        "value": 7961,
+        "scriptPubKey": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+      },
+      {
+        "txid": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d",
+        "vout": 1,
+        "value": 4000,
+        "scriptPubKey": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+      }
+    ],
+    "confirmedSats": 12507,
+    "ordinalCheck": "ok",
+    "unconfirmedSats": 0,
+    "estimatedCostSats": 10461,
+    "pendingDeposit": null
+  },
+  "depositError": null,
+  "candidates": [
+    {
+      "outpoint": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0",
+      "value": 7961,
+      "classification": "clean",
+      "inscriptions": [],
+      "selected": true,
+      "role": "identity"
+    },
+    {
+      "outpoint": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:1",
+      "value": 4000,
+      "classification": "clean",
+      "inscriptions": [],
+      "selected": true,
+      "role": "fee"
+    },
+    {
+      "outpoint": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:2",
+      "value": 546,
+      "classification": "inscribed",
+      "inscriptions": [
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeei0"
+      ],
+      "selected": false,
+      "role": null
+    }
+  ],
+  "selection": {
+    "selected": [
+      "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0",
+      "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:1"
+    ],
+    "totalSats": 11961,
+    "shortfallSats": 0
+  },
+  "satoshi": "2471664383",
+  "expectedDid": "did:btco:2471664383",
+  "commit": {
+    "hex": "020000000001026d025e7feb169c358203fea081a4423c3cbf1cef90436faa7bf75ec6d67c1b9b0000000000fdffffff6d025e7feb169c358203fea081a4423c3cbf1cef90436faa7bf75ec6d67c1b9b0100000000fdffffff02c40f00000000000022512065e358c4c2be6ce3f1663546bb39ddb6a03c3bebf656ae7236ebd19e822b0187a41a000000000000160014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d9002483045022100fb3dbaa8a051e72492d6c208cfcd160553b482ca419e9a33e01feadb66abec9f02205319eae76d263d868b7a3059a71015c220cc5b4e95089dc0adcf92dd56b3fb900121029ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b02483045022100dbf8fd0a2ef3baabf2f45b8fb98f55ba8daf7a14bf3b1d7941a43354947c915002205590c2aef93241734c075a82b3d42c32ddce90a22d021298742347fd010464e20121029ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b00000000",
+    "txid": "aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08",
+    "vsize": 221,
+    "weight": 882,
+    "sizeEstimated": false,
+    "inputs": [
+      {
+        "outpoint": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0",
+        "value": 7961,
+        "sequence": 4294967293,
+        "witnessItems": 2
+      },
+      {
+        "outpoint": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:1",
+        "value": 4000,
+        "sequence": 4294967293,
+        "witnessItems": 2
+      }
+    ],
+    "outputs": [
+      {
+        "vout": 0,
+        "value": 4036,
+        "address": "bc1pvh3433xzhekw8utxx4rtkwwak6srcwlt7et2uu3ka0geaq3tqxrsv8cc25",
+        "scriptType": "tr",
+        "scriptHex": "512065e358c4c2be6ce3f1663546bb39ddb6a03c3bebf656ae7236ebd19e822b0187"
+      },
+      {
+        "vout": 1,
+        "value": 6820,
+        "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+        "scriptType": "wpkh",
+        "scriptHex": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+      }
+    ],
+    "feeSats": 1105,
+    "feeRateSatVb": 5
+  },
+  "reveal": {
+    "hex": "02000000000101082ee1855f9f7f31d076638e6a9d4512539f6e8975f688c031d187f3484f3faa0000000000fdffffff012202000000000000160014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90034044e001f992a6494ba501786a2efd3a2dad16712c7e4b848b7a9e93232792fc77131f9ecdffe65108feb4835128427b43d577475610e9915ed8634dc1537cde65fdc5082013ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8ac0063036f7264010109696d6167652f706e6701054d0802a1636c6f6783a2656576656e74a1696f7065726174696f6ea26464617461a6646e616d65674472792072756e656e6f6e6365764c484c30456c762d46697931526f5246426b4f4e4f416770726f66696c656f6f726967696e616c732f63656c2f33696372656174656441747818323032362d31302d30335431393a30353a35342e3535355a697265736f757263657381a362696469696e7075742e706e67696d656469615479706569696d6167652f706e676f6469676573744d756c746962617365782f754569426550546774744e3244315a716c644365547257743541304365686c7944764c78556731424a38454f3846516a636f6e74726f6c6c657278386469643a6b65793a7a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a786474797065666372656174656570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d31302d30335431393a30353a35342e3535395a6a70726f6f6656616c756578597a3335725a584a6e387158664137784148484e68416a5365634369596b72796a33697747567948626e5077384a546f555048704774714e725a5158696e46537266627963556b415058744c4247394b74556735354c6331516b6b63727970746f73756974656e65646473612d6a63732d323032326c01054d080270726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a78237a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a78a2656576656e74a2696f7065726174696f6ea26464617461a562746f788c6469643a77656276683a516d63656a72317962525a37416b50666641523441484d5779704568715538483732375662324b7354597731346d3a6f726967696e616c732e6275696c643a7075626c69736865643a616e6f6e796d6f75733a754569434b544636354c4d75677a4c2d6338337561416a534c5162436771464e584847386a336d704e4e47735232776466726f6d78396e693a2f2f2f7368612d3235363b696b786575537a4c6f4d795f6e504e376d674930693047776f4b6854567878764939357154545272456473656c617965726577656276686770726f66696c656f6f726967696e616c732f63656c2f336a6d6967726174656441747818323032362d31302d30335431393a30353a35342e3636385a6474797065676d6967726174656d70726576696f75734576656e74782f754569434b544636354c4d75677a4c2d6338337561416a534c516243677101054d0802464e584847386a336d704e4e47735232776570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d31302d30335431393a30353a35342e3636395a6a70726f6f6656616c756578597a334652377247636a44594a345a51545a6e5a62445656535667477a6333516334667931796258685842475744586e765a425854706253355148544b753665574473757276353931704b73737153454b6563387158673844566b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a78237a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a78a2656576656e74a2696f7065726174696f6ea26464617461a562746f736469643a6274636f3a323437313636343338336466726f6d788c6469643a77656276683a516d63656a72317962525a37416b50666641523441484d5779704568715538483732375662324b7354597731346d3a6f726967696e616c732e6275696c643a7075626c69736865643a616e6f6e796d6f75733a754569434b01054d0802544636354c4d75677a4c2d6338337561416a534c5162436771464e584847386a336d704e4e4773523277656c61796572646274636f6770726f66696c656f6f726967696e616c732f63656c2f336a6d6967726174656441747818323032362d31302d30335431393a30353a35342e3838355a6474797065676d6967726174656d70726576696f75734576656e74782f754569413456655f726853625239795f73584e32454e733078704d466c386e6675654f51654335422d3839737175416570726f6f6681a664747970657244617461496e7465677269747950726f6f6667637265617465647818323032362d31302d30335431393a30353a35342e3838365a6a70726f6f6656616c756578587a794e37453531317865784b45444c6970597a7872695356664e3977707261556568567374434a774e32766d3235373273437a64424238387a73744d43775164683958705a47444177345970674c7766725956664c70424d6b63727970746f73756974656e65646473612d6a63732d323032326c70726f6f66507572706f73656f617373657274696f6e4d6574686f6472766572696669636174696f6e4d6574686f6478696469643a6b65793a7a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58435155426a4a744a62797a7043534e71794a78237a364d6b74624232434c7a6b4e624e6d6a75574d4371694438574e4e58010513435155426a4a744a62797a7043534e71794a78004489504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b4944415478da63fcff1f0003030200efa2a75b0000000049454e44ae4260826821c113ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e800000000",
+    "txid": "694b24cb47ccdf9ac48ec33f749eeb1180d02560d6033f9c895f185a59ce3331",
+    "vsize": 670,
+    "weight": 2678,
+    "sizeEstimated": false,
+    "inputs": [
+      {
+        "outpoint": "aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08:0",
+        "value": 4036,
+        "sequence": 4294967293,
+        "witnessItems": 3
+      }
+    ],
+    "outputs": [
+      {
+        "vout": 0,
+        "value": 546,
+        "address": "bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk",
+        "scriptType": "wpkh",
+        "scriptHex": "0014e1fae3324e28a4ef5ee01f14dd337ac6c85d1d90"
+      }
+    ],
+    "feeSats": 3490,
+    "feeRateSatVb": 5.21
+  },
+  "envelope": {
+    "contentType": "image/png",
+    "bodyBytes": 68,
+    "bodySha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+    "metadataBytes": 2099,
+    "metadataBoundaryDid": "did:btco:2471664383",
+    "controlBlockVersion": 193,
+    "internalKey": "13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8",
+    "rebuildsCommitOutput": true,
+    "signature": {
+      "ok": true,
+      "detail": "Schnorr valid (sighash 0x0)",
+      "leafKey": "13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8"
+    }
+  },
+  "freshness": {
+    "firstInternalKey": "13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8",
+    "secondInternalKey": "ec1d52203d1a661e623f916e83a3f7f1a8444523774390446355c4fd172196ea",
+    "fundingKeyXOnly": "9ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b"
+  },
+  "server": {
+    "inscribeStatus": 502,
+    "inscribeBody": {
+      "error": "commit_broadcast_failed",
+      "message": "DRY RUN: broadcast refused by construction; nothing was sent to the network (broadcastTransaction)",
+      "commitTxId": "aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08"
+    },
+    "recordStatus": "signed",
+    "broadcastAttempts": [
+      "broadcastTransaction"
+    ],
+    "broadcastRouteCalls": 0,
+    "buildError": null,
+    "moneyLog": [
+      "[landing][money] {\"event\":\"deposit_address_issued\",\"at\":\"2026-10-03T19:05:54.787Z\",\"sub\":\"dry-run\",\"network\":\"mainnet\",\"address\":\"bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk\"}",
+      "[landing][money] {\"event\":\"deposit_seen\",\"at\":\"2026-10-03T19:05:54.790Z\",\"sub\":\"dry-run\",\"network\":\"mainnet\",\"address\":\"bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk\",\"confirmedSats\":12507,\"outputs\":3}",
+      "[landing][money] {\"event\":\"inscribe_attempted\",\"at\":\"2026-10-03T19:05:55.162Z\",\"sub\":\"dry-run\",\"commitTxId\":\"aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08\",\"revealTxId\":\"694b24cb47ccdf9ac48ec33f749eeb1180d02560d6033f9c895f185a59ce3331\",\"inputs\":2,\"fundingSats\":11961}",
+      "[landing][money] {\"event\":\"inscribe_failed\",\"at\":\"2026-10-03T19:05:55.165Z\",\"sub\":\"dry-run\",\"commitTxId\":\"aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08\",\"reason\":\"commit_broadcast_failed\",\"detail\":\"DRY RUN: broadcast refused by construction; nothing was sent to the network (broadcastTransaction)\"}"
+    ]
+  },
+  "sdkNotes": [],
+  "inscriptionId": "694b24cb47ccdf9ac48ec33f749eeb1180d02560d6033f9c895f185a59ce3331i0",
+  "checks": [
+    {
+      "id": "fee.source",
+      "label": "Live fee estimate is readable and sane (1..10000 sat/vB)",
+      "result": "pass",
+      "detail": "raw estimate 5 sat/vB → route serves ceil = 5 sat/vB"
+    },
+    {
+      "id": "deposit.read",
+      "label": "Deposit route serves an ordinal-checked spendable set",
+      "result": "pass",
+      "detail": "ordinalCheck=ok, 2 spendable of 3 confirmed, quote 10461 sats for 3657 content bytes"
+    },
+    {
+      "id": "selection.funded",
+      "label": "Largest-first selection covers the buffered quote",
+      "result": "pass",
+      "detail": "2 input(s), 11961 sats against a 10461 sat quote"
+    },
+    {
+      "id": "selection.clean",
+      "label": "No selected input carries an inscription; the inscribed one is excluded",
+      "result": "pass",
+      "detail": "9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0 7961 sats clean SELECTED(identity); 9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:1 4000 sats clean SELECTED(fee); 9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:2 546 sats inscribed"
+    },
+    {
+      "id": "never.broadcast",
+      "label": "The exact signed pair returns broadcast-unknown after the guarded server refuses delivery",
+      "result": "pass",
+      "detail": "provider refusals: broadcastTransaction; /api/btc/broadcast calls: 0; status: broadcast-unknown; SDK error: none ()"
+    },
+    {
+      "id": "server.invariants",
+      "label": "Inscribe route accepted the pair (inputs, outputs, change, ordinal check, binding)",
+      "result": "pass",
+      "detail": "route answered 502 {\"error\":\"commit_broadcast_failed\",\"message\":\"DRY RUN: broadcast refused by construction; nothing was sent to the network (broadcastTransaction)\"}"
+    },
+    {
+      "id": "server.persisted",
+      "label": "Pair persisted as status=signed before any broadcast was attempted",
+      "result": "pass",
+      "detail": "record aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08 status=signed at /tmp/sdk-gate-06d54/.gate-run/dry-run-inscription-srTd8A"
+    },
+    {
+      "id": "commit.inputs",
+      "label": "Commit spends exactly the selected set, identity input first",
+      "result": "pass",
+      "detail": "#0 9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0 (7961 sats); #1 9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:1 (4000 sats)"
+    },
+    {
+      "id": "commit.rbf",
+      "label": "Every commit input signals RBF (sequence 0xfffffffd)",
+      "result": "pass",
+      "detail": "0xfffffffd, 0xfffffffd"
+    },
+    {
+      "id": "commit.output0",
+      "label": "Commit output 0 is P2TR and funds reveal fee + postage",
+      "result": "pass",
+      "detail": "vout 0 → bc1pvh3433xzhekw8utxx4rtkwwak6srcwlt7et2uu3ka0geaq3tqxrsv8cc25 (tr) 4036 sats"
+    },
+    {
+      "id": "commit.change",
+      "label": "Change (if any) returns to the deposit address; no third output",
+      "result": "pass",
+      "detail": "vout 1 → bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk 6820 sats"
+    },
+    {
+      "id": "commit.feerate",
+      "label": "Commit pays at least the live rate",
+      "result": "pass",
+      "detail": "1105 sats over 221 vB = 5 sat/vB (rate 5)"
+    },
+    {
+      "id": "commit.signed",
+      "label": "Commit is signed and finalized; witness keys match the deposit address and every ECDSA signature verifies",
+      "result": "pass",
+      "detail": "#0 ECDSA valid (sighash 0x1); #1 ECDSA valid (sighash 0x1); keys match deposit address: true"
+    },
+    {
+      "id": "reveal.spends",
+      "label": "Reveal spends commit:0 as its only input",
+      "result": "pass",
+      "detail": "aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08:0"
+    },
+    {
+      "id": "reveal.rbf",
+      "label": "Reveal input signals RBF",
+      "result": "pass",
+      "detail": "0xfffffffd"
+    },
+    {
+      "id": "reveal.postage",
+      "label": "Inscribed sat lands at the deposit address with at least dust postage",
+      "result": "pass",
+      "detail": "vout 0 → bc1qu8awxvjw9zjw7hhqru2d6vm6cmy968vs4cm9yk 546 sats"
+    },
+    {
+      "id": "reveal.feerate",
+      "label": "Reveal pays at least the live rate",
+      "result": "pass",
+      "detail": "3490 sats over 670 vB = 5.21 sat/vB (rate 5)"
+    },
+    {
+      "id": "fee.quote",
+      "label": "What the pair actually costs sits inside the 1.5x-buffered quote",
+      "result": "pass",
+      "detail": "commit fee 1105 + reveal fee 3490 + postage 546 = 5141 sats; quote 10461 (re-derived 10461) = ceil(5 sat/vB × est. vB × 1.5) + 546"
+    },
+    {
+      "id": "reveal.scriptpath",
+      "label": "Reveal is a 3-item script-path spend whose leaf + internal key rebuild commit output 0",
+      "result": "pass",
+      "detail": "witness [sig, leaf, control block]; leaf version 0xc0; internal key 13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8; rebuild matches: true"
+    },
+    {
+      "id": "reveal.signed",
+      "label": "Reveal Schnorr signature verifies against the leaf key over the BIP-341 sighash",
+      "result": "pass",
+      "detail": "Schnorr valid (sighash 0x0); leaf key 13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8 (= internal key)"
+    },
+    {
+      "id": "reveal.envelope",
+      "label": "Envelope carries the payload bytes and content type unchanged",
+      "result": "pass",
+      "detail": "contentType image/png; body 68 bytes sha256 5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15; metadata 2099 bytes"
+    },
+    {
+      "id": "sat.identity",
+      "label": "Verified CEL boundary alias is did:btco:<first sat of identity input>; inscription id is reveal:i0",
+      "result": "pass",
+      "detail": "sat 2471664383 (first sat of 9b1b7cd6c65ef77baa6f4390ef1cbf3c3c42a481a0fe0382359c16eb7f5e026d:0) → expected did:btco:2471664383, metadata CEL boundary alias did:btco:2471664383; ordinal FIFO: commit vout 0 offset 0 → reveal vout 0 offset 0 → 694b24cb47ccdf9ac48ec33f749eeb1180d02560d6033f9c895f185a59ce3331i0"
+    },
+    {
+      "id": "reveal.freshkey",
+      "label": "Reveal address derives from a fresh random keypair, not the funding key",
+      "result": "pass",
+      "detail": "build 1 internal key 13ee25e9b692ca66b6e580ce0b465b4c2f424628237d6746a2a1a2c4dce7a1e8; build 2 ec1d52203d1a661e623f916e83a3f7f1a8444523774390446355c4fd172196ea; funding key (x-only) 9ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b"
+    },
+    {
+      "id": "never.broadcast.second",
+      "label": "Second preparation performs no additional submission or broadcast",
+      "result": "pass",
+      "detail": "provider refusals so far: 1; broadcast route calls: 0"
+    }
+  ],
+  "verdict": "pass",
+  "recordDir": "/tmp/sdk-gate-06d54/.gate-run/dry-run-inscription-srTd8A"
+}

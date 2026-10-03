@@ -3,6 +3,7 @@ import { createAuthMiddleware, createOptionalAuthMiddleware } from '../src/serve
 import { signToken } from '../src/server/jwt';
 import { StructuredError } from '@originals/sdk';
 import type { Request, Response, NextFunction } from 'express';
+import type { AuthenticatedRequest } from '../src/types';
 
 const TEST_SECRET = 'test-jwt-secret-that-is-long-enough-for-hs256';
 
@@ -468,3 +469,83 @@ describe('middleware', () => {
     });
   });
 });
+
+// Shared contracts for required and optional authentication (#868, #885).
+for (const [name, factory] of [
+  ['required', createAuthMiddleware],
+  ['optional', createOptionalAuthMiddleware],
+] as const) {
+  describe(`${name} middleware contracts`, () => {
+    const claims = { issuer: 'my-app', audience: 'my-app-api' };
+
+    for (const configuredClaims of [{}, { issuer: claims.issuer }, { audience: claims.audience }, claims]) {
+      test(`populates user with matching claims ${JSON.stringify(configuredClaims)}`, async () => {
+        const token = signToken(mockUser.turnkeySubOrgId, mockUser.email, 'session', {
+          secret: TEST_SECRET, ...configuredClaims,
+        });
+        const req = createMockReq({ auth_token: token });
+        const res = createMockRes();
+        const lookup = mock(async () => mockUser);
+        const next = mock((_error?: unknown) => {});
+        await factory({ jwtSecret: TEST_SECRET, ...configuredClaims, getUserByTurnkeyId: lookup })(req, res, next);
+        expect((req as Request & AuthenticatedRequest).user).toEqual({
+          ...mockUser, sessionToken: 'session',
+        });
+        expect(lookup).toHaveBeenCalledTimes(1);
+        expect(lookup).toHaveBeenCalledWith(mockUser.turnkeySubOrgId);
+        expect(next.mock.calls).toEqual([[]]);
+        expect(res._status).toBe(0);
+      });
+    }
+
+    for (const scenario of ['absent', 'invalid', 'expired', 'issuer mismatch', 'audience mismatch', 'custom claims without configuration'] as const) {
+      test(`handles ${scenario} without looking up a user`, async () => {
+        const token = scenario === 'absent' ? undefined : scenario === 'invalid' ? 'bad.token' :
+          signToken(mockUser.turnkeySubOrgId, mockUser.email, undefined, {
+            secret: TEST_SECRET,
+            ...claims,
+            ...(scenario === 'expired' ? { expiresIn: -1 } : {}),
+            ...(scenario === 'issuer mismatch' ? { issuer: 'other-app' } : {}),
+            ...(scenario === 'audience mismatch' ? { audience: 'other-api' } : {}),
+          });
+        const req = createMockReq(token ? { auth_token: token } : {});
+        const res = createMockRes();
+        const lookup = mock(async () => mockUser);
+        const next = mock((_error?: unknown) => {});
+        await factory({
+          jwtSecret: TEST_SECRET,
+          ...(scenario === 'custom claims without configuration' ? {} : claims),
+          getUserByTurnkeyId: lookup,
+        })(req, res, next);
+        expect((req as Request & Partial<AuthenticatedRequest>).user).toBeUndefined();
+        expect(lookup).not.toHaveBeenCalled();
+        expect(next.mock.calls).toEqual(name === 'optional' ? [[]] : []);
+        expect(res._status).toBe(name === 'optional' ? 0 : 401);
+      });
+    }
+
+    test('propagates lookup failure exactly once', async () => {
+      const token = signToken(mockUser.turnkeySubOrgId, mockUser.email, undefined, { secret: TEST_SECRET });
+      const req = createMockReq({ auth_token: token });
+      const error = new StructuredError('AUTH_TOKEN_INVALID', 'database unavailable');
+      const lookup = mock(async () => { throw error; });
+      const next = mock((_error?: unknown) => {});
+      const res = createMockRes();
+      await factory({ jwtSecret: TEST_SECRET, getUserByTurnkeyId: lookup })(req, res, next);
+      expect(next.mock.calls).toEqual([[error]]);
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect((req as Request & Partial<AuthenticatedRequest>).user).toBeUndefined();
+      expect(res._status).toBe(0);
+    });
+
+    test('does not catch a consumer next error or call next twice', async () => {
+      const token = signToken(mockUser.turnkeySubOrgId, mockUser.email, undefined, { secret: TEST_SECRET });
+      const error = new Error('consumer next failed');
+      const next = mock(() => { throw error; });
+      await expect(factory({ jwtSecret: TEST_SECRET, getUserByTurnkeyId: async () => mockUser })(
+        createMockReq({ auth_token: token }), createMockRes(), next,
+      )).rejects.toBe(error);
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+  });
+}

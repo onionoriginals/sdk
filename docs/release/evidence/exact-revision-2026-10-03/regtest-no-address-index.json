@@ -1,0 +1,43 @@
+{
+  "checkedAt": "2026-10-03T19:07:36.019Z",
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0"
+  },
+  "network": "regtest",
+  "addressIndex": false,
+  "satoshi": "5000000000",
+  "inscriptionId": "6215994dac1fd73f0962276f64ccf30b7b89482b47dd99086b100e726cf9ea74i0",
+  "pngBytes": 68,
+  "ownershipBefore": {
+    "owner": "bcrt1qhp395dh5egekhwqpg5tzu6gund9gtgwmw6k5tj",
+    "satpoint": "6215994dac1fd73f0962276f64ccf30b7b89482b47dd99086b100e726cf9ea74:0:0"
+  },
+  "ownershipAfter": {
+    "owner": "bcrt1qd8qhud9rjzs2xv9fdx873j63lcucvz2qdsfvwh",
+    "satpoint": "b0f614784cc23c98fb63b01e4d83fad9fdbcb18fa388f831431cb31be6360341:0:0"
+  },
+  "tipBefore": {
+    "height": 103,
+    "hash": "5e4ffca3e85631b849017e4750235ccec00d7ca07ffcf38474b816083507c1c1"
+  },
+  "tipAfter": {
+    "height": 105,
+    "hash": "75091d7f541dac540137354d34b3cebe616740b16ab1a9aa35830a24be3cfc99"
+  },
+  "checks": [
+    "real ord address index disabled",
+    "complete sat enumeration",
+    "exact PNG bytes",
+    "initial owner and satpoint",
+    "real confirmed sat transfer",
+    "fresh owner and satpoint",
+    "unchanged publication evidence",
+    "separate Core validates imported raw blocks",
+    "independent Core validates real inscription blocks",
+    "fabricated block transactions rejected",
+    "independent reorg rejected",
+    "reconsider and authenticated restart validated"
+  ],
+  "success": true
+}
