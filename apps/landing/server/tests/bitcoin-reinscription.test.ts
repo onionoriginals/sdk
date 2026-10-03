@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { createLocalSigner, createNonce, signEvent, eventDigest, encodeDocument, prepareInscriptionOnSat } from '@originals/sdk';
+import { deriveAssetId } from '@originals/sdk/cel';
 import type { CelDocument, SatSnapshot } from '@originals/sdk/cel';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { serializeCookie } from '../cookies';
@@ -55,7 +56,7 @@ function fakeIndexerFetch(): typeof fetch {
 async function fixture(inputIds: (ids: string[]) => string[] = ids => ids) {
   const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(3));
   const genesis = await signEvent({ operation: { type: 'create', data: { profile: 'originals/cel/3', controller: signer.controller, createdAt: new Date().toISOString(), nonce: createNonce(), resources: [] } } }, signer);
-  const did = 'did:cel:' + eventDigest(genesis.event);
+  const did = deriveAssetId(genesis.event);
   const webDid = 'did:webvh:QmYwAPJzv5CZsnAzt8auVZRnGiVvJzUuWPuJHGMNYWcJ7V:example.com';
   const web = await signEvent({ previousEvent: eventDigest(genesis.event), operation: { type: 'migrate', data: { profile: 'originals/cel/3', from: did, to: webDid, layer: 'webvh', migratedAt: new Date().toISOString() } } }, signer);
   const boundary = await signEvent({ previousEvent: eventDigest(web.event), operation: { type: 'migrate', data: { profile: 'originals/cel/3', from: webDid, to: 'did:btco:reg:5000000000', layer: 'btco', migratedAt: new Date().toISOString() } } }, signer);

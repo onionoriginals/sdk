@@ -174,7 +174,7 @@ function reference(value: JsonValue): void {
     }
   }
 }
-function eventShape(value: JsonValue): void {
+function eventShape(value: JsonValue, scidTemplate = false): void {
   const event = object(value);
   fields(event, ["operation"], ["previousEvent"]);
   const operation = object(event.operation);
@@ -200,7 +200,11 @@ function eventShape(value: JsonValue): void {
       "Unsupported or missing Originals profile",
     );
   if (operation.type === "create") {
-    fields(event, ["operation"]);
+    fields(event, ["operation"], ["previousEvent"]);
+    if (Object.prototype.hasOwnProperty.call(event, "previousEvent")) {
+      if (!(scidTemplate && event.previousEvent === SCID_PLACEHOLDER))
+        validateDigest(event.previousEvent);
+    }
     fields(
       data,
       ["profile", "controller", "createdAt", "nonce", "resources"],
@@ -239,7 +243,8 @@ function eventShape(value: JsonValue): void {
         time(data.migratedAt);
         requireThat(
           (/^did:(cel|webvh):[^\s]+$/.test(data.from) ||
-            (data.from.startsWith("ni:///sha-256;") && normalizeAssetId(data.from) === data.from)) &&
+            (data.from.startsWith("ni:///sha-256;") &&
+              normalizeAssetId(data.from) === data.from)) &&
             (data.layer === "webvh" || data.layer === "btco") &&
             data.to.startsWith("did:" + data.layer + ":"),
           "CEL_MIGRATION",
@@ -257,6 +262,16 @@ function eventShape(value: JsonValue): void {
   if (Object.prototype.hasOwnProperty.call(data, "name")) string(data.name);
   if (Object.prototype.hasOwnProperty.call(data, "metadata"))
     object(data.metadata);
+  if (
+    !scidTemplate &&
+    operation.type === "create" &&
+    event.previousEvent !== undefined
+  )
+    requireThat(
+      event.previousEvent === genesisCommitment(event),
+      "CEL_SCID",
+      "Genesis SCID does not match its commitment",
+    );
 }
 function proofShape(value: JsonValue): void {
   const proof = object(value);
@@ -405,9 +420,54 @@ export function encodeDocument(
 export function eventDigest(input: unknown): string {
   return hashJson(validateEvent(input));
 }
-/** Derive the RFC 6920 identity of a validated genesis event. */
+/** The only SCID-bearing position is the genesis event's top-level previousEvent. */
+export const SCID_PLACEHOLDER = "{SCID}";
+
+/** Shared preimage construction; callers validate the genesis shape first. */
+function genesisCommitment(event: JsonObject): string {
+  return hashJson({ ...event, previousEvent: SCID_PLACEHOLDER });
+}
+
+/** Commit to the full genesis template using CEL's JCS/SHA-256 multihash stack. */
+export function deriveScid(input: unknown): string {
+  const value = object(copyValue(input));
+  eventShape(value, true);
+  requireThat(
+    object(value.operation).type === "create",
+    "CEL_GENESIS",
+    "Genesis must be create",
+  );
+  requireThat(
+    Object.prototype.hasOwnProperty.call(value, "previousEvent"),
+    "CEL_SCID",
+    "Genesis template requires previousEvent",
+  );
+  return genesisCommitment(value);
+}
+
+/** Independently verify both the embedded SCID and the expected genesis commitment. */
+export function verifyScid(input: unknown, expectedScid: unknown): boolean {
+  try {
+    validateDigest(expectedScid);
+    const value = object(copyValue(input));
+    eventShape(value);
+    // eventShape independently checked the genesis commitment above.
+    return (
+      object(value.operation).type === "create" &&
+      value.previousEvent === expectedScid
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Derive the RFC 6920 name of the genesis SCID (legacy events retain their original identity). */
 export function deriveAssetId(input: unknown): string {
   const event = validateEvent(input);
-  requireThat(event.operation.type === "create", "CEL_GENESIS", "Genesis must be create");
-  return assetIdFromDigest(hashJson(event));
+  requireThat(
+    event.operation.type === "create",
+    "CEL_GENESIS",
+    "Genesis must be create",
+  );
+  return assetIdFromDigest(event.previousEvent ?? hashJson(event));
 }

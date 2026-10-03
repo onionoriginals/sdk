@@ -15,7 +15,7 @@ genesis commitment from DID-method identity.
 
 | SDK 3 | SDK 4 |
 | --- | --- |
-| `asset.id` is `did:cel:<genesis-multihash>` | `asset.id` is `ni:///sha-256;<raw-genesis-hash>` |
+| `asset.id` is `did:cel:<genesis-multihash>` | `asset.id` is `ni:///sha-256;<raw-genesis-commitment-hash>` |
 | `state.didCel` is the primary genesis identifier | Use `state.assetId`; `state.didCel` is removed |
 | Initial `state.alias` is the Originals `did:cel` spelling | Initial `state.alias` is canonical `ni`; hosted/Bitcoin aliases continue to change on migration |
 | Envelope `version: 3`, `assetDid` | Envelope `version: 4`, `assetId` |
@@ -24,10 +24,24 @@ genesis commitment from DID-method identity.
 | `parseAssetDid(alias)` returning `{ method: 'cel' \| 'webvh' \| 'btco' }` | `parseAssetAlias(alias)` returning `{ layer: 'cel' \| 'webvh' \| 'btco' }` |
 
 The new URI is defined by [RFC 6920](https://www.rfc-editor.org/rfc/rfc6920).
-For Originals it carries the complete SHA-256 of the JCS genesis event as
-canonical unpadded base64url. The suffix omits the old multibase/multihash header.
-No authority host, query or fragment is accepted. The event and resource
-multihashes, chain links and signatures do not change.
+For new Originals it carries the raw SHA-256 digest of the genesis SCID as
+canonical unpadded base64url. The suffix omits the multibase/multihash header.
+No authority host, query or fragment is accepted. Existing signed histories
+retain their original event hashes, links, signatures and identity commitments.
+
+New genesis events have `previousEvent` containing their SCID. Derivation hashes
+the entire JCS genesis template with only that position set to `"{SCID}"`, using
+CEL's existing SHA-256 multihash and `u` base64url multibase encoding. `signEvent`
+fills an absent or placeholder genesis `previousEvent` before signing. Always
+use its returned `entry.event` when hashing an event or checking its proof.
+
+History identity and event identity now differ: use `deriveAssetId` for the
+history and `eventDigest` for links to the final published event. Do not derive
+new history IDs from `eventDigest(genesis)`. `deriveScid` and `verifyScid` are
+available from `@originals/sdk/cel` and `@originals/cel/v3`; verification rebuilds
+the placeholder commitment and compares it with the expected SCID. Older readers
+that reject genesis `previousEvent` must be upgraded before reading new histories.
+See [the SCID contract](../packages/cel/V3.md#asset-identity).
 
 Use the public helpers instead of slicing strings:
 
@@ -50,8 +64,8 @@ const savedSdk4Envelope = asset.serialize(); // version: 4, assetId: canonical
 must still be bound to authenticated genesis when loading an asset. It does
 not convert arbitrary CCG method DIDs or establish a WebVH/Bitcoin binding.
 `sameAssetIdentity` returns false for malformed or unrelated identities.
-`assetIdFromDigest` is available when you already have the canonical event
-multihash. Standalone integrations import these APIs from `@originals/cel/v3`.
+`assetIdFromDigest` wraps a SCID, or the genesis event multihash of a
+legacy history. Standalone integrations import these APIs from `@originals/cel/v3`.
 
 ## Read existing records without rewriting signed history
 

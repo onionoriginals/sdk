@@ -52,6 +52,7 @@ export type Operation =
     };
 export interface CelEvent {
   operation: Operation;
+  /** Genesis: SCID commitment. Later events: digest of the preceding published event. */
   previousEvent?: string;
 }
 export interface ControllerProof {

@@ -117,6 +117,7 @@ function digest(value: string): string {
 }
 
 function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
+  const genesis = entry.type === 'create';
   const accent = accentFor(entry);
   const proof = entry.proof[0];
   const vm = proof?.verificationMethod;
@@ -124,9 +125,9 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
   return (
     <li className="cel-entry">
       {/* The link renders ABOVE its entry: an entry's previousEvent is a
-          claim about its parent, so the digest belongs between them — the
+          claim about its parent except at genesis, where it is the SCID. The
           ONE hash chain stays visible across both sections. */}
-      {entry.previousEvent ? (
+      {!genesis && entry.previousEvent ? (
         <div className="cel-link">
           <span className="cel-link-rail" aria-hidden="true" />
           <span className="cel-link-label">
@@ -145,7 +146,7 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
             <code className="cel-entry-type" style={{ color: accent }}>
               {entry.type}
             </code>
-            {!entry.previousEvent && (
+            {genesis && (
               <span className="cel-entry-genesis">{demo.eventLog.genesisLabel}</span>
             )}
             {unattributed && (
@@ -153,6 +154,11 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
             )}
           </div>
           <p className="cel-entry-summary">{summarize(entry)}</p>
+          {genesis && entry.previousEvent && (
+            <div className="cel-entry-proof">
+              <span>History SCID <code>{digest(entry.previousEvent)}</code></span>
+            </div>
+          )}
           <div className="cel-entry-proof">
             {proof?.proofValue ? (
               <>

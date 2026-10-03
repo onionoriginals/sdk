@@ -34,7 +34,7 @@ for (const [algorithm, size, spki, hash] of [
     expect(verifyEntry(entry).signers).toEqual([signer.controller]);
     const { proofValue, ...configuration } = entry.proof[0];
     const message = Buffer.concat(
-      [configuration, event].map((v) =>
+      [configuration, entry.event].map((v) =>
         createHash(hash ?? "sha256")
           .update(canonicalize(v)!)
           .digest(),
@@ -108,7 +108,10 @@ for (const [algorithm, secretSize, size] of [
   ["P-384", 48, 96],
 ] as const)
   test(`verifyJcsSignature rejects a wrong-length ${algorithm} signature as a CelError instead of throwing a raw RangeError (#725)`, () => {
-    const signer = createLocalSigner(algorithm, new Uint8Array(secretSize).fill(9));
+    const signer = createLocalSigner(
+      algorithm,
+      new Uint8Array(secretSize).fill(9),
+    );
     const document = corpus.accepted[0].document.log[0].event;
     const configuration = {
       type: "DataIntegrityProof",
