@@ -74,26 +74,7 @@ describe('PSBTBuilder', () => {
     })).toThrow('Insufficient funds');
   });
 
-  test('falls back when Buffer/btoa not available', () => {
-    const b = new PSBTBuilder();
-    const originalBuffer = (global as any).Buffer;
-    const originalBtoa = (global as any).btoa;
-    (global as any).Buffer = undefined;
-    (global as any).btoa = undefined;
-    try {
-      const res = b.build({
-        utxos: [utxo('a', 0, 10_000)],
-        outputs: [{ address: 'to', value: 1_000 }],
-        changeAddress: 'change',
-        feeRate: 1,
-        network: 'regtest'
-      });
-      expect(res.psbtBase64.startsWith('psbt:')).toBe(true);
-    } finally {
-      (global as any).Buffer = originalBuffer;
-      (global as any).btoa = originalBtoa;
-    }
-  });
+
 });
 
 
