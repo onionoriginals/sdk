@@ -5,7 +5,7 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, canonicalDidKeyVm, encoding, signingInput } from '@originals/sdk';
+import { OriginalsSDK, StructuredError, canonicalDidKeyVm, encoding, signingInput } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
 import { withTokenExpiration } from './turnkey-client.js';
@@ -111,7 +111,9 @@ export class TurnkeyDIDSigner {
 }
 
 /**
- * Create a DID:WebVH using OriginalsSDK.createDIDOriginal() with Turnkey signing
+ * Create a DID:WebVH using OriginalsSDK.createDIDOriginal() with Turnkey signing.
+ * The update account must declare CURVE_ED25519 for WebVH method-log custody.
+ * @throws {StructuredError} TURNKEY_UPDATE_KEY_CURVE_INVALID for any other curve.
  */
 export async function createDIDWithTurnkey(params: {
   turnkeyClient: Turnkey;
@@ -139,6 +141,13 @@ export async function createDIDWithTurnkey(params: {
     slug,
     onExpired,
   } = params;
+
+  if (updateKeyAccount.curve !== 'CURVE_ED25519') {
+    throw new StructuredError(
+      'TURNKEY_UPDATE_KEY_CURVE_INVALID',
+      'WebVH update keys must use Ed25519. Select a Turnkey account with curve CURVE_ED25519 and supply its matching updateKeyPublic.'
+    );
+  }
 
   // Create Turnkey signer for the update key
   const signer = new TurnkeyDIDSigner(
