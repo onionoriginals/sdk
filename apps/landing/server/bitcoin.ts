@@ -991,11 +991,21 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
+  // Single-flight admission across all users of this route instance only.
+  // Separate processes/route instances do not coordinate faucet spending.
+  // Each admission reads the provider anew; a stale provider snapshot may
+  // still cause a sequential broadcast to fail. No durable input claims or
+  // recovery guarantees are implied, and failed sends do not reserve inputs.
+  let faucetInFlight = false;
+  const faucetBusy = () => json({
+    error: 'faucet_busy', message: 'Another faucet request is in progress. Try again later.',
+  }, 503, { 'Retry-After': '1' });
+
   const funding: Handler = async (req, _url, clientIp) => {
     // Creator-pays deploys (mainnet) have no faucet at all — the route is not
     // mounted there, and this guard keeps a miswired mount fail-closed.
     const faucet = deps.faucet;
-    if (!faucet) return json({ error: 'faucet_unavailable' }, 404);
+    if (!faucet || (deps.network ?? 'testnet') !== 'testnet') return json({ error: 'faucet_unavailable' }, 404);
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp);
@@ -1008,91 +1018,102 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'bad_address', message: 'A testnet4 P2WPKH (tb1) address is required.' }, 400);
     }
 
-    const perUser = userLimiter.check(sub);
-    if (!perUser.allowed) {
-      return json({ error: 'faucet_user_cap', message: 'Per-user faucet limit reached; try again later.' }, 429, {
-        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+    if (faucetInFlight) return faucetBusy();
+    faucetInFlight = true;
+    try {
+      const perUser = userLimiter.check(sub);
+      if (!perUser.allowed) {
+        return json({ error: 'faucet_user_cap', message: 'Per-user faucet limit reached; try again later.' }, 429, {
+          'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+        });
+      }
+
+      // 1) Gather the faucet's spendable UTXOs; pick enough to cover fundingSats +
+      //    a fixed fee floor. Empty faucet → 507.
+      let faucetUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
+      try {
+        faucetUtxos = await provider.getSpendableUtxos(faucet.address);
+      } catch (e) {
+        return json({ error: 'faucet_unavailable', message: (e as Error).message }, 502);
+      }
+      const totalAvail = faucetUtxos.reduce((n, u) => n + u.value, 0);
+      if (faucetUtxos.length === 0 || totalAvail < faucetSats + 500) {
+        return json({ error: 'faucet_empty', message: 'The testnet4 faucet is out of funds. Try again later.' }, 507);
+      }
+
+      // 2) Build the funding tx: faucet UTXOs in, fundingSats to the user, change
+      //    back to the faucet. Fee = feeRate * estimated vsize (simple P2WPKH).
+      let feeRate: number;
+      try {
+        feeRate = await currentFeeRate(1);
+      } catch (e) {
+        // No floor: a 1 sat/vB funding tx just sits unconfirmed, and the user
+        // waits on a deposit that never arrives.
+        return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+      }
+      const selected: typeof faucetUtxos = [];
+      let inSats = 0;
+      for (const u of faucetUtxos) {
+        selected.push(u);
+        inSats += u.value;
+        if (inSats >= faucetSats + 200) break;
+      }
+      // vsize ~ 10.5 + 68*inputs + 31*2 outputs (P2WPKH), rounded up.
+      const vsize = Math.ceil(10.5 + 68 * selected.length + 31 * 2);
+      const fee = feeRate * vsize;
+      const change = inSats - faucetSats - fee;
+      if (change < 0) return json({ error: 'faucet_empty', message: 'Faucet UTXOs too small for the fee.' }, 507);
+
+      const tx = new btc.Transaction();
+      for (const u of selected) {
+        tx.addInput({
+          txid: hex.decode(u.txid),
+          index: u.vout,
+          // BIP-125 opt-in RBF: a final-sequence funding tx would be un-bumpable
+          // through a fee spike (mirrors the SDK's commit/reveal builders).
+          sequence: 0xfffffffd,
+          witnessUtxo: { script: hex.decode(u.scriptPubKey), amount: BigInt(u.value) },
+        });
+      }
+      tx.addOutputAddress(address, BigInt(faucetSats), btc.TEST_NETWORK);
+      if (change > 330) tx.addOutputAddress(faucet.address, BigInt(change), btc.TEST_NETWORK);
+
+      // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
+      // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
+      // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
+      const userScript = tx.getOutput(0).script;
+      if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
+      const scriptPubKey = hex.encode(userScript);
+
+      // 3) Sign the funding tx with the faucet's key (raw WIF or Turnkey org) →
+      //    broadcast-ready hex.
+      let signedTxHex: string;
+      let signedTxid: string;
+      try {
+        signedTxHex = await faucet.signFundingTx(tx);
+        signedTxid = btc.Transaction.fromRaw(hex.decode(signedTxHex)).id;
+      } catch (e) {
+        return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
+      }
+
+      // 4) Broadcast. Already-known evidence applies to these exact signed bytes.
+      let txid: string;
+      try {
+        txid = await provider.broadcastTransaction(signedTxHex);
+      } catch (e) {
+        if (!isAlreadyKnownTxError(e)) {
+          return json({ error: 'faucet_broadcast_failed', message: (e as Error).message }, 502);
+        }
+        txid = signedTxid;
+      }
+
+      return json({
+        fundingUtxo: { txid, vout: 0, value: faucetSats, scriptPubKey },
+        changeAddress: address, // the user's own address is the inscription change/reveal dest
       });
+    } finally {
+      faucetInFlight = false;
     }
-
-    // 1) Gather the faucet's spendable UTXOs; pick enough to cover fundingSats +
-    //    a fixed fee floor. Empty faucet → 507.
-    let faucetUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
-    try {
-      faucetUtxos = await provider.getSpendableUtxos(faucet.address);
-    } catch (e) {
-      return json({ error: 'faucet_unavailable', message: (e as Error).message }, 502);
-    }
-    const totalAvail = faucetUtxos.reduce((n, u) => n + u.value, 0);
-    if (faucetUtxos.length === 0 || totalAvail < faucetSats + 500) {
-      return json({ error: 'faucet_empty', message: 'The testnet4 faucet is out of funds. Try again later.' }, 507);
-    }
-
-    // 2) Build the funding tx: faucet UTXOs in, fundingSats to the user, change
-    //    back to the faucet. Fee = feeRate * estimated vsize (simple P2WPKH).
-    let feeRate: number;
-    try {
-      feeRate = await currentFeeRate(1);
-    } catch (e) {
-      // No floor: a 1 sat/vB funding tx just sits unconfirmed, and the user
-      // waits on a deposit that never arrives.
-      return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
-    }
-    const selected: typeof faucetUtxos = [];
-    let inSats = 0;
-    for (const u of faucetUtxos) {
-      selected.push(u);
-      inSats += u.value;
-      if (inSats >= faucetSats + 200) break;
-    }
-    // vsize ~ 10.5 + 68*inputs + 31*2 outputs (P2WPKH), rounded up.
-    const vsize = Math.ceil(10.5 + 68 * selected.length + 31 * 2);
-    const fee = feeRate * vsize;
-    const change = inSats - faucetSats - fee;
-    if (change < 0) return json({ error: 'faucet_empty', message: 'Faucet UTXOs too small for the fee.' }, 507);
-
-    const tx = new btc.Transaction();
-    for (const u of selected) {
-      tx.addInput({
-        txid: hex.decode(u.txid),
-        index: u.vout,
-        // BIP-125 opt-in RBF: a final-sequence funding tx would be un-bumpable
-        // through a fee spike (mirrors the SDK's commit/reveal builders).
-        sequence: 0xfffffffd,
-        witnessUtxo: { script: hex.decode(u.scriptPubKey), amount: BigInt(u.value) },
-      });
-    }
-    tx.addOutputAddress(address, BigInt(faucetSats), btc.TEST_NETWORK);
-    if (change > 330) tx.addOutputAddress(faucet.address, BigInt(change), btc.TEST_NETWORK);
-
-    // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
-    // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
-    // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
-    const userScript = tx.getOutput(0).script;
-    if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
-    const scriptPubKey = hex.encode(userScript);
-
-    // 3) Sign the funding tx with the faucet's key (raw WIF or Turnkey org) →
-    //    broadcast-ready hex.
-    let signedTxHex: string;
-    try {
-      signedTxHex = await faucet.signFundingTx(tx);
-    } catch (e) {
-      return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
-    }
-
-    // 4) Broadcast.
-    let txid: string;
-    try {
-      txid = await provider.broadcastTransaction(signedTxHex);
-    } catch (e) {
-      return json({ error: 'faucet_broadcast_failed', message: (e as Error).message }, 502);
-    }
-
-    return json({
-      fundingUtxo: { txid, vout: 0, value: faucetSats, scriptPubKey },
-      changeAddress: address, // the user's own address is the inscription change/reveal dest
-    });
   };
 
   /**
