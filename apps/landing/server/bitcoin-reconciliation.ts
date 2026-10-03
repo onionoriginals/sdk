@@ -455,7 +455,10 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
               { confirmations: st.confirmations, blockHeight: st.blockHeight, blockHash: st.blockHash }
             )
           : true;
-        if (needsWrite && applied) changed = true;
+        // A losing CAS means another request changed the record while our
+        // provider read was pending. Refresh the response from disk in that
+        // case too; returning the initial list would hide its confirmation.
+        if (needsWrite) changed = true;
         if (applied && (st.confirmations ?? 0) >= RECOVERY_CONFIRMATIONS) {
           // Guarded retire: re-verify against the record's CURRENT on-disk
           // state immediately before retiring, rather than trusting the

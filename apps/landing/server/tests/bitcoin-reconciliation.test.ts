@@ -1405,3 +1405,40 @@ test.each([1, 0, -1, NaN, Infinity, 1.5])('direct factory keeps the six-confirma
   expect(store.get('sub-1', commitTxId)?.retired).not.toBe(true);
   expect(store.get('sub-1', commitTxId)?.signedCommitHex).toBe('02aa');
 });
+
+
+describe('concurrent inscription list responses', () => {
+  test('a losing confirmation CAS returns the persisted winner instead of its initial snapshot', async () => {
+    const { store } = harness();
+    const commitTxId = 'f'.repeat(64);
+    store.create('sub-1', rec({ commitTxId, status: 'reveal_broadcast' }));
+    const reads: Array<(status: { confirmed: boolean; confirmations: number }) => void> = [];
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: () => new Promise(resolve => reads.push(resolve)) },
+      broadcastIdempotent: async () => { throw new Error('Confirmed pairs must not rebroadcast'); },
+      unreadableRecords: () => null,
+      money: silentMoney,
+    });
+    // Both public list requests snapshot reveal_broadcast before either node
+    // observation completes. The first persists confirmation while the second
+    // is suspended in its provider read, making the second's CAS lose.
+    const first = reconciler.reconcileUser('sub-1');
+    const second = reconciler.reconcileUser('sub-1');
+    expect(reads).toHaveLength(2);
+    reads[0]({ confirmed: true, confirmations: 1 });
+    const firstResponse = await first;
+    expect(firstResponse.status).toBe(200);
+    expect((await firstResponse.json()).inscriptions[0].status).toBe('confirmed');
+    reads[1]({ confirmed: true, confirmations: 1 });
+    const secondResponse = await second;
+    expect(secondResponse.status).toBe(200);
+    const winner = store.get('sub-1', commitTxId)!;
+    expect(winner.status).toBe('confirmed');
+    expect((await secondResponse.json()).inscriptions[0]).toMatchObject({
+      commitTxId, status: winner.status, confirmations: 1, settled: false,
+    });
+    expect(winner.signedCommitHex).toBe('02aa');
+    expect(winner.revealTxHex).toBe('02bb');
+  });
+});

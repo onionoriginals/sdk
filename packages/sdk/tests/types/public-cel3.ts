@@ -3,6 +3,7 @@ import SDK, {
   OriginalsSDK,
   OriginalsAsset,
   LifecycleManager,
+  HostedMemoryStorageAdapter,
   createLocalSigner,
   fetchPublicReachabilityCheck,
   type OriginalsSDKOptions,
@@ -143,7 +144,7 @@ import type { InscribeConfirm as PreviousConfirm } from '@originals/sdk/types';
 import { parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection, type AssetEnvelope as SubpathAssetEnvelope } from '@originals/sdk/asset-envelope';
 import { inspectAssetEnvelope as inspectRootEnvelope } from '@originals/sdk';
 import { inspectAssetEnvelope as inspectLocalEnvelope } from '@originals/sdk/v3';
-import { deriveAssetId, normalizeAssetId, normalizeSatpoint, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
+import { deriveAssetId, normalizeAssetId, normalizeSatpoint, normalizeInscriptionId, normalizeTxid, assetDigest, parseAssetAlias, type AssetAlias } from '@originals/sdk/cel';
 // @ts-expect-error Removed from the CEL 2 / SDK 4 surface; use deriveAssetId.
 import { deriveDid } from '@originals/sdk/cel';
 // @ts-expect-error Renamed to parseAssetAlias; the historical name no longer resolves.
@@ -202,3 +203,11 @@ import type { ChainValidator, BitcoinCoreChainValidatorOptions } from '@original
 const coreOptions: BitcoinCoreChainValidatorOptions = { endpoint: 'http://localhost:18443', rpcAuth: { username: 'user', password: 'password' } };
 const chainValidator: ChainValidator = createBitcoinCoreChainValidator(coreOptions);
 OriginalsSDK.create({ network: 'regtest', satProvider, chainValidator });
+
+// Existing exports omitted from the original inventory remain public contracts.
+const hostedMemoryAdapter: HostedMemoryStorageAdapter = new HostedMemoryStorageAdapter();
+const canonicalInscriptionId: string = normalizeInscriptionId('AB'.repeat(32) + 'i0');
+const canonicalTxid: string = normalizeTxid('AB'.repeat(32));
+void hostedMemoryAdapter;
+void canonicalInscriptionId;
+void canonicalTxid;
