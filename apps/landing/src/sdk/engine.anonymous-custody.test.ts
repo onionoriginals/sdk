@@ -107,7 +107,7 @@ describe('anonymous authorship custody survives a reload (#598)', () => {
     await coldSecond.hydrateFromWeb(secondPublished.webvhDid!);
     const updated = await coldSecond.update('Second, revised', 'Upload', 'more bytes');
     expect(updated.resource.version).toBe(2);
-  });
+  }, 30_000); // Two real publication/backup lifecycles plus recovery on shared CI runners.
 
   test('a transparent local backup whose decrypted key does not match its recorded controller is refused, not silently used', async () => {
     host = installCel3Host();

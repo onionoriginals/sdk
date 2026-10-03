@@ -262,6 +262,16 @@ function eventShape(value: JsonValue, scidTemplate = false): void {
   if (Object.prototype.hasOwnProperty.call(data, "name")) string(data.name);
   if (Object.prototype.hasOwnProperty.call(data, "metadata"))
     object(data.metadata);
+  if (
+    !scidTemplate &&
+    operation.type === "create" &&
+    event.previousEvent !== undefined
+  )
+    requireThat(
+      event.previousEvent === genesisCommitment(event),
+      "CEL_SCID",
+      "Genesis SCID does not match its commitment",
+    );
 }
 function proofShape(value: JsonValue): void {
   const proof = object(value);
@@ -302,7 +312,7 @@ function proofShape(value: JsonValue): void {
 function entryShape(value: JsonValue): void {
   const entry = object(value);
   fields(entry, ["event", "proof"]);
-  validateEvent(entry.event);
+  eventShape(entry.event);
   const proofs = Array.isArray(entry.proof) ? entry.proof : [entry.proof];
   requireThat(
     proofs.length >= 1 && proofs.length <= 8,
@@ -315,14 +325,7 @@ function entryShape(value: JsonValue): void {
 export function validateEvent(input: unknown): CelEvent {
   const value = copyValue(input);
   eventShape(value);
-  const event = value as unknown as CelEvent;
-  if (event.operation.type === "create" && event.previousEvent !== undefined)
-    requireThat(
-      verifyScid(event, event.previousEvent),
-      "CEL_SCID",
-      "Genesis SCID does not match its commitment",
-    );
-  return event;
+  return value as unknown as CelEvent;
 }
 /** Validate a proof's options, did:key relationship and canonical encodings, without authenticating its signature. */
 export function validateProof(input: unknown): ControllerProof {
@@ -420,6 +423,11 @@ export function eventDigest(input: unknown): string {
 /** The only SCID-bearing position is the genesis event's top-level previousEvent. */
 export const SCID_PLACEHOLDER = "{SCID}";
 
+/** Shared preimage construction; callers validate the genesis shape first. */
+function genesisCommitment(event: JsonObject): string {
+  return hashJson({ ...event, previousEvent: SCID_PLACEHOLDER });
+}
+
 /** Commit to the full genesis template using CEL's JCS/SHA-256 multihash stack. */
 export function deriveScid(input: unknown): string {
   const value = object(copyValue(input));
@@ -434,7 +442,7 @@ export function deriveScid(input: unknown): string {
     "CEL_SCID",
     "Genesis template requires previousEvent",
   );
-  return hashJson({ ...value, previousEvent: SCID_PLACEHOLDER });
+  return genesisCommitment(value);
 }
 
 /** Independently verify both the embedded SCID and the expected genesis commitment. */
@@ -443,8 +451,10 @@ export function verifyScid(input: unknown, expectedScid: unknown): boolean {
     validateDigest(expectedScid);
     const value = object(copyValue(input));
     eventShape(value);
+    // eventShape independently checked the genesis commitment above.
     return (
-      value.previousEvent === expectedScid && deriveScid(value) === expectedScid
+      object(value.operation).type === "create" &&
+      value.previousEvent === expectedScid
     );
   } catch {
     return false;

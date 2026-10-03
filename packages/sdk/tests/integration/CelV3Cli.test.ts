@@ -136,138 +136,162 @@ async function envelopes() {
   return { cel, webvh, btco };
 }
 
+// Each case launches several real CLI processes and checks a full lifecycle.
+// Keep a bounded integration budget independent of Bun's 5-second default.
+const CLI_LIFECYCLE_TIMEOUT_MS = 30_000;
+
 for (const layer of ["cel", "webvh", "btco"] as const) {
-  test(`CLI verifies complete ${layer} bytes offline without inferring publication acceptance`, async () => {
-    const envelope = (await envelopes())[layer];
-    const dir = await mkdtemp(join(tmpdir(), "cli-offline-"));
-    try {
-      const path = join(dir, "asset.json");
-      await writeFile(path, JSON.stringify(envelope));
-      const result = await run(["verify", "--asset", path]);
-      expect(result.exitCode, result.stderr).toBe(0);
-      const output = JSON.parse(result.stdout);
-      expect(output.localVerification).toEqual({
-        scope: "controller-history-and-bytes",
-        verified: true,
-      });
-      expect(output.verified).toBe(layer === "cel");
-      expect(output.resources).toBe("verified");
-      expect(output.state).toBeUndefined();
-      expect(output.history.webvhBinding).toBe(
-        layer === "cel" ? "not-applicable" : "unverified",
-      );
-      expect(output.history.bitcoinAcceptance).toBe(
-        layer === "btco" ? "unverified" : "not-applicable",
-      );
-      expect(output.history.freshness).toBe("unknown");
-      expect(output.hosted).toBeUndefined();
-      expect(output.publication).toBeUndefined();
-      if (layer !== "cel") {
-        await expect(
-          LocalSDK.create().lifecycle.loadAsset(envelope),
-        ).rejects.toMatchObject({ code: "ASSET_LOAD_VERIFICATION_FAILED" });
-      }
-      for (const defect of [
-        "missing",
-        "draft",
-        "signature",
-        "bytes",
-      ] as const) {
-        const broken = structuredClone(envelope);
-        if (defect === "missing") broken.resources.shift(); // Historical version, not just the head.
-        if (defect === "signature")
-          broken.eventLog.log[0].proof[0].proofValue = (
-            await signEvent(
-              broken.eventLog.log[0].event,
-              createLocalSigner("Ed25519", new Uint8Array(32).fill(10)),
-            )
-          ).proof[0].proofValue;
-        if (defect === "bytes") broken.resources[0].content.data = "YmFk";
-        if (defect === "draft") {
-          const { asset } = await LocalSDK.create().lifecycle.loadAsset(
-            broken,
-            { allowPartial: true },
-          );
-          await asset.addResourceVersion("art", "draft", "text/plain", {
-            onAppendFailure: "skip",
-          });
-          broken.unverified = asset.serialize().unverified;
+  test(
+    `CLI verifies complete ${layer} bytes offline without inferring publication acceptance`,
+    async () => {
+      const envelope = (await envelopes())[layer];
+      const dir = await mkdtemp(join(tmpdir(), "cli-offline-"));
+      try {
+        const path = join(dir, "asset.json");
+        await writeFile(path, JSON.stringify(envelope));
+        const result = await run(["verify", "--asset", path]);
+        expect(result.exitCode, result.stderr).toBe(0);
+        const output = JSON.parse(result.stdout);
+        expect(output.localVerification).toEqual({
+          scope: "controller-history-and-bytes",
+          verified: true,
+        });
+        expect(output.verified).toBe(layer === "cel");
+        expect(output.resources).toBe("verified");
+        expect(output.state).toBeUndefined();
+        expect(output.history.webvhBinding).toBe(
+          layer === "cel" ? "not-applicable" : "unverified",
+        );
+        expect(output.history.bitcoinAcceptance).toBe(
+          layer === "btco" ? "unverified" : "not-applicable",
+        );
+        expect(output.history.freshness).toBe("unknown");
+        expect(output.hosted).toBeUndefined();
+        expect(output.publication).toBeUndefined();
+        if (layer !== "cel") {
+          await expect(
+            LocalSDK.create().lifecycle.loadAsset(envelope),
+          ).rejects.toMatchObject({ code: "ASSET_LOAD_VERIFICATION_FAILED" });
         }
-        await writeFile(path, JSON.stringify(broken));
-        const rejected = await run(["verify", "--asset", path]);
-        expect(
-          rejected.exitCode,
-          `${layer}/${defect}: ${rejected.stdout}`,
-        ).toBe(1);
-        expect(rejected.stdout).toBe("");
-        const inspected = await run(["inspect", "--asset", path]);
-        if (defect === "missing" || defect === "draft") {
-          expect(inspected.exitCode, inspected.stderr).toBe(0);
-          const partial = JSON.parse(inspected.stdout);
-          expect(partial.verified).toBe(false);
-          expect(partial.localVerification.verified).toBe(false);
-          expect(partial.state).toEqual(partial.history.state);
-          if (defect === "missing")
-            expect(partial.missingResources).toContainEqual({
-              id: "art",
-              version: 1,
+        for (const defect of [
+          "missing",
+          "draft",
+          "signature",
+          "bytes",
+        ] as const) {
+          const broken = structuredClone(envelope);
+          if (defect === "missing") broken.resources.shift(); // Historical version, not just the head.
+          if (defect === "signature")
+            broken.eventLog.log[0].proof[0].proofValue = (
+              await signEvent(
+                broken.eventLog.log[0].event,
+                createLocalSigner("Ed25519", new Uint8Array(32).fill(10)),
+              )
+            ).proof[0].proofValue;
+          if (defect === "bytes") broken.resources[0].content.data = "YmFk";
+          if (defect === "draft") {
+            const { asset } = await LocalSDK.create().lifecycle.loadAsset(
+              broken,
+              { allowPartial: true },
+            );
+            await asset.addResourceVersion("art", "draft", "text/plain", {
+              onAppendFailure: "skip",
             });
-          else expect(partial.unverifiedLocalResources).toBe(1);
-        } else expect(inspected.exitCode).toBe(1);
+            broken.unverified = asset.serialize().unverified;
+          }
+          await writeFile(path, JSON.stringify(broken));
+          const rejected = await run(["verify", "--asset", path]);
+          expect(
+            rejected.exitCode,
+            `${layer}/${defect}: ${rejected.stdout}`,
+          ).toBe(1);
+          expect(rejected.stdout).toBe("");
+          const inspected = await run(["inspect", "--asset", path]);
+          if (defect === "missing" || defect === "draft") {
+            expect(inspected.exitCode, inspected.stderr).toBe(0);
+            const partial = JSON.parse(inspected.stdout);
+            expect(partial.verified).toBe(false);
+            expect(partial.localVerification.verified).toBe(false);
+            expect(partial.state).toEqual(partial.history.state);
+            if (defect === "missing")
+              expect(partial.missingResources).toContainEqual({
+                id: "art",
+                version: 1,
+              });
+            else expect(partial.unverifiedLocalResources).toBe(1);
+          } else expect(inspected.exitCode).toBe(1);
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
       }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+    },
+    CLI_LIFECYCLE_TIMEOUT_MS,
+  );
 }
 
 for (const format of ["json", "cbor"] as const) {
-  test(`inspect --log adds state while verify preserves its ${format} history-only result`, async () => {
-    const { btco } = await envelopes();
-    const dir = await mkdtemp(join(tmpdir(), "cli-log-"));
-    try {
-      const path = join(dir, "history");
-      await writeFile(path, encodeDocument(btco.eventLog, format));
-      const verified = await run(["verify", "--log", path, "--format", format]);
-      const inspected = await run([
-        "inspect",
-        "--log",
-        path,
-        "--format",
-        format,
-      ]);
-      expect(verified.exitCode, verified.stderr).toBe(0);
-      expect(inspected.exitCode, inspected.stderr).toBe(0);
-      const output = JSON.parse(verified.stdout);
-      expect(Object.keys(output).sort()).toEqual([
-        "history",
-        "resources",
-        "scope",
-        "verified",
-      ]);
-      expect(output).toMatchObject({
-        verified: false,
-        scope: "controller-history",
-        resources: "unchecked",
-      });
-      expect(JSON.parse(inspected.stdout)).toEqual({
-        ...output,
-        state: output.history.state,
-      });
-      const assetPath = join(dir, "asset.json");
-      await writeFile(assetPath, JSON.stringify(btco));
-      const asset = await run(["inspect", "--asset", assetPath]);
-      expect(JSON.parse(asset.stdout).state).toEqual(output.history.state);
-      btco.eventLog.log.at(-1)!.event.previousEvent =
-        btco.eventLog.log[1].event.previousEvent;
-      await writeFile(path, encodeDocument(btco.eventLog, format));
-      for (const command of ["verify", "inspect"]) {
-        const invalid = await run([command, "--log", path, "--format", format]);
-        expect(invalid.exitCode).toBe(1);
-        expect(invalid.stdout).toBe("");
+  test(
+    `inspect --log adds state while verify preserves its ${format} history-only result`,
+    async () => {
+      const { btco } = await envelopes();
+      const dir = await mkdtemp(join(tmpdir(), "cli-log-"));
+      try {
+        const path = join(dir, "history");
+        await writeFile(path, encodeDocument(btco.eventLog, format));
+        const verified = await run([
+          "verify",
+          "--log",
+          path,
+          "--format",
+          format,
+        ]);
+        const inspected = await run([
+          "inspect",
+          "--log",
+          path,
+          "--format",
+          format,
+        ]);
+        expect(verified.exitCode, verified.stderr).toBe(0);
+        expect(inspected.exitCode, inspected.stderr).toBe(0);
+        const output = JSON.parse(verified.stdout);
+        expect(Object.keys(output).sort()).toEqual([
+          "history",
+          "resources",
+          "scope",
+          "verified",
+        ]);
+        expect(output).toMatchObject({
+          verified: false,
+          scope: "controller-history",
+          resources: "unchecked",
+        });
+        expect(JSON.parse(inspected.stdout)).toEqual({
+          ...output,
+          state: output.history.state,
+        });
+        const assetPath = join(dir, "asset.json");
+        await writeFile(assetPath, JSON.stringify(btco));
+        const asset = await run(["inspect", "--asset", assetPath]);
+        expect(JSON.parse(asset.stdout).state).toEqual(output.history.state);
+        btco.eventLog.log.at(-1)!.event.previousEvent =
+          btco.eventLog.log[1].event.previousEvent;
+        await writeFile(path, encodeDocument(btco.eventLog, format));
+        for (const command of ["verify", "inspect"]) {
+          const invalid = await run([
+            command,
+            "--log",
+            path,
+            "--format",
+            format,
+          ]);
+          expect(invalid.exitCode).toBe(1);
+          expect(invalid.stdout).toBe("");
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
       }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+    },
+    CLI_LIFECYCLE_TIMEOUT_MS,
+  );
 }
