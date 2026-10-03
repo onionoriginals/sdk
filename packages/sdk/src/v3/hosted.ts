@@ -515,11 +515,11 @@ export class HostedAssets {
         domain,
         prefix + "resources/" + resource.digestMultibase,
       );
-      if (!body)
-        return error(
-          "ASSET_RESOURCE_MISSING",
-          "Hosted historical resource is unavailable",
-        );
+      // Missing bytes affect resource coverage, not the authenticated hosted
+      // head. Keep their signed descriptors; verification reports missing
+      // attachments, and Bitcoin preparation requires its selected inline bytes.
+      // Returned bytes still undergo digest/reference matching below.
+      if (!body) continue;
       total += body.content.length;
       byteBudget(total);
       // The signed descriptor owns media interpretation. Transport metadata
