@@ -272,21 +272,25 @@ export function createInscriptionReconciler(deps: InscriptionReconcilerDeps): In
     }
     for (const r of liveStuck) {
       if (lookups >= stuckLimit) break;
-      const current = store.get(sub, r.commitTxId);
+      let current = store.get(sub, r.commitTxId);
       if (!current || current.superseded || current.retired) continue;
       lookups++;
       cursors.stuck++;
       const st = await readStatus(r.commitTxId);
       if (!st) continue;
-      if (!st.confirmed) {
-        // #677 — read the FRESH pre-await snapshot (`current`), not the
-        // top-of-function one (`r`): by the time this record's turn comes
-        // up, `r` can be arbitrarily stale (other records' awaits already
-        // ran, or a concurrent reconcileUser call for the same user already
-        // moved this exact record).
-        const lastPush = Date.parse(current.rebroadcastAt ?? current.updatedAt);
-        if (!current.signedCommitHex || now() - lastPush < REVEAL_REBROADCAST_AFTER_MS) continue;
-      }
+      // An overlapping poll may have attempted or completed this pair while
+      // the status lookup was in flight. Check the durable attempt clock and
+      // eligibility again, with no await before journaling our own attempt.
+      current = store.get(sub, r.commitTxId);
+      if (!current || current.superseded || current.retired ||
+          (current.status !== 'signed' && current.status !== 'commit_broadcast')) continue;
+      // A confirmed commit with no journaled attempt can recover immediately.
+      // Prior attempts (including unconfirmed/manual retries) keep their full
+      // window even after confirmation (#861). updatedAt is only a fallback
+      // for the existing unconfirmed-commit retry policy.
+      const lastPush = current.rebroadcastAt ?? (st.confirmed ? undefined : current.updatedAt);
+      if (lastPush !== undefined && now() - Date.parse(lastPush) < REVEAL_REBROADCAST_AFTER_MS) continue;
+      if (!st.confirmed && !current.signedCommitHex) continue;
       store.markRebroadcast(sub, r.commitTxId);
       let atStatus = current.status;
       if (!st.confirmed) {
