@@ -35,7 +35,7 @@
       },
       "devDependencies": {
         "@turnkey/sdk-server": "^8.3.0",
-        "@turnkey/sdk-types": "1.7.0",
+        "@turnkey/sdk-types": "1.8.0",
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
         "@vitejs/plugin-react": "^6.0.3",
@@ -452,7 +452,7 @@
 
     "@turnkey/sdk-server": ["@turnkey/sdk-server@8.4.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.14", "@turnkey/crypto": "2.12.1", "@turnkey/http": "6.4.0", "@turnkey/sdk-types": "1.7.0", "@turnkey/wallet-stamper": "1.1.26", "buffer": "^6.0.3", "cross-fetch": "^3.1.5" } }, "sha512-kaNPDYBi9b8SQylsXRlAe7FxA/FiR9J63jyn1ZL/6QYm01hd9XsFSUbSloXZMYsnanZ/M2GewEsF5C+GXhKLhw=="],
 
-    "@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
+    "@turnkey/sdk-types": ["@turnkey/sdk-types@1.8.0", "", {}, "sha512-ts0hEvoyjj32f9Wt1irQj273f4y3EU0U4nQTF9qn+kP81ZZJCfujsSDCTBAVxl7TQ3JnF6xBKduU13GhwWRmDg=="],
 
     "@turnkey/wallet-stamper": ["@turnkey/wallet-stamper@1.1.26", "", { "dependencies": { "@turnkey/crypto": "2.12.1", "@turnkey/encoding": "0.6.0" }, "optionalDependencies": { "viem": "^2.21.35" } }, "sha512-z7KFaDc3CEB+TteUyh/1ZYRohDM88qUU8TeYyqGLNYib4t0aQZ9sAPQHJAXo6KzxFysm8yqfj26Tlo/cGS7APA=="],
 
@@ -1011,6 +1011,14 @@
     "@turnkey/crypto/@noble/curves": ["@noble/curves@1.9.0", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg=="],
 
     "@turnkey/crypto/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
+
+    "@turnkey/crypto/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
+
+    "@turnkey/indexed-db-stamper/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
+
+    "@turnkey/sdk-browser/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
+
+    "@turnkey/sdk-server/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
 
     "bip174/uint8array-tools": ["uint8array-tools@0.0.10", "", {}, "sha512-sSbrZqlr04w4p8KKpHw0ME/R4JzQaadum+BWhMlk2M7LrDyXWTfJOco3d1jNMdQNxgk5DDm88R3IWYH0nR+tzQ=="],
 
