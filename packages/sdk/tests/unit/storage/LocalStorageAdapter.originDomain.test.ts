@@ -116,6 +116,62 @@ describe('LocalStorageAdapter originDomain mode (#780)', () => {
     },
   );
 
+  test.each([
+    ['localhost:3000', 'https://localhost:3000', 'localhost:3000'],
+    ['example.com:8443', 'https://example.com:8443/', 'example.com:8443'],
+    ['example.com:443', 'https://example.com', 'example.com'],
+    ['example.com:443', 'https://example.com:443/', 'example.com'],
+    ['EXAMPLE.com:08443', 'https://example.com:8443', 'example.com:8443'],
+    ['example.com', 'https://example.com:443/', 'example.com'],
+    ['example.com:443', undefined, 'example.com'],
+    ['localhost:3000', undefined, 'localhost:3000'],
+  ])('port origin %s with baseUrl %s round-trips at canonical domain %s', async (originDomain, baseUrl, canonicalDomain) => {
+    const adapter = new LocalStorageAdapter({ baseDir: tempDir, originDomain, baseUrl });
+    expect(await adapter.putObject(originDomain, 'a/data.bin', 'content'))
+      .toBe(`https://${canonicalDomain}/a/data.bin`);
+    expect(fs.readFileSync(path.join(tempDir, 'a/data.bin'), 'utf8')).toBe('content');
+    expect(await adapter.exists(canonicalDomain, 'a/data.bin')).toBe(true);
+    expect(await adapter.listObjects(canonicalDomain, 'a/')).toEqual(['a/data.bin']);
+    expect(new TextDecoder().decode((await adapter.getObject(canonicalDomain, 'a/data.bin'))!.content)).toBe('content');
+    await expect(adapter.putObject('other.com', 'bad.bin', 'bad')).rejects.toMatchObject({ code: 'STORAGE_DOMAIN_MISMATCH' });
+    const wrongPort = canonicalDomain.startsWith('localhost') ? 'localhost:3001' : 'example.com:9443';
+    await expect(adapter.putObject(wrongPort, 'a/data.bin', 'bad')).rejects.toMatchObject({ code: 'STORAGE_DOMAIN_MISMATCH' });
+    await expect(adapter.getObject(wrongPort, 'a/data.bin')).rejects.toMatchObject({ code: 'STORAGE_DOMAIN_MISMATCH' });
+    await expect(adapter.exists(wrongPort, 'a/data.bin')).rejects.toMatchObject({ code: 'STORAGE_DOMAIN_MISMATCH' });
+    await expect(adapter.listObjects(wrongPort, '')).rejects.toMatchObject({ code: 'STORAGE_DOMAIN_MISMATCH' });
+    expect(fs.readFileSync(path.join(tempDir, 'a/data.bin'), 'utf8')).toBe('content');
+  });
+
+  test.each([
+    'https://localhost', 'https://localhost:443', 'https://localhost:3001',
+    'http://localhost:3000', 'https://user:pass@localhost:3000',
+    'https://@localhost:3000', 'https://localhost:3000/path',
+    'https://localhost:3000/a/..', 'https://localhost:3000/%2e/',
+    'https://localhost:3000?', 'https://localhost:3000#',
+    'https://localhost:3000?q=1', 'https://localhost:3000#fragment',
+    'https://localhost:3000\\', 'https://localhost:3000\\a\\..',
+    ' https://localhost:3000', 'https://localhost:3000\n',
+    'https://local\thost:3000', 'https://%6cocalhost:3000',
+    'https:////localhost:3000',
+  ])('rejects unsafe or mismatched port origin %j', (baseUrl) => {
+    expect(() => new LocalStorageAdapter({ baseDir: tempDir, originDomain: 'localhost:3000', baseUrl }))
+      .toThrow(expect.objectContaining({ code: 'STORAGE_INVALID_ORIGIN' }));
+    expect(fs.readdirSync(tempDir)).toEqual([]);
+  });
+
+  test.each([
+    '', 'example.com/', 'example.com/path', 'example.com/a/..',
+    'user@example.com', '@example.com', 'example.com?', 'example.com#',
+    'example.com\\', ' example.com', 'example.com\n', '%65xample.com',
+    'https://example.com', 'example.com:', 'example.com:invalid', 'example.com:65536',
+  ])('validates configured originDomain even without a baseUrl (%j)', (originDomain) => {
+    for (const baseUrl of [undefined, `https://${originDomain}`]) {
+      expect(() => new LocalStorageAdapter({ baseDir: tempDir, originDomain, baseUrl }))
+        .toThrow(expect.objectContaining({ code: 'STORAGE_INVALID_ORIGIN' }));
+    }
+    expect(fs.readdirSync(tempDir)).toEqual([]);
+  });
+
   test('an invalid originDomain baseUrl is rejected before any storage write', () => {
     let thrown: unknown;
     try {
