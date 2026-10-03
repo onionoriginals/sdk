@@ -1,7 +1,7 @@
 // Reads saved expected evidence; never regenerates it or imports Originals code.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { checkDocument, schemaValidate, decodeCbor, bytes, encodeCbor } from './profile-reference.mjs';
+import { checkDocument, schemaValidate, decodeCbor, bytes, encodeCbor, checkJsonIntegerFidelity } from './profile-reference.mjs';
 const read = name => JSON.parse(readFileSync(new URL(name, import.meta.url), 'utf8'));
 const corpus = read('profile-documents.json');
 for (const fixture of corpus.accepted) {
@@ -27,6 +27,13 @@ const inputs = read('transport-inputs.json');
 for (const fixture of inputs.cbor) {
   if (fixture.expected === 'accepted') decodeCbor(Buffer.from(fixture.hex, 'hex'));
   else assert.throws(() => decodeCbor(Buffer.from(fixture.hex, 'hex')), undefined, fixture.id);
+}
+// JSON transport vectors for integer-literal exactness (see #727): confirm
+// this independent oracle agrees with the production parser's accept/reject
+// split, closing the JSON/CBOR parity gap for out-of-range integer literals.
+for (const fixture of inputs.json.filter(f => f.id.includes('integer'))) {
+  if (fixture.expected === 'accepted') checkJsonIntegerFidelity(fixture.source);
+  else assert.throws(() => checkJsonIntegerFidelity(fixture.source), undefined, fixture.id);
 }
 // Literal preferred encodings, independent of fixture generation.
 assert.equal(Buffer.from(encodeCbor({ a: 1 })).toString('hex'), 'a1616101');

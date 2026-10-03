@@ -454,6 +454,26 @@ test('a NEW hash with no height CLEARS the stale height rather than pairing it w
   expect(reloaded.confirmedBlockHeight).toBeUndefined();
 });
 
+test('#825: a NEW height with no hash CLEARS the stale hash rather than pairing it with the wrong block', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'is-hash-'));
+  const store = createInscriptionsStore({ dataDir });
+  const record = rec({});
+  store.create('sub-1', record);
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 1, blockHeight: 100, blockHash: 'a'.repeat(64) });
+
+  // This read's height PROVES the identity changed (a reconfirmation at a
+  // new height, with the hash lookup failing independently of the height —
+  // the exact mirror image of the "NEW hash with no height" case above).
+  // Keeping the OLD hash would pair it with a height it was never actually
+  // observed at, and would misreport a later same-height read as a reorg
+  // (identical heights, unrelated stale hash) even though nothing reorged.
+  store.setStatus('sub-1', record.commitTxId, 'confirmed', { confirmations: 2, blockHeight: 105 });
+  const reloaded = createInscriptionsStore({ dataDir }).get('sub-1', record.commitTxId)!;
+  expect(reloaded.confirmations).toBe(2);
+  expect(reloaded.confirmedBlockHeight).toBe(105);
+  expect(reloaded.confirmedBlockHash).toBeUndefined();
+});
+
 test('an evidence-less read (same or absent hash) keeps the prior height — nothing proves the identity changed', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'is-height2-'));
   const store = createInscriptionsStore({ dataDir });

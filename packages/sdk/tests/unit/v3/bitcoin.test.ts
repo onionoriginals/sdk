@@ -170,7 +170,7 @@ async function fixture(
       { ...fundingUtxos[0], txid: "34".repeat(32) },
     ];
   }
-  return { sdk, asset, snapshot, provider, options, accept };
+  return { sdk, asset, snapshot, provider, options, accept, stored };
 }
 
 test("prepares raw media plus the complete boundary without broadcasting and roundtrips the saved pair", async () => {
@@ -589,4 +589,155 @@ test("uninscribed common sat uses the output sat-range proof when ord has no own
   expect(prepared.transactions.satoshi).toBe(f.snapshot.sat);
   expect(f.provider.getFirstSatOfOutput).toHaveBeenCalledTimes(1);
   expect(f.provider.broadcastTransaction).not.toHaveBeenCalled();
+});
+
+// #851: resource availability is separate from authenticated hosted-head evidence.
+test("a boundary can inline art when unrelated hosted bytes are missing", async () => {
+  const f = await fixture(true, png, [
+    {
+      id: "notes",
+      mediaType: "text/plain",
+      content: new TextEncoder().encode("notes"),
+    },
+  ]);
+  const notes = f.asset.resources.find((resource) => resource.id === "notes")!;
+  const key = [...f.stored.keys()].find((path) =>
+    path.endsWith(notes.digestMultibase),
+  )!;
+  f.stored.delete(key);
+
+  // Local custody still has every byte; cold readers report the missing attachment.
+  expect(await f.asset.verify()).toBe(true);
+  const cold = await f.sdk.lifecycle.resolveAssetFromWeb(f.asset.state.alias);
+  expect(cold.verification.hosted?.status).toBe("verified");
+  expect(cold.verification.verified).toBe(false);
+  expect(cold.verification.missingResources).toEqual([
+    { id: "notes", version: 1 },
+  ]);
+  for (const asset of [f.asset, cold.asset]) {
+    const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(asset, {
+      ...f.options,
+      inlineResourceId: "art",
+    });
+    expect(boundary.document.log.slice(0, -1)).toEqual(f.asset.celLog.log);
+    expect(inscription(boundary).body).toEqual(png);
+  }
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(cold.asset, {
+    ...f.options,
+    inlineResourceId: "art",
+  });
+  f.accept(boundary);
+  const resolved = await f.sdk.lifecycle.resolveAssetFromSat(f.snapshot.sat);
+  if (resolved.status !== "accepted") throw new Error(resolved.status);
+  expect(resolved.resourceAvailability).toEqual([
+    { id: "art", version: 1, availability: "bitcoin-inline" },
+    { id: "notes", version: 1, availability: "referenced" },
+  ]);
+  expect(resolved.verification.missingResources).toEqual([
+    { id: "notes", version: 1 },
+  ]);
+  expect(f.provider.broadcastTransaction).not.toHaveBeenCalled();
+});
+
+test("a boundary retains authenticated superseded descriptors without their hosted bytes", async () => {
+  const f = await fixture();
+  const oldDigest = f.asset.resources[0].digestMultibase;
+  const revised = new Uint8Array([...png, 1]);
+  await f.asset.addResourceVersion("art", revised, "image/png");
+  const published = await f.sdk.lifecycle.publishToWeb(f.asset, {
+    domain: "example.com",
+  });
+  f.stored.delete(
+    [...f.stored.keys()].find((path) => path.endsWith(oldDigest))!,
+  );
+  const cold = await f.sdk.lifecycle.resolveAssetFromWeb(published.did);
+  expect(cold.verification.missingResources).toEqual([
+    { id: "art", version: 1 },
+  ]);
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(
+    cold.asset,
+    f.options,
+  );
+  expect(inscription(boundary).body).toEqual(revised);
+  expect(boundary.document.log.slice(0, -1)).toEqual(
+    published.asset.celLog.log,
+  );
+});
+
+test("missing selected inline bytes fail specifically, while log-only publication remains possible", async () => {
+  const f = await fixture();
+  for (const path of f.stored.keys())
+    if (path.includes("/resources/")) f.stored.delete(path);
+  const cold = await f.sdk.lifecycle.resolveAssetFromWeb(f.asset.state.alias);
+  await expect(
+    f.sdk.lifecycle.prepareBitcoinPublication(cold.asset, f.options),
+  ).rejects.toMatchObject({ code: "ASSET_RESOURCE_MISSING" });
+  expect(f.options.satSigner.signAndFinalizeCommitPsbt).not.toHaveBeenCalled();
+  const boundary = await f.sdk.lifecycle.prepareBitcoinPublication(cold.asset, {
+    ...f.options,
+    inlineResourceId: null,
+  });
+  expect(inscription(boundary).tags.contentType).toBe("application/cel");
+});
+
+test.each(["cel.json", "did.jsonl", "resource"])(
+  "missing unrelated bytes never bypass substituted %s authentication",
+  async (target) => {
+    const f = await fixture(true, png, [
+      { id: "notes", mediaType: "text/plain", content: new Uint8Array([9]) },
+    ]);
+    const notes = f.asset.resources.find(
+      (resource) => resource.id === "notes",
+    )!;
+    f.stored.delete(
+      [...f.stored.keys()].find((path) =>
+        path.endsWith(notes.digestMultibase),
+      )!,
+    );
+    const suffix =
+      target === "resource" ? f.asset.resources[0].digestMultibase : target;
+    const path = [...f.stored.keys()].find((path) => path.endsWith(suffix))!;
+    const stored = f.stored.get(path)!;
+    if (target === "cel.json") {
+      const document = JSON.parse(new TextDecoder().decode(stored.content));
+      document.log[0].event.operation.data.name = "forged";
+      stored.content = new TextEncoder().encode(JSON.stringify(document));
+    } else if (target === "did.jsonl") {
+      const entries = new TextDecoder()
+        .decode(stored.content)
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      entries[0].state.alsoKnownAs = ["ni:///sha-256;forged"];
+      stored.content = new TextEncoder().encode(
+        entries.map((entry: unknown) => JSON.stringify(entry)).join("\n") +
+          "\n",
+      );
+    } else stored.content = new Uint8Array([0]);
+    await expect(
+      f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options),
+    ).rejects.toMatchObject({ code: "ASSET_WEBVH_BINDING" });
+    expect(
+      f.options.satSigner.signAndFinalizeCommitPsbt,
+    ).not.toHaveBeenCalled();
+    await expect(
+      f.sdk.lifecycle.resolveAssetFromWeb(f.asset.state.alias),
+    ).rejects.toThrow();
+  },
+);
+
+test("missing resources do not permit an unpublished head or incomplete sat evidence", async () => {
+  const f = await fixture();
+  for (const path of f.stored.keys())
+    if (path.includes("/resources/")) f.stored.delete(path);
+  f.snapshot.enumerationComplete = false;
+  await expect(
+    f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options),
+  ).rejects.toMatchObject({ code: "ASSET_ACCEPTED_HEAD_REQUIRED" });
+  f.snapshot.enumerationComplete = true;
+  await f.asset.update({ name: "unpublished" });
+  await expect(
+    f.sdk.lifecycle.prepareBitcoinPublication(f.asset, f.options),
+  ).rejects.toMatchObject({ code: "ASSET_WEBVH_BINDING" });
+  expect(f.options.satSigner.signAndFinalizeCommitPsbt).not.toHaveBeenCalled();
 });

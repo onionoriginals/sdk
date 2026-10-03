@@ -105,7 +105,14 @@ export function ExploreOriginal({ did }: { did: string }) {
             : null,
           declaredHash: digest ? digestMultibaseSha256Hex(digest) : null,
         });
-        if (live) setChecks(result);
+        // Do not publish the local checks on their own: the "Verified" badge
+        // reads `checks.every(ok)`, so setting them before the Bitcoin check
+        // exists would let an unmigrated-looking pass show as fully verified
+        // for the whole (potentially slow) Bitcoin round-trip. Build the full
+        // batch — appending the "btco" check when applicable — and publish it
+        // once, keeping `checks === null` (the existing "checking" state)
+        // until every applicable check has actually run.
+        let nextChecks = result;
         if (row.sat && btcoPromise) {
           const btcoResolution = await btcoPromise;
           if (!live) return;
@@ -113,11 +120,11 @@ export function ExploreOriginal({ did }: { did: string }) {
             sat: row.sat,
             celVerified: result.find((c) => c.id === 'cel')?.ok ?? false,
             assetId: state.assetId,
-            controller: state.controller,
             resolution: btcoResolution,
           });
-          setChecks((prev) => (prev ? [...prev, btcoCheck] : prev));
+          nextChecks = [...result, btcoCheck];
         }
+        if (live) setChecks(nextChecks);
       } catch {
         if (live) setChecks([]);
       }

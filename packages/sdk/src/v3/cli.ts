@@ -19,7 +19,7 @@ const HELP = `originals-cel — local CEL 3 assets and authenticated history
 create --file PATH --media-type TYPE --algorithm Ed25519|P-256|P-384 --key PATH
        [--name NAME] [--output PATH]
   Read a raw binary private key (32 bytes, or 48 for P-384). Emit a complete
-  version-3 asset envelope with base64 media. Existing output files are refused.
+  version-4 asset envelope with base64 media. Existing output files are refused.
 
 verify --asset PATH
   Verify a complete local asset envelope, including all historical media bytes.
@@ -60,7 +60,13 @@ function required(options: Map<string, string>, key: string): string {
 }
 async function boundedFile(file: string, limit: number): Promise<Uint8Array> {
   const info = await stat(file);
-  if (!info.isFile() || info.size > limit)
+  if (!info.isFile())
+    throw new CelError(
+      "invalid",
+      "CLI_FILE_TYPE",
+      "Input must be a regular file",
+    );
+  if (info.size > limit)
     throw new CelError(
       "limit",
       "CLI_FILE_LIMIT",
@@ -104,6 +110,9 @@ export async function main(
       "name",
       "output",
     ]);
+    const destination = options.has("output")
+      ? required(options, "output")
+      : undefined;
     const algorithm = required(options, "algorithm");
     if (!["Ed25519", "P-256", "P-384"].includes(algorithm))
       invalid("Unsupported signing algorithm");
@@ -120,8 +129,7 @@ export async function main(
       options.has("name") ? { name: options.get("name") } : {},
     );
     const output = JSON.stringify(asset.serialize()) + "\n";
-    const destination = options.get("output");
-    if (destination)
+    if (destination !== undefined)
       await writeFile(destination, output, { flag: "wx", mode: 0o600 });
     else process.stdout.write(output);
     return;

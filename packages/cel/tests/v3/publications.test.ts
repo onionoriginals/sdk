@@ -13,6 +13,8 @@ import {
   eventDigest,
   verifyHistory,
   normalizeSatpoint,
+  normalizeInscriptionId,
+  normalizeTxid,
   jcsSigningMessage,
   decodeController,
   type SatSnapshot,
@@ -210,6 +212,18 @@ test("fails closed when independent metadata evidence disagrees while body and m
   expect(result.status).toBe("inconsistent-evidence");
 });
 
+test("cross-checks content when independent evidence reports the same inscription id in a different hex case (#808)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot).map((e) => ({
+    ...e,
+    inscriptionId: e.inscriptionId.toUpperCase(),
+  }));
+  const result = resolveSat(snapshot, { independentContent: evidence });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.contentAssurance).toBe("cross-checked");
+});
+
 test("rejects malformed independent content evidence rather than ignoring it", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
@@ -238,6 +252,28 @@ test("rejects duplicate inscription ids in independent content evidence", () => 
   const evidence = completeContentEvidence(snapshot);
   const result = resolveSat(snapshot, {
     independentContent: [evidence[0], evidence[0]],
+  });
+  expect(result.status).toBe("incomplete");
+});
+
+test("rejects duplicate inscription ids that differ only in hex case, even with conflicting content (#808)", () => {
+  // Distinct content digests: if the dedup check ever regressed to comparing
+  // raw (non-normalized) ids, these two entries would coexist under
+  // different-case map keys instead of being rejected as a duplicate, and
+  // the conflicting second entry could be silently ignored rather than
+  // surfaced. Same-content variants wouldn't distinguish that from a
+  // correctly normalized dedup check.
+  const snapshot = observations(fixtures.cases[0]);
+  const evidence = completeContentEvidence(snapshot);
+  const result = resolveSat(snapshot, {
+    independentContent: [
+      evidence[0],
+      {
+        ...evidence[0],
+        inscriptionId: evidence[0].inscriptionId.toUpperCase(),
+        contentDigest: digestBytes(new TextEncoder().encode("conflicting content")),
+      },
+    ],
   });
   expect(result.status).toBe("incomplete");
 });
@@ -326,6 +362,35 @@ for (const scenario of fixtures.cases)
     }
   });
 
+test("resolveSat rejects the removed expectedDid option instead of silently skipping the identity check", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "requested-later-identity-cannot-filter-away-earlier-boundary",
+  )!;
+  const snapshot = observations(scenario);
+  const expectedDid = (scenario.snapshot as { expectedDid?: string }).expectedDid!;
+
+  // The current, correct key still performs the identity check.
+  expect(resolveSat(snapshot, { expectedAssetId: expectedDid }).status).toBe(
+    "identity-mismatch",
+  );
+
+  // The removed key must fail closed, never silently skip the identity check
+  // as if no identity had been requested at all.
+  expect(
+    resolveSat(snapshot, { expectedDid } as unknown as { expectedAssetId?: string })
+      .status,
+  ).toBe("invalid");
+
+  // Supplying both must still be rejected - the removed key cannot be
+  // shadowed by also passing the current one.
+  expect(
+    resolveSat(snapshot, {
+      expectedAssetId: expectedDid,
+      expectedDid,
+    } as unknown as { expectedAssetId?: string }).status,
+  ).toBe("invalid");
+});
+
 test("enumeration assurance defaults to provider-asserted with no independent source configured", () => {
   const result = resolveSat(observations(fixtures.cases[0]));
   expect(result.status).toBe("accepted");
@@ -348,6 +413,19 @@ test("cross-checks enumeration when an independent source agrees with the primar
   }
 });
 
+test("cross-checks enumeration when an independent source reports the same inscription ids in a different hex case (#808)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "second-ord-instance",
+      inscriptionIds: snapshot.publications.map((p) => p.id.toUpperCase()),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted")
+    expect(result.enumerationAssurance).toBe("cross-checked");
+});
+
 test("does not report an enumeration source when no independent source was consulted", () => {
   const result = resolveSat(observations(fixtures.cases[0]));
   expect(result.status).toBe("accepted");
@@ -367,14 +445,43 @@ test("rejects a non-string independent enumeration source label", () => {
   expect(result.status).toBe("incomplete");
 });
 
-test("a fewer-inscriptions independent source still cross-checks (it just corroborates less)", () => {
+// #907: a strictly smaller independent report never contains anything
+// "absent from the primary snapshot" — that check alone is trivially
+// satisfied by an empty list, which is exactly the honest, expected shape
+// from a second index that legitimately has not indexed this far yet. That
+// must not be able to earn "cross-checked" for corroborating nothing; the
+// independent source must report the primary's full known set to be
+// credited with actually having cross-checked it.
+test("a fewer-inscriptions independent source does not cross-check (it corroborated less than everything)", () => {
   const snapshot = observations(fixtures.cases[0]);
   const result = resolveSat(snapshot, {
     independentEnumeration: { source: "lagging-index", inscriptionIds: [] },
   });
   expect(result.status).toBe("accepted");
-  if (result.status === "accepted")
-    expect(result.enumerationAssurance).toBe("cross-checked");
+  if (result.status === "accepted") {
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+    expect(result.enumerationSource).toBeUndefined();
+  }
+});
+
+test("a partially-covering independent source (missing one of several known ids) does not cross-check", () => {
+  const scenario = fixtures.cases.find(
+    (c) => c.id === "holder-can-publish-controller-authorized-bytes",
+  )!;
+  const snapshot = observations(scenario);
+  const knownIds = snapshot.publications.map((p) => p.id);
+  expect(knownIds.length).toBeGreaterThan(1);
+  const result = resolveSat(snapshot, {
+    independentEnumeration: {
+      source: "lagging-index",
+      inscriptionIds: knownIds.slice(1),
+    },
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status === "accepted") {
+    expect(result.enumerationAssurance).toBe("provider-asserted");
+    expect(result.enumerationSource).toBeUndefined();
+  }
 });
 
 test("fails closed when an independent source reports an inscription the primary snapshot omitted", () => {
@@ -502,6 +609,105 @@ test("normalizeSatpoint lowercases only the txid component and passes through nu
   expect(normalizeSatpoint("not-a-satpoint")).toBe("not-a-satpoint");
   const nonHexTxid = "gg" + "ab".repeat(31) + ":0:0";
   expect(normalizeSatpoint(nonHexTxid)).toBe(nonHexTxid);
+});
+
+test("normalizeInscriptionId lowercases the txid and separator and passes through malformed values (#808)", () => {
+  expect(normalizeInscriptionId("AB".repeat(32) + "i0")).toBe("ab".repeat(32) + "i0");
+  expect(normalizeInscriptionId("AB".repeat(32) + "I12")).toBe("ab".repeat(32) + "i12");
+  expect(normalizeInscriptionId("ab".repeat(32) + "i0")).toBe("ab".repeat(32) + "i0");
+  // Not the expected <txid>i<index> shape: returned unchanged rather than coerced.
+  expect(normalizeInscriptionId("not-an-inscription-id")).toBe("not-an-inscription-id");
+  const nonHexTxid = "gg" + "ab".repeat(31) + "i0";
+  expect(normalizeInscriptionId(nonHexTxid)).toBe(nonHexTxid);
+});
+
+test("normalizeTxid lowercases a 64-hex txid and passes through malformed values unchanged (#821)", () => {
+  expect(normalizeTxid("AB".repeat(32))).toBe("ab".repeat(32));
+  expect(normalizeTxid("ab".repeat(32))).toBe("ab".repeat(32));
+  // Not exactly 64 hex chars: returned unchanged rather than coerced.
+  const tooShort = "ab".repeat(30);
+  expect(normalizeTxid(tooShort)).toBe(tooShort);
+  const nonHex = "gg" + "ab".repeat(31);
+  expect(normalizeTxid(nonHex)).toBe(nonHex);
+});
+
+test("accepts a confirmed publication whose revealTxid differs only in hex case from id/block txids (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: p.revealTxid.toUpperCase() } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("accepted");
+});
+
+test("rejects a revealTxid that disagrees with id/block txids even after case normalization (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: "f".repeat(64) } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("rejects a malformed (non-64-hex) revealTxid rather than coercing it into matching (#821)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, revealTxid: "not-a-txid" } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
+});
+
+test("accepts a confirmed publication whose id differs only in hex case from revealTxid (#857)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target
+        ? {
+            ...p,
+            id: p.id.replace(
+              /^([0-9a-f]{64})(i\d+)$/,
+              (_match, txid: string, suffix: string) =>
+                txid.toUpperCase() + suffix,
+            ),
+          }
+        : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("accepted");
+});
+
+test("rejects an id that disagrees with revealTxid/position even after case normalization (#857)", () => {
+  const snapshot = observations(fixtures.cases[0]);
+  const target = snapshot.publications.find((p) => p.confirmed && p.creation);
+  expect(target).toBeDefined();
+  const patched: SatSnapshot = {
+    ...snapshot,
+    publications: snapshot.publications.map((p) =>
+      p === target ? { ...p, id: "f".repeat(64) + "i0" } : p,
+    ),
+  };
+  const result = resolveSat(patched);
+  expect(result.status).toBe("inconsistent-evidence");
 });
 
 test("does not accept conflicting confirmed and pending records for one inscription", () => {
@@ -1049,6 +1255,98 @@ test("resolveSat ignores an unauthenticated CCG dataReference candidate that mer
   });
 });
 
+// #846: deactivation is unconditionally terminal (specs/originals-cel-v3-authority.md) —
+// no operation, supported or not, can ever extend a deactivated history. A retired
+// controller's still-valid key can still produce a genuinely authenticated dataReference
+// candidate over the deactivated head; that must remain ignorable (like any other
+// candidate that provably cannot be a valid continuation) so the already-accepted
+// deactivated state is returned as `accepted`, rather than the entire sat permanently
+// failing closed with `unsupported-capability` and discarding it.
+test("resolveSat ignores a genuinely controller-authenticated CCG dataReference candidate that extends an already-deactivated head, rather than blocking resolution (#846)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const deactivateEvent = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "deactivate",
+      data: { profile: "originals/cel/3", deactivatedAt: "2026-09-11T00:00:03Z" },
+    },
+  };
+  const deactivate = await signEvent(deactivateEvent, A);
+  const afterDeactivate = verifyHistory({ log: [deactivate] }, { prefix: afterBtco });
+  expect(afterDeactivate.state.active).toBe(false);
+  const dataReferenceEvent = {
+    previousEvent: afterDeactivate.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const dataReferenceEntry = {
+    event: dataReferenceEvent,
+    proof: [await signRawEvent(dataReferenceEvent, A)],
+  };
+  const tip = { height: 202, hash: "0".repeat(64) };
+  const deactivatePublication: SatSnapshot["publications"][number] = {
+    id: "d".repeat(64) + "i0",
+    revealTxid: "d".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 201, blockHash: "e".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [deactivate] }, "json"),
+      metadata: null,
+    },
+  };
+  const dataReferencePublication: SatSnapshot["publications"][number] = {
+    id: "f".repeat(64) + "i0",
+    revealTxid: "f".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: { height: 202, blockHash: "0".repeat(64), transactionIndex: 0, inscriptionIndex: 0 },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [dataReferenceEntry] }, "json"),
+      metadata: null,
+    },
+  };
+  const result = resolveSat({
+    ...emptySnapshot(),
+    tipBefore: tip,
+    tipAfter: tip,
+    indexTip: tip,
+    blocks: [
+      ...emptySnapshot().blocks,
+      { height: 201, hash: "e".repeat(64), txids: ["d".repeat(64)] },
+      { height: 202, hash: tip.hash, txids: ["f".repeat(64)] },
+    ],
+    publications: [
+      publicationAt(log, resourceA, "text/plain"),
+      deactivatePublication,
+      dataReferencePublication,
+    ],
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterDeactivate.state.head);
+  expect(result.state.active).toBe(false);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "f".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
 // A candidate can be validly signed and still not be authenticated: a signature from any
 // key other than the sat's current controller must remain ignorable, exactly like an
 // empty/missing proof, never treated as an uninspectable capability block.
@@ -1185,6 +1483,89 @@ test("resolveSat reports unsupported-capability when a genuinely controller-sign
   expect(result.reason).toBe("CEL_DATA_REFERENCE");
 });
 
+// #888: CEL_WEBVH_IDNA can only be thrown from inside apply()'s migrate handling, after
+// verifyEntry/CEL_CHAIN/CEL_AUTHORITY have run — but with no `prefix` (no boundary selected
+// yet), `expectedController` falls back to the candidate's own self-declared `create`
+// controller, so those checks only prove the candidate is internally self-consistent, not
+// that it is authorized by this sat's real Original. An unrelated party's own self-signed
+// history — not a boundary, and not extending anything, since no boundary exists yet — must
+// remain exactly as ignorable as any other invalid pre-boundary candidate, never able to
+// permanently poison resolution of the real Original once it happens to be inscribed first.
+test("resolveSat ignores a stranger's self-signed webvh migration with an invalid IDNA domain that predates any accepted boundary, rather than blocking resolution (#888)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log: boundaryLog, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+
+  const stranger = createLocalSigner("Ed25519", new Uint8Array(32).fill(9));
+  const strangerGenesis = await signEvent(
+    {
+      operation: {
+        type: "create",
+        data: {
+          profile: "originals/cel/3",
+          controller: stranger.controller,
+          createdAt: "2026-09-11T00:00:00Z",
+          nonce: createNonce(),
+          resources: [],
+        },
+      },
+    },
+    stranger,
+  );
+  const strangerInitial = verifyHistory({ log: [strangerGenesis] });
+  const strangerMigrate = await signEvent(
+    {
+      previousEvent: strangerInitial.state.head,
+      operation: {
+        type: "migrate",
+        data: {
+          profile: "originals/cel/3",
+          from: strangerInitial.state.assetId,
+          to: `did:webvh:${scid}:xn--e1afmkfd.example:378`,
+          layer: "webvh",
+          migratedAt: "2026-09-11T00:00:01Z",
+        },
+      },
+    },
+    stranger,
+  );
+  const strangerPublication: SatSnapshot["publications"][number] = {
+    id: "a".repeat(64) + "i0",
+    revealTxid: "a".repeat(64),
+    network: "regtest",
+    sat,
+    confirmed: true,
+    creation: {
+      height: 199,
+      blockHash: "9".repeat(64),
+      transactionIndex: 0,
+      inscriptionIndex: 0,
+    },
+    body: {
+      status: "complete",
+      mediaType: "application/cel",
+      bytes: encodeValue({ log: [strangerGenesis, strangerMigrate] }, "json"),
+      metadata: null,
+    },
+  };
+  const genuinePublication = publicationAt(boundaryLog, resourceA, "text/plain");
+  const result = resolveSat({
+    ...emptySnapshot(),
+    blocks: [
+      { height: 199, hash: "9".repeat(64), txids: ["a".repeat(64)] },
+      ...emptySnapshot().blocks,
+    ],
+    publications: [strangerPublication, genuinePublication],
+  });
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "a".repeat(64) + "i0",
+    code: "CEL_WEBVH_IDNA",
+  });
+});
+
 // previousLog is always ignorable, even when its wrapped log is genuinely signed by the
 // current controller: unlike dataReference (embedded inside the signed operation) or
 // CEL_WEBVH_IDNA (reachable only after full signature authentication), the previousLog
@@ -1314,6 +1695,124 @@ test("resolveSat still treats a disallowed profile as ignorable, not unsupported
   });
 });
 
+// #769: entryExtendsUnderController must require every supplied proof to validate, not
+// accept on the first match. A garbage/unsupported proof mixed in with a genuine
+// current-controller proof must still make the whole entry unauthenticated — "one valid
+// proof does not excuse another invalid proof" (specs/originals-cel-v3-profile.md).
+const garbageProof = {
+  type: "DataIntegrityProof",
+  cryptosuite: "not-a-real-suite",
+  verificationMethod: A.controller + "#bogus",
+  proofPurpose: "assertionMethod",
+  proofValue: "zGARBAGE",
+};
+
+test("resolveSat ignores a CCG dataReference candidate whose proof array mixes a genuine current-controller proof with a garbage proof, regardless of order (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("forged off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const genuineProof = await signRawEvent(event, A);
+  for (const proof of [
+    [garbageProof, genuineProof],
+    [genuineProof, garbageProof],
+  ]) {
+    const result = resolveSat(
+      unsupportedCapabilitySnapshot(
+        unsupportedCapabilityDelta(log, resourceA, {
+          log: [{ event, proof }],
+        }),
+      ),
+    );
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error(result.status);
+    expect(result.state.head).toBe(afterBtco.state.head);
+    expect(result.diagnostics).toContainEqual({
+      inscriptionId: "e".repeat(64) + "i0",
+      code: "CEL_DATA_REFERENCE",
+    });
+  }
+});
+
+test("resolveSat ignores a CCG dataReference candidate whose proof array mixes a genuine current-controller proof with a genuine wrong-controller proof (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const impostor = createLocalSigner("Ed25519", new Uint8Array(32).fill(7));
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("forged off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const mixedProofEntry = {
+    event,
+    proof: [await signRawEvent(event, A), await signRawEvent(event, impostor)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [mixedProofEntry] }),
+    ),
+  );
+  expect(result.status).toBe("accepted");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.state.head).toBe(afterBtco.state.head);
+  expect(result.diagnostics).toContainEqual({
+    inscriptionId: "e".repeat(64) + "i0",
+    code: "CEL_DATA_REFERENCE",
+  });
+});
+
+// Control: two independently genuine current-controller proofs on the same entry must
+// still count as authenticated — the all-proofs-must-validate rule rejects an invalid
+// proof, not a redundant valid one.
+test("resolveSat reports unsupported-capability when every proof in the array is genuinely signed by the current controller (#769)", async () => {
+  const resourceA = new TextEncoder().encode("resource A bytes"),
+    resourceB = new TextEncoder().encode("resource B bytes");
+  const { log, afterBtco } = await twoResourceBoundary(resourceA, resourceB);
+  const event = {
+    previousEvent: afterBtco.state.head,
+    operation: {
+      type: "update",
+      dataReference: {
+        digestMultibase: digestBytes(
+          new TextEncoder().encode("off-chain content"),
+        ),
+        mediaType: "text/plain",
+      },
+    },
+  };
+  const doublySignedEntry = {
+    event,
+    proof: [await signRawEvent(event, A), await signRawEvent(event, A)],
+  };
+  const result = resolveSat(
+    unsupportedCapabilitySnapshot(
+      unsupportedCapabilityDelta(log, resourceA, { log: [doublySignedEntry] }),
+    ),
+  );
+  expect(result.status).toBe("unsupported-capability");
+  if (result.status !== "unsupported-capability") throw new Error(result.status);
+  expect(result.reason).toBe("CEL_DATA_REFERENCE");
+});
+
 // An unrelated/non-extending confirmed inscription carrying a recognized-but-unimplemented
 // CCG shape must not be able to block resolution of an otherwise valid, already-accepted
 // history just by sharing the sat — Bitcoin possession never restores or grants CEL
@@ -1353,3 +1852,20 @@ test("resolveSat ignores an unrelated CCG dataReference candidate that does not 
     code: "CEL_DATA_REFERENCE",
   });
 });
+
+for (const [label, extra] of [
+  ["bigint", 5n],
+  ["date", new Date(0)],
+  ["class instance", new (class ProviderValue { value = 5; })()],
+  ["cycle", (() => { const value: { self?: unknown } = {}; value.self = value; return value; })()],
+] as const) {
+  test(`non-JSON ${label} in a creation position returns incomplete evidence without throwing (#848)`, () => {
+    const snapshot = observations(fixtures.cases[0]);
+    expect(resolveSat(snapshot).status).toBe("accepted");
+    Object.assign(snapshot.publications[0].creation!, { providerValue: extra });
+    const result = resolveSat(snapshot);
+    expect(result.status).toBe("incomplete");
+    expect("state" in result).toBe(false);
+    expect("history" in result).toBe(false);
+  });
+}

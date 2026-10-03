@@ -5,7 +5,7 @@ import { createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument';
 describe('DIDManager additional branches', () => {
   test('migrateToDIDWebVH rejects invalid domain', async () => {
     const dm = new DIDManager({} as any);
-    await expect(dm.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:x' }, 'bad..host')).rejects.toThrow('Invalid domain');
+    await expect(dm.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:x' }, 'bad..host')).rejects.toMatchObject({ code: 'INVALID_DOMAIN' });
   });
 
   test('migrateToDIDBTCO validates satoshi and carries services', async () => {

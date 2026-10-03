@@ -52,7 +52,7 @@ function fakeIndexerFetch(): typeof fetch {
     return raw ? new Response(raw, { status: 200 }) : new Response('not found', { status: 404 });
   }) as unknown as typeof fetch;
 }
-async function fixture() {
+async function fixture(inputIds: (ids: string[]) => string[] = ids => ids) {
   const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(3));
   const genesis = await signEvent({ operation: { type: 'create', data: { profile: 'originals/cel/3', controller: signer.controller, createdAt: new Date().toISOString(), nonce: createNonce(), resources: [] } } }, signer);
   const did = 'did:cel:' + eventDigest(genesis.event);
@@ -71,7 +71,7 @@ async function fixture() {
   const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'cel3-reinscription-')) });
   store.bindDepositAddress('creator', 'regtest', payment.address!);
   let feeInscribed = false, extraIdentitySat = false;
-  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, ordinals: { outpointInscriptions: async outpoint => { classifications++; return outpoint.txid === previousTxid || feeInscribed ? [outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])] : []; } }, indexer: { api: 'https://fake-indexer.test' }, fetchImpl: fakeIndexerFetch() });
+  const routes = createBitcoinRoutes({ jwtSecret, network: 'regtest', provider, inscriptions: store, ordinals: { outpointInscriptions: async outpoint => { classifications++; return outpoint.txid === previousTxid || feeInscribed ? inputIds([outpoint.txid + 'i0', ...(extraIdentitySat ? ['99'.repeat(32) + 'i0'] : [])]) : []; } }, indexer: { api: 'https://fake-indexer.test' }, fetchImpl: fakeIndexerFetch() });
   const invoke = async (document = delta, metadata = false, alter?: (raw: string) => string) => {
     const prepared = await prepareInscriptionOnSat({ provider, network: 'regtest', fundingUtxos: [{ txid: previousTxid, vout: 0, value: 546, scriptPubKey: Buffer.from(payment.script).toString('hex') }, { txid: feeTxid, vout: 0, value: 100000, scriptPubKey: Buffer.from(payment.script).toString('hex') }], changeAddress: payment.address!, feeRate: 2,
       satSigner: { signAndFinalizeCommitPsbt: async psbt => { const tx = btc.Transaction.fromPSBT(Buffer.from(psbt, 'base64'), { allowUnknownOutputs: true }); tx.sign(key); tx.finalize(); return tx.hex; } },
@@ -90,9 +90,62 @@ test('accepts current-controller CEL delta on the first inscribed input and pers
   const f = await fixture(); const response = await f.invoke();
   expect(response.status).toBe(200); expect((await response.json()).status).toBe('reveal_broadcast'); expect(f.broadcasts()).toBe(2);
 });
+for (const source of ['publication', 'diagnostic'] as const) {
+  for (const uppercase of ['snapshot', 'outpoint'] as const) {
+    test(`accepts signed continuation with uppercase ${uppercase} ${source} ids (#869)`, async () => {
+      const f = await fixture(ids => {
+        const reported = source === 'diagnostic' ? [...ids, ids[0].replace(/i0$/, 'i1')] : ids;
+        return uppercase === 'outpoint' ? reported.map(id => id.toUpperCase()) : reported;
+      });
+      if (source === 'diagnostic') {
+        const boundary = f.snapshot.publications[0];
+        f.snapshot.publications.push({ ...boundary, id: boundary.id.replace(/i0$/, 'i1'),
+          creation: { ...boundary.creation!, inscriptionIndex: 1 },
+          body: { status: 'complete', mediaType: 'text/plain', bytes: new TextEncoder().encode('unrelated inscription'), metadata: null } });
+      }
+      if (uppercase === 'snapshot') {
+        for (const publication of f.snapshot.publications) publication.id = publication.id.toUpperCase();
+      }
+      const response = await f.invoke();
+      expect(response.status).toBe(200);
+      expect((await response.json()).status).toBe('reveal_broadcast');
+      expect(f.broadcasts()).toBe(2);
+      expect(f.stored()).toHaveLength(1);
+    });
+  }
+}
+
+for (const invalid of ['different-txid', 'different-index', 'non-hex', 'short-txid', 'whitespace', 'missing-index', 'padded-index'] as const) {
+  test(`rejects ${invalid} outpoint inscription id alongside a case-matched id (#869)`, async () => {
+    const f = await fixture(ids => {
+      const valid = ids[0].toUpperCase();
+      const bad = {
+        'different-txid': 'AB'.repeat(32) + 'I0',
+        'different-index': valid.replace(/I0$/, 'I1'),
+        'non-hex': 'G' + valid.slice(1),
+        'short-txid': valid.slice(1),
+        'whitespace': ' ' + valid,
+        'missing-index': valid.slice(0, -1),
+        'padded-index': valid + '0',
+      }[invalid];
+      return [valid, bad];
+    });
+    const response = await f.invoke();
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('funding_outpoint_inscribed');
+    expect(f.broadcasts()).toBe(0);
+    expect(f.stored()).toHaveLength(0);
+  });
+}
+
 test('rejects snapshots, unbound media, stale or incomplete identity evidence, and inscribed fee inputs', async () => {
-  for (const failure of ['snapshot', 'media', 'offset', 'incomplete', 'fee', 'extra-sat'] as const) {
-    const f = await fixture();
+  for (const failure of ['snapshot', 'media', 'offset', 'owner', 'pending', 'incomplete', 'fee', 'extra-sat'] as const) {
+    const f = await fixture(ids => ids.map(id => id.toUpperCase()));
+    if (failure === 'owner') f.snapshot.ownership.owner = 'another-holder';
+    if (failure === 'pending') {
+      const boundary = f.snapshot.publications[0];
+      f.snapshot.publications.push({ ...boundary, id: boundary.id.replace(/i0$/, 'i1'), confirmed: false, creation: undefined });
+    }
     if (failure === 'offset') f.snapshot.ownership.satpoint = f.snapshot.ownership.satpoint.replace(/:0$/, ':1');
     if (failure === 'incomplete') f.snapshot.enumerationComplete = false;
     if (failure === 'fee') f.inscribeFee();
@@ -102,9 +155,28 @@ test('rejects snapshots, unbound media, stale or incomplete identity evidence, a
   }
 });
 
+test('accepts a reinscription whose provider-reported satpoint txid differs only in hex case from the declared identity (#811)', async () => {
+  const f = await fixture();
+  const [txid, vout, offset] = f.snapshot.ownership.satpoint.split(':');
+  f.snapshot.ownership.satpoint = `${txid.toUpperCase()}:${vout}:${offset}`;
+  const response = await f.invoke();
+  expect(response.status).toBe(200);
+  expect((await response.json()).status).toBe('reveal_broadcast');
+  expect(f.broadcasts()).toBe(2);
+});
+
+test('still rejects a genuinely different satpoint even after hex-case normalization', async () => {
+  const f = await fixture();
+  const [txid, vout, offset] = f.snapshot.ownership.satpoint.split(':');
+  f.snapshot.ownership.satpoint = `${'ab'.repeat(32)}:${vout}:${offset}`;
+  const response = await f.invoke();
+  expect(response.status).toBe(400);
+  expect(f.broadcasts()).toBe(0);
+});
+
 
 test('rejects holder-only signatures and ambiguous inscription scripts before broadcast', async () => {
-  const unauthorized = await fixture();
+  const unauthorized = await fixture(ids => ids.map(id => id.toUpperCase()));
   const holder = createLocalSigner('Ed25519', new Uint8Array(32).fill(9));
   const forged = { log: [await signEvent(unauthorized.delta.log[0].event, holder)] };
   expect((await unauthorized.invoke(forged)).status).toBe(400);

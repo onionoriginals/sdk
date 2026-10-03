@@ -647,6 +647,40 @@ test('validator failures fail closed and validator mutations cannot change the r
   expect(result.resolution.chainEvidence.assurance).toBe('node-validated');
 });
 
+test('a configured chainValidator does not turn ordinary mid-observation chain movement into "incomplete"', async () => {
+  const { snapshot } = await boundary();
+  const changing = structuredClone(snapshot);
+  changing.tipAfter.hash = 'e'.repeat(64);
+  // A real independent validator legitimately disagrees when re-checking an
+  // already-stale tipBefore against the node's current (moved-on) tip — this
+  // must not by itself defeat the documented bounded retry on chain movement.
+  let validatorCalls = 0;
+  const withValidator = OriginalsSDK.create({
+    network: 'regtest',
+    satProvider: { getSatSnapshot: async () => changing },
+    chainValidator: async () => {
+      validatorCalls++;
+      throw Object.assign(new Error('disagreement'), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' });
+    },
+  });
+  const result = await withValidator.lifecycle.resolveAssetFromSat('123');
+  expect(result.status).toBe('chain-changed');
+  // The validator is never worth invoking against a snapshot that already
+  // reports its own tip moved mid-observation.
+  expect(validatorCalls).toBe(0);
+
+  // A validator-detected disagreement against a genuinely chain-stable
+  // snapshot is unaffected and still fails closed as "incomplete".
+  const { snapshot: stable } = await boundary();
+  const stableWithValidator = OriginalsSDK.create({
+    network: 'regtest',
+    satProvider: { getSatSnapshot: async () => stable },
+    chainValidator: async () => { throw Object.assign(new Error('disagreement'), { code: 'SAT_SNAPSHOT_CHAIN_DISAGREEMENT' }); },
+  });
+  const stableResult = await stableWithValidator.lifecycle.resolveAssetFromSat('123');
+  expect(stableResult.status).toBe('incomplete');
+});
+
 test("cross-checks enumeration against an independently configured second index and carries the assurance into DID metadata", async () => {
   const { snapshot } = await boundary();
   const agreeing = structuredClone(snapshot);
@@ -669,6 +703,26 @@ test("cross-checks enumeration against an independently configured second index 
   expect(metadata.didDocumentMetadata.enumerationSource).toBe(
     "second-ord-instance",
   );
+});
+
+test("cross-checks enumeration and ownership when the independent source reports the same tips/blocks in a different hex case (#844)", async () => {
+  const { snapshot } = await boundary();
+  const upper = structuredClone(snapshot);
+  for (const tip of [upper.tipBefore, upper.tipAfter, upper.indexTip])
+    tip.hash = tip.hash.toUpperCase();
+  for (const block of upper.blocks) block.hash = block.hash.toUpperCase();
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "second-ord-instance",
+      provider: { getSatSnapshot: async () => upper },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("cross-checked");
 });
 
 test("without an independent source configured, resolution still accepts but only claims provider-asserted enumeration", async () => {
@@ -847,10 +901,46 @@ test("does not cross-check ownership against an independent source observing a d
   });
   const result = await sdk.lifecycle.resolveAssetFromSat("123");
   if (result.status !== "accepted") throw new Error(result.status);
-  // Enumeration is still corroborated (an older tip's ids are a safe subset to compare),
-  // but ownership from a different tip must not be able to confer cross-checked, even
+  // Enumeration is still corroborated (an older tip's ids are the same real
+  // set to compare, per the coverage check in resolveSat), but ownership
+  // from a different tip must not be able to confer cross-checked, even
   // though its value happens to equal the primary snapshot's.
   expect(result.resolution.enumerationAssurance).toBe("cross-checked");
+  expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
+});
+
+// #907: a second index that is honestly, self-consistently behind the
+// primary's tip has not indexed the sat's inscription(s) yet, so it reports
+// an empty (but internally healthy/complete/stable) enumeration. That must
+// not be able to earn "cross-checked" by trivially never disagreeing with
+// the primary — it never actually observed anything to corroborate with.
+test("a stale-but-honest independent index reporting zero publications does not earn cross-checked", async () => {
+  const { snapshot } = await boundary();
+  const olderTip = { height: snapshot.tipBefore.height - 1, hash: "9".repeat(64) };
+  const staleIndependent: SatSnapshot = {
+    ...structuredClone(snapshot),
+    tipBefore: olderTip,
+    tipAfter: olderTip,
+    indexTip: olderTip,
+    enumerationComplete: true,
+    indexHealthy: true,
+    publications: [],
+  };
+  const sdk = OriginalsSDK.create({
+    network: "regtest",
+    satProvider: { getSatSnapshot: async () => snapshot },
+    independentEnumeration: {
+      label: "stale-index",
+      provider: { getSatSnapshot: async () => staleIndependent },
+    },
+  });
+  const result = await sdk.lifecycle.resolveAssetFromSat("123");
+  if (result.status !== "accepted") throw new Error(result.status);
+  expect(result.resolution.enumerationAssurance).toBe("provider-asserted");
+  expect(result.resolution.enumerationSource).toBeUndefined();
+  // A snapshot at this fabricated older tip has no live ownership to begin
+  // with (no real chain behind it), so this also exercises the pre-existing
+  // tip gate on the ownership half of the same cross-check.
   expect(result.resolution.ownershipAssurance).toBe("provider-asserted");
 });
 

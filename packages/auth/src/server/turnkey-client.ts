@@ -3,9 +3,22 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
+import { StructuredError } from '@originals/sdk';
 import { normalizeEmail } from '../email.js';
 
 export { normalizeEmail };
+
+/**
+ * Stable error codes for server-side Turnkey client/sub-org failures (#747).
+ */
+export const AUTH_TURNKEY_ERROR_CODES = {
+  configApiPublicKeyMissing: 'AUTH_TURNKEY_CONFIG_API_PUBLIC_KEY_MISSING',
+  configApiPrivateKeyMissing: 'AUTH_TURNKEY_CONFIG_API_PRIVATE_KEY_MISSING',
+  configOrganizationIdMissing: 'AUTH_TURNKEY_CONFIG_ORGANIZATION_ID_MISSING',
+  subOrgLookupFailed: 'AUTH_TURNKEY_SUBORG_LOOKUP_FAILED',
+  subOrgCreateFailed: 'AUTH_TURNKEY_SUBORG_CREATE_FAILED',
+  walletLookupFailed: 'AUTH_TURNKEY_WALLET_LOOKUP_FAILED',
+} as const;
 
 export interface TurnkeyClientConfig {
   /** Turnkey API base URL (default: https://api.turnkey.com) */
@@ -27,13 +40,22 @@ export function createTurnkeyClient(config?: Partial<TurnkeyClientConfig>): Turn
   const organizationId = config?.organizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
 
   if (!apiPublicKey) {
-    throw new Error('TURNKEY_API_PUBLIC_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configApiPublicKeyMissing,
+      'TURNKEY_API_PUBLIC_KEY is required'
+    );
   }
   if (!apiPrivateKey) {
-    throw new Error('TURNKEY_API_PRIVATE_KEY is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configApiPrivateKeyMissing,
+      'TURNKEY_API_PRIVATE_KEY is required'
+    );
   }
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+      'TURNKEY_ORGANIZATION_ID is required'
+    );
   }
 
   return new Turnkey({
@@ -140,34 +162,64 @@ function getDefaultSubOrgLock(): SubOrgLock {
 }
 
 /**
- * Whether an error from the Turnkey API definitively means the queried
- * resource does not exist (as opposed to a transient/network/auth failure).
- * gRPC status code 5 is NOT_FOUND. Walks the `cause` chain (cycle-safe) in
- * case the original Turnkey error arrives wrapped.
+ * Walks the `cause` chain (cycle-safe) and returns the first numeric `code`
+ * found, or `undefined` if none is present anywhere in the chain.
  *
- * Only the strongly-typed `code === 5` evidence is trusted. `@turnkey/http`'s
- * `TurnkeyRequestError` always carries a numeric `code` parsed from Turnkey's
- * own JSON error body, so a genuine Turnkey not-found response is never
- * missing it; a transport/routing failure (a plain-text 404 from an
- * unrelated host, a proxy error page) throws a plain `Error` with no `code`
- * at all. A message-substring match on "not found"/"does not exist" would
- * therefore accept that unrelated transport error as if it were Turnkey's
- * own not-found response, and this function must never do that: fall
- * through to `createSubOrganization` on such an ambiguous error mints a
- * duplicate identity for an existing user.
+ * `@turnkey/http`'s `TurnkeyRequestError` always carries a numeric gRPC
+ * status `code` parsed from Turnkey's own JSON error body — for ANY error
+ * Turnkey's API returned a response for, not only a rejected OTP: auth
+ * failures, rate-limiting, and internal errors are also structured
+ * `TurnkeyRequestError`s with their own (different) codes. A
+ * transport/routing failure (network blip, timeout, DNS, a proxy error
+ * page, `ECONNRESET`) throws a plain `Error` with no `code` at all, because
+ * the request never reached a point where Turnkey could respond.
+ *
+ * Callers needing "Turnkey definitively rejected THIS SPECIFIC condition"
+ * (e.g. {@link isDefinitiveNotFound}, or `email-auth.ts`'s OTP-verification
+ * catch) must compare the returned code against the exact expected value —
+ * never merely check it is present — or an unrelated Turnkey-side failure
+ * (rate limit, permission, internal error) gets misclassified as that
+ * specific condition (#747/#819).
  */
-function isDefinitiveNotFound(error: unknown): boolean {
+export function extractTurnkeyErrorCode(error: unknown): number | undefined {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (typeof current === 'object' && current !== null && !seen.has(current)) {
     seen.add(current);
     const { code } = current as { code?: unknown };
-    if (code === 5) {
-      return true;
+    if (typeof code === 'number') {
+      return code;
     }
     current = (current as { cause?: unknown }).cause;
   }
-  return false;
+  return undefined;
+}
+
+/**
+ * gRPC status code 3, INVALID_ARGUMENT — the code Turnkey's `verifyOtp`
+ * returns when it definitively rejects a submitted OTP code (confirmed by
+ * #819's own repro: `"Turnkey error 3: invalid OTP code"`). Used by
+ * `email-auth.ts` to distinguish a genuinely wrong code from every other
+ * Turnkey-side failure (auth, rate-limiting, internal errors), which must
+ * NOT be charged against the local brute-force attempt budget.
+ */
+export const TURNKEY_GRPC_INVALID_ARGUMENT = 3;
+
+/**
+ * Whether an error from the Turnkey API definitively means the queried
+ * resource does not exist (as opposed to a transient/network/auth failure).
+ * gRPC status code 5 is NOT_FOUND.
+ *
+ * Only the strongly-typed `code === 5` evidence is trusted — never merely
+ * "some numeric code is present", since other Turnkey-side failures (auth,
+ * rate-limiting) also carry a code. A message-substring match on "not
+ * found"/"does not exist" would accept an unrelated transport error as if
+ * it were Turnkey's own not-found response, and this function must never do
+ * that: fall through to `createSubOrganization` on such an ambiguous error
+ * mints a duplicate identity for an existing user.
+ */
+function isDefinitiveNotFound(error: unknown): boolean {
+  return extractTurnkeyErrorCode(error) === 5;
 }
 
 /**
@@ -181,6 +233,19 @@ function isDefinitiveNotFound(error: unknown): boolean {
  *   not-found — transient/API errors are rethrown;
  * - an existing sub-org that lacks a wallet gets a wallet created **in
  *   place** rather than being replaced by a new sub-org;
+ * - a failure checking whether that wallet exists is rethrown, never
+ *   swallowed into a false "wallet present" success (#805) — unlike the
+ *   sub-org lookup, this check has no legitimate not-found case to
+ *   distinguish, since a genuinely walletless sub-org is a successful empty
+ *   `{ wallets: [] }` response;
+ * - an existing sub-org whose wallet(s) are missing one or more required
+ *   account roles (bitcoin-auth, did-assertion, did-update) — including a
+ *   wallet that still carries a stale, pre-#748 Ethereum-formatted Bitcoin
+ *   auth-key account, since a role is identified by curve + path + address
+ *   format, not curve + path alone (#749) — gets the missing role(s) added
+ *   **in place**, on one deterministic wallet, rather than being silently
+ *   left incomplete or replaced. Turnkey accounts are immutable, so a
+ *   repaired role is added alongside a stale one rather than overwriting it;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
  *   selection is deterministic so every login resolves the same identity;
  * - the lookup-then-create sequence is serialized per normalized email via
@@ -199,9 +264,15 @@ export async function getOrCreateTurnkeySubOrg(
   turnkeyClient: Turnkey,
   lock: SubOrgLock = getDefaultSubOrgLock()
 ): Promise<string> {
-  const organizationId = process.env.TURNKEY_ORGANIZATION_ID;
+  // Use the same parent as the client's other requests, including OTP. The
+  // environment remains a fallback for legacy injected clients without config.
+  const organizationId =
+    turnkeyClient.config?.defaultOrganizationId ?? process.env.TURNKEY_ORGANIZATION_ID;
   if (!organizationId) {
-    throw new Error('TURNKEY_ORGANIZATION_ID is required');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+      'TURNKEY_ORGANIZATION_ID is required'
+    );
   }
 
   const normalizedEmail = normalizeEmail(email);
@@ -229,7 +300,8 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     // transient failure (network blip, 429, auth misconfig) as "no existing
     // sub-org" would mint a duplicate identity for an existing user.
     if (!isDefinitiveNotFound(error)) {
-      throw new Error(
+      throw new StructuredError(
+        AUTH_TURNKEY_ERROR_CODES.subOrgLookupFailed,
         `Failed to look up existing Turnkey sub-organization: ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -251,19 +323,31 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     }
     const existingSubOrgId = [...subOrgIds].sort()[0];
 
-    // Ensure the sub-org has a wallet; repair in place if not.
-    let walletCount: number;
+    // Ensure the sub-org has a wallet; repair in place if not. Unlike the
+    // sub-org lookup above, `getWallets` has no legitimate not-found case to
+    // distinguish: a sub-org with no wallet is a normal, successful
+    // `{ wallets: [] }` response. So any thrown error here (network blip,
+    // timeout, rate limit) must propagate rather than be treated as "a
+    // wallet exists, nothing to repair" — silently swallowing it would
+    // report this login as successful without ever having established that
+    // the wallet exists or is complete (#805).
+    let wallets: Array<{ walletId?: string }>;
     try {
       const walletsCheck = await turnkeyClient.apiClient().getWallets({
         organizationId: existingSubOrgId,
       });
-      walletCount = walletsCheck.wallets?.length || 0;
+      wallets = walletsCheck.wallets || [];
     } catch (walletCheckErr) {
-      console.error('[auth] Could not check wallets in existing sub-org:', walletCheckErr);
-      return existingSubOrgId;
+      throw new StructuredError(
+        AUTH_TURNKEY_ERROR_CODES.walletLookupFailed,
+        `Failed to check wallets in existing Turnkey sub-organization: ${
+          walletCheckErr instanceof Error ? walletCheckErr.message : String(walletCheckErr)
+        }`,
+        { cause: walletCheckErr }
+      );
     }
 
-    if (walletCount === 0) {
+    if (wallets.length === 0) {
       // Repair the EXISTING identity: create the wallet under the existing
       // sub-org. Creating a new sub-org here would fork the user's identity
       // (and again on every subsequent login).
@@ -273,6 +357,113 @@ async function getOrCreateTurnkeySubOrgUnlocked(
         walletName: DEFAULT_WALLET_NAME,
         accounts: [...DEFAULT_WALLET_ACCOUNTS],
       });
+      return existingSubOrgId;
+    }
+
+    // The sub-org has at least one wallet, but wallet existence alone does
+    // not mean every required account role (bitcoin-auth, did-assertion,
+    // did-update) is present in it — only the walletless-repair path above
+    // was ever checked. Enumerate accounts across ALL of the sub-org's
+    // wallets (a role may be satisfied in any of them, not just the first)
+    // and repair whichever roles are missing sub-org-wide.
+    //
+    // A failure enumerating any wallet's accounts means the true inventory
+    // is unknown, so this fails soft and skips repair for this login rather
+    // than risk inferring a role absent from incomplete data and creating a
+    // duplicate account for a role that already exists in an unread wallet.
+    const allAccounts: Array<{ curve: string; path: string; addressFormat: string }> = [];
+    for (const wallet of wallets) {
+      if (!wallet.walletId) {
+        continue;
+      }
+      try {
+        const accountsResponse = await turnkeyClient.apiClient().getWalletAccounts({
+          organizationId: existingSubOrgId,
+          walletId: wallet.walletId,
+        });
+        allAccounts.push(...(accountsResponse.accounts || []));
+      } catch (accountsCheckErr) {
+        console.error(
+          '[auth] Could not check wallet accounts in existing sub-org:',
+          accountsCheckErr
+        );
+        return existingSubOrgId;
+      }
+    }
+
+    // Match on curve + path + addressFormat, not curve + path alone: a
+    // sub-org provisioned before #748's fix has a CURVE_SECP256K1 account at
+    // the Bitcoin auth-key path with the old Ethereum address format. That
+    // account shares its curve and path with the corrected P2TR spec, so a
+    // curve+path-only comparison would treat the role as already present and
+    // skip repairing it, permanently stranding the account that
+    // `ensureWalletWithAccounts`/`getKeyByRole` actually require (#749).
+    // Turnkey accounts are immutable, so the corrected account is added
+    // alongside the stale one rather than replacing it.
+    const missingAccounts = DEFAULT_WALLET_ACCOUNTS.filter(
+      (spec) =>
+        !allAccounts.some(
+          (acc) =>
+            acc.curve === spec.curve &&
+            acc.path === spec.path &&
+            acc.addressFormat === spec.addressFormat
+        )
+    );
+
+    const targetWalletId = wallets[0]?.walletId;
+    if (missingAccounts.length > 0 && targetWalletId) {
+      // Create every globally-missing role exactly once, on one
+      // deterministic target wallet (the stable first wallet), rather than
+      // adding it to every wallet that happens to lack it - that would
+      // duplicate a role that is genuinely present elsewhere in the sub-org.
+      console.warn(
+        `[auth] Existing sub-org's wallet is missing ${missingAccounts.length} required ` +
+          'account(s); repairing in place'
+      );
+      try {
+        await turnkeyClient.apiClient().createWalletAccounts({
+          organizationId: existingSubOrgId,
+          walletId: targetWalletId,
+          accounts: missingAccounts.map((spec) => ({ ...spec })),
+        });
+      } catch (repairWriteErr) {
+        // This read-then-create sequence is only serialized within this
+        // process (see the SubOrgLock production warning above); a
+        // concurrent login handled by another instance can run the same
+        // repair for the same missing role at the same time, and lose the
+        // resulting write race with an error from Turnkey (e.g. a
+        // duplicate-account rejection). Before treating that as a real
+        // failure, re-check whether the role is now present - if a
+        // concurrent repair already added it, the desired end state holds
+        // and this login must not fail on a race it merely lost.
+        let stillMissing = missingAccounts;
+        try {
+          const recheck = await turnkeyClient.apiClient().getWalletAccounts({
+            organizationId: existingSubOrgId,
+            walletId: targetWalletId,
+          });
+          const recheckAccounts = recheck.accounts || [];
+          stillMissing = missingAccounts.filter(
+            (spec) =>
+              !recheckAccounts.some(
+                (acc) =>
+                  acc.curve === spec.curve &&
+                  acc.path === spec.path &&
+                  acc.addressFormat === spec.addressFormat
+              )
+          );
+        } catch {
+          // The re-check itself failed - fall through and propagate the
+          // original write error rather than guess at the true state.
+        }
+        if (stillMissing.length > 0) {
+          throw repairWriteErr;
+        }
+        console.warn(
+          '[auth] Repair write raced with a concurrent repair that already added the ' +
+            'missing account(s); continuing'
+        );
+      }
     }
 
     return existingSubOrgId;
@@ -284,6 +475,7 @@ async function getOrCreateTurnkeySubOrgUnlocked(
 
   // Create sub-organization with wallet containing required keys
   const result = await turnkeyClient.apiClient().createSubOrganization({
+    organizationId,
     subOrganizationName: subOrgName,
     rootUsers: [
       {
@@ -304,7 +496,10 @@ async function getOrCreateTurnkeySubOrgUnlocked(
   const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
 
   if (!subOrgId) {
-    throw new Error('No sub-organization ID returned from Turnkey');
+    throw new StructuredError(
+      AUTH_TURNKEY_ERROR_CODES.subOrgCreateFailed,
+      'No sub-organization ID returned from Turnkey'
+    );
   }
 
   return subOrgId;

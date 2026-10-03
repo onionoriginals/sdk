@@ -18,6 +18,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { WebVHManager, computeNextKeyHash, normalizeUpdateKey } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
+import { StructuredError } from '@originals/cel';
 
 describe('normalizeUpdateKey', () => {
   const multikey = 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
@@ -234,6 +235,23 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     ).rejects.toThrow();
   }, 20000);
 
+  test('rotation with a non-pre-committed key throws StructuredError WEBVH_PREROTATION_KEY_MISMATCH (#720)', async () => {
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    const rogue = await keyManager.generateKeyPair('Ed25519');
+    try {
+      await manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: created.log,
+        currentKeyPair: rogue,
+        prerotation: true,
+      });
+      throw new Error('expected rotateDIDWebVHKeys to throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StructuredError);
+      expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_KEY_MISMATCH');
+    }
+  }, 20000);
+
   test('pre-rotation on an empty DID log is rejected with a clear error', async () => {
     const created = await manager.createDIDWebVH({
       domain: 'example.com',
@@ -251,6 +269,22 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     ).rejects.toThrow('empty DID log');
   }, 20000);
 
+  test('pre-rotation on an empty DID log throws StructuredError WEBVH_PREROTATION_EMPTY_LOG (#720)', async () => {
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    try {
+      await manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: [],
+        currentKeyPair: created.nextKeyPair!,
+        prerotation: true,
+      });
+      throw new Error('expected rotateDIDWebVHKeys to throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StructuredError);
+      expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_EMPTY_LOG');
+    }
+  }, 20000);
+
   test('rotating a pre-rotation DID without prerotation:true is rejected (no silent corruption)', async () => {
     // Macroscope HIGH: forgetting prerotation:true on the next rotation would run
     // the non-pre-rotation path, set an un-committed updateKey, and corrupt the log.
@@ -265,6 +299,21 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     ).rejects.toThrow('pre-rotation chain');
   }, 20000);
 
+  test('rotating a pre-rotation DID without prerotation:true throws StructuredError WEBVH_PREROTATION_REQUIRED (#720)', async () => {
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    try {
+      await manager.rotateDIDWebVHKeys({
+        did: created.did,
+        currentLog: created.log,
+        currentKeyPair: created.nextKeyPair!,
+      });
+      throw new Error('expected rotateDIDWebVHKeys to throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StructuredError);
+      expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_REQUIRED');
+    }
+  }, 20000);
+
   test('updateDIDWebVH on a pre-rotation DID is rejected', async () => {
     // Macroscope Medium: updateDIDWebVH appends a non-pre-rotation entry.
     const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
@@ -276,6 +325,22 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
         signer: created.nextKeyPair!,
       })
     ).rejects.toThrow('does not support DIDs on a pre-rotation chain');
+  }, 20000);
+
+  test('updateDIDWebVH on a pre-rotation DID throws StructuredError WEBVH_PREROTATION_UNSUPPORTED (#720)', async () => {
+    const created = await manager.createDIDWebVH({ domain: 'example.com', prerotation: true });
+    try {
+      await manager.updateDIDWebVH({
+        did: created.did,
+        currentLog: created.log,
+        updates: { service: [{ id: '#svc', type: 'X', serviceEndpoint: 'https://e.example' }] } as any,
+        signer: created.nextKeyPair!,
+      });
+      throw new Error('expected updateDIDWebVH to throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StructuredError);
+      expect((e as StructuredError).code).toBe('WEBVH_PREROTATION_UNSUPPORTED');
+    }
   }, 20000);
 
   test('recoverDIDWebVH on a pre-rotation DID is rejected', async () => {

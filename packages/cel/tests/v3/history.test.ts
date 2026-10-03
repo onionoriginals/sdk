@@ -8,6 +8,7 @@ import {
   CelError,
   type HistoryCheckpoint,
 } from "../../src/v3/index.js";
+import { base58 } from "@scure/base";
 
 function codeOf(fn: () => unknown): string {
   try {
@@ -65,8 +66,56 @@ test("rotation retires A, keeps historical signatures valid and requires B for t
   const result = verifyHistory({ log: [genesis, rotation, updated] });
   expect(result.state.name).toBe("Updated");
   expect(result.state.controllers).toEqual([
-    { controller: A.controller, fromEntry: 0, throughEntry: 1 },
-    { controller: B.controller, fromEntry: 2 },
+    { controller: A.controller, fromEntry: 0, throughEntry: 2 },
+    { controller: B.controller, fromEntry: 3 },
+  ]);
+});
+
+test("controller intervals attribute each rotation entry to its outgoing signer across a two-rotation chain", async () => {
+  const C = createLocalSigner("P-384", new Uint8Array(48).fill(7));
+  const initial = verifyHistory({ log: [genesis] });
+  const rotationAB = await signEvent(
+    {
+      previousEvent: initial.state.head,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: B.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const rotationBC = await signEvent(
+    {
+      previousEvent: verifyEntry(rotationAB).digest,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: C.controller,
+          rotatedAt: "2026-09-06T00:00:00Z",
+        },
+      },
+    },
+    B,
+  );
+  const updated = await signEvent(
+    {
+      previousEvent: verifyEntry(rotationBC).digest,
+      operation: { type: "update", data: { profile, name: "Updated by C" } },
+    },
+    C,
+  );
+  const result = verifyHistory({
+    log: [genesis, rotationAB, rotationBC, updated],
+  });
+  expect(result.state.controllers).toEqual([
+    { controller: A.controller, fromEntry: 0, throughEntry: 2 },
+    { controller: B.controller, fromEntry: 3, throughEntry: 3 },
+    { controller: C.controller, fromEntry: 4 },
   ]);
 });
 
@@ -140,6 +189,129 @@ test("an internally-consistent no-prefix delta still becomes invalid once a real
   );
 });
 
+test("a no-prefix delta with deactivate-then-update is invalid, not history-required", async () => {
+  const deactivateEntry = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "deactivate",
+        data: { profile, deactivatedAt: "2026-09-05T00:00:00Z" },
+      },
+    },
+    A,
+  );
+  const updateEntry = await signEvent(
+    {
+      previousEvent: verifyEntry(deactivateEntry).digest,
+      operation: { type: "update", data: { profile, name: "should never apply" } },
+    },
+    A,
+  );
+  // Deactivation is terminal under any prefix: no real prefix could ever make this delta
+  // valid, so it must be rejected outright rather than reported as needing more history.
+  expect(
+    codeOf(() => verifyHistory({ log: [deactivateEntry, updateEntry] })),
+  ).toBe("CEL_DEACTIVATED");
+
+  // A forged/invalid proof on the entry after deactivate must still be caught by
+  // signature authentication, not masked by the terminal-deactivation check.
+  const tampered = structuredClone(updateEntry);
+  const signatureBytes = base58.decode(tampered.proof[0].proofValue.slice(1));
+  signatureBytes[0] ^= 0xff;
+  tampered.proof[0].proofValue = "z" + base58.encode(signatureBytes);
+  expect(
+    codeOf(() => verifyHistory({ log: [deactivateEntry, tampered] })),
+  ).toBe("CEL_SIGNATURE");
+});
+
+test("a no-prefix delta that rotates to the already-current signer is invalid, not history-required", async () => {
+  const selfRotation = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "rotateKey",
+        data: {
+          profile,
+          newController: A.controller,
+          rotatedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  // The entry's own signer is its only provisional controller; rotating to that exact
+  // controller is invalid regardless of what any prefix could show.
+  expect(codeOf(() => verifyHistory({ log: [selfRotation] }))).toBe(
+    "CEL_ROTATION",
+  );
+});
+
+test("a no-prefix delta with two migrations to the same layer is invalid, not history-required", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: initial.state.assetId,
+          to: "did:webvh:scid1:example.com:1",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  const toWebvhAgain = await signEvent(
+    {
+      previousEvent: verifyEntry(toWebvh).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: "did:webvh:scid1:example.com:1",
+          to: "did:webvh:scid2:example.com:2",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:01Z",
+        },
+      },
+    },
+    A,
+  );
+  // Once the first migration establishes "webvh" as the known layer, a second migration in
+  // the same delta must progress to "btco"; repeating "webvh" is invalid under any prefix.
+  expect(
+    codeOf(() => verifyHistory({ log: [toWebvh, toWebvhAgain] })),
+  ).toBe("CEL_MIGRATION");
+});
+
+test("a no-prefix delta with a single migration still stays history-required", async () => {
+  const initial = verifyHistory({ log: [genesis] });
+  const toWebvh = await signEvent(
+    {
+      previousEvent: verifyEntry(genesis).digest,
+      operation: {
+        type: "migrate",
+        data: {
+          profile,
+          from: initial.state.assetId,
+          to: "did:webvh:scid1:example.com:1",
+          layer: "webvh",
+          migratedAt: "2026-09-05T00:00:00Z",
+        },
+      },
+    },
+    A,
+  );
+  // A single migration's own layer can't be checked against unknown prior state, so it
+  // remains history-required, not invalid.
+  expect(codeOf(() => verifyHistory({ log: [toWebvh] }))).toBe(
+    "CEL_HISTORY_REQUIRED",
+  );
+});
+
 for (const id of [
   "valid-signature-wrong-chain-link",
   "valid-log-wrong-requested-DID",
@@ -153,6 +325,44 @@ for (const id of [
       }),
     ).toThrow();
   });
+
+test("verifyHistory rejects the removed expectedDid option instead of silently skipping the identity check", () => {
+  const assetId = verifyHistory({ log: [genesis] }).state.assetId;
+
+  // The current, correct key still performs the identity check.
+  expect(
+    codeOf(() =>
+      verifyHistory({ log: [genesis] }, { expectedAssetId: "did:key:zNotTheRealAssetId" }),
+    ),
+  ).toBe("CEL_IDENTITY");
+  expect(
+    verifyHistory({ log: [genesis] }, { expectedAssetId: assetId }).state.assetId,
+  ).toBe(assetId);
+
+  // The removed key must fail closed, never silently skip the identity check
+  // as if no identity had been requested at all.
+  expect(
+    codeOf(() =>
+      verifyHistory(
+        { log: [genesis] },
+        { expectedDid: assetId } as unknown as { expectedAssetId?: string },
+      ),
+    ),
+  ).toBe("CEL_OPTION_REMOVED");
+
+  // Supplying both must still be rejected - the removed key cannot be
+  // shadowed by also passing the current one.
+  expect(
+    codeOf(() =>
+      verifyHistory(
+        { log: [genesis] },
+        { expectedAssetId: assetId, expectedDid: assetId } as unknown as {
+          expectedAssetId?: string;
+        },
+      ),
+    ),
+  ).toBe("CEL_OPTION_REMOVED");
+});
 
 test("a first-time verifier with no checkpoint gets authenticated-history freshness only", () => {
   const result = verifyHistory({ log: [genesis] });

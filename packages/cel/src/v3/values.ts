@@ -162,6 +162,12 @@ export function decodeUtf8(input: Uint8Array): string {
   }
 }
 
+// A JSON number token with no fraction or exponent is a plain decimal
+// integer literal. It must name its binary64 exactly, or be that binary64's
+// RFC 8785 spelling (JCS writes 2**61 as "2305843009213694000"); any other
+// literal would round silently. Fraction/exponent tokens (e.g. "1e30") are exempt.
+const integerLiteral = /^-?(?:0|[1-9]\d*)$/;
+
 // Parse object members before JSON.parse could discard duplicate decoded names.
 function parseJson(source: string): JsonValue {
   let offset = 0,
@@ -242,8 +248,15 @@ function parseJson(source: string): JsonValue {
     const match = number.exec(source);
     requireThat(match, "CEL_JSON", "Expected JSON value");
     offset = number.lastIndex;
-    const result = Number(match[0]);
+    const token = match[0];
+    const result = Number(token);
     requireThat(Number.isFinite(result), "CEL_NUMBER", "Nonfinite JSON number");
+    if (integerLiteral.test(token))
+      requireThat(
+        BigInt(result) === BigInt(token) || String(result) === token,
+        "CEL_NUMBER",
+        "JSON integer is neither exact nor the JCS spelling of a binary64",
+      );
     return result;
   }
   const result = value(0);

@@ -1,9 +1,14 @@
+import { Turnkey } from '@turnkey/sdk-server';
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { StructuredError } from '@originals/sdk';
 import {
   createTurnkeyClient,
   getOrCreateTurnkeySubOrg,
   normalizeEmail,
   createInProcessSubOrgLock,
+  extractTurnkeyErrorCode,
+  TURNKEY_GRPC_INVALID_ARGUMENT,
+  AUTH_TURNKEY_ERROR_CODES,
 } from '../src/server/turnkey-client';
 
 describe('turnkey-client', () => {
@@ -47,6 +52,18 @@ describe('turnkey-client', () => {
           organizationId: 'org_id',
         })
       ).toThrow('TURNKEY_API_PUBLIC_KEY is required');
+    });
+
+    test('throws a StructuredError with a stable code for a missing config value (#747)', () => {
+      try {
+        createTurnkeyClient({ apiPrivateKey: 'priv_key', organizationId: 'org_id' });
+        throw new Error('expected createTurnkeyClient to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(
+          AUTH_TURNKEY_ERROR_CODES.configApiPublicKeyMissing
+        );
+      }
     });
 
     test('throws when private key missing', () => {
@@ -97,11 +114,72 @@ describe('turnkey-client', () => {
     });
   });
 
+  describe('extractTurnkeyErrorCode', () => {
+    test('returns the numeric code on a TurnkeyRequestError-shaped error', () => {
+      expect(extractTurnkeyErrorCode(Object.assign(new Error('nope'), { code: 5 }))).toBe(5);
+    });
+
+    test('returns undefined for a plain transport/network error with no code', () => {
+      expect(extractTurnkeyErrorCode(new Error('ECONNRESET'))).toBeUndefined();
+    });
+
+    test('walks a wrapped cause chain to find the code', () => {
+      const turnkeyError = Object.assign(new Error('rejected'), { code: 3 });
+      const wrapped = new Error('outer', { cause: turnkeyError });
+      expect(extractTurnkeyErrorCode(wrapped)).toBe(3);
+    });
+
+    test('does not loop forever on a cyclic cause chain', () => {
+      const a: { cause?: unknown } = new Error('a');
+      const b: { cause?: unknown } = new Error('b');
+      (a as Error & { cause?: unknown }).cause = b;
+      (b as Error & { cause?: unknown }).cause = a;
+      expect(extractTurnkeyErrorCode(a)).toBeUndefined();
+    });
+
+    test('returns undefined for non-object input', () => {
+      expect(extractTurnkeyErrorCode('nope')).toBeUndefined();
+      expect(extractTurnkeyErrorCode(null)).toBeUndefined();
+      expect(extractTurnkeyErrorCode(undefined)).toBeUndefined();
+    });
+
+    test('TURNKEY_GRPC_INVALID_ARGUMENT is gRPC code 3', () => {
+      // Pinned to the value confirmed by #819's own repro
+      // ("Turnkey error 3: invalid OTP code"); callers must compare against
+      // this exact code, not merely check a code is present, since other
+      // Turnkey-side failures (auth, rate-limiting) also carry a code.
+      expect(TURNKEY_GRPC_INVALID_ARGUMENT).toBe(3);
+    });
+  });
+
   describe('getOrCreateTurnkeySubOrg', () => {
+    // Default: a single wallet already holding all three required accounts,
+    // so existing tests that don't care about per-role completeness see no
+    // repair activity.
+    const COMPLETE_ACCOUNTS = [
+      {
+        curve: 'CURVE_SECP256K1',
+        path: "m/44'/0'/0'/0/0",
+        addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+      },
+      {
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/0'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+      {
+        curve: 'CURVE_ED25519',
+        path: "m/44'/501'/1'/0'",
+        addressFormat: 'ADDRESS_FORMAT_SOLANA',
+      },
+    ];
+
     function createMockClient(overrides?: {
       getSubOrgIds?: () => Promise<unknown>;
       getWallets?: () => Promise<unknown>;
+      getWalletAccounts?: (params: { walletId: string }) => Promise<unknown>;
       createWallet?: () => Promise<unknown>;
+      createWalletAccounts?: () => Promise<unknown>;
       createSubOrganization?: () => Promise<unknown>;
     }) {
       const getSubOrgIds =
@@ -110,8 +188,13 @@ describe('turnkey-client', () => {
       const getWallets =
         overrides?.getWallets ??
         mock(() => Promise.resolve({ wallets: [{ walletId: 'w1' }] }));
+      const getWalletAccounts =
+        overrides?.getWalletAccounts ??
+        mock(() => Promise.resolve({ accounts: COMPLETE_ACCOUNTS }));
       const createWallet =
         overrides?.createWallet ?? mock(() => Promise.resolve({ walletId: 'w_new' }));
+      const createWalletAccounts =
+        overrides?.createWalletAccounts ?? mock(() => Promise.resolve({ accounts: [] }));
       const createSubOrganization =
         overrides?.createSubOrganization ??
         mock(() =>
@@ -128,7 +211,9 @@ describe('turnkey-client', () => {
         apiClient: () => ({
           getSubOrgIds,
           getWallets,
+          getWalletAccounts,
           createWallet,
+          createWalletAccounts,
           createSubOrganization,
         }),
       } as unknown as import('@turnkey/sdk-server').Turnkey;
@@ -136,6 +221,108 @@ describe('turnkey-client', () => {
 
     beforeEach(() => {
       process.env.TURNKEY_ORGANIZATION_ID = 'parent_org_123';
+    });
+
+    describe('parent organization selection (#890)', () => {
+      function configuredClient(organizationId: string, external = false) {
+        const client = external
+          ? new Turnkey({
+              apiBaseUrl: 'https://api.turnkey.com',
+              apiPublicKey: 'test-public-key',
+              apiPrivateKey: 'test-private-key',
+              defaultOrganizationId: organizationId,
+            })
+          : createTurnkeyClient({
+              apiPublicKey: 'test-public-key',
+              apiPrivateKey: 'test-private-key',
+              organizationId,
+            });
+        const mocked = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
+        });
+        const api = mocked.apiClient();
+        client.apiClient = () => api;
+        return { client, api };
+      }
+
+      async function expectParent(
+        client: Turnkey,
+        api: ReturnType<Turnkey['apiClient']>,
+        organizationId: string
+      ) {
+        expect(await getOrCreateTurnkeySubOrg('user@example.com', client)).toBe('new_sub_org');
+        expect(api.getSubOrgIds).toHaveBeenLastCalledWith({
+          organizationId,
+          filterType: 'EMAIL',
+          filterValue: 'user@example.com',
+        });
+        expect(api.createSubOrganization).toHaveBeenLastCalledWith(
+          expect.objectContaining({ organizationId })
+        );
+      }
+
+      test('uses explicit client config for lookup and creation with no environment', async () => {
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        const { client, api } = configuredClient('explicit-parent');
+        await expectParent(client, api, 'explicit-parent');
+      });
+
+      test('prefers explicit config to a conflicting environment', async () => {
+        const { client, api } = configuredClient('explicit-parent');
+        await expectParent(client, api, 'explicit-parent');
+      });
+
+      test('keeps multiple clients isolated across environment changes', async () => {
+        const first = configuredClient('first-parent');
+        const second = configuredClient('second-parent');
+        process.env.TURNKEY_ORGANIZATION_ID = 'unrelated-parent';
+        await Promise.all([
+          expectParent(first.client, first.api, 'first-parent'),
+          expectParent(second.client, second.api, 'second-parent'),
+        ]);
+        await expectParent(first.client, first.api, 'first-parent');
+      });
+
+      test('uses the default organization of an externally constructed Turnkey client', async () => {
+        const { client, api } = configuredClient('external-parent', true);
+        await expectParent(client, api, 'external-parent');
+      });
+
+      test('retains the organization resolved from environment when the client was created', async () => {
+        process.env.TURNKEY_API_PUBLIC_KEY = 'test-public-key';
+        process.env.TURNKEY_API_PRIVATE_KEY = 'test-private-key';
+        const client = createTurnkeyClient();
+        const { api } = configuredClient('unused-parent');
+        client.apiClient = () => api;
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        await expectParent(client, api, 'parent_org_123');
+      });
+
+      test('falls back to environment for legacy clients without config', async () => {
+        const { api } = configuredClient('unused-parent');
+        const client = { apiClient: () => api } as unknown as Turnkey;
+        await expectParent(client, api, 'parent_org_123');
+      });
+
+      test('rejects an empty configured organization instead of silently using another parent', async () => {
+        const { client, api } = configuredClient('', true);
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toMatchObject({
+          code: AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+        });
+        expect(api.getSubOrgIds).not.toHaveBeenCalled();
+        expect(api.createSubOrganization).not.toHaveBeenCalled();
+      });
+
+      test('fails before API calls when neither client nor environment has an organization', async () => {
+        delete process.env.TURNKEY_ORGANIZATION_ID;
+        const { api } = configuredClient('unused-parent');
+        const client = { apiClient: () => api } as unknown as Turnkey;
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toMatchObject({
+          code: AUTH_TURNKEY_ERROR_CODES.configOrganizationIdMissing,
+        });
+        expect(api.getSubOrgIds).not.toHaveBeenCalled();
+        expect(api.createSubOrganization).not.toHaveBeenCalled();
+      });
     });
 
     test('returns existing sub-org when found with wallet', async () => {
@@ -246,6 +433,349 @@ describe('turnkey-client', () => {
       );
     });
 
+    describe('repairing missing account roles in an existing sub-org (#784)', () => {
+      test('is a no-op when the wallet already has all three required roles', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['already_complete'] })),
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('already_complete');
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+      });
+
+      test('repairs a missing did-assertion account in place', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['missing_assertion'] })),
+          getWalletAccounts: mock(() =>
+            Promise.resolve({
+              accounts: [
+                {
+                  curve: 'CURVE_SECP256K1',
+                  path: "m/44'/0'/0'/0/0",
+                  addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+                },
+                {
+                  curve: 'CURVE_ED25519',
+                  path: "m/44'/501'/1'/0'",
+                  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                },
+              ],
+            })
+          ),
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('missing_assertion');
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        const callArgs = (createWalletAccounts as any).mock.calls[0][0];
+        expect(callArgs.organizationId).toBe('missing_assertion');
+        expect(callArgs.walletId).toBe('w1');
+        expect(callArgs.accounts).toHaveLength(1);
+        expect(callArgs.accounts[0].curve).toBe('CURVE_ED25519');
+        expect(callArgs.accounts[0].path).toBe("m/44'/501'/0'/0'");
+      });
+
+      test('repairs a missing did-update account in place', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['missing_update'] })),
+          getWalletAccounts: mock(() =>
+            Promise.resolve({
+              accounts: [
+                {
+                  curve: 'CURVE_SECP256K1',
+                  path: "m/44'/0'/0'/0/0",
+                  addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+                },
+                {
+                  curve: 'CURVE_ED25519',
+                  path: "m/44'/501'/0'/0'",
+                  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                },
+              ],
+            })
+          ),
+          createWalletAccounts,
+        });
+
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        const callArgs = (createWalletAccounts as any).mock.calls[0][0];
+        expect(callArgs.accounts).toHaveLength(1);
+        expect(callArgs.accounts[0].path).toBe("m/44'/501'/1'/0'");
+      });
+
+      test('repairs a wallet whose Bitcoin auth-key account is stale (correct curve/path, pre-#748 Ethereum address format) (#749)', async () => {
+        // Turnkey accounts are immutable, so the stale account cannot be
+        // edited in place - the fix is to add the corrected P2TR account
+        // alongside it, exactly like a totally-missing role. Matching on
+        // curve+path alone would wrongly treat this role as already
+        // present and skip the repair, permanently stranding the account
+        // ensureWalletWithAccounts/getKeyByRole actually require.
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['stale_btc_format'] })),
+          getWalletAccounts: mock(() =>
+            Promise.resolve({
+              accounts: [
+                {
+                  curve: 'CURVE_SECP256K1',
+                  path: "m/44'/0'/0'/0/0",
+                  addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+                },
+                {
+                  curve: 'CURVE_ED25519',
+                  path: "m/44'/501'/0'/0'",
+                  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                },
+                {
+                  curve: 'CURVE_ED25519',
+                  path: "m/44'/501'/1'/0'",
+                  addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                },
+              ],
+            })
+          ),
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('stale_btc_format');
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        const callArgs = (createWalletAccounts as any).mock.calls[0][0];
+        expect(callArgs.organizationId).toBe('stale_btc_format');
+        expect(callArgs.walletId).toBe('w1');
+        expect(callArgs.accounts).toHaveLength(1);
+        expect(callArgs.accounts[0].curve).toBe('CURVE_SECP256K1');
+        expect(callArgs.accounts[0].path).toBe("m/44'/0'/0'/0/0");
+        expect(callArgs.accounts[0].addressFormat).toBe('ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR');
+      });
+
+      test('a wallet with both the stale and corrected Bitcoin auth-key accounts needs no further repair', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['already_repaired'] })),
+          getWalletAccounts: mock(() =>
+            Promise.resolve({
+              accounts: [
+                {
+                  curve: 'CURVE_SECP256K1',
+                  path: "m/44'/0'/0'/0/0",
+                  addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+                },
+                ...COMPLETE_ACCOUNTS,
+              ],
+            })
+          ),
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('already_repaired');
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+      });
+
+      test('repairs every missing role (including a totally missing bitcoin-auth account) in one call', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['missing_all'] })),
+          getWalletAccounts: mock(() => Promise.resolve({ accounts: [] })),
+          createWalletAccounts,
+        });
+
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        const callArgs = (createWalletAccounts as any).mock.calls[0][0];
+        expect(callArgs.accounts).toHaveLength(3);
+      });
+
+      test('a role satisfied in a second wallet counts as present sub-org-wide, so no repair happens', async () => {
+        // A role split across two wallets is still complete overall - the
+        // repair must not duplicate it into wallets[0] just because that
+        // one wallet alone doesn't have every role.
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const getWalletAccounts = mock((params: { walletId: string }) =>
+          Promise.resolve({
+            accounts:
+              params.walletId === 'w_first'
+                ? [
+                    {
+                      curve: 'CURVE_SECP256K1',
+                      path: "m/44'/0'/0'/0/0",
+                      addressFormat: 'ADDRESS_FORMAT_BITCOIN_MAINNET_P2TR',
+                    },
+                    {
+                      curve: 'CURVE_ED25519',
+                      path: "m/44'/501'/0'/0'",
+                      addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                    },
+                  ]
+                : [
+                    {
+                      curve: 'CURVE_ED25519',
+                      path: "m/44'/501'/1'/0'",
+                      addressFormat: 'ADDRESS_FORMAT_SOLANA',
+                    },
+                  ],
+          })
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['split_roles'] })),
+          getWallets: mock(() =>
+            Promise.resolve({ wallets: [{ walletId: 'w_first' }, { walletId: 'w_second' }] })
+          ),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('split_roles');
+        expect(getWalletAccounts).toHaveBeenCalledTimes(2);
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+      });
+
+      test('fails soft (returns the existing sub-org, does not repair) when checking wallet accounts fails', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['accounts_check_fails'] })),
+          getWalletAccounts: mock(() => Promise.reject(new Error('getWalletAccounts exploded'))),
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('accounts_check_fails');
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+      });
+
+      test('fails soft when a LATER wallet in a multi-wallet sub-org fails enumeration', async () => {
+        const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
+        const getWalletAccounts = mock((params: { walletId: string }) =>
+          params.walletId === 'w_first'
+            ? Promise.resolve({ accounts: [] })
+            : Promise.reject(new Error('second wallet exploded'))
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['second_wallet_fails'] })),
+          getWallets: mock(() =>
+            Promise.resolve({ wallets: [{ walletId: 'w_first' }, { walletId: 'w_second' }] })
+          ),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('second_wallet_fails');
+        expect(createWalletAccounts).not.toHaveBeenCalled();
+      });
+
+      test('propagates a repair-write failure instead of minting a new sub-org', async () => {
+        const createSubOrganization = mock(() => Promise.resolve({}));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['repair_write_fails'] })),
+          getWalletAccounts: mock(() => Promise.resolve({ accounts: [] })),
+          createWalletAccounts: mock(() =>
+            Promise.reject(new Error('createWalletAccounts exploded'))
+          ),
+          createSubOrganization,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'createWalletAccounts exploded'
+        );
+        expect(createSubOrganization).not.toHaveBeenCalled();
+      });
+
+      test('does not fail the login when a repair-write race is lost to a concurrent repair that already succeeded', async () => {
+        // Two instances can both observe the same missing role and both
+        // attempt to repair it (the lookup-then-repair sequence is only
+        // serialized within one process). If this instance's write loses
+        // that race, the role is still present afterward - failing the
+        // login here would be wrong.
+        let getWalletAccountsCalls = 0;
+        const getWalletAccounts = mock(() => {
+          getWalletAccountsCalls += 1;
+          // First call: initial inventory, missing did-assertion. Second
+          // call: post-failure re-check, now complete because the other
+          // instance's write won the race.
+          return Promise.resolve({
+            accounts: getWalletAccountsCalls === 1 ? [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] : COMPLETE_ACCOUNTS,
+          });
+        });
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('duplicate account for this curve/path'))
+        );
+        const createSubOrganization = mock(() => Promise.resolve({}));
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['raced_repair'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+          createSubOrganization,
+        });
+
+        const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
+
+        expect(result).toBe('raced_repair');
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        expect(getWalletAccounts).toHaveBeenCalledTimes(2);
+        expect(createSubOrganization).not.toHaveBeenCalled();
+      });
+
+      test('propagates the repair-write failure when the post-failure re-check shows the role is still missing', async () => {
+        const getWalletAccounts = mock(() =>
+          Promise.resolve({ accounts: [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] })
+        );
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('transient write failure, not a race'))
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['real_write_failure'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'transient write failure, not a race'
+        );
+      });
+
+      test('propagates the original repair-write failure when the post-failure re-check itself fails', async () => {
+        let getWalletAccountsCalls = 0;
+        const getWalletAccounts = mock(() => {
+          getWalletAccountsCalls += 1;
+          if (getWalletAccountsCalls === 1) {
+            return Promise.resolve({ accounts: [COMPLETE_ACCOUNTS[0], COMPLETE_ACCOUNTS[2]] });
+          }
+          return Promise.reject(new Error('re-check also failed'));
+        });
+        const createWalletAccounts = mock(() =>
+          Promise.reject(new Error('original write failure'))
+        );
+        const client = createMockClient({
+          getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['recheck_fails'] })),
+          getWalletAccounts,
+          createWalletAccounts,
+        });
+
+        await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+          'original write failure'
+        );
+      });
+    });
+
     test('picks deterministically (sorted) when multiple sub-orgs exist', async () => {
       const createSubOrganization = mock(() => Promise.resolve({}));
       const client = createMockClient({
@@ -269,16 +799,53 @@ describe('turnkey-client', () => {
       expect(await getOrCreateTurnkeySubOrg('user@example.com', client2)).toBe('org_alpha');
     });
 
-    test('returns existing sub-org when wallet check fails', async () => {
+    test('rethrows instead of reporting fake success when the wallet check fails (#805)', async () => {
+      // getWallets has no legitimate not-found case: a genuinely walletless
+      // sub-org is a successful `{ wallets: [] }` response. Any thrown error
+      // here must propagate rather than be silently treated as "a wallet
+      // exists, nothing to repair" - that would report OTP auth as
+      // successful without ever having established the wallet's existence.
+      const createWallet = mock(() => Promise.resolve({ walletId: 'w_new' }));
+      const createSubOrganization = mock(() => Promise.resolve({}));
       const client = createMockClient({
-        getSubOrgIds: mock(() =>
-          Promise.resolve({ organizationIds: ['fallback_org'] })
-        ),
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['fallback_org'] })),
         getWallets: mock(() => Promise.reject(new Error('Wallet check failed'))),
+        createWallet,
+        createSubOrganization,
       });
 
-      const result = await getOrCreateTurnkeySubOrg('user@example.com', client);
-      expect(result).toBe('fallback_org');
+      await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
+        'Wallet check failed'
+      );
+      expect(createWallet).not.toHaveBeenCalled();
+      expect(createSubOrganization).not.toHaveBeenCalled();
+
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+        throw new Error('expected getOrCreateTurnkeySubOrg to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_TURNKEY_ERROR_CODES.walletLookupFailed);
+      }
+    });
+
+    test('rethrows a structured Turnkey error (e.g. code 5) from the wallet check rather than treating it as success (#805)', async () => {
+      const structuredError = Object.assign(new Error('not found'), { code: 5 });
+      const createWallet = mock(() => Promise.resolve({ walletId: 'w_new' }));
+      const client = createMockClient({
+        getSubOrgIds: mock(() => Promise.resolve({ organizationIds: ['fallback_org_2'] })),
+        getWallets: mock(() => Promise.reject(structuredError)),
+        createWallet,
+      });
+
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+        throw new Error('expected getOrCreateTurnkeySubOrg to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_TURNKEY_ERROR_CODES.walletLookupFailed);
+      }
+      expect(createWallet).not.toHaveBeenCalled();
     });
 
     test('throws when TURNKEY_ORGANIZATION_ID not set', async () => {
@@ -300,6 +867,14 @@ describe('turnkey-client', () => {
       await expect(getOrCreateTurnkeySubOrg('user@example.com', client)).rejects.toThrow(
         'No sub-organization ID returned'
       );
+
+      try {
+        await getOrCreateTurnkeySubOrg('user@example.com', client);
+        throw new Error('expected getOrCreateTurnkeySubOrg to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructuredError);
+        expect((error as StructuredError).code).toBe(AUTH_TURNKEY_ERROR_CODES.subOrgCreateFailed);
+      }
     });
 
     test('creates sub-org with correct wallet configuration', async () => {

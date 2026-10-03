@@ -15,13 +15,13 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
-import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal } from '@originals/sdk';
+import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal, StructuredError } from '@originals/sdk';
 import { json, type Handler } from './router';
 import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
-import type { InscriptionsStore, InscriptionRecord } from './inscriptions-store';
+import type { InscriptionsStore, InscriptionRecord, InscriptionStatus } from './inscriptions-store';
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-reconciliation';
 import { encodeSatSnapshot } from './sat-snapshot-codec';
@@ -436,23 +436,52 @@ export function quickNodeOrdinalLookup(opts: {
 }
 
 /**
- * Memoize classification per outpoint. An unspent output's inscription set
- * does not change (it can only change by being spent, which removes it from
- * the UTXO set), so a hit is permanently valid — and without this the 15s
- * deposit poll would pay an add-on call per UTXO per tick. Failures are NOT
- * cached: an outage must not pin a creator's coins as unspendable for the
- * lifetime of the process.
+ * Memoize classification per outpoint. Without this the 15s deposit poll
+ * would pay an add-on call per UTXO per tick.
+ *
+ * The two verdicts are NOT symmetric. Once an outpoint is reported as
+ * carrying an inscription, that fact cannot un-happen while the output stays
+ * unspent (it can only change by being spent, which removes it from the UTXO
+ * set) — a positive hit is cached permanently. An empty/"clean" verdict is
+ * different: it can be the ord indexer lagging behind the UTXO indexer that
+ * feeds this same poll, so an outpoint whose inscription reveal hasn't been
+ * indexed yet reads as clean on the very first query. Caching that verdict
+ * permanently would spend it as fee input forever after, even once the
+ * indexer catches up and would truthfully report the inscription — so a
+ * "clean" verdict is only trusted for `cleanTtlMs` before being re-verified
+ * against the index. Failures are NOT cached either way: an outage must not
+ * pin a creator's coins as unspendable, nor as spendable, for the lifetime of
+ * the process.
  */
-export function cachedOrdinalLookup(inner: OrdinalLookup, maxEntries = 5_000): OrdinalLookup {
-  const cache = new Map<string, string[]>();
+export function cachedOrdinalLookup(
+  inner: OrdinalLookup,
+  maxEntries = 5_000,
+  cleanTtlMs = 5 * 60_000,
+  now: () => number = () => Date.now()
+): OrdinalLookup {
+  const inscribed = new Map<string, string[]>();
+  const clean = new Map<string, number>();
   return {
     async outpointInscriptions(outpoint) {
       const key = `${outpoint.txid.toLowerCase()}:${outpoint.vout}`;
-      const hit = cache.get(key);
-      if (hit) return hit;
+
+      const inscribedHit = inscribed.get(key);
+      if (inscribedHit) return inscribedHit;
+
+      const cleanAt = clean.get(key);
+      if (cleanAt !== undefined && now() - cleanAt < cleanTtlMs) return [];
+
       const answer = await inner.outpointInscriptions(outpoint);
-      if (cache.size >= maxEntries) cache.clear();
-      cache.set(key, answer);
+
+      if (answer.length > 0) {
+        if (inscribed.size >= maxEntries) inscribed.clear();
+        inscribed.set(key, answer);
+        clean.delete(key);
+      } else {
+        if (clean.size >= maxEntries) clean.clear();
+        clean.set(key, now());
+      }
+
       return answer;
     },
   };
@@ -609,6 +638,9 @@ export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 // inscriptions burn the creator's fee and our QuickNode bandwidth.
 const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
 
+/** Bitcoin Core's RPC -27 ("already in chain/mempool"), independent of wording. */
+const RPC_TRANSACTION_ALREADY_IN_CHAIN = -27;
+
 /**
  * The exact rejections Bitcoin Core raises when the transaction is ALREADY on
  * the network. Matched as a closed set rather than a bare /already/: a
@@ -616,20 +648,27 @@ const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
  * already closed") would otherwise count as a successful broadcast, and a
  * falsely-advanced record can park real funds — a reveal marked broadcast
  * that never went out is only rescued by the much slower staleness sweep.
+ * Kept as a string fallback for providers that don't surface an RPC code;
+ * `isAlreadyKnownTxError` below checks the RPC -27 code first since Core's
+ * own wording for it has changed across versions (see the entries below).
  */
 const ALREADY_KNOWN_TX_ERRORS = [
   'txn-already-in-mempool',
   'txn-already-known',
-  'transaction already in block chain', // RPC -27
+  'transaction already in block chain', // RPC -27, Bitcoin Core < 28.0
   'transaction already in mempool',
+  'transaction outputs already in utxo set', // RPC -27, Bitcoin Core >= 28.0 (bitcoin/bitcoin#30212)
 ];
 
 /**
  * True when a broadcast rejection means the transaction is ALREADY on the
  * network — success for our idempotent retry purposes. A conflicting-spend
- * rejection ("txn-mempool-conflict") is NOT a match.
+ * rejection ("txn-mempool-conflict") is NOT a match. Checks the RPC error
+ * code first (stable across Bitcoin Core versions) before falling back to
+ * prose matching, since Core 28.0 rewrote RPC -27's message text.
  */
 export function isAlreadyKnownTxError(e: unknown): boolean {
+  if (e instanceof StructuredError && e.details?.rpcCode === RPC_TRANSACTION_ALREADY_IN_CHAIN) return true;
   const msg = ((e as Error)?.message ?? '').toLowerCase();
   return ALREADY_KNOWN_TX_ERRORS.some((known) => msg.includes(known));
 }
@@ -818,7 +857,11 @@ export function createBitcoinRoutes(deps: {
   // multiple of the observed rate, so a signer cannot relabel skimmed change
   // as "fee" without tripping it.
   const MAX_FEE_RATE_TOLERANCE_MULTIPLIER = 10;
-  const feeCache = new Map<number, { at: number; rate: number }>();
+  // Keyed by the NORMALIZED target (see below), not the raw client value, so
+  // it actually caches/evicts (#771) instead of growing one entry per
+  // never-repeated raw `blocks` and immortally, since a plain Map is never
+  // swept.
+  const feeCache = createExpiringCache<number, number>(FEE_CACHE_MS, now);
   const feeInFlight = new Map<number, Promise<number>>();
   // `blocks` is client-supplied (POST /api/btc/fee body, no allowlist), so a
   // caller sending many distinct values could otherwise grow a plain failure
@@ -829,17 +872,26 @@ export function createBitcoinRoutes(deps: {
 
   /** Shared estimator. Throws (never floors) when the source is unusable. */
   async function currentFeeRate(blocks = 1): Promise<number> {
-    const cached = feeCache.get(blocks);
-    if (cached && now() - cached.at < FEE_CACHE_MS) return cached.rate;
-    const pending = feeInFlight.get(blocks);
+    if (!Number.isFinite(blocks)) {
+      throw new Error(`Fee estimate target must be a finite number (got ${blocks}).`);
+    }
+    // Normalize to the exact target QuickNodeProvider.estimateFee requests
+    // (Math.max(1, Math.floor(blocks))) BEFORE any cache lookup (#771).
+    // Otherwise near-identical raw values (1, 1.1, 1.9999, -5, ...) that all
+    // resolve to the same upstream call each get their own cache entry and
+    // in-flight slot, defeating both the 60s cache and single-flight dedupe.
+    const target = Math.max(1, Math.floor(blocks));
+    const cached = feeCache.get(target);
+    if (cached !== undefined) return cached;
+    const pending = feeInFlight.get(target);
     if (pending) return pending;
-    const failedMessage = feeFailureCache.get(blocks);
+    const failedMessage = feeFailureCache.get(target);
     if (failedMessage !== undefined) {
       throw new Error(failedMessage);
     }
     const run = (async () => {
       try {
-        const estimated = await provider.estimateFee(blocks);
+        const estimated = await provider.estimateFee(target);
         if (typeof estimated !== 'number' || !Number.isFinite(estimated) || estimated <= 0) {
           throw new Error(`Fee estimator returned an unusable rate (${estimated}).`);
         }
@@ -847,20 +899,20 @@ export function createBitcoinRoutes(deps: {
         if (rate > MAX_FEE_RATE_SAT_VB) {
           throw new Error(`Estimated fee rate ${rate} sat/vB exceeds the ${MAX_FEE_RATE_SAT_VB} sat/vB maximum.`);
         }
-        feeCache.set(blocks, { at: now(), rate });
-        feeFailureCache.delete(blocks);
+        feeCache.set(target, rate);
+        feeFailureCache.delete(target);
         return rate;
       } catch (e) {
-        feeFailureCache.set(blocks, (e as Error).message);
+        feeFailureCache.set(target, (e as Error).message);
         throw e;
       }
     })();
-    feeInFlight.set(blocks, run);
+    feeInFlight.set(target, run);
     // Clear the slot AFTER it is set — an estimator that throws synchronously
     // (config validated before any promise) would otherwise leave its rejected
     // promise parked here and re-serve that failure to every later poll. The
     // identity check keeps a settled run from evicting a newer one.
-    const clear = () => { if (feeInFlight.get(blocks) === run) feeInFlight.delete(blocks); };
+    const clear = () => { if (feeInFlight.get(target) === run) feeInFlight.delete(target); };
     run.then(clear, clear);
     return run;
   }
@@ -949,6 +1001,9 @@ export function createBitcoinRoutes(deps: {
     const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const { blocks } = (await req.json().catch(() => ({}))) as { blocks?: number };
+    if (blocks !== undefined && (typeof blocks !== 'number' || !Number.isFinite(blocks))) {
+      return json({ error: 'bad_request' }, 400);
+    }
     try {
       // Same estimator (and same cache) the deposit quote was sized from —
       // the rate the creator is told to fund and the rate the inscription is
@@ -975,11 +1030,21 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
+  // Single-flight admission across all users of this route instance only.
+  // Separate processes/route instances do not coordinate faucet spending.
+  // Each admission reads the provider anew; a stale provider snapshot may
+  // still cause a sequential broadcast to fail. No durable input claims or
+  // recovery guarantees are implied, and failed sends do not reserve inputs.
+  let faucetInFlight = false;
+  const faucetBusy = () => json({
+    error: 'faucet_busy', message: 'Another faucet request is in progress. Try again later.',
+  }, 503, { 'Retry-After': '1' });
+
   const funding: Handler = async (req, _url, clientIp) => {
     // Creator-pays deploys (mainnet) have no faucet at all — the route is not
     // mounted there, and this guard keeps a miswired mount fail-closed.
     const faucet = deps.faucet;
-    if (!faucet) return json({ error: 'faucet_unavailable' }, 404);
+    if (!faucet || (deps.network ?? 'testnet') !== 'testnet') return json({ error: 'faucet_unavailable' }, 404);
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp);
@@ -992,91 +1057,102 @@ export function createBitcoinRoutes(deps: {
       return json({ error: 'bad_address', message: 'A testnet4 P2WPKH (tb1) address is required.' }, 400);
     }
 
-    const perUser = userLimiter.check(sub);
-    if (!perUser.allowed) {
-      return json({ error: 'faucet_user_cap', message: 'Per-user faucet limit reached; try again later.' }, 429, {
-        'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+    if (faucetInFlight) return faucetBusy();
+    faucetInFlight = true;
+    try {
+      const perUser = userLimiter.check(sub);
+      if (!perUser.allowed) {
+        return json({ error: 'faucet_user_cap', message: 'Per-user faucet limit reached; try again later.' }, 429, {
+          'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)),
+        });
+      }
+
+      // 1) Gather the faucet's spendable UTXOs; pick enough to cover fundingSats +
+      //    a fixed fee floor. Empty faucet → 507.
+      let faucetUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
+      try {
+        faucetUtxos = await provider.getSpendableUtxos(faucet.address);
+      } catch (e) {
+        return json({ error: 'faucet_unavailable', message: (e as Error).message }, 502);
+      }
+      const totalAvail = faucetUtxos.reduce((n, u) => n + u.value, 0);
+      if (faucetUtxos.length === 0 || totalAvail < faucetSats + 500) {
+        return json({ error: 'faucet_empty', message: 'The testnet4 faucet is out of funds. Try again later.' }, 507);
+      }
+
+      // 2) Build the funding tx: faucet UTXOs in, fundingSats to the user, change
+      //    back to the faucet. Fee = feeRate * estimated vsize (simple P2WPKH).
+      let feeRate: number;
+      try {
+        feeRate = await currentFeeRate(1);
+      } catch (e) {
+        // No floor: a 1 sat/vB funding tx just sits unconfirmed, and the user
+        // waits on a deposit that never arrives.
+        return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+      }
+      const selected: typeof faucetUtxos = [];
+      let inSats = 0;
+      for (const u of faucetUtxos) {
+        selected.push(u);
+        inSats += u.value;
+        if (inSats >= faucetSats + 200) break;
+      }
+      // vsize ~ 10.5 + 68*inputs + 31*2 outputs (P2WPKH), rounded up.
+      const vsize = Math.ceil(10.5 + 68 * selected.length + 31 * 2);
+      const fee = feeRate * vsize;
+      const change = inSats - faucetSats - fee;
+      if (change < 0) return json({ error: 'faucet_empty', message: 'Faucet UTXOs too small for the fee.' }, 507);
+
+      const tx = new btc.Transaction();
+      for (const u of selected) {
+        tx.addInput({
+          txid: hex.decode(u.txid),
+          index: u.vout,
+          // BIP-125 opt-in RBF: a final-sequence funding tx would be un-bumpable
+          // through a fee spike (mirrors the SDK's commit/reveal builders).
+          sequence: 0xfffffffd,
+          witnessUtxo: { script: hex.decode(u.scriptPubKey), amount: BigInt(u.value) },
+        });
+      }
+      tx.addOutputAddress(address, BigInt(faucetSats), btc.TEST_NETWORK);
+      if (change > 330) tx.addOutputAddress(faucet.address, BigInt(change), btc.TEST_NETWORK);
+
+      // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
+      // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
+      // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
+      const userScript = tx.getOutput(0).script;
+      if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
+      const scriptPubKey = hex.encode(userScript);
+
+      // 3) Sign the funding tx with the faucet's key (raw WIF or Turnkey org) →
+      //    broadcast-ready hex.
+      let signedTxHex: string;
+      let signedTxid: string;
+      try {
+        signedTxHex = await faucet.signFundingTx(tx);
+        signedTxid = btc.Transaction.fromRaw(hex.decode(signedTxHex)).id;
+      } catch (e) {
+        return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
+      }
+
+      // 4) Broadcast. Already-known evidence applies to these exact signed bytes.
+      let txid: string;
+      try {
+        txid = await provider.broadcastTransaction(signedTxHex);
+      } catch (e) {
+        if (!isAlreadyKnownTxError(e)) {
+          return json({ error: 'faucet_broadcast_failed', message: (e as Error).message }, 502);
+        }
+        txid = signedTxid;
+      }
+
+      return json({
+        fundingUtxo: { txid, vout: 0, value: faucetSats, scriptPubKey },
+        changeAddress: address, // the user's own address is the inscription change/reveal dest
       });
+    } finally {
+      faucetInFlight = false;
     }
-
-    // 1) Gather the faucet's spendable UTXOs; pick enough to cover fundingSats +
-    //    a fixed fee floor. Empty faucet → 507.
-    let faucetUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>;
-    try {
-      faucetUtxos = await provider.getSpendableUtxos(faucet.address);
-    } catch (e) {
-      return json({ error: 'faucet_unavailable', message: (e as Error).message }, 502);
-    }
-    const totalAvail = faucetUtxos.reduce((n, u) => n + u.value, 0);
-    if (faucetUtxos.length === 0 || totalAvail < faucetSats + 500) {
-      return json({ error: 'faucet_empty', message: 'The testnet4 faucet is out of funds. Try again later.' }, 507);
-    }
-
-    // 2) Build the funding tx: faucet UTXOs in, fundingSats to the user, change
-    //    back to the faucet. Fee = feeRate * estimated vsize (simple P2WPKH).
-    let feeRate: number;
-    try {
-      feeRate = await currentFeeRate(1);
-    } catch (e) {
-      // No floor: a 1 sat/vB funding tx just sits unconfirmed, and the user
-      // waits on a deposit that never arrives.
-      return json({ error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
-    }
-    const selected: typeof faucetUtxos = [];
-    let inSats = 0;
-    for (const u of faucetUtxos) {
-      selected.push(u);
-      inSats += u.value;
-      if (inSats >= faucetSats + 200) break;
-    }
-    // vsize ~ 10.5 + 68*inputs + 31*2 outputs (P2WPKH), rounded up.
-    const vsize = Math.ceil(10.5 + 68 * selected.length + 31 * 2);
-    const fee = feeRate * vsize;
-    const change = inSats - faucetSats - fee;
-    if (change < 0) return json({ error: 'faucet_empty', message: 'Faucet UTXOs too small for the fee.' }, 507);
-
-    const tx = new btc.Transaction();
-    for (const u of selected) {
-      tx.addInput({
-        txid: hex.decode(u.txid),
-        index: u.vout,
-        // BIP-125 opt-in RBF: a final-sequence funding tx would be un-bumpable
-        // through a fee spike (mirrors the SDK's commit/reveal builders).
-        sequence: 0xfffffffd,
-        witnessUtxo: { script: hex.decode(u.scriptPubKey), amount: BigInt(u.value) },
-      });
-    }
-    tx.addOutputAddress(address, BigInt(faucetSats), btc.TEST_NETWORK);
-    if (change > 330) tx.addOutputAddress(faucet.address, BigInt(change), btc.TEST_NETWORK);
-
-    // The funded outpoint is vout 0 (the user output). Capture its scriptPubKey
-    // now — the SDK's createCommitTransaction REQUIRES it on the fundingUtxo to
-    // set the segwit witnessUtxo (it throws "missing scriptPubKey" otherwise).
-    const userScript = tx.getOutput(0).script;
-    if (!userScript) return json({ error: 'funding_build_failed', message: 'No user output script.' }, 500);
-    const scriptPubKey = hex.encode(userScript);
-
-    // 3) Sign the funding tx with the faucet's key (raw WIF or Turnkey org) →
-    //    broadcast-ready hex.
-    let signedTxHex: string;
-    try {
-      signedTxHex = await faucet.signFundingTx(tx);
-    } catch (e) {
-      return json({ error: 'faucet_sign_failed', message: (e as Error).message }, 502);
-    }
-
-    // 4) Broadcast.
-    let txid: string;
-    try {
-      txid = await provider.broadcastTransaction(signedTxHex);
-    } catch (e) {
-      return json({ error: 'faucet_broadcast_failed', message: (e as Error).message }, 502);
-    }
-
-    return json({
-      fundingUtxo: { txid, vout: 0, value: faucetSats, scriptPubKey },
-      changeAddress: address, // the user's own address is the inscription change/reveal dest
-    });
   };
 
   /**
@@ -1258,9 +1334,10 @@ export function createBitcoinRoutes(deps: {
     //
     // Capped at MAX_PENDING_FEE_LOOKUPS reads: this route is polled every 15s
     // against a rate-limited indexer, and an unbounded fan-out here would
-    // spend a creator's poll budget on an advisory. Beyond the cap the advice
-    // is drawn from the ones we did read, which can only understate the
-    // problem, never invent one.
+    // spend a creator's poll budget on an advisory. Beyond the cap there is
+    // no advice at all (see sawThemAll below) rather than one drawn only from
+    // the txids we happened to read — a partial view could name the wrong
+    // payment as the slowest one.
     let pendingDeposit:
       | { txid: string; feeSats: number; vsize: number; rbf: boolean; networkSatVb: number }
       | null = null;
@@ -1642,22 +1719,26 @@ export function createBitcoinRoutes(deps: {
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
-    // #693 — a retired record's signed hex is cleared, so `commitTxId`/
+    // #693/#755 — a retired record's signed hex is cleared, so `commitTxId`/
     // `revealTxId` (which exclude witness data) cannot alone prove this
     // resubmission is byte-for-byte the same pair. `signedPairDigest`
     // (persisted at creation, retained across retirement) closes that gap
     // when present; a settled retry is additionally authenticated by a
     // fresh, valid reveal witness (verified by validateInscriptionReveal
-    // below) before this is ever called. A settled (`confirmed`) record's
-    // result is returned exactly as last observed, with no re-verification,
-    // broadcast, or state write (CLAUDE.md: "Retained prepared pairs enable
-    // exact recovery after ambiguous acknowledgements"). A retired record
-    // that never settled here (a terminally-dead superseded loser whose
-    // funding outpoint a different, confirmed pair already won) is refused
-    // outright rather than reprocessed. Shared with the post-lock recheck
-    // below, which can also observe a record retired concurrently by
-    // reconciliation.
-    function retiredResubmissionResponse(rec: InscriptionRecord): Response {
+    // below) before this is ever called. A `confirmed` record's result is
+    // returned exactly as last observed, with no re-verification, broadcast,
+    // or state write (CLAUDE.md: "Retained prepared pairs enable exact
+    // recovery after ambiguous acknowledgements") — whether or not it has
+    // yet crossed the six-confirmation retention floor: `settled` reports
+    // `rec.retired`, never hardcoded, so a resubmission of a merely
+    // `confirmed`-but-not-yet-`retired` record (#755) is not misreported as
+    // having crossed a horizon it has not. A retired record that never
+    // settled here (a terminally-dead superseded loser whose funding
+    // outpoint a different, confirmed pair already won) is refused outright
+    // rather than reprocessed. Shared with the post-lock recheck below and
+    // the post-broadcast guards further down, which can also observe a
+    // record confirmed or retired concurrently by reconciliation.
+    function settledResubmissionResponse(rec: InscriptionRecord): Response {
       // ABSENT only on a row written before this field existed; that legacy
       // case falls back to the id-only matching already done by the caller.
       if (rec.signedPairDigest !== undefined &&
@@ -1672,7 +1753,7 @@ export function createBitcoinRoutes(deps: {
           revealTxId: rec.revealTxId,
           inscriptionId: rec.inscriptionId,
           status: 'confirmed',
-          settled: true,
+          settled: rec.retired === true,
           confirmations: rec.confirmations,
           ...(rec.confirmedBlockHeight !== undefined ? { confirmedBlockHeight: rec.confirmedBlockHeight } : {}),
           ...(rec.confirmedBlockHash !== undefined ? { confirmedBlockHash: rec.confirmedBlockHash } : {}),
@@ -1758,14 +1839,17 @@ export function createBitcoinRoutes(deps: {
       return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
     }
 
-    // #693 — only past this point has the caller PROVEN possession of a
+    // #693/#755 — only past this point has the caller PROVEN possession of a
     // validly-signed reveal for this exact commit (the check just above): a
     // retired record's own signed bytes are gone, so txid equality alone
     // (already established by checkRecordedPair) is not enough to trust a
     // resubmission claiming to be it. Handle it before any economics/
     // broadcast logic — a retired record is never legitimately reprocessed.
-    if (existingByCommitId?.retired) {
-      return retiredResubmissionResponse(existingByCommitId);
+    // A `confirmed`-but-not-yet-`retired` record is equally settled state
+    // that a retry must not regress (#755): it is reported exactly as
+    // observed, not pushed back through broadcast/setStatus.
+    if (existingByCommitId?.retired || existingByCommitId?.status === 'confirmed') {
+      return settledResubmissionResponse(existingByCommitId);
     }
 
     // Cheap syntax, transaction shape and bound-address checks precede this
@@ -1916,6 +2000,24 @@ export function createBitcoinRoutes(deps: {
     const declaredSet = new Set(outpoints);
     const covers = (r: InscriptionRecord) => outpointsOf(r).every((o) => declaredSet.has(o));
 
+    // The status this record is actually AT going into the broadcast calls
+    // below (#755): 'signed' for a brand-new commitTxId (nothing else could
+    // have touched it before `store.create` below runs), or the in-lock
+    // snapshot's own status for a resubmission of an existing live record.
+    // Used as the CAS `expected` for the guarded post-broadcast transitions —
+    // never re-derived after the lock releases, since that is exactly the
+    // window reconciliation can move the record in.
+    let preBroadcastStatus: InscriptionStatus = 'signed';
+    // Set when this exact commitTxId is itself a previously-superseded record
+    // (a rebuilt rival won its outpoint on an earlier attempt, then that rival
+    // was itself superseded or vanished, freeing the outpoint back up). #874:
+    // `store.create` below is a no-op for an existing commitTxId, so nothing
+    // else ever clears a stale `superseded: true` off THIS record — it must be
+    // reinstated explicitly once this resubmission is about to become the live
+    // record for the outpoint, mirroring `reclaimOutpoint`'s paired
+    // supersede/reinstate pattern in bitcoin-reconciliation.ts.
+    let resubmittedWasSuperseded = false;
+
     // Read the rivals, judge them, supersede and persist WITHOUT yielding to
     // another submission from this user in between (C5): the guard reads state
     // that a concurrent request would otherwise invalidate mid-flight.
@@ -1927,15 +2029,18 @@ export function createBitcoinRoutes(deps: {
         const recorded = store.get(sub, commitTxId);
         const mismatch = checkRecordedPair(recorded);
         if (mismatch) return mismatch;
-        // Re-check retirement too: reconciliation runs independently of this
-        // request and could confirm-and-retire this exact commitTxId while
-        // the economics/ordinal checks above were awaiting a provider
-        // (#693). Route through the same settled-vs-terminal decision as the
-        // pre-lock check — a record that settled during that window must
-        // still return its settlement, not a false conflict.
-        if (recorded?.retired) {
-          return retiredResubmissionResponse(recorded);
+        // Re-check retirement AND confirmation too: reconciliation runs
+        // independently of this request and could confirm (#755), or
+        // confirm-and-retire (#693), this exact commitTxId while the
+        // economics/ordinal checks above were awaiting a provider. Route
+        // through the same settled-vs-terminal decision as the pre-lock
+        // check — a record that settled during that window must still
+        // return its settlement, not a false conflict or a regression.
+        if (recorded?.retired || recorded?.status === 'confirmed') {
+          return settledResubmissionResponse(recorded);
         }
+        if (recorded) preBroadcastStatus = recorded.status;
+        resubmittedWasSuperseded = recorded?.superseded === true;
         if (recorded && !recorded.economicsVerified) store.markEconomicsVerified(sub, commitTxId);
         rivals = store.findByOutpoints(sub, outpoints).filter((r) => r.commitTxId !== commitTxId);
       } catch (e) {
@@ -1954,7 +2059,24 @@ export function createBitcoinRoutes(deps: {
         try {
           const st = await provider.getTransactionStatus(existing.commitTxId);
           if (st?.confirmed) {
-            store.setStatus(sub, existing.commitTxId, 'commit_broadcast');
+            // Guarded write (#762): the status check above only proved
+            // `existing` was 'signed' BEFORE this await. A concurrent
+            // reconciliation pass can legitimately confirm (and record real
+            // confirmation depth/block evidence for) this exact rival while
+            // this provider lookup is in flight. An unconditional setStatus
+            // here would silently downgrade that fresher 'confirmed' record
+            // back to 'commit_broadcast', wiping its confirmations per
+            // applyStatus. Only apply the transition if the rival is still
+            // exactly the 'signed' record this branch observed; on a CAS
+            // miss, no retry is needed — the fresh provider result still
+            // proves the rival won the outpoint, so this request keeps
+            // refusing with 409 while leaving the concurrent pass's newer
+            // state untouched.
+            store.trySetStatus(
+              sub, existing.commitTxId,
+              { status: 'signed', retired: false, superseded: false },
+              'commit_broadcast'
+            );
             return refuse('outpoint_already_confirmed', { error: 'outpoint_pending', commitTxId: existing.commitTxId }, 409);
           }
         } catch {
@@ -1979,6 +2101,16 @@ export function createBitcoinRoutes(deps: {
         }
         if (current.length === 1) store.supersede(sub, current[0].commitTxId);
       }
+
+      // #874: this resubmission is about to become (or remain) the live
+      // record for the outpoint — any rival sharing it was just superseded
+      // (or is already gone) above. If THIS record itself was left
+      // `superseded: true` by an earlier round (a since-superseded/vanished
+      // rival had won in the meantime), clear that stale flag now so the
+      // outpoint doesn't end up with zero live records once this pair
+      // broadcasts. `store.create` below cannot do this — it is a no-op for
+      // an already-persisted commitTxId.
+      if (resubmittedWasSuperseded) store.reinstate(sub, commitTxId);
 
       // Every invariant held: this pair is about to spend a stranger's real
       // BTC, so it is on the record before it goes anywhere (R29).
@@ -2010,7 +2142,24 @@ export function createBitcoinRoutes(deps: {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_broadcast_failed', detail: commitErr });
       return json({ error: 'commit_broadcast_failed', message: commitErr, commitTxId }, 502);
     }
-    store.setStatus(sub, commitTxId, 'commit_broadcast');
+    // #755 — guarded, not unconditional: `broadcastIdempotent` above awaited,
+    // and reconciliation runs independently of this request, so it can have
+    // confirmed (or confirmed-and-retired) this exact record in that window.
+    // Advance only from the state this request actually observed; a CAS
+    // failure means it already moved without us, so report its current
+    // settlement/status instead of regressing it.
+    if (!store.trySetStatus(sub, commitTxId, { status: preBroadcastStatus, retired: false, superseded: false }, 'commit_broadcast')) {
+      let moved: InscriptionRecord | null;
+      try {
+        moved = store.get(sub, commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
+      if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
+      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? preBroadcastStatus });
+    }
 
     const revealErr = await broadcastIdempotent(revealTxHex);
     if (revealErr) {
@@ -2020,7 +2169,20 @@ export function createBitcoinRoutes(deps: {
       money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'commit_broadcast' });
       return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'commit_broadcast' });
     }
-    store.setStatus(sub, commitTxId, 'reveal_broadcast');
+    // Same guard for the second transition: the reveal broadcast above is
+    // itself another await reconciliation can act across.
+    if (!store.trySetStatus(sub, commitTxId, { status: 'commit_broadcast', retired: false, superseded: false }, 'reveal_broadcast')) {
+      let moved: InscriptionRecord | null;
+      try {
+        moved = store.get(sub, commitTxId);
+      } catch (e) {
+        const unreadable = unreadableRecords(sub, e);
+        if (unreadable) return unreadable;
+        throw e;
+      }
+      if (moved?.retired || moved?.status === 'confirmed') return settledResubmissionResponse(moved);
+      return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: moved?.status ?? 'reveal_broadcast' });
+    }
     money('inscribe_broadcast', { sub, commitTxId, revealTxId, status: 'reveal_broadcast' });
     return json({ commitTxId, revealTxId, inscriptionId: record.inscriptionId, status: 'reveal_broadcast' });
   };
@@ -2253,14 +2415,23 @@ export function createBitcoinRoutes(deps: {
     if (afterReveal instanceof Response) return afterReveal;
     // F1 — the terminal deadlock. A commit that broadcast fine can still be
     // EVICTED from every mempool by a fee spike, and with no reveal child
-    // there is no CPFP to pull it back: it never confirms, so the list poll's
-    // confirmed-commit gate never fires, and the reveal is rejected for
-    // missing inputs forever while the creator's rebuild 409s on a live
-    // record. Both transactions can also be evicted after a successful reveal
-    // broadcast. Re-push the persisted commit, then retry. Re-pushing a commit
-    // that is still in the mempool is a harmless no-op — which is why this is
-    // the safe direction.
-    if (revealErr && (rec.status === 'commit_broadcast' || rec.status === 'reveal_broadcast') && rec.signedCommitHex && isMissingInputsError(revealErr)) {
+    // there is no CPFP to pull it back: it never confirms on its own, so the
+    // list poll's `liveStuck` pass can't take its immediate path (complete
+    // the persisted reveal once THAT commit is observed confirmed), and the
+    // reveal here is rejected for missing inputs while the creator's rebuild
+    // 409s on a live record. Both transactions can also be evicted after a
+    // successful reveal broadcast. Re-push the persisted commit, then retry.
+    // Re-pushing a commit that is still in the mempool is a harmless no-op —
+    // which is why this is the safe direction. (The same `liveStuck` pass
+    // also re-pushes an evicted commit itself once REVEAL_REBROADCAST_AFTER_MS
+    // has passed since the last push, so it does eventually self-heal this
+    // exact deadlock; this guard is what recovers it immediately on a manual
+    // retry instead of waiting for that window.) Check the freshest
+    // post-reveal snapshot here, not the call's original `rec`: this same
+    // call can have just moved status from 'signed' to 'commit_broadcast'
+    // above, and this guard must see that transition, not the stale value
+    // read before it.
+    if (revealErr && (afterReveal.status === 'commit_broadcast' || afterReveal.status === 'reveal_broadcast') && afterReveal.signedCommitHex && isMissingInputsError(revealErr)) {
       money('inscribe_failed', { sub, commitTxId, reason: 'commit_missing_repushed', detail: revealErr });
       const commitErr = await broadcastIdempotent(rec.signedCommitHex);
       const afterFallbackCommit = reloadIfUnchanged(observed);
