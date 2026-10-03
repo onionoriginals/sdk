@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { summarize, accentFor, isCustodyEntry } from './CelChain';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CelChain, summarize, accentFor, isCustodyEntry } from './CelChain';
 import type { CelEntry } from '../sdk/engine';
 
 /**
@@ -106,4 +108,22 @@ describe('creator vs holder rendering (item 5)', () => {
     expect(text).toContain('exhibited');
     expect(text).not.toContain('Held by');
   });
+});
+
+
+test('genesis SCID renders as history identity, while later previousEvent renders as a parent link', () => {
+  const genesis = { ...entry('create'), previousEvent: 'uGenesisScid' };
+  const render = (entries: CelEntry[]) => renderToStaticMarkup(createElement(CelChain, { entries }));
+  const html = render([genesis]);
+  expect(html).toContain('History SCID');
+  expect(html).toContain('uGenesisScid');
+  expect(html).toContain('cel-entry-genesis');
+  expect(html).not.toContain('cel-link-rail');
+  const legacy = render([entry('create')]);
+  expect(legacy).toContain('cel-entry-genesis');
+  expect(legacy).not.toContain('History SCID');
+  const update = render([{ ...entry('update'), previousEvent: 'uPublishedGenesisDigest' }]);
+  expect(update).toContain('cel-link-rail');
+  expect(update).not.toContain('cel-entry-genesis');
+  expect(update).not.toContain('History SCID');
 });

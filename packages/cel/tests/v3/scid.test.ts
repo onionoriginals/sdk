@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { base64urlnopad } from "@scure/base";
+import { base58, base64urlnopad } from "@scure/base";
 import {
   SCID_PLACEHOLDER,
   deriveScid,
@@ -14,6 +14,11 @@ import {
   validateEvent,
   encodeDocument,
   parseDocument,
+  deriveAssetId,
+  jcsSigningMessage,
+  verifyJcsSignature,
+  verifyEntry,
+  validateDocument,
 } from "../../src/v3/index.js";
 
 const signer = createLocalSigner("Ed25519", new Uint8Array(32).fill(19));
@@ -187,4 +192,113 @@ test("signing substitutes before proof creation and chaining uses final event di
       signer,
     ),
   ).rejects.toThrow();
+});
+
+// Bypass signEvent's construction guards: an attacker controlling a valid key
+// can sign arbitrary bytes. Verification must enforce SCID binding itself.
+async function rawSigned(event: Parameters<typeof jcsSigningMessage>[0]) {
+  const configuration = {
+    type: "DataIntegrityProof" as const,
+    cryptosuite: "eddsa-jcs-2022" as const,
+    verificationMethod: signer.controller + "#" + signer.controller.slice(8),
+    proofPurpose: "assertionMethod" as const,
+  };
+  const signature = await signer.sign(
+    jcsSigningMessage(event, configuration, signer.algorithm),
+  );
+  expect(
+    verifyJcsSignature(event, configuration, signature, signer.controller),
+  ).toBe(true);
+  return {
+    event,
+    proof: [{ ...configuration, proofValue: "z" + base58.encode(signature) }],
+  };
+}
+
+test("valid controller signatures cannot override a false genesis SCID", async () => {
+  const event = published();
+  const expected = deriveAssetId(event);
+  const tampered = {
+    ...event,
+    operation: {
+      ...event.operation,
+      data: { ...event.operation.data, name: "attacker change" },
+    },
+  };
+  const forged = await rawSigned(tampered);
+  expect(verifyScid(tampered, event.previousEvent)).toBe(false);
+  expect(() => verifyEntry(forged)).toThrow("Genesis SCID");
+  expect(() => validateDocument({ log: [forged] })).toThrow("Genesis SCID");
+  expect(() =>
+    verifyHistory({ log: [forged] }, { expectedAssetId: expected }),
+  ).toThrow("Genesis SCID");
+  expect(() =>
+    parseDocument(JSON.stringify({ log: [forged] }), "json"),
+  ).toThrow("Genesis SCID");
+});
+
+test("stripping and re-signing SCID cannot downgrade a pinned history to legacy identity", async () => {
+  const event = published();
+  const expected = deriveAssetId(event);
+  const stripped = await rawSigned({ operation: event.operation });
+  // Legacy compatibility is deliberate, but it must yield a DIFFERENT history.
+  expect(verifyHistory({ log: [stripped] }).state.assetId).not.toBe(expected);
+  expect(() =>
+    verifyHistory({ log: [stripped] }, { expectedAssetId: expected }),
+  ).toThrow("Requested identity");
+  expect(verifyScid(stripped.event, event.previousEvent)).toBe(false);
+  const other = await signEvent(
+    {
+      ...template,
+      operation: {
+        ...template.operation,
+        data: { ...template.operation.data, name: "another history" },
+      },
+    },
+    signer,
+  );
+  expect(() =>
+    verifyHistory({ log: [other] }, { expectedAssetId: expected }),
+  ).toThrow("Requested identity");
+});
+
+test("SCID APIs reject hostile representations without invoking input accessors", async () => {
+  const event = published();
+  let invoked = false;
+  const accessor = { ...event };
+  Object.defineProperty(accessor, "previousEvent", {
+    enumerable: true,
+    get() {
+      invoked = true;
+      return event.previousEvent;
+    },
+  });
+  expect(verifyScid(accessor, event.previousEvent)).toBe(false);
+  expect(() => deriveScid(accessor)).toThrow();
+  await expect(signEvent(accessor, signer)).rejects.toThrow();
+  expect(invoked).toBe(false);
+  const digest = base64urlnopad.decode(event.previousEvent.slice(1));
+  digest[0] = 0x13;
+  for (const previousEvent of [
+    "u" + base64urlnopad.encode(digest),
+    event.previousEvent + "=",
+    "{scid}",
+    null,
+  ]) {
+    const malformed = { ...event, previousEvent };
+    expect(verifyScid(malformed, previousEvent)).toBe(false);
+    expect(() => deriveScid(malformed)).toThrow();
+  }
+  expect(
+    verifyScid(
+      {
+        previousEvent: event.previousEvent,
+        operation: {
+          type: "update",
+          data: { profile: "originals/cel/3", name: "not genesis" },
+        },
+      },
+      event.previousEvent,
+    ),
+  ).toBe(false);
 });
