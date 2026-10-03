@@ -201,7 +201,7 @@ async function bitcoinFixture() {
   return { sdk, prepared, broadcastTransaction, save, recoveryStore };
 }
 
-test.each(["", "00", "not-hex"])(
+test.each(["", "00", "not-hex", "02000000000000000000"])(
   "corrupt retained reveal %j fails before persistence or broadcasts",
   async (revealTxHex) => {
     const f = await bitcoinFixture();

@@ -461,6 +461,11 @@ export class BitcoinPublications {
         "Prepared reveal transaction could not be parsed",
       );
     }
+    if (reveal.inputsLength === 0)
+      invalid(
+        "ASSET_BITCOIN_PUBLICATION",
+        "Prepared reveal transaction has no inputs",
+      );
     const witness = reveal.getInput(0).finalScriptWitness;
     if (!witness || witness.length !== 3)
       invalid(
