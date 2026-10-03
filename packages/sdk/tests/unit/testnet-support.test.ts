@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { btcoDidPrefix, btcoDidFromSatoshi } from '@originals/cel';
+import { btcoDidPrefix, btcoDidFromSatoshi, multikey } from '@originals/cel';
 import { createBtcoDidDocument } from '../../src/did/createBtcoDidDocument.js';
 import { validateBitcoinAddress, isValidBitcoinAddress } from '../../src/utils/bitcoin-address.js';
 
@@ -10,11 +10,19 @@ describe('SDK testnet (testnet4) support', () => {
   });
 
   test('createBtcoDidDocument mints a did:btco:test id on testnet', () => {
+    const publicKey = Uint8Array.from(
+      '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'.match(/../g)!,
+      byte => parseInt(byte, 16),
+    );
     const doc = createBtcoDidDocument('123456', 'testnet', {
-      publicKey: '02'.padEnd(66, '0'),
-      keyType: 'ES256K',
+      publicKey,
+      keyType: 'Secp256k1',
     });
     expect(doc.id).toBe('did:btco:test:123456');
+    expect(multikey.decodePublicKey(doc.verificationMethod![0].publicKeyMultibase!)).toEqual({
+      key: publicKey,
+      type: 'Secp256k1',
+    });
   });
 
   test('validateBitcoinAddress accepts a testnet4 tb1 P2WPKH address under "testnet"', () => {

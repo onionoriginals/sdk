@@ -10,6 +10,7 @@ import { requireWebVHDomain } from "./DIDManager.js";
 import {
   normalizeUpdateKey,
   assertEd25519WebVHUpdateKeys,
+  requireWebVHPaths,
 } from "./WebVHManager.js";
 
 // Type for DID log (from didwebvh-ts)
@@ -50,6 +51,17 @@ export interface OriginalResult {
   meta: DIDResolutionMeta;
 }
 
+/**
+ * A verification method as supplied to createDIDOriginal/updateDIDOriginal.
+ * `controller` may be omitted: didwebvh-ts fills it in with the DID being
+ * minted/updated. The returned DIDDocument's VerificationMethod.controller
+ * remains required — this input shape only relaxes what a caller must
+ * already know before the DID exists (issue #804).
+ */
+export type VerificationMethodInput = Omit<VerificationMethod, "controller"> & {
+  controller?: string;
+};
+
 // DID-based Original creation options
 export interface CreateDIDOriginalOptions {
   type: "did";
@@ -64,7 +76,7 @@ export interface CreateDIDOriginalOptions {
    * legacy-form updateKeys with pre-rotation is rejected (see nextKeyHashes).
    */
   updateKeys: string[];
-  verificationMethods: VerificationMethod[];
+  verificationMethods: VerificationMethodInput[];
   paths?: string[];
   controller?: string;
   context?: string | string[] | object | object[];
@@ -92,7 +104,7 @@ export interface UpdateDIDOriginalOptions {
   verifier?: ExternalVerifier;
   /** Same format rules as {@link CreateDIDOriginalOptions.updateKeys}. */
   updateKeys?: string[];
-  verificationMethods?: VerificationMethod[];
+  verificationMethods?: VerificationMethodInput[];
   services?: ServiceEndpoint[];
   controller?: string;
   context?: string | string[] | object | object[];
@@ -128,7 +140,8 @@ function assertBareUpdateKeysForPrerotation(
   if (!nextKeyHashes || nextKeyHashes.length === 0 || !updateKeys) return;
   const legacy = updateKeys.filter((k) => k !== normalizeUpdateKey(k));
   if (legacy.length > 0) {
-    throw new Error(
+    throw new StructuredError(
+      "WEBVH_PREROTATION_KEY_FORMAT_INVALID",
       'Pre-rotation (nextKeyHashes) requires updateKeys in bare multikey form ("z6Mk..."), ' +
         `but got legacy did:key form: ${legacy.join(", ")}. nextKeyHashes commit to the exact ` +
         "updateKey string and cannot be normalized after hashing — pass bare multikeys and " +
@@ -181,7 +194,8 @@ export async function prepareDIDDataForSigning(
 
   // Runtime validation
   if (typeof prepareDataForSigning !== "function") {
-    throw new Error(
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
       "Failed to load didwebvh-ts: prepareDataForSigning is not a function",
     );
   }
@@ -213,7 +227,8 @@ export async function verifyDIDSignature(
   // secp256k1 key. Stripping one byte and verifying against the remainder
   // verified against garbage — reject instead of guessing (issue #352).
   if (publicKey.length !== 32) {
-    throw new Error(
+    throw new StructuredError(
+      "ED25519_KEY_LENGTH_INVALID",
       `Invalid Ed25519 public key length: ${publicKey.length} (expected 32 bytes)`,
     );
   }
@@ -245,7 +260,10 @@ export async function createOriginal(
       return createDIDOriginal(options);
     default:
       // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-      throw new Error(`Unsupported Original type: ${options.type}`);
+      throw new StructuredError(
+        "ORIGINAL_TYPE_UNSUPPORTED",
+        `Unsupported Original type: ${options.type}`,
+      );
   }
 }
 
@@ -276,7 +294,10 @@ export async function createDIDOriginal(
 
   // Runtime validation
   if (typeof createDID !== "function") {
-    throw new Error("Failed to load didwebvh-ts: createDID is not a function");
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
+      "Failed to load didwebvh-ts: createDID is not a function",
+    );
   }
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
@@ -284,6 +305,7 @@ export async function createDIDOriginal(
   // A blank/whitespace-only domain must fail loudly here, before any signing
   // work — never mint a permanent did:webvh at a host nobody serves (#531, #678).
   const domain = requireWebVHDomain(options.domain);
+  const paths = requireWebVHPaths(options.paths ?? []);
 
   // didwebvh-ts >= 2.8 requires bare multikey updateKeys (did:webvh spec);
   // accept legacy "did:key:..." input and normalize first, then validate —
@@ -299,7 +321,7 @@ export async function createDIDOriginal(
     domain,
     signer: options.signer,
     verifier: resolveVerifier(options.signer, options.verifier),
-    paths: options.paths,
+    paths,
     updateKeys,
     verificationMethods: options.verificationMethods,
     context: options.context || [
@@ -350,7 +372,8 @@ export async function updateOriginal(
       return updateDIDOriginal(options);
     default: {
       const unsupported = options as unknown as { type: unknown };
-      throw new Error(
+      throw new StructuredError(
+        "ORIGINAL_TYPE_UNSUPPORTED",
         `Unsupported Original type: ${String(unsupported.type)}`,
       );
     }
@@ -381,10 +404,23 @@ export async function updateDIDOriginal(
 
   // Runtime validation
   if (typeof updateDID !== "function") {
-    throw new Error("Failed to load didwebvh-ts: updateDID is not a function");
+    throw new StructuredError(
+      "WEBVH_MODULE_LOAD_FAILED",
+      "Failed to load didwebvh-ts: updateDID is not a function",
+    );
   }
 
   assertBareUpdateKeysForPrerotation(options.updateKeys, options.nextKeyHashes);
+
+  // A supplied domain (including an explicitly empty string) must be a real
+  // host: an empty string must not silently no-op the move, and whitespace
+  // must not mint an unresolvable did:webvh (#531, #678). This is validated
+  // before resolveVerifier below — not just before updateDID — so a blank/
+  // whitespace domain always fails loudly with WEBVH_DOMAIN_REQUIRED, rather
+  // than being masked by WEBVH_VERIFIER_REQUIRED when the caller's signer
+  // also doesn't implement verify() (#792), matching createDIDOriginal's
+  // check ordering (domain before verifier).
+  const domain = options.domain === undefined ? undefined : requireWebVHDomain(options.domain);
 
   // Prepare options for updateDID
   const updateOptions: Record<string, unknown> = {
@@ -417,11 +453,9 @@ export async function updateDIDOriginal(
     updateOptions.assertionMethod = options.assertionMethod;
   if (options.keyAgreement !== undefined)
     updateOptions.keyAgreement = options.keyAgreement;
-  // A supplied domain (including an explicitly empty string) must be a real
-  // host: an empty string must not silently no-op the move, and whitespace
-  // must not mint an unresolvable did:webvh (#531, #678).
-  if (options.domain !== undefined)
-    updateOptions.domain = requireWebVHDomain(options.domain);
+  // Reuse the already-validated/canonical domain computed above (#792) —
+  // do not call requireWebVHDomain a second time here.
+  if (domain !== undefined) updateOptions.domain = domain;
 
   // Update the DID using didwebvh-ts
   const result = await updateDID(updateOptions);
@@ -430,13 +464,20 @@ export async function updateDIDOriginal(
   let did: string;
   if (result.did) {
     did = result.did;
-  } else if (result.log && result.log.length > 0) {
+  } else if (
+    result.log &&
+    result.log.length > 0 &&
+    (result.log[result.log.length - 1]?.state as unknown as DIDDocument | undefined)?.id
+  ) {
     // Extract DID from the document in the log
     const latestDoc = result.log[result.log.length - 1]?.state as unknown as
-      DIDDocument | undefined;
-    did = latestDoc?.id || "";
+      DIDDocument;
+    did = latestDoc.id;
   } else {
-    throw new Error("Cannot determine DID from update result");
+    throw new StructuredError(
+      "WEBVH_UPDATE_DID_UNRESOLVED",
+      "Cannot determine DID from update result",
+    );
   }
 
   return {

@@ -15,6 +15,129 @@ export type AssetAlias =
       methodBinding: "unverified";
     }
   | { layer: "btco"; did: string; network: BitcoinNetwork; sat: string };
+
+/**
+ * Canonically percent-encode a decoded WebVH path segment for the HTTPS log
+ * path spelling: `encodeURIComponent`, then force-escape the sub-delims
+ * `encodeURIComponent` itself leaves literal (`!'()*`). RFC 3986 leaves the
+ * unreserved `~` untouched, so this spelling does too. Module-private: the
+ * DID spelling below is the only one authoring code needs.
+ */
+function encodeWebVHHttpPathSegment(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  );
+}
+
+/**
+ * Canonically percent-encode a decoded WebVH path segment for the DID
+ * method-specific-id spelling: the HTTPS spelling above, except DID Core's
+ * `idchar` excludes a literal `~`, so it must read back as `%7E`. Authoring
+ * code (e.g. `WebVHManager.createDIDWebVH`) uses this so a caller-supplied
+ * DECODED path segment survives a canonical did:webvh round-trip instead of
+ * failing {@link parseAssetAlias}'s allow-list on first publish. Input is
+ * always the decoded segment: a pre-encoded `hello%21world` is encoded again
+ * (`hello%2521world`).
+ */
+export function encodeWebVHPathSegment(value: string): string {
+  return encodeWebVHHttpPathSegment(value).replace(/~/g, "%7E");
+}
+
+/** A decoded WebVH path segment `parseAssetAlias` reads back: non-empty, not `.`/`..`, no `/`, `\`, NUL, no edge whitespace, well-formed UTF-16. */
+export function isWebVHPathSegment(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value === "." ||
+    value === ".." ||
+    /[/\\\0]/.test(value) ||
+    value.trim() !== value
+  )
+    return false;
+  try {
+    encodeURIComponent(value); // throws on a lone surrogate
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Authoring only: validate decoded `paths`, reserve a leading `.well-known` (case-insensitive), return DID-spelling segments. */
+export function canonicalWebVHPaths(
+  paths: unknown,
+):
+  | { ok: true; segments: string[] }
+  | { ok: false; reason: "invalid"; index?: number }
+  | { ok: false; reason: "reserved" } {
+  if (!Array.isArray(paths)) return { ok: false, reason: "invalid" };
+  // Array.from turns holes into undefined; Array#every would skip them.
+  const segments: unknown[] = Array.from(paths);
+  const index = segments.findIndex((segment) => !isWebVHPathSegment(segment));
+  if (index !== -1) return { ok: false, reason: "invalid", index };
+  const valid = segments as string[];
+  // [".well-known"] would host its log where the no-path DID's lives.
+  if (valid[0]?.toLowerCase() === ".well-known")
+    return { ok: false, reason: "reserved" };
+  return { ok: true, segments: valid.map(encodeWebVHPathSegment) };
+}
+
+/** Host checks shared by `parseAssetAlias` and `canonicalizeWebVHDomain`; `code` names the failing seam. */
+function assertWebVHDnsHost(host: string, code: string, allowPunycode = false): void {
+  // Unicode IDNA2008 method validation needs its own implementation, not WHATWG's UTS-46 substitute.
+  if (
+    [...host].some((c) => c.charCodeAt(0) > 127) ||
+    (!allowPunycode && /(^|\.)xn--/i.test(host))
+  )
+    throw new CelError(
+      "unsupported",
+      "CEL_WEBVH_IDNA",
+      "WebVH IDNA2008 validation is not available in this core",
+    );
+  requireThat(
+    host.length <= 253 &&
+      host.includes(".") &&
+      host
+        .split(".")
+        .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)),
+    code,
+    "Expected canonical fully qualified DNS name",
+  );
+  let parsed: URL;
+  try {
+    parsed = new URL("https://" + host);
+  } catch {
+    throw new CelError("invalid", code, "Invalid WebVH DNS host");
+  }
+  // URL equality also rejects WHATWG IPv4 shorthands such as `1.2.3`.
+  requireThat(
+    parsed.hostname === host && !/^\d+\.\d+\.\d+\.\d+$/.test(host),
+    code,
+    "WebVH requires DNS, not an IP address",
+  );
+}
+
+/** Trim, lowercase and validate an authoring-input WebVH host[:port]; returns the WHATWG `URL#host` spelling (default :443 dropped, port leading zeros removed).
+ * `identity` admits `localhost` and punycode hosts: identity DIDs never pass `parseAssetAlias`'s IDNA limit. */
+export function canonicalizeWebVHDomain(
+  domain: string,
+  options: { identity?: boolean } = {},
+): string {
+  // ASCII-only lowercase: String#toLowerCase folds U+212A KELVIN SIGN into "k".
+  const lowered = String(domain).trim().replace(/[A-Z]+/g, (s) => s.toLowerCase());
+  const match = /^([^:]*)(?::(\d+))?$/.exec(lowered);
+  const port = match?.[2] === undefined ? 443 : +match[2];
+  requireThat(
+    match && port >= 1 && port <= 65535,
+    "INVALID_DOMAIN",
+    `Invalid WebVH domain: ${JSON.stringify(domain)} is not host[:port] with a port of 1-65535`,
+  );
+  const host = match[1];
+  if (!(options.identity && host === "localhost"))
+    assertWebVHDnsHost(host, "INVALID_DOMAIN", options.identity);
+  return port === 443 ? host : `${host}:${port}`;
+}
+
 /** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
  * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
  * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
@@ -84,45 +207,16 @@ export function parseAssetAlias(did: unknown): AssetAlias {
   } catch {
     throw new CelError("invalid", "CEL_DID", "Invalid WebVH domain encoding");
   }
-  // Unicode IDNA2008 method validation needs its own implementation, not WHATWG's UTS-46 substitute.
-  if (
-    [...decoded].some((c) => c.charCodeAt(0) > 127) ||
-    /(^|\.)xn--/i.test(decoded)
-  )
-    throw new CelError(
-      "unsupported",
-      "CEL_WEBVH_IDNA",
-      "WebVH IDNA2008 validation is not available in this core",
-    );
-  const match = /^([^:]+)(?::([1-9]\d{0,4}))?$/.exec(decoded);
+  const [host, ...port] = decoded.split(":");
+  assertWebVHDnsHost(host, "CEL_DID");
   requireThat(
-    match && (!match[2] || +match[2] <= 65535),
+    port.length === 0 ||
+      (port.length === 1 && /^[1-9]\d{0,4}$/.test(port[0]) && +port[0] <= 65535),
     "CEL_DID",
     "Invalid WebVH port",
   );
-  const host = match[1];
   requireThat(
-    host.length <= 253 &&
-      host.includes(".") &&
-      host
-        .split(".")
-        .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)),
-    "CEL_DID",
-    "Expected canonical fully qualified DNS name",
-  );
-  let parsed: URL;
-  try {
-    parsed = new URL("https://" + decoded);
-  } catch {
-    throw new CelError("invalid", "CEL_DID", "Invalid WebVH DNS host");
-  }
-  requireThat(
-    parsed.hostname === host && !/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname),
-    "CEL_DID",
-    "WebVH requires DNS, not an IP address",
-  );
-  requireThat(
-    domain === host + (match[2] ? "%3A" + match[2] : ""),
+    domain === host + (port.length ? "%3A" + port[0] : ""),
     "CEL_DID",
     "Noncanonical WebVH domain spelling",
   );
@@ -143,21 +237,12 @@ export function parseAssetAlias(did: unknown): AssetAlias {
       throw new CelError("invalid", "CEL_DID", "Invalid WebVH path encoding");
     }
     requireThat(
-      value &&
-        value !== "." &&
-        value !== ".." &&
-        !value.includes("/") &&
-        !value.includes("\\") &&
-        !value.includes("\0") &&
-        value.trim() === value,
+      isWebVHPathSegment(value),
       "CEL_DID",
       "Invalid decoded WebVH path",
     );
-    const httpEncoded = encodeURIComponent(value).replace(
-      /[!'()*]/g,
-      (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
-    );
-    const didEncoded = httpEncoded.replace(/~/g, "%7E");
+    const httpEncoded = encodeWebVHHttpPathSegment(value);
+    const didEncoded = encodeWebVHPathSegment(value);
     requireThat(
       didEncoded === segment,
       "CEL_DID",

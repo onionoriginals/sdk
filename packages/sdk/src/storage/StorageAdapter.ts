@@ -55,18 +55,22 @@ export interface LocalStorageAdapterOptions {
    * default multi-tenant behavior appends `${domain}` under `baseUrl`, which
    * duplicates the domain when `baseUrl` already points at that domain's own
    * origin). Every `putObject`/`getObject`/`exists`/`listObjects` call must
-   * then use this exact domain, or the call throws `STORAGE_DOMAIN_MISMATCH`
+   * then use this configured domain or its canonical URL host spelling, or
+   * the call throws `STORAGE_DOMAIN_MISMATCH`
    * rather than silently mapping a different domain's files onto this
    * adapter's one advertised origin. Files are also stored directly under
    * `baseDir` with no per-domain subdirectory (unlike the default
    * multi-tenant layout), so the physical layout matches the URL: pointing
    * any static file server's document root at `baseDir` serves exactly the
-   * paths this adapter advertises. If `baseUrl` is supplied alongside
-   * `originDomain`, the constructor validates it is exactly
-   * `https://${originDomain}` (no port, path, query or fragment) and throws
-   * `STORAGE_INVALID_ORIGIN` immediately otherwise, since hosted publication
-   * can never accept a `putObject()` URL built from anything else.
+   * paths this adapter advertises. `originDomain` must be a bare host with an
+   * optional port (e.g. `localhost:3000`). If `baseUrl` is supplied, it must
+   * match that HTTPS origin, optionally ending in `/`, with no credentials,
+   * path, query or fragment. Invalid configuration throws
+   * `STORAGE_INVALID_ORIGIN` in the constructor, including when `baseUrl` is
+   * omitted. Returned URLs use the canonical origin: HTTPS port 443 is omitted,
+   * other ports are preserved, and host case/port leading zeros are normalized.
+   * The configured domain and canonical host both route to the same baseDir;
+   * other domains or ports still throw `STORAGE_DOMAIN_MISMATCH`.
    */
   originDomain?: string;
 }
-
