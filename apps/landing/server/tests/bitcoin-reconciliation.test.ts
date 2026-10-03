@@ -150,6 +150,55 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.revealTxHex).toBeUndefined(); // retiring drops the hex
   });
 
+  // #777 — `settled` must track `retired` alone, matching the resubmission
+  // path's `settled: rec.retired === true`, not the raw confirmations depth.
+  // `reconcileRecords` spends a shared per-poll lookup budget rotated across
+  // categories, so a `confirmed` record whose on-disk `confirmations` already
+  // meets the recovery threshold can have its own `retire()` turn deferred
+  // to a later poll — no reorg or `supersede()` required to reach that state.
+  test('settled tracks retired, not the raw confirmations depth: a confirmed record the shared lookup budget has not reached this poll is not reported settled', async () => {
+    const target = 'e'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+      recoveryConfirmations: 6,
+      now: () => Date.parse('2026-08-01T00:00:30.000Z'),
+    });
+    // Four `commit_broadcast` decoys exhaust the shared per-poll lookup
+    // budget's `stuck` share before the `confirm` category is reached.
+    for (let i = 0; i < 4; i++) {
+      const id = `s${i}`.padEnd(64, '0');
+      store.create('sub-1', rec({
+        commitTxId: id, status: 'commit_broadcast',
+        createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z',
+      }));
+    }
+    // Target: already confirmed at/above the recovery threshold, but never
+    // retired — plausible leftover state, no reorg/supersede needed.
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed', createdAt: '2026-08-01T00:00:10.000Z' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 10, blockHeight: 100, blockHash: 'f'.repeat(64) });
+    // A newer `reveal_broadcast` record consumes the single reserved
+    // `confirm`-category lookup this poll, so `target`'s own turn is never
+    // reached.
+    const decoy = 'd'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: decoy, status: 'reveal_broadcast', createdAt: '2026-08-01T00:00:20.000Z' }));
+
+    const res = await reconciler.reconcileUser('sub-1');
+    const { inscriptions } = (await res.json()) as {
+      inscriptions: Array<{ commitTxId: string; settled?: boolean }>;
+    };
+    const targetEntry = inscriptions.find((r) => r.commitTxId === target)!;
+    expect(targetEntry.settled).toBe(false);
+    expect(store.get('sub-1', target)!.retired).toBeUndefined();
+    expect(store.get('sub-1', target)!.revealTxHex).toBeDefined();
+
+    // Once `retire()` actually runs for this record, `settled` agrees —
+    // matching `bitcoin.ts`'s resubmission path for the exact same record.
+    store.retire('sub-1', target);
+    const after = await reconciler.reconcileUser('sub-1');
+    const afterBody = (await after.json()) as { inscriptions: Array<{ commitTxId: string; settled?: boolean }> };
+    expect(afterBody.inscriptions.find((r) => r.commitTxId === target)!.settled).toBe(true);
+  });
+
   test('a superseded pair whose commit confirmed is reinstated and its rival retired', async () => {
     const winner = '4'.repeat(64);
     const rival = '5'.repeat(64);
@@ -320,6 +369,99 @@ describe('createInscriptionReconciler: status transitions', () => {
     expect(stored.retired).toBe(true);
     expect(stored.status).toBe('signed');
     expect(stored.revealTxHex).toBeUndefined();
+  });
+
+  // #777 — the `supersededPending` pass only ever handled POSITIVE evidence
+  // on a superseded record's own commit (reclaim once it confirms); a
+  // negative read was a silent no-op (`if (!st?.confirmed) continue`), so a
+  // record that reached `status: 'confirmed'` and was later superseded by a
+  // rival kept reporting `confirmed`/`settled: true` forever, even after its
+  // own commit stopped confirming (a deeper reorg than the one that
+  // superseded it). These regressions pin the negative-evidence demotion
+  // that closes that gap, mirroring the #677 guard already covering
+  // `liveUnconfirmed` below, but keeping `superseded: true` since this pair
+  // already lost the outpoint race.
+
+  test("a superseded pair's stale confirmed status is demoted once its own commit stops confirming", async () => {
+    const target = '6'.repeat(64);
+    const { store, reconciler } = harness({
+      txStatus: () => ({ confirmed: false }),
+    });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 3, blockHeight: 100, blockHash: 'a'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const { inscriptions } = await listOf(reconciler, 'sub-1');
+    const entry = inscriptions.find((r) => r.commitTxId === target)!;
+    expect(entry.status).toBe('reveal_broadcast');
+    expect(entry.superseded).toBe(true);
+    const stored = store.get('sub-1', target)!;
+    expect(stored.confirmations).toBeUndefined(); // cleared on the demotion
+    // Block identity stays sticky so a later reconfirmation can still be
+    // compared against it.
+    expect(stored.confirmedBlockHeight).toBe(100);
+    expect(stored.confirmedBlockHash).toBe('a'.repeat(64));
+  });
+
+  test("a provider outage while checking a superseded confirmed pair's commit preserves its last observed state", async () => {
+    const target = '7'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 4, blockHeight: 50, blockHash: 'b'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: { getTransactionStatus: async () => { throw new Error('provider down'); } },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', target)!;
+    expect(stored.status).toBe('confirmed'); // not demoted on a mere outage
+    expect(stored.confirmations).toBe(4);
+    expect(stored.superseded).toBe(true);
+  });
+
+  test("a concurrent reconfirmation landing during the status lookup is not clobbered by this pass's own stale negative read", async () => {
+    const target = '8'.repeat(64);
+    const store = createInscriptionsStore({ dataDir: mkdtempSync(join(tmpdir(), 'recon-')) });
+    store.create('sub-1', rec({ commitTxId: target, status: 'signed' }));
+    store.setStatus('sub-1', target, 'confirmed', { confirmations: 2, blockHeight: 10, blockHash: 'c'.repeat(64) });
+    store.supersede('sub-1', target);
+
+    const reconciler = createInscriptionReconciler({
+      store,
+      provider: {
+        getTransactionStatus: async () => {
+          // A concurrent pass (an overlapping poll, or the background sweep)
+          // writes fresher confirmation evidence while THIS pass's own
+          // status lookup for the same commit is still in flight.
+          store.setStatus('sub-1', target, 'confirmed', {
+            confirmations: 5, blockHeight: 20, blockHash: 'd'.repeat(64),
+          });
+          return { confirmed: false };
+        },
+      },
+      broadcastIdempotent: async () => null,
+      unreadableRecords: () => null,
+      money: silentMoney,
+      now: () => 0,
+    });
+
+    await reconciler.reconcileUser('sub-1');
+
+    const stored = store.get('sub-1', target)!;
+    // The concurrent pass's fresher confirmation must stand: this pass's own
+    // negative read, taken before that write landed, must not demote it.
+    expect(stored.status).toBe('confirmed');
+    expect(stored.confirmations).toBe(5);
+    expect(stored.confirmedBlockHeight).toBe(20);
+    expect(stored.superseded).toBe(true);
   });
 
   // #677 — the demotion decision must read a FRESH per-record snapshot, not
