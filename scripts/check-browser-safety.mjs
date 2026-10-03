@@ -25,6 +25,9 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/sdk/dist', entry: 'lifecycle/LifecycleManager.js' },
   { dist: 'packages/sdk/dist', entry: 'lifecycle/OriginalsAsset.js' },
   { dist: 'packages/sdk/dist', entry: 'cel/index.js' },
+  { dist: 'packages/sdk/dist', entry: 'v3/index.js' },
+  { dist: 'packages/sdk/dist', entry: 'testing/index.js' },
+  { dist: 'packages/sdk/dist', entry: 'types/public.js' },
   { dist: 'packages/sdk/dist', entry: 'asset-envelope.js', browserFirst: true },
   { dist: 'packages/cel/dist', entry: 'index.js', browserFirst: true },
   // @originals/auth's root is types + the isomorphic turnkeySignBytes, and its
