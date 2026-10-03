@@ -1441,4 +1441,32 @@ describe('concurrent inscription list responses', () => {
     expect(winner.signedCommitHex).toBe('02aa');
     expect(winner.revealTxHex).toBe('02bb');
   });
+
+  test('a confirmation won during an earlier record lookup is returned even when this pass needs no writes', async () => {
+    const { store } = harness();
+    const target = 'a'.repeat(64);
+    const earlier = 'b'.repeat(64);
+    store.create('sub-1', rec({ commitTxId: target, status: 'reveal_broadcast' }));
+    store.create('sub-1', rec({ commitTxId: earlier, status: 'confirmed', confirmations: 1 }));
+    let releaseEarlier!: (status: { confirmed: boolean; confirmations: number }) => void;
+    const status = { confirmed: true, confirmations: 1 };
+    const makeReconciler = (provider: ReconciliationProvider) => createInscriptionReconciler({
+      store, provider,
+      broadcastIdempotent: async () => { throw new Error('Confirmed pairs must not rebroadcast'); },
+      unreadableRecords: () => null, money: silentMoney,
+    });
+    const paused = makeReconciler({ getTransactionStatus: txid => txid === rec({ commitTxId: earlier }).revealTxId
+      ? new Promise(resolve => { releaseEarlier = resolve; }) : Promise.resolve(status) });
+    const winner = makeReconciler({ getTransactionStatus: async () => status });
+    const pending = paused.reconcileUser('sub-1');
+    expect(releaseEarlier).toBeFunction();
+    expect((await winner.reconcileUser('sub-1')).status).toBe(200);
+    expect(store.get('sub-1', target)!.status).toBe('confirmed');
+    releaseEarlier(status);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    const row = (await response.json()).inscriptions.find((record: { commitTxId: string }) => record.commitTxId === target);
+    expect(row).toMatchObject({ commitTxId: target, status: 'confirmed', confirmations: 1, settled: false });
+  });
+
 });
