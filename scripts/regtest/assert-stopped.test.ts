@@ -1,33 +1,32 @@
+import { fileURLToPath } from 'node:url';
 import { test, expect } from 'bun:test';
-import { assertEndpointStopped } from './assert-stopped';
 
-test('a listener that never responds cannot count as a stopped endpoint', async () => {
-  const server = Bun.serve({
-    hostname: '127.0.0.1', port: 0,
-    fetch: () => new Promise<Response>(() => {}),
-  });
-  const endpoint = server.url.origin;
-  try {
-    await expect(assertEndpointStopped(endpoint, 50)).rejects.toBeInstanceOf(DOMException);
-  } finally { server.stop(true); }
-  await expect(assertEndpointStopped(endpoint)).resolves.toBeUndefined();
-});
+// The root test preload mocks fetch before each test. Exercise the production
+// helper in a plain Bun process, where [test] preloads do not apply, without
+// restoring global mocks that other SDK tests depend on.
+const fixture = new URL('./assert-stopped.fixture.ts', import.meta.url);
 
-test('an HTTP response also fails the stopped-endpoint check', async () => {
-  const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch:() => new Response('alive')});
-  try {
-    await expect(assertEndpointStopped(server.url.origin)).rejects.toThrow('still accepts connections');
-  } finally { server.stop(true); }
-});
-
-
-test('a redirect to a closed port cannot hide a live original endpoint', async () => {
-  const target = Bun.serve({hostname:'127.0.0.1',port:0,fetch:() => new Response('target')});
-  const location = target.url.origin;
-  const server = Bun.serve({hostname:'127.0.0.1',port:0,
-    fetch:() => new Response(null, {status:302,headers:{location}})});
-  target.stop(true);
-  try {
-    await expect(assertEndpointStopped(server.url.origin)).rejects.toThrow('still accepts connections');
-  } finally { server.stop(true); }
-});
+for (const scenario of [
+  'a listener that never responds cannot count as a stopped endpoint',
+  'an HTTP response also fails the stopped-endpoint check',
+  'a redirect to a closed port cannot hide a live original endpoint',
+]) {
+  test(scenario, async () => {
+    const child = Bun.spawn([process.execPath, fileURLToPath(fixture), scenario], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const timeout = setTimeout(() => child.kill(), 5_000);
+    try {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ exitCode, stdout, stderr }).toEqual({ exitCode: 0, stdout: '', stderr: '' });
+    } finally {
+      clearTimeout(timeout);
+      child.kill();
+    }
+  }, 10_000);
+}
