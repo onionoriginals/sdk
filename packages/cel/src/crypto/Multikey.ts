@@ -20,6 +20,18 @@ export const LEGACY_SECP256K1_PRIV_HEADER = new Uint8Array([0x13, 0x01]);
 
 export type MultikeyType = 'Ed25519' | 'Secp256k1' | 'Bls12381G2' | 'P256';
 
+function assertSupportedKeyType(type: unknown): asserts type is MultikeyType {
+  switch (type) {
+    case 'Ed25519':
+    case 'Secp256k1':
+    case 'Bls12381G2':
+    case 'P256':
+      return;
+    default:
+      throw new Error('Unsupported key type');
+  }
+}
+
 // Expected raw key lengths per type. Decode paths enforce these so a
 // wrong-length body cannot decode "successfully" and be re-encoded into a
 // well-formed-looking but wrong multikey (e.g. during migrateToDIDBTCO key
@@ -60,6 +72,8 @@ export function validateMultikeyFormat(
   expectedType: MultikeyType,
   isPrivate: boolean
 ): void {
+  assertSupportedKeyType(expectedType);
+
   // Validate multibase prefix
   if (!key || typeof key !== 'string') {
     throw new Error('Invalid multibase key format. Key must be a non-empty string.');
@@ -135,6 +149,7 @@ export function validateMultikeyFormat(
 
 export const multikey = {
   encodePublicKey: (publicKey: Uint8Array, type: MultikeyType): string => {
+    assertSupportedKeyType(type);
     const header =
       type === 'Ed25519'
         ? MULTICODEC_ED25519_PUB_HEADER
@@ -148,6 +163,7 @@ export const multikey = {
   },
 
   encodePrivateKey: (privateKey: Uint8Array, type: MultikeyType): string => {
+    assertSupportedKeyType(type);
     const header =
       type === 'Ed25519'
         ? MULTICODEC_ED25519_PRIV_HEADER
@@ -246,4 +262,3 @@ export const multikey = {
     throw new Error('Unsupported key type');
   }
 };
-
