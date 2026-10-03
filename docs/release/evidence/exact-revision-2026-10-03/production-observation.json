@@ -1,0 +1,49 @@
+{
+  "observedAt": "2026-10-03T18:57:20.287Z",
+  "original": {
+    "assetId": "ni:///sha-256;rfjz7elkFe6RL70fn7trULM1X220MvLiGqnBOWl9kz8",
+    "celUrl": "/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json",
+    "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+    "createdAt": "2026-09-06T21:56:26.241Z",
+    "did": "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+    "logUrl": "/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl",
+    "resourceContentType": "image/png",
+    "resourceCount": 2,
+    "resourceHash": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33",
+    "resourceUrl": "/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+    "sat": "321959825743820",
+    "title": "Originals 3.0.0 Release Proof"
+  },
+  "page": "https://originals.build/explore/did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+  "pageText": "Originals\nExplore\nWhy Originals\nTry it\nProtocol\nDevelopers\nGitHub\nSign in\nStart\n← All Originals\n\nCREATED · SEP 6, 2026\n\nOriginals 3.0.0 Release Proof\n\n2 files · image/png\n\n✓\nHosted history and primary file verified\n\nThese checks verify the hosted signatures and primary file in your browser. Any linked Bitcoin publication is checked against fresh public Bitcoin data.\n\nOpen the original file ↗\n\nSIGNED HISTORY\n\nInspect the signed artifacts\nController key\ndid:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui\nOriginal identity\nni:///sha-256;rfjz7elkFe6RL70fn7trULM1X220MvLiGqnBOWl9kz8\nPublished identity\ndid:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw\nBitcoin inscription\nsat 321959825743820\n\n1 accepted on-chain publication verified (provider-asserted) → sat 321959825743820\n\nWebVH version history\ndid.jsonl ↗\nCryptographic event log\ncel.json ↗\nOriginals\n\nProvenance that survives the internet.\n\nMIT licensed. Built by Aviary Tech.\n\nProject\nExplore Originals\nGitHub\nnpm — @originals/sdk\nProtocol specification\nStandards\nW3C DID Core\nVerifiable Credentials\ndid:webvh method\nLegal\nPrivacy\nTerms\n© 2026 Aviary Tech · MIT License\nlocal CEL → did:webvh → did:btco",
+  "resourceBytes": 3857,
+  "resourceSha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33",
+  "scripts": [
+    "https://originals.build/assets/index-CCJYqKx5.js"
+  ],
+  "snapshotKeys": [
+    "network",
+    "sat",
+    "tipBefore",
+    "tipAfter",
+    "indexTip",
+    "indexHealthy",
+    "enumerationComplete",
+    "blocks",
+    "publications",
+    "ownership"
+  ],
+  "storage": {
+    "caches": [],
+    "indexedDB": [],
+    "local": [],
+    "serviceWorkers": [],
+    "session": []
+  },
+  "limitations": [
+    "New agent-owned T3 tab; empty origin storage observed, but a newly created browser profile was not established.",
+    "GitHub deployment record identifies revision; running server does not expose a revision attestation.",
+    "T3 screenshot/snapshot capture failed twice; DOM text and public responses captured via browser evaluation.",
+    "Public provider assertion is not independent consensus/Ordinals assurance. No new signing, funding, publication, broadcast or asset movement."
+  ]
+}

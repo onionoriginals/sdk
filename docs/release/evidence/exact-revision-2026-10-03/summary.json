@@ -1,0 +1,346 @@
+{
+  "issue": "https://github.com/onionoriginals/sdk/issues/569",
+  "testedSha": "68f9d599db867356502effb9da9d2b5d745c96e1",
+  "initialSha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+  "verdict": "PASS",
+  "localExecution": "PASS",
+  "reason": "Fresh corrected-SHA gate passes; initial response race fixed and independently reviewed; historical owner/deployment requirements reconciled explicitly. Clean-profile mainnet acceptance, corrected deployment and packed next-major publication remain separate gates, not #569 prerequisites.",
+  "runDate": "2026-10-03",
+  "versions": {
+    "os": "macOS 15.3.1 arm64",
+    "bun": "1.3.5",
+    "node": "24.21.0",
+    "core": "31.1.0",
+    "ord": "0.29.0",
+    "chromium": "154.0.8037.95",
+    "playwright-core": "1.61.1",
+    "sdk": "3.0.0",
+    "cel": "1.0.0",
+    "auth": "3.0.0",
+    "landing": "0.2.0"
+  },
+  "packageVersionNote": "Manifest versions precede the pending SDK4/CEL2/auth4 version train; wire profile originals/cel/3.",
+  "commands": [
+    {
+      "name": "test",
+      "command": [
+        "bun",
+        "run",
+        "test"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:05:17.144535+00:00",
+      "endedAt": "2026-10-03T19:07:25.517880+00:00"
+    },
+    {
+      "name": "lint",
+      "command": [
+        "bun",
+        "run",
+        "lint"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:25.518486+00:00",
+      "endedAt": "2026-10-03T19:07:35.687958+00:00"
+    },
+    {
+      "name": "types",
+      "command": [
+        "bun",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:35.688239+00:00",
+      "endedAt": "2026-10-03T19:07:36.737027+00:00"
+    },
+    {
+      "name": "public-types",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/sdk",
+        "typecheck:public"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:36.737264+00:00",
+      "endedAt": "2026-10-03T19:07:36.999925+00:00"
+    },
+    {
+      "name": "auth-public-types",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "packages/auth",
+        "typecheck:public"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:37.000163+00:00",
+      "endedAt": "2026-10-03T19:07:37.819523+00:00"
+    },
+    {
+      "name": "esm",
+      "command": [
+        "bun",
+        "run",
+        "verify:esm"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:37.819779+00:00",
+      "endedAt": "2026-10-03T19:07:38.325970+00:00"
+    },
+    {
+      "name": "browser-safety",
+      "command": [
+        "bun",
+        "run",
+        "verify:browser"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:38.326194+00:00",
+      "endedAt": "2026-10-03T19:07:38.951479+00:00"
+    },
+    {
+      "name": "landing-types",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "apps/landing",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:38.951703+00:00",
+      "endedAt": "2026-10-03T19:07:39.353271+00:00"
+    },
+    {
+      "name": "server-types",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "apps/landing",
+        "typecheck:server"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:39.353506+00:00",
+      "endedAt": "2026-10-03T19:07:39.604616+00:00"
+    },
+    {
+      "name": "landing-build",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "apps/landing",
+        "build"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:39.604847+00:00",
+      "endedAt": "2026-10-03T19:07:40.115879+00:00"
+    },
+    {
+      "name": "landing-tests",
+      "command": [
+        "bun",
+        "run",
+        "--cwd",
+        "apps/landing",
+        "test"
+      ],
+      "exitCode": 0,
+      "startedAt": "2026-10-03T19:07:40.116125+00:00",
+      "endedAt": "2026-10-03T19:08:50.093953+00:00"
+    }
+  ],
+  "otherCommands": [
+    {
+      "command": "bun install --frozen-lockfile",
+      "exitCode": 0,
+      "sha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+      "note": "729 packages; dependency manifests unchanged at corrected SHA"
+    },
+    {
+      "command": "REGTEST_TOOLS_DIR=<scratch>/tools bun run regtest:install",
+      "exitCode": 0,
+      "note": "Pinned archives verified by repository installer; no public Bitcoin network"
+    },
+    {
+      "command": "BITCOIND_BIN=<scratch>/tools/bitcoin-31.1/bin/bitcoind ORD_BIN=<scratch>/tools/ord-0.29.0/ord REGTEST_RECEIPT=<scratch>/final/regtest.json REGTEST_LOGS_DIR=<scratch>/final/regtest-logs TMPDIR=<scratch> bun run regtest",
+      "exitCode": 0,
+      "note": "Direct package tsc builds, Node RPC authentication test and regtest typecheck precede five scenarios"
+    },
+    {
+      "command": "BITCOIND_BIN=<scratch>/tools/bitcoin-31.1/bin/bitcoind ORD_BIN=<scratch>/tools/ord-0.29.0/ord REGTEST_BROWSER_ARTIFACTS_DIR=<scratch>/final/browser TMPDIR=<scratch> bun apps/landing/scripts/regtest-browser.ts",
+      "exitCode": 0,
+      "note": "Invoked existing browser child entry after successful package/harness builds; two real Chromium scenarios"
+    },
+    {
+      "command": "env -u QUICKNODE_ENDPOINT -u DRY_RUN_WIF BTC_NETWORK=mainnet DRY_RUN_PAYLOAD=<scratch>/input.png DRY_RUN_JSON=<scratch>/final/dry-run.json TMPDIR=<scratch> bun apps/landing/scripts/dry-run-inscription.ts",
+      "exitCode": 0,
+      "note": "Mock funding; existing local fixture signer; broadcast provider refuses by construction"
+    }
+  ],
+  "counts": {
+    "packageTests": {
+      "pass": 5521,
+      "skip": 250,
+      "fail": 0,
+      "assertions": 57897,
+      "scope": "Mixed current and retained previous-format tests; not 5521 CEL3 publication tests"
+    },
+    "landingTests": {
+      "pass": 1287,
+      "fail": 0,
+      "assertions": 6634,
+      "files": 105
+    },
+    "regtestCreator": {
+      "scenarios": 3,
+      "checksPerScenario": 28
+    },
+    "noAddressIndexChecks": 12,
+    "restartChecks": 14,
+    "chromiumScenarios": 2,
+    "dryRunChecks": 24,
+    "lintWarnings": 274,
+    "nodeEsmEntries": 26
+  },
+  "dryRun": {
+    "payloadBytes": 68,
+    "payloadSha256": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+    "commitTxid": "aa3f4f48f387d131c088f675896e9f5312459d6a8e6376d0317f9f5f85e12e08",
+    "revealTxid": "694b24cb47ccdf9ac48ec33f749eeb1180d02560d6033f9c895f185a59ce3331",
+    "commitBytesSha256": "40a6279a1f32f78a93e5a49bbb20e3edbfe75bc28db580cb7ee22434353c0458",
+    "revealBytesSha256": "2771ae14024f7cac88a7ff8de8bc9f1b71a95cc60fb0f2ca0de15a71ba25f6d4",
+    "checks": 24,
+    "broadcastRouteCalls": 0,
+    "refusedProviderAttempts": [
+      "broadcastTransaction"
+    ],
+    "mode": "mock",
+    "chainAcceptanceExercised": false
+  },
+  "initialFailure": {
+    "sha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+    "fault": "commit-response-lost",
+    "persistedStatus": "confirmed",
+    "confirmations": 1,
+    "ui": "inscription pending",
+    "failure": "Timed out waiting for inscribed \u2713",
+    "receipt": "initial-3162ff5d/failure.json"
+  },
+  "intermediateCorrection": {
+    "sha": "92373bbfa8653030b7cea83940272252cefc033e",
+    "status": "superseded",
+    "note": "Losing-CAS fix passed both Chromium scenarios but earlier-record-await regression failed; not final gate target"
+  },
+  "deployment": {
+    "source": "coordinator read-only GitHub observation",
+    "id": 6831485355,
+    "environment": "Onion / Originals / production",
+    "sha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+    "successAt": "2026-10-03T18:34:32Z",
+    "api": "https://api.github.com/repos/onionoriginals/sdk/deployments/6831485355/statuses",
+    "runtimeAttested": false,
+    "correctedTargetDeployed": false
+  },
+  "baseRevisionCi": [
+    {
+      "name": "CI",
+      "headSha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+      "conclusion": "success",
+      "url": "https://github.com/onionoriginals/sdk/actions/runs/37144633983"
+    },
+    {
+      "name": "CI",
+      "headSha": "3162ff5d396385f52f9771d04417f0afc31606b5",
+      "conclusion": "success",
+      "url": "https://github.com/onionoriginals/sdk/actions/runs/37144734277"
+    }
+  ],
+  "correctedRevisionCi": "Pending at recording; results will be recorded on the PR.",
+  "fullLogDigests": {
+    "types.log": {
+      "sha256": "67cc487231f76864690a24f9ffd3b199902ed5f18491aa759518dbbb36355edd",
+      "bytes": 745,
+      "retainedInGit": false
+    },
+    "browser.log": {
+      "sha256": "1811c20eaba08659c4269977edd01d4bdbdf64472fabc638f363d316f5d25c0e",
+      "bytes": 21202,
+      "retainedInGit": false
+    },
+    "dry-run.log": {
+      "sha256": "892425140737eef5a958a5022414ac1c8d659ca25d7632da99a3b197686bdd87",
+      "bytes": 16049,
+      "retainedInGit": false
+    },
+    "auth-public-types.log": {
+      "sha256": "aa1fb9c28f42415c9abbbb463bc4d4a0397679f7560ef6ed1bc00b76cae5fd0b",
+      "bytes": 121,
+      "retainedInGit": false
+    },
+    "lint.log": {
+      "sha256": "8703b8181c8ac406275851422300461ac3f933e59c715095acd1a2b437442159",
+      "bytes": 48467,
+      "retainedInGit": false
+    },
+    "landing-tests.log": {
+      "sha256": "ffcdd2ff679460700f9cf0fd810a45f8002ea2263cfd6cce79406e22e94fb6d8",
+      "bytes": 154085,
+      "retainedInGit": false
+    },
+    "test.log": {
+      "sha256": "4d2c6a6c66a306f2cad98a05fbb526231715bbe16341771c04975867ec688940",
+      "bytes": 1230443,
+      "retainedInGit": false
+    },
+    "public-types.log": {
+      "sha256": "e9545129eacc4e3e719906cfd8796f68fe04b1aa8aecc6f807a2667c5e3c11d5",
+      "bytes": 115,
+      "retainedInGit": false
+    },
+    "server-types.log": {
+      "sha256": "b2f327a363ac2117e2d2dd2deb15c4faeef49c09c5bb46f62aeee4a0d65e7449",
+      "bytes": 39,
+      "retainedInGit": false
+    },
+    "landing-build.log": {
+      "sha256": "1b2207345b7095ed50568089bf16469c36f7a3db1fb7c96ef1955ea8a7f9436b",
+      "bytes": 8002,
+      "retainedInGit": false
+    },
+    "regtest.log": {
+      "sha256": "b4aab9079ffc19f3046297423fa082c2fd95e8254da4b2837891134fd954251b",
+      "bytes": 48893,
+      "retainedInGit": false
+    },
+    "landing-types.log": {
+      "sha256": "8366207267355d3e3d5bf3bf6e8c94c5f93f6078c34f08973fa2b38cdda6cc92",
+      "bytes": 15,
+      "retainedInGit": false
+    },
+    "browser-safety.log": {
+      "sha256": "15bc6321fcaa7d5804802b4dac041f4caef9df242e0ffacd4f4d2b3c115e788b",
+      "bytes": 2059,
+      "retainedInGit": false
+    },
+    "esm.log": {
+      "sha256": "687b749b61ed9d7ce157bd0591d69ecf769be68d9b153fbefc7cd0f48d7a9427",
+      "bytes": 189,
+      "retainedInGit": false
+    }
+  },
+  "limits": [
+    "Disposable local Bitcoin/CEL keys via Turnkey adapters, no live Turnkey service",
+    "No deployment/mainnet writes/spending/new inscription",
+    "Production observation is a new T3 tab with empty origin state, not a proven clean browser profile; screenshot unavailable",
+    "GitHub deployment metadata is not runtime byte/revision attestation",
+    "No newly packed or published SDK4/CEL2/auth4 artifact consumer test; manifest versions remain pre-bump",
+    "Full coverage deferred to PR CI; local lint passes with existing warnings; browser safety has Buffer advisories"
+  ],
+  "verdictScope": "#569 pre-broadcast exact-revision gate; subject to final independent artifact/PR review"
+}
