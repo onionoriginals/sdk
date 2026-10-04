@@ -1,52 +1,37 @@
-import { useMemo, useSyncExternalStore } from 'react';
 import { hero } from '../content';
-import { generateArtwork } from '../sdk/artwork';
-import { getArtSeed, subscribeArtSeed } from '../sdk/artwork-sync';
 import { IdentityPanel } from './IdentityPanel';
-import { Pipeline } from './Pipeline';
-import './hero.css';
+import { SplitMark } from './SplitMark';
 
 export function Hero() {
-  // The halo IS the demo's asset: same seed the demo will hash and inscribe,
-  // fresh per visit, live-updated as the visitor edits it in the demo.
-  const seed = useSyncExternalStore(subscribeArtSeed, getArtSeed);
-  const art = useMemo(
-    () => generateArtwork(seed.title, seed.style, seed.nonce, { transparent: true }),
-    [seed]
-  );
-
+  const copy = hero.imprint;
   return (
-    <section className="hero" id="top">
-      <div className="hero-glow" aria-hidden="true" />
-      <div className="hero-art" aria-hidden="true">
-        <img key={art.dataUri} src={art.dataUri} alt="" />
-      </div>
-      <div className="container">
-        <p className="hero-eyebrow">{hero.eyebrow}</p>
-        <h1 className="hero-headline">{hero.headline}</h1>
-        <p className="hero-subhead">{hero.subhead}</p>
-        <IdentityPanel />
-        <div className="hero-actions">
-          <a className="btn btn-primary" href={hero.primaryCta.href}>
-            {hero.primaryCta.label}
-            <svg viewBox="0 0 16 16" aria-hidden="true" width="14" height="14">
-              <path
-                d="M8 3v9m0 0 3.5-3.5M8 12 4.5 8.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </a>
-          <a className="hero-example-link" href={hero.exampleLink.href}>
-            {hero.exampleLink.label}
-          </a>
+    <section className="hero press-hero" id="top">
+      <div className="container press-grid">
+        <div className="press-copy">
+          <p className="press-kicker">{copy.eyebrow}</p>
+          <h1 className="hero-headline press-headline">
+            {copy.headline.map((line) => <span key={line}>{line}</span>)}
+          </h1>
+          <p className="press-promise">{copy.promise.map((line) => <span key={line}>{line}</span>)}</p>
+          <div className="press-actions">
+            <a className="btn btn-primary" href={hero.primaryCta.href}>
+              {hero.primaryCta.label}<span aria-hidden="true">↗</span>
+            </a>
+            <p>{copy.note}</p>
+          </div>
+          <IdentityPanel />
         </div>
-        <figure className="hero-visual card">
-          <Pipeline autoplay showNames={false} />
-          <figcaption>{hero.pipelineCaption}</figcaption>
+        <figure className="press-proof">
+          <div className="press-proof-inner">
+            <p className="press-proof-label">{copy.recordLabel}</p>
+            <SplitMark />
+            <figcaption>
+              <span>{copy.filename}</span>
+              <strong>{copy.recordTitle}</strong>
+              <span>{copy.illustrationNote}</span>
+            </figcaption>
+            <span className="press-stamp" aria-hidden="true">{copy.stamp}</span>
+          </div>
         </figure>
       </div>
     </section>

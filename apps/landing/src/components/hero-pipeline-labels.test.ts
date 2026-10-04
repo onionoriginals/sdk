@@ -1,18 +1,25 @@
 /**
- * The hero pipeline shows each layer's role, not its DID method name. A
+ * The landing introduction uses plain-language history labels, not DID names. A
  * first-time visitor should read "Private draft", not "did:cel", before the
  * page has explained either. The demo's pipeline keeps the names.
  */
 import { describe, test, expect } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ImprintHistory } from './ImprintHistory';
 
 async function read(file: string): Promise<string> {
   return Bun.file(new URL(`./${file}`, import.meta.url)).text();
 }
 
-describe('the hero pipeline hides the did:* names', () => {
-  test('Hero renders Pipeline with showNames off', async () => {
-    const hero = await read('Hero.tsx');
-    expect(hero).toMatch(/<Pipeline\b[^>]*\bshowNames=\{false\}/);
+describe('landing history and pipeline labels', () => {
+  test('the introduction shows plain-language events and identifies its illustrative history', () => {
+    const markup = renderToStaticMarkup(createElement(ImprintHistory));
+    for (const label of ['Created', 'Revised', 'Published']) {
+      expect(markup).toContain(`<h2>${label}</h2>`);
+    }
+    expect(markup).toContain('Illustrative history / no live transactions');
+    expect(markup).not.toMatch(/did:(cel|webvh|btco)/);
   });
 
   test('Pipeline only renders the name label when showNames is on', async () => {

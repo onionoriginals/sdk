@@ -123,6 +123,26 @@ export const identityPanel = {
 };
 
 export const hero = {
+  imprint: {
+    eyebrow: 'For those who make things.',
+    headline: ['MAKE IT.', 'ORIGINAL.'],
+    promise: ['Your work has a beginning.', 'Give it a history that follows.'],
+    note: 'Create privately. Publish when ready.',
+    recordLabel: 'Originals / Mark No. 001',
+    stamp: 'SIGNED ↗',
+    filename: 'STUDY-001.SVG',
+    recordTitle: 'Created. Signed. Connected.',
+    illustrationNote: 'Illustrative asset',
+    ribbon: 'FILE → HISTORY → ORIGINAL',
+    historyLabel: 'The record keeps going.',
+    historyNote: 'Illustrative history / no live transactions',
+    history: [
+      { title: 'Created', body: 'The first signed event.' },
+      { title: 'Revised', body: 'New bytes. Connected history.' },
+      { title: 'Published', body: 'A record others can inspect.' }
+    ],
+    closing: 'Make something worth remembering.'
+  },
   eyebrow: 'Signed history · Anchored on Bitcoin',
   headline: 'A signed provenance trail. Anchored on Bitcoin.',
   subhead:
