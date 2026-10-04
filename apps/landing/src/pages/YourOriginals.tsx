@@ -397,9 +397,11 @@ function AccountOriginals() {
   return (
     <main className="section your-originals">
       <div className="container">
-        <p className="eyebrow">{yourOriginals.navLabel}</p>
-        <h1>{yourOriginals.heading}</h1>
-        <p className="your-originals-sub">{yourOriginals.subhead}</p>
+        <header className="imprint-page-heading">
+          <p className="eyebrow">{yourOriginals.navLabel}</p>
+          <h1>{yourOriginals.heading}</h1>
+          <p className="your-originals-sub">{yourOriginals.subhead}</p>
+        </header>
 
         {view.mode === 'loading' && (
           <p className="your-originals-note your-originals-loading" role="status">

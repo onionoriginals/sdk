@@ -1,0 +1,105 @@
+/* Paper for working and reading; ink panels frame the actual assets.
+   Native controls and explicit verification/status labels remain intact. */
+.imprint-interior {
+  --bg: var(--paper); --bg-raised: #eee8d4; --bg-overlay: #e5dec7;
+  --text-primary: var(--ink); --text-secondary: #514d3e; --text-tertiary: #6b6350;
+  --border: #25241e30; --border-strong: #25241e66;
+  --accent: #ac301c; --accent-text: #ac301c; --accent-soft: #ed3e2310;
+  --ok: #326242; --cel: #725533; --cel-soft: #72553315;
+  --webvh: #425f54; --webvh-soft: #425f5415;
+  --btco: #ac301c; --btco-soft: #ac301c15; --holder: #615d50;
+  min-height: 100vh; background: var(--paper);
+}
+.imprint-interior > main { min-height: 65vh; }
+.imprint-interior .section, .imprint-interior .explore-page { padding-block: clamp(48px, 6vw, 88px); }
+.imprint-interior .btn { min-height: 48px; height: auto; padding-block: 12px; white-space: normal; text-align: center; }
+.imprint-interior .btn-primary { color: var(--paper); background: var(--ink); }
+.imprint-interior .btn-ghost, .imprint-interior .explore-page .btn:not(.btn-primary) { border: 1px solid var(--ink); color: var(--ink); }
+.imprint-interior .btn-ghost:hover, .imprint-interior .explore-page .btn:not(.btn-primary):hover { background: var(--ink); color: var(--paper); }
+.imprint-interior .nav-cta { min-height: 40px; padding-block: 8px; }
+.imprint .nav :focus-visible { outline-color: var(--ink); }
+.imprint-interior .card { border-radius: 0; box-shadow: none; }
+.imprint-interior .layer-pill, .imprint-interior .od-badge { border-radius: 0; }
+.imprint-interior :is(.explore-intro h1, .imprint-page-heading h1, .legal h1) {
+  font: 800 clamp(44px, 6.3vw, 90px)/.98 var(--font-sans);
+  letter-spacing: -.065em; text-transform: uppercase; max-width: 1000px; overflow-wrap: anywhere; margin: 0;
+}
+.imprint-page-heading { border-bottom: 1px solid var(--border-strong); padding-bottom: 40px; margin-bottom: 32px; }
+.imprint-page-heading .your-originals-sub { margin-top: 24px; font-size: 18px; max-width: 65ch; }
+.imprint-interior .explore-intro { gap: 48px; margin-bottom: 48px; }
+.imprint-interior .explore-intro > p { font-size: 17px; line-height: 1.65; }
+.imprint-interior .explore-toolbar { border-top: 2px solid var(--ink); }
+.imprint-interior .explore-toolbar button { font-weight: 650; }
+.imprint-interior .explore-cover, .imprint-interior .explore-detail-art { background: var(--ink); border: 0; }
+.imprint-interior .explore-open { border-radius: 0; background: var(--paper); color: var(--ink); border: 0; }
+.imprint-interior .explore-caption { border-top: 1px solid var(--border-strong); padding-top: 16px; }
+.imprint-interior .explore-caption h2 { font-weight: 700; letter-spacing: -.035em; }
+.imprint-interior .explore-index { color: var(--accent); font-family: var(--font-mono); }
+.imprint-interior .explore-file { background: var(--bg-raised); }
+.imprint-interior .explore-file strong { font-family: var(--font-sans); font-weight: 700; letter-spacing: -.04em; }
+.imprint-interior .explore-empty { border-block: 1px solid var(--border); text-align: left; padding: 40px 0; }
+.imprint-interior .explore-empty h2 { font: 700 32px/1.15 var(--font-sans); letter-spacing: -.04em; }
+.imprint-interior .explore-empty .btn { margin-top: 24px; }
+.imprint-interior .explore-detail-info h1 { font-family: var(--font-sans); font-weight: 750; letter-spacing: -.055em; }
+.imprint-interior .explore-back, .imprint-interior .od-back { color: var(--accent); text-decoration: underline; text-underline-offset: 5px; }
+.imprint-interior .explore-provenance { border-top: 2px solid var(--ink); }
+.imprint-interior .explore-provenance h2 { font: 700 36px/1.05 var(--font-sans); letter-spacing: -.04em; }
+.imprint-interior .explore-provenance dt { text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+.imprint-interior .your-originals-grid { gap: 36px 24px; }
+.imprint-interior .your-original-card { background: transparent; border: 0; border-bottom: 1px solid var(--border-strong); }
+.imprint-interior .your-original-card:hover { box-shadow: none; }
+.imprint-interior .your-original-card-body { padding: 20px 0; }
+.imprint-interior .your-original-card-body h2 { font-size: 24px; font-weight: 700; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.imprint-interior :is(.your-original-cover, .your-original-cover-empty, .od-art, .od-art-placeholder) { background: var(--ink); }
+.imprint-interior .your-original-badge { border-radius: 0; background: var(--paper); color: var(--text-secondary); backdrop-filter: none; }
+.imprint-interior .your-original-badge[data-ok] { color: var(--ok); border-color: var(--ok); }
+.imprint-interior .your-originals-finish { border: 1px solid var(--accent); background: var(--accent-soft); }
+.imprint-interior :is(.your-originals-note, .od-note, .od-empty) { max-width: 75ch; }
+.imprint-interior .your-originals-empty { border-top: 1px solid var(--border); padding-top: 32px; }
+.imprint-interior .od-hero { background: transparent; border: 1px solid var(--border-strong); }
+.imprint-interior .od-hero-body h1 { font-size: clamp(32px, 4vw, 56px); font-weight: 750; letter-spacing: -.055em; overflow-wrap: anywhere; }
+.imprint-interior .od-art-text { color: var(--paper); }
+.imprint-interior .od-checks li[data-state='ok'] .od-check-mark { color: var(--paper); }
+.imprint-interior .od-checks li[data-state='fail'] .od-check-mark { color: #a32620; border-color: #a32620; }
+.imprint-interior .od-section .section-head h2 { font-size: clamp(28px, 3vw, 42px); }
+.imprint-interior .od-step-card { background: transparent; border: 0; border-top: 1px solid var(--border-strong); padding-inline: 0; }
+.imprint-interior .od-step[data-state='upcoming'] .od-step-card { opacity: 1; color: var(--text-tertiary); }
+.imprint-interior .od-step-node { border-radius: 0; box-shadow: none !important; }
+.imprint-interior .od-step:not(:last-child)::before { background: var(--border-strong); width: 1px; }
+.imprint-interior .od-resource, .imprint-interior .od-identity { background: transparent; }
+.imprint-interior .od-copy:hover { border-color: var(--ink); }
+.imprint-interior .legal-inner { max-width: 1160px; }
+.imprint-interior .legal-sub { max-width: 65ch; font-size: 19px; margin-top: 28px; }
+.imprint-interior .legal-updated { padding-bottom: 40px; border-bottom: 2px solid var(--ink); }
+.imprint-interior .legal-section { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.2fr); column-gap: 48px; border-bottom: 1px solid var(--border); padding-bottom: 32px; margin-top: 32px; }
+.imprint-interior .legal-section h2 { grid-column: 1; grid-row: 1 / span 20; font-size: 23px; letter-spacing: -.035em; }
+.imprint-interior .legal-section > :not(h2) { grid-column: 2; margin-top: 0; margin-bottom: 16px; max-width: 70ch; line-height: 1.8; }
+/* Shared authentication sheet, including when opened from the landing hero. */
+.imprint .login-modal {
+  --text-primary: var(--ink); --text-secondary: #514d3e;
+  --bg: var(--paper); --surface: var(--paper); --border: #25241e66; --accent: #ac301c;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--ink); border-radius: 0;
+  box-shadow: 10px 10px 0 #25241e55;
+}
+.imprint .login-form h2 { font-size: 32px; font-weight: 750; letter-spacing: -.045em; }
+.imprint .login-email, .imprint .otp-digit { border-radius: 0; background: var(--paper); }
+.imprint .login-error, .imprint .otp-error { color: #a32620; }
+.imprint .otp-row { width: 100%; gap: clamp(4px, 1vw, 8px); }
+.imprint .otp-digit { min-width: 0; width: min(2.75rem, 12vw); }
+@media (max-width: 760px) {
+  .imprint-interior .explore-intro { gap: 24px; }
+  .imprint-interior .legal-section { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .imprint-interior .legal-section h2 { grid-row: auto; }
+  .imprint-interior .legal-section > :not(h2) { grid-column: 1; }
+  .imprint-interior .your-originals-finish li { align-items: flex-start; flex-wrap: wrap; }
+  .imprint-interior .od-step-time { margin-left: 0; white-space: normal; }
+  .imprint-interior .od-did { flex-wrap: wrap; }
+  .imprint-interior .od-did code { flex-basis: 100%; }
+}
+
+/* Account navigation moves into the menu before the wordmark can wrap. */
+.imprint .nav-wordmark { white-space: nowrap; flex-shrink: 0; }
+.imprint .nav-signout { white-space: nowrap; }
+@media (max-width: 700px) {
+  .imprint .nav-your-originals { display: none; }
+}

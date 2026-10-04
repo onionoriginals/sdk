@@ -17,6 +17,7 @@ import { LegalPage, legalRouteDoc } from './pages/Legal';
 import { smokeAutoRunAllowed } from './sdk/network-flag';
 import { ImprintHistory } from './components/ImprintHistory';
 import './design/imprint.css';
+import './design/imprint-pages.css';
 
 export function App() {
   if (new URLSearchParams(location.search).has('smoke')) {
@@ -30,7 +31,7 @@ function RoutedApp() {
   const route = routeForPath(path);
   const legalDoc = legalRouteDoc(route);
   return (
-    <div className={route === 'landing' ? 'imprint' : undefined}>
+    <div className={`imprint${route === 'landing' ? '' : ' imprint-interior'}`}>
       <Nav />
       {route === 'explore' ? <Explore /> : route === 'explore-original' ? <ExploreOriginal did={exploreDidFromPath(path)!} /> : legalDoc ? (
         <LegalPage doc={legalDoc} />
