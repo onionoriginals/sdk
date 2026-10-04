@@ -1,4 +1,4 @@
-import { footer, site } from '../content';
+import { footer, site, hero } from '../content';
 import { navigate } from '../router';
 import './footer.css';
 
@@ -11,9 +11,10 @@ export function isInternalHref(href: string): boolean {
   return href.startsWith('/') && !href.startsWith('//');
 }
 
-export function Footer() {
+export function Footer({ imprint = false }: { imprint?: boolean }) {
   return (
     <footer className="footer">
+      {imprint && <div className="container"><p className="press-closing">{hero.imprint.closing}</p></div>}
       <div className="container footer-inner">
         <div className="footer-brand">
           <a className="nav-wordmark" href="#top">
