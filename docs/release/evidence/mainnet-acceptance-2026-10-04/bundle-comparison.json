@@ -1,0 +1,47 @@
+{
+  "sourceSha": "21891c0a24e14574a4a5e8b13858e3e3c5bd8211",
+  "buildEnvironment": {
+    "NODE_ENV": "production",
+    "VITE_BTC_NETWORK": "mainnet",
+    "VITE_WEBVH_HOST": "originals.build",
+    "otherViteVariables": "unset"
+  },
+  "files": [
+    {
+      "file": "cel-D0UAr4kb.js",
+      "bytes": 1205,
+      "sha256": "1530442df93dd659a0450635d5721f12d144324f7926ae03b224378b7b282134",
+      "matchesLocalBuild": true
+    },
+    {
+      "file": "dist-DllIi3IQ.js",
+      "bytes": 516016,
+      "sha256": "725e4d66ea6eb1eab71f058523729bca383c85be09e5a8b01af426740ae99de8",
+      "matchesLocalBuild": true
+    },
+    {
+      "file": "history-DgHNi86w.js",
+      "bytes": 97237,
+      "sha256": "222b767ecb62e2a69d815da7b228eae9d29bab42dadf58bc0a0ac155b83a9813",
+      "matchesLocalBuild": true
+    },
+    {
+      "file": "index-BkmxDY5k.js",
+      "bytes": 423538,
+      "sha256": "a770479417456a179e660f4aad5cc70aec26c112b1084cad00909d9f714be9df",
+      "matchesLocalBuild": true
+    },
+    {
+      "file": "public-sat-provider-B50M_BPl.js",
+      "bytes": 1673,
+      "sha256": "7a8d3cd2fbe47bb5611a6189ca767db8e53184020d6c310ebf0c4ba9ce797430",
+      "matchesLocalBuild": true
+    },
+    {
+      "file": "verify-original-oHYYbjmL.js",
+      "bytes": 2503,
+      "sha256": "60e099283dcf5b463afedfc4a1d5124ad5d00110a2484014b53cb30d0e3d36a7",
+      "matchesLocalBuild": true
+    }
+  ]
+}
