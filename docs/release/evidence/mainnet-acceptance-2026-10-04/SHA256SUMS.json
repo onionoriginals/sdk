@@ -14,6 +14,6 @@
   "hosted-regtest/regtest-receipt-restart.json": "cd90b578ff13865076bf783e7fee235337be0cca5fe5bb1e0bf7eb3ee14c338b",
   "hosted-regtest/regtest-receipt-reveal-rejected.json": "3a30c117516dfc8a29adb8fca4f9c1472dee79e04539788aae1914a1c6fff000",
   "receipt.json": "08de1b0fd20b46933d82f6b3f2a04807c70ede0ded97391e96e3e7b04ae537d0",
-  "summary.json": "9c100c0a875dcb47f238e0a24f9064e676830057fd187a4c0d2c8384b8163cf4",
+  "summary.json": "a8ff4e5d5c624ed35d44bf372d1ae340d511be50c612857834e47159103d8eee",
   "verify-mainnet.mjs": "b8362194b05615b3b6e0888325a887ee01f001053e6369410b600bb3391a468d"
 }

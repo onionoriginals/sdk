@@ -413,7 +413,8 @@
     "esm": "PASS, 26 entry points",
     "browserSafety": "PASS",
     "landingBuild": "PASS; production environment and only the two declared VITE settings; all six compared live bundles match",
-    "nonBroadcastDryRun": "PASS, 24 checks, fixture signer/mock funding; zero broadcast-route calls"
+    "nonBroadcastDryRun": "PASS, 24 checks, fixture signer/mock funding; zero broadcast-route calls",
+    "lint": "PASS; existing warnings"
   },
   "retained569": {
     "testedSha": "68f9d599db867356502effb9da9d2b5d745c96e1",
@@ -428,5 +429,11 @@
   },
   "browserAcceptance": "PASS, receipt.json",
   "noProductionMutations": true,
-  "landingSourceVersion": "0.2.1"
+  "landingSourceVersion": "0.2.1",
+  "additionalRootTest": {
+    "command": "bun test",
+    "knownFailure": "Node-specific chain-validator-node.test.mjs executed under Bun; SAT_SNAPSHOT_CHAIN_UNAVAILABLE",
+    "prescribedCommand": "node --test scripts/chain-validator-node.test.mjs",
+    "prescribedResult": "PASS, 1 test"
+  }
 }

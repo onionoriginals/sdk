@@ -45,6 +45,14 @@ test key. It retained the signed pair and refused the provider broadcast by
 construction, with **zero broadcast-route calls**. It proves construction and
 read-back, not public-chain submission.
 [Dry-run receipt](evidence/mainnet-acceptance-2026-10-04/dry-run.json).
+An additional unscoped root `bun test` invocation runs the Node-specific
+`scripts/chain-validator-node.test.mjs` under Bun and fails that transport check
+with `SAT_SNAPSHOT_CHAIN_UNAVAILABLE`. Its prescribed
+`node --test scripts/chain-validator-node.test.mjs` invocation passes 1/1. This
+runner mismatch is recorded separately; the release workflow uses Node for
+that check, and the hosted package/landing gates are the passing evidence above.
+Fresh `bun run lint` also passes.
+
 The live issue query had zero open bug tickets; that is tracker state, not a
 fresh independent audit of every closed finding.
 [Gate/version summary](evidence/mainnet-acceptance-2026-10-04/summary.json).
