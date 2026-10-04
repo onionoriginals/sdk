@@ -1,5 +1,598 @@
 # @originals/sdk
 
+## 4.0.0
+
+### Major Changes
+
+- 335abad: **BREAKING (security): legacy `data.did` genesis events now bind authority to the create-event signer.** `verifyEventLog`'s legacy compatibility path — a genesis event that embeds the asset DID directly in `data.did`, rather than deriving it from `data.controller` — trusted the create event's signer on first use whenever `data.did` named a non-self-certifying DID (`did:webvh`, `did:web`, an old-scheme `did:cel` string, ...). Because `expectedDid` matching on that path is plain string equality against the embedded `data.did`, a forger could copy any victim's `data.did` into a freshly self-signed genesis and produce a log that "backs" the victim's identifier under the attacker's own key.
+
+  Legacy `data.did` now binds exactly like `data.controller` already does: a self-certifying `data.did` (`did:key`) requires the create event's signing key to be embedded in it; a non-self-certifying `data.did` requires the create proof's `verificationMethod` to name that exact DID, with the configured resolver vouching for the signing key. There is no trust-on-first-use fallback left on this path. A genesis that carries both a legacy `data.did` and a `data.controller` is now rejected outright as an ambiguous shape.
+
+  **Pre-existing legacy logs whose genesis names a non-self-certifying `data.did` that the create-event key does not (and cannot, via a resolver) authenticate no longer verify.** Logs whose `data.did` is self-certifying (`did:key`), or whose create proof's `verificationMethod` genuinely names the declared `data.did` under a working resolver, are unaffected. `DIDManager.resolveDID`/`resolveDidCel` inherit the fix — they delegate to `verifyEventLog`.
+
+- 5ca171e: Name Originals with `did:cel:<SCID>` derived from the SHA-256 genesis
+  commitment. Continue reading the interim `ni:` identity spelling. `asset.id` and `state.assetId`
+  use this identity; newly serialized asset envelopes use version 4 and `assetId`.
+  Retain strict reading of version-3 envelopes and the former application-specific
+  `did:cel` alias, without changing signed history, hosted paths or inscriptions.
+  The CEL wire format remains version 3. See the SDK 4 migration guide.
+- 335469a: Use `did:cel:<SCID>` as the public Originals history identifier. Keep the
+  placeholder-derived genesis SCID, signing, and event-link hashes unchanged.
+  Read existing `ni:` IDs in version-4 envelopes and signed migration/WebVH
+  bindings, normalizing the public ID without rewriting signed data. Version-3
+  envelopes retain their did-only contract. Envelope fields and versions do not
+  change, and removed legacy API names are not restored.
+
+  The landing app also discovers retained ni-keyed publication records and restores
+  ni-keyed anonymous authorship backups using their original authenticated-data
+  binding. Existing ciphertext and signed artifacts are not rewritten.
+
+- d813344: Expose `resourceAvailability` on an accepted `resolveAssetFromSat`/`AssetResolution`
+  result: a per-historical-resource-version `"bitcoin-inline" | "referenced"` label
+  naming whether that version's bytes are recoverable from the accepted Bitcoin
+  inscriptions alone, or depend on a separate off-chain host. Each Bitcoin publication selects one resource body to inline; resources with a
+  matching media type and digest may share those bytes. A multi-resource asset commonly has
+  both labels at once; `"referenced"` is the expected, by-design state for the rest,
+  not a defect.
+
+  The core sat result also reports current-resource availability. Both layers use the same media-type/digest matching rule and shared record shape; historical versions remain explicit at the SDK level.
+
+  The new required fields on exported resolution results can affect callers constructing result literals.
+
+- 8f02af6: **`credentialStatus` arrays no longer bypass revocation/status checking** (#592).
+
+  VCDM 2.0 permits `credentialStatus` to be a single object or an array of them. Every status-checking path — `Verifier.checkCredentialStatus` / `verifyCredential`, the multi-sig verification path (both in `Verifier` and `MultiSigManager`), and `CredentialManager.verifyCredentialWithStatus` — read it as a singleton (`(vc.credentialStatus as BitstringStatusListEntry)?.type`), so an array-shaped value read `.type` as `undefined` and skipped status checking entirely, including the existing fail-closed "no resolver configured" branch. A credential whose `credentialStatus` was wrapped in a one-element array verified as not-revoked regardless of its actual status.
+
+  - Added `credentialStatusEntries()` (`packages/sdk/src/vc/credentialStatus.ts`), the single normalization helper every status-checking path now reads `credentialStatus` through instead of casting it to a singleton.
+  - Every declared entry is evaluated, not just the first: a mix of a clean entry and a revoked/unsupported one still fails the credential.
+  - An entry whose `type` is not `BitstringStatusListEntry` now fails closed with an explicit "unsupported credentialStatus type" error instead of being silently ignored — previously true for a singleton unsupported type too, not only for arrays.
+  - `CredentialManager`'s revoke/suspend/check-status management methods (which take one caller-supplied status list) now require the credential to declare exactly one `credentialStatus` entry, rejecting an array rather than guessing which entry to act on.
+  - A malformed array element (not an object, or with no string `type`) now fails the credential closed with an explicit "malformed credentialStatus entry" error instead of risking an unhandled `TypeError`.
+  - `CredentialManager.verifyCredentialWithStatus`'s `statusListCredential` parameter now also accepts an array, so entries that reference different status lists (e.g. separate revocation and suspension lists) can each be matched to the list they actually name and verified in one call; single-credential callers are unaffected.
+
+  `VerifiableCredential.credentialStatus` is now typed `CredentialStatus | CredentialStatus[]`. Breaking because a credential that previously verified only because its declared status was unreachable through the old singleton cast — array-shaped, or a singleton of an unsupported type — no longer verifies.
+
+- bc129c7: **Verifier proof-purpose authorization no longer confuses verification methods that merely share a URL fragment** (#593, audit finding H05).
+
+  `Verifier.checkProofPurpose` (used by `verifyCredential` and `verifyPresentation`, and by `CredentialManager`'s Data Integrity path) checked whether a proof's `verificationMethod` was listed under the DID document's `assertionMethod`/`authentication` relationship by comparing URL **fragments only**. A relationship entry naming a completely different, foreign DID — e.g. `did:example:other#key-1` — could authorize an unrelated proof key `did:example:issuer#key-1` purely because the fragments matched.
+
+  - Relationship entries are now resolved to a complete DID URL the same way DID Core resolves relative references (`#key-1` → `${didDocument.id}#key-1`; an already-absolute entry is used as-is), then compared as full DID URLs. A foreign absolute entry sharing only a fragment no longer authorizes an unrelated key.
+  - When the verification method's DID document fails to resolve, authorization now fails closed instead of silently reporting `verified: true` — for every DID method except the self-certifying `did:key`, which publishes no separate relationship document by design and continues to rely on the controller binding and signature check that already run.
+
+  Credentials/presentations relying on the old fragment-only match to pass — including any relying on an unresolvable non-`did:key` relationship document silently succeeding — may now fail verification, as intended.
+
+- 46337ab: New genesis events carry a self-certifying history identifier in `previousEvent`.
+  Derive the SCID from the full JCS genesis template with that position set to
+  `"{SCID}"`, using CEL's existing SHA-256 multihash and base64url multibase.
+  Verify it independently before accepting the genesis. The `did:cel:` asset ID wraps
+  this commitment; subsequent event links still hash the final published event.
+  Historical signed genesis events without `previousEvent` retain their identities.
+
+  `signEvent` now fills an absent or placeholder genesis `previousEvent` before
+  signing. Callers must use the returned event when hashing or checking proofs,
+  and derive history identity with `deriveAssetId` instead of `eventDigest`.
+  `deriveScid` and `verifyScid` are available from the CEL profile exports.
+
+- 077de93: **BBS+ selective disclosure (`bbs-2023`) is parked and disabled end to end** (#591).
+
+  A holder could derive a BBS proof that hid `validUntil` and `credentialStatus`, and the verifier read the missing fields as "no policy" and returned `verified: true` for an expired, status-bearing credential. Closing that needs a mandatory-disclosure profile enforced at issuance, and credentials already issued with permissive pointers cannot be repaired by changing issuance. Rather than ship a verifier that guesses which disclosures a proof was allowed to omit, the suite is removed.
+
+  - `DataIntegrityProofManager.createProof` throws `Cryptosuite bbs-2023 is disabled` and `verifyProof` returns `verified: false` with that error for any `bbs-2023` proof, base or derived. `Verifier.verifyCredential` and `CredentialManager.verifyCredential` inherit the rejection, so no previously issued BBS credential verifies.
+  - **Removed:** `BBSCryptosuiteManager`, `BBSCryptosuiteUtils`, `BBSProofOptions`, `BBSDeriveOptions`, `BBSVerifyOptions`, `SelectiveDisclosureOptions`, `DerivedProofResult`, `CredentialManager.prepareSelectiveDisclosure`, `CredentialManager.deriveSelectiveProof`, the `mandatoryPointers` / `publicKey` fields of `ProofOptions`, and the `expectedChallenge` / `expectedDomain` / `expectedPresentationHeader` / `expectedController` options of `Verifier.verifyCredential`, which only the BBS suite honoured. `Verifier.verifyPresentation` keeps its own `expectedChallenge` / `expectedDomain` checks.
+  - **Removed dependency:** `@digitalbazaar/bbs-signatures`. `Bls12381G2Signer` and the `Bls12381G2` multikey codec stay; they are generic key utilities.
+
+  `eddsa-rdfc-2022` is the only credential cryptosuite. The code is retained in git history for when a disclosure profile exists.
+
+- 60443e3: **Data Integrity proof-chain options are no longer silently ignored** (#604).
+
+  `ProofOptions.previousProof` and a multi-proof array were accepted by the public Data Integrity API but never actually checked as a chain: `EdDSACryptosuiteManager` dropped `previousProof` when creating a proof, and `Verifier.verifyCredential`/`verifyPresentation` verified only `proof[0]` of an array while implying the whole credential/presentation was checked. A caller could believe a chained or multi-proof approval was verified when only a single, independent signature was.
+
+  - `DataIntegrityProofManager.createProof` now throws `ProofOptions.previousProof is not supported` instead of silently dropping it.
+  - `Verifier.verifyCredential` and `verifyPresentation` now return `verified: false` for a credential/presentation with more than one proof, directing callers to `verifyCredentialMultiSig()` (which has its own threshold policy, not proof chaining) instead of silently checking only the first proof.
+  - `Verifier.verifyCredential` and `verifyPresentation` now return `verified: false` when the selected proof declares `previousProof`, since no code verifies that dependency.
+  - `EdDSACryptosuiteManager.createProofConfiguration` now honors a caller-supplied `created` timestamp instead of always overwriting it with the current time.
+
+  Callers that never supplied `previousProof` or multi-proof arrays to the ordinary single-proof verification API are unaffected.
+
+- 29290f7: Remove `deriveDid`, `AssetState.didCel` and the deprecated `expectedDid`
+  verification option from the CEL 2 / SDK 4 asset identity surface; use
+  `deriveAssetId`, `state.assetId`/`state.aliases` and `expectedAssetId` instead.
+  Rename `parseAssetDid` to `parseAssetAlias`, and its result's discriminator
+  from `method` to `layer` (`'cel' | 'webvh' | 'btco'`), since the `cel` layer
+  is not a claim that Originals implements a DID method. Old SDK 3 envelope
+  reading, signed history, hosted paths and inscriptions are unchanged.
+- 75f31c2: Expose required `chainEvidence: { assurance, source? }` metadata on sat results and
+  DID/publication metadata. Core JSON input and ordinary providers stay
+  `provider-asserted`; failures before a snapshot is obtained report `unavailable`.
+
+  The default SDK accepts an application-selected `chainValidator`. The exported
+  `createBitcoinCoreChainValidator` checks chain tips, active block hashes, and
+  ordered transactions against a separately trusted Core endpoint with explicit
+  RPC credentials and bounded requests, bytes, and elapsed time. Successful checks
+  earn `node-validated`; configured validation failures fail closed. Detached
+  snapshots prevent asynchronous mutation from changing the view being resolved.
+
+  These labels never establish complete Ordinals enumeration, sat trajectory,
+  ownership or inscription content bindings. Issue #594 remains open. Required
+  result fields are a breaking type change for callers constructing result literals.
+
+- 810ec9a: **Ordinary credential verification no longer silently skips revocation checking** (#600).
+
+  `CredentialManager.verifyCredential` hardcoded `checkStatus: false`, and `UnifiedVerifier`'s credential branch did the same — a credential that declared a `credentialStatus` verified as `true` on signature alone, with no way for a caller to tell that revocation was never evaluated. Similarly, `UnifiedVerifier`'s event-log branch never reported whether btco head-freshness actually ran.
+
+  - `CredentialManager.verifyCredential` is now safe by default: when the credential declares a `credentialStatus`, it is checked via the new `CredentialManager.statusListResolver` (settable on the instance); with no resolver configured, a credential that declares a status entry now fails closed instead of silently passing.
+  - The previous signature-only behavior is now an explicitly-named entry point, `CredentialManager.verifyCredentialSignature` — for offline/proof-only verification, or internal reuse (checking a status list credential's own signature) where recursing into status checking would be redundant or incorrect.
+  - `UnifiedVerifier.verify()` now returns an `assurance` field (`{ signature, status, freshness }`, each `'checked' | 'failed' | 'unknown'`) alongside `verified`, so a caller can tell "checked and passed" apart from "not checked at all" instead of reading a bare boolean. A new `UnifiedVerifierOptions.statusListResolver` lets the credential branch actually check status; a new `signatureOnly` option explicitly opts out of status/freshness checking (reported `unknown`, never silently `checked`) rather than that being the unnamed default.
+
+  Breaking because `CredentialManager.verifyCredential` and `UnifiedVerifier.verify()` on a credential that declares `credentialStatus` no longer verify on signature alone — configure `statusListResolver`, or use the explicitly-named signature-only entry point if that's genuinely what's wanted.
+
+### Minor Changes
+
+- 42cad62: Add a portable `checkpoint`/`freshness` contract to CEL 3 `verifyHistory`, addressing #607.
+
+  `verifyHistory`'s existing `prefix` option only authenticates continuation within
+  one verifier instance (a `WeakSet`-tracked object), so it cannot detect rollback
+  or a diverging continuation once history crosses a process boundary — for
+  example, a private (non-Bitcoin-anchored) CEL a holder re-presents after time
+  has passed. `checkpointFromHistory(history)` now extracts a portable, JSON-safe
+  `{ assetId, head, entryCount }` claim a caller can persist or hand to a
+  different verifier. Passing it back as `verifyHistory(log, { checkpoint })`
+  independently confirms the presented history equals or extends that checkpoint
+  — never trusting the checkpoint's own say-so — and fails closed
+  (`CEL_CHECKPOINT_ASSET`, `CEL_CHECKPOINT_ROLLBACK`, `CEL_CHECKPOINT_FORK`) on a
+  wrong asset, rollback, or fork/equivocation.
+
+  `VerifiedHistory` gains a `freshness` field (`"unknown" | "checkpoint-consistent"
+| "externally-anchored"`), reported separately from signature-chain
+  authentication. It is `"unknown"` whenever no checkpoint is supplied, so a
+  first-time verifier's result still never implies it has seen the latest state.
+  `"externally-anchored"` is reserved for future witness/Bitcoin-anchoring
+  evidence and is not produced by this change. Persisting a checkpoint, and
+  deciding when its absence should block an operation, remains an
+  application/recipient policy choice.
+
+- 038895a: Bitcoin sat resolution can now corroborate that a confirmed inscription's reported media type, content bytes and CEL metadata tag are actually what is encoded on-chain, rather than trusting the same indexer that supplied enumeration/ownership. `resolveSat(snapshot, { independentContent? })` accepts an optional array of `{ inscriptionId, mediaType, contentDigest, metadataDigest }`. If it disagrees with an accepted publication's reported content, media type, or metadata, resolution fails closed with `inconsistent-evidence`. The accepted `SatResolution` gains `contentAssurance: 'provider-asserted' | 'cross-checked'`, `'cross-checked'` only once independent evidence covered every accepted publication and none of it disagreed.
+
+  At the SDK layer, `OriginalsSDK.create({ contentValidator })` configures independent content derivation. The exported `createBitcoinCoreContentValidator({ endpoint, rpcAuth? })` fetches each confirmed inscription's reveal transaction from a separately trusted Bitcoin Core node and parses its taproot witness with this SDK's own Ordinals envelope interpreter — never re-fetching from the same Ordinals indexer. A configured validator that is unreachable fails resolution closed with `incomplete` rather than silently falling back to an unqualified provider claim. `did.resolveDIDWithMetadata()` exposes the same `contentAssurance` on `didDocumentMetadata`.
+
+  This corroborates content/media binding only, a separate dimension from Bitcoin chain/index consistency, Ordinals enumeration completeness, and ownership. Progresses #594.
+
+- dd84574: Bitcoin sat resolution can now corroborate that the primary provider did not omit an inscription. `resolveSat(snapshot, { independentEnumeration? })` accepts an optional `{ source, inscriptionIds }`: every inscription id a second, independently configured Ordinals index currently reports for the queried sat. If that source lists an id absent from the primary snapshot, resolution fails closed with `inconsistent-evidence` instead of accepting a possibly-incomplete history. The accepted `SatResolution` gains `enumerationAssurance: 'provider-asserted' | 'cross-checked'`, `'cross-checked'` only when such a source was actually consulted and did not disagree.
+
+  At the SDK layer, `OriginalsSDK.create({ independentEnumeration: { label, provider } })` configures a second `SatProvider` for this cross-check. When configured, an unreachable independent source also fails resolution closed rather than silently degrading to `'provider-asserted'`. `did.resolveDIDWithMetadata()` exposes the same `enumerationAssurance` on `didDocumentMetadata`.
+
+  This corroborates Ordinals enumeration completeness only, a separate dimension from Bitcoin chain/index consistency; it does not by itself establish independently validated Bitcoin consensus. Progresses #594.
+
+- 730f295: Bitcoin sat resolution can now corroborate current sat _ownership_, not just enumeration. The same independently configured second Ordinals index used by `independentEnumeration` (see the enumeration cross-check) may also report its own current-holder observation via `resolveSat(snapshot, { independentEnumeration: { ownership? } })`: `{ owner, satpoint }`. If supplied and it disagrees with the primary snapshot's `ownership`, resolution fails closed with `inconsistent-evidence` instead of accepting an unqualified ownership claim. The accepted `SatResolution` gains `ownershipAssurance: 'provider-asserted' | 'cross-checked'`, `'cross-checked'` only when independent ownership evidence was actually supplied and agreed.
+
+  At the SDK layer, `OriginalsSDK.create({ independentEnumeration: { label, provider } })` now also cross-checks ownership automatically, reusing the same independent snapshot already fetched for enumeration — no extra network round trip, no new SDK option. `did.resolveDIDWithMetadata()` exposes the same `ownershipAssurance` on `didDocumentMetadata` alongside `enumerationAssurance`.
+
+  This corroborates current sat ownership only, a separate dimension from Ordinals enumeration completeness and Bitcoin chain/index consistency; it does not by itself establish independently derived sat transfer history. Progresses #594.
+
+- 75617cb: **Hosted WebVH publication now distinguishes an adapter-asserted read-back from an independently confirmed one** (#601).
+
+  `publishToWeb`/`publishPreparedToWeb` read the newly written DID log back through the same `storageAdapter` that wrote it, so a private or in-memory adapter satisfied the publication contract exactly as well as a genuinely public HTTPS host — nothing distinguished the two, and a fresh `resolveAssetFromWeb` call reused that same adapter rather than an independent fetch.
+
+  - `PublishedWebAsset` gains `hostingEvidence: 'adapter-asserted' | 'independently-verified'`, defaulting to `'adapter-asserted'` — today's actual behavior, now labeled honestly instead of implying public reachability.
+  - New SDK options `publicReachability` (a check that fetches the advertised URL through a path other than the configured storage adapter) and `requirePublicReachability` (fail the publish, with the prepared publication preserved for retry, when that independent check cannot confirm the exact log that was just written).
+  - New export `fetchPublicReachabilityCheck`, a ready-made `publicReachability` implementation using a real HTTPS GET.
+
+  Both options remain opt-in for SDK callers. The landing app requires independent reachability for anonymous and signed-in publication, including cold recovery before saving an account record or deleting its retry wrapper. The default checker omits credentials and cached responses, refuses redirects, and caps streamed responses at 2 MiB with a ten-second deadline. Missing required checker configuration is rejected before any writes; a failed check after upload preserves the exact prepared publication for retry. Separating the publication-host capability from the general `storageAdapter` contract remains follow-on work.
+
+- 9755861: **Explicitly label the sat-trajectory trust boundary in Bitcoin resolution.** `resolveSat`'s accepted `SatResolution` (and `did.resolveDIDWithMetadata()`'s `didDocumentMetadata`) now carries `trajectoryAssurance: 'not-independently-derived'`, always. `ownership` was already documented as a single point-in-time observation, but nothing in the public shape said so where a consumer could read it programmatically. This resolver never walks the UTXO/transfer graph, so it cannot derive _how_ a sat arrived at its current holder/satpoint — that stays true even when a caller configures independent enumeration/ownership cross-checking against a second index source, since agreement between two indexes corroborates one snapshot rather than independently deriving the historical transfer path. Progresses #594; narrows the acceptance/trust model for the sat-trajectory dimension rather than building full independent derivation.
+
+  TypeScript callers that construct accepted `SatResolution` literals must include the new required field with the value `"not-independently-derived"`.
+
+- 1e57416: Bitcoin sat resolution distinguishes "not confirmed yet" from "nothing here." When
+  every publication `resolveSat` observes for a sat is still unconfirmed — nothing
+  has reached the snapshot's confirmation depth yet — it now reports a distinct
+  `status: 'pending'` result (carrying the unconfirmed publication ids in `pending`)
+  instead of `not-found`. `not-found` continues to mean confirmed data was inspected
+  and no valid boundary was found in it; a sat with no observed publications at all,
+  or with confirmed-but-invalid ones, still reports `not-found`.
+
+  At the SDK layer, `sdk.did.resolveDIDWithMetadata()` surfaces the same
+  `didResolutionMetadata.status: 'pending'` and the unconfirmed ids on
+  `didDocumentMetadata.pending`, without throwing. `sdk.did.resolveDID()` treats
+  `pending` like every other inconclusive status and throws
+  `ASSET_RESOLUTION_INCOMPLETE`, rather than returning `null` as it previously did
+  for this case — a caller of the throwing method can no longer mistake "just
+  broadcast, awaiting its first confirmation" for a confirmed absence.
+
+  Progresses the remaining "immediacy hardening" increment noted on #407: a
+  provider that can already report unconfirmed publications (`confirmed: false`)
+  is now resolved gracefully instead of colliding with `not-found`. Provider-side
+  discovery of unconfirmed/mempool publications remains out of scope for this
+  change; production providers currently only enumerate confirmed inscriptions.
+
+### Patch Changes
+
+- fdd5478: Add optional `blockHash` to `OrdinalsProvider.getTransactionStatus()`, returned by `QuickNodeProvider` and `RegtestProvider` (already available from verbose `getrawtransaction`, previously discarded after resolving height) and `SignetProvider` (from ord's `/tx/<txid>` response).
+
+  Block height alone is not block identity: an ordinary one-block reorg can replace the block at a given height with a different one, which a height-only comparison cannot distinguish from uninterrupted confirmation. Consumers that need to detect a reorg (rather than just read confirmation depth) should compare `blockHash` when available.
+
+- 66a9944: **`BtcoCelManager.migrate()` (the legacy pre-CEL-3 layer manager) now fails closed by default** instead of silently inscribing a did:btco document that a fresh process cannot use to recover pre-inscription history (#597).
+
+  `BtcoCelManager.migrate()` inscribes a did:btco document whose only anchor is `service[0].serviceEndpoint.headDigestMultibase` — a head digest of the migrate event, not the asset's full CEL boundary history the CEL 3 recovery model needs. A recipient holding just the inscribed document and the bare sat cannot reconstruct pre-inscription history from this writer alone. This class predates the CEL 3 lifecycle and is retained only for the previous-format lifecycle and its regression tests (see `docs/history/previous-sdk/CLAUDE.md`) — it is not a compatibility path for CEL 3 / SDK 3.0.
+
+  - `migrate()` now throws a `StructuredError` (`CEL_BTCO_INCOMPLETE_HISTORY`) unless `config.acknowledgeIncompleteHistory` is set to `true`, explicitly acknowledging the retained legacy path.
+  - Real, fully recoverable Bitcoin publication should come from the SDK's CEL 3 path (`packages/sdk/src/v3/bitcoin.ts` / `hosted.ts`, or `@originals/cel/v3`), which is unaffected.
+  - `OriginalsCel`'s `btco` config already intersects `BtcoCelConfig`, so `config.btco.acknowledgeIncompleteHistory` threads through automatically.
+  - The legacy `originals-cel` CLI's internal `migrate --to btco` path (not the published `originals-cel` binary, which is `packages/sdk/src/v3/cli.ts`) now sets this flag itself and prints a warning explaining the incomplete history.
+
+  **Breaking:** `BtcoCelManager.migrate()` now throws by default where it previously succeeded; existing callers that knowingly rely on this retained legacy path must pass `{ acknowledgeIncompleteHistory: true }`.
+
+- d1a26af: **Fix: independent Bitcoin chain-tip and block-hash comparisons now normalize hex casing.** (#844)
+
+  `createBitcoinCoreChainValidator`'s `checkTip`/`validate` (`packages/sdk/src/v3/chain-validation.ts`) compared a configured `SatProvider`'s reported tip/block hashes and block txids against Bitcoin Core's RPC-returned values with plain `!==`. `resolution.ts`'s `validChainTip`/`sameChainTip` (used by `usableIndependentSnapshot` and the ownership cross-check) likewise required lowercase-only hex and compared hashes case-sensitively. Neither hex hash carries a casing contract of its own, so a provider or independently configured index reporting the identical chain fact in a different, individually valid hex case was treated as a disagreement (`SAT_SNAPSHOT_CHAIN_DISAGREEMENT`) or an unusable observation (`status: "incomplete"`) instead of being accepted, contradicting CLAUDE.md's "Provider snapshots must establish ... active-chain ordering" contract.
+
+  Both now normalize through the existing shared `normalizeTxid` export (`@originals/cel/v3`, already used for reveal-txid comparisons), so two sources reporting the same chain fact in different hex letter case agree, while a genuinely different hash still fails comparison.
+
+- 06d1c46: Allow CLI offline verification of complete signed envelopes at every layer, reporting local history and byte completeness separately from unverified hosted or Bitcoin publication evidence. Preserve strict rejection of missing historical bytes, unsigned drafts, invalid proofs, and corrupted attachments. Add top-level authenticated state to `inspect --log` for JSON and CBOR while preserving `verify --log` output.
+- 2cb1f4f: Fix a permission-less denial-of-service in `resolveSat`'s handling of the CCG
+  `dataReference` shape: it no longer treats a candidate as an
+  `unsupported-capability` block on the strength of its raw, unauthenticated
+  `previousEvent` string alone. `eventShape`/`validateDocument` reject this
+  shape before any proof is ever inspected, so anyone without the sat's
+  controller key could previously force a permanent `unsupported-capability`
+  result for a real Original by inscribing a single candidate whose
+  `previousEvent` merely claimed to match the accepted head, with an empty,
+  invalid, or wrong-controller proof — including by appending an unsigned
+  `dataReference` entry after an unrelated, genuinely controller-signed one,
+  since a proof only ever signs its own event, never the whole log.
+  `resolveSat` now independently authenticates the entire prefix leading up to
+  the offending entry (signature, chain linkage and controller authority,
+  including any rotation among them) and the offending entry's own signature
+  against the resulting controller, before it may block resolution; otherwise
+  the candidate remains exactly as ignorable as any other invalid one, and the
+  already-accepted history is reported normally. `CEL_WEBVH_IDNA` blocks
+  resolution only after a boundary has been accepted; unrelated pre-boundary
+  candidates remain ignorable, as described in the IDNA fix below.
+
+  `CEL_PREVIOUS_LOG` is always treated as ignorable, and is deliberately not
+  given the same authenticated-blocking treatment as `dataReference`: unlike
+  `dataReference` (embedded inside the signed operation), the `previousLog`
+  wrapper is a document-level construct that sits entirely outside any signed
+  event, and its own proof has no CCG-specified target. Authenticating only
+  the _wrapped_ log would not establish that the controller authorized the
+  wrapping itself — anyone can wrap a copy of any log, controller-signed or
+  not, in a `previousLog` envelope, which would let a permissionless observer
+  flip a resolution from `accepted` to `unsupported-capability` at will.
+  Originals 3 itself never produces `previousLog` documents, so this does not
+  blind resolution to any real writer output.
+
+- 12f605e: Fix a permanent, attacker-triggerable denial-of-resolution in `resolveSat`'s
+  CCG `dataReference` handling: a candidate that is genuinely authenticated by
+  the current controller but extends an already-**deactivated** head is now
+  ignored, exactly like any other candidate that cannot be a valid
+  continuation, instead of blocking the entire sat resolution closed with
+  `status: 'unsupported-capability'`.
+
+  Deactivation retires the asset's _authority_, not the controller's _key_ —
+  per `specs/originals-cel-v3-authority.md`, no later authorship operation is
+  ever accepted after deactivation, unconditionally. Previously,
+  `candidateAuthenticatedContinuation` checked only that a `dataReference`
+  candidate extended the accepted head and carried a genuine signature from
+  the accepted controller; it never checked whether that accepted history was
+  already deactivated. Since the original controller's key remains valid even
+  after deactivation, that same controller could sign a `dataReference`
+  candidate over the deactivated head and permanently discard the
+  already-accepted, correctly-deactivated resolution in favor of
+  `unsupported-capability` — reachable through the default SDK's
+  `resolveAssetFromSat`/`resolveDID`, with no way to recover since the
+  poisoning inscription is immutable on-chain.
+
+- 041cb9b: Fix `HostedAssets.publish()` wrapping `LocalStorageAdapter`'s deterministic `STORAGE_DOMAIN_MISMATCH`/`STORAGE_PATH_TRAVERSAL` rejections as the retryable `ASSET_WEB_PUBLISH_INCOMPLETE`, misdirecting callers into retrying a prepared publication that can never succeed against the same misconfigured adapter (#903).
+- b210e71: Fix: a mutable did:webvh document cached (or pinned) by `DIDManager` could remain authoritative for up to 24 hours — or indefinitely if pinned — after being rotated or recovered by a different process/host, since only that same `DIDManager` instance's own mutations invalidated its cache.
+
+  `DIDManager.resolveDID(did, { mode: 'current' })` now bypasses the cache entirely for did:webvh and always re-resolves live; `Verifier.checkProofPurpose`, `DocumentLoader`, and the CEL key resolver (`createDidManagerKeyResolver`) now request this mode when deciding whether a signing key is presently authorized, so an externally rotated or recovered key can no longer be accepted from a stale or pinned cache entry. A cached/pinned document remains available as an explicit offline snapshot via the new `DIDManager.resolveDIDWithFreshness(did, { mode })` (`'cache' | 'current' | 'offline'`), which also reports `source`, `fresh`, `resolvedAt`, and `pinned` metadata. Default (no options) `resolveDID` behavior, and all other DID methods, are unchanged.
+
+- 013a6fe: **`createDIDWithTurnkey` and `buildUserWebVHDid` no longer bake an empty-string `controller` into every verification method (#804).** Both called `OriginalsSDK.createDIDOriginal()` with `controller: ''` on each entry in `verificationMethods`, because the DID being minted isn't known until creation completes and the SDK's input type required `controller` up front. `didwebvh-ts` passes that value straight through instead of filling it in itself, so every verification method in the resulting DID document — and everywhere that document is published or resolved — carried a literal empty string instead of the DID.
+
+  - `CreateDIDOriginalOptions`/`UpdateDIDOriginalOptions` (`@originals/sdk`) now accept a `VerificationMethodInput` shape whose `controller` is optional. Omitting it lets `didwebvh-ts` derive the correct value; the returned `DIDDocument`'s `VerificationMethod.controller` is unaffected and remains required.
+  - `createDIDWithTurnkey` (`@originals/auth`) and `buildUserWebVHDid` (`@originals/landing`) now omit `controller` entirely instead of passing `''`.
+
+- b545475: Reject empty CLI output paths, distinguish non-file inputs from size limits, and describe the emitted version-4 asset envelope accurately.
+- ff2d1b3: **`createDIDOriginal` now falls back to the signer as verifier when no `verifier` option is supplied**, matching `updateDIDOriginal`'s existing behavior (#672).
+
+  `packages/sdk/V3.md` documents that "Standalone WebVH signing accepts either a key pair or an external signer, with the appropriate verifier" — a signer that also implements `ExternalVerifier` is a supported pattern. That pattern already worked on `updateDIDOriginal`, but `createDIDOriginal` passed `options.verifier` straight through with no fallback and threw `Verifier implementation is required` when it was omitted.
+
+- 0e32a48: **Fixed the default inline Bitcoin publication path permanently failing for a signed CEL history whose metadata contains an integer `>= 2^32`** (#687), while an undocumented `inlineResourceId: null` call for the same asset succeeded.
+
+  `checkedContent` (`packages/sdk/src/v3/bitcoin.ts`) and `createCommitTransaction` (`packages/sdk/src/bitcoin/transactions/commit.ts`) built the inscription's Ordinals `metadata` tag by asking micro-ordinals' own CBOR encoder to re-derive it from a plain JS object. That encoder cannot encode a JS `number` in `[2^32, 2^53)` (a `micro-packed` `U64BE`/bigint coercion limitation) and threw `ASSET_INSCRIPTION_METADATA`, permanently blocking the SDK's documented default resource-selection behavior for an otherwise valid, already-signed CEL document — the offending signed event, once in history, could never be removed.
+
+  The metadata tag is now written from CEL's own pre-encoded, deterministic CBOR bytes (`encodeDocument(document, "cbor")`), placed verbatim under the inscription's raw `unknown` tag/data pushes rather than asking micro-ordinals to re-derive them, sidestepping that encoder's limitation entirely for every CEL-representable document. Readers (the self-check in `prepare()`, and `validate()`'s check before `publish()` broadcasts) extract the same raw bytes and verify them with CEL's own `parseDocument(..., "cbor")`, rather than through micro-ordinals' `Inscription.tags.metadata`, whose decoder is not relied on to preserve every CEL-representable value.
+
+  `inlineResourceId: null` (log-only publication) remains an explicit product choice, not an automatic fallback: the default inline path now succeeds on its own for this input instead of requiring that undocumented workaround.
+
+- c7a203e: **`validateBitcoinAddress` now accepts Taproot (P2TR/bech32m) addresses again** (#713).
+
+  The `bitcoinjs-lib` `^6.1.0` → `^7.0.2` dependency bump in #682 removed bitcoinjs-lib's bundled secp256k1 support; v7 requires callers to explicitly call `initEccLib(ecc)` before it will validate any Taproot output or address, which this package never did. Every P2TR address — the conventional choice for an inscription-holding wallet — was rejected by `validateBitcoinAddress`/`isValidBitcoinAddress`, and transitively by `lifecycle.prepareBitcoinPublication`'s `changeAddress`/reveal-destination handling, with an `ECC library` error rather than an address-validity result.
+
+  `packages/sdk/src/utils/bitcoin-address.ts` now validates addresses via `@scure/btc-signer`'s `Address().decode()` — the same address/network decoding already used elsewhere in the SDK's real Bitcoin transaction path (`bitcoin/transfer.ts`, `bitcoin/transactions/commit.ts`) — instead of `bitcoinjs-lib`'s `address.toOutputScript()`. This covers P2WPKH, P2WSH, P2TR, P2PKH and P2SH without a separately initialized ECC backend, and preserves the existing checksum/prefix/length error messages and the regtest→testnet address fallback.
+
+- a7d202b: Fix LocalStorageAdapter originDomain mode to accept matching port-bearing HTTPS base URLs. Canonicalize advertised origins (including default HTTPS port equivalence), preserve configured-domain storage routing, and reject unsafe origin configuration before writing files.
+- 3d28934: **`createDIDOriginal`/`updateDIDOriginal` now reject non-Ed25519 `updateKeys` and unguarded sign-only signers** (#714, #719).
+
+  `WebVHManager.assertEd25519WebVHUpdateKeys` already enforces that did:webvh `updateKeys` must be Ed25519, because this SDK's did:webvh log resolution is Ed25519-only — a DID minted with a non-Ed25519 updateKey signs successfully but can never resolve afterward. The standalone `identity-operations.ts` helpers (`createDIDOriginal`/`updateDIDOriginal`, also exported as static `OriginalsSDK.createDIDOriginal`/`updateDIDOriginal`) are a second, independent path into `didwebvh-ts` and did not share that guard. Both now normalize `updateKeys` (accepting legacy `did:key:...` input, as before) and then validate them as Ed25519 before any signing work, matching `WebVHManager.createDIDWebVH`.
+
+  Separately, both helpers' signer-as-verifier fallback (`verifier: options.verifier || options.signer`) had no `verify()` capability guard: a sign-only `ExternalSigner` (the documented public interface has no `verify()` member) was silently cast to a verifier, which made `didwebvh-ts` fail deep inside with a raw `TypeError: verifier.verify is not a function` instead of a clear error at this seam. Both helpers now only use the signer as its own verifier when it actually implements `verify()`, and otherwise throw a clear error asking for an explicit `verifier` — mirroring the guard `WebVHManager.createDIDWebVH` already applies.
+
+  An explicit, valid Ed25519 `updateKeys` and a signer/verifier pair supplied either way continue to work exactly as before.
+
+- 5dfc23c: Fix `HostedAssets.prepare()` reporting `ASSET_WEB_STATE` instead of the documented `WEBVH_DOMAIN_REQUIRED` when a missing/blank domain coincides with an invalid asset state (#798).
+
+  The asset-state/local-drafts guard ran before the domain-blank guard, so publishing a deactivated asset or one with unsigned local resource drafts with no domain masked the missing domain as `ASSET_WEB_STATE`. The domain precondition is now checked first and unconditionally, matching `packages/sdk/V3.md` and `CLAUDE.md`'s "every hosted publication requires an explicit domain" contract. The single-cause cases (a valid domain on an invalid-state asset, or a missing domain on a valid-state asset) are unaffected.
+
+- b4f135d: **Hosted web publication now reports missing historical resource bytes and adapter URL mismatches as their own specific errors, never as the retryable `ASSET_WEB_PUBLISH_INCOMPLETE`** (#739).
+
+  `HostedAssets.publish()` previously wrapped its own resource and URL validation errors as retryable upload failures. Resource completeness is now checked in both `prepare()` and `publish()` before any write. Only failures thrown by `storage.putObject()` receive the retryable `ASSET_WEB_PUBLISH_INCOMPLETE` wrapper and retained prepared publication, including adapter-thrown `StructuredError` or `CelError` values. The SDK's resource and URL checks preserve their specific error codes.
+
+- 11c28f3: Fix hosted publication (`publishToWeb`/`prepareWebPublication`) failing with
+  `ASSET_STORAGE_URL` for both shipped `StorageAdapter` implementations (#780).
+  `HostedAssets.publish()` requires every write to land at exactly
+  `https://${domain}/${path}`, but `MemoryStorageAdapter` returns an opaque
+  `mem://` locator and `LocalStorageAdapter`'s default multi-tenant `baseUrl`
+  mode appended the domain as its own path segment, duplicating it when
+  `baseUrl` already pointed at that domain's own origin — so neither adapter
+  could ever satisfy hosted publication out of the box.
+
+  Add `HostedMemoryStorageAdapter`, an in-memory adapter whose `putObject()`
+  asserts the canonical hosted URL, for tests and local development. Add an
+  `originDomain` option to `LocalStorageAdapterOptions` that treats `baseUrl`
+  as exactly one domain's public origin (no repeated domain segment); every
+  call for a different domain throws `STORAGE_DOMAIN_MISMATCH` rather than
+  silently mapping it onto the wrong advertised origin. `MemoryStorageAdapter`
+  itself is unchanged, since its `mem://` locator remains correct for its
+  other, non-hosted uses.
+
+- ac36070: Use StructuredError consistently for local storage traversal, Signet inscription capability guards, OrdinalsClient SSRF and response-size rejections, and the retained experimental migration error factory. OrdinalsClient index and content fetch rejections and non-success content HTTP responses now use ORD_FETCH_FAILED, with serializable cause details for fetch and malformed-URL failures. Preserve rejection messages, non-success index null results, fetch safeguards, and migration metadata.
+- da6b08e: Allow Bitcoin boundary preparation when unrelated hosted resource objects are missing. Retain authenticated historical descriptors and report missing byte coverage separately, while preserving WebVH binding, exact-head, signature, and available-resource digest checks.
+- 24bfe5d: **`@originals/sdk`'s main entry no longer crashes on import in a runtime without a global `Buffer`** (#838).
+
+  `packages/sdk/src/utils/serialization.ts`'s `canonicalizeDocument` statically imported `jsonld`, which pulls in `undici` via `jsonld`'s Node platform document loader; `undici` references the bare `Buffer` global at module-evaluation time. Because `canonicalizeDocument` is reachable eagerly from the package's main entry (`index.ts` exports `CredentialManager`, which imports `canonicalizeDocument` directly), simply running `import '@originals/sdk'` threw `ReferenceError: Buffer is not defined` in any runtime without a global `Buffer` (browsers, Cloudflare Workers/edge runtimes, Deno without Node compat), before any API was called. `jsonld` is now loaded with a dynamic `import()` inside `canonicalizeDocument`, matching the lazy-loading pattern already used elsewhere in this package (`crypto/signingInput.ts`), so importing the SDK no longer requires a global `Buffer` at all — only actually canonicalizing a credential does.
+
+  `scripts/check-browser-safety.mjs` now also verifies every guarded entry point (including `@originals/auth`'s `client/index.js`, which shared the same root chain through its dependency on `@originals/sdk`) by actually importing it in a subprocess with `globalThis.Buffer` deleted, instead of relying only on a static source-text scan — closing the regression-protection gap this bug exposed.
+
+- a4a71f8: Fix experimental migration storage in runtimes without a global Buffer. Decode raw and enveloped Uint8Array results with TextDecoder and encode legacy writes with TextEncoder, preserving UTF-8 BOMs, byte-view boundaries, and Buffer-based legacy Node adapters. Canonical string writes and missing-result behavior are unchanged.
+- 80ccadf: **`resolveSat`'s independent-enumeration/content cross-check now normalizes inscription id hex casing before comparing, matching the existing `normalizeSatpoint` treatment for satpoints.** (#808)
+
+  The `independentEnumeration.inscriptionIds` membership check and the `independentContent` id lookup both compared inscription ids (`<64-hex-txid>i<index>`) verbatim, with no case normalization — unlike the sibling satpoint comparison a few lines below, already fixed by #751 via `normalizeSatpoint`. A second, independently-configured index that reported the same underlying inscription using a different (equally valid) hex-case convention for the txid was treated as disagreeing: the enumeration check failed closed with `inconsistent-evidence`, and the content-assurance check silently missed the match, leaving assurance at `provider-asserted` instead of `cross-checked`.
+
+  Added `normalizeInscriptionId` (`packages/cel/src/v3/publications.ts`), mirroring `normalizeSatpoint`: it lowercases the txid and the `i` separator, and returns non-matching values unchanged so a genuinely malformed id still fails comparison. Applied at all three cross-check sites (`known` enumeration set, `independentContentById` map build, and its lookup by the primary snapshot's `publication.id`).
+
+  **`resolveSat`'s own `revealTxid` self-consistency check is now case-normalized too.** (#821)
+
+  Distinct from the independent cross-check above: `resolveSat` also compares `publication.revealTxid` against the txid parsed out of `publication.id` and against `block.txids[position.transactionIndex]` — both of which are guaranteed lowercase by their own validation — but never normalized `revealTxid` itself. A provider reporting `revealTxid` in a different (still valid) hex case than its own `id`/`block.txids` fields made an otherwise fully valid, fully signed publication hard-fail with `inconsistent-evidence`.
+
+  Added `normalizeTxid` (`packages/cel/src/v3/publications.ts`), mirroring `normalizeSatpoint`/`normalizeInscriptionId`: a 64-hex value is lowercased, anything else is returned unchanged so a malformed `revealTxid` still fails comparison rather than being coerced into matching. Applied at both `revealTxid` comparison sites.
+
+- 6bf9f2d: Fix `WebVHManager.createDIDWebVH` minting a spec-noncanonical `did:webvh` when a caller-supplied `paths` segment contains a character such as `!`, `@`, `+`, or a space (#810).
+
+  `isValidPathSegment` only rejected directory-traversal characters (`.`, `..`, path separators, a leading `/`, a Windows drive prefix), so a segment containing an RFC 3986 sub-delimiter or reserved character passed validation but was handed to `didwebvh-ts` verbatim. The resulting DID failed CEL's `parseAssetAlias` allow-list on the very first publish (`CEL_DID: Invalid WebVH path component`), even though the same segment had just been accepted as valid.
+
+  `@originals/cel/v3` (and `@originals/sdk/cel`) now export `encodeWebVHPathSegment`, the canonical DID-spelling percent-encoding `parseAssetAlias` already computes when reading a WebVH path segment back, and `WebVHManager.createDIDWebVH` encodes each validated segment with it before constructing the DID — so a segment that passes `isValidPathSegment` now always produces a DID that CEL's own parser can read back. `paths` values are **decoded** input: a segment you pre-encoded yourself (`hello%21world`) is encoded again (`hello%2521world`). The HTTPS-spelling helper stays module-private.
+
+- 1ad78a0: `resolveSat`'s `entryExtendsUnderController` helper (used to decide whether a
+  CCG `dataReference` candidate is genuinely authenticated by the sat's current
+  controller) now requires every proof in a candidate's `proof` array to
+  validate and belong to the controller, instead of returning `true` as soon as
+  any single proof matched. Per `specs/originals-cel-v3-profile.md`'s
+  proof-array rule, "one valid proof does not excuse another invalid or
+  unsupported proof" — mixing a genuine current-controller proof with a
+  malformed, unsupported, or wrong-controller proof in the same array
+  previously still counted as authenticated, wrongly reporting
+  `unsupported-capability` (which stops evaluating further publications on the
+  sat) instead of ignoring the candidate and continuing. This mirrors the
+  all-or-nothing semantics `verifyEntry` already enforces in the real fold path.
+- de27b01: `jcsSigningMessage` now reports an unsupported signing algorithm with
+  `status: 'unsupported'`, matching `createLocalSigner` and `signEvent`, which
+  already reported the identical condition that way. Previously
+  `jcsSigningMessage` routed the check through `requireThat`, which can only
+  ever emit `status: 'invalid'`, so the same public `@originals/cel/v3`
+  function family reported two different `FailureStatus` values for one
+  semantic condition (#700).
+
+  `verifyJcsSignature` now validates the supplied signature's byte length
+  against its controller's algorithm before calling into `@noble/curves`,
+  throwing a `CelError('invalid', 'CEL_SIGNATURE', ...)` for a wrong-length
+  signature instead of letting a raw, unwrapped `RangeError` escape this public
+  verification boundary. A correctly-shaped but cryptographically wrong
+  signature still returns `false`, unchanged (#725).
+
+- 5058a34: Fix the retained PSBTBuilder's browser fallback to encode UTF-8 payloads as base64 without Node globals. Throw a structured encoding error instead of silently returning raw JSON when encoding is unavailable or fails.
+- 9b618c1: Report `ASSET_SAT_OCCUPIED` when a complete fresh Bitcoin observation shows a different Original already accepted on the proposed boundary sat. Preserve `ASSET_ACCEPTED_HEAD_REQUIRED` for missing or incomplete evidence, and reject the occupied sat before controller or Bitcoin signing.
+- e6845d1: Normalize corrupt retained Bitcoin reveal transactions to `ASSET_BITCOIN_PUBLICATION` CelErrors and invalid WebVH method histories to `ASSET_WEBVH_BINDING` CelErrors during hosted publication, resolution, and republishing. Preserve storage failure and parsing-limit contracts.
+- e5d05ea: `QuickNodeProvider` now returns a plain `Uint8Array` for inscription content instead of a Node `Buffer`, matching the documented `Uint8Array` contract on `OrdinalsProvider.getInscriptionById(...).content` and `SatSnapshotReader.content()`. A `Buffer` is structurally a `Uint8Array` subclass, but it overrides observable behavior — notably `JSON.stringify`, which serializes a `Buffer` as `{"type":"Buffer","data":[...]}` instead of the plain-`Uint8Array` shape — so a caller that serializes this content (logging, caching, hashing a serialized envelope) could get a different byte representation than the type promised (#796).
+- 0d30394: Fix: `updateDIDOriginal` could silently return `did: ""` on its `OriginalResult` instead of throwing when neither `result.did` nor the update log's last state carried a usable `id`. The function's own final error branch ("Cannot determine DID from update result") is now reachable in that case instead of being bypassed by an unconditional `|| ""` fallback.
+- dca3854: `AssetResolver.observe()` no longer loses its documented bounded retry on
+  Bitcoin chain movement when a `chainValidator` is configured. Previously, a
+  configured validator was consulted unconditionally, before the check that
+  classifies a snapshot whose `tipBefore` and `tipAfter` disagree as the benign,
+  retryable `"chain-changed"` status. A real independent validator legitimately
+  disagrees when it re-checks that already-stale `tipBefore` against the node's
+  current (moved-on) tip, and the outer catch handler only recognized a literal
+  `"SAT_SNAPSHOT_CHAIN_CHANGED"` error code that is never actually thrown — so
+  every validator-thrown error fell through to `"incomplete"` with no retry.
+  The validator is now only consulted when the snapshot itself is already
+  chain-stable; a mid-observation movement is classified as `"chain-changed"`
+  the same way it is when no validator is configured at all.
+- 0330f30: Fix `isAlreadyKnownTxError` failing to recognize Bitcoin Core >=28.0's rewritten RPC -27 ("already in chain/mempool") rejection message (#889).
+
+  `ALREADY_KNOWN_TX_ERRORS` only matched Core's pre-28.0 wording ("transaction already in block chain"). Core 28.0 rewrote that message to "Transaction outputs already in utxo set" (bitcoin/bitcoin#30212), which is what this repo's own regtest evidence (Core 31.1) and QuickNode actually emit — so a rebroadcast of an already-mined transaction was misread as a real failure, permanently sticking a record at `commit_broadcast` and 502ing the manual Finish-button recovery meant to rescue exactly that case. `isAlreadyKnownTxError` now checks the RPC -27 error code first (stable across Core versions) before falling back to prose matching, and adds the new wording as a fallback for providers that only expose a message. Fixed in both `apps/landing/server/bitcoin.ts` and the mirrored `packages/sdk/src/bitcoin/inscription-recovery.ts`.
+
+- bb60bde: **Breaking (folds into 4.0.0): `keyStore` is removed from the default `OriginalsSDK` options.** It was accepted and validated but no wired manager read it (`sdk.did`, `sdk.credentials`, `sdk.lifecycle` all ignored it), so a caller relying on it for custody minted assets it could not sign. `OriginalsSDK.create({ keyStore })` now throws `SDK_OPTION_REMOVED`; pass `{ signer }` (a `CelSigner`, e.g. `createLocalSigner`) for custody instead. The `KeyStore` type and `signerFromKeyStore` helper remain exported for the retained legacy lifecycle.
+- fa89b5b: Removed `OrdNodeProvider`, the self-hosted-ord-node `ResourceProvider` stub whose every method rejected with `ORD_NODE_NOT_IMPLEMENTED` (#248/#318) rather than performing any real network I/O.
+
+  Per [#328](https://github.com/onionoriginals/sdk/issues/328)'s current-state review, this class was never reachable through any of `@originals/sdk`'s published `exports` subpaths (`.`, `./cel`, `./testing`, `./types`, `./v3`, `./asset-envelope`) — it was dead code carried in `dist/` with no supported way for a consumer to import it. Its `ResourceProvider`/`LinkedResource`/`Inscription`/`ResourceInfo` type family (`bitcoin/providers/types.ts`) is removed with it, since `OrdNodeProvider` was its only implementer. The exported live-provider surface (`QuickNodeProvider`, `RegtestProvider`, and the `OrdinalsProvider` interface they and `OrdMockProvider` implement) already covers production Bitcoin/Ordinals reads; this stub added confusion without capability. A genuine local-ord-node adapter can be added later against that existing `OrdinalsProvider` contract if a concrete integration need arises.
+
+- 32625b5: Fix `HostedAssets.prepare()` (used by `sdk.lifecycle.publishToWeb`/`prepareWebPublication`) rejecting a republish of an already-hosted asset with `ASSET_WEBVH_BINDING` whenever `WebPublicationOptions.paths` was supplied, even when it exactly matched the asset's existing bound path. The republish branch compared `options.paths` by truthiness instead of by equality against the existing binding, so replaying the exact same `WebPublicationOptions` used on the original `publishToWeb` call — a natural retry/idempotent pattern — failed on every call after the first unless `paths` was omitted entirely. `options.paths` is now decoded from the asset's existing hosted path and compared element-by-element; a caller-supplied `paths` that differs from the existing binding is still rejected, matching the domain check immediately to its left.
+- 139d9be: **`publishToWeb` no longer requires an Ed25519 `webvhSigner` to republish an already-hosted asset** (#703).
+
+  `HostedAssets.prepare()` validated that the WebVH method signer was Ed25519 before branching on whether the call was a first-time WebVH mint or a republish of an already-hosted (`state.layer === "webvh"`) asset. The republish branch fetches and returns the existing `did.jsonl` verbatim — it never signs the method log — so a controller who rotated their asset's signing key to P-256 or P-384 (a fully supported `CelSigner` algorithm) could no longer republish that asset (a new resource version, a metadata update, a further rotation) without also supplying an unrelated, functionally-unused Ed25519 key as `webvhSigner`.
+
+  The Ed25519 method-custody check now only runs in the "mint a new WebVH identity" branch, which is the only branch that actually uses `methodSigner` to sign the method log. Republishing with a correctly-authorized non-Ed25519 controller signer now succeeds exactly as it does for an Ed25519 controller; first-time WebVH publication still requires an explicit Ed25519 `webvhSigner` when the controller itself is not Ed25519.
+
+- 568db50: Reserve the `.well-known` WebVH path segment at every authoring seam. `paths: [".well-known"]` hosts its log at `/.well-known/did.jsonl`, the same location `paths: []` already uses, so two distinct DIDs would share one log file. `WebVHManager.createDIDWebVH` (and `sdk.did.createDIDWebVH`/`migrateToDIDWebVH`) now throw `WEBVH_PATH_RESERVED`, and `publishToWeb`/`HostedAssets.prepare` fail with `ASSET_WEBVH_PATH_RESERVED`, when the first path segment is `.well-known` (case-insensitive). Omit `paths` to publish at the default location.
+- 3ed7af1: **`resolveDID`/`resolveDIDWithMetadata` now surface a resolution status for a cross-network or wrong-layer Bitcoin DID instead of throwing** (#695).
+
+  `AssetResolver.resolveDID` threw a raw `CelError("invalid", "ASSET_NETWORK")` for a syntactically valid asset alias whose layer/network didn't match the configured provider, contradicting `packages/sdk/V3.md`'s documented contract that `resolveDIDWithMetadata` "surfaces `didResolutionMetadata.status`... without throwing" for every inconclusive case, and leaking that undocumented code past `AssetDIDManager.resolveDID`'s single-error-code (`ASSET_RESOLUTION_INCOMPLETE`) contract. The check now shares the same `identity-mismatch` handling already used by `AssetResolver.check()`: a parsed alias naming the wrong layer or network resolves to `{ didDocument: null, didResolutionMetadata: { status: "identity-mismatch" }, ... }` rather than throwing. A malformed identifier (one that fails to parse at all) still throws, unchanged.
+
+- af7051f: `SignetProvider.createInscription` now types its parameters from the shared
+  `OrdinalsProvider` contract (`data`/`buildContent`/`targetSatoshi`) instead of a
+  narrower local shape, and rejects deferred content (`buildContent`) or
+  reinscribing a pinned satoshi (`targetSatoshi`) with a named
+  `StructuredError('ORD_PROVIDER_UNSUPPORTED', ...)` before assuming an
+  unconfigured wallet is the reason nothing happened. Static-`data` behavior is
+  unchanged.
+- 244cae1: **`submitPreparedInscriptionOnSat`/`resumeInscriptionOnSat` no longer downgrade a healthy `reveal_broadcast` status or misreport an ordinary duplicate-broadcast rejection as an error (#816).**
+
+  Retrying a prepared pair whose reveal was already recorded as `reveal_broadcast` but isn't yet independently confirmed — the normal window before the first confirmation — could downgrade the persisted status before even attempting resubmission, and had no way to distinguish a provider's "already on the network" rejection of the identical bytes (a positive signal) from a genuine lost/failed broadcast. Both a prior definite `reveal_broadcast` record and a closed-set `isAlreadyKnownTxError` classification (mirroring `apps/landing/server/bitcoin.ts`'s existing pattern) now resolve an ambiguous resubmission rejection as continued success instead of a fresh error, per `packages/sdk/V3.md`'s "retry the same prepared wrapper; never rebuild merely because an acknowledgement was lost" contract. Genuine eviction/reorg recovery is unaffected.
+
+- eb8869e: **`OriginalsSDK.create({ storageAdapter })` now validates the adapter's shape and no longer silently drops a new-style adapter from `config.storageAdapter`** (#698).
+
+  The constructor checked `"putObject" in storageAdapter` before confirming `storageAdapter` was even an object, so a malformed value (e.g. a string) crashed with a raw `TypeError` instead of a structured `CelError` (`SDK_STORAGE_ADAPTER`). Separately, only a legacy-shape adapter (`put`/`get`) was ever copied onto `this.config.storageAdapter` — a pure new-style adapter (`putObject`/`getObject`/`exists`) built the local hosted-publication adapter correctly but was invisible to duck-typed consumers that read `config.storageAdapter` directly (e.g. `DIDManager.readStoredCelLog`), even though the option's declared type accepts either shape. Both shapes are now forwarded.
+
+- 8705bfc: **Bitcoin resolution response bodies are now capped while streaming, not after full allocation (#606).**
+
+  `QuickNodeProvider` and `OrdHttpProvider` checked `Content-Length` as a cheap early reject, but then called `response.arrayBuffer()` to materialize the entire body before comparing its actual size against the configured cap. A chunked/streamed response with no (or a lying) `Content-Length` header could therefore force a full oversized allocation into memory before any cap took effect, even though the aggregate request/time/inscription-count budget from #606's earlier fix (`SatSnapshotBudget`) was already in place.
+
+  - New shared `readResponseBodyCapped()` (`packages/sdk/src/adapters/response-body-limit.ts`) reads a response body incrementally via its stream reader and cancels the underlying stream the instant more than the configured cap has been observed, so the excess is never buffered. Falls back to `arrayBuffer()` only for response-like objects without a streaming body (e.g. test doubles).
+  - `QuickNodeProvider.rpcCall()`, its raw `contentBaseUrl` `/content/:id` and `/r/metadata/:id` reads, and `OrdHttpProvider`'s content/JSON/`  /r/metadata` fetches all route through it. Error codes and messages are unchanged (`QUICKNODE_RESPONSE_TOO_LARGE`, `OrdHttpProvider: response (body) exceeds N bytes`).
+  - A resource-limit failure still surfaces as the existing typed error / `incomplete` resolution outcome — never a truncated "complete" result.
+
+- 131e1ae: Fix `identity-operations.ts` and `WebVHManager.updateDIDWebVH`/`rotateDIDWebVHKeys` throwing plain `Error` instead of `StructuredError` on their public validation paths (#720, a sibling of #711).
+
+  `prepareDIDDataForSigning`, `verifyDIDSignature`, `createOriginal`, `createDIDOriginal`, `updateOriginal`, and `updateDIDOriginal` (all exported as static `OriginalsSDK`/`OriginalsSDK3` methods and consumed directly by `@originals/auth`'s Turnkey signer), plus `WebVHManager.updateDIDWebVH` and `WebVHManager.rotateDIDWebVHKeys` and the validation helpers they call directly (`assertEd25519WebVHUpdateKeys`, `saveDIDLog`, the private `appendKeyChange`/`appendKeyChangePrerotation`), now throw `StructuredError` with a stable `.code` on every validation-failure branch, matching the pattern already used elsewhere in the same files (e.g. `WEBVH_VERIFIER_REQUIRED`, `WEBVH_DOMAIN_REQUIRED`). Callers doing `catch (e) { if (e.code === ...) }` around these methods no longer silently get `undefined`.
+
+  New codes: `WEBVH_MODULE_LOAD_FAILED`, `ED25519_KEY_LENGTH_INVALID`, `ORIGINAL_TYPE_UNSUPPORTED`, `WEBVH_PREROTATION_KEY_FORMAT_INVALID`, `WEBVH_UPDATE_DID_UNRESOLVED`, `WEBVH_PREROTATION_UNSUPPORTED`, `WEBVH_PREROTATION_REQUIRED`, `WEBVH_RESULT_DOCUMENT_INVALID`, `WEBVH_UPDATE_KEY_INVALID`, `WEBVH_UPDATE_KEY_NOT_ED25519`, `WEBVH_PREROTATION_EMPTY_LOG`, `WEBVH_PREROTATION_NOT_COMMITTED`, `WEBVH_PREROTATION_KEY_MISMATCH`, `WEBVH_DID_FORMAT_INVALID`, `WEBVH_PATH_SEGMENT_INVALID`, `WEBVH_DOMAIN_SEGMENT_INVALID`, `WEBVH_PATH_OUTSIDE_BASE_DIR`. Error messages are unchanged, so existing message-based assertions are unaffected. `WebVHManager.createDIDWebVH`'s own raw-`Error` throws remain out of scope here — that method is #711's own scope (PR #786) — as does `recoverDIDWebVH`, which #720 does not name.
+
+- c70b789: Fix: `prepareBitcoinPublication` crashed with a bare, unwrapped third-party `Error` (not the documented `CelError` contract) when an asset's CEL `metadata` contained an ordinary integer &gt;= 2^32 — a value fully valid under the CEL 3 wire format, but unencodable by the `micro-ordinals` CBOR encoder used for Bitcoin inscription sizing (#673). `checkedContent` (`packages/sdk/src/v3/bitcoin.ts`) now catches that encoder failure and rethrows it as a structured `CelError` with code `ASSET_INSCRIPTION_METADATA`.
+- 902de9c: Update bitcoinjs-lib to 7.0.2 for Bitcoin address validation.
+- 669e2b3: **`WebVHManager.updateDIDWebVH` / `DIDManager.updateDIDWebVH` now fall back to the signer as verifier when no `verifier` option is supplied**, matching `createDIDWebVH`'s existing behavior (#702).
+
+  `packages/sdk/V3.md` documents that "Standalone WebVH signing accepts either a key pair or an external signer, with the appropriate verifier" — a signer that also implements `ExternalVerifier` (the pattern `TurnkeyWebVHSigner`/`TurnkeyDIDSigner` use) is a supported pattern. That pattern already worked on `createDIDWebVH`, but `updateDIDWebVH` passed `options.verifier` straight through with no fallback and threw `Verifier implementation is required` deep inside `didwebvh-ts` when it was omitted — forcing every caller to remember to pass a separate `verifier` on update even though `create` did not require one.
+
+  `updateDIDWebVH` now accepts the same dual signer/verifier object `createDIDWebVH` already accepts, and still requires an explicit `verifier` (with a clear error) when the supplied signer does not itself implement `verify()`.
+
+- b9ed515: **did:webvh domain authoring and hosted publication now canonicalize (trim + lowercase + host/port validate) the caller's `domain` instead of using it verbatim** (#722, #761, #764).
+
+  Three related defects shared one root cause: nothing normalized `domain` before it reached DID construction or a binding comparison.
+
+  - `sdk.did.createDIDWebVH`, `createDIDOriginal`, and `updateDIDOriginal` accepted a padded-but-nonblank domain (e.g. `"  example.com  "`) and minted a permanent `did:webvh` with literal whitespace embedded in the identifier — unresolvable once published (#764).
+  - `lifecycle.publishToWeb`/`prepareWebPublication` rejected a valid mixed-case domain (e.g. `"Example.com"`) with a confusing low-level `CEL_DID` error surfacing from deep inside CEL history verification, instead of a clear domain-specific error or simply normalizing and succeeding (#722).
+  - Republishing an already-hosted asset rejected a same-host domain that only differed in letter case (e.g. `"Example.com"` vs. the stored `"example.com"`) with `ASSET_WEBVH_BINDING`, since the comparison was a raw case-sensitive string match against the always-lower-cased stored host (#761).
+
+  `@originals/cel/v3` (and `@originals/sdk/cel`) export `canonicalizeWebVHDomain`, which trims, lower-cases and validates a WebVH host[:port] and returns its WHATWG `URL#host` spelling (default `:443` dropped, port leading zeros removed). It shares its host checks with `parseAssetAlias`. `HostedAssets.prepare()` (strict: fully qualified DNS hosts only) and `DIDManager`'s `requireWebVHDomain()` (identity seams `createDIDWebVH`, `migrateToDIDWebVH`, `createDIDOriginal`, `updateDIDOriginal`; also admits `localhost[:port]` and ASCII punycode hosts) both use it, and use that single canonical value for DID construction, method-log storage, and any existing-binding comparison.
+
+  A missing/blank domain still throws `WEBVH_DOMAIN_REQUIRED`. Any other unusable domain fails at the seam, before signing, with `CelError` `INVALID_DOMAIN` (IPs, single-label hosts, `localhost` for assets, bad ports) or `CEL_WEBVH_IDNA` (Unicode; punycode for assets), instead of minting broken output, an uncoded didwebvh-ts error, or a much later `CEL_DID` failure. A valid mixed-case, padded or explicit-port domain succeeds and is normalized: republishing with the same `example.com:443` or `example.com:08080` input now succeeds (previously the first publish minted `%3A443`/`%3A8080` while storage used `URL#host`, so the republish failed `ASSET_WEBVH_BINDING`), and `createDIDWebVH({ domain: "example.com:443" })` mints a portless DID. Identity seams now reject single-label hosts and IPs that `createDIDWebVH`/`createDIDOriginal` previously minted or failed uncoded. Republishing to a genuinely different host is still rejected with `ASSET_WEBVH_BINDING`.
+
+- b16ca13: `resolveSat` no longer lets an unrelated party permanently block resolution of
+  a sat by inscribing their own self-signed history whose `migrate` operation
+  targets an unsupported IDNA WebVH domain (`CEL_WEBVH_IDNA`), when that
+  candidate arrives before any boundary has been selected for the sat.
+
+  `apply()`'s controller-authority check (`CEL_AUTHORITY`) only proves an entry
+  is signed by _some_ controller: with no `prefix` supplied (no boundary
+  selected yet), that controller is the candidate's own self-declared `create`
+  controller, not this Original's real controller. Treating every
+  `CEL_WEBVH_IDNA` throw as an authenticated, poisoning continuation — as the
+  pre-existing code did unconditionally — let anyone author a throwaway,
+  internally self-consistent history with an invalid IDNA domain and, once
+  confirmed at a lower block height/position than the real boundary, flip the
+  whole sat's resolution to `unsupported-capability` forever.
+
+  `CEL_WEBVH_IDNA` now only poisons resolution once a boundary has actually
+  been accepted (`history !== undefined`), matching the existing
+  `CEL_DATA_REFERENCE` guard's `candidateAuthenticatedContinuation` reasoning:
+  a pre-boundary candidate remains exactly as ignorable as any other invalid
+  one, per `specs/originals-cel-v3-authority.md`'s "does not poison an
+  otherwise valid history" rule.
+
+- 67891d3: One WebVH path-segment rule, owned by `@originals/cel`, now guards every `paths`-taking authoring seam.
+
+  `@originals/cel/v3` (and `@originals/sdk/cel`) export `isWebVHPathSegment`, the decoded-segment predicate `parseAssetAlias` applies (non-empty, not `.`/`..`, no `/`, `\`, NUL or leading/trailing whitespace, well-formed UTF-16), and `canonicalWebVHPaths`, which validates a `paths` array, reserves a leading `.well-known` (any case) and returns the DID-spelling segments. `publishToWeb`, `sdk.did.createDIDWebVH`/`migrateToDIDWebVH` and `createDIDOriginal` (and so `@originals/auth`'s `createDIDWithTurnkey`) all use it before signing.
+
+  Behaviour changes: a segment with edge whitespace or a lone surrogate now fails `ASSET_WEBVH_PATH` / `WEBVH_PATH_SEGMENT_INVALID` instead of an uncoded didwebvh-ts `Error` or `URIError`; a colon inside a segment (`a:b`) is accepted and encoded `a%3Ab`; `createDIDOriginal` now percent-encodes its segments and rejects invalid, non-array and reserved `paths` instead of minting a DID `parseAssetAlias` cannot read. `parseAssetAlias` still reads existing `.well-known` DIDs. The unreleased SDK helper `isValidWebVHPathSegment` is removed in favour of the CEL predicate.
+
+- 320b8e2: **`HostedAssets.prepare()` now validates `WebPublicationOptions.paths` at the public seam instead of letting a malformed value reach `WebVHManager`** (#826).
+
+  Previously a non-string `paths` element (e.g. `[123]`) escaped as a raw `TypeError`, a well-typed-but-invalid segment (e.g. `[".."]`) escaped as a plain `Error` instead of a `CelError`, and a non-array `paths` value (e.g. a plain string) was silently iterated character-by-character, producing a corrupted `did:webvh` path with no error at all. `prepare()` now rejects any of these with a `CelError` (`ASSET_WEBVH_PATH`) before any signing/storage work begins, using the same CEL path-segment rule (`canonicalWebVHPaths` / `isWebVHPathSegment` from `@originals/cel/v3`) that `WebVHManager.createDIDWebVH` and `parseAssetAlias` apply.
+
+- 594be92: **`signCredential`, `signCredentialMultiSig`, and `createDIDWebVH` now throw `StructuredError` on caller-input validation failures instead of a raw `Error`** (#711).
+
+  Per CLAUDE.md's public-seam contract ("Use `StructuredError` or the CEL 3 `CelError` contract appropriate to the public seam"), a caller following the SDK's own `catch (e) { if (e.code === 'X') ... }` idiom around these three documented public methods previously got `undefined` for `.code` on a validation failure — indistinguishable from an unrelated error such as a network failure.
+
+  - `CredentialManager.generateProofValue` (the legacy fallback path `signCredential` uses when the verification method isn't a resolvable `did:`) now wraps a malformed `privateKeyMultibase` as `StructuredError('INVALID_KEY', ...)`, the same code `LifecycleManager` already uses for this failure mode.
+  - `MultiSigManager.assertEd25519SignerKey` (used by `signCredentialMultiSig`) now throws `StructuredError('INVALID_KEY', ...)` for a malformed signer key and `StructuredError('MULTISIG_ED25519_REQUIRED', ...)` for a non-Ed25519 signer key.
+  - `WebVHManager.createDIDWebVH`'s caller-input validation now throws typed errors: `WEBVH_PATH_SEGMENT_INVALID`, `WEBVH_PREROTATION_EXTERNAL_SIGNER_UNSUPPORTED`, `WEBVH_VERIFICATION_METHODS_REQUIRED`, `WEBVH_UPDATE_KEYS_REQUIRED`, and `WEBVH_VERIFIER_REQUIRED` — the last reusing the exact code `identity-operations.ts`'s `resolveVerifier` and `updateDIDWebVH` already use for the identical sign-only-signer-without-verifier condition, so all three DID write paths share one error contract for this failure.
+  - `assertEd25519WebVHUpdateKeys` (the shared Ed25519-only `updateKeys` guard used by `createDIDWebVH`'s `externalSigner` path and every rotation/recovery entry) now throws `StructuredError('WEBVH_UPDATE_KEY_INVALID', ...)` for a malformed multikey and `StructuredError('WEBVH_UPDATE_KEY_NOT_ED25519', ...)` for a non-Ed25519 key, instead of a raw `Error`.
+
+  Internal/dependency-invariant failures in these same files (e.g. a broken `didwebvh-ts` module load, or a malformed document returned from it) are unchanged — they aren't a caller-input mistake, so aren't part of this typed-error contract.
+
+- f246be0: **`createDIDOriginal` and `updateDIDOriginal` now reject a blank/whitespace-only `domain` with `WEBVH_DOMAIN_REQUIRED`, matching `DIDManager`'s existing guard** (#678).
+
+  `#531` made `DIDManager.createDIDWebVH`/`migrateToDIDWebVH` refuse to guess a did:webvh domain: an omitted or blank domain throws `WEBVH_DOMAIN_REQUIRED` rather than silently minting an unresolvable DID. The standalone `createDIDOriginal`/`updateDIDOriginal` helpers in `packages/sdk/src/did/identity-operations.ts` — also exported as static `OriginalsSDK.createDIDOriginal`/`updateDIDOriginal` on both the default (CEL 3) and previous-format SDKs — were a second, independent call path into `didwebvh-ts` that did not share that guard:
+
+  - `createDIDOriginal({ domain: "   " })` silently minted a permanent `did:webvh` with literal unencoded spaces embedded in its identifier instead of failing loudly.
+  - `updateDIDOriginal({ domain: "   " })` had the same defect on the move/rotation path.
+  - `updateDIDOriginal({ domain: "" })` silently swallowed the move as a no-op (didwebvh-ts's internal `options.address || options.domain` treats `""` as falsy) instead of erroring — the caller got a normal success result with the DID's location unchanged.
+
+  Both helpers now validate a supplied `domain` with the same `requireWebVHDomain` guard `DIDManager` uses (now exported from `did/DIDManager.js`), before any signing work. `HostedAssets.prepare()` (`packages/sdk/src/v3/hosted.ts`) had a sibling gap — its `!options.domain` check treated a whitespace-only domain as "explicit" and let it through to fail later, mid-mint, with the wrong error code (`CEL_DID` instead of `WEBVH_DOMAIN_REQUIRED`); it now rejects blank/whitespace domains up front with the correct code too.
+
+  An explicit, non-blank domain continues to work exactly as before on all three paths; `updateDIDOriginal` with `domain` omitted entirely still updates without requiring one.
+
+- 5153d0d: **Fix: satpoint comparisons now normalize hex casing on both sides, instead of only one.** (#733)
+
+  `prepareBitcoinPublication`'s identity-sat alignment check (`packages/sdk/src/v3/bitcoin.ts`) lowercased only the caller-supplied funding UTXO's txid before comparing it against the configured `SatProvider`'s reported `ownership.satpoint`, which carries no casing contract of its own. A provider or caller-supplied `Utxo.txid` that used a different hex letter case than the other side happened to use caused a spurious `ASSET_SAT_ALIGNMENT` failure for a funding input that genuinely was the identity sat's current holder.
+
+  `resolveSat`'s independent-ownership cross-check (`packages/cel/src/v3/publications.ts`) had the same one-sided gap: an independent enumeration source's `ownership.satpoint` was compared to the primary snapshot's with strict, case-sensitive equality.
+
+  Both now compare through a new shared `normalizeSatpoint` export (`@originals/cel/v3`), which lowercases only the txid component of a well-formed `<64-hex-txid>:<vout>:<offset>` satpoint and leaves any other value unchanged, so a genuinely malformed or differing satpoint still fails comparison.
+
+- Updated dependencies [335abad]
+- Updated dependencies [352e5a2]
+- Updated dependencies [66a9944]
+- Updated dependencies [a72b030]
+- Updated dependencies [42cad62]
+- Updated dependencies [5ca171e]
+- Updated dependencies [7acca1c]
+- Updated dependencies [2cb1f4f]
+- Updated dependencies [2a51556]
+- Updated dependencies [12f605e]
+- Updated dependencies [335469a]
+- Updated dependencies [b210e71]
+- Updated dependencies [810ec9a]
+- Updated dependencies [d813344]
+- Updated dependencies [b4a7fcf]
+- Updated dependencies [46337ab]
+- Updated dependencies [038895a]
+- Updated dependencies [dd84574]
+- Updated dependencies [730f295]
+- Updated dependencies [ea5d573]
+- Updated dependencies [9755861]
+- Updated dependencies [82bd3a3]
+- Updated dependencies [f01d5e6]
+- Updated dependencies [80ccadf]
+- Updated dependencies [e74afb4]
+- Updated dependencies [1e57416]
+- Updated dependencies [6bf9f2d]
+- Updated dependencies [1ad78a0]
+- Updated dependencies [de27b01]
+- Updated dependencies [fb0877f]
+- Updated dependencies [67439b6]
+- Updated dependencies [29290f7]
+- Updated dependencies [a16d05e]
+- Updated dependencies [75f31c2]
+- Updated dependencies [1536a76]
+- Updated dependencies [b9ed515]
+- Updated dependencies [b16ca13]
+- Updated dependencies [6c74745]
+- Updated dependencies [67891d3]
+- Updated dependencies [42df5c7]
+- Updated dependencies [5153d0d]
+  - @originals/cel@2.0.0
+
 ## 3.0.0
 
 ### Major Changes
