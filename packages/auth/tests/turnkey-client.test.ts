@@ -434,6 +434,22 @@ describe('turnkey-client', () => {
     });
 
     describe('repairing missing account roles in an existing sub-org (#784)', () => {
+      test('allows login to the existing identity when the parent key cannot repair accounts', async () => {
+        const createSubOrganization = mock(() => Promise.resolve({}));
+        const createWalletAccounts = mock(() =>
+          Promise.reject(Object.assign(new Error('request not authorized'), { code: 7 }))
+        );
+        const client = createMockClient({
+          getWalletAccounts: mock(() => Promise.resolve({ accounts: COMPLETE_ACCOUNTS.slice(0, 2) })),
+          createWalletAccounts,
+          createSubOrganization,
+        });
+
+        expect(await getOrCreateTurnkeySubOrg('user@example.com', client)).toBe('existing_sub_org');
+        expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+        expect(createSubOrganization).not.toHaveBeenCalled();
+      });
+
       test('is a no-op when the wallet already has all three required roles', async () => {
         const createWalletAccounts = mock(() => Promise.resolve({ accounts: [] }));
         const client = createMockClient({

@@ -292,6 +292,28 @@ describe('email-auth', () => {
       expect(session!.subOrgId).toBe('sub_org_existing');
     });
 
+    test('successful OTP survives a permission-denied wallet account repair', async () => {
+      const base = createMockTurnkeyClient().apiClient();
+      const createWalletAccounts = mock(() =>
+        Promise.reject(Object.assign(new Error('request not authorized'), { code: 7 }))
+      );
+      const client = {
+        apiClient: () => ({
+          ...base,
+          getWalletAccounts: async () => ({ accounts: [] }),
+          createWalletAccounts,
+        }),
+      } as unknown as import('@turnkey/sdk-server').Turnkey;
+      const sessionId = await setupSession(client);
+
+      const result = await verifyEmailAuth(sessionId, '123456', client, storage, verifyOptions);
+      expect(result.verified).toBe(true);
+      expect(result.subOrgId).toBe('sub_org_existing');
+      expect(result.verificationToken).toBe('token_abc');
+      expect(storage.get(sessionId)?.verified).toBe(true);
+      expect(createWalletAccounts).toHaveBeenCalledTimes(1);
+    });
+
     test('provisions a new sub-org after successful verification when none exists', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
