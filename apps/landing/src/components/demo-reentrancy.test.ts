@@ -108,9 +108,9 @@ describe('depositBadgeLabel — the four readiness states, as a table', () => {
   });
 
   test('only "ready" invites the next step; the other three do not', () => {
-    expect(/ready to inscribe/i.test(depositBadgeLabel('ready', demo.deposit))).toBe(true);
+    expect(/ready to add to Bitcoin/i.test(depositBadgeLabel('ready', demo.deposit))).toBe(true);
     for (const r of ['unspendable', 'detected', 'waiting'] as const) {
-      expect(/ready to inscribe/i.test(depositBadgeLabel(r, demo.deposit))).toBe(false);
+      expect(/ready to add to Bitcoin/i.test(depositBadgeLabel(r, demo.deposit))).toBe(false);
     }
   });
 });

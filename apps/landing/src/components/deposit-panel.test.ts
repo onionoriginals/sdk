@@ -43,11 +43,11 @@ describe('the two money risks do not require a click to see', () => {
 
   test('names irreversibility, and does not exempt us from it', () => {
     expect(/can.t be reversed|cannot be reversed/i.test(risk)).toBe(true);
-    expect(/us included|including us/i.test(risk)).toBe(true);
+    expect(/us included|including (?:by )?us/i.test(risk)).toBe(true);
   });
 
   test('tells them to send the quoted amount, not a round number', () => {
-    expect(/round number/i.test(risk)).toBe(true);
+    expect(/quoted amount/i.test(risk)).toBe(true);
   });
 
   // The summary must not promise a way out that the long-form line denies.
@@ -88,7 +88,7 @@ describe('a quote never crosses to another address', () => {
   /**
    * The bug: reset() on an identity change clears the engine and the asset but
    * not the quote, so the previous account's balance could be shown against
-   * the new account's address — "ready to inscribe" for someone who has sent
+   * the new account's address — "ready to add to Bitcoin" for someone who has sent
    * nothing, and the old amount behind the new address in the wallet link.
    */
   test('a quote left over from another identity is not', () => {
@@ -187,12 +187,12 @@ describe('a funded deposit stops asking for money', () => {
   });
 
   test('the funded copy tells the creator to inscribe, not to send more', () => {
-    expect(demo.deposit.fundedHeading).toMatch(/ready to inscribe/i);
+    expect(demo.deposit.fundedHeading).toMatch(/ready to add to Bitcoin/i);
     expect(demo.deposit.fundedBody).not.toMatch(/send/i);
   });
 
   test('the balance copy explains that a surplus is reusable, not stranded', () => {
-    expect(demo.deposit.balanceReuse).toMatch(/next inscription/i);
+    expect(demo.deposit.balanceReuse).toMatch(/another Original here/i);
   });
 });
 
@@ -218,7 +218,7 @@ describe('a commit-only broadcast is not an inscription', () => {
 
   test('the commit-only copy does not claim the inscription exists', () => {
     expect(demo.deposit.commitOnlyHeading).not.toMatch(/inscribed/i);
-    expect(demo.deposit.commitOnlyBody).toMatch(/not propagated|has not propagated/i);
+    expect(demo.deposit.commitOnlyBody).toMatch(/has not reached the network yet/i);
     // And it must not imply the creator owes another action.
     expect(demo.deposit.commitOnlyBody).toMatch(/automatically/i);
   });

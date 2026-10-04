@@ -194,7 +194,7 @@ describe('the published log’s durability (R7)', () => {
   test('the anonymous resolved heading does not promise a permanent home', () => {
     expect(resolvedCopy(false).heading).not.toBe(resolvedCopy(true).heading);
     expect(resolvedCopy(false).heading).toMatch(/for now|temporar/i);
-    expect(resolvedCopy(true).heading).toMatch(/live at this origin/i);
+    expect(resolvedCopy(true).heading).toMatch(/available on this site/i);
   });
 });
 

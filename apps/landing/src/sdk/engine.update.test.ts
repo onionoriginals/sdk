@@ -210,6 +210,6 @@ describe('revise a created asset', () => {
     const updated = await engine.update('Two', 'Artwork', SVG_V2);
     const gloss = summarize(updated.celLog[1]);
     expect(gloss).toContain('artwork.svg');
-    expect(gloss).toContain('digest');
+    expect(gloss).toContain('linked to the previous version');
   });
 });

@@ -91,26 +91,24 @@ describe('the page states the indexer trust assumption', () => {
   });
 
   test('the provenance card names the index the Bitcoin reads depend on', () => {
-    const card = why.cards.find((c) => /hand to anyone/i.test(c.title));
+    const card = why.cards.find((c) => /anyone can check/i.test(c.title));
     expect(card).toBeDefined();
     // Named plainly, not softened into "decentralized infrastructure".
-    expect(card!.body).toMatch(/ordinals index/i);
+    expect(card!.body).toMatch(/third-party data service/i);
   });
 
   test('surviving our disappearance is conditioned on inscribing and keeping the log', () => {
     // Pre-anchor assets die with the host — the page may not imply otherwise.
-    const card = why.cards.find((c) => /vanish/i.test(c.body));
+    const card = why.cards.find((c) => /stop operating/i.test(c.body));
     expect(card).toBeDefined();
-    expect(card!.body).toMatch(/inscribe/i);
-    expect(card!.body).toMatch(/copy of the log/i);
+    expect(card!.body).toMatch(/add an Original to Bitcoin/i);
+    expect(card!.body).toMatch(/copy of its signed history/i);
   });
 });
 
-describe('the page separates CEL provenance from DID methods', () => {
-  test('the protocol section names did:cel identity and genesis binding', () => {
-    expect(protocol.standardsNote).toMatch(/Cryptographic Event Logs/);
-    expect(protocol.standardsNote).toMatch(/did:cel identifiers derived from genesis SCIDs/);
-    expect(protocol.standardsNote).toMatch(/binds each history to its genesis commitment/);
-    expect(protocol.standardsNote).not.toMatch(/did:cel is ours/);
+describe('plain-language limits of verification', () => {
+  test('a signed history does not claim to prove authorship', () => {
+    expect(protocol.standardsNote).toMatch(/signing key approved each version/);
+    expect(protocol.standardsNote).toMatch(/does not prove who originally made the work/);
   });
 });
