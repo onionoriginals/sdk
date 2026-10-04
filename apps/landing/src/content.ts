@@ -21,9 +21,9 @@ export const site = {
    * byte-exact history that anyone can re-check, later anchored and ordered
    * on Bitcoin.
    */
-  title: 'Originals — A signed history, anchored on Bitcoin',
+  title: 'Originals — Give your work a history',
   description:
-    'Screenshots are free. Provenance is not. Sign a byte-exact history of your work, publish it for anyone to verify, and anchor ownership on Bitcoin.',
+    'Keep a signed history of your work. Start privately, publish when ready, and choose whether to record ownership on Bitcoin.',
   /**
    * The production origin. Single source of truth: injected into index.html
    * (canonical, og:url, og:image, twitter:image) at build time, and
@@ -51,7 +51,7 @@ export const nav = {
     { label: 'Explore', href: '/explore' },
     { label: 'Why Originals', href: '#why' },
     { label: 'Try it', href: '#demo' },
-    { label: 'Protocol', href: '#protocol' },
+    { label: 'How it works', href: '#protocol' },
     { label: 'Developers', href: '#developers' }
   ],
   /** Interim target: points at the demo until the creator-app upload flow ships. */
@@ -101,25 +101,25 @@ export const login = {
  * custody is the kind of thing a user should never discover on their own.
  */
 export const identityPanel = {
-  layerLabel: 'did:webvh',
-  idleTitle: 'Your own DID — no key to lose',
+  layerLabel: 'Your identity',
+  idleTitle: 'Use the same identity on any device',
   idleBody:
-    'Mint a did:webvh signed by a key held in your name, so signing in is all it takes to be you again. No seed phrase, no backup file, nothing to write down.',
-  createAction: 'Create your did:webvh',
+    'Create a public identity for signing your work. Turnkey holds the signing key for you, so there’s nothing to back up. Sign in to use it again.',
+  createAction: 'Create your identity',
   creating: 'Creating…',
-  createFailed: 'DID creation failed — try again.',
-  doneTitle: 'Your DID is signed',
+  createFailed: 'Couldn’t create your identity. Try again.',
+  doneTitle: 'Your identity is ready',
   doneNote:
-    'Signed by your key at Turnkey, our custody provider, and published where DIDs resolve — so it comes back on any browser or device you sign in from. Nothing to back up.',
+    'Your public identity is saved on this site. Use it from any browser or device you sign in from.',
   /** The custody fact itself, stated plainly rather than buried in legal. */
   custodyNote:
-    'Turnkey holds the key; we can ask it to sign only while you are signed in. That is the trade for never having a key to lose — if you would rather hold your own, the SDK signs locally and never talks to us.',
+    'Turnkey holds the key used to sign your work. We can request signatures only while you’re signed in. If you prefer to hold your own key, our developer tools let you sign on your device without connecting to this service.',
   /** Creating needs a live signing session (auth/webvh.ts TurnkeyWebVHSigner). */
-  sessionRequired: 'Your signing session has expired — sign in again to create your DID.',
+  sessionRequired: 'Sign in again to create your identity.',
   copy: 'Copy',
   copied: 'Copied',
-  copyAria: 'Copy DID',
-  copiedAria: 'DID copied'
+  copyAria: 'Copy identity',
+  copiedAria: 'Identity copied'
 };
 
 export const hero = {
@@ -131,53 +131,53 @@ export const hero = {
     recordLabel: 'Originals / Mark No. 001',
     stamp: 'SIGNED ↗',
     filename: 'STUDY-001.SVG',
-    recordTitle: 'Created. Signed. Connected.',
-    illustrationNote: 'Illustrative asset',
+    recordTitle: 'A signed beginning.',
+    illustrationNote: 'Example artwork',
     ribbon: 'FILE → HISTORY → ORIGINAL',
     historyLabel: 'The record keeps going.',
-    historyNote: 'Illustrative history / no live transactions',
+    historyNote: 'Example history / no live transactions',
     history: [
-      { title: 'Created', body: 'The first signed event.' },
-      { title: 'Revised', body: 'New bytes. Connected history.' },
+      { title: 'Created', body: 'The first signed record.' },
+      { title: 'Revised', body: 'A new version linked to the last.' },
       { title: 'Published', body: 'A record others can inspect.' }
     ],
     closing: 'Make something worth remembering.'
   },
-  eyebrow: 'Signed history · Anchored on Bitcoin',
-  headline: 'A signed provenance trail. Anchored on Bitcoin.',
+  eyebrow: 'Signed history · Recorded on Bitcoin',
+  headline: 'A signed history of your work.',
   subhead:
-    'The internet is perfect at copying and terrible at remembering. Originals fixes the remembering: every asset carries a signed history of when it was published, where it lives, and who owns it now — from private draft to Bitcoin-anchored original.',
+    'Keep a signed record of your work as it changes. Start with a private draft, publish it for others to check, and choose whether to record ownership on Bitcoin.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
   primaryCta: { label: 'Make your first Original', href: '#demo' },
   exampleLink: { label: 'See one that already exists', href: '#example' },
   pipelineCaption:
-    'One asset, three layers: private draft, public, inscribed on Bitcoin. Each step signed. The path only moves forward.'
+    'Start with a private draft. Publish it on the web, then add it to Bitcoin if you choose. Each step becomes part of its signed history.'
 };
 
 export const layers = [
   {
     id: 'did:cel' as const,
-    name: 'Local CEL',
+    name: 'Create',
     title: 'Create',
     role: 'Private draft',
-    blurb: 'Born offline as a signed event log. Free, instant, and invisible until you say otherwise.',
-    facts: ['Costs nothing', 'Works offline', 'Keys stay with you']
+    blurb: 'Create a signed record on your device. Keep it private until you publish.',
+    facts: ['Costs nothing', 'Works offline', 'Private until published']
   },
   {
     id: 'did:webvh' as const,
-    name: 'did:webvh',
+    name: 'Publish',
     title: 'Publish',
     role: 'Public discovery',
-    blurb: 'Hosted at your domain with a signed, append-only version history.',
-    facts: ['Served over HTTPS', 'Versioned history', 'Resolvable by anyone']
+    blurb: 'Publish on your domain with a signed record of each version.',
+    facts: ['On your website', 'Past versions preserved', 'Anyone can check']
   },
   {
     id: 'did:btco' as const,
-    name: 'did:btco',
-    title: 'Inscribe',
+    name: 'Add to Bitcoin',
+    title: 'Add to Bitcoin',
     role: 'Bitcoin ownership',
-    blurb: 'Inscribed on a satoshi. Ownership becomes transferable and final.',
-    facts: ['Anchored via Ordinals', 'Transferable', 'Outlives everything']
+    blurb: 'Record ownership on Bitcoin so it can be transferred.',
+    facts: ['Recorded on Bitcoin', 'Transferable', 'Network fees apply']
   }
 ];
 
@@ -186,27 +186,28 @@ export const why = {
   eyebrow: 'Why it matters',
   headline: 'The internet copies. Originals keeps the signed record.',
   subhead:
-    'Screenshots are free. Provenance is not. Originals gives digital work the one thing platforms can’t fake or take away: a cryptographic paper trail, timestamped on Bitcoin.',
+    'Originals keeps a signed record of your work and its changes. Others can check that record, and you can choose to add it to Bitcoin.',
   cards: [
     {
-      title: 'Provenance you can hand to anyone',
-      body: 'Every asset is a signed event log of how it was made and published, and ownership settles directly on Bitcoin. Anyone can re-check every signature themselves — no account, no permission, nothing to ask us for. One honest caveat: the Bitcoin facts (which satoshi, which block, who holds it) are read from an Ordinals index, not from block headers your browser checked. The signatures need no one’s word. The chain data is as good as that index.'
+      title: 'A history anyone can check',
+      body: 'Anyone can check the signatures in an Original’s history without an account or permission from us. Bitcoin ownership details come from a third-party data service and depend on its accuracy; your browser does not check them directly against Bitcoin itself.'
     },
     {
-      title: 'A lifecycle, not a lock-in',
-      body: 'Start private and free. Go public when it matters. Pay Bitcoin fees only when ownership is worth anchoring. Each step is optional, and the path only moves forward.'
+      title: 'Publish when you’re ready',
+      body: 'Start with a free, private draft. Publish it on the web when you want to share it. Pay Bitcoin fees if you choose to record ownership there. You can stop at any stage; moving to the next stage cannot be undone.'
     },
     {
-      title: 'Rails that outlive companies',
-      body: 'Built on W3C DIDs, Verifiable Credentials, and Bitcoin Ordinals. No proprietary registry, no token. Inscribe it and keep a copy of the log, and it still verifies the day we vanish. Before you inscribe, it lives on this host and leaves with it — so export it.'
+      title: 'Keep a copy you can check later',
+      body: 'Originals uses open standards, with no company-owned registry or separate token. Once you add an Original to Bitcoin and keep a copy of its signed history, you can check it even if we stop operating. Until then, the online record depends on this site. Export a copy.'
     }
   ]
 };
 
+
 export const demo = {
   id: 'demo',
   eyebrow: 'Live demo',
-  headline: 'Watch an original come to life.',
+  headline: 'Make an Original.',
   /**
    * Tier-aware (R8). The old single subhead told everyone "Bitcoin steps use
    * the SDK's built-in mock Ordinals provider" — printed directly above what
@@ -214,45 +215,47 @@ export const demo = {
    * for both tiers; the tail states which of the two is reading it.
    */
   subhead:
-    'Name a piece and your browser generates a one-of-a-kind artwork — a real SVG file. The real @originals/sdk then hashes its actual bytes, creates its identity, signs its CEL history, and publishes it.',
+    'Name a piece to generate artwork in your browser, upload a file, or write something. Originals keeps a signed record of the exact content you choose.',
   subheadReal:
-    'The last step inscribes it on Bitcoin for real: your key signs the transactions in this browser, and your own BTC pays the network fee.',
+    'The final step adds it to Bitcoin. Your signing key approves the transactions through this browser, and your own BTC pays the network fees.',
   subheadSimulated:
-    'The Bitcoin step requires an enabled Bitcoin deployment and a funded account. Creating and publishing the Original remain available.',
+    'Adding work to Bitcoin requires a funded account and Bitcoin support on this site. You can still create and publish your Original.',
   /** Only appended where signing in genuinely buys a real inscription. */
-  subheadSignIn: 'Sign in to inscribe for real, with your own key and your own BTC.',
+  subheadSignIn: 'Sign in to add your Original to Bitcoin using your own BTC.',
   consoleHint:
-    'Skeptical? Open your devtools console — every SDK event is logged live.',
+    'You can inspect the steps as they run in your browser’s developer console.',
   form: {
-    titleLabel: 'Asset title',
-    titlePlaceholder: 'e.g. Genesis Artwork #001',
-    defaultTitle: 'Genesis Artwork #001',
+    draftLabel: 'Draft',
+    titleLabel: 'Title',
+    titlePlaceholder: 'e.g. Study No. 1',
+    defaultTitle: 'Study No. 1',
     sourceLabel: 'Source',
     sourceGenerate: 'Generate',
     sourceUpload: 'Upload',
     sourceWrite: 'Write',
     uploadCta: 'Choose a file',
-    uploadHint: 'Any file, up to 32 KB — its exact bytes are what get hashed, signed and published.',
-    uploadTooBig: 'That file is larger than 32 KB. Inscribing pays by the byte, so the demo keeps uploads small enough to actually reach Bitcoin.',
+    uploadHint: 'Any file up to 32 KB. Your signed history records the exact file you choose.',
+    uploadTooBig: 'Choose a file up to 32 KB. Larger files cost more to add to Bitcoin, so this demo keeps them small.',
     uploadReadError: 'There was a problem reading that file. Try again.',
-    uploadEmpty: 'That file is empty, so there would be nothing to hash.',
-    uploadBinaryPreview: "This file isn't text or an image, so there's nothing to preview — but its exact bytes are what get hashed, signed and published.",
-    writePlaceholder: 'Type or paste anything. These exact characters get hashed, signed and published.',
-    writeEmpty: 'Write something first — an empty asset has nothing to prove.',
-    writeHint: 'These exact characters are what get hashed, signed and published.',
+    uploadEmpty: 'That file is empty. Choose one with content.',
+    uploadBinaryPreview: 'This file has no preview. You can still create a signed record of it and publish it.',
+    writePlaceholder: 'Type or paste your text. Originals records exactly what you write.',
+    writeEmpty: 'Write something first.',
+    writeHint: 'Your signed history records exactly what you write.',
     styleLabel: 'Style',
     regenerate: 'Regenerate',
-    artHint: 'Drawn in your browser from the style you pick — its exact bytes are what get hashed, signed and published.'
+    artHint: 'Generated in your browser using the style you choose.'
   },
   steps: [
     {
       id: 'create',
-      action: 'Create asset',
+      action: 'Create Original',
       pending: 'Creating…',
       title: 'Create',
       layer: 'did:cel',
+      label: 'Private draft',
       description:
-        'Hashes the artwork’s bytes and creates its signed genesis — a signed event log that stays private, never uploaded or hosted anywhere until you publish. Signed in, it’s signed by your Turnkey-held key; otherwise it’s signed and kept entirely in this tab.'
+        'Creates a signed record of your file. It stays private until you publish. When you’re signed in, Turnkey holds your signing key. Otherwise, the key and your work stay in this tab.'
     },
     {
       id: 'publish',
@@ -260,26 +263,28 @@ export const demo = {
       pending: 'Publishing…',
       title: 'Publish',
       layer: 'did:webvh',
+      label: 'On the web',
       description:
-        'Migrates the asset to did:webvh and hosts the signed DID log at this origin — the SDK’s real resolver then fetches it back over HTTP(S).'
+        'Makes your signed history available on this site, then checks that it can be opened.'
     },
     {
       id: 'inscribe',
-      action: 'Inscribe on Bitcoin',
-      pending: 'Inscribing…',
-      title: 'Inscribe',
+      action: 'Add to Bitcoin',
+      pending: 'Adding to Bitcoin…',
+      title: 'Add to Bitcoin',
       layer: 'did:btco',
+      label: 'On Bitcoin',
       // The signed-in mainnet tier. This step is LIVE: it spends the creator's
       // own confirmed deposit. The string it replaced ("Coming soon … once
       // testnet4 ordinals support ships") was wrong about the status and the
       // network, and rendered to every visitor regardless of tier.
       description:
-        'Inscribes the published Original onto a satoshi as did:btco — real Bitcoin transactions, signed by your key in this browser and paid for out of your own deposit.'
+        'Adds your published Original to Bitcoin. Your key approves the transactions through this browser, and your own deposit pays for them.'
     }
   ],
   /** Live transaction fees depend on the complete CEL 3 publication. */
   inscribeCost:
-    'Creating and publishing on the web require no Bitcoin fee. Bitcoin publication uses a live fee quote based on the resource bytes and signed history. The transaction builder checks the fee before broadcasting; network fees are not refundable.',
+    'Creating and publishing on the web require no Bitcoin fee. Adding an Original to Bitcoin uses a current fee quote based on file size and signed history. The fee is checked before the transactions are sent; network fees are not refundable.',
   /**
    * The simulated tier (R6). An anonymous visitor CAN complete step 3, so the
    * copy names it a simulation outright rather than promising a real
@@ -287,52 +292,63 @@ export const demo = {
    */
   simulated: {
     badge: 'Account required',
-    action: 'Sign in to inscribe',
+    action: 'Sign in to add to Bitcoin',
     pending: 'Preparing…',
     description:
-      'Bitcoin publication requires a signed-in account, a funded address and an enabled Bitcoin deployment.',
+      'Adding an Original to Bitcoin requires a signed-in account, a funded address and Bitcoin support on this site.',
     note:
-      'This Original is published on the web. Sign in on an enabled Bitcoin deployment to fund and sign its Bitcoin publication.'
+      'Your Original is published on the web. To add it to Bitcoin, sign in on a site where Bitcoin is enabled and fund the fee.'
   },
   revise: {
-    heading: 'Edit it — the log keeps every version',
+    heading: 'Edit it—keep every version',
     body:
-      'Change the title and the artwork is regenerated from it. Commit, and the SDK signs an update event chaining the new bytes to the version before them — plus one for the metadata that describes them. Before publication that is free and offline; once published, the SDK uploads each new byte version before replacing the hosted CEL. Old versions stay resolvable.',
+      'For generated artwork, changing the title creates a new image. Save a revision to add it and its description to the signed history. Before publication, revisions stay on your device and cost nothing. After publication, new versions are uploaded to this site, and earlier versions remain available.',
     regenerateAction: 'Shuffle artwork',
-    action: 'Commit update',
-    pending: 'Signing update…',
+    action: 'Save revision',
+    pending: 'Saving revision…',
     discard: 'Discard revision',
-    unsignedBadge: 'not in the log yet',
+    unsignedBadge: 'Unsaved revision',
     unsignedNote:
-      'This edit is only in the browser. Commit it to add a signed update event — or discard it and keep the version you have.',
+      'This edit is only in your browser. Save it to add it to the signed history, or discard it to keep the previous version.',
     versionLabel: 'artwork',
     committedNote:
-      'Every revision is a signed event chained to the one before it — open the Event log to see them.',
+      'Each saved revision links to the previous version. Open History to see them.',
     lockedNote:
-      'Revising an inscribed asset writes a new inscription on its satoshi — a paid on-chain append, so the demo stops here.'
+      'Updating an Original after adding it to Bitcoin requires another paid transaction. This demo stops before that step.'
   },
   eventLog: {
-    title: 'Event log',
-    empty: 'Awaiting genesis event',
-    emptyHint: 'Create an asset and its signed event log builds here, entry by entry.',
-    emptyUpcoming: ['create', 'migrate', 'migrate'],
-    sourceNote: 'Signed controller history. Bitcoin acceptance is checked separately from these signatures.',
+    detailsLabel: 'View signature details',
+    identityLabel: 'History ID',
+    entryLabels: { create: 'Created', migrate: 'Published', rotateKey: 'Signing key changed', update: 'Revised' } as Record<string, string>,
+    title: 'History',
+    empty: 'Your history starts here',
+    emptyHint: 'Create an Original to see its signed history here.',
+    emptyUpcoming: ['Create', 'Publish', 'Add to Bitcoin'],
+    sourceNote: 'These signatures record changes approved by the signing key. Whether Bitcoin accepted the record is checked separately.',
     /** Each entry commits to the hash of the one before it. */
-    chainLabel: 'previousEvent',
-    genesisLabel: 'genesis · no parent',
+    chainLabel: 'Previous entry',
+    genesisLabel: 'First entry',
     signedBy: 'signed by',
     unsigned: 'unsigned',
     /** Creator entries: the authenticity claim about what the work IS. */
-    authenticityTitle: 'Controller history',
+    authenticityTitle: 'Signed history',
     /** Holder entries: chain of custody; can add to the story, never define the work. */
-    custodyTitle: 'Custody — holders’ additions',
+    custodyTitle: 'Notes from owners',
     heldBy: 'Held by',
     unverifiedAuthor: 'unverified author'
   },
   inspector: {
-    provenanceTab: 'Provenance',
-    resourceTab: 'Resource',
-    emptyState: 'Create an asset to inspect its DID, hashes, and provenance chain.'
+    previewAlt: 'Preview of your file',
+    fileLabel: 'File',
+    versionLabel: 'Version',
+    fingerprintLabel: 'File fingerprint',
+    signaturesLabel: 'Signed records',
+    identityLabel: 'Original ID',
+    webLabel: 'Web ID',
+    bitcoinLabel: 'Bitcoin ID',
+    provenanceTab: 'Record details',
+    resourceTab: 'File',
+    emptyState: 'Create an Original to view its record and file.'
   },
   /**
    * The completion screen, per tier (R8). Both halves used to be one block, so
@@ -342,60 +358,60 @@ export const demo = {
    */
   done: {
     real: {
-      lead: 'Bitcoin publication broadcast.',
-      beforeSatoshi: 'The signed publication targets satoshi',
+      lead: 'Sent to Bitcoin.',
+      beforeSatoshi: 'The record is intended for Bitcoin unit',
       beforeTx: 'in transaction',
-      after: 'Confirmation and the accepted history must be checked against the Bitcoin network.',
-      explorerLabel: 'View the real transaction on mempool.space'
+      after: 'Check the Bitcoin network to confirm that the transactions and recorded history have been accepted.',
+      explorerLabel: 'View transaction on mempool.space'
     },
     simulated: {
       lead: 'Simulation finished.',
-      beforeSatoshi: 'The mock provider handed back satoshi',
+      beforeSatoshi: 'The simulation returned Bitcoin unit',
       beforeTx: 'and transaction id',
       after:
-        'Neither exists: nothing was broadcast and no sats moved. Everything before this step was real — the signed event log beside it is genuine, and only its Bitcoin anchor is make-believe.'
+        'Neither exists: nothing was broadcast and no Bitcoin was spent. Your signed history is real; the Bitcoin step was simulated.'
     }
   },
   resolved: {
-    heading: 'did:webvh log — live at this origin',
+    heading: 'Signed history—available on this site',
     /** Anonymous logs live in the shared in-memory host store; see `hosting.temporaryNote`. */
-    temporaryHeading: 'did:webvh log — served at this origin, for now',
-    resolvedBadge: 'resolved ✓',
-    pendingBadge: 'resolves in production',
-    linkLabel: 'Open the signed DID log',
-    note: 'The SDK’s real resolver fetched this back over HTTP(S). Open it: it’s the signed version history.'
+    temporaryHeading: 'Signed history—available here for now',
+    resolvedBadge: 'Available ✓',
+    pendingBadge: 'Available on the published site',
+    linkLabel: 'Open the signed history',
+    note: 'Your published history was opened successfully. Follow the link to inspect it.'
   },
   /** Explicit local chain, separately labelled from the public networks. */
   regtest: {
     subhead: 'The final step inscribes on local Bitcoin regtest using test coins.',
     done: 'Publication broadcast on local Bitcoin regtest.',
     notice: 'Local regtest · test coins only. This run uses your local Bitcoin Core and ord services.',
-    signInPrompt: 'Sign in to inscribe on your local Bitcoin regtest network.',
+    signInPrompt: 'Sign in to add to Bitcoin on your local Bitcoin regtest network.',
     stepDescription: 'Inscribes the published Original onto a satoshi on local Bitcoin regtest. Fund the displayed bcrt address with local test coins.',
   },
   testnet4: {
-    signInPrompt: 'Sign in to inscribe on Bitcoin testnet4 — your own key signs it.',
+    signInPrompt: 'Sign in to add to Bitcoin on Bitcoin testnet4 — your own key signs it.',
     stepDescription:
-      'Inscribes the published Original onto a satoshi as did:btco — a real inscription on Bitcoin testnet4, signed by your key and funded by a faucet with worthless tBTC.',
-    yourKeyNote: 'Your Turnkey key signs this inscription in your browser. The server never sees a private key; funding comes from a testnet4 faucet (worthless tBTC).',
+      'Adds your Original to Bitcoin testnet4, a test network. Your key signs it, and a test funding service supplies coins with no monetary value.',
+    yourKeyNote: 'Your Turnkey key signs this Bitcoin record in your browser. The server never sees a private key; funding comes from a testnet4 faucet (worthless tBTC).',
     faucetEmpty: 'The testnet4 faucet is temporarily out of funds — try again in a bit.',
-    fundingFailed: 'The testnet4 funding request didn’t come through. Try the inscribe step again in a moment — nothing has been spent.'
+    fundingFailed: 'The testnet4 funding request didn’t come through. Try the Add to Bitcoin step again in a moment — nothing has been spent.'
   },
   session: {
     expiredHeading: 'Your signing session expired',
     expiredBody:
       'Your browser’s signing key has expired, so nothing can be signed right now. Sign in again to get a fresh one — your Original, and any BTC already sitting at your deposit address, are untouched and waiting.',
     missingBody:
-      'You’re signed in, but this browser has no signing key for your account — sign in again to get one. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address is still yours.',
+      'You’re signed in, but this browser has no signing key for your account — sign in again to get one. Nothing is lost: your Original is still available on the web, and any BTC at your deposit address is still yours.',
     // Deliberately does NOT offer "sign in again": this state is reached
     // because signing in is what failed. Promising a retry that cannot work is
     // the failure mode this string exists to avoid.
     unavailableHeading: 'Signing is unavailable right now',
     unavailableBody:
-      'Signing isn’t working on this site right now, so inscribing is paused — this is on our end, not something you can fix by signing in again. Nothing is lost: your Original is still real and resolvable, and any BTC at your deposit address stays yours, at your own address, under your own key.',
+      'Signing isn’t working on this site right now, so adding work to Bitcoin is paused — this is on our end, not something you can fix by signing in again. Nothing is lost: your Original is still available on the web, and any BTC at your deposit address stays yours, at your own address, under your own key.',
     // Replaces unavailableBody when this browser refused a foreign-key token (#494); no retry offered, it would meet the same key.
     boundKeyMismatchBody:
-      'This browser refused to finish signing in: the sign-in token it was handed names a signing key this browser does not hold. That should never happen, so rather than let an unknown key sign for your account, nothing was installed and inscribing is paused. Please tell us before you send any BTC. Your Original is still real and resolvable, and any BTC already at your deposit address stays yours, at your own address, under your own key.',
+      'This browser refused to finish signing in: the sign-in token it was handed names a signing key this browser does not hold. That should never happen, so rather than let an unknown key sign for your account, nothing was installed and adding work to Bitcoin is paused. Please tell us before you send any BTC. Your Original is still available on the web, and any BTC already at your deposit address stays yours, at your own address, under your own key.',
     reauthCta: 'Sign in again to keep going',
     reauthPending: 'Waiting for you to sign back in…',
     preserved: 'Your Original is held right where you left it — signing back in picks up from here.',
@@ -408,10 +424,10 @@ export const demo = {
       'Signed out — but we could not erase this browser’s signing key. It can still sign for up to 12 hours. If this machine is shared, clear this site’s data in your browser before you walk away.'
   },
   deposit: {
-    heading: 'Fund your inscription',
-    signInPrompt: 'Sign in to inscribe on Bitcoin — your own key signs it, your own BTC funds it.',
+    heading: 'Pay to add your Original to Bitcoin',
+    signInPrompt: 'Sign in to add your Original to Bitcoin. Your signing key approves it, and your BTC pays for it.',
     sendPrefix: 'Send at least',
-    sendSuffix: 'of BTC to your deposit address. One payment or several — the inscription spends every confirmed deposit sitting there, so a top-up after a fee rise works too. The change and the inscribed sat come back to the same address.',
+    sendSuffix: 'of BTC to your deposit address. One payment or several will work. We use the confirmed payments needed to cover the cost, starting with the largest. Change and the Bitcoin record return to the same address.',
     addressLabel: 'Your deposit address',
     // The redesign (see DepositPanel): the action comes first and the full
     // R27 text moves into an always-present <details> below it. These two
@@ -419,9 +435,9 @@ export const demo = {
     // SUBSTANCE of the two money risks. The long-form lines below are not
     // replaced by them; they are still rendered, in full, on the same screen.
     purposeShort:
-      'Covers the Bitcoin network fees for two transactions, plus the 546-sat output your inscription rides on. Change comes back to this address.',
+      'Covers Bitcoin network fees for two transactions, plus 546 sats (small units of Bitcoin) to hold the record. Change returns to this address.',
     riskSummary:
-      'There is no withdraw or refund. Anything you send that isn’t spent on an inscription stays at this address until you inscribe here again, and a broadcast fee can’t be reversed by anyone, us included. Send the amount above rather than a round number you’d want back.',
+      'There is no withdrawal or refund. Unspent BTC stays at this address and can only be used to add another Original here. Network fees cannot be reversed, including by us. Send the quoted amount rather than a round number you would want back.',
     detailsSummary: 'How this works — the address, your key, and closing the tab',
     copyAddress: 'Copy',
     copiedAddress: 'Copied',
@@ -431,23 +447,23 @@ export const demo = {
     scanHint: 'Or scan to pay from your phone',
     // Between sending and confirming, a creator has no way to tell whether we
     // can see their money — and that is the worst moment to say nothing.
-    pendingSeenSuffix: 'in the mempool — we can see it, waiting for one confirmation.',
+    pendingSeenSuffix: 'received by the Bitcoin network—waiting for one confirmation.',
     pendingViewLink: 'View transaction',
     // The funded state. Previously the panel said "Send at least N sats" even
     // once the deposit covered the cost, so a creator who had already paid was
     // still being told to pay and had no idea the next move was theirs.
-    fundedHeading: 'Funded — ready to inscribe',
-    fundedBody: 'Your deposit covers this inscription. Use the button below to inscribe on Bitcoin.',
+    fundedHeading: 'Funded—ready to add to Bitcoin',
+    fundedBody: 'Your deposit covers the cost. Use “Add to Bitcoin” to continue.',
     balanceLabel: 'Your deposit balance',
-    balanceNeeded: 'needed for this inscription',
+    balanceNeeded: 'needed to add this Original',
     addMoreSummary: 'Add more funds, or see the deposit address',
     // The commit landed but the reveal did not propagate. The inscription is
     // NOT on chain yet, and saying "inscribed" here is the same dishonesty as
     // telling someone to sign in again when signing in is what failed.
-    commitOnlyHeading: 'Commit broadcast — the inscription finishes shortly',
+    commitOnlyHeading: 'First transaction sent—waiting for confirmation',
     // The sat is decided by the commit's first input, so it IS known already;
     // the inscription that will ride on it is not on chain yet.
-    commitOnlySatPrefix: 'It will land on satoshi',
+    commitOnlySatPrefix: 'The record is intended for Bitcoin unit',
     // The commit txid is the ONE thing that lets someone watch their own money
     // land. Withholding it while telling them to wait is what made this step
     // feel like nothing happened.
@@ -455,11 +471,11 @@ export const demo = {
     commitOnlyFeeLabel: 'paid at',
     commitOnlyTrackLink: 'Track it on Your Originals',
     commitOnlyRevealPending:
-      'The inscription transaction is signed and saved; it broadcasts as soon as the one above confirms.',
+      'The transaction carrying your Original is signed and saved. It is sent automatically once the funding transaction confirms.',
     commitOnlyBody:
-      'Your funding transaction is on the network. The second transaction, the one that carries the inscription, has not propagated yet — this is expected while the first is still unconfirmed. It is signed and saved on our side and goes out automatically once the first confirms. Nothing is stuck and nothing more is owed; your Your Originals page shows it through to done.',
+      'Your funding transaction has been sent. The second transaction carries your Original. It has not reached the network yet, but is signed and saved on our side. It is sent automatically once the first confirms. You do not need to pay again. Follow its progress on Your Originals.',
     balanceReuse:
-      'Anything left over stays at this address and pays for your next inscription here — you will not be asked to deposit again while it covers the cost.',
+      'Unspent BTC stays at this address and can pay for another Original here. You will not need to deposit again while it covers the cost.',
     // A CONFIRMED deposit that does not cover the cost. Distinct from
     // 'detected', whose copy promises a confirmation that already happened.
     shortBadge: 'Deposit confirmed — a top-up is needed.',
@@ -471,11 +487,11 @@ export const demo = {
     // can replace the transaction. Saying so beats a button that cannot work.
     feeLowHeading: 'Your deposit is paying below the going rate',
     feeLowBody:
-      'It will still confirm — it is queued behind higher-paying transactions, not stuck — and nothing is at risk while it waits.',
+      'Your payment may take longer because other transactions are paying higher fees. It is waiting for confirmation.',
     feeLowBumpable:
       'If your wallet has a “bump fee” or “speed up” option, this payment can be replaced. Two things to get right: take the increase from your change, never from the deposit amount, and aim for the rate below — Bitcoin makes a replacement pay for its own bandwidth on top of the original fee, so a small nudge is rejected outright.',
     feeLowUnbumpable:
-      'Your wallet did not mark this payment replaceable, so its fee cannot be raised. Waiting is the only option, and it will get there.',
+      'Your wallet did not allow this payment to be replaced, so its fee cannot be raised here. Wait for confirmation.',
     feeLowYours: 'Yours',
     feeLowNetwork: 'Clearing now',
     feeLowSuggest: 'Replace at',
@@ -488,10 +504,10 @@ export const demo = {
     // left at the address — and there is no withdrawal path for it. The old
     // line promised the opposite ("spends every confirmed deposit").
     topUpNote:
-      'Several payments work too: the inscription spends what it needs, largest first, and leaves the rest at the address.',
+      'Several payments work too: the Bitcoin record spends what it needs, largest first, and leaves the rest at the address.',
     waiting: 'Waiting for your deposit…',
     detected: 'Deposit detected — waiting for one confirmation.',
-    ready: 'Deposit confirmed — ready to inscribe.',
+    ready: 'Deposit confirmed—ready to add to Bitcoin.',
     needed: 'No confirmed deposit covering the fee yet — send BTC to your deposit address and wait for one confirmation.',
     // U15 — the pre-deposit disclosure, rendered above the address in every
     // state (first visit, top-up, and a return visit where the address was
@@ -501,37 +517,37 @@ export const demo = {
     // custodied") was a legal characterisation of a contested arrangement,
     // printed directly above the address a stranger sends mainnet BTC to.
     purpose:
-      'This deposit funds one inscription: the Bitcoin network fees for its two transactions, plus the 546-sat output the inscription rides on. Whatever is left over comes back to the same address as change.',
+      'This deposit pays the Bitcoin network fees for two transactions, plus 546 sats (small units of Bitcoin) to hold the record. Change returns to the same address.',
     addressOrigin:
       'The address is derived in this browser from your Turnkey wallet, and your account is bound to the first address it sends us — we don’t re-check it against Turnkey after that. Your browser signs the spend with that wallet’s key; the key is never sent to the server.',
     nonRefundable:
       'The network fee is spent the moment the transactions are broadcast, and Bitcoin transactions cannot be reversed. Nobody — us included — can undo or refund one.',
     unspentBalance:
-      'Anything you send that is never spent on an inscription stays sitting at that address. There is no withdraw or refund flow here: the only way to move it is to inscribe again through this site, for as long as this service and its Turnkey organization are running. Send the amount above rather than a round number you would want back.',
+      'There is no withdrawal or refund flow here. Unspent BTC stays at this address. The only way to move it through this site is to add another Original to Bitcoin, for as long as this service and its Turnkey organization are running. Send the quoted amount.',
     // R31 — said BEFORE they deposit, because that is the only moment we are
     // sure they are reading. It names the exact place the state will be, so
     // "close the tab" is a safe thing to do rather than a gamble.
     ifSomethingGoesWrong:
-      'You can close this tab. If anything goes wrong on our side while you’re away — we lose our read of the network, or your inscription stalls — it’ll be waiting for you on your Your Originals page the next time you sign in. We don’t send email about it, so that page is where to look.',
+      'You can close this tab. If anything goes wrong on our side while you’re away — we lose our read of the network, or your Bitcoin record stalls — it’ll be waiting for you on your Your Originals page the next time you sign in. We don’t send email about it, so that page is where to look.',
     addressPending: 'Checking your deposit address with the server…',
     unavailableBadge: 'Fee estimate unavailable.',
     readUnavailableBadge: 'Can’t read your deposit address.',
-    readBusyBadge: 'Deposit lookups rate-limited.',
+    readBusyBadge: 'Deposit checks are temporarily limited.',
     feeUnavailable:
-      'We can’t reach the Bitcoin fee estimator right now, so we can’t tell you an honest amount to deposit — and we won’t guess, because a wrong number would leave your BTC stuck in an inscription that can’t be paid for. No deposit address is shown until the estimate is back. Nothing you’ve made is lost: your Original is already real and resolvable as did:webvh. Try again in a few minutes.',
+      'We can’t estimate the Bitcoin fee right now, so we’re not showing a deposit address. Your Original is still available on the web. Try again in a few minutes.',
     indexerUnavailable:
-      'We can’t read your deposit address on the Bitcoin network right now, so we can’t tell you what’s arrived — and we won’t show you a stale balance and call it current. No address is shown while that’s true. Anything you’ve already sent is untouched: it’s at your own address, under your own key, and it will still be there when the read comes back. Your Original is already real and resolvable as did:webvh in the meantime.',
+      'We can’t check your Bitcoin deposit right now, so we’re not showing an address or an old balance. Any BTC you sent is untouched at your address. Your Original is still available on the web. Try again in a few minutes.',
     indexerBusy:
-      'Our Bitcoin address lookups are being rate-limited at the moment, so we can’t confirm what’s at your deposit address just yet. Nothing is lost or stuck on your side — any BTC you’ve sent is at your own address, under your own key. Give it a few minutes and reload; we’ll pick up exactly where this left off.',
+      'The Bitcoin data service is limiting our requests, so we can’t check your deposit right now. Any BTC you sent is untouched at your address. Wait a few minutes and reload.',
     // A shortfall names the number: "deposit more" without an amount is what
     // leaves someone topping up blind. Composed by depositShortfallMessage.
     shortfallPrefix: 'Your confirmed deposits come to',
     shortfallMiddle: ', which is',
     shortfallSuffix:
-      'short of the amount above. Send the difference to the same deposit address and wait for one confirmation — the inscription will spend both payments together.',
+      'short of the amount above. Send the difference to the same deposit address and wait for one confirmation — the Bitcoin record will spend both payments together.',
     // The ordinal classification is unavailable, so nothing is spendable.
     ordinalCheckUnavailable:
-      'We can’t currently check whether the coins at your deposit address carry an inscription of their own, and we won’t spend a coin we can’t check — an inscribed sat spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
+      'We can’t currently check whether the coins at your deposit address carry a Bitcoin record of their own, and we won’t spend a coin we can’t check — an Bitcoin unit holding the record spent as a fee is destroyed. Your BTC is untouched at your own address. Try again in a few minutes.',
     ordinalCheckBadge: 'Can’t check your coins for inscriptions.',
     // The check ran, but the address holds more outputs than one poll can
     // classify. The unchecked ones are simply not counted — a block explorer
@@ -558,8 +574,8 @@ export const demo = {
       'We couldn’t confirm your deposit just now, so we’re not showing an address or an amount — showing a stale one is how BTC ends up somewhere we can’t spend from, or priced against a fee that has moved. Nothing is lost: anything you’ve already sent is at your own address, under your own key. Give it a minute and reload.',
     unknownBadge: 'Deposit check failed.',
     networkMismatch:
-      'This deploy is misconfigured: the app was built for a different Bitcoin network than the server is running. Inscribing is disabled until they match — no deposit address is shown, because funds sent to it could not be spent here.',
-    yourKeyNote: 'Your Turnkey key signs this inscription in your browser; your own deposit pays the fee. The server never sees a private key.'
+      'This site’s Bitcoin settings do not match. Adding Originals to Bitcoin is disabled, and no deposit address is shown, until the settings are fixed.',
+    yourKeyNote: 'Your Turnkey signing key approves the transactions through your browser. Your deposit pays the fee. The private key is never sent to this site’s server.'
   },
   /**
    * The hosting layer, in visitor words. A raw `HttpHostingStorageAdapter.put
@@ -568,21 +584,21 @@ export const demo = {
    */
   hosting: {
     rateLimited:
-      'That’s a lot of publishing at once, so the demo host asked us to slow down. Wait a few seconds and publish again — nothing you’ve made is lost, your Original is still signed and safe in this tab.',
+      'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
     unavailable:
-      'We couldn’t host the signed log just now, so your Original is still local — real, signed, and safe in this tab. Try publishing again in a moment.',
+      'We couldn’t publish your signed history. Your Original is still in this tab. Try again in a moment.',
     quotaFull:
-      'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still resolvable.',
+      'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still available.',
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Publishing anonymously puts your signed log on a shared demo path, in memory, and drops it after a couple of hours. Sign in first and your Originals get their own path on a persistent volume, kept for as long as this service runs, with the same signed history.'
+      'Without signing in, your published history is stored in a shared demo area and removed after a couple of hours. Sign in before publishing to save it under your account for as long as this service runs.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
     'Something went wrong on our side. Nothing you’ve made is lost — your Original is still in this tab. Try that step again.',
-  reset: 'Start over with a new asset'
+  reset: 'Start a new Original'
 };
 
 export const yourOriginals = {
@@ -781,14 +797,16 @@ export const originalDetail = {
 
 export const realExample = {
   id: 'example',
-  eyebrow: 'A real Original',
-  headline: 'Don’t take our word for it.',
+  eyebrow: 'An example Original',
+  headline: 'Check the history of “First Light”.',
   subhead:
-    '“First Light” is a genuine Original, minted with this SDK: real keys, a real signed genesis event log, a did:webvh identity with a signed method history and a CEL 3 controller history. These bundled artifacts demonstrate local signature verification; they do not claim a live DNS or Bitcoin publication. Your browser is re-verifying every signature right now — the checks below run locally, not on a server.',
+    '“First Light” was created with Originals. Your browser checks the artwork against its signed record and checks the signatures in its history. These bundled files demonstrate those checks; they do not establish that the work is currently published online or recorded on Bitcoin.',
+  detailsLabel: 'View check details',
+  recordDetailsLabel: 'View record details',
   checkLabels: {
-    hash: 'Artwork bytes match their declared sha-256',
-    log: 'did:webvh log — SCID and Ed25519 proof chain verify',
-    cel: 'CEL controller history signature verifies'
+    hash: 'The artwork matches the signed record',
+    log: 'The published history’s identity and signatures check out',
+    cel: 'Signatures match the recorded history'
   },
   pendingLabel: 'Verifying in your browser…',
   checkFailDetails: {
@@ -798,15 +816,15 @@ export const realExample = {
   verifiedBadge: 'Verified in this tab',
   failedBadge: 'Verification incomplete',
   failNote:
-    'Some checks could not complete in this environment. The raw artifacts are in the repository — verify them yourself with the SDK.',
-  artifactsLabel: 'Raw artifacts',
+    'Some checks could not finish here. You can download the original files and use our developer tools to check them.',
+  artifactsLabel: 'View the original files',
   artifactsHref:
     'https://github.com/onionoriginals/sdk/tree/main/apps/landing/public/example',
   fields: {
-    identity: 'Identity',
-    published: 'Published as',
-    profile: 'CEL profile',
-    issued: 'Issued'
+    identity: 'Original ID',
+    published: 'Web ID',
+    profile: 'Record format',
+    issued: 'Recorded'
   }
 };
 
@@ -817,40 +835,41 @@ export const realExample = {
 // receipt the team independently verified themselves.
 export const mainnetExample = {
   eyebrow: 'On Bitcoin',
-  headline: 'And one we actually inscribed.',
+  headline: 'An Original recorded on Bitcoin.',
   subhead:
-    'A separate Original the team funded and inscribed for real, on Bitcoin mainnet. Its did:btco identity, inscription and satoshi are public — anyone can look them up on a block explorer.',
-  pendingLabel: 'Checking the chain…',
-  liveBadge: 'Re-checked live, just now',
-  retainedBadge: 'Last independently verified',
+    'The team paid to add this separate Original to Bitcoin. Its public record can be looked up on a Bitcoin transaction website.',
+  pendingLabel: 'Checking Bitcoin…',
+  liveBadge: 'Checked just now',
+  retainedBadge: 'Showing the last saved check',
   trustNote:
-    "Checked live against this deploy's Bitcoin indexer — a provider-asserted read, the same trust boundary as any block-explorer lookup, not an independent multi-node consensus check. When a live check isn't available (for example, to a signed-out visitor), the receipt below is the last one the team verified themselves.",
+    'Live checks use a third-party Bitcoin data service and depend on its accuracy. They do not independently check agreement across the Bitcoin network. When a live check is unavailable, including for signed-out visitors, we show the last receipt the team checked.',
   fields: {
-    identity: 'did:btco',
-    inscription: 'Inscription',
-    sat: 'Satoshi',
-    resource: 'On-chain resource'
+    identity: 'Bitcoin ID',
+    inscription: 'Record ID',
+    sat: 'Bitcoin unit',
+    resource: 'File on Bitcoin'
   },
-  resourceOnChainNote: 'bytes found inline in the accepted inscription',
-  resourceOffChainNote: 'not found inline in this check',
-  explorerLabel: 'View reveal transaction on mempool.space',
-  receiptLabel: 'Underlying evidence'
+  resourceOnChainNote: 'file contents found in the accepted record',
+  resourceOffChainNote: 'file contents not found in this check',
+  explorerLabel: 'View transaction on mempool.space',
+  receiptLabel: 'View the saved evidence'
 };
 
 export const protocol = {
   id: 'protocol',
-  eyebrow: 'The protocol',
-  headline: 'Three layers. One direction.',
+  eyebrow: 'How it works',
+  headline: 'From private draft to published work.',
   subhead:
-    'Assets migrate unidirectionally — local CEL → did:webvh → did:btco. Each migration is recorded and signed, so the full lineage travels with the asset.',
+    'Create on your device. Publish on the web when you’re ready. Choose whether to record ownership on Bitcoin. Each step is added to the signed history.',
   migrationNote:
-    'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
+    'You can stop at any stage. Moving to the next stage cannot be undone.',
   // Generic CEL application provenance and DID-method identity are separate standards.
   standardsNote:
-    'Originals uses CCG Cryptographic Event Logs for signed file history and did:cel identifiers derived from genesis SCIDs. WebVH and Bitcoin supply publication identities. CEL verification binds each history to its genesis commitment.',
+    'The signed history lets others check which signing key approved each version. It does not prove who originally made the work.',
   columns: [
     {
       layer: 'did:cel',
+      name: 'Private draft',
       stage: '01 · Create',
       cost: 'Free',
       rows: [
@@ -862,24 +881,26 @@ export const protocol = {
     },
     {
       layer: 'did:webvh',
+      name: 'On the web',
       stage: '02 · Publish',
       cost: 'Hosting',
       rows: [
-        ['Where it lives', 'Your domain, over HTTPS'],
-        ['Who can see it', 'Anyone — globally resolvable'],
+        ['Where it lives', 'Your website'],
+        ['Who can see it', 'Anyone'],
         ['What it costs', 'Standard web hosting'],
         ['Best for', 'Catalogs, portfolios, discovery']
       ]
     },
     {
       layer: 'did:btco',
-      stage: '03 · Inscribe',
+      name: 'On Bitcoin',
+      stage: '03 · Add to Bitcoin',
       cost: 'BTC fees',
       rows: [
-        ['Where it lives', 'A satoshi on Bitcoin'],
-        ['Who can see it', 'Anyone, forever'],
+        ['Where it lives', 'The Bitcoin network'],
+        ['Who can see it', 'Anyone'],
         ['What it costs', 'One-time network fees'],
-        ['Best for', 'Ownership, transfer, permanence']
+        ['Best for', 'Recording and transferring ownership']
       ]
     }
   ]
@@ -888,18 +909,18 @@ export const protocol = {
 export const developers = {
   id: 'developers',
   eyebrow: 'Developers',
-  headline: 'npm install to Bitcoin in one sitting.',
+  headline: 'Build Originals into your app.',
   subhead:
-    'TypeScript-first, event-driven, and pluggable everywhere it counts: Ordinals providers, storage adapters, key stores, and external signers (Turnkey, AWS KMS, HSMs).',
+    'Use our developer tools to create, publish and add Originals to Bitcoin from your own app.',
   bullets: [
-    'Typed events for every lifecycle step',
-    'Mock Bitcoin provider for tests and CI',
-    'External signers — keys never touch the SDK',
-    'W3C Verifiable Credentials out of the box'
+    'Follow each step as it happens',
+    'Test Bitcoin steps without spending money',
+    'Choose where to store files and signing keys',
+    'Create signed records other apps can check'
   ],
   installLabel: 'Install',
   sdkNote:
-    'Everything on this page — sealing, publishing, inscription, verification — is @originals/sdk, MIT licensed.',
+    'This page uses @originals/sdk, available under the MIT license.',
   versionNote:
     'The 3.x line is what this page runs; it ships under the `next` tag until 3.0.0 is released.',
   docsLink: {
@@ -918,10 +939,10 @@ export const installCommand = {
 };
 
 export const footer = {
-  tagline: 'Provenance that survives the internet.',
+  tagline: 'A history that follows your work.',
   license: 'MIT licensed. Built by Aviary Tech.',
   bottomLeft: '© 2026 Aviary Tech · MIT License',
-  bottomRight: 'local CEL → did:webvh → did:btco',
+  bottomRight: 'Create → Publish → Add to Bitcoin',
   columns: [
     {
       title: 'Project',
@@ -933,11 +954,11 @@ export const footer = {
       ]
     },
     {
-      title: 'Standards',
+      title: 'Technical references',
       links: [
-        { label: 'W3C DID Core', href: 'https://www.w3.org/TR/did-core/' },
-        { label: 'Verifiable Credentials', href: 'https://www.w3.org/TR/vc-data-model-2.0/' },
-        { label: 'did:webvh method', href: 'https://identity.foundation/didwebvh/' }
+        { label: 'Identity standard', href: 'https://www.w3.org/TR/did-core/' },
+        { label: 'Signed records standard', href: 'https://www.w3.org/TR/vc-data-model-2.0/' },
+        { label: 'Web publishing standard', href: 'https://identity.foundation/didwebvh/' }
       ]
     },
     /**

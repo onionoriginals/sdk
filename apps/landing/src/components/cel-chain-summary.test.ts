@@ -32,26 +32,26 @@ describe('CEL entry glosses', () => {
 
   test('genesis counts the resources it binds', () => {
     expect(summarize(entry('create', { resources: [{}, {}] }))).toBe(
-      'Genesis — binds 2 resources to a new identifier'
+      'Started a signed history for 2 files'
     );
-    expect(summarize(entry('create', { resources: [{}] }))).toContain('1 resource ');
-    expect(summarize(entry('create'))).toBe('Genesis — establishes a new identifier');
+    expect(summarize(entry('create', { resources: [{}] }))).toContain('1 file');
+    expect(summarize(entry('create'))).toBe('Started a signed history');
   });
 
-  test('a webvh migrate names its domain and targetDid', () => {
+  test('a web publication names its domain without protocol jargon', () => {
     const text = summarize(
       entry('migrate', { layer: 'webvh', domain: 'example.com', targetDid: 'did:webvh:abc:example.com' })
     );
     expect(text).toContain('the web at example.com');
-    expect(text).toContain('did:webvh:abc:example.com');
+    expect(text).not.toContain('did:');
   });
 
   // A btco migrate carries its destination as `to`, not `targetDid` — the two
   // migrate shapes differ, and reading only one blanks the identifier.
-  test('a btco migrate names its destination from `to`', () => {
+  test('a Bitcoin publication names its destination plainly', () => {
     const text = summarize(entry('migrate', { layer: 'btco', to: 'did:btco:1066296127976657' }));
     expect(text).toContain('Bitcoin');
-    expect(text).toContain('did:btco:1066296127976657');
+    expect(text).not.toContain('did:');
   });
 
   test('accent follows the destination layer, not the event type', () => {
@@ -115,15 +115,15 @@ test('genesis SCID renders as history identity, while later previousEvent render
   const genesis = { ...entry('create'), previousEvent: 'uGenesisScid' };
   const render = (entries: CelEntry[]) => renderToStaticMarkup(createElement(CelChain, { entries }));
   const html = render([genesis]);
-  expect(html).toContain('History SCID');
+  expect(html).toContain('History ID');
   expect(html).toContain('uGenesisScid');
   expect(html).toContain('cel-entry-genesis');
   expect(html).not.toContain('cel-link-rail');
   const legacy = render([entry('create')]);
   expect(legacy).toContain('cel-entry-genesis');
-  expect(legacy).not.toContain('History SCID');
+  expect(legacy).not.toContain('History ID');
   const update = render([{ ...entry('update'), previousEvent: 'uPublishedGenesisDigest' }]);
   expect(update).toContain('cel-link-rail');
   expect(update).not.toContain('cel-entry-genesis');
-  expect(update).not.toContain('History SCID');
+  expect(update).not.toContain('History ID');
 });

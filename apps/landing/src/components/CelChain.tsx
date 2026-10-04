@@ -75,34 +75,33 @@ export function summarize(entry: CelEntry): string {
   }
   if (entry.type === 'create') {
     const count = Array.isArray(data.resources) ? data.resources.length : 0;
-    const noun = count === 1 ? 'resource' : 'resources';
+    const noun = count === 1 ? 'file' : 'files';
     return count > 0
-      ? `Genesis — binds ${count} ${noun} to a new identifier`
-      : 'Genesis — establishes a new identifier';
+      ? `Started a signed history for ${count} ${noun}`
+      : 'Started a signed history';
   }
   if (entry.type === 'migrate') {
-    const target = targetDidOf(entry);
     const layer = str(data.layer) ?? '';
     const where = layer.includes('btco')
       ? 'Bitcoin'
       : layer.includes('webvh')
         ? `the web${str(data.domain) ? ` at ${str(data.domain)}` : ''}`
-        : 'a new layer';
-    return target ? `Moves to ${where} — ${truncate(target, 46)}` : `Moves to ${where}`;
+        : 'a new location';
+    return `Published to ${where}`;
   }
-  if (entry.type === 'rotateKey') return 'Rotates the controlling key';
+  if (entry.type === 'rotateKey') return 'Changed the key used to sign updates';
   if (entry.type === 'update') {
     if (Array.isArray(data.resources) && data.resources.length) {
       const ids = data.resources.map((r: { id: string }) => r.id).join(', ');
-      return `Revises ${truncate(ids, 40)} — new digest chained to the preceding bytes`;
+      return `Revises ${truncate(ids, 40)} — linked to the previous version`;
     }
     // The body is reference-shaped: it carries the signed toHash, never bytes.
     const id = str(data.resourceId);
     const to = typeof data.toVersion === 'number' ? data.toVersion : undefined;
-    if (id && to) return `New version — ${truncate(id, 28)} → v${to}, chained to the bytes before it`;
+    if (id && to) return `New version — ${truncate(id, 28)} → v${to}, linked to the previous version`;
     const statement = str(data.statement);
     if (statement) return `Statement — “${truncate(statement, 60)}”`;
-    return 'Records a new resource version';
+    return 'Saved a new file version';
   }
   return entry.type;
 }
@@ -144,7 +143,7 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
         <div className="cel-entry-main">
           <div className="cel-entry-head">
             <code className="cel-entry-type" style={{ color: accent }}>
-              {entry.type}
+              {demo.eventLog.entryLabels[entry.type] ?? entry.type}
             </code>
             {genesis && (
               <span className="cel-entry-genesis">{demo.eventLog.genesisLabel}</span>
@@ -154,24 +153,27 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
             )}
           </div>
           <p className="cel-entry-summary">{summarize(entry)}</p>
-          {genesis && entry.previousEvent && (
-            <div className="cel-entry-proof">
-              <span>History SCID <code>{digest(entry.previousEvent)}</code></span>
-            </div>
-          )}
-          <div className="cel-entry-proof">
-            {proof?.proofValue ? (
-              <>
-                <span className="cel-proof-mark" style={{ background: accent }} />
-                <span>
-                  {demo.eventLog.signedBy} <code>{vm ? truncate(vm, 34) : 'controller'}</code>
-                </span>
-                <code className="cel-proof-value">{digest(proof.proofValue)}</code>
-              </>
-            ) : (
-              <span className="cel-entry-unsigned">{demo.eventLog.unsigned}</span>
+          <details>
+            <summary>{demo.eventLog.detailsLabel}</summary>
+            {genesis && entry.previousEvent && (
+              <div className="cel-entry-proof">
+                <span>{demo.eventLog.identityLabel} <code>{digest(entry.previousEvent)}</code></span>
+              </div>
             )}
-          </div>
+            <div className="cel-entry-proof">
+              {proof?.proofValue ? (
+                <>
+                  <span className="cel-proof-mark" style={{ background: accent }} />
+                  <span>
+                    {demo.eventLog.signedBy} <code>{vm ? truncate(vm, 34) : 'controller'}</code>
+                  </span>
+                  <code className="cel-proof-value">{digest(proof.proofValue)}</code>
+                </>
+              ) : (
+                <span className="cel-entry-unsigned">{demo.eventLog.unsigned}</span>
+              )}
+            </div>
+          </details>
         </div>
       </div>
     </li>
@@ -181,7 +183,7 @@ function CelEntryItem({ entry, index }: { entry: CelEntry; index: number }) {
 export function CelChain({ entries }: { entries: CelEntry[] }) {
   return (
     <>
-      <ol className="cel-chain" aria-label="Controller history">
+      <ol className="cel-chain" aria-label={demo.eventLog.authenticityTitle}>
         {entries.map((entry, index) => <CelEntryItem key={index} entry={entry} index={index} />)}
       </ol>
       <p className="demo-log-source">{demo.eventLog.sourceNote}</p>

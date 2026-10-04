@@ -18,7 +18,7 @@ export function Protocol() {
                 <header className="protocol-card-head">
                   <span className="protocol-stage">{column.stage}</span>
                   <div className="protocol-name-row">
-                    <h3>{column.layer}</h3>
+                    <h3>{column.name}</h3>
                     <span className="protocol-cost">{column.cost}</span>
                   </div>
                 </header>

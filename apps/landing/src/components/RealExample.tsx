@@ -128,7 +128,12 @@ export function RealExample() {
                           </span>
                           <div>
                             <p className="example-check-label">{realExample.checkLabels[id]}</p>
-                            {check && <p className="example-check-detail">{check.detail}</p>}
+                            {check && (
+                              <details className="example-check-detail">
+                                <summary>{realExample.detailsLabel}</summary>
+                                <p>{check.detail}</p>
+                              </details>
+                            )}
                           </div>
                         </li>
                       );
@@ -136,34 +141,37 @@ export function RealExample() {
                   </ul>
 
                   {result && (
-                    <dl className="demo-kv example-kv">
-                      <div>
-                        <dt>{realExample.fields.identity}</dt>
-                        <dd>
-                          <code title={result.dids.cel}>{short(result.dids.cel, 34, 8)}</code>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{realExample.fields.published}</dt>
-                        <dd>
-                          <code title={result.dids.webvh}>{result.dids.webvh}</code>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{realExample.fields.profile}</dt>
-                        <dd>
-                          <code>{result.profile}</code>
-                        </dd>
-                      </div>
-                      {result.issuedAt && (
+                    <details>
+                      <summary>{realExample.recordDetailsLabel}</summary>
+                      <dl className="demo-kv example-kv">
                         <div>
-                          <dt>{realExample.fields.issued}</dt>
+                          <dt>{realExample.fields.identity}</dt>
                           <dd>
-                            <code>{result.issuedAt}</code>
+                            <code title={result.dids.cel}>{short(result.dids.cel, 34, 8)}</code>
                           </dd>
                         </div>
-                      )}
-                    </dl>
+                        <div>
+                          <dt>{realExample.fields.published}</dt>
+                          <dd>
+                            <code title={result.dids.webvh}>{result.dids.webvh}</code>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>{realExample.fields.profile}</dt>
+                          <dd>
+                            <code>{result.profile}</code>
+                          </dd>
+                        </div>
+                        {result.issuedAt && (
+                          <div>
+                            <dt>{realExample.fields.issued}</dt>
+                            <dd>
+                              <code>{result.issuedAt}</code>
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    </details>
                   )}
                 </>
               )}
@@ -213,37 +221,40 @@ export function RealExample() {
 
               {mainnetResult && (
                 <>
-                  <dl className="demo-kv example-kv">
-                    <div>
-                      <dt>{mainnetExample.fields.identity}</dt>
-                      <dd>
-                        <code title={mainnetResult.didBtco}>{mainnetResult.didBtco}</code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{mainnetExample.fields.inscription}</dt>
-                      <dd>
-                        <code title={mainnetResult.inscriptionId}>
-                          {short(mainnetResult.inscriptionId, 20, 10)}
-                        </code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{mainnetExample.fields.sat}</dt>
-                      <dd>
-                        <code>{mainnetResult.sat}</code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{mainnetExample.fields.resource}</dt>
-                      <dd>
-                        <code>{mainnetResult.resource.id}</code> —{' '}
-                        {mainnetResult.resourceOnChain
-                          ? mainnetExample.resourceOnChainNote
-                          : mainnetExample.resourceOffChainNote}
-                      </dd>
-                    </div>
-                  </dl>
+                  <details>
+                    <summary>{realExample.recordDetailsLabel}</summary>
+                    <dl className="demo-kv example-kv">
+                      <div>
+                        <dt>{mainnetExample.fields.identity}</dt>
+                        <dd>
+                          <code title={mainnetResult.didBtco}>{mainnetResult.didBtco}</code>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{mainnetExample.fields.inscription}</dt>
+                        <dd>
+                          <code title={mainnetResult.inscriptionId}>
+                            {short(mainnetResult.inscriptionId, 20, 10)}
+                          </code>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{mainnetExample.fields.sat}</dt>
+                        <dd>
+                          <code>{mainnetResult.sat}</code>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{mainnetExample.fields.resource}</dt>
+                        <dd>
+                          <code>{mainnetResult.resource.id}</code> —{' '}
+                          {mainnetResult.resourceOnChain
+                            ? mainnetExample.resourceOnChainNote
+                            : mainnetExample.resourceOffChainNote}
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
 
                   <p className="example-medium mainnet-trust-note">{mainnetExample.trustNote}</p>
 

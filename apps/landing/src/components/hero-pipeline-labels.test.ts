@@ -18,7 +18,7 @@ describe('landing history and pipeline labels', () => {
     for (const label of ['Created', 'Revised', 'Published']) {
       expect(markup).toContain(`<h2>${label}</h2>`);
     }
-    expect(markup).toContain('Illustrative history / no live transactions');
+    expect(markup).toContain('Example history / no live transactions');
     expect(markup).not.toMatch(/did:(cel|webvh|btco)/);
   });
 

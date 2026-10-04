@@ -4,8 +4,8 @@ import { inscribeCostNote } from './demo-logic';
 
 test('the unavailable Bitcoin step explains costs without quoting a previous-format payload', () => {
   expect(inscribeCostNote(false)).toBe(demo.inscribeCost);
-  expect(demo.inscribeCost).toMatch(/live fee quote/i);
-  expect(demo.inscribeCost).toMatch(/resource bytes and signed history/i);
+  expect(demo.inscribeCost).toMatch(/current fee quote/i);
+  expect(demo.inscribeCost).toMatch(/file size and signed history/i);
   expect(demo.inscribeCost).not.toMatch(/simulation|4,100|18,100|exact amount/i);
   expect(demo.inscribeCost).toMatch(/not refundable/i);
 });

@@ -638,7 +638,7 @@ export function Demo() {
                     )}
                     <span className="demo-art-badge layer-pill" data-layer={asset?.layer ?? undefined}>
                       <span className="dot" />
-                      {asset?.layer ?? 'draft'}
+                      {demo.steps.find((step) => step.layer === asset?.layer)?.label ?? demo.form.draftLabel}
                     </span>
                   </div>
                   <div className="demo-form" data-disabled={formLocked || undefined}>
@@ -773,7 +773,7 @@ export function Demo() {
                             <h3>{s.title}</h3>
                             <span className="layer-pill" data-layer={s.layer}>
                               <span className="dot" />
-                              {s.layer}
+                              {s.label}
                             </span>
                             {i === 2 && inscribeView.simulated && (
                               // Stays put in every state, including 'done' —
@@ -1188,29 +1188,29 @@ export function Demo() {
                           <img
                             className="demo-resource-thumb"
                             src={resourceDataUrl(asset.resource.content, asset.resource.contentType)}
-                            alt="The asset's artwork resource"
+                            alt={demo.inspector.previewAlt}
                           />
                           <dl className="demo-kv">
                             <div>
-                              <dt>file</dt>
+                              <dt>{demo.inspector.fileLabel}</dt>
                               <dd>
                                 <code>{asset.resource.id} · {asset.resource.contentType}</code>
                               </dd>
                             </div>
                             <div>
-                              <dt>version</dt>
+                              <dt>{demo.inspector.versionLabel}</dt>
                               <dd>
                                 <code>v{asset.resource.version}</code>
                               </dd>
                             </div>
                             <div>
-                              <dt>sha-256</dt>
+                              <dt>{demo.inspector.fingerprintLabel}</dt>
                               <dd>
                                 <code>{asset.resource.hash}</code>
                               </dd>
                             </div>
                             <div>
-                              <dt>credentials</dt>
+                              <dt>{demo.inspector.signaturesLabel}</dt>
                               <dd>
                                 <code>{asset.credentials} signed</code>
                               </dd>
@@ -1237,17 +1237,17 @@ export function Demo() {
 }
 
 function DidList({ asset }: { asset: DemoAssetState }) {
-  const entries: Array<[string, string]> = [['Asset ID', asset.did]];
-  if (asset.webvhDid) entries.push(['did:webvh', asset.webvhDid]);
-  if (asset.btcoDid) entries.push(['did:btco', asset.btcoDid]);
+  const entries: Array<[string, string, string]> = [['Asset ID', demo.inspector.identityLabel, asset.did]];
+  if (asset.webvhDid) entries.push(['did:webvh', demo.inspector.webLabel, asset.webvhDid]);
+  if (asset.btcoDid) entries.push(['did:btco', demo.inspector.bitcoinLabel, asset.btcoDid]);
   return (
     <dl className="demo-kv">
-      {entries.map(([layer, did]) => (
+      {entries.map(([layer, label, did]) => (
         <div key={layer}>
           <dt>
             <span className="layer-pill" data-layer={layer}>
               <span className="dot" />
-              {layer}
+              {label}
             </span>
           </dt>
           <dd>
