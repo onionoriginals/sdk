@@ -245,7 +245,9 @@ function isDefinitiveNotFound(error: unknown): boolean {
  *   format, not curve + path alone (#749) — gets the missing role(s) added
  *   **in place**, on one deterministic wallet, rather than being silently
  *   left incomplete or replaced. Turnkey accounts are immutable, so a
- *   repaired role is added alongside a stale one rather than overwriting it;
+ *   repaired role is added alongside a stale one rather than overwriting it.
+ *   If the parent key lacks write permission, login keeps the existing
+ *   identity and leaves account creation to the authenticated user session;
  * - when multiple sub-orgs match the email (a pre-existing anomaly), the
  *   selection is deterministic so every login resolves the same identity;
  * - the lookup-then-create sequence is serialized per normalized email via
@@ -427,6 +429,17 @@ async function getOrCreateTurnkeySubOrgUnlocked(
           accounts: missingAccounts.map((spec) => ({ ...spec })),
         });
       } catch (repairWriteErr) {
+        // The parent API key can inspect an existing user's wallet without
+        // being allowed to mutate it. OTP verification has already proven
+        // ownership; a denied maintenance write must not prevent login to
+        // that same identity. Account creation can use the user's session
+        // after OTP_LOGIN. Do not swallow transport or other API failures.
+        if (extractTurnkeyErrorCode(repairWriteErr) === 7) {
+          console.warn(
+            '[auth] Parent key cannot repair wallet accounts; continuing with existing identity'
+          );
+          return existingSubOrgId;
+        }
         // This read-then-create sequence is only serialized within this
         // process (see the SubOrgLock production warning above); a
         // concurrent login handled by another instance can run the same
