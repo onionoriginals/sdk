@@ -1,5 +1,4 @@
-/* Imprint / Press. Scoped to the homepage so account and public records retain
-   their existing UI. The retained Inter face matches the supplied broadside. */
+/* Shared Imprint / Press identity. Interior surfaces live in imprint-pages.css. */
 .imprint {
   --paper: #f5f0dc;
   --ink: #25241e;

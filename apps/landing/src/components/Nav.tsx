@@ -135,6 +135,15 @@ export function Nav() {
       </div>
       {open && (
         <nav className="nav-mobile" aria-label={nav.mobileAria}>
+          {isAuthenticated && (
+            <a href="/me" onClick={(e) => {
+              e.preventDefault();
+              setOpen(false);
+              navigate('/me');
+            }}>
+              {yourOriginals.navLabel}
+            </a>
+          )}
           {!isAuthenticated && (
             <a
               href={nav.cta.href}
