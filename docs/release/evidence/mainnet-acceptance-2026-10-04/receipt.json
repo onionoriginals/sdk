@@ -1,0 +1,603 @@
+{
+  "status": "PASS",
+  "startedAt": "2026-10-04T03:52:16.776Z",
+  "completedAt": "2026-10-04T03:52:28.232Z",
+  "browser": "149.0.7827.55",
+  "profile": {
+    "newlyCreatedEmptyDirectory": true,
+    "isolatedProcess": true,
+    "reused": false,
+    "deletedAfterRun": true
+  },
+  "appUrl": "https://originals.build/explore/did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+  "preconditions": {
+    "localStorageKeys": [],
+    "sessionStorageKeys": [],
+    "indexedDB": [],
+    "cacheStorage": [],
+    "serviceWorkers": [],
+    "sessionStatus": 401,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/149.0.7827.55 Safari/537.36"
+  },
+  "cookiesBeforeApp": [],
+  "postconditions": {
+    "localStorageKeys": [],
+    "sessionStorageKeys": []
+  },
+  "pageText": "← All Originals\n\nCREATED · SEP 6, 2026\n\nOriginals 3.0.0 Release Proof\n\n2 files · image/png\n\n✓\nHosted history and primary file verified\n\nThese checks verify the hosted signatures and primary file in your browser. Any linked Bitcoin publication is checked against fresh public Bitcoin data.\n\nOpen the original file ↗\n\nSIGNED HISTORY\n\nInspect the signed artifacts\nController key\ndid:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui\nOriginal identity\ndid:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw\nPublished identity\ndid:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw\nBitcoin inscription\nsat 321959825743820\n\n1 accepted on-chain publication verified (provider-asserted) → sat 321959825743820\n\nWebVH version history\ndid.jsonl ↗\nCryptographic event log\ncel.json ↗",
+  "proof": {
+    "assetId": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+    "state": {
+      "assetId": "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+      "alias": "did:btco:321959825743820",
+      "aliases": [
+        "did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+        "did:webvh:QmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe:originals.build:published:accounts:00da079c-a004-474a-b09f-0ea12dcbeccb:uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+        "did:btco:321959825743820"
+      ],
+      "layer": "btco",
+      "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+      "controllers": [
+        {
+          "controller": "did:key:z6Mko6cJwm5KinFfo3NFSMVjH7U145mD5R3ECGpKWsNWd3ui",
+          "fromEntry": 0
+        }
+      ],
+      "createdAt": "2026-09-06T21:56:26.241Z",
+      "name": "Originals 3.0.0 Release Proof",
+      "metadata": {},
+      "resources": [
+        {
+          "digestMultibase": "uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+          "id": "tla-logo.png",
+          "mediaType": "image/png",
+          "version": 1
+        },
+        {
+          "digestMultibase": "uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "version": 1
+        }
+      ],
+      "active": true,
+      "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+      "entryCount": 3
+    },
+    "tip": {
+      "height": 969793,
+      "hash": "000000000000000000016e99a2b294119034f9272a89e8ce9b54519a02ab1167"
+    },
+    "publications": [
+      {
+        "inscriptionId": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9i0",
+        "position": {
+          "height": 965854,
+          "blockHash": "000000000000000000004093dbe74190a09158efed283039a3758651c2677f4b",
+          "transactionIndex": 626,
+          "inscriptionIndex": 0
+        },
+        "eventDigests": [
+          "uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw",
+          "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
+          "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw"
+        ],
+        "inlineResourceIds": [
+          "tla-logo.png"
+        ],
+        "inlineContentStatus": "matched"
+      }
+    ],
+    "ownership": {
+      "owner": "bc1qwx77y7n2dvcfy2aejnrxcapevmssfezc4ly4rl",
+      "satpoint": "cdb2eccae0a929f7e5c7459893eb34e24d8099850e04d323963d19d5f4a344d9:0:0"
+    },
+    "assurance": {
+      "chain": "provider-asserted",
+      "enumeration": "provider-asserted",
+      "content": "provider-asserted",
+      "ownership": "provider-asserted",
+      "trajectory": "not-independently-derived"
+    },
+    "satOnly": {
+      "verified": false,
+      "missingResources": [
+        {
+          "id": "metadata.json",
+          "version": 1
+        }
+      ],
+      "resourceAvailability": [
+        {
+          "id": "tla-logo.png",
+          "version": 1,
+          "availability": "bitcoin-inline"
+        },
+        {
+          "id": "metadata.json",
+          "version": 1,
+          "availability": "referenced"
+        }
+      ]
+    },
+    "hosted": {
+      "verified": true,
+      "head": "uEiD4at5wYdRpvXxpIe37qDwHcTzpGX9SD_eia1MBGzKINg",
+      "webvhStatus": 200,
+      "webvhLogSha256": "a7ad878abc7cb81baef4fa6716a50068cb0e9586afd6c24a9ea5622a36a66889"
+    },
+    "full": {
+      "verified": true,
+      "head": "uEiDc-LgUKMpRyHs_ILvGBWSyLOLUNZ4E5pYfVIANXd4LGw",
+      "resources": [
+        {
+          "id": "tla-logo.png",
+          "bytes": 3857,
+          "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33"
+        },
+        {
+          "id": "metadata.json",
+          "bytes": 257,
+          "sha256": "447201c82e21ef0727f3b56566c5852b5b83e6389faebe2b56ba457855aef717"
+        }
+      ]
+    },
+    "checks": [
+      {
+        "id": "hash",
+        "ok": true,
+        "detail": "sha-256 recomputed from 3857 bytes → 98bbbe3fed7293f4b2c3…"
+      },
+      {
+        "id": "log",
+        "ok": true,
+        "detail": "1 signed log entry verified → did:webvh:QmQx4uVtBmx22aFv3LDH8r79zt…"
+      },
+      {
+        "id": "cel",
+        "ok": true,
+        "detail": "2 signed controller events and the WebVH backlink verified → did:cel:uEiCt-PPt6WQV7pEvvR-fu2tQszV…"
+      },
+      {
+        "id": "btco",
+        "ok": true,
+        "detail": "1 accepted on-chain publication verified (provider-asserted) → sat 321959825743820"
+      }
+    ],
+    "bitcoinCheck": {
+      "id": "btco",
+      "ok": true,
+      "detail": "1 accepted on-chain publication verified (provider-asserted) → sat 321959825743820"
+    },
+    "storageReads": [
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json",
+        "status": 200,
+        "bytes": 1721,
+        "sha256": "aafa7ba03d3aba08a9da9c277cc3ce7e9b3f4149b562fdd6c5f9225751070165"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl",
+        "status": 200,
+        "bytes": 1710,
+        "sha256": "a7ad878abc7cb81baef4fa6716a50068cb0e9586afd6c24a9ea5622a36a66889"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+        "status": 200,
+        "bytes": 3857,
+        "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+        "status": 200,
+        "bytes": 257,
+        "sha256": "447201c82e21ef0727f3b56566c5852b5b83e6389faebe2b56ba457855aef717"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json",
+        "status": 200,
+        "bytes": 1721,
+        "sha256": "aafa7ba03d3aba08a9da9c277cc3ce7e9b3f4149b562fdd6c5f9225751070165"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl",
+        "status": 200,
+        "bytes": 1710,
+        "sha256": "a7ad878abc7cb81baef4fa6716a50068cb0e9586afd6c24a9ea5622a36a66889"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw",
+        "status": 200,
+        "bytes": 3857,
+        "sha256": "98bbbe3fed7293f4b2c335f66fe76025ef9da84c18a905d297598aafaa663e33"
+      },
+      {
+        "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw",
+        "status": 200,
+        "bytes": 257,
+        "sha256": "447201c82e21ef0727f3b56566c5852b5b83e6389faebe2b56ba457855aef717"
+      }
+    ]
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/health"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/me"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/explore/did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/index-BkmxDY5k.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/rolldown-runtime-aKtaBQYM.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/buffer-polyfill-CQPDoYnv.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/preload-helper-Czpn1I53.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/satoshi-validation-BL-aqnKO.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/base-sw6L8_83.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/sha2-BTEF2nLV.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/history-DgHNi86w.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/utils-Bpv4vmSW.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/sha2-hT-Q4pur.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/hmac-CHo86Fai.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/hash-jj1o6o0T.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/ed25519-B4It4yEo.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/browser-sQhSLvlj.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/dist-DllIi3IQ.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/dist-DRxKWaXV.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/durable-hosting-adapter-BGZV6nom.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/http-ordinals-provider-CFtHSvf1.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/index-DAhVTv0A.css"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/inter-latin-wght-normal-Dx4kXJAl.woff2"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/explore/original?did=did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/me"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/verify-original-oHYYbjmL.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/cel-D0UAr4kb.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/assets/public-sat-provider-B50M_BPl.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/api/explore/original?did=did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "method": "GET",
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    }
+  ],
+  "responses": [
+    {
+      "status": 200,
+      "url": "https://originals.build/api/health"
+    },
+    {
+      "status": 401,
+      "url": "https://originals.build/api/me"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/explore/did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/rolldown-runtime-aKtaBQYM.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/sha2-BTEF2nLV.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/satoshi-validation-BL-aqnKO.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/index-DAhVTv0A.css"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/utils-Bpv4vmSW.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/preload-helper-Czpn1I53.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/buffer-polyfill-CQPDoYnv.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/ed25519-B4It4yEo.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/http-ordinals-provider-CFtHSvf1.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/hmac-CHo86Fai.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/base-sw6L8_83.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/durable-hosting-adapter-BGZV6nom.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/sha2-hT-Q4pur.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/hash-jj1o6o0T.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/browser-sQhSLvlj.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/history-DgHNi86w.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/dist-DRxKWaXV.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/index-BkmxDY5k.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/dist-DllIi3IQ.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/inter-latin-wght-normal-Dx4kXJAl.woff2"
+    },
+    {
+      "status": 401,
+      "url": "https://originals.build/api/me"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/api/explore/original?did=did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/verify-original-oHYYbjmL.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/cel-D0UAr4kb.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/assets/public-sat-provider-B50M_BPl.js"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/cel.json"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiCYu74_7XKT9LLDNfZv52Al752oTBipBdKXWYqvqmY-Mw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/resources/uEiBEcgHILiHvByfztWVmxYUrW4PmOJ-uvitWukV4Va73Fw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/api/explore/sat-snapshot/321959825743820"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/api/explore/original?did=did%3Awebvh%3AQmQx4uVtBmx22aFv3LDH8r79ztaVBatVWihyVbH89ZaEJe%3Aoriginals.build%3Apublished%3Aaccounts%3A00da079c-a004-474a-b09f-0ea12dcbeccb%3AuEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw"
+    },
+    {
+      "status": 200,
+      "url": "https://originals.build/published/accounts/00da079c-a004-474a-b09f-0ea12dcbeccb/uEiCt-PPt6WQV7pEvvR-fu2tQszVfbbQy8uIaqcE5aX2TPw/did.jsonl"
+    }
+  ],
+  "denied": [],
+  "errors": [],
+  "limits": [
+    "Existing owner asset only; no creation, signing, funding or broadcast.",
+    "Chain/index/content/ownership evidence is provider-asserted; no independently derived sat trajectory.",
+    "PNG is Bitcoin-inline; metadata.json remains hosted.",
+    "Full-resource SDK verification is a supplemental browser-side read using shipped modules; the normal Explore UI verifies the primary file and accepted publication."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "result": "pass",
+  "chain": "regtest",
+  "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+  "ord": "ord 0.29.0",
+  "inscriptionId": "bb95e577be979a149daed5cda010b1e0b828d6d8b69e7bee64690102f3a00615i0",
+  "inscriptionSat": 5000000000,
+  "contentSha256": "446202974996f85954ceb12b80a9327b2ec8826bfac31c6c2306923ea104fe5c",
+  "restarts": [
+    {
+      "target": "ord",
+      "preservedTip": "0706e61e060e91153fef917ddeadfbb81dada301db288285ddf2dcce02c83823",
+      "preservedHeight": 103,
+      "indexedNextBlock": "4c03f5241f327ac53df83bc55f160a0743036349cd76b404f91b475107b0e36d",
+      "cookieRotated": false
+    },
+    {
+      "target": "core",
+      "preservedTip": "4c03f5241f327ac53df83bc55f160a0743036349cd76b404f91b475107b0e36d",
+      "preservedHeight": 104,
+      "indexedNextBlock": "76c4912bf208170506942b16506f2463d29bd29aa8bbfa09bb714cd459f10142",
+      "cookieRotated": true
+    },
+    {
+      "target": "both",
+      "preservedTip": "76c4912bf208170506942b16506f2463d29bd29aa8bbfa09bb714cd459f10142",
+      "preservedHeight": 105,
+      "indexedNextBlock": "492a7965a65e98d927aee816522c1dc97ac8eb600236d040a80323c90ebd688f",
+      "cookieRotated": true
+    }
+  ],
+  "dataDir": "/tmp/originals-regtest-BRtfzO",
+  "logs": [
+    "bitcoin.1.error.log",
+    "bitcoin.1.log",
+    "bitcoin.2.error.log",
+    "bitcoin.2.log",
+    "bitcoin.3.error.log",
+    "bitcoin.3.log",
+    "bitcoin.4.error.log",
+    "bitcoin.4.log",
+    "bitcoin.error.log",
+    "bitcoin.log",
+    "ord.1.error.log",
+    "ord.1.log",
+    "ord.2.error.log",
+    "ord.2.log",
+    "ord.3.error.log",
+    "ord.3.log",
+    "ord.4.error.log",
+    "ord.4.log",
+    "ord.error.log",
+    "ord.log"
+  ],
+  "checks": [
+    "mature funded wallet",
+    "real mined inscription",
+    "ord-only restart",
+    "Core-only restart",
+    "combined restart",
+    "same chain and wallet balances",
+    "cookie refresh",
+    "inscription satpoint and bytes preserved",
+    "new block indexed after each restart",
+    "serialized concurrent restarts",
+    "failed restart rejects and stops both endpoints",
+    "repeat stop is safe",
+    "restart after stop rejects",
+    "all process-generation logs retained"
+  ]
+}

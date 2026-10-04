@@ -1,0 +1,439 @@
+{
+  "observedAt": "2026-10-04T03:55:05.989793+00:00",
+  "sourceSha": "21891c0a24e14574a4a5e8b13858e3e3c5bd8211",
+  "versions": {
+    "sdk": {
+      "sourceVersion": "4.0.0",
+      "registryTags": {
+        "next": "3.0.0-next.1",
+        "latest": "4.0.0"
+      },
+      "publishedAt": "2026-10-04T01:27:06.677Z"
+    },
+    "cel": {
+      "sourceVersion": "2.0.0",
+      "registryTags": {
+        "next": "0.2.0-next.0",
+        "latest": "2.0.0"
+      },
+      "publishedAt": "2026-10-04T01:28:22.950Z"
+    },
+    "auth": {
+      "sourceVersion": "4.0.0",
+      "registryTags": {
+        "next": "3.0.0-next.0",
+        "latest": "4.0.0"
+      },
+      "publishedAt": "2026-10-04T02:13:41.073Z"
+    }
+  },
+  "ci": {
+    "conclusion": "success",
+    "headSha": "21891c0a24e14574a4a5e8b13858e3e3c5bd8211",
+    "jobs": [
+      {
+        "name": "Coverage meets thresholds",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run tests with coverage",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "ESM importable (Node)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Node.js",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify built packages import under Node ESM",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify SDK public types match the default CEL 3 API",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify auth public client API matches documented signatures",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify browser-facing entry points have no eager Node builtins",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Node.js",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Lint",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Lint",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Typecheck passes",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Typecheck",
+            "conclusion": "success"
+          },
+          {
+            "name": "Typecheck Railway IaC",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Dependency audit",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v7",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run oven-sh/setup-bun@v2",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun install --frozen-lockfile",
+            "conclusion": "success"
+          },
+          {
+            "name": "Audit production dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Audit all dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run oven-sh/setup-bun@v2",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v7",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Landing app typechecks, tests and builds",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Typecheck, test and build the landing app against the built SDK",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Tests pass",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies (bun)",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run tests",
+            "conclusion": "success"
+          },
+          {
+            "name": "Release workflow contract",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Setup Bun",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "Changeset present",
+        "conclusion": "skipped",
+        "steps": []
+      }
+    ],
+    "url": "https://github.com/onionoriginals/sdk/actions/runs/37167925201"
+  },
+  "regtest": {
+    "conclusion": "success",
+    "headSha": "6cfbf788a6ab67c78e095145e3d7397500d86761",
+    "jobs": [
+      {
+        "name": "regtest",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@v7",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run oven-sh/setup-bun@v2",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun install --frozen-lockfile",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun test download.test.ts environment.test.ts assert-stopped.test.ts",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun run regtest",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun run --cwd apps/landing playwright-core install --with-deps chromium",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run bun run regtest:browser",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/upload-artifact@v7",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run oven-sh/setup-bun@v2",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@v7",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ],
+    "url": "https://github.com/onionoriginals/sdk/actions/runs/37167471663"
+  },
+  "treeEquality": {
+    "ciHead": "6cfbf788a6ab67c78e095145e3d7397500d86761",
+    "deployedHead": "21891c0a24e14574a4a5e8b13858e3e3c5bd8211",
+    "identicalTree": true
+  },
+  "freshLocalChecks": {
+    "packageBuild": "PASS, three tasks, no cached builds",
+    "typecheck": "PASS, two cached build dependencies",
+    "esm": "PASS, 26 entry points",
+    "browserSafety": "PASS",
+    "landingBuild": "PASS; production environment and only the two declared VITE settings; all six compared live bundles match",
+    "nonBroadcastDryRun": "PASS, 24 checks, fixture signer/mock funding; zero broadcast-route calls",
+    "lint": "PASS; existing warnings"
+  },
+  "retained569": {
+    "testedSha": "68f9d599db867356502effb9da9d2b5d745c96e1",
+    "digestFilesChecked": 19,
+    "digestMismatches": 0,
+    "issueState": "CLOSED",
+    "mergedPR": 942
+  },
+  "bugs": {
+    "openBugCount": 0,
+    "scope": "Live GitHub states, not an independent re-audit of every closed ticket"
+  },
+  "browserAcceptance": "PASS, receipt.json",
+  "noProductionMutations": true,
+  "landingSourceVersion": "0.2.1",
+  "additionalRootTest": {
+    "command": "bun test",
+    "knownFailure": "Node-specific chain-validator-node.test.mjs executed under Bun; SAT_SNAPSHOT_CHAIN_UNAVAILABLE",
+    "prescribedCommand": "node --test scripts/chain-validator-node.test.mjs",
+    "prescribedResult": "PASS, 1 test"
+  }
+}

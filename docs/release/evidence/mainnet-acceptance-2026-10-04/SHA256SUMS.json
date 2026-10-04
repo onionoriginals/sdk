@@ -1,0 +1,19 @@
+{
+  "bundle-comparison.json": "52c64f1cf5b52edaab44ce66704002e2a94ad08701b2fcd83c41b7314d41fe03",
+  "clean-browser.png": "e285ee5ab128e2e139e6052a311a7452e007d0f4a58f528622c64e88bda6b90f",
+  "deployment.json": "3eac57e413aeac1c72fd158d4982e25120c7807074e8193497f765ca3ecbabd5",
+  "dry-run.json": "e56e244161723b08e24f9214a77ca9dc2ca5ac92fb98a7fd3ce92bad3d75eb2c",
+  "dry-run.ts": "554570a96e623ce1d9c7b9ce2df15e83d1ad0e9b049324df8ebbd5a9a2c8c120",
+  "funding-identifiers.json": "3baa165ef2ec9533fe2c3bf320ab78daff8487f02f5c3ea91f73f49d6481506c",
+  "hosted-cel.json": "aafa7ba03d3aba08a9da9c277cc3ce7e9b3f4149b562fdd6c5f9225751070165",
+  "hosted-did.jsonl": "a7ad878abc7cb81baef4fa6716a50068cb0e9586afd6c24a9ea5622a36a66889",
+  "hosted-regtest/regtest-browser-artifacts/receipt.json": "37008da51716a740a1f7aee0484fd1b8bab7bf7ea2e9c62ae9ab3857e3522160",
+  "hosted-regtest/regtest-receipt-commit-response-lost.json": "f902650b34fb7fe94ddb5400bb02d11565f04fe1113650448f05628730bb5825",
+  "hosted-regtest/regtest-receipt-no-address-index.json": "13f48a25000bde184dc8e25e1123029efc8f448969c1868e086492ab9b73ee41",
+  "hosted-regtest/regtest-receipt-none.json": "66aeda0c3e12e3af9d1b94acd76944b68be290fe44982fb7a69fa6a7dfd80407",
+  "hosted-regtest/regtest-receipt-restart.json": "cd90b578ff13865076bf783e7fee235337be0cca5fe5bb1e0bf7eb3ee14c338b",
+  "hosted-regtest/regtest-receipt-reveal-rejected.json": "3a30c117516dfc8a29adb8fca4f9c1472dee79e04539788aae1914a1c6fff000",
+  "receipt.json": "08de1b0fd20b46933d82f6b3f2a04807c70ede0ded97391e96e3e7b04ae537d0",
+  "summary.json": "a8ff4e5d5c624ed35d44bf372d1ae340d511be50c612857834e47159103d8eee",
+  "verify-mainnet.mjs": "b8362194b05615b3b6e0888325a887ee01f001053e6369410b600bb3391a468d"
+}

@@ -1,0 +1,242 @@
+{
+  "result": "pass",
+  "format": "originals/cel/3",
+  "chain": "regtest",
+  "fault": "commit-response-lost",
+  "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+  "ord": "ord 0.29.0",
+  "did": "did:btco:reg:5000000000",
+  "ownershipObservations": [
+    {
+      "stage": "matching-tip-before-transfer",
+      "primaryTip": {
+        "height": 112,
+        "hash": "2b576d1dc5f1850af8da78b1d85d40facdc5d8c0d5bc733bcefa25625604249b"
+      },
+      "independentTip": {
+        "height": 112,
+        "hash": "2b576d1dc5f1850af8da78b1d85d40facdc5d8c0d5bc733bcefa25625604249b"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "lagging-tip-same-owner",
+      "primaryTip": {
+        "height": 113,
+        "hash": "2a8b2eeaa16a8ac034bcea2f887e7e3dc93e659cace0a6de396a87c70ad3ec64"
+      },
+      "independentTip": {
+        "height": 112,
+        "hash": "2b576d1dc5f1850af8da78b1d85d40facdc5d8c0d5bc733bcefa25625604249b"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "same-height-different-hash",
+      "primaryTip": {
+        "height": 113,
+        "hash": "2a8b2eeaa16a8ac034bcea2f887e7e3dc93e659cace0a6de396a87c70ad3ec64"
+      },
+      "independentTip": {
+        "height": 113,
+        "hash": "7516e87bb147d5c2a3bfbe1bd405bdec53518b562008c5fc5082e422401cadbb"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "fork-rejoined",
+      "primaryTip": {
+        "height": 114,
+        "hash": "726d40fba656dcd85c4ec724c5ba91cbc591e93de45d913d8d21425813d69d42"
+      },
+      "independentTip": {
+        "height": 114,
+        "hash": "726d40fba656dcd85c4ec724c5ba91cbc591e93de45d913d8d21425813d69d42"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "sale-lagging-index",
+      "primaryTip": {
+        "height": 116,
+        "hash": "5dec347c556b0ca3b2c27f974dd1d1e91b455b6f23dddd0c8c6c29c34722c675"
+      },
+      "independentTip": {
+        "height": 114,
+        "hash": "726d40fba656dcd85c4ec724c5ba91cbc591e93de45d913d8d21425813d69d42"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qlgzu2nqrxuezdhcz84c46dfk962tjx8vu39ap9",
+        "satpoint": "c7b11340fbf5854ade62634bf29e2e93292354202b7fa7d40c0045477aad0eea:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "sale-indexes-agree",
+      "primaryTip": {
+        "height": 116,
+        "hash": "5dec347c556b0ca3b2c27f974dd1d1e91b455b6f23dddd0c8c6c29c34722c675"
+      },
+      "independentTip": {
+        "height": 116,
+        "hash": "5dec347c556b0ca3b2c27f974dd1d1e91b455b6f23dddd0c8c6c29c34722c675"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qlgzu2nqrxuezdhcz84c46dfk962tjx8vu39ap9",
+        "satpoint": "c7b11340fbf5854ade62634bf29e2e93292354202b7fa7d40c0045477aad0eea:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qlgzu2nqrxuezdhcz84c46dfk962tjx8vu39ap9",
+        "satpoint": "c7b11340fbf5854ade62634bf29e2e93292354202b7fa7d40c0045477aad0eea:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "reacquisition-lagging-index",
+      "primaryTip": {
+        "height": 118,
+        "hash": "307bfa989a47796f39b1b016a16febfd822f73490571c7935233caa2077e2ceb"
+      },
+      "independentTip": {
+        "height": 116,
+        "hash": "5dec347c556b0ca3b2c27f974dd1d1e91b455b6f23dddd0c8c6c29c34722c675"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qlgzu2nqrxuezdhcz84c46dfk962tjx8vu39ap9",
+        "satpoint": "c7b11340fbf5854ade62634bf29e2e93292354202b7fa7d40c0045477aad0eea:0:0"
+      },
+      "ownershipAssurance": "provider-asserted"
+    },
+    {
+      "stage": "reacquisition-indexes-agree",
+      "primaryTip": {
+        "height": 118,
+        "hash": "307bfa989a47796f39b1b016a16febfd822f73490571c7935233caa2077e2ceb"
+      },
+      "independentTip": {
+        "height": 118,
+        "hash": "307bfa989a47796f39b1b016a16febfd822f73490571c7935233caa2077e2ceb"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    },
+    {
+      "stage": "independent-restart",
+      "primaryTip": {
+        "height": 118,
+        "hash": "307bfa989a47796f39b1b016a16febfd822f73490571c7935233caa2077e2ceb"
+      },
+      "independentTip": {
+        "height": 118,
+        "hash": "307bfa989a47796f39b1b016a16febfd822f73490571c7935233caa2077e2ceb"
+      },
+      "primaryOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285:0:0"
+      },
+      "independentOwnership": {
+        "owner": "bcrt1qclsnzhv8pyznhuwjgyvs7cnsec7kpu2c5z543c",
+        "satpoint": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285:0:0"
+      },
+      "ownershipAssurance": "cross-checked"
+    }
+  ],
+  "webDid": "did:webvh:QmdHdSAvPbxUBLJTh38KhbJiFgSh1QdbA7XyY66pHcEhEv:regtest.localhost%3A45299:published:anonymous:uEiB6B5rR4xbrie8RTsk1yL4o2AyS9K6z_RF3UWpSt72V9A",
+  "commitTxId": "f05ea2675882afa7af6ab129e08e74145e6a01e5ece29d18fc41eb5b1fc8669c",
+  "revealTxId": "4edc2c5e38b0cb058390534254533a7ad4eacf231f1a8abbdf6dbb8f87fc5655",
+  "inscriptionId": "4edc2c5e38b0cb058390534254533a7ad4eacf231f1a8abbdf6dbb8f87fc5655i0",
+  "publications": [
+    "4edc2c5e38b0cb058390534254533a7ad4eacf231f1a8abbdf6dbb8f87fc5655i0",
+    "ebe8e3904852dbe855a641f7cc4c7072f254d9875e10c20fcbe997512f5ac351i0",
+    "2876e377cdee5fcb267798ddd334849d8e5f95403316abb16e7bf56e3b5e254ci0",
+    "0ab8ecc39e93e4db451da67b34000b6cfe1382cb337a3c9d450745d4be4f1021i0"
+  ],
+  "saleTxid": "c7b11340fbf5854ade62634bf29e2e93292354202b7fa7d40c0045477aad0eea",
+  "reacquisitionTxid": "593660a4c99d1cd6f1c4c51656552c5f1d82f7d1f7197dbfc9248adb6b44f285",
+  "buyerAddress": "bcrt1qlgzu2nqrxuezdhcz84c46dfk962tjx8vu39ap9",
+  "orphanedRotationBlock": "2b4c915c3476eca094d60c427c6fb8eb2e84d13eb213e06b3f4799d6261ddd71",
+  "orphanedBlock": "4acbf1f683fd27e4d624fafec2dae388db695ebf12159d0542f0257482f3178c",
+  "activeTip": "794839b244e5a8d70d18d87f7a2ce0052af0125c14afdea5c9d91e535bfa56af",
+  "pngBytes": 68,
+  "pngHash": "5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15",
+  "dataDir": "/tmp/originals-regtest-p5YFKu",
+  "finalHead": "uEiDqZAFchycqaue4kSi1WUhWgEX_gUmGBtQwxIeh0MwUNA",
+  "checks": [
+    "explicit HTTPS WebVH method and CEL publication",
+    "cold hosted PNG bytes",
+    "HTTP deposit/fee/sat/prevtx",
+    "zero-broadcast preparation",
+    "raw PNG plus full boundary CBOR",
+    "persist exact signed pair before broadcast",
+    "route/store recreation from disk",
+    "selected sat preserved",
+    "orphaned boundary rejected after real reorg",
+    "reconfirmation",
+    "cold sat bytes and DID authority",
+    "CEL 3 JSON reload",
+    "six-confirmation retention horizon",
+    "cold accepted-head delta",
+    "one-publication rotation plus new-controller update",
+    "retired controller rejected",
+    "orphaned rotation restores prior controller",
+    "independent Core/ord ownership at matching tips",
+    "lagging and same-height forked tips never upgrade ownership",
+    "sale and reacquisition corroborated after real index catch-up",
+    "ownership and DID metadata survive independent restart",
+    "unavailable independent index fails closed",
+    "real sat sale and reacquisition preserve CEL head and authority",
+    "closed-browser recovery sweep",
+    "new-resource raw media delta",
+    "historical and current resource bytes",
+    "log-only deactivation",
+    "deactivated DID metadata"
+  ],
+  "signer": "disposable local Bitcoin key through TurnkeySatSigner; disposable CEL keys; no Turnkey service call"
+}
