@@ -827,7 +827,7 @@ export const protocol = {
     'Unidirectional by design: an original can gain permanence, but its history can never be quietly rewritten.',
   // Generic CEL application provenance and DID-method identity are separate standards.
   standardsNote:
-    'Originals uses CCG Cryptographic Event Logs for signed file history and standard ni: hash identifiers for assets. WebVH and Bitcoin supply publication identities. The separate did:cel method is not defined or implemented by Originals.',
+    'Originals uses CCG Cryptographic Event Logs for signed file history and did:cel identifiers derived from genesis SCIDs. WebVH and Bitcoin supply publication identities. CEL verification binds each history to its genesis commitment.',
   columns: [
     {
       layer: 'did:cel',

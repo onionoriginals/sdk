@@ -140,7 +140,7 @@ export function canonicalizeWebVHDomain(
 
 /** Parse a bare canonical asset alias. WebVH syntax never proves its separate method-log binding.
  * The `layer` discriminator names the Originals lifecycle stage (cel/webvh/btco); it is not a
- * claim that every alias is a DID. Only the webvh/btco spellings are actual DID methods.
+ * claim that a separate DID-method resolver is provided for every alias.
  */
 export function parseAssetAlias(did: unknown): AssetAlias {
   requireThat(
@@ -151,9 +151,8 @@ export function parseAssetAlias(did: unknown): AssetAlias {
   if (did.startsWith("ni:")) {
     return { layer: "cel", did: normalizeAssetId(did) };
   }
-  // Retained parser compatibility for reading authenticated SDK 3 history/aliases;
-  // this is an Originals 3.0 alias, not DID-method resolution, and is not offered
-  // as new migration/authoring input.
+  // Originals history identity; SCID/genesis verification is performed by the
+  // CEL verifier, not by syntax parsing or a separate DID-method resolver.
   if (did.startsWith("did:cel:")) {
     validateDigest(did.slice(8));
     return { layer: "cel", did };

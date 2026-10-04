@@ -5,8 +5,8 @@ recover it from authenticated CEL 3 history and exact resource bytes. An Origina
 a separate concept, established by on-chain observations rather than a signature
 alone.
 
-This checkout prepares SDK 4 / CEL 2: canonical asset identity is the RFC 6920
-`ni:///sha-256;…` URI wrapping the genesis SCID. SDK 3.0.0 is already published. Its
+This checkout prepares SDK 4 / CEL 2: canonical asset identity is
+`did:cel:<SCID>`, wrapping the genesis SCID. Former `ni:` IDs remain readable. SDK 3.0.0 is already published. Its
 CEL 3 histories remain readable through a strict version-3 envelope path;
 pre-CEL-3 asset formats are unsupported. The signed CEL representation, controller
 proofs, WebVH publication, Bitcoin publication and fresh resolution are retained. Publishing returns explicit prepared/submitted states;

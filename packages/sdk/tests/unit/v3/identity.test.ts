@@ -21,6 +21,7 @@ test("new exports name the asset honestly and old signed v3 envelopes still reco
   ]);
   const expected = deriveAssetId(asset.celLog.log[0].event);
   expect(asset.id).toBe(expected);
+  expect(asset.id).toBe("did:cel:" + asset.celLog.log[0].event.previousEvent);
   const genesis = asset.celLog.log[0].event;
   expect(genesis.previousEvent).toBe(assetDigest(expected));
   expect(verifyScid(genesis, assetDigest(expected))).toBe(true);
@@ -51,13 +52,20 @@ test("new exports name the asset honestly and old signed v3 envelopes still reco
   await expect(
     OriginalsSDK.create().lifecycle.loadAsset(tampered, { allowPartial: true }),
   ).rejects.toThrow();
+  const ni =
+    "ni:///sha-256;" +
+    Buffer.from(assetDigest(expected).slice(1), "base64url")
+      .subarray(2)
+      .toString("base64url");
+  const retained = await OriginalsSDK.create().lifecycle.loadAsset({
+    ...current,
+    assetId: ni,
+  });
+  expect(retained.asset.id).toBe(expected);
+  expect(retained.asset.serialize().assetId).toBe(expected);
+  expect(JSON.stringify(retained.asset.celLog)).toBe(before);
+  // Version 3 still has its original did-only contract; version 4 reads both spellings.
   await expect(
-    OriginalsSDK.create().lifecycle.loadAsset({ ...old, assetDid: expected }),
-  ).rejects.toThrow();
-  await expect(
-    OriginalsSDK.create().lifecycle.loadAsset({
-      ...current,
-      assetId: old.assetDid,
-    }),
+    OriginalsSDK.create().lifecycle.loadAsset({ ...old, assetDid: ni }),
   ).rejects.toThrow();
 });

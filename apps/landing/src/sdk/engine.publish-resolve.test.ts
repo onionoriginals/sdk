@@ -133,7 +133,7 @@ describe('publish → resolve roundtrip', () => {
 
   test('a local genesis has no hosted or Bitcoin binding', async () => {
     const state = await new DemoEngine().create('Local', 'Artwork', '<svg/>');
-    expect(state.did).toStartWith('ni:///sha-256;');
+    expect(state.did).toStartWith('did:cel:u');
     expect(state.webvhDid).toBeUndefined();
     expect(state.btcoDid).toBeUndefined();
   });

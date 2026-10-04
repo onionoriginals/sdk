@@ -107,10 +107,10 @@ describe('the page states the indexer trust assumption', () => {
 });
 
 describe('the page separates CEL provenance from DID methods', () => {
-  test('the protocol section names ni identity and disclaims did:cel implementation', () => {
+  test('the protocol section names did:cel identity and genesis binding', () => {
     expect(protocol.standardsNote).toMatch(/Cryptographic Event Logs/);
-    expect(protocol.standardsNote).toMatch(/ni: hash identifiers/);
-    expect(protocol.standardsNote).toMatch(/did:cel method is not defined or implemented by Originals/);
+    expect(protocol.standardsNote).toMatch(/did:cel identifiers derived from genesis SCIDs/);
+    expect(protocol.standardsNote).toMatch(/binds each history to its genesis commitment/);
     expect(protocol.standardsNote).not.toMatch(/did:cel is ours/);
   });
 });
