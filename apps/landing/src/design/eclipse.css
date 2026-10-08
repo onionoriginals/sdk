@@ -102,7 +102,7 @@
   min-height: min(calc(100svh - 72px), 900px);
   padding-block: 24px 48px;
 }
-.eclipse-hero-copy { position: relative; z-index: 1; display: grid; gap: 0; max-width: 720px; }
+.eclipse-hero-copy { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; max-width: 720px; min-width: 0; }
 .eclipse-display { font-size: var(--t-display); margin: 0; }
 .eclipse-lede {
   margin-top: 28px; max-width: 44ch;
@@ -117,7 +117,7 @@
   transition: text-decoration-color var(--dur-fast) var(--ease);
 }
 .eclipse-quiet:hover { text-decoration-color: var(--accent); }
-.eclipse-hero .idp { margin-top: 40px; }
+.eclipse-hero .idp { margin-top: 40px; min-width: 0; }
 
 .eclipse-sky {
   position: relative; margin: 0;
