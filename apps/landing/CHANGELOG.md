@@ -1,5 +1,14 @@
 # @originals/landing
 
+## 0.2.2
+
+### Patch Changes
+
+- 0b3fc5c: Redesign the landing and interior pages around the eclipse identity: dark night ground, Archivo type, a live eclipse hero and amber reserved for signing and Bitcoin moments.
+- 8a823fa: Keep the signed-in landing hero within phone width: a long identity no longer pushes the headline, intro and actions off-screen.
+- Updated dependencies [5924062]
+  - @originals/auth@4.0.1
+
 ## 0.2.1
 
 ### Patch Changes
