@@ -182,9 +182,9 @@ for (const fault of faults) {
     await page!.goto(origin, { waitUntil: 'domcontentloaded' });
     await page!.getByRole('tab', { name: 'Upload', exact: true }).click();
     await page!.waitForFunction(() => (window as any).__originalsDemo?.tier.real === true);
-    await page!.getByLabel('Asset title', { exact: true }).fill(`Regtest recovery ${fault}`);
+    await page!.getByLabel('Title', { exact: true }).fill(`Regtest recovery ${fault}`);
     await page!.locator('input[type=file]').setInputFiles({ name: 'browser-proof.png', mimeType: 'image/png', buffer: Buffer.from(png) });
-    await page!.getByRole('button', { name: 'Create asset', exact: true }).click();
+    await page!.getByRole('button', { name: 'Create Original', exact: true }).click();
     await page!.getByRole('button', { name: 'Publish to web', exact: true }).click();
     await page!.waitForFunction(() => {
       try { return (window as any).__originalsDemo.snapshot().webvhResolved === true; } catch { return false; }
@@ -213,7 +213,7 @@ for (const fault of faults) {
     checkpoint('fund-confirmed-deposit', { assetId: hosted.assetId, webDid: hosted.webDid });
     await env.fund(config.fundingAddress);
     // The actual click refreshes the deposit through the production route.
-    await page!.getByRole('button', { name: 'Inscribe on Bitcoin', exact: true }).click();
+    await page!.getByRole('button', { name: 'Add to Bitcoin', exact: true }).click();
     await page!.locator('.demo-done').waitFor();
     const prepared = await page!.evaluate(() => {
       for (const key of Object.keys(localStorage)) {

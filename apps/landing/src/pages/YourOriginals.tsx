@@ -397,7 +397,7 @@ function AccountOriginals() {
   return (
     <main className="section your-originals">
       <div className="container">
-        <header className="imprint-page-heading">
+        <header className="page-heading">
           <p className="eyebrow">{yourOriginals.navLabel}</p>
           <h1>{yourOriginals.heading}</h1>
           <p className="your-originals-sub">{yourOriginals.subhead}</p>

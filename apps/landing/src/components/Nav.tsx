@@ -3,6 +3,7 @@ import { nav, site, yourOriginals } from '../content';
 import { useAuth } from '../auth/useAuth';
 import { navigate, goToSection } from '../router';
 import { LoginModal } from './LoginModal';
+import { Mark } from './Mark';
 import './nav.css';
 
 // In-page section links (#why, #demo, …, #top) must work from any route — on
@@ -22,10 +23,7 @@ function Wordmark() {
       aria-label={`${site.wordmark} ${nav.homeAriaSuffix}`}
       onClick={(e) => onSectionClick(e, '#top')}
     >
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <circle cx="10" cy="10" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="2.5" />
-        <circle cx="10" cy="10" r="2" fill="currentColor" />
-      </svg>
+      <Mark />
       <span>{site.wordmark}</span>
     </a>
   );

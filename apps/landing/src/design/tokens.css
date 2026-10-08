@@ -1,50 +1,54 @@
 /*
- * Originals landing — design tokens.
- * Dark, quiet, precise. One warm accent (Bitcoin amber), three layer hues.
- * Spacing sits on a 4px grid; type on a ~1.25 modular scale.
+ * Originals: design tokens. The source of truth is design/DIRECTION.md.
+ * A night scene: the moon's disc for ground, the limb's white for ink, and
+ * one amber, the diamond flare, for the act of signing and anchoring.
+ * Layers are told apart by word and position, not by hue.
  */
 :root {
   /* Surfaces */
-  --bg: #08090c;
-  --bg-raised: #0d0f14;
-  --bg-overlay: #12151c;
-  --border: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.13);
+  color-scheme: dark;
+  --bg: #07080b;
+  --bg-raised: #0e1015;
+  --bg-overlay: #151821;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
 
   /* Text */
-  --text-primary: #f4f5f7;
-  --text-secondary: #9da4b0;
-  --text-tertiary: #828a9a;
+  --text-primary: #f3f1ec;
+  --text-secondary: #aeb2bc;
+  --text-tertiary: #8a8f9b;
 
-  /* Accent — Bitcoin amber, used sparingly */
-  --accent: #f7931a;
-  --accent-soft: rgba(247, 147, 26, 0.14);
-  --accent-text: #ffb04d;
+  /* Accent: the diamond flare. Signing, anchoring, the one action. */
+  --accent: #ffa63d;
+  --accent-soft: rgba(255, 166, 61, 0.14);
+  --accent-text: #ffb866;
 
   /* Layer hues */
-  --cel: #a78bfa;
-  --cel-soft: rgba(167, 139, 250, 0.14);
-  --webvh: #4cc2ff;
-  --webvh-soft: rgba(76, 194, 255, 0.13);
-  --btco: #f7931a;
-  --btco-soft: rgba(247, 147, 26, 0.14);
+  /* Layers: draft is moonlight, the web is the limb, Bitcoin is the flare. */
+  --cel: #9aa0ad;
+  --cel-soft: rgba(154, 160, 173, 0.14);
+  --webvh: #f3f1ec;
+  --webvh-soft: rgba(243, 241, 236, 0.1);
+  --btco: #ffa63d;
+  --btco-soft: rgba(255, 166, 61, 0.14);
   /* Custody chain (holder entries): deliberately outside the layer palette so
      a holder's addition never reads as the creator's voice. */
   --holder: #9aa7b4;
 
   /* Status */
-  --ok: #3fdd9d;
+  --ok: #7fd9a8;
 
   /* Type */
-  --font-sans: 'Inter Variable', 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Archivo Variable', 'Archivo Fallback', system-ui, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code',
     Menlo, monospace;
 
   --text-xs: 0.75rem;    /* 12 */
   --text-sm: 0.8125rem;  /* 13 */
-  --text-base: 0.9375rem;/* 15 */
+  --text-base: 1rem;     /* 16 */
   --text-md: 1.0625rem;  /* 17 */
-  --text-lg: 1.3125rem;  /* 21 */
+  --text-lg: 1.375rem;   /* 22 */
   --text-xl: 1.75rem;    /* 28 */
   --text-2xl: 2.25rem;   /* 36 */
   --text-3xl: 3rem;      /* 48 */
@@ -68,16 +72,16 @@
   /* Radii */
   --r-sm: 6px;
   --r-md: 10px;
-  --r-lg: 14px;
+  --r-lg: 14px; /* objects; buttons are pills (the ring) */
   --r-full: 999px;
 
   /* Motion */
-  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 150ms;
   --dur: 220ms;
   --dur-slow: 420ms;
 
   /* Layout */
-  --container: 1120px;
-  --gutter: 24px;
+  --container: 1320px;
+  --gutter: clamp(20px, 4vw, 64px);
 }

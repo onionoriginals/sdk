@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C · Planetarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;800;900&family=Public+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme: dark; --field: #1c24b8; --ink: #ffffff; --ink-2: #d4d8ff; --star: #ffd43b; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--field); color: var(--ink); font-family: "Public Sans", system-ui, sans-serif; }
+.nav { display: flex; justify-content: space-between; padding: 24px clamp(20px, 4vw, 56px); font-weight: 600; font-size: 15px; }
+.nav a { color: var(--ink); text-decoration: none; }
+.poster { position: relative; min-height: calc(100svh - 70px); display: grid; align-content: end; padding: 0 clamp(20px, 4vw, 56px) 48px; overflow: hidden; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+h1 { position: relative; font-family: "Big Shoulders Display", Impact, sans-serif; font-weight: 900; text-transform: uppercase; font-size: clamp(76px, 15vw, 240px); line-height: .82; letter-spacing: -.005em; }
+.row { position: relative; display: flex; justify-content: space-between; align-items: end; gap: 32px; margin-top: 28px; flex-wrap: wrap; }
+.row p { max-width: 42ch; font-size: 18px; line-height: 1.5; color: var(--ink-2); }
+.btn { background: var(--star); color: #11147a; font-weight: 600; font-size: 17px; padding: 18px 28px; text-decoration: none; border: 1px solid transparent; }
+@media (max-width: 700px) { .row p { font-size: 16px; } }
+</style>
+</head>
+<body>
+<header class="nav"><a href="#">ORIGINALS</a><a href="#">Sign in</a></header>
+<section class="poster">
+  <canvas id="c" aria-hidden="true"></canvas>
+  <h1>Your work,<br>on the record.</h1>
+  <div class="row"><p>Sign every version. Publish when you’re ready. Add it to Bitcoin if you choose. “First Light” was signed on 6 September 2026, 15:34 UTC.</p><a class="btn" href="#">Make your first Original</a></div>
+</section>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d'), reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let W, H, dpr;
+function size() { dpr = Math.min(devicePixelRatio || 1, 2); W = c.clientWidth; H = c.clientHeight; c.width = W * dpr; c.height = H * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); }
+size(); addEventListener('resize', size);
+function frame(now) {
+  const t = reduce ? 0 : now / 1000;
+  x.clearRect(0, 0, W, H);
+  const cx = W * .66, cy = H * .36, R = Math.min(W, H) * .28, step = W < 700 ? 9 : 12;
+  const sa = -Math.PI / 4 + Math.sin(t / 6) * .05, sx = cx + Math.cos(sa) * R, sy = cy + Math.sin(sa) * R;
+  for (let y = step / 2; y < H; y += step) for (let xx = step / 2; xx < W; xx += step) {
+    const d = Math.hypot(xx - cx, y - cy), ring = Math.exp(-Math.pow((d - R) / (R * .05), 2));
+    const corona = d > R ? Math.exp(-(d - R) / (R * .35)) * (.35 + .15 * Math.sin(Math.atan2(y - cy, xx - cx) * 9 + t)) : 0;
+    const sd = Math.hypot(xx - sx, y - sy), spark = Math.exp(-sd / (R * .12)) + (Math.abs(xx - sx) < step && Math.abs(y - sy) < R * .5 ? .6 * Math.exp(-Math.abs(y - sy) / (R * .2)) : 0) + (Math.abs(y - sy) < step && Math.abs(xx - sx) < R * .55 ? .6 * Math.exp(-Math.abs(xx - sx) / (R * .2)) : 0);
+    const v = Math.min(1, ring + corona * .6 + spark);
+    if (v < .04) continue;
+    x.fillStyle = spark > .3 ? '#ffd43b' : '#ffffff';
+    x.beginPath(); x.arc(xx, y, step * .45 * Math.sqrt(v), 0, 7); x.fill();
+  }
+  if (!reduce) requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

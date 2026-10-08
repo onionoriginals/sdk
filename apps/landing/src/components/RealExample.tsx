@@ -3,6 +3,7 @@ import { realExample, mainnetExample } from '../content';
 import type { VerifiedExample } from '../sdk/verify-example';
 import type { MainnetExampleResult } from '../sdk/verify-mainnet-example';
 import { Reveal } from './Reveal';
+import { Flare } from './Flare';
 import { short } from '../sdk/format';
 import { explorerTxUrl } from '../sdk/explorer';
 import './real-example.css';
@@ -196,7 +197,7 @@ export function RealExample() {
             <div className="example-body">
               <header className="example-head">
                 <div>
-                  <p className="eyebrow">{mainnetExample.eyebrow}</p>
+                  <p className="eyebrow mainnet-eyebrow"><Flare />{mainnetExample.eyebrow}</p>
                   <h3>{mainnetExample.headline}</h3>
                 </div>
                 {mainnetState.status === 'pending' && (
