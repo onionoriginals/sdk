@@ -1,5 +1,7 @@
 import { footer, site, hero } from '../content';
-import { navigate } from '../router';
+import { navigate, goToSection } from '../router';
+import { Mark } from './Mark';
+import { KeepLastWord } from './KeepLastWord';
 import './footer.css';
 
 /**
@@ -11,17 +13,26 @@ export function isInternalHref(href: string): boolean {
   return href.startsWith('/') && !href.startsWith('//');
 }
 
-export function Footer({ imprint = false }: { imprint?: boolean }) {
+export function Footer({ closing = false }: { closing?: boolean }) {
   return (
     <footer className="footer">
-      {imprint && <div className="container"><p className="press-closing">{hero.imprint.closing}</p></div>}
+      {closing && (
+        <div className="container footer-close">
+          <p className="footer-closing"><KeepLastWord text={hero.closing} /></p>
+          <a
+            className="btn btn-primary btn-mark"
+            href={hero.primaryCta.href}
+            onClick={(e) => { e.preventDefault(); goToSection(hero.primaryCta.href); }}
+          >
+            <span className="btn-ring" aria-hidden="true" />
+            {hero.primaryCta.label}
+          </a>
+        </div>
+      )}
       <div className="container footer-inner">
         <div className="footer-brand">
           <a className="nav-wordmark" href="#top">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <circle cx="10" cy="10" r="7.25" fill="none" stroke="var(--accent)" strokeWidth="2.5" />
-              <circle cx="10" cy="10" r="2" fill="currentColor" />
-            </svg>
+            <Mark />
             <span>{site.wordmark}</span>
           </a>
           <p className="footer-tagline">{footer.tagline}</p>

@@ -21,8 +21,7 @@ body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: 1.6;
-  font-feature-settings: 'cv11', 'ss01';
-  -webkit-font-smoothing: antialiased;
+    -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
@@ -66,7 +65,7 @@ pre {
 }
 
 ::selection {
-  background: rgba(247, 147, 26, 0.28);
+  background: rgba(255, 166, 61, 0.32);
   color: var(--text-primary);
 }
 
@@ -220,29 +219,15 @@ pre {
   border-color: var(--border-strong);
 }
 
-/* Scroll reveal */
+/* Scroll reveal: retired. Content is visible from first paint; the hero's
+   eclipse is the page's one entrance. The class stays as a hook. */
 .reveal {
-  opacity: 0;
-  transform: translateY(12px);
-  transition:
-    opacity var(--dur-slow) var(--ease),
-    transform var(--dur-slow) var(--ease);
-  transition-delay: var(--reveal-delay, 0ms);
-}
-
-.reveal.is-visible {
   opacity: 1;
-  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
-  }
-  .reveal {
-    opacity: 1;
-    transform: none;
-    transition: none;
   }
   *,
   *::before,

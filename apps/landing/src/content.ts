@@ -33,7 +33,7 @@ export const site = {
   url: 'https://originals.build',
   tagline: 'Provenance that survives the internet.',
   ogImageAlt:
-    'Generative orbital artwork beside the Originals wordmark and the tagline “Provenance that survives the internet.”',
+    'A total eclipse with a bright diamond of light on its edge, beside the Originals wordmark and the line “Give your work a history.”',
   wordmark: 'Originals',
   github: 'https://github.com/onionoriginals/sdk',
   /**
@@ -123,28 +123,33 @@ export const identityPanel = {
 };
 
 export const hero = {
-  imprint: {
-    eyebrow: 'For those who make things.',
-    headline: ['MAKE IT.', 'ORIGINAL.'],
-    promise: ['Your work has a beginning.', 'Give it a history that follows.'],
-    note: 'Create privately. Publish when ready.',
-    recordLabel: 'Originals / Mark No. 001',
-    stamp: 'SIGNED ↗',
-    filename: 'STUDY-001.SVG',
-    recordTitle: 'A signed beginning.',
-    illustrationNote: 'Example artwork',
-    ribbon: 'FILE → HISTORY → ORIGINAL',
-    historyLabel: 'The record keeps going.',
-    historyNote: 'Example history / no live transactions',
-    history: [
+  /**
+   * The eclipse hero. `evidence` is the bundled "First Light" example's real
+   * CEL log (public/example/cel-log.json): its create and migrate events carry
+   * these exact proof times. It was never added to Bitcoin, so the third line
+   * says so instead of borrowing the separate mainnet receipt's block.
+   */
+  evidence: {
+    caption: '“First Light”, an example Original',
+    events: [
+      { label: 'Created', value: '6 Sep 2026 · 15:34:21 UTC', done: true },
+      { label: 'Published', value: '6 Sep 2026 · 15:34:21 UTC', done: true },
+      { label: 'On Bitcoin', value: 'Not added. Its owner’s choice.', done: false }
+    ]
+  },
+  record: {
+    headline: 'The record keeps going.',
+    line: 'Every new version is signed and linked to the one before.',
+    note: 'Example history, not live transactions.',
+    events: [
       { title: 'Created', body: 'The first signed record.' },
       { title: 'Revised', body: 'A new version linked to the last.' },
       { title: 'Published', body: 'A record others can inspect.' }
-    ],
-    closing: 'Make something worth remembering.'
+    ]
   },
+  closing: 'Make something worth remembering.',
   eyebrow: 'Signed history · Recorded on Bitcoin',
-  headline: 'A signed history of your work.',
+  headline: 'Give your work a history.',
   subhead:
     'Keep a signed record of your work as it changes. Start with a private draft, publish it for others to check, and choose whether to record ownership on Bitcoin.',
   /** Interim target: points at the demo until the creator-app upload flow ships. */
@@ -949,7 +954,7 @@ export const footer = {
       links: [
         { label: 'Explore Originals', href: '/explore' },
         { label: 'GitHub', href: 'https://github.com/onionoriginals/sdk' },
-        { label: 'npm — @originals/sdk', href: 'https://www.npmjs.com/package/@originals/sdk' },
+        { label: 'npm: @originals/sdk', href: 'https://www.npmjs.com/package/@originals/sdk' },
         { label: 'Protocol specification', href: 'https://github.com/onionoriginals/sdk/blob/main/specs/README.md' }
       ]
     },

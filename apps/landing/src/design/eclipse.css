@@ -1,0 +1,384 @@
+/* The eclipse skin for the landing, nav and footer. Tokens: tokens.css.
+   Direction and reasons: design/DIRECTION.md. Interior pages: eclipse-pages.css. */
+
+@font-face {
+  font-family: 'Archivo Fallback';
+  src: local('Arial'), local('Liberation Sans'), local('Arimo'), local('Helvetica');
+  size-adjust: 98.09%;
+  ascent-override: 89.72%;
+  descent-override: 21.41%;
+  line-gap-override: 0%;
+}
+
+.eclipse {
+  --t-display: clamp(2.5rem, 0.9rem + 4.4vw, 5rem);
+  --t-h2: clamp(1.75rem, 1.1rem + 1.9vw, 2.75rem);
+  --t-h3: 1.375rem;
+  --t-body: 1.0625rem;
+  --t-small: 0.9375rem;
+  --t-meta: 0.8125rem;
+  --s-7: 64px;
+  --s-8: 104px;
+  --s-9: 168px;
+  --measure: 62ch;
+  color: var(--text-secondary);
+  background: var(--bg);
+  font-size: var(--t-body);
+}
+
+/* Expanded display voice, from the wordmark: the hero and the closing line only. */
+.eclipse :is(.eclipse-display, .footer-closing) {
+  font-stretch: 125%;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
+  line-height: 1;
+  color: var(--text-primary);
+  text-wrap: balance;
+  /* Expanded caps run long in translation; break a word before the page scrolls sideways. */
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+/* Section headings: the same family, less wide, sentence case. */
+.eclipse :is(.section-head h2, .eclipse-record-head h2, .dev-copy h2) {
+  font-stretch: 112%;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  color: var(--text-primary);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+/* ——— buttons: pills, the ring ——— */
+.eclipse .btn {
+  height: 48px;
+  padding: 0 24px;
+  border-radius: var(--r-full);
+  font-weight: 620;
+  font-size: var(--t-small);
+  border: 1px solid transparent;
+}
+.eclipse .btn-primary { background: var(--text-primary); color: #0b0c10; }
+.eclipse .btn-primary:hover { background: #ffffff; }
+.eclipse .btn-ghost { border-color: var(--border-strong); }
+.eclipse :focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; border-radius: 4px; }
+.eclipse .btn:focus-visible { border-radius: var(--r-full); }
+
+.eclipse .btn-mark { gap: 12px; padding-left: 20px; }
+.btn-ring {
+  position: relative; flex: none;
+  width: 13px; height: 13px; margin-top: 2px;
+  border: 2.4px solid currentColor; border-radius: 50%;
+}
+.btn-ring::after {
+  content: ''; position: absolute; top: -6px; right: -6px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+
+/* ——— nav ——— */
+.eclipse .nav { background: color-mix(in srgb, var(--bg) 88%, transparent); }
+.eclipse .nav-inner { height: 72px; gap: 32px; }
+.eclipse .nav-wordmark {
+  gap: 14px;
+  font-stretch: 125%; font-weight: 800; font-size: 14px;
+  letter-spacing: 0.32em; text-transform: uppercase;
+  white-space: nowrap; flex-shrink: 0;
+}
+.eclipse .nav-wordmark .mark { width: 22px; height: 22px; }
+.eclipse .nav-links { gap: 28px; margin-left: auto; }
+.eclipse .nav-links a, .eclipse .nav-github, .eclipse .nav-signin { font-size: var(--t-small); font-weight: 450; white-space: nowrap; }
+.eclipse .nav-signin { color: var(--text-primary); }
+.eclipse .nav-cta { height: 40px; padding: 0 20px; }
+.eclipse .nav-signout { white-space: nowrap; }
+
+/* ——— hero ——— */
+.eclipse-hero { text-align: left; padding: 0; overflow: hidden; }
+.eclipse .eclipse-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+  min-height: min(calc(100svh - 72px), 900px);
+  padding-block: 24px 48px;
+}
+.eclipse-hero-copy { position: relative; z-index: 1; display: grid; gap: 0; max-width: 720px; }
+.eclipse-display { font-size: var(--t-display); margin: 0; }
+.eclipse-lede {
+  margin-top: 28px; max-width: 44ch;
+  font-size: clamp(1.0625rem, 0.95rem + 0.4vw, 1.25rem); line-height: 1.55;
+}
+.eclipse-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; margin-top: 40px; }
+.eclipse-actions .btn { height: 56px; padding-inline: 20px 28px; font-size: var(--t-body); }
+.eclipse-quiet {
+  color: var(--text-primary); font-size: var(--t-body);
+  text-decoration: underline; text-decoration-color: var(--border-strong);
+  text-underline-offset: 6px; text-decoration-thickness: 1px;
+  transition: text-decoration-color var(--dur-fast) var(--ease);
+}
+.eclipse-quiet:hover { text-decoration-color: var(--accent); }
+.eclipse-hero .idp { margin-top: 40px; }
+
+.eclipse-sky {
+  position: relative; margin: 0;
+  /* The scene bleeds past the container into the right margin. */
+  margin-right: calc(-1 * var(--gutter));
+  aspect-ratio: 1 / 1;
+  max-height: min(calc(100svh - 120px), 820px);
+  justify-self: end; width: 100%;
+}
+.eclipse-scene { position: absolute; inset: 0; }
+.eclipse-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.eclipse-evidence {
+  position: absolute; right: var(--gutter); bottom: 2%;
+  display: grid; gap: 8px;
+  font-size: var(--t-meta);
+}
+.eclipse-evidence-caption { color: var(--text-primary); font-size: var(--t-small); }
+.eclipse-evidence ul { list-style: none; padding: 0; display: grid; gap: 4px; }
+.eclipse-evidence li {
+  display: grid; grid-template-columns: 10px 96px auto; align-items: baseline; gap: 10px;
+  color: var(--text-secondary);
+}
+.eclipse-evidence li::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  border: 1.5px solid var(--text-tertiary); transform: translateY(-1px);
+}
+.eclipse-evidence li[data-done]::before { background: var(--accent); border-color: var(--accent); }
+.eclipse-evidence time { font-family: var(--font-mono); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.eclipse-evidence li:not([data-done]) time { font-family: inherit; color: var(--text-secondary); }
+
+/* ——— the record line ——— */
+.eclipse-record { border-top: 1px solid var(--border); padding-block: var(--s-8); }
+.eclipse-record-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; }
+.eclipse-record-head h2 { font-size: var(--t-h2); }
+.eclipse-record-head p { max-width: 44ch; font-size: var(--t-body); line-height: 1.6; }
+.eclipse-record-head p span { display: block; margin-top: 8px; color: var(--text-tertiary); font-size: var(--t-small); }
+.eclipse-record-body { position: relative; margin-top: var(--s-7); --arc: 160px; }
+.eclipse-record-arc {
+  position: absolute; top: 0; left: 10px; right: 0; width: calc(100% - 10px); height: var(--arc);
+  overflow: visible; fill: none;
+}
+.eclipse-record-arc path { stroke: var(--text-primary); stroke-width: 2; stroke-opacity: .85; }
+.eclipse-record-line {
+  list-style: none; padding: 0; position: relative;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px;
+}
+/* Each dot sits on the arc: y = H(1 − sin(acos(1 − x/W))) at its column's x. */
+.eclipse-record-line li { position: relative; padding-top: calc(var(--arc) + 36px); --y: 1; }
+.eclipse-record-line li:nth-child(2) { --y: .24; }
+.eclipse-record-line li:nth-child(3) { --y: .049; }
+.eclipse-record-line li::before {
+  content: ''; position: absolute; left: 0; top: calc(var(--arc) * var(--y) - 10px);
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--text-primary);
+}
+.eclipse-flare {
+  position: absolute; z-index: 1; width: 92px; height: 92px;
+  left: -36px; top: calc(var(--arc) * var(--y) - 46px); pointer-events: none;
+}
+.eclipse-record-line h3 { font-size: var(--t-h3); font-weight: 650; letter-spacing: -0.01em; }
+.eclipse-record-line p { margin-top: 8px; font-size: var(--t-body); }
+
+/* ——— sections ——— */
+.eclipse .section { border-top: 1px solid var(--border); padding-block: var(--s-8); }
+.eclipse .section-head { max-width: 900px; margin-bottom: var(--s-7); }
+.eclipse .section-head h2 { font-size: var(--t-h2); margin-bottom: 24px; }
+.eclipse .section-head p { font-size: var(--t-body); line-height: 1.6; max-width: var(--measure); }
+.eclipse .eyebrow {
+  font-family: var(--font-sans); font-size: var(--t-small); font-weight: 600;
+  letter-spacing: 0; text-transform: none; color: var(--text-tertiary); margin-bottom: 16px;
+}
+
+/* Why: heading on the left, statements on the right, as type on hairlines. */
+@media (min-width: 980px) {
+  .eclipse #why > .container { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; }
+  .eclipse #why .section-head { margin-bottom: 0; position: sticky; top: 112px; }
+  .eclipse #why .why-card { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .eclipse #why .why-card:first-child { border-top: 0; padding-top: 0; }
+}
+.eclipse .why-grid { grid-template-columns: 1fr; gap: 0; }
+.eclipse .why-card {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 16px 64px;
+  padding: 32px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none;
+}
+.eclipse .why-card:hover { border-color: var(--border); }
+.eclipse .why-icon { display: none; }
+.eclipse .why-card h3 { font-size: var(--t-h3); font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+.eclipse .why-card p { font-size: var(--t-body); max-width: var(--measure); }
+
+/* How it works */
+.eclipse .protocol-card { background: transparent; border-radius: 0; border: 0; border-top: 1.5px solid var(--border-strong); }
+.eclipse .protocol-card[data-layer='did:btco'] { border-top-color: var(--accent); }
+.eclipse .protocol-card h3 { font-family: var(--font-sans); font-stretch: 112%; font-weight: 650; font-size: var(--t-h3); letter-spacing: -0.01em; }
+.eclipse .protocol-card[data-layer] h3 { color: var(--text-primary); }
+.eclipse .protocol-stage { font-family: var(--font-sans); font-size: var(--t-meta); }
+.eclipse .protocol-card dt { font-size: var(--t-meta); letter-spacing: 0.02em; }
+.eclipse .protocol-card dd { font-size: var(--t-small); }
+.eclipse .protocol-note { max-width: 72ch; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; padding: 16px 0 0; }
+.eclipse .protocol-note svg { display: none; }
+.eclipse .protocol-name-row h3 { font-family: var(--font-sans); color: var(--text-primary); }
+.eclipse .protocol-card .protocol-cost { color: var(--text-secondary); background: var(--bg-overlay); }
+.eclipse .protocol-card[data-layer='did:btco'] .protocol-cost { color: var(--accent-text); background: var(--accent-soft); }
+.eclipse .protocol-card dt { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+/* Developers: the pitch on the left, the install and the docs on the right. */
+@media (min-width: 980px) {
+  .eclipse .dev-copy { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); column-gap: 64px; max-width: none; align-items: start; }
+  .eclipse .dev-copy > * { grid-column: 1; }
+  .eclipse .dev-copy > .dev-side { grid-column: 2; grid-row: 2 / span 3; align-self: end; }
+  .eclipse .dev-side .dev-install { margin-top: 0; }
+}
+.eclipse .developers { background: var(--bg); }
+.eclipse .developers::before, .eclipse .developers::after { display: none; }
+.eclipse .dev-note code { font-size: var(--t-small); color: var(--text-primary); background: var(--bg-overlay); padding: 1px 6px; border-radius: 4px; }
+.eclipse .dev-bullets svg { color: var(--text-tertiary); }
+.eclipse .dev-copy { max-width: 900px; }
+.eclipse .dev-copy h2 { font-size: var(--t-h2); margin-bottom: 24px; }
+.eclipse .dev-subhead { font-size: var(--t-body); max-width: var(--measure); }
+
+/* Footer: ends on the lockup's own scene. */
+.eclipse .footer-close { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 32px 64px; margin-bottom: var(--s-8); }
+.eclipse .footer-closing { font-size: clamp(1.5rem, 0.7rem + 4vw, 4rem); max-width: 18ch; }
+.eclipse .footer-close .btn { height: 56px; padding-inline: 20px 28px; font-size: var(--t-body); }
+.eclipse .footer { padding-top: var(--s-8); }
+
+/* Demo chrome: amber only where signing happens (the active step, the flare). */
+.eclipse :is(.demo-console-hint svg, .install-prompt) { color: var(--text-tertiary); }
+.eclipse .demo-tabs [role='tab'][aria-selected='true'] { border-bottom-color: var(--text-primary); }
+.eclipse .demo-log-cursor { background: var(--text-secondary); }
+.eclipse .demo-field input:focus, .eclipse .demo-field select:focus { border-color: var(--text-primary); }
+.eclipse .demo-output { background: transparent; }
+.eclipse :is(.demo-field span, .dev-install-label, .cel-section-label) { text-transform: none; letter-spacing: 0; font-size: var(--t-meta); font-weight: 500; }
+.eclipse :is(.pipeline-name, .demo-log-zero-title) { font-family: var(--font-sans); }
+.eclipse .pipeline-node[data-state] .pipeline-dot { box-shadow: none; animation: none; }
+.eclipse .pipeline-fill { background: linear-gradient(90deg, var(--cel), var(--webvh) 60%, var(--btco)); }
+.eclipse .dev-note a:hover { color: var(--text-primary); text-decoration-color: var(--accent); }
+
+/* Demo: a locked step reads as "not yet", by colour and its disabled button,
+   not by fading the whole step below legible contrast. */
+.eclipse .demo-step[data-state='locked'] { opacity: 1; color: var(--text-tertiary); }
+.eclipse .demo-step[data-state='locked'] :is(h3, h4, strong) { color: var(--text-secondary); }
+
+.eclipse .demo-step-copy p { font-size: var(--t-small); max-width: 60ch; }
+.eclipse .mainnet-trust-note { max-width: 72ch; }
+
+/* Signed-in identity panel sits under the hero actions. */
+.eclipse .idp { text-align: left; }
+
+@media (max-width: 1100px) {
+  .eclipse .nav-links, .eclipse .nav-github { display: none; }
+  .eclipse .nav-menu-btn { display: grid; }
+  .eclipse .nav-mobile { display: flex; }
+  .eclipse .nav-actions { margin-left: auto; }
+}
+
+@media (max-width: 860px) {
+  .eclipse .eclipse-hero-grid { grid-template-columns: minmax(0, 1fr); min-height: 0; padding-block: 0 56px; }
+  /* The figure dissolves so its scene leads and its evidence follows the action. */
+  .eclipse-sky { display: contents; }
+  .eclipse-scene { position: relative; order: -1; height: clamp(230px, 60vw, 400px); margin: 0 calc(-1 * var(--gutter)); }
+  .eclipse-evidence { position: static; order: 2; margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .eclipse-lede { margin-top: 20px; }
+  .eclipse-actions { margin-top: 28px; }
+  .eclipse-record-head { grid-template-columns: minmax(0, 1fr); }
+  .eclipse-record-body { --arc: 0px; }
+  .eclipse-record-arc { display: none; }
+  .eclipse-record-line { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .eclipse-record-line::before { content: ''; position: absolute; top: 10px; bottom: 0; left: 9px; width: 2px;
+    background: linear-gradient(180deg, var(--border-strong), var(--text-primary) 70%); }
+  .eclipse-record-line li { padding: 0 0 0 44px; --y: 0 !important; }
+  .eclipse-record-line li::before { top: 2px; }
+  .eclipse-flare { left: -36px; top: -34px; }
+  .eclipse .why-card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 28px 0; }
+}
+
+@media (max-width: 700px) {
+  .eclipse .nav-inner { height: 64px; gap: 12px; }
+  .eclipse .nav-wordmark { font-size: 12px; letter-spacing: 0.28em; gap: 12px; }
+  .eclipse .nav-cta { display: none; }
+  .eclipse .nav-your-originals { display: none; }
+  .eclipse .section, .eclipse-record { padding-block: var(--s-7); }
+  .eclipse-actions .btn { width: 100%; justify-content: center; }
+}
+
+/* Reading text stays at 15px or more. */
+.eclipse :is(.example-medium, .protocol-note) { font-size: var(--t-small); line-height: 1.6; }
+
+/* Windows High Contrast removes backgrounds; a transparent border keeps text-only controls shaped. */
+.eclipse :is(.nav-signin, .nav-signout, .demo-source-tabs button) { border: 1px solid transparent; }
+
+.eclipse .example-badge[data-state='warn'] { background: transparent; }
+
+/* ——— round 3: the demo out of its dev-tool dress ——— */
+/* A headline's last word keeps its full stop, where the line has room for it. */
+@media (min-width: 700px) { .nowrap { white-space: nowrap; } }
+
+/* Layer labels are words after a title, not pills. Only Bitcoin keeps a dot. */
+.eclipse .layer-pill {
+  border: 0; background: none; padding: 0; border-radius: 0;
+  font-family: var(--font-sans); font-size: var(--t-meta); font-weight: 500; color: var(--text-secondary);
+}
+.eclipse .layer-pill::before { content: '·'; margin-right: 2px; color: var(--text-tertiary); }
+.eclipse .layer-pill .dot { display: none; }
+.eclipse .layer-pill[data-layer='did:btco'] .dot { display: inline-block; background: var(--accent); }
+.eclipse .demo-sim-badge {
+  border: 0; padding: 0; font-family: var(--font-sans); font-size: var(--t-meta); color: var(--text-tertiary);
+}
+.eclipse .demo-sim-badge .dot { display: none; }
+.eclipse .demo-art-badge.layer-pill {
+  padding: 3px 9px; border-radius: var(--r-full); background: rgba(7, 8, 11, 0.72); color: var(--text-secondary);
+}
+.eclipse .demo-art-badge.layer-pill::before { content: none; }
+.eclipse :is(.demo-log-ghosts code, .example-shell summary) { font-family: var(--font-sans); }
+.eclipse .demo-log-ghosts code { font-size: 14px; color: var(--text-tertiary); }
+
+/* The step number is ink while it waits; amber only once the step is signed. */
+.eclipse .demo-step[data-state='ready'] .demo-step-marker,
+.eclipse .demo-step[data-state='busy'] .demo-step-marker { border-color: var(--text-primary); color: var(--text-primary); }
+
+/* "Sign in to add to Bitcoin" reads as a control from its outline, not from greyed text. */
+.eclipse .demo-step-btn.demo-sim-btn {
+  height: 44px; padding: 0 20px; border: 1px solid var(--text-tertiary); border-radius: var(--r-full);
+  color: var(--text-secondary); opacity: 1;
+}
+
+.eclipse .example-badge[data-state='warn'] { color: var(--text-secondary); border-color: var(--text-tertiary); }
+
+/* The mainnet receipt is anchoring, so it carries the flare. */
+.eclipse .mainnet-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+.eclipse .mainnet-eyebrow .flare { width: 22px; height: 22px; margin-left: -4px; }
+
+@media (max-width: 860px) {
+  .eclipse .eclipse-flare { width: 54px; height: 54px; left: -17px; top: -15px; }
+  .eclipse .eclipse-record-line li { padding-left: 52px; }
+}
+
+/* How it works on phones: label and value side by side. */
+@media (max-width: 600px) {
+  .eclipse .protocol-card dl > div { display: grid; grid-template-columns: 38% minmax(0, 1fr); gap: 12px; align-items: baseline; }
+  .eclipse .protocol-card dl { gap: 10px; }
+  .eclipse .protocol-card dd { color: var(--text-primary); }
+}
+/* On the latest event the flare is the point; no ring under it. */
+.eclipse .eclipse-record-line li:last-child::before { border-color: transparent; background: transparent; }
+
+/* ——— fixed after the last critique round ——— */
+/* Every disabled action reads alike: an outline, never a muddy fill. */
+.eclipse .demo-step-btn[disabled]:not([data-busy]) {
+  background: transparent; border: 1px solid var(--text-tertiary); color: var(--text-tertiary); opacity: 1;
+}
+/* How-it-works notes sit on the table's grid, not the section's. */
+@media (min-width: 860px) {
+  .eclipse .protocol-note { margin-left: var(--sp-6); max-width: calc(66.6% - var(--sp-6)); }
+}
+/* Artwork frames take the night ground. The washes inside the artworks are their own signed bytes. */
+.eclipse :is(.example-art, .demo-art) { background: var(--bg); }
+.eclipse .example-art-placeholder { background: var(--bg); }
+/* The footer's lifecycle line is a phrase, not data. */
+.eclipse .footer-bottom code { font-family: var(--font-sans); font-size: var(--t-meta); color: var(--text-tertiary); }
+/* Phone flare: at least 12px clear of the viewport edge. */
+@media (max-width: 860px) {
+  .eclipse .eclipse-flare { width: 42px; height: 42px; left: -11px; top: -9px; }
+}

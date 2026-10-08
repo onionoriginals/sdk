@@ -15,9 +15,9 @@ import { YourOriginals } from './pages/YourOriginals';
 import { OriginalDetail } from './pages/OriginalDetail';
 import { LegalPage, legalRouteDoc } from './pages/Legal';
 import { smokeAutoRunAllowed } from './sdk/network-flag';
-import { ImprintHistory } from './components/ImprintHistory';
-import './design/imprint.css';
-import './design/imprint-pages.css';
+import { RecordLine } from './components/RecordLine';
+import './design/eclipse.css';
+import './design/eclipse-pages.css';
 
 export function App() {
   if (new URLSearchParams(location.search).has('smoke')) {
@@ -31,7 +31,7 @@ function RoutedApp() {
   const route = routeForPath(path);
   const legalDoc = legalRouteDoc(route);
   return (
-    <div className={`imprint${route === 'landing' ? '' : ' imprint-interior'}`}>
+    <div className={`eclipse${route === 'landing' ? '' : ' eclipse-interior'}`}>
       <Nav />
       {route === 'explore' ? <Explore /> : route === 'explore-original' ? <ExploreOriginal did={exploreDidFromPath(path)!} /> : legalDoc ? (
         <LegalPage doc={legalDoc} />
@@ -42,7 +42,7 @@ function RoutedApp() {
       ) : (
         <main>
           <Hero />
-          <ImprintHistory />
+          <RecordLine />
           <Why />
           <Demo />
           <RealExample />
@@ -50,7 +50,7 @@ function RoutedApp() {
           <Developers />
         </main>
       )}
-      <Footer imprint={route === 'landing'} />
+      <Footer closing={route === 'landing'} />
     </div>
   );
 }

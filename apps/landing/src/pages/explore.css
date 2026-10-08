@@ -22,9 +22,8 @@
   margin-bottom: 60px;
 }
 .explore-intro h1 {
-  font:
-    400 clamp(44px, 6vw, 76px)/1.06 Georgia,
-    serif;
+  font: 650 clamp(44px, 6vw, 76px)/1.06 var(--font-sans);
+  font-stretch: 112%;
   letter-spacing: -0.04em;
   max-width: 620px;
   margin: 18px 0 0;
@@ -173,9 +172,8 @@
   overflow-wrap: anywhere;
 }
 .explore-file > span:first-child {
-  font:
-    40px Georgia,
-    serif;
+  font: 650 40px var(--font-sans);
+  font-stretch: 112%;
   color: var(--accent-text);
 }
 .explore-file > span {
@@ -183,9 +181,8 @@
   color: var(--text-secondary);
 }
 .explore-file strong {
-  font:
-    400 clamp(24px, 3vw, 38px)/1.15 Georgia,
-    serif;
+  font: 650 clamp(24px, 3vw, 38px)/1.15 var(--font-sans);
+  font-stretch: 112%;
   color: var(--text-primary);
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -205,15 +202,13 @@
   padding: 70px 20px;
 }
 .explore-empty > span {
-  font:
-    60px Georgia,
-    serif;
+  font: 650 60px var(--font-sans);
+  font-stretch: 112%;
   color: var(--accent-text);
 }
 .explore-empty h2 {
-  font:
-    400 32px Georgia,
-    serif;
+  font: 650 32px var(--font-sans);
+  font-stretch: 112%;
 }
 .explore-empty p {
   color: var(--text-secondary);
@@ -244,9 +239,8 @@
   object-fit: contain;
 }
 .explore-detail-info h1 {
-  font:
-    400 clamp(36px, 5vw, 60px)/1.12 Georgia,
-    serif;
+  font: 650 clamp(36px, 5vw, 60px)/1.12 var(--font-sans);
+  font-stretch: 112%;
   letter-spacing: -0.025em;
   overflow-wrap: anywhere;
   margin: 20px 0;
@@ -280,9 +274,8 @@
   border-top: 1px solid var(--border-strong);
 }
 .explore-provenance h2 {
-  font:
-    400 32px/1.2 Georgia,
-    serif;
+  font: 650 32px/1.2 var(--font-sans);
+  font-stretch: 112%;
   max-width: 280px;
 }
 .explore-provenance dl {

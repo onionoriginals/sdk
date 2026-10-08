@@ -1,37 +1,49 @@
 import { hero } from '../content';
+import { Eclipse } from './Eclipse';
 import { IdentityPanel } from './IdentityPanel';
-import { SplitMark } from './SplitMark';
+import { goToSection } from '../router';
+import { KeepLastWord } from './KeepLastWord';
 
 export function Hero() {
-  const copy = hero.imprint;
+  const { evidence } = hero;
   return (
-    <section className="hero press-hero" id="top">
-      <div className="container press-grid">
-        <div className="press-copy">
-          <p className="press-kicker">{copy.eyebrow}</p>
-          <h1 className="hero-headline press-headline">
-            {copy.headline.map((line) => <span key={line}>{line}</span>)}
-          </h1>
-          <p className="press-promise">{copy.promise.map((line) => <span key={line}>{line}</span>)}</p>
-          <div className="press-actions">
-            <a className="btn btn-primary" href={hero.primaryCta.href}>
-              {hero.primaryCta.label}<span aria-hidden="true">↗</span>
+    <section className="hero eclipse-hero" id="top">
+      <div className="container eclipse-hero-grid">
+        <div className="eclipse-hero-copy">
+          <h1 className="eclipse-display"><KeepLastWord text={hero.headline} /></h1>
+          <p className="eclipse-lede">{hero.subhead}</p>
+          <div className="eclipse-actions">
+            <a
+              className="btn btn-primary btn-mark"
+              href={hero.primaryCta.href}
+              onClick={(e) => { e.preventDefault(); goToSection(hero.primaryCta.href); }}
+            >
+              <span className="btn-ring" aria-hidden="true" />
+              {hero.primaryCta.label}
             </a>
-            <p>{copy.note}</p>
+            <a
+              className="eclipse-quiet"
+              href={hero.exampleLink.href}
+              onClick={(e) => { e.preventDefault(); goToSection(hero.exampleLink.href); }}
+            >
+              {hero.exampleLink.label}
+            </a>
           </div>
           <IdentityPanel />
         </div>
-        <figure className="press-proof">
-          <div className="press-proof-inner">
-            <p className="press-proof-label">{copy.recordLabel}</p>
-            <SplitMark />
-            <figcaption>
-              <span>{copy.filename}</span>
-              <strong>{copy.recordTitle}</strong>
-              <span>{copy.illustrationNote}</span>
-            </figcaption>
-            <span className="press-stamp" aria-hidden="true">{copy.stamp}</span>
-          </div>
+        <figure className="eclipse-sky">
+          <div className="eclipse-scene"><Eclipse className="eclipse-canvas" /></div>
+          <figcaption className="eclipse-evidence">
+            <span className="eclipse-evidence-caption">{evidence.caption}</span>
+            <ul>
+              {evidence.events.map((event) => (
+                <li key={event.label} data-done={event.done || undefined}>
+                  <span>{event.label}</span>
+                  <time>{event.value}</time>
+                </li>
+              ))}
+            </ul>
+          </figcaption>
         </figure>
       </div>
     </section>

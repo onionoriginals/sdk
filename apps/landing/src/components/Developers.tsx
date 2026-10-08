@@ -21,17 +21,22 @@ export function Developers() {
               </li>
             ))}
           </ul>
-          <div className="dev-install">
-            <span className="dev-install-label">{developers.installLabel}</span>
-            <InstallCommand />
+          <div className="dev-side">
+            <div className="dev-install">
+              <span className="dev-install-label">{developers.installLabel}</span>
+              <InstallCommand />
+            </div>
+            <p className="dev-note">
+              {developers.sdkNote}{' '}
+              <a href={developers.docsLink.href} target="_blank" rel="noreferrer">
+                {developers.docsLink.label}
+              </a>
+            </p>
+            <p className="dev-note dev-note-version">
+              {/* Backticked words in the note are code, not literal backticks. */}
+              {developers.versionNote.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}
+            </p>
           </div>
-          <p className="dev-note">
-            {developers.sdkNote}{' '}
-            <a href={developers.docsLink.href} target="_blank" rel="noreferrer">
-              {developers.docsLink.label}
-            </a>
-          </p>
-          <p className="dev-note dev-note-version">{developers.versionNote}</p>
         </Reveal>
       </div>
     </section>

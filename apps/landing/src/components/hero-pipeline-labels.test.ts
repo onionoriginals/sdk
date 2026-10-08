@@ -6,7 +6,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ImprintHistory } from './ImprintHistory';
+import { RecordLine } from './RecordLine';
 
 async function read(file: string): Promise<string> {
   return Bun.file(new URL(`./${file}`, import.meta.url)).text();
@@ -14,11 +14,11 @@ async function read(file: string): Promise<string> {
 
 describe('landing history and pipeline labels', () => {
   test('the introduction shows plain-language events and identifies its illustrative history', () => {
-    const markup = renderToStaticMarkup(createElement(ImprintHistory));
+    const markup = renderToStaticMarkup(createElement(RecordLine));
     for (const label of ['Created', 'Revised', 'Published']) {
-      expect(markup).toContain(`<h2>${label}</h2>`);
+      expect(markup).toContain(`<h3>${label}</h3>`);
     }
-    expect(markup).toContain('Example history / no live transactions');
+    expect(markup).toContain('Example history, not live transactions.');
     expect(markup).not.toMatch(/did:(cel|webvh|btco)/);
   });
 
