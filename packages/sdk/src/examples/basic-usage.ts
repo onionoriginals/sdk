@@ -1,78 +1,36 @@
-import { OriginalsSDK } from '../index.js';
+import {
+  OriginalsSDK,
+  createLocalSigner,
+  type LoadedAsset,
+} from "@originals/sdk";
 
-async function basicExample() {
-  const sdk = OriginalsSDK.create({
-    network: 'regtest',
-    enableLogging: true,
-    // Example uses defaults; provide adapters in your app or tests
-    telemetry: {
-      onEvent: (e) => console.log('[telemetry]', e.name, e.attributes || {}),
-      onError: (err) => console.warn('[error]', err.code, err.message)
-    }
-  });
+/**
+ * A self-contained local example for the SDK in this checkout.
+ *
+ * This disposable key exists only in memory. For real assets, supply a key from
+ * your own custody and retain it for later edits. Never commit or log private keys.
+ */
+export async function basicExample(): Promise<LoadedAsset> {
+  const secretKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const signer = createLocalSigner("Ed25519", secretKeyBytes);
+  const sdk = OriginalsSDK.create({ signer });
+  const asset = await sdk.lifecycle.createAsset(
+    [{ id: "greeting", mediaType: "text/plain", content: "Hello, Originals!" }],
+    { name: "First greeting" },
+  );
 
-  // Create new digital asset
-  const resources = [{
-    id: 'image-1',
-    type: 'image',
-    content: 'base64-encoded-image-data',
-    contentType: 'image/png',
-    hash: 'sha256-hash'
-  }];
+  // The SDK queues mutations and computes digests from the actual resource bytes.
+  await Promise.all([
+    asset.update({ name: "Revised greeting" }),
+    asset.addResourceVersion(
+      "greeting",
+      "Hello again, Originals!",
+      "text/plain",
+    ),
+  ]);
 
-  try {
-    // Create asset in did:cel genesis layer (private, offline)
-    const asset = await sdk.lifecycle.createAsset(resources);
-    console.log('Created asset:', asset.id);
-    console.log('Current layer:', asset.currentLayer); // 'did:cel'
-    
-    // Publish to web for discovery (did:webvh layer)
-    await sdk.lifecycle.publishToWeb(asset, 'example.com');
-    console.log('Published to web, current layer:', asset.currentLayer); // 'did:webvh'
-    
-    // Inscribe on Bitcoin for permanent ownership (did:btco layer)
-    await sdk.lifecycle.inscribeOnBitcoin(asset);
-    console.log('Inscribed on Bitcoin, current layer:', asset.currentLayer); // 'did:btco'
-    
-    // Get full provenance chain
-    const provenance = asset.getProvenance();
-    console.log('Provenance:', provenance);
-    
-    // Verify asset integrity
-    const isValid = await asset.verify();
-    console.log('Asset is valid:', isValid);
-    
-  } catch (error) {
-    console.error('Error:', error);
-  }
+  // The envelope retains both historical resource versions. Reading and checking
+  // them in a fresh SDK does not require the controller's private key.
+  const saved = JSON.stringify(asset.serialize());
+  return OriginalsSDK.create().lifecycle.loadAsset(saved);
 }
-
-async function digitalArtExample() {
-  const sdk = OriginalsSDK.create();
-  
-  // Artist creates digital artwork
-  const artwork = [{
-    id: 'artwork-001',
-    type: 'image', 
-    url: 'https://artist-site.com/my-artwork.jpg',
-    contentType: 'image/jpeg',
-    hash: 'abcd1234...' // SHA-256 hash of image
-  }];
-  
-  // Create private version for experimentation
-  const asset = await sdk.lifecycle.createAsset(artwork);
-  
-  // Make discoverable when ready
-  await sdk.lifecycle.publishToWeb(asset, 'artist-gallery.com');
-  
-  // Inscribe on Bitcoin when sold
-  await sdk.lifecycle.inscribeOnBitcoin(asset);
-  
-  // Transfer to buyer
-  await sdk.lifecycle.transferOwnership(asset, 'buyer-address');
-}
-
-// Export examples
-export { basicExample, digitalArtExample };
-
-

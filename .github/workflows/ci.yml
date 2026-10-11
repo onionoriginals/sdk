@@ -121,6 +121,10 @@ jobs:
         working-directory: packages/sdk
         run: bun run typecheck:public
 
+      - name: Verify local SDK examples match built public types
+        working-directory: packages/sdk
+        run: bun run typecheck:examples
+
       # Catches the #716 class of defect: a documented example's positional
       # signature (e.g. a required subOrgId argument) silently drifting out
       # of sync with the real implementation.

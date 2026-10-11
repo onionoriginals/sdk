@@ -1,60 +1,36 @@
 /**
- * Example Runner
- * 
- * Run all SDK examples to demonstrate functionality.
- * 
- * Usage:
- *   bun run src/examples/run.ts
- *   bun run src/examples/run.ts basic
- *   bun run src/examples/run.ts module
- *   bun run src/examples/run.ts lifecycle
+ * Run the current checkout's self-contained local example after `bun run build`.
+ * From packages/sdk: bun run src/examples/run.ts [basic]
  */
-
-import { basicExample, digitalArtExample } from './basic-usage.js';
-import { main as createModuleExample } from './create-module-original.js';
-import { main as fullLifecycleExample } from './full-lifecycle-flow.js';
-
-async function runAll(): Promise<void> {
-  console.log('Running all Originals SDK examples...\n');
-  
-  console.log('='.repeat(60));
-  console.log('BASIC USAGE EXAMPLES');
-  console.log('='.repeat(60));
-  await basicExample();
-  await digitalArtExample();
-  
-  console.log('\n' + '='.repeat(60));
-  console.log('CREATE MODULE ORIGINAL EXAMPLES');
-  console.log('='.repeat(60));
-  await createModuleExample();
-  
-  console.log('\n' + '='.repeat(60));
-  console.log('FULL LIFECYCLE FLOW EXAMPLE');
-  console.log('='.repeat(60));
-  await fullLifecycleExample();
-  
-  console.log('\n' + '='.repeat(60));
-  console.log('ALL EXAMPLES COMPLETED SUCCESSFULLY');
-  console.log('='.repeat(60));
-}
+import { basicExample } from "./basic-usage.js";
 
 async function main(): Promise<void> {
-  const arg = process.argv[2];
-  
-  switch (arg) {
-    case 'basic':
-      await basicExample();
-      await digitalArtExample();
-      break;
-    case 'module':
-      await createModuleExample();
-      break;
-    case 'lifecycle':
-      await fullLifecycleExample();
-      break;
-    default:
-      await runAll();
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === "--help") {
+    console.log("Usage: bun run src/examples/run.ts [basic]");
+    console.log(
+      "Create, edit, serialize and verify a local Original with a disposable key.",
+    );
+    console.log(
+      "No network publication, Bitcoin transaction, or file write is performed.",
+    );
+    return;
   }
+  if (args.length > 1 || (args.length === 1 && args[0] !== "basic")) {
+    throw new Error(
+      `Unsupported example arguments: ${args.join(" ")}. Use 'basic' or '--help'. ` +
+        "The other example files describe previous SDK APIs; see src/examples/README.md.",
+    );
+  }
+
+  const { asset, verification } = await basicExample();
+  console.log("Recovered local Original:", asset.id);
+  console.log("Name:", asset.state.name);
+  console.log("Resource version:", asset.state.resources[0].version);
+  console.log("Local history and bytes verified:", verification.verified);
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

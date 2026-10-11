@@ -9,6 +9,10 @@ Follow the byte-based, explicit-custody example in
 [the package README](../packages/sdk/README.md), then read
 [the CEL 3 API guide](../packages/sdk/V3.md) before publishing.
 
+For a self-contained local example with actual resource bytes and a disposable
+signing key, follow [the example runner](../packages/sdk/src/examples/README.md).
+It exercises the SDK in this checkout and requires no external services.
+
 1. Create a local asset from actual resource bytes and a `CelSigner`.
 2. Configure durable storage and your explicit WebVH domain; publish and retain
    the returned asset. A fresh SDK can recover both signed histories and bytes.
