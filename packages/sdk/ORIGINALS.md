@@ -18,8 +18,10 @@ under CEL 3 is read, converted or migrated.
   full asset state: name, metadata, lifecycle status, resource descriptors and
   aliases.
 - The author is a DID fixed at genesis. The baseline profile lists did:vh,
-  did:webvh and did:btco. Every entry carries exactly one proof, by an Originals
-  key of the author DID at the author DID version the entry names. Accepted
+  did:webvh and did:btco. Every entry carries exactly one proof, by an
+  `assertionMethod` key of the author DID at the author DID version the entry
+  names. That key must not also be an update key of the author DID's own log.
+  A hosted author declares its witnesses in a DID service (plan 011, S8). Accepted
   cryptosuites are `eddsa-jcs-2022` and `bip340-jcs-2025`.
 - Keys rotate in the author DID only. The asset log has no update keys.
 - The DID document of the did:vh is derived from the log. It is never stored or
@@ -31,6 +33,7 @@ under CEL 3 is read, converted or migrated.
 const sdk = OriginalsSDK.create({ store, authorDids });
 
 const created = await sdk.create({ name, metadata, resources, signer });
+// entry timestamps carry milliseconds (VH-Log PR 8; plan 011, Q8)
 // created.kind === "original" | "draft"; a draft is unsigned and is never history (P6.3)
 
 const edited = await sdk.edit(original, {
@@ -69,7 +72,7 @@ const view = await sdk.load(pkg);         // read-only; needs no key and no netw
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used and whether its freshness was established (P7.8) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure |
 | `ordering` | claimed · witnessed · anchored (P7.6) |
-| `forks`, `anchors` | every known branch and anchoring entry (P6.6, P9.16) |
+| `forks`, `anchors` | every known branch and anchoring entry. A fork not on Bitcoin is an unresolved conflict with no current branch (plan 011, S1); only an anchor settles one (P9.16) |
 | `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
 | `current` | true only when every part above passes under the selected policy |
 
@@ -100,8 +103,8 @@ Rotation is an author DID update. Entries naming the new author DID version
 can use the new key without any asset log entry. An unwitnessed entry signed
 by a key the latest author DID no longer lists is reported as historically
 authorized with unproven ordering, never as current (P7.9). Divergent valid
-branches are reported as a fork. How the author resolves a fork (P6.6) waits
-on spec finding S1.
+branches are reported as an unresolved fork, with no branch current. Only
+anchoring on Bitcoin settles a fork (plan 011, S1).
 
 ## Hosted publication and witnesses — phase 3
 
@@ -110,7 +113,7 @@ the witnesses declared in the author DID (at least three, P9.8) and adds a
 did:webvh alias. The alias is its own small log, bound in both directions with
 the did:vh (P3.6). The public reader verifies one exact snapshot (P9.1).
 Fetches apply the VH-Log retrieval rules (P8.5), and active content is served
-isolated (P9.7). Rules for the witness parameter wait on spec finding S2.
+isolated (P9.7). The witness parameter follows the reworded P9.9 (plan 011, S2).
 
 ## Bitcoin anchoring and ownership — phase 4
 

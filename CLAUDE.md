@@ -30,15 +30,18 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
 ## Contracts to preserve
 
 - **One author, one signature.** Each entry is signed once, by a key that the
-  author DID lists at the version the entry names, under `assertionMethod` and
-  in its Originals declaration (P5.2, P5.3). The author DID is fixed at
-  genesis. Rotation happens only in the author DID, never in the asset log
-  (P5.8–P5.10).
+  author DID embeds under `assertionMethod` at the version the entry names, and
+  that is not an update key of the author DID's own log (P5.2, P5.3, P5.11;
+  owner decision S8). The author DID is fixed at genesis. Rotation happens only
+  in the author DID, never in the asset log (P5.8–P5.10).
+- **Forks stay unresolved off-chain.** Divergent valid branches are reported as
+  a conflict with no current branch. Only anchoring on Bitcoin settles a fork
+  (owner decision S1, P9.16).
 - **Ownership is not authority.** The owner of an anchored Original is the
   holder of its anchoring sat. Holding the sat never confers authority to sign
   changes (P9.11, P9.12).
 - **No silent choices.** Never pick a branch by timestamp. Never rebase an edit
-  onto a moved parent: that is a conflict (P2.1, P4.5, P6.6). Never report
+  onto a moved parent: that is a conflict (P2.1, P4.5). Never report
   generic VH-Log or DID resolution as Originals verification (P3.5).
 - **Reports stay separate.** History, author binding, identity evidence,
   resource availability, ordering and freshness are reported separately. A

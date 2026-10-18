@@ -17,7 +17,7 @@ scheduled for deletion and is not a compatibility target.
 | --- | --- | --- |
 | [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/d64fdbe4aef3d12e26109e7eeab28da569169e05/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@d64fdbe4aef3d12e26109e7eeab28da569169e05`, Editor's Draft 0.1 | Asset state, author binding, operations, evidence packages, hosting, witnesses, anchoring and ownership. Rules are cited by ID (for example P5.3). |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
-| VH-Log pull requests, treated as merged | [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `7bae699a` keys from a controller | The specialisation hooks the Originals extension uses. |
+| VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `7bae699a` keys from a controller | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
 | did:vh pull request, treated as merged | [#3](https://github.com/swcurran/didvh/pull/3) `b3e7a56d` extensions | Lets the Originals extension define its own state, parameters and `src` kinds. |
 | [did:webvh on VH-Log (experimental)](https://github.com/decentralized-identity/didwebvh/tree/deef9cf12b9543475a1df70322c362876dc89a58/spec-exp) | `decentralized-identity/didwebvh@deef9cf1` (PR 302), method value `did:webvh:1.0` | Author DIDs and an Original's web alias. Logs written by `didwebvh-ts` (did:webvh 1.0) must verify under it. |
@@ -38,9 +38,18 @@ test vector, and nothing built on one supports an interoperability claim.
 ### Spec findings
 
 Section 4 of the plan lists the places where the pinned documents are
-ambiguous or conflict (S1–S6). Where a finding blocks implementation, work on
+ambiguous or conflict (S1–S8). Where a finding blocks implementation, work on
 that rule stops until the spec is corrected. Code never silently diverges from
 the pinned text.
+
+Three owner decisions (plan section 6) depart from the pinned text until the
+spec is edited:
+- Only Bitcoin settles a fork; P6.6's abandonment declarations are dropped (S1).
+- Author keys are ordinary `assertionMethod` keys, and the witness list is a
+  DID service (S8).
+- P9.9's witness-parameter rule is reworded (S2).
+
+Each departure is cited in code where it applies.
 
 ## Conformance evidence
 

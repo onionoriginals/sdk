@@ -222,7 +222,8 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Owner decision Q5 (plan S1): declarations are dropped. Proposed replacement row: fork not on Bitcoin is an unresolved conflict, no branch current. Pending a spec edit."
     },
     {
       "id": "C12-25",
@@ -231,7 +232,8 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Owner decision Q5 (plan S1): declarations are dropped. Proposed replacement row: fork not on Bitcoin is an unresolved conflict, no branch current. Pending a spec edit."
     },
     {
       "id": "C12-26",
@@ -366,7 +368,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Owner decision Q5 (plan S1): declarations are dropped, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-41",
@@ -550,7 +553,8 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Owner decision Q6 (plan S8): tested as 'author key not under assertionMethod: author binding failure'. Pending a spec edit."
     },
     {
       "id": "C12-61",

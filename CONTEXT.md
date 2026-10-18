@@ -28,14 +28,14 @@ An exact byte sequence bound to a mediaType and a SHA-256 digest in verified his
 The DID that signs every change for the Original's whole life. It is fixed at genesis, and authorship never transfers (P5.8).
 _Avoid_: controller key, owner (when discussing who may sign)
 
-**Originals declaration**:
-The part of the author DID document that lists the keys allowed to sign the author's Originals and the author's witness list and threshold (P9.9).
+**Author key**:
+A verification method embedded in the author DID document under `assertionMethod`. It is never an update key of the author DID's own log (P5.11). Keeping it for Originals only is the signer's discipline; verifiers cannot check it.
 
-**Originals key**:
-A verification method of the author DID, listed in its Originals declaration and used only for Originals entries. It is never an update key of the author DID's own log (P5.11).
+**Witness declaration**:
+A DID service in the author DID document that lists the author's witnesses and threshold (P9.9).
 
 **Key rotation**:
-A change to the author DID that adds or removes an Originals key. Nothing is appended to the asset log (P5.10).
+A change to the author DID that adds or removes an author key. Nothing is appended to the asset log (P5.10).
 
 **Witness**:
 A VH witness that approves asset log entries after checking the author DID's latest state. Hosted Originals require at least three (P9.8).
@@ -61,4 +61,4 @@ A local, unsigned candidate change. It is never a resource version and is never 
 A ZIP holding an asset log prefix, the author identity evidence and the resource bytes. It declares itself complete or partial, and verifies offline without a private key (section 7).
 
 **Fork**:
-Two or more valid branches from the same accepted entry. A fork is always reported, and no branch is chosen by timestamp (P6.6).
+Two or more valid branches from the same accepted entry. A fork is always reported, and no branch is chosen by timestamp. A fork that is not on Bitcoin stays an unresolved conflict with no current branch; only anchoring settles one (P9.16).
