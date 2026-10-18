@@ -1,0 +1,138 @@
+{
+  "generator": "@did-btcr2/cryptosuite@10.0.1 (BIP340Cryptosuite, bip340-jcs-2025)",
+  "generated": "2026-10-18T23:06:31Z",
+  "cases": [
+    {
+      "secretKeyHex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "parity": "odd",
+      "publicKeyMultibase": "zQ3shgVXZLaMzm5S5x7XzGUG6YFHFLtoEMiv9ao2Bqa7hGyg2",
+      "compressedPublicKeyHex": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+      "document": {
+        "versionId": "1-QmPlaceholderEntryHash000000000000000000000000",
+        "versionTime": "2026-10-18T12:00:00Z",
+        "parameters": {
+          "method": "originals:1.0",
+          "scid": "QmScid",
+          "note": "case 1"
+        },
+        "state": {
+          "id": "did:vh:QmScid",
+          "name": "Harbor at dawn ☀",
+          "n": 1.5,
+          "list": [
+            true,
+            null,
+            "é"
+          ]
+        }
+      },
+      "proof": {
+        "type": "DataIntegrityProof",
+        "cryptosuite": "bip340-jcs-2025",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:vh:QmTestAuthor0000000000000000000000000000000000#key-1",
+        "proofValue": "zCH6rooHCKTCh1s8fwgcZ4aKWDD7aBXz3cNVnVFy6tUfvgkKZH9TpUaxJ42LUQSrcZyD1dHEuH1gFjbZQwZwbcNu"
+      },
+      "generatorVerified": true
+    },
+    {
+      "secretKeyHex": "0202020202020202020202020202020202020202020202020202020202020202",
+      "parity": "even",
+      "publicKeyMultibase": "zQ3shScWratmosu8R95gHDdPPypPdxht5hkJ16K2Pv7NWWW4m",
+      "compressedPublicKeyHex": "024d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766",
+      "document": {
+        "versionId": "1-QmPlaceholderEntryHash000000000000000000000000",
+        "versionTime": "2026-10-18T12:00:00Z",
+        "parameters": {
+          "method": "originals:1.0",
+          "scid": "QmScid",
+          "note": "case 2"
+        },
+        "state": {
+          "id": "did:vh:QmScid",
+          "name": "Harbor at dawn ☀",
+          "n": 1.5,
+          "list": [
+            true,
+            null,
+            "é"
+          ]
+        }
+      },
+      "proof": {
+        "type": "DataIntegrityProof",
+        "cryptosuite": "bip340-jcs-2025",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:vh:QmTestAuthor0000000000000000000000000000000000#key-2",
+        "proofValue": "z3duBbzCPvwme4boGbr7CqKRzcw6gz3nKxgBrdX5tMjcPeCAWzYCyRDznv8DKypr9tixU1jjpPjM1GrihamKRGzBz"
+      },
+      "generatorVerified": true
+    },
+    {
+      "secretKeyHex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "parity": "even",
+      "publicKeyMultibase": "zQ3shT1GokQF68docxRmRpQTjnaB66odZYc2tfAv6YMNJqS7g",
+      "compressedPublicKeyHex": "02531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337",
+      "document": {
+        "versionId": "1-QmPlaceholderEntryHash000000000000000000000000",
+        "versionTime": "2026-10-18T12:00:00Z",
+        "parameters": {
+          "method": "originals:1.0",
+          "scid": "QmScid",
+          "note": "case 3"
+        },
+        "state": {
+          "id": "did:vh:QmScid",
+          "name": "Harbor at dawn ☀",
+          "n": 1.5,
+          "list": [
+            true,
+            null,
+            "é"
+          ]
+        }
+      },
+      "proof": {
+        "type": "DataIntegrityProof",
+        "cryptosuite": "bip340-jcs-2025",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:vh:QmTestAuthor0000000000000000000000000000000000#key-3",
+        "proofValue": "zvYzwDPHLFVecxE2tCjL9RqrJyfNwZxZRPJn2bVXRwFbCjDm77ke4Zf96Z2DnqLSSwp3bP6WGpLCFx9ubRto6FLs"
+      },
+      "generatorVerified": true
+    },
+    {
+      "secretKeyHex": "0404040404040404040404040404040404040404040404040404040404040404",
+      "parity": "odd",
+      "publicKeyMultibase": "zQ3shjMxaVg5ES6ZpCnPTdMRRRAaxUijzYHNRuAScV3UTXePk",
+      "compressedPublicKeyHex": "03462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b",
+      "document": {
+        "versionId": "1-QmPlaceholderEntryHash000000000000000000000000",
+        "versionTime": "2026-10-18T12:00:00Z",
+        "parameters": {
+          "method": "originals:1.0",
+          "scid": "QmScid",
+          "note": "case 4"
+        },
+        "state": {
+          "id": "did:vh:QmScid",
+          "name": "Harbor at dawn ☀",
+          "n": 1.5,
+          "list": [
+            true,
+            null,
+            "é"
+          ]
+        }
+      },
+      "proof": {
+        "type": "DataIntegrityProof",
+        "cryptosuite": "bip340-jcs-2025",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:vh:QmTestAuthor0000000000000000000000000000000000#key-4",
+        "proofValue": "z4etiz5Ctni47nEnG4WxNk2tjqaKKZUE6CAXLtXhrz94suJMtgdYfSZCWafgGQPuNgyUawMqwJJFRwJtr1uSWEPQm"
+      },
+      "generatorVerified": true
+    }
+  ]
+}

@@ -14,7 +14,7 @@ for (const existing of ['matching-link', 'different-link', 'directory']) {
         copyFileSync(new URL('./verify-esm.mjs', import.meta.url), join(root, 'scripts/verify-esm.mjs'));
         mkdirSync(join(root, 'node_modules/@originals'), { recursive: true });
         writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
-        for (const name of ['cel', 'sdk', 'auth']) {
+        for (const name of ['cel', 'vh', 'sdk', 'auth']) {
           const pkg = join(root, 'packages', name);
           mkdirSync(join(pkg, 'dist'), { recursive: true });
           writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@originals/' + name, type: 'module', exports: { '.': './dist/index.js' } }));

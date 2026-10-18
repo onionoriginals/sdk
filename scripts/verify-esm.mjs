@@ -34,6 +34,7 @@ const nodeModules = join(repoRoot, 'node_modules');
 
 const packages = [
   { name: '@originals/cel', dir: 'packages/cel' },
+  { name: '@originals/vh', dir: 'packages/vh' },
   { name: '@originals/sdk', dir: 'packages/sdk' },
   { name: '@originals/auth', dir: 'packages/auth' },
 ];

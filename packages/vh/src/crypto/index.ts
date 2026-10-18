@@ -1,0 +1,294 @@
+/**
+ * Encodings and the two cryptosuites the Originals Protocol permits (P5.12).
+ *
+ * - `eddsa-jcs-2022`: W3C Data Integrity EdDSA Cryptosuites v1.0, section 3.3.
+ *   hashData = sha256(JCS(proofConfig)) ‖ sha256(JCS(document)), signed with Ed25519.
+ * - `bip340-jcs-2025`: Data Integrity BIP340 Cryptosuite v0.1, section 3.3.
+ *   hashData = sha256(sha256(JCS(proofConfig)) ‖ sha256(JCS(document))), signed
+ *   with BIP340 Schnorr. Keys are 33-byte compressed secp256k1 Multikeys
+ *   (0xe701); BIP340 uses their x coordinate. The draft's data-model section
+ *   says base64url for proofValue but its algorithms say base58btc multibase;
+ *   this follows the algorithms (spec finding S6), as @did-btcr2/cryptosuite does.
+ */
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { schnorr, secp256k1 } from "@noble/curves/secp256k1.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { base58 } from "@scure/base";
+import { OriginalsError, fail } from "../errors.js";
+import { canonicalBytes, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
+
+// ---------------------------------------------------------------------------
+// multibase / multihash
+
+export function base58btcEncode(bytes: Uint8Array): string {
+  return base58.encode(bytes);
+}
+
+export function base58btcDecode(text: string): Uint8Array {
+  try {
+    return base58.decode(text);
+  } catch {
+    return fail("invalid-evidence", "MULTIBASE_INVALID", "value is not base58btc");
+  }
+}
+
+/** Multibase, base58btc only (prefix `z`). */
+export function multibaseEncode(bytes: Uint8Array): string {
+  return `z${base58.encode(bytes)}`;
+}
+
+export function multibaseDecode(text: string): Uint8Array {
+  if (typeof text !== "string" || !text.startsWith("z")) {
+    fail("invalid-evidence", "MULTIBASE_UNSUPPORTED", "only base58btc multibase (z) is accepted");
+  }
+  return base58btcDecode(text.slice(1));
+}
+
+const SHA2_256 = 0x12;
+
+/** sha2-256 multihash: 0x12 0x20 ‖ digest. */
+export function sha256Multihash(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(34);
+  out[0] = SHA2_256;
+  out[1] = 32;
+  out.set(sha256(bytes), 2);
+  return out;
+}
+
+/**
+ * Decode a sha2-256 multihash and return its digest. Any other algorithm is
+ * outside every profile in this package (VH-Log 1.0 permits SHA-256 only).
+ */
+export function decodeSha256Multihash(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < 2) fail("invalid-evidence", "MULTIHASH_INVALID", "multihash is truncated");
+  if (bytes[0] !== SHA2_256) fail("unsupported-profile", "MULTIHASH_UNSUPPORTED", `multihash code 0x${bytes[0].toString(16)} is not sha2-256`);
+  if (bytes[1] !== 32 || bytes.length !== 34) fail("invalid-evidence", "MULTIHASH_INVALID", "sha2-256 multihash must carry 32 bytes");
+  return bytes.slice(2);
+}
+
+export { sha256 };
+
+// ---------------------------------------------------------------------------
+// Multikey
+
+export type KeyType = "Ed25519" | "secp256k1";
+
+const MULTICODEC: Record<KeyType, { prefix: [number, number]; length: number }> = {
+  Ed25519: { prefix: [0xed, 0x01], length: 32 },
+  secp256k1: { prefix: [0xe7, 0x01], length: 33 },
+};
+
+export interface DecodedMultikey {
+  type: KeyType;
+  publicKey: Uint8Array;
+}
+
+export function encodeMultikey(type: KeyType, publicKey: Uint8Array): string {
+  const { prefix } = MULTICODEC[type];
+  return multibaseEncode(new Uint8Array([...prefix, ...publicKey]));
+}
+
+/** Decode a public-key Multikey. Only canonical Ed25519 and compressed secp256k1 keys decode. */
+export function decodeMultikey(publicKeyMultibase: string): DecodedMultikey {
+  if (typeof publicKeyMultibase !== "string") fail("invalid-evidence", "MULTIKEY_INVALID", "publicKeyMultibase must be a string");
+  const bytes = multibaseDecode(publicKeyMultibase);
+  for (const type of Object.keys(MULTICODEC) as KeyType[]) {
+    const { prefix, length } = MULTICODEC[type];
+    if (bytes[0] !== prefix[0] || bytes[1] !== prefix[1]) continue;
+    const publicKey = bytes.slice(2);
+    if (publicKey.length !== length) fail("invalid-evidence", "MULTIKEY_INVALID", `${type} Multikey must carry ${length} bytes`);
+    try {
+      if (type === "Ed25519") ed25519.Point.fromBytes(publicKey);
+      else secp256k1.Point.fromBytes(publicKey);
+    } catch {
+      fail("invalid-evidence", "MULTIKEY_INVALID", `${type} Multikey is not a valid point`);
+    }
+    if (type === "secp256k1" && publicKey[0] !== 2 && publicKey[0] !== 3) {
+      fail("invalid-evidence", "MULTIKEY_INVALID", "secp256k1 Multikey must be compressed");
+    }
+    return { type, publicKey };
+  }
+  return fail("unsupported-profile", "MULTIKEY_UNSUPPORTED", "Multikey is neither Ed25519 nor secp256k1");
+}
+
+/**
+ * The Multikey named by a did:key verification method of the form
+ * `did:key:<multibase>#<multibase>`, with the two values equal (did:vh, did:webvh).
+ * The key is recovered only by decoding; nothing is resolved.
+ */
+export function didKeyMultikey(verificationMethod: string): string {
+  const match = typeof verificationMethod === "string" ? /^did:key:(z[1-9A-HJ-NP-Za-km-z]+)#(z[1-9A-HJ-NP-Za-km-z]+)$/.exec(verificationMethod) : null;
+  if (!match || match[1] !== match[2]) {
+    fail("invalid-evidence", "DID_KEY_INVALID", "verification method must be did:key:<multikey>#<multikey>");
+  }
+  decodeMultikey(match[1]);
+  return match[1];
+}
+
+/** The did:key DID (no fragment) for a Multikey. */
+export function didKeyOf(publicKeyMultibase: string): string {
+  decodeMultikey(publicKeyMultibase);
+  return `did:key:${publicKeyMultibase}`;
+}
+
+// ---------------------------------------------------------------------------
+// Data Integrity proofs
+
+export type CryptosuiteName = "eddsa-jcs-2022" | "bip340-jcs-2025";
+
+export const CRYPTOSUITES: Readonly<Record<CryptosuiteName, KeyType>> = Object.freeze({
+  "eddsa-jcs-2022": "Ed25519",
+  "bip340-jcs-2025": "secp256k1",
+});
+
+export interface DataIntegrityProof {
+  type: "DataIntegrityProof";
+  cryptosuite: string;
+  verificationMethod: string;
+  proofPurpose: string;
+  proofValue: string;
+  created?: string;
+  "@context"?: JsonValue;
+  [member: string]: JsonValue | undefined;
+}
+
+/** Members Data Integrity defines for a proof. Anything else is rejected (P5.7). */
+const PROOF_MEMBERS = new Set([
+  "@context", "id", "type", "cryptosuite", "verificationMethod", "proofPurpose",
+  "created", "expires", "domain", "challenge", "nonce", "previousProof", "proofValue",
+]);
+
+export function isCryptosuite(name: unknown): name is CryptosuiteName {
+  return typeof name === "string" && Object.prototype.hasOwnProperty.call(CRYPTOSUITES, name);
+}
+
+function requireSuite(name: unknown): CryptosuiteName {
+  if (!isCryptosuite(name)) {
+    fail("unsupported-profile", "CRYPTOSUITE_UNSUPPORTED", `cryptosuite ${JSON.stringify(name)} is not permitted`);
+  }
+  return name;
+}
+
+const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** Build the proof configuration: the proof without proofValue, with the document's @context. */
+function proofConfig(document: JsonObject, options: JsonObject): JsonObject {
+  const config: JsonObject = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (value === undefined || key === "proofValue") continue;
+    if (!PROOF_MEMBERS.has(key)) fail("invalid-evidence", "PROOF_UNKNOWN_MEMBER", `proof member ${JSON.stringify(key)} is not defined by Data Integrity`);
+    config[key] = value;
+  }
+  if (config.type !== "DataIntegrityProof") fail("invalid-evidence", "PROOF_INVALID", "proof type must be DataIntegrityProof");
+  requireSuite(config.cryptosuite);
+  if (typeof config.verificationMethod !== "string" || typeof config.proofPurpose !== "string") {
+    fail("invalid-evidence", "PROOF_INVALID", "proof needs verificationMethod and proofPurpose strings");
+  }
+  if (config.created !== undefined && (typeof config.created !== "string" || !DATE_TIME.test(config.created))) {
+    fail("invalid-evidence", "PROOF_INVALID", "proof created must be an XML Schema dateTime");
+  }
+  if (document["@context"] !== undefined && config["@context"] === undefined) config["@context"] = document["@context"];
+  return config;
+}
+
+function withoutUndefined(value: JsonObject): JsonObject {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
+}
+
+/**
+ * The bytes a signer signs for `document` under the proof `options`
+ * (everything in the proof except proofValue).
+ */
+export function proofHashData(document: JsonObject, options: Omit<DataIntegrityProof, "proofValue"> | DataIntegrityProof): Uint8Array {
+  if (!isJsonObject(document)) fail("invalid-evidence", "PROOF_INVALID", "document must be a JSON object");
+  const unsecured = withoutUndefined(document);
+  delete unsecured.proof;
+  const config = proofConfig(unsecured, options as JsonObject);
+  const configHash = sha256(canonicalBytes(config));
+  const documentHash = sha256(canonicalBytes(unsecured));
+  const joined = new Uint8Array(64);
+  joined.set(configHash, 0);
+  joined.set(documentHash, 32);
+  return config.cryptosuite === "bip340-jcs-2025" ? sha256(joined) : joined;
+}
+
+/** Something that can sign hash data for one Multikey. */
+export interface ProofSigner {
+  readonly keyType: KeyType;
+  readonly publicKeyMultibase: string;
+  sign(hashData: Uint8Array): Promise<Uint8Array>;
+}
+
+/** Create a proof over `document` (which must not contain `proof`). */
+export async function createProof(
+  document: JsonObject,
+  options: Omit<DataIntegrityProof, "proofValue"> | DataIntegrityProof,
+  signer: ProofSigner,
+): Promise<DataIntegrityProof> {
+  const suite = requireSuite((options as JsonObject).cryptosuite);
+  if (CRYPTOSUITES[suite] !== signer.keyType) {
+    fail("unsupported-profile", "CRYPTOSUITE_KEY_MISMATCH", `${suite} needs a ${CRYPTOSUITES[suite]} key`);
+  }
+  const unsecured = withoutUndefined(document);
+  const config = proofConfig(unsecured, options as JsonObject);
+  const signature = await signer.sign(proofHashData(unsecured, config));
+  return { ...(config as DataIntegrityProof), proofValue: multibaseEncode(signature) };
+}
+
+/**
+ * Verify `proof` over `document` with `publicKeyMultibase`. Returns false for a
+ * bad signature; throws for a proof or key this package does not accept, so an
+ * unsupported suite is never mistaken for a merely invalid one.
+ */
+export function verifyProof(document: JsonObject, proof: DataIntegrityProof, publicKeyMultibase: string): boolean {
+  if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
+  const suite = requireSuite(proof.cryptosuite);
+  const key = decodeMultikey(publicKeyMultibase);
+  if (CRYPTOSUITES[suite] !== key.type) {
+    fail("unsupported-profile", "CRYPTOSUITE_KEY_MISMATCH", `${suite} needs a ${CRYPTOSUITES[suite]} key`);
+  }
+  if (typeof proof.proofValue !== "string") fail("invalid-evidence", "PROOF_INVALID", "proof needs a proofValue string");
+  const unsecured = withoutUndefined(document);
+  delete unsecured.proof;
+  const options = withoutUndefined(proof);
+  delete options.proofValue;
+  if (options["@context"] !== undefined) {
+    // Data Integrity: the document's @context must start with the proof's.
+    const proofContext = ([] as JsonValue[]).concat(options["@context"]);
+    const documentContext = ([] as JsonValue[]).concat(unsecured["@context"] ?? []);
+    const prefix = documentContext.slice(0, proofContext.length);
+    if (JSON.stringify(prefix) !== JSON.stringify(proofContext)) return false;
+    unsecured["@context"] = options["@context"];
+  }
+  let signature: Uint8Array;
+  try {
+    signature = multibaseDecode(proof.proofValue);
+  } catch (error) {
+    if (error instanceof OriginalsError) return false;
+    throw error;
+  }
+  if (signature.length !== 64) return false;
+  const data = proofHashData(unsecured, options);
+  try {
+    return key.type === "Ed25519"
+      ? ed25519.verify(signature, data, key.publicKey)
+      : schnorr.verify(signature, data, key.publicKey.slice(1));
+  } catch {
+    return false;
+  }
+}
+
+/** A signer holding raw secret key bytes. For tests and local custody only. */
+export function localSigner(keyType: KeyType, secretKey: Uint8Array): ProofSigner {
+  if (!(secretKey instanceof Uint8Array) || secretKey.length !== 32) {
+    fail("invalid-evidence", "SECRET_KEY_INVALID", "secret key must be 32 bytes");
+  }
+  const secret = secretKey.slice();
+  const publicKey = keyType === "Ed25519" ? ed25519.getPublicKey(secret) : secp256k1.getPublicKey(secret, true);
+  return {
+    keyType,
+    publicKeyMultibase: encodeMultikey(keyType, publicKey),
+    sign: (hashData) =>
+      Promise.resolve(keyType === "Ed25519" ? ed25519.sign(hashData, secret) : schnorr.sign(hashData, secret)),
+  };
+}

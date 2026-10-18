@@ -188,6 +188,9 @@ Each PR is registered with `link_pull_request` and nothing gets merged without y
   - *Issue:* the algorithm text encodes `proofValue` as base58btc multibase, but the data-model section says base64url. The draft also gives 33-byte compressed secp256k1 Multikeys (`0xe701`) without saying how to convert them to x-only keys for BIP340.
   - *Fix:* follow the algorithm text (`z…`) and BIP340 lift-x, and pin interop against `@did-btcr2/cryptosuite`.
 
+- **S7 — not blocking (VH-Log worked example).** *Where:* VH-Log, "Generate Entry Hash".
+  - *Issue:* the example preliminary entry does not hash to the stated entry hash `QmQ6FJ4fk2xheSSQoEjVpTgx9AQPKhJgtR9hn1nr4EeCrZ`. JCS, a sha2-256 multihash and base58btc give `QmXoHG2Z6Hg1kmryaRxcqgzF6nv2vgLZnYHvGirL9t2a8U`. The algorithm text is unambiguous, and logs from `didwebvh-ts` verify under it.
+  - *Fix:* regenerate the example upstream. Until then it is not used as a test vector.
 - **S8 — owner decision Q6 departs from P5.3, P5.11 and P9.9 (author keys).**
   - *Issue:* the pinned text requires an "Originals declaration" listing the keys allowed to sign Originals. The owner chose ordinary DID constructs instead: `assertionMethod` for keys and a service entry for witnesses.
   - *Consequence:* a verifier can no longer check that an author key is used only for Originals. P5.11's protection against a host application tricking a general-purpose assertion key into signing Originals entries then rests on signer discipline alone, not verification. The section 11 row "Malicious host application" weakens accordingly.
