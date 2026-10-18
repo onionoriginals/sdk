@@ -1,5 +1,12 @@
 # Originals SDK
 
+> **In transition.** The SDK is being rebuilt on the
+> [Originals Protocol](specs/README.md): each Original becomes a `did:vh` log
+> signed by its author's DID. This replaces CEL 3 outright, with no conversion
+> or migration. See [the target contract](packages/sdk/ORIGINALS.md) and
+> [plan 011](plans/011-originals-vh-replacement.md). The rest of this README
+> describes the CEL 3 code that the plan deletes.
+
 An Original records signed claims about files and their versions. Create and
 recover it from authenticated CEL 3 history and exact resource bytes. An Original's controller authorizes its history; Bitcoin sat possession is
 a separate concept, established by on-chain observations rather than a signature

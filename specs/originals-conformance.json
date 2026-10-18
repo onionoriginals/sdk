@@ -1,0 +1,853 @@
+{
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. Phases follow spec section 10 and plans/011.",
+  "spec": {
+    "repository": "aviarytech/originals-spec",
+    "commit": "d64fdbe4aef3d12e26109e7eeab28da569169e05",
+    "section": "12"
+  },
+  "rows": [
+    {
+      "id": "C12-01",
+      "test": "Fresh create, edit, package and verify",
+      "requiredResult": "Same asset checkpoint and resource versions; no private key in reader",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-02",
+      "test": "Byte changed at same URL",
+      "requiredResult": "Digest failure; no verified resource result",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-03",
+      "test": "Wrong genesis or Original ID",
+      "requiredResult": "Identifier binding failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-04",
+      "test": "Broken chain or reordered entry",
+      "requiredResult": "History invalid; no derived accepted state beyond failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-05",
+      "test": "Valid key of an identity other than the Original’s author DID",
+      "requiredResult": "Rejected; identity alone grants no edit right",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-06",
+      "test": "Valid VH entry, key not a method of the named author DID",
+      "requiredResult": "Author binding failure; VH validity cannot rescue it",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-07",
+      "test": "Wrong DID method binding or relationship",
+      "requiredResult": "Identity authorization failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-08",
+      "test": "Old identity version with claimed old time",
+      "requiredResult": "Witnessed: witness ordering applies. Unwitnessed: ordering unproven; no timestamp-only acceptance. Anchored: checked against the author DID state at the inscription time (P9.15)",
+      "phases": [
+        2,
+        3,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-09",
+      "test": "Missing identity history",
+      "requiredResult": "Incomplete identity evidence; no blanket verified result",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-10",
+      "test": "Missing historical resource bytes",
+      "requiredResult": "Explicit partial availability; supplied bytes still checked",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-11",
+      "test": "Caller changes version counter",
+      "requiredResult": "Counter ignored or rejected; history-derived version retained",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-12",
+      "test": "Stale parent or prior digest",
+      "requiredResult": "Conflict; no silent rebase or commit",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-13",
+      "test": "Signer rejects or returns invalid proof",
+      "requiredResult": "No partial state commit",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-14",
+      "test": "Interrupted local commit",
+      "requiredResult": "Recover prior or fully committed checkpoint; no false success",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-15",
+      "test": "Identical accepted retry",
+      "requiredResult": "Existing result or explicit duplicate; no unintended extra version",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-16",
+      "test": "Resource added, removed or renamed",
+      "requiredResult": "Rejected in baseline fixed-resource profile",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-17",
+      "test": "Metadata supplied, omitted or null",
+      "requiredResult": "Replacement, unchanged or removed, respectively",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-18",
+      "test": "Name set to null",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-19",
+      "test": "Update that leaves a resource’s digest unchanged",
+      "requiredResult": "That resource’s version does not advance",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-20",
+      "test": "Import then edit without authority",
+      "requiredResult": "Read succeeds where evidence valid; edit authorization fails",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-21",
+      "test": "Update after deactivation",
+      "requiredResult": "Rejected; historical evidence retained",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-22",
+      "test": "Old valid prefix served as current",
+      "requiredResult": "Freshness unresolved or failed under policy, never assumed",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-23",
+      "test": "Divergent valid branches",
+      "requiredResult": "Explicit fork/conflict, no timestamp winner",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-24",
+      "test": "Author entry on one branch declares the other abandoned",
+      "requiredResult": "Declared branch and its descendants reported as abandoned, never current",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-25",
+      "test": "Each branch declares the other abandoned",
+      "requiredResult": "Unresolved conflict",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-26",
+      "test": "Hosted mixed snapshot",
+      "requiredResult": "Rejected before public result is marked verified",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-27",
+      "test": "Anchoring sat moved to a new holder",
+      "requiredResult": "Owner reported as the new holder; author unchanged",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-28",
+      "test": "After anchoring, author-signed entry not inscribed on the sat",
+      "requiredResult": "Not current",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-29",
+      "test": "Inscription on the anchoring sat not signed by the author, including by the owner",
+      "requiredResult": "Rejected; state unchanged",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-30",
+      "test": "Author-signed entry inscribed by the owner",
+      "requiredResult": "Accepted",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-31",
+      "test": "Entry that names a different sat or migrates after anchoring",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-32",
+      "test": "Newer inscription on the sat that does not extend the head",
+      "requiredResult": "Ignored; state follows the authenticated chain",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-33",
+      "test": "Same evidence inscribed on a different sat",
+      "requiredResult": "No ownership conferred",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-34",
+      "test": "Anchoring an Original whose log never activated witnesses",
+      "requiredResult": "Accepted; ordering before the anchor claimed only; uniqueness not established; ownership provisional",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-35",
+      "test": "Migrate entry, after witnesses are active, that leaves the witness parameter set or is not approved by the witnesses",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-36",
+      "test": "Migrate entry that activates witnesses on a log that never had them",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-37",
+      "test": "Entry after anchoring that adds a did:webvh alias when the anchoring entry’s state listed none",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-38",
+      "test": "Two valid anchoring entries for one Original on different sats",
+      "requiredResult": "The first in chain order is the anchor; the other and its descendants are a conflicting anchor, not current, conferring no ownership",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-39",
+      "test": "Unwitnessed anchor of a branch forked before witnesses were activated on another known branch",
+      "requiredResult": "Conflicting anchor; not current",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-40",
+      "test": "Later anchoring entry that declares an earlier anchored branch abandoned",
+      "requiredResult": "Declaration ignored; the first anchor stands",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-41",
+      "test": "Anchoring entry inscribed on a sat other than the one it names",
+      "requiredResult": "Not an anchor",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-42",
+      "test": "Witness asked to approve an entry that does not extend the last entry it approved",
+      "requiredResult": "Refused",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-43",
+      "test": "Entry inscribed on the anchoring sat without witness proofs",
+      "requiredResult": "Accepted; no witnesses after anchoring",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-44",
+      "test": "Publication at the same or a lower block height than the previous accepted one",
+      "requiredResult": "Not accepted",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-45",
+      "test": "Bitcoin failure, retry or reorganization",
+      "requiredResult": "Durable boundary follows adapter policy, not pending intent",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-46",
+      "test": "Entry signed by a key removed from the author DID",
+      "requiredResult": "Witnessed: refused by witnesses and not current. Unwitnessed: historically authorized, ordering unproven, never current. Anchored: rejected if its inscription time is at or after the removal’s versionTime",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-47",
+      "test": "Accepted anchored entry whose key the author DID later removes",
+      "requiredResult": "Remains current",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-48",
+      "test": "Author DID deactivated after an Original is anchored",
+      "requiredResult": "Accepted state remains current; entries inscribed later rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-49",
+      "test": "Anchored entry naming an author DID version newer than its inscription time",
+      "requiredResult": "Checked against the named version",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-50",
+      "test": "Block whose timestamp is earlier than an ancestor’s",
+      "requiredResult": "Inscription time is the greatest ancestor timestamp",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-51",
+      "test": "Author DID history missing through an inscription time",
+      "requiredResult": "Incomplete identity evidence; not reported as current",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-52",
+      "test": "Author DID version published with a versionTime before an already accepted inscription it would reject",
+      "requiredResult": "Retroactive revocation conflict reported; result not silently changed",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-53",
+      "test": "Entry changes the witness parameter to a list the author DID does not declare",
+      "requiredResult": "Rejected",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-54",
+      "test": "Entry sets the witness parameter to an empty object after witnesses are active",
+      "requiredResult": "Rejected",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-55",
+      "test": "Entry after witness activation without enough witness proofs, whatever the deployment",
+      "requiredResult": "Not current",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-56",
+      "test": "Entries before witness activation, signed by a key later removed",
+      "requiredResult": "Ordering unproven; not made current by activation",
+      "phases": [
+        2,
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-57",
+      "test": "Any entry after the author DID is deactivated",
+      "requiredResult": "Not anchored: refused by witnesses; Original reported as non-current. Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
+      "phases": [
+        2,
+        3,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-58",
+      "test": "Entry that sets updateKeys or nextKeyHashes",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-59",
+      "test": "Entry signed by a key the author DID added, with no asset log entry for the change",
+      "requiredResult": "Accepted",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-60",
+      "test": "Author key not in the author DID’s Originals declaration",
+      "requiredResult": "Author binding failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-61",
+      "test": "Author DID versionId absent from signed state",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-62",
+      "test": "Verification method from another DID, with a different controller, or under authentication only",
+      "requiredResult": "Author binding failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-63",
+      "test": "Key expressed as JWK or a different multikey encoding",
+      "requiredResult": "Author binding failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-64",
+      "test": "Later entry names a different author DID, or an older author DID version than its predecessor",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-65",
+      "test": "Author DID using a method the profile does not list",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-66",
+      "test": "Anchored Original with a did:btco author DID, verified from Bitcoin alone",
+      "requiredResult": "Author binding checked against inscribed DID versions in chain order",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-67",
+      "test": "did:btco author DID version inscribed after an Originals inscription in the same block",
+      "requiredResult": "Not in effect for that inscription",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-68",
+      "test": "Anchoring entry naming the author DID’s own did:btco sat",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-69",
+      "test": "Inscription on a did:btco author DID’s sat after its deactivation",
+      "requiredResult": "Not a version; author DID remains deactivated",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-70",
+      "test": "Anchored Original whose did:vh or did:webvh author DID log is unavailable",
+      "requiredResult": "Incomplete identity evidence; not reported as current",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-71",
+      "test": "Witness cannot obtain author DID state no more than 60 seconds old",
+      "requiredResult": "Entry refused",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-72",
+      "test": "Two proofs in the proof array",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-73",
+      "test": "Stale author DID history served with a current asset log",
+      "requiredResult": "Identity freshness not established; not reported as currently authorized",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-74",
+      "test": "VH-valid log that fails Originals rules, read through a generic resolver",
+      "requiredResult": "Not reported as Originals-verified",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-75",
+      "test": "did:webvh whose document points to a did:vh that does not list it",
+      "requiredResult": "Not an alias; no Originals result through that did:webvh",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-76",
+      "test": "Asset state lists a did:webvh whose document points elsewhere",
+      "requiredResult": "Alias not confirmed; the did:vh still verifiable directly",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-77",
+      "test": "Served DID document for the did:vh that differs from the one derived from the log",
+      "requiredResult": "Ignored; the derived document is used",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-78",
+      "test": "Derived DID document",
+      "requiredResult": "Same for every resolver; `controller`, `alsoKnownAs` and `#files` match the author DID and asset state",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-79",
+      "test": "Plain did:vh resolver given an Originals log",
+      "requiredResult": "Rejected by its unrecognised `method` value",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-80",
+      "test": "Later entry that moves the log between plain did:vh and the Originals extension",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-81",
+      "test": "Proof using a cryptosuite other than `eddsa-jcs-2022` or `bip340-jcs-2025`",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-82",
+      "test": "Entry whose state is a delta rather than the full asset state",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-83",
+      "test": "Inscription carrying a compact delta",
+      "requiredResult": "Decoded to the full entry; hashes and proofs checked over the decoded entry",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-84",
+      "test": "Inscription that does not decode deterministically",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-85",
+      "test": "Lifecycle status deactivated without VH deactivated: true, or the reverse",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-86",
+      "test": "Older prefix imported over a newer local history",
+      "requiredResult": "Local current state not rolled back",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-87",
+      "test": "Log file larger than the profile cap",
+      "requiredResult": "Fetch refused; reported as unavailable",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-88",
+      "test": "Entry with duplicate JSON keys or an unsigned state field",
+      "requiredResult": "Parse failure; no verified state",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-89",
+      "test": "Resource digest with an unlisted algorithm",
+      "requiredResult": "Unsupported-profile failure",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-90",
+      "test": "Locator resolving or redirecting to a private address",
+      "requiredResult": "Fetch refused; reported as unavailable",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-91",
+      "test": "History or identity history beyond profile limits",
+      "requiredResult": "Last valid prefix reported, labelled limit-exceeded; never complete or current",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-92",
+      "test": "Archive with a symbolic link, `..` path or duplicate entry",
+      "requiredResult": "Rejected before extraction",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-93",
+      "test": "SVG resource containing script, or a name containing markup",
+      "requiredResult": "Not executed on the platform origin or in a client",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    }
+  ]
+}
