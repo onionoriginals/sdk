@@ -26,7 +26,7 @@ function checkFixture(t, changedEntry, source) {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
   copyFileSync(new URL('./check-browser-safety.mjs', import.meta.url), join(root, 'scripts/check-browser-safety.mjs'));
   mkdirSync(join(root, 'packages/sdk'), { recursive: true });
-  writeFileSync(join(root, 'packages/sdk/package.json'), JSON.stringify({ exports: sdkExports }));
+  writeFileSync(join(root, 'packages/sdk/package.json'), JSON.stringify({ type: 'module', exports: sdkExports }));
   for (const entry of [...sdkEntries, ...additionalEntries]) {
     mkdirSync(dirname(join(root, entry)), { recursive: true });
     writeFileSync(join(root, entry), entry === changedEntry ? source : 'export const safe = true;');
