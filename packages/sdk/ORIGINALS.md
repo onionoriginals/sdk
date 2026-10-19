@@ -171,10 +171,13 @@ await sdk.activateWitnesses(did, { parent, author, signer }); // parent: the hea
 await sdk.edit(did, { parent, name, author, signer });       // approved by a threshold before it is stored
 ```
 
-The witness parameter must equal the declaration in the author DID version an
-entry names (P9.9). While witnesses are active, a changed declaration is carried
-into the log by the next entry, which the outgoing witnesses approve; the SDK
-does this itself (PROVISIONAL reading of P9.9). Witnesses cannot be removed
+An entry that sets the witness parameter to anything but `{}` must set it to
+the declaration in the author DID version it names (P9.9 as reworded in plan
+011 S2, owner decision Q7); entries that leave it alone are not checked
+against the declaration, and witnesses refuse a change that does not match the
+author DID's latest declaration. When the author changes their declaration,
+the SDK sets the new list on the next entry, which the outgoing witnesses
+approve. Witnesses cannot be removed
 once active, except by the anchoring entry (phase 4). An entry after activation
 without threshold witness proofs is not current, whether or not the Original
 is hosted. Commits collect approvals before anything is stored; when too few

@@ -89,14 +89,14 @@ describe("after activation", () => {
     rejected(await verify([genesis, activation, off], [alice], await approvals([activation, off], w)), 2, "WITNESS_REMOVED");
   });
 
-  test("a changed declaration must be carried into the log by the next entry, which the old witnesses approve", async () => {
+  test("after a declaration change, an entry that leaves the parameter alone stays valid; one that sets the new list is approved by the outgoing witnesses (S2, Q7)", async () => {
     const { alice, genesis, activation, w, sign, at } = await witnessed();
     const next = witnessSet([41, 42, 43], 2);
     alice.witnesses = next.declaration;
     await alice.rotate([{ fragment: "orig", signer: KEY }]);
     const ref = alice.ref("orig");
     const stale = await updateOriginal(activation, { versionTime: at(), name: "Harbor", author: ref, sign });
-    rejected(await verify([genesis, activation, stale], [alice], await approvals([activation, stale], w)), 2, "WITNESS_DECLARATION_MISMATCH");
+    expect((await verify([genesis, activation, stale], [alice], await approvals([activation, stale], w.slice(0, 2)))).current).toBe(true);
     const moved = await updateOriginal(activation, { versionTime: at(), witness: next.declaration, author: ref, sign });
     const file = await approvals([activation, moved], w.slice(0, 2));
     expect((await verify([genesis, activation, moved], [alice], file)).current).toBe(true);
