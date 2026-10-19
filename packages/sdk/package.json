@@ -12,7 +12,8 @@
     "LICENSE"
   ],
   "bin": {
-    "originals-cel": "./dist/v3/cli.js"
+    "originals-cel": "./dist/v3/cli.js",
+    "originals": "./dist/originals/cli.js"
   },
   "sideEffects": false,
   "exports": {
@@ -21,7 +22,6 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json",
     "./cel": {
       "types": "./dist/cel/index.d.ts",
       "import": "./dist/cel/index.js",
@@ -46,7 +46,18 @@
       "types": "./dist/asset-envelope.d.ts",
       "import": "./dist/asset-envelope.js",
       "default": "./dist/asset-envelope.js"
-    }
+    },
+    "./originals": {
+      "types": "./dist/originals/index.d.ts",
+      "import": "./dist/originals/index.js",
+      "default": "./dist/originals/index.js"
+    },
+    "./originals/fs": {
+      "types": "./dist/originals/fs-store.d.ts",
+      "import": "./dist/originals/fs-store.js",
+      "default": "./dist/originals/fs-store.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsc",
@@ -83,10 +94,11 @@
   },
   "dependencies": {
     "@noble/curves": "^2.2.0",
-    "@originals/cel": "^2.0.0",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.1.0",
+    "@originals/cel": "^2.0.0",
+    "@originals/vh": "^0.1.0",
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.2.0",
     "b58": "^4.0.3",

@@ -174,6 +174,13 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
+### 3.1 Release blocker to resolve before any publish
+
+From PR 4 on, the public `@originals/sdk` depends on `@originals/vh`, which
+is `private` and unpublished. Nothing is published without the owner's
+approval anyway. Before a release, `@originals/vh` must become a public
+package, or be bundled into the SDK.
+
 ## 4. Spec findings (rule ID → issue → proposed fix)
 
 - **S1 — resolved by the owner (Q5): only Bitcoin settles forks.** *Where:* P6.6 against VH-Log "Comparing Copies of a Log".

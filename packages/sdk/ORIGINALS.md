@@ -1,6 +1,7 @@
 # Originals SDK: the Originals Protocol contract
 
-**Status: target contract, not yet implemented.** This document describes what
+**Status: target contract, partly implemented.** Phase 1 (local use) is in
+`@originals/sdk/originals`. This document describes what
 `@originals/sdk` provides once the phases of
 [plan 011](../../plans/011-originals-vh-replacement.md) land. Each section
 names the phase that delivers it. API names are provisional until that phase's
@@ -27,39 +28,59 @@ under CEL 3 is read, converted or migrated.
 - The DID document of the did:vh is derived from the log. It is never stored or
   taken from a host.
 
-## Local use — phase 1
+## Local use — phase 1 (implemented; `@originals/sdk/originals`)
 
 ```ts
-const sdk = OriginalsSDK.create({ store, authorDids });
+import { OriginalsSDK, MemoryStore, keySigner } from "@originals/sdk/originals";
+import { FileStore } from "@originals/sdk/originals/fs"; // Node: durable local store
 
-const created = await sdk.create({ name, metadata, resources, signer });
+const sdk = OriginalsSDK.create({
+  store: await FileStore.open("./originals"),   // or new MemoryStore()
+  authors: [authorDidEvidence],                 // or (did) => Promise<AuthorDidEvidence | undefined>
+  freshness: "asserted",                        // only when the caller vouches its evidence is the latest (P7.8)
+});
+const signer = keySigner({ keyType: "Ed25519", secretKey, verificationMethod: `${authorDid}#orig` });
+const author = { did: authorDid, verificationMethod: `${authorDid}#orig`, versionId: authorVersionId };
+
+const created = await sdk.create({ name, metadata, resources: [{ id: "photo", mediaType: "image/jpeg", bytes }], author, signer });
+// created.kind === "original" | "draft" (no signer: an unsigned draft, never history, P6.3)
 // entry timestamps carry milliseconds (VH-Log PR 8; plan 011, Q8)
-// created.kind === "original" | "draft"; a draft is unsigned and is never history (P6.3)
 
-const edited = await sdk.edit(original, {
+const edited = await sdk.edit(did, {
   parent: original.checkpoint,   // required; a moved parent is a StaleParent conflict (P4.5)
   name,                          // omitted keeps the value; null is rejected (P4.6)
   metadata,                      // omitted keeps the value; null removes it (P4.6)
-  resources,                     // same resourceIDs as genesis (P4.1)
-  signer,
+  resources: [{ id: "photo", bytes, expectedDigest }], // same resourceIDs as genesis (P4.1)
+  author, signer,
 });
+await sdk.deactivate(did, { parent, author, signer }); // terminal (P6.5)
 
-await sdk.deactivate(original, { parent, signer }); // terminal (P6.5)
+const draft = await sdk.prepareEdit(did, { parent, name, author }); // prepare now, sign later
+await sdk.commit(draft, signer);                                     // retrying returns status "duplicate"
 
-const pkg = await sdk.package(original);  // evidence package, complete or partial (P7.1)
-const view = await sdk.load(pkg);         // read-only; needs no key and no network (P7.3)
+const pkg = await sdk.package(did, { checkpoint });  // ZIP evidence package, complete or partial (P7.1)
+const { report, manifest, reasons } = await sdk.load(pkg.bytes); // read-only; no key, no network (P7.3)
+await sdk.import(pkg.bytes); // "imported" | "already-current" | "kept-newer-local" | "conflict" (P7.5)
 ```
 
-- **Durable commit (P6.2).** The current checkpoint advances only after the
-  signed entry and the new bytes are durably stored. An interrupted commit
-  recovers to either the prior checkpoint or the fully committed one. A signer
-  rejection leaves the prior checkpoint unchanged (P6.1).
-- **Retries (P6.4).** Retrying an accepted, identical candidate returns its
-  existing checkpoint. Any other retry needs a new preparation step.
+The `originals` command verifies a package offline:
+`originals verify harbor.zip [--json] [--now <time>] [--freshness asserted]`.
+
+- **Durable commit (P6.2).** The SDK signs the entry, verifies the whole
+  resulting history, stores new bytes, and then replaces the log atomically.
+  `FileStore` writes to a temporary file, fsyncs it and renames it. An
+  interrupted commit recovers to either the prior checkpoint or the fully
+  committed one. A signer rejection or an invalid proof leaves the prior
+  checkpoint unchanged (P6.1).
+- **Retries (P6.4).** Committing an accepted, identical draft returns its
+  existing checkpoint with status `duplicate`. Any other retry needs a new
+  preparation step.
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
-  counter is ignored, and an unchanged digest does not advance a version.
-- **Signing (P5.11).** The SDK hands the signer the parsed entry together with
-  a summary of the Original, the operation and the resource changes.
+  counter is rejected, and an unchanged digest does not advance a version.
+- **Signing (P5.11).** The signer receives the unsigned entry, the proof options
+  and a summary of the Original, the operation and the resource changes.
+  `keySigner` refuses anything that is not an Originals entry for its own key,
+  and it computes the signed bytes itself rather than taking the caller's.
 
 ## Verification report — phase 1, extended in later phases
 
@@ -81,11 +102,13 @@ Errors are `OriginalsError` (a `StructuredError`) in one of these categories:
 `unauthorized-key`, `author-binding`, `stale-parent`, `fork`, `deactivated`,
 `unavailable-bytes` or `limit-exceeded`.
 
-## Evidence package — phase 1 (PROVISIONAL format, D4)
+## Evidence package — phase 1, implemented (PROVISIONAL format, D4)
 
 The package is an uncompressed ZIP containing `originals-evidence.json` (the
-manifest), `asset/did.jsonl`, `asset/did-witness.json`, the author DID
-histories under `authors/`, and the resource bytes under `resources/<digest>`.
+manifest), `asset/did.jsonl` through the checkpoint, `asset/did-witness.json`,
+the author DID histories under `authors/<sha256(did)>/`, and the resource bytes
+under `resources/<digest>`. The manifest records the packager's head, so a
+package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
 declares the package complete or partial, listing any missing items.
 

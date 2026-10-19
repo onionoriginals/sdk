@@ -7,7 +7,7 @@
  */
 import { fail } from "../errors.js";
 import type { JsonObject } from "../json/index.js";
-import { appendEntry, createLog, SCID_PLACEHOLDER, type EntrySigner, type LogEntry } from "../log/index.js";
+import { prepareGenesis, prepareNext, signEntry, SCID_PLACEHOLDER, type EntrySigner, type LogEntry, type UnsignedEntry } from "../log/index.js";
 import {
   ORIGINALS_METHOD,
   checkDescriptor,
@@ -19,16 +19,19 @@ import {
   type ResourceDescriptor,
 } from "./state.js";
 
-export interface CreateOriginalInput {
+export interface PrepareCreateInput {
   versionTime: string;
   name: string;
   metadata?: JsonObject;
   resources: ResourceDescriptor[];
   author: AuthorRef;
+}
+
+export interface CreateOriginalInput extends PrepareCreateInput {
   sign: EntrySigner;
 }
 
-export interface UpdateOriginalInput {
+export interface PrepareUpdateInput {
   versionTime: string;
   /** Omitted keeps the name; null is rejected (P4.6). */
   name?: string;
@@ -37,6 +40,9 @@ export interface UpdateOriginalInput {
   /** New descriptors for existing resources, by id. Others are unchanged. */
   resources?: ResourceDescriptor[];
   author: AuthorRef;
+}
+
+export interface UpdateOriginalInput extends PrepareUpdateInput {
   sign: EntrySigner;
 }
 
@@ -44,12 +50,12 @@ function invalidInput(code: string, message: string): never {
   return fail("invalid-evidence", code, message);
 }
 
-function stateOf(entry: LogEntry): EntryState {
+function stateOf(entry: UnsignedEntry): EntryState {
   return entry.state as unknown as EntryState;
 }
 
-/** The genesis entry of a new Original: `did:vh:{SCID}` until the SCID is computed. */
-export async function createOriginal(input: CreateOriginalInput): Promise<LogEntry> {
+/** The unsigned genesis entry of a new Original: `did:vh:{SCID}` until the SCID is computed. */
+export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry {
   const resources = input.resources.map((r, i) => checkDescriptor(r, `resources[${i}]`));
   const asset: AssetState = {
     name: input.name,
@@ -67,10 +73,15 @@ export async function createOriginal(input: CreateOriginalInput): Promise<LogEnt
   } as unknown as JsonObject;
   // Validate with a stand-in SCID; the real one is computed from this entry.
   checkEntryState({ ...state, id: "did:vh:placeholder" }, { scid: "placeholder", index: 0, deactivatedParameter: false });
-  return createLog({ versionTime: input.versionTime, parameters: { method: ORIGINALS_METHOD, scid: SCID_PLACEHOLDER }, state, sign: input.sign });
+  return prepareGenesis({ versionTime: input.versionTime, parameters: { method: ORIGINALS_METHOD, scid: SCID_PLACEHOLDER }, state });
 }
 
-function nextAsset(previous: AssetState, input: Omit<UpdateOriginalInput, "versionTime" | "author" | "sign">): AssetState {
+/** The signed genesis entry of a new Original. */
+export async function createOriginal(input: CreateOriginalInput): Promise<LogEntry> {
+  return signEntry(prepareCreateOriginal(input), input.sign);
+}
+
+function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versionTime" | "author">): AssetState {
   if (input.name === null) invalidInput("STATE_NAME", "the name cannot be null (P4.6)");
   const changes = new Map((input.resources ?? []).map((r) => [r.id, r]));
   for (const id of changes.keys()) {
@@ -86,7 +97,7 @@ function nextAsset(previous: AssetState, input: Omit<UpdateOriginalInput, "versi
   };
 }
 
-async function next(previous: LogEntry, operation: "update" | "deactivate", asset: AssetState, input: { versionTime: string; author: AuthorRef; sign: EntrySigner }): Promise<LogEntry> {
+function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
   const before = stateOf(previous);
   const state = {
     id: before.id,
@@ -98,15 +109,25 @@ async function next(previous: LogEntry, operation: "update" | "deactivate", asse
   const scid = before.id.slice("did:vh:".length);
   checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate" });
   const parameters: JsonObject = operation === "deactivate" ? { deactivated: true } : {};
-  return appendEntry(previous, { versionTime: input.versionTime, parameters, state, sign: input.sign });
+  return prepareNext(previous, { versionTime: input.versionTime, parameters, state });
 }
 
-/** An update entry after `previous`. */
+/** An unsigned update entry after `previous`. */
+export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpdateInput): UnsignedEntry {
+  return next(previous, "update", nextAsset(stateOf(previous).asset, input), input);
+}
+
+/** An unsigned deactivation entry after `previous` (P6.5). */
+export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
+  return next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, input);
+}
+
+/** A signed update entry after `previous`. */
 export async function updateOriginal(previous: LogEntry, input: UpdateOriginalInput): Promise<LogEntry> {
-  return await next(previous, "update", nextAsset(stateOf(previous).asset, input), input);
+  return signEntry(prepareUpdateOriginal(previous, input), input.sign);
 }
 
-/** The terminal deactivation entry after `previous` (P6.5). */
+/** The signed, terminal deactivation entry after `previous`. */
 export async function deactivateOriginal(previous: LogEntry, input: { versionTime: string; author: AuthorRef; sign: EntrySigner }): Promise<LogEntry> {
-  return await next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, input);
+  return signEntry(prepareDeactivateOriginal(previous, input), input.sign);
 }
