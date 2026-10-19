@@ -29,6 +29,8 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/sdk/dist', entry: 'testing/index.js' },
   { dist: 'packages/sdk/dist', entry: 'types/public.js' },
   { dist: 'packages/sdk/dist', entry: 'asset-envelope.js', browserFirst: true },
+  { dist: 'packages/sdk/dist', entry: 'originals/index.js', browserFirst: true },
+  { dist: 'packages/sdk/dist', entry: 'originals/fs-store.js' },
   { dist: 'packages/cel/dist', entry: 'index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'json/index.js', browserFirst: true },

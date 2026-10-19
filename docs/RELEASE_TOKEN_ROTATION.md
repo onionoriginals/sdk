@@ -14,7 +14,7 @@ credential.
 
 Trusted publishing requires a publisher registered on npmjs.com for **each**
 published package — this is npm account configuration, not something a
-workflow change can do. For every package (`@originals/cel`, `@originals/sdk`,
+workflow change can do. For every package (`@originals/cel`, `@originals/vh`, `@originals/sdk`,
 `@originals/auth`):
 
 1. Sign into npmjs.com, open the package's Settings, and add a GitHub Actions

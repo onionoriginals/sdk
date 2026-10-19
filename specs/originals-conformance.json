@@ -13,11 +13,12 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/cli.test.ts",
+        "packages/sdk/tests/unit/originals/evidence.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Verifier: create, edit and fresh verification without a key. Evidence packages and the fresh-process run come with the SDK (PR 4)."
+      ]
     },
     {
       "id": "C12-02",
@@ -124,11 +125,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Verifier reports partial availability per resource version. Partial evidence packages come with PR 4."
+      ]
     },
     {
       "id": "C12-11",
@@ -137,11 +138,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "State carries no counter; versions are derived. The SDK's caller-supplied counter is checked in PR 4."
+      ]
     },
     {
       "id": "C12-12",
@@ -150,7 +151,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts"
+      ]
     },
     {
       "id": "C12-13",
@@ -159,7 +163,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts"
+      ]
     },
     {
       "id": "C12-14",
@@ -168,7 +175,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/fs-store.test.ts"
+      ]
     },
     {
       "id": "C12-15",
@@ -177,7 +187,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts"
+      ]
     },
     {
       "id": "C12-16",
@@ -188,6 +201,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
@@ -198,11 +212,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Builder semantics (replace, keep, null removes). The SDK edit API is checked in PR 4."
+      ]
     },
     {
       "id": "C12-18",
@@ -211,11 +225,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Builder rejects a null name. The SDK edit API is checked in PR 4."
+      ]
     },
     {
       "id": "C12-19",
@@ -226,6 +240,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
@@ -236,7 +251,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts"
+      ]
     },
     {
       "id": "C12-21",
@@ -247,6 +265,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
@@ -901,7 +920,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
     },
     {
       "id": "C12-87",
@@ -966,7 +988,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
     },
     {
       "id": "C12-93",

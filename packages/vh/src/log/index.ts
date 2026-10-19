@@ -885,26 +885,42 @@ export interface EntryInput {
   sign: EntrySigner;
 }
 
+/** An entry with its versionId computed and no proof yet. */
+export type UnsignedEntry = Omit<LogEntry, "proof">;
+
 /**
- * VH-Log Create: `parameters` and `state` carry the `{SCID}` placeholder
- * wherever the SCID will appear (including `parameters.scid`).
+ * VH-Log Create, without signing: `parameters` and `state` carry the `{SCID}`
+ * placeholder wherever the SCID will appear (including `parameters.scid`).
  */
-export async function createLog(input: EntryInput): Promise<LogEntry> {
+export function prepareGenesis(input: Omit<EntryInput, "sign">): UnsignedEntry {
   const preliminary: JsonObject = { versionId: SCID_PLACEHOLDER, versionTime: input.versionTime, parameters: input.parameters, state: input.state };
   const scid = computeScid(preliminary);
   const resolved = replaceText(preliminary, SCID_PLACEHOLDER, scid) as JsonObject;
   const entryHash = vhHash({ ...resolved, versionId: scid });
-  const unsigned = { ...resolved, versionId: `1-${entryHash}` };
-  return { ...(unsigned as unknown as Omit<LogEntry, "proof">), proof: await input.sign(unsigned) };
+  return { ...(resolved as unknown as UnsignedEntry), versionId: `1-${entryHash}` };
 }
 
-/** VH-Log Update: the next entry after `previous`. Parameters default to `{}`. */
-export async function appendEntry(previous: LogEntry, input: EntryInput): Promise<LogEntry> {
+/** VH-Log Update, without signing: the next entry after `previous`. */
+export function prepareNext(previous: { versionId: string }, input: Omit<EntryInput, "sign">): UnsignedEntry {
   const number = Number(VERSION_ID.exec(previous.versionId)?.[1] ?? NaN);
   if (!Number.isInteger(number)) fail("invalid-evidence", "VERSION_ID_FORMAT", "previous versionId is malformed");
   const preliminary: JsonObject = { versionId: previous.versionId, versionTime: input.versionTime, parameters: input.parameters, state: input.state };
-  const unsigned = { ...preliminary, versionId: `${number + 1}-${vhHash(preliminary)}` };
-  return { ...(unsigned as unknown as Omit<LogEntry, "proof">), proof: await input.sign(unsigned) };
+  return { ...(preliminary as unknown as UnsignedEntry), versionId: `${number + 1}-${vhHash(preliminary)}` };
+}
+
+/** Sign a prepared entry. */
+export async function signEntry(unsigned: UnsignedEntry, sign: EntrySigner): Promise<LogEntry> {
+  return { ...unsigned, proof: await sign(unsigned) };
+}
+
+/** VH-Log Create: prepare and sign the first entry. */
+export async function createLog(input: EntryInput): Promise<LogEntry> {
+  return signEntry(prepareGenesis(input), input.sign);
+}
+
+/** VH-Log Update: prepare and sign the next entry after `previous`. Parameters default to `{}`. */
+export async function appendEntry(previous: LogEntry, input: EntryInput): Promise<LogEntry> {
+  return signEntry(prepareNext(previous, input), input.sign);
 }
 
 /** A witness proof approving `versionId`, signed with a did:key witness key. */

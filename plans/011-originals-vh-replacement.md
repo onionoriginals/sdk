@@ -174,6 +174,15 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
+### 3.1 Publishing `@originals/vh` (owner decision Q11, 2026-10-18)
+
+`@originals/vh` is a public package, published with the SDK's releases.
+`@originals/sdk` depends on it from PR 4 on. Releasing still needs the owner's
+approval. Before the first release that includes `@originals/vh`, the owner
+must also confirm npm trusted publishing for the new package
+(`docs/RELEASE_TOKEN_ROTATION.md`). npm may need the package to exist before
+a trusted publisher can be registered for it.
+
 ## 4. Spec findings (rule ID → issue → proposed fix)
 
 - **S1 — resolved by the owner (Q5): only Bitcoin settles forks.** *Where:* P6.6 against VH-Log "Comparing Copies of a Log".
@@ -228,5 +237,6 @@ The algorithm itself is small: JCS, then `sha256(sha256(config) ‖ sha256(doc))
 - **Q6 — author keys and witnesses (S8).** Use ordinary DID constructs: `assertionMethod` keys, plus a service entry for the witness list and threshold.
 - **Q7 — witness parameter (S2).** The rewording in S2 is accepted.
 - **Q8 — versionTime precision (D5).** Milliseconds, using VH-Log PR 8 with three fractional digits.
-- **Q9 — the `brianorwhatever/vh` interop repository.** It holds a TypeScript VH-Log reference implementation and shared vectors pinned at `f2f9fda`. `@originals/vh` keeps its own engine, because it carries the PR 2–11 hooks, and joins that interop harness so the shared vectors check it.
+- **Q9 — the `brianorwhatever/vh` interop repository.** It holds a TypeScript VH-Log reference implementation and shared vectors pinned at `f2f9fda`. `@originals/vh` keeps its own engine, because it carries the PR 2–11 hooks, and runs the shared vectors in this repository. Registering it in that repository's harness is not planned (owner, 2026-10-18).
 - **Q10 — VH-Log PR 1.** It is treated as merged too (witnesses verify a candidate without its own witness threshold).
+- **Q11 — `@originals/vh` on npm.** Public, published with the SDK's releases (section 3.1).

@@ -17,14 +17,18 @@ function testFiles(dir: string): string[] {
   });
 }
 
-const root = new URL("../", import.meta.url).pathname;
+// Test roots that may cite rows, relative to the repository root.
+const repo = new URL("../../../../", import.meta.url).pathname;
+const roots = ["packages/vh/tests", "packages/sdk/tests/unit/originals"];
 const cited = new Map<string, Set<string>>();
-for (const file of testFiles(root)) {
-  if (file.endsWith("registry.test.ts")) continue;
-  for (const [id] of readFileSync(file, "utf8").matchAll(/C12-\d{2}/g)) {
-    const files = cited.get(id) ?? new Set<string>();
-    files.add(file.slice(root.length));
-    cited.set(id, files);
+for (const root of roots) {
+  for (const file of testFiles(join(repo, root))) {
+    if (file.endsWith("registry.test.ts")) continue;
+    for (const [id] of readFileSync(file, "utf8").matchAll(/C12-\d{2}/g)) {
+      const files = cited.get(id) ?? new Set<string>();
+      files.add(file.slice(repo.length));
+      cited.set(id, files);
+    }
   }
 }
 
@@ -40,7 +44,7 @@ describe("section 12 conformance registry", () => {
       const row = byId.get(id);
       expect(row, `${id} is not a registered row`).toBeDefined();
       expect(row!.status, `${id} is cited but still todo`).not.toBe("todo");
-      expect(new Set(row!.coveredBy ?? []), `${id} coveredBy`).toEqual(new Set([...files].map((f) => `packages/vh/tests/${f}`)));
+      expect(new Set(row!.coveredBy ?? []), `${id} coveredBy`).toEqual(files);
     }
   });
 

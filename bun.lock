@@ -105,6 +105,7 @@
       "version": "4.0.0",
       "bin": {
         "originals-cel": "./dist/v3/cli.js",
+        "originals": "./dist/originals/cli.js",
       },
       "dependencies": {
         "@noble/curves": "^2.2.0",
@@ -112,6 +113,7 @@
         "@noble/hashes": "^2.0.1",
         "@noble/secp256k1": "^3.1.0",
         "@originals/cel": "^2.0.0",
+        "@originals/vh": "^0.1.0",
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.2.0",
         "b58": "^4.0.3",
