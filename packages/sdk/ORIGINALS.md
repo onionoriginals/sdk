@@ -1,7 +1,8 @@
 # Originals SDK: the Originals Protocol contract
 
 **Status: target contract, partly implemented.** Phases 1 (local use) and 2
-(author DID rotation, freshness and forks) are in `@originals/sdk/originals`. This document describes what
+(author DID rotation, freshness and forks), and the witness half of phase 3,
+are in `@originals/sdk/originals`. This document describes what
 `@originals/sdk` provides once the phases of
 [plan 011](../../plans/011-originals-vh-replacement.md) land. Each section
 names the phase that delivers it. API names are provisional until that phase's
@@ -93,7 +94,7 @@ The `originals` command verifies a package offline:
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · not-established · stale against the retained versionId (P7.8) |
 | `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure |
-| `ordering` | claimed · witnessed · anchored (P7.6) |
+| `ordering`, `witnessedFrom` | claimed · witnessed · anchored (P7.6), and the entry that activated witnesses; entries before it keep claimed ordering |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
@@ -150,14 +151,50 @@ replaces stored author DID evidence with an older or diverging history.
 Stores implement `getRetained`/`putRetained` and `putBranch`/`getBranches` in
 addition to the phase 1 methods; `MemoryStore` and `FileStore` do.
 
-## Hosted publication and witnesses — phase 3
+## Witnesses — phase 3 (implemented)
 
-Publishing to the web requires an explicit domain. The publish entry activates
-the witnesses declared in the author DID (at least three, P9.8) and adds a
-did:webvh alias. The alias is its own small log, bound in both directions with
-the did:vh (P3.6). The public reader verifies one exact snapshot (P9.1).
-Fetches apply the VH-Log retrieval rules (P8.5), and active content is served
-isolated (P9.7). The witness parameter follows the reworded P9.9 (plan 011, S2).
+An author declares witnesses with one `OriginalsWitnesses` service in their DID
+document (PROVISIONAL; plan 011 §2.2, owner decision Q6):
+
+```json
+{ "id": "<authorDid>#originals-witnesses", "type": "OriginalsWitnesses",
+  "serviceEndpoint": { "threshold": 2, "witnesses": [{ "id": "did:key:z6Mk…" }, …] } }
+```
+
+A declaration names at least three witnesses with a threshold of at least two
+and less than their number (P9.8). Witness keys are did:key Ed25519 and sign
+with `eddsa-jcs-2022` (plan 011, S3).
+
+```ts
+const sdk = OriginalsSDK.create({ store, authors, witnesses: [w1, w2, w3] }); // WitnessClient[]
+await sdk.activateWitnesses(did, { parent, author, signer }); // parent: the head the author confirms
+await sdk.edit(did, { parent, name, author, signer });       // approved by a threshold before it is stored
+```
+
+The witness parameter must equal the declaration in the author DID version an
+entry names (P9.9). While witnesses are active, a changed declaration is carried
+into the log by the next entry, which the outgoing witnesses approve; the SDK
+does this itself (PROVISIONAL reading of P9.9). Witnesses cannot be removed
+once active, except by the anchoring entry (phase 4). An entry after activation
+without threshold witness proofs is not current, whether or not the Original
+is hosted. Commits collect approvals before anything is stored; when too few
+witnesses approve, the commit fails with `WITNESS_APPROVALS_INSUFFICIENT`, the
+refusals in its details, and the head unchanged (P6.1).
+
+`OriginalsWitness` is the reference witness. It verifies the entry under the
+profile, reads the author DID from its own source and refuses state more than
+60 seconds old, refuses keys the latest author DID does not list and every
+entry once the author DID is deactivated, and refuses an entry that does not
+extend the last one it approved unless it extends a witnessed entry that is not
+an ancestor of it (P9.8). It records each approval in a `WitnessLedger` before
+returning the proof; deployments need a durable ledger.
+
+## Hosted publication — phase 3 (plan 011, PR 7b)
+
+Publishing to the web requires an explicit domain. The publish entry adds a
+did:webvh alias, its own small log bound in both directions with the did:vh
+(P3.6). The public reader verifies one exact snapshot (P9.1). Fetches apply the
+VH-Log retrieval rules (P8.5), and active content is served isolated (P9.7).
 
 ## Bitcoin anchoring and ownership — phase 4
 

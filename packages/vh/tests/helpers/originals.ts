@@ -14,10 +14,13 @@ export class VhAuthor {
   readonly update = seeded(90);
   entries: LogEntry[] = [];
   did = "";
+  /** The witness declaration (plan 011 §2.2) put in each new document, if any. */
+  witnesses: JsonObject | null = null;
   private seconds = 0;
 
-  static async create(keys: Array<{ fragment: string; signer: ProofSigner; relationship?: string; controller?: string }>): Promise<VhAuthor> {
+  static async create(keys: Array<{ fragment: string; signer: ProofSigner; relationship?: string; controller?: string }>, witnesses: JsonObject | null = null): Promise<VhAuthor> {
     const author = new VhAuthor();
+    author.witnesses = witnesses;
     const genesis = await createLog({
       versionTime: author.time(),
       parameters: { method: "did:vh:1.0", scid: "{SCID}", updateKeys: [author.update.publicKeyMultibase] },
@@ -45,6 +48,7 @@ export class VhAuthor {
       verificationMethod: keys.map((k) => ({ id: `${did}#${k.fragment}`, type: "Multikey", controller: k.controller ?? did, publicKeyMultibase: k.signer.publicKeyMultibase })),
       assertionMethod: keys.filter((k) => (k.relationship ?? "assertionMethod") === "assertionMethod").map((k) => `${did}#${k.fragment}`),
       authentication: keys.filter((k) => k.relationship === "authentication").map((k) => `${did}#${k.fragment}`),
+      ...(this.witnesses ? { service: [{ id: `${did}#originals-witnesses`, type: "OriginalsWitnesses", serviceEndpoint: this.witnesses }] } : {}),
     };
   }
 
@@ -89,4 +93,10 @@ export function clock(start = 0) {
     const d = new Date(Date.parse("2026-10-18T12:00:00Z") + ms);
     return d.toISOString();
   };
+}
+
+/** Witness signers and the declaration that lists them. */
+export function witnessSet(seeds: number[], threshold: number) {
+  const signers = seeds.map((n) => seeded(n));
+  return { signers, declaration: { threshold, witnesses: signers.map((w) => ({ id: `did:key:${w.publicKeyMultibase}` })) } as JsonObject };
 }

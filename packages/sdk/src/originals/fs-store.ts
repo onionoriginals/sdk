@@ -2,9 +2,11 @@
  * A file-system store (Node only; `@originals/sdk/originals/fs`).
  *
  *   <root>/originals/<scid>/did.jsonl   the committed log
- *   <root>/resources/<digest>           content-addressed bytes
- *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl
+ *   <root>/originals/<scid>/did-witness.json
+ *                                       its witness proofs, written before the log
+ *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl (and .witness.json)
  *                                       valid branches that diverge from it
+ *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
  *
@@ -107,12 +109,12 @@ export class FileStore implements OriginalsStore {
   }
 
   async get(did: string): Promise<StoredOriginal | undefined> {
-    try {
-      return { log: await fs.readFile(join(this.dirOf(did), "did.jsonl"), "utf8") };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
+    const dir = this.dirOf(did);
+    const log = await this.readText(join(dir, "did.jsonl"));
+    if (log === undefined) return undefined;
+    // The witness file may hold proofs for a newer log than the one committed; unknown versionIds are ignored.
+    const witness = await this.readText(join(dir, "did-witness.json"));
+    return { log, ...(witness !== undefined ? { witness: JSON.parse(witness) as unknown } : {}) };
   }
 
   async commit(did: string, update: CommitUpdate): Promise<void> {
@@ -122,6 +124,7 @@ export class FileStore implements OriginalsStore {
       await fs.mkdir(dir, { recursive: true });
       const current = headOf((await this.get(did))?.log);
       if (current !== update.expectedHead) throw staleHead(did, update.expectedHead, current);
+      if (update.witness !== undefined) await this.writeAtomically(dir, "did-witness.json", JSON.stringify(update.witness));
       await this.writeAtomically(dir, "did.jsonl", update.log);
     });
     this.locks.set(did, run.catch(() => undefined));
@@ -182,20 +185,22 @@ export class FileStore implements OriginalsStore {
     await this.writeAtomically(join(this.root, "retained"), this.didFile(did), JSON.stringify({ did, versionId }));
   }
 
-  async putBranch(did: string, log: string): Promise<void> {
+  async putBranch(did: string, branch: StoredOriginal): Promise<void> {
     const dir = join(this.dirOf(did), "branches");
     await fs.mkdir(dir, { recursive: true });
-    const name = `${hashHex(log)}.jsonl`;
-    if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, log);
+    const name = hashHex(branch.log);
+    if (branch.witness !== undefined) await this.writeAtomically(dir, `${name}.witness.json`, JSON.stringify(branch.witness));
+    await this.writeAtomically(dir, `${name}.jsonl`, branch.log);
   }
 
-  async getBranches(did: string): Promise<string[]> {
+  async getBranches(did: string): Promise<StoredOriginal[]> {
     const dir = join(this.dirOf(did), "branches");
     const names = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl")).sort();
-    const out: string[] = [];
+    const out: StoredOriginal[] = [];
     for (const name of names) {
       const log = await this.readText(join(dir, name));
-      if (log !== undefined) out.push(log);
+      const witness = await this.readText(join(dir, name.replace(/\.jsonl$/, ".witness.json")));
+      if (log !== undefined) out.push({ log, ...(witness !== undefined ? { witness: JSON.parse(witness) as unknown } : {}) });
     }
     return out;
   }

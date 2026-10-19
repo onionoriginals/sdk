@@ -472,7 +472,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/witness.test.ts"
+      ]
     },
     {
       "id": "C12-43",
@@ -511,10 +514,12 @@
       ],
       "status": "partial",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/witness.test.ts",
         "packages/vh/tests/freshness.test.ts",
-        "packages/vh/tests/originals.test.ts"
+        "packages/vh/tests/originals.test.ts",
+        "packages/vh/tests/witness.test.ts"
       ],
-      "note": "Unwitnessed case: historically valid, never current (P7.9). Witnessed and anchored cases in PRs 7 and 9."
+      "note": "Unwitnessed: historically valid, never current (P7.9). Witnessed: refused by witnesses and not current. The anchored case arrives in PR 9."
     },
     {
       "id": "C12-47",
@@ -577,7 +582,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/witness.test.ts"
+      ]
     },
     {
       "id": "C12-54",
@@ -586,7 +594,11 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/witness.test.ts"
+      ],
+      "note": "The anchoring entry, which must set {} (P9.10), arrives with Bitcoin in PR 9."
     },
     {
       "id": "C12-55",
@@ -595,7 +607,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/witness.test.ts"
+      ]
     },
     {
       "id": "C12-56",
@@ -605,7 +620,10 @@
         2,
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/witness.test.ts"
+      ]
     },
     {
       "id": "C12-57",
@@ -618,9 +636,10 @@
       ],
       "status": "partial",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/witness.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "Unanchored case: a deactivated author DID makes the Original non-current. Witness refusal (PR 7) and anchored case (PR 9) remain."
+      "note": "Unanchored: a deactivated author DID makes the Original non-current, and witnesses refuse every entry. The anchored case arrives in PR 9."
     },
     {
       "id": "C12-58",
@@ -772,7 +791,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/witness.test.ts"
+      ]
     },
     {
       "id": "C12-72",

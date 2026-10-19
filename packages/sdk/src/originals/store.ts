@@ -17,7 +17,7 @@ import type { AuthorDidEvidence } from "@originals/vh/originals";
 export interface StoredOriginal {
   /** The committed asset log, `did.jsonl` text. */
   log: string;
-  /** The witness proofs file, once witnesses exist (plan 011, PR 7). */
+  /** The witness proofs file, once witnesses are active (P9.8). */
   witness?: unknown;
 }
 
@@ -41,8 +41,8 @@ export interface OriginalsStore {
   getRetained(did: string): Promise<string | undefined>;
   putRetained(did: string, versionId: string): Promise<void>;
   /** Keep a valid branch of an Original that diverges from its committed log. */
-  putBranch(did: string, log: string): Promise<void>;
-  getBranches(did: string): Promise<string[]>;
+  putBranch(did: string, branch: StoredOriginal): Promise<void>;
+  getBranches(did: string): Promise<StoredOriginal[]>;
   list(): Promise<string[]>;
 }
 
@@ -64,7 +64,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly resources = new Map<string, Uint8Array>();
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
-  private readonly branches = new Map<string, string[]>();
+  private readonly branches = new Map<string, StoredOriginal[]>();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -106,14 +106,14 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
-  putBranch(did: string, log: string): Promise<void> {
-    const known = this.branches.get(did) ?? [];
-    if (!known.includes(log)) this.branches.set(did, [...known, log]);
+  putBranch(did: string, branch: StoredOriginal): Promise<void> {
+    const known = (this.branches.get(did) ?? []).filter((b) => b.log !== branch.log);
+    this.branches.set(did, [...known, structuredClone(branch)]);
     return Promise.resolve();
   }
 
-  getBranches(did: string): Promise<string[]> {
-    return Promise.resolve([...(this.branches.get(did) ?? [])]);
+  getBranches(did: string): Promise<StoredOriginal[]> {
+    return Promise.resolve(structuredClone(this.branches.get(did) ?? []));
   }
 
   /** Forget stored bytes, as a store that lost them would. */

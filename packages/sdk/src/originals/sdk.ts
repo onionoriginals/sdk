@@ -14,6 +14,10 @@
  *   verified for the Original and its author DIDs, so an older prefix is stale
  *   rather than current (P7.6, P7.8). Reads, commits and imports retain the
  *   new highest; loading a package changes nothing.
+ * - Witnessed Originals (P9.8, P9.9): `activateWitnesses` sets the witness
+ *   parameter to the author DID's declaration on a head the caller confirms.
+ *   From then on every commit collects threshold approvals from the declared
+ *   witnesses before anything is stored; refusals leave the head unchanged.
  * - An import that diverges from the committed log keeps the other branch.
  *   From then on the Original reports the fork, with every branch, and is not
  *   current; edits continue on the local branch. Only anchoring settles a
@@ -21,15 +25,17 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { multibaseEncode } from "@originals/vh/crypto";
-import { parseJson, type JsonObject } from "@originals/vh/json";
-import { serializeLog, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
+import { canonicalize, parseJson, type JsonObject } from "@originals/vh/json";
+import { serializeLog, type LogEntry, type UnsignedEntry, type WitnessFileEntry } from "@originals/vh/log";
 import {
   prepareCreateOriginal,
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
+  namedVersion,
   resourceDigest,
   verifyAuthorHistory,
   verifyOriginal,
+  witnessDeclaration,
   type AssetState,
   type AuthorDidEvidence,
   type AuthorRef,
@@ -42,7 +48,8 @@ import {
 } from "@originals/vh/originals";
 import { readEvidence, writeEvidence, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
-import { MemoryStore, headOf, staleHead, type OriginalsStore } from "./store.js";
+import { MemoryStore, headOf, staleHead, type OriginalsStore, type StoredOriginal } from "./store.js";
+import type { WitnessClient } from "./witness.js";
 import type { ZipLimits } from "./zip.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
@@ -59,6 +66,8 @@ export interface OriginalsSDKOptions {
   /** Milliseconds since the epoch; used for entry timestamps and verification time. */
   clock?: () => number;
   archiveLimits?: ZipLimits;
+  /** Clients for the witnesses author DIDs declare, matched by did:key (P9.8). */
+  witnesses?: WitnessClient[];
 }
 
 export interface ResourceInput {
@@ -132,6 +141,13 @@ export interface LoadedEvidence {
   reasons: string[];
 }
 
+export interface WitnessRefusal {
+  witness: string;
+  category: string;
+  code: string;
+  message: string;
+}
+
 export interface ImportResult {
   status: "imported" | "already-current" | "kept-newer-local" | "conflict";
   original: OriginalView;
@@ -166,6 +182,30 @@ function authorDidsOf(log: string): string[] {
     }
   }
   return [...dids];
+}
+
+/** The witness parameter in effect after the last entry (VH-Log accumulation). */
+function activeWitness(log: string): JsonObject {
+  let active: JsonObject = {};
+  for (const line of lines(log)) {
+    const w = (parseJson(line) as { parameters?: { witness?: unknown } }).parameters?.witness;
+    if (w !== undefined) active = w as JsonObject;
+  }
+  return active;
+}
+
+/** The witness list that must approve the last entry: the one active before it, or the one it activates. */
+function governingWitnesses(log: string): { threshold: number; ids: string[] } | null {
+  const all = lines(log);
+  const before = activeWitness(all.slice(0, -1).map((l) => `${l}\n`).join(""));
+  const list = Object.keys(before).length > 0 ? before : activeWitness(log);
+  if (Object.keys(list).length === 0) return null;
+  const ids = (list.witnesses as Array<{ id: string }>).map((w) => w.id);
+  return { threshold: list.threshold as number, ids };
+}
+
+function witnessEntries(value: unknown): WitnessFileEntry[] {
+  return Array.isArray(value) ? (value as WitnessFileEntry[]) : [];
 }
 
 /** The did:vh a log's genesis names, before verification; only used to look up what to compare with. */
@@ -237,7 +277,7 @@ export class OriginalsSDK {
       if (version) retained.authors![author] = version;
     }
     const branches = did ? await this.store.getBranches(did) : [];
-    return { retained, copies: branches.map((branch, i) => ({ source: `branch-${i + 1}`, log: branch })) };
+    return { retained, copies: branches.map((branch, i) => ({ source: `branch-${i + 1}`, log: branch.log, witnessFile: branch.witness })) };
   }
 
   /** Keep the highest versionIds a report verified. The report never lowers them. */
@@ -246,9 +286,14 @@ export class OriginalsSDK {
     for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
   }
 
-  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<OriginalsReport> {
+  private async verify(
+    { log, witness }: StoredOriginal,
+    options: { checkpoint?: string; extra?: ReadonlyMap<string, Uint8Array> } = {},
+  ): Promise<OriginalsReport> {
+    const { checkpoint, extra } = options;
     return verifyOriginal({
       log,
+      ...(witness !== undefined ? { witnessFile: witness } : {}),
       authors: await this.authorEvidence(authorDidsOf(log)),
       bytes: await this.storedBytes(log, extra),
       now: this.clock(),
@@ -266,16 +311,15 @@ export class OriginalsSDK {
     return { did, checkpoint: report.checkpoint, head: report.head, state: report.state, resources: report.resources.versions, current: report.current, report };
   }
 
-  private async stored(did: string): Promise<string> {
+  private async stored(did: string): Promise<StoredOriginal> {
     const stored = await this.store.get(did);
     if (!stored) sdkError("incomplete-evidence", "ORIGINAL_NOT_FOUND", `${did} is not in this store`);
-    return stored.log;
+    return stored;
   }
 
   /** The verified state of a stored Original, at its head or an exact checkpoint (P3.2). */
   async get(did: string, options: { checkpoint?: string } = {}): Promise<OriginalView> {
-    const log = await this.stored(did);
-    const report = await this.verify(log, options.checkpoint);
+    const report = await this.verify(await this.stored(did), options);
     await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
@@ -314,8 +358,9 @@ export class OriginalsSDK {
   }
 
   private async parentOf(did: string, parent: string): Promise<{ log: string; head: LogEntry; view: OriginalView }> {
-    const log = await this.stored(did);
-    const view = this.view(did, await this.verify(log));
+    const stored = await this.stored(did);
+    const log = stored.log;
+    const view = this.view(did, await this.verify(stored));
     if (view.report.history.status !== "valid" || view.report.identityEvidence.status !== "complete") {
       sdkError("incomplete-evidence", "PARENT_NOT_VERIFIED", `${did} does not fully verify; it cannot be extended`, { report: view.report });
     }
@@ -327,7 +372,12 @@ export class OriginalsSDK {
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
     exactKeys(input, ["parent", "name", "metadata", "resources", "author", "signer"], "edit input");
-    const { head, view } = await this.parentOf(did, input.parent);
+    return this.prepareUpdate(did, input, false);
+  }
+
+  private async prepareUpdate(did: string, input: EditInput, activate: boolean): Promise<Draft> {
+    const { log, head, view } = await this.parentOf(did, input.parent);
+    const witness = await this.witnessParameter(log, input.author, activate);
     const bytes = new Map<string, Uint8Array>();
     const resources = (input.resources ?? []).map((r, i) => {
       exactKeys(r, ["id", "bytes", "mediaType", "expectedDigest"], `resources[${i}]`);
@@ -345,8 +395,42 @@ export class OriginalsSDK {
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       resources,
       author: input.author,
+      ...(witness ? { witness } : {}),
     });
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes };
+  }
+
+  /**
+   * The witness parameter a new entry must set, if any (P9.9): the author DID's
+   * declaration at the named version when activating, or when witnesses are
+   * active and the declaration has changed.
+   */
+  private async witnessParameter(log: string, author: AuthorRef, activate: boolean): Promise<JsonObject | undefined> {
+    const active = activeWitness(log);
+    const isActive = Object.keys(active).length > 0;
+    if (!activate && !isActive) return undefined;
+    const [evidence] = await this.authorEvidence([author.did]);
+    if (!evidence) sdkError("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no history for author DID ${author.did}`);
+    const declared = witnessDeclaration(namedVersion(await verifyAuthorHistory(evidence, { now: this.clock() }), author));
+    if (!declared) {
+      sdkError(isActive ? "invalid-evidence" : "unsupported-profile", "WITNESSES_NOT_DECLARED", `author DID version ${author.versionId} declares no witnesses (P9.9)`);
+    }
+    if (isActive && canonicalize(declared) === canonicalize(active)) return undefined;
+    return declared;
+  }
+
+  /**
+   * Activate the witnesses the author DID declares (P9.8, P9.9). `parent` is
+   * the head the author confirms: activation does not give earlier entries
+   * proven ordering (P7.6), so it must not land on a head the author has not
+   * seen.
+   */
+  async activateWitnesses(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner }): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer"], "activation input");
+    if (Object.keys(activeWitness((await this.stored(did)).log)).length > 0) {
+      sdkError("invalid-evidence", "WITNESSES_ALREADY_ACTIVE", `${did} already has witnesses`);
+    }
+    return this.commit(await this.prepareUpdate(did, { parent: input.parent, author: input.author }, true), input.signer);
   }
 
   async edit(did: string, input: EditInput & { signer: OriginalsSigner }): Promise<CommitResult> {
@@ -354,8 +438,9 @@ export class OriginalsSDK {
   }
 
   async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef }): Promise<Draft> {
-    const { head } = await this.parentOf(did, input.parent);
-    const entry = prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author });
+    const { log, head } = await this.parentOf(did, input.parent);
+    const witness = await this.witnessParameter(log, input.author, false);
+    const entry = prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author, ...(witness ? { witness } : {}) });
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes: new Map() };
   }
 
@@ -367,7 +452,8 @@ export class OriginalsSDK {
 
   /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
   async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
-    const stored = (await this.store.get(draft.original))?.log ?? "";
+    const current = await this.store.get(draft.original);
+    const stored = current?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
       return { status: "duplicate", original: await this.get(draft.original) };
     }
@@ -379,7 +465,13 @@ export class OriginalsSDK {
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
 
-    const report = await this.verify(candidate, undefined, draft.bytes);
+    let witness = witnessEntries(current?.witness);
+    let report = await this.verify({ log: candidate, witness }, { extra: draft.bytes });
+    const pending = report.history.failure?.code === "WITNESS_THRESHOLD" && report.history.failure.index === lines(candidate).length - 1;
+    if (pending) {
+      witness = await this.collectApprovals(draft.original, candidate, witness, entry.versionId);
+      report = await this.verify({ log: candidate, witness }, { extra: draft.bytes });
+    }
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);
     if (
       report.history.status !== "valid" || report.history.entries !== lines(candidate).length ||
@@ -389,16 +481,41 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
     }
     for (const [digest, bytes] of draft.bytes) await this.store.putResource(digest, bytes);
-    await this.store.commit(draft.original, { expectedHead: head, log: candidate });
+    await this.store.commit(draft.original, { expectedHead: head, log: candidate, ...(witness.length > 0 ? { witness } : {}) });
     await this.retain(report);
     return { status: "committed", original: this.view(draft.original, report) };
+  }
+
+  /** Ask the declared witnesses to approve the last entry until the threshold is met (P9.8). */
+  private async collectApprovals(original: string, log: string, witness: WitnessFileEntry[], versionId: string): Promise<WitnessFileEntry[]> {
+    const governing = governingWitnesses(log)!;
+    const refusals: WitnessRefusal[] = [];
+    const proofs = [];
+    for (const id of governing.ids) {
+      if (proofs.length >= governing.threshold) break;
+      const client = this.options.witnesses?.find((w) => w.id === id);
+      if (!client) {
+        refusals.push({ witness: id, category: "unavailable-bytes", code: "WITNESS_NOT_CONFIGURED", message: `no client for witness ${id}` });
+        continue;
+      }
+      try {
+        proofs.push(await client.approve({ original, log, witness }));
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+        refusals.push({ witness: id, category: error.category, code: error.code, message: error.message });
+      }
+    }
+    if (proofs.length < governing.threshold) {
+      sdkError("incomplete-evidence", "WITNESS_APPROVALS_INSUFFICIENT", `${proofs.length} of ${governing.threshold} witnesses approved the entry; nothing was committed`, { refusals });
+    }
+    return [...witness.filter((w) => w.versionId !== versionId), { versionId, proof: proofs }];
   }
 
   // ---------------------------------------------------------------- evidence
 
   /** An evidence package for the head or an exact checkpoint (P7.1). */
   async package(did: string, options: { checkpoint?: string } = {}): Promise<EvidencePackage> {
-    const log = await this.stored(did);
+    const { log, witness } = await this.stored(did);
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
@@ -420,7 +537,9 @@ export class OriginalsSDK {
       completeness: missing.length === 0 && view.report.identityEvidence.status === "complete" ? "complete" : "partial",
       missing,
     };
-    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
+    const kept = new Set(ids.slice(0, ids.indexOf(view.checkpoint) + 1));
+    const proofs = witnessEntries(witness).filter((w) => kept.has(w.versionId));
+    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes, ...(proofs.length > 0 ? { witness: proofs } : {}) }), manifest };
   }
 
   /** Verify an evidence package without storing it. Needs no key and no network (P7.3). */
@@ -469,12 +588,12 @@ export class OriginalsSDK {
       if (incoming.length < have.length && sharesPrefix(incoming, have)) return result("kept-newer-local");
       if (!sharesPrefix(have, incoming)) {
         await this.keepEvidence(contents, r);
-        await this.store.putBranch(did, contents.log);
+        await this.store.putBranch(did, { log: contents.log, ...(contents.witness !== undefined ? { witness: contents.witness } : {}) });
         return result("conflict");
       }
     }
     await this.keepEvidence(contents, r);
-    await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
+    await this.store.commit(did, { expectedHead: headOf(local), log: contents.log, ...(contents.witness !== undefined ? { witness: contents.witness } : {}) });
     return result("imported");
   }
 

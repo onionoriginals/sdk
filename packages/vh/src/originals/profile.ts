@@ -2,14 +2,21 @@
  * The `originals:1.0` did:vh extension (did:vh PR 3) as a VH-Log
  * specialisation. Keys come from the author DID (VH-Log PR 11): one proof per
  * entry (P5.2), by the author key the entry names (P5.3). versionTime carries
- * milliseconds (VH-Log PR 8; owner decision Q8). Witnesses arrive with
- * hosting (plan 011, PR 7), so this verifier refuses a witness parameter.
+ * milliseconds (VH-Log PR 8; owner decision Q8).
+ *
+ * Witnesses (P9.8, P9.9): an entry that sets the witness parameter must set it
+ * to the declaration in the author DID version it names, and once witnesses
+ * are active they cannot be removed (the anchoring exception arrives with
+ * Bitcoin, plan 011 PR 9). PROVISIONAL reading of P9.9: while witnesses are
+ * active, every entry's author DID version must declare the active list, so a
+ * changed declaration is carried into the log by the next entry, which the
+ * outgoing witnesses approve.
  */
 import { fail } from "../errors.js";
-import type { JsonObject } from "../json/index.js";
+import { canonicalize, isJsonObject, type JsonObject } from "../json/index.js";
 import type { Specialisation, VerifiedEntry, VersionRules } from "../log/index.js";
 import type { DidVhExtension } from "../didvh/index.js";
-import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
+import { authorKey, authorMethod, namedVersion, versionNumberOf, witnessDeclaration, type AuthorHistory } from "./author.js";
 import { ORIGINALS_METHOD, checkAuthorRef, checkEntryState, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
@@ -52,9 +59,23 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         return Promise.resolve(authorKey(namedVersion(history, ref), ref));
       },
     },
-    validateEntry: ({ entry, previous, scid, index, active }) => {
-      if (Object.keys(active.witness).length > 0) {
-        fail("unsupported-profile", "WITNESS_NOT_SUPPORTED_YET", "witnessed Originals arrive with hosted publication (plan 011, PR 7)");
+    validateEntry: ({ entry, previous, scid, index }) => {
+      const before = previous?.active.witness ?? {};
+      const wasActive = Object.keys(before).length > 0;
+      const set = entry.parameters.witness;
+      if (set !== undefined || wasActive) {
+        const ref = checkAuthorRef(entry.state.author);
+        const history = byDid.get(ref.did);
+        if (!history) fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`);
+        const declared = witnessDeclaration(namedVersion(history, ref));
+        const same = (a: JsonObject | null, b: unknown) => a !== null && canonicalize(a) === canonicalize(b as JsonObject);
+        if (isJsonObject(set) && Object.keys(set).length === 0) {
+          if (wasActive) fail("invalid-evidence", "WITNESS_REMOVED", "once witnesses are active an entry may not remove them (P9.9)");
+        } else if (set !== undefined) {
+          if (!same(declared, set)) fail("invalid-evidence", "WITNESS_NOT_DECLARED", "the witness parameter must equal the author DID's declaration at the named version (P9.9)");
+        } else if (!same(declared, before)) {
+          fail("invalid-evidence", "WITNESS_DECLARATION_MISMATCH", "the author DID version this entry names declares other witnesses; the entry must set them (P9.9)");
+        }
       }
       checkEntryState(entry.state, {
         scid,

@@ -40,6 +40,8 @@ export interface PrepareUpdateInput {
   /** New descriptors for existing resources, by id. Others are unchanged. */
   resources?: ResourceDescriptor[];
   author: AuthorRef;
+  /** Sets the VH witness parameter: the author DID's declaration at `author.versionId` (P9.9). */
+  witness?: JsonObject;
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -97,7 +99,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
   };
 }
 
-function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
+function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: { versionTime: string; author: AuthorRef; witness?: JsonObject }): UnsignedEntry {
   const before = stateOf(previous);
   const state = {
     id: before.id,
@@ -108,7 +110,10 @@ function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset
   } as unknown as JsonObject;
   const scid = before.id.slice("did:vh:".length);
   checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate" });
-  const parameters: JsonObject = operation === "deactivate" ? { deactivated: true } : {};
+  const parameters: JsonObject = {
+    ...(operation === "deactivate" ? { deactivated: true } : {}),
+    ...(input.witness !== undefined ? { witness: input.witness } : {}),
+  };
   return prepareNext(previous, { versionTime: input.versionTime, parameters, state });
 }
 
@@ -118,7 +123,7 @@ export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpd
 }
 
 /** An unsigned deactivation entry after `previous` (P6.5). */
-export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
+export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef; witness?: JsonObject }): UnsignedEntry {
   return next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, input);
 }
 

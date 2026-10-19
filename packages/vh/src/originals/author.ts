@@ -136,6 +136,37 @@ export function authorKey(version: AuthorVersion, ref: AuthorRef): string {
   return vm.publicKeyMultibase;
 }
 
+/** PROVISIONAL (plan 011 §2.2, owner decision Q6): the DID service type that declares an author's witnesses. */
+export const WITNESS_SERVICE_TYPE = "OriginalsWitnesses";
+
+function invalidDeclaration(message: string): never {
+  return fail("invalid-evidence", "WITNESS_DECLARATION_INVALID", message);
+}
+
+/**
+ * The witness list and threshold the author DID declares at `version` (P9.9),
+ * as a VH witness parameter value, or null when it declares none. A
+ * declaration names at least three witnesses with a threshold of at least two
+ * and less than their number, so no single witness can block or approve
+ * entries alone (P9.8).
+ */
+export function witnessDeclaration(version: AuthorVersion): JsonObject | null {
+  const services = Array.isArray(version.document.service) ? version.document.service.filter(isJsonObject) : [];
+  const declared = services.filter((s) => s.type === WITNESS_SERVICE_TYPE);
+  if (declared.length === 0) return null;
+  if (declared.length > 1) invalidDeclaration(`the author DID declares more than one ${WITNESS_SERVICE_TYPE} service`);
+  const endpoint = declared[0].serviceEndpoint;
+  if (!isJsonObject(endpoint) || Object.keys(endpoint).some((k) => k !== "threshold" && k !== "witnesses")) {
+    invalidDeclaration("the witness declaration must be exactly { threshold, witnesses }");
+  }
+  const { threshold, witnesses } = endpoint;
+  if (!Array.isArray(witnesses) || witnesses.length < 3) invalidDeclaration("a witness declaration lists at least three witnesses (P9.8)");
+  if (typeof threshold !== "number" || !Number.isInteger(threshold) || threshold < 2 || threshold >= witnesses.length) {
+    invalidDeclaration("the witness threshold must be at least two and less than the number of witnesses (P9.8)");
+  }
+  return { threshold, witnesses };
+}
+
 /** True when `version` still lists `ref`'s key under assertionMethod (for P7.9). */
 export function stillAuthorized(version: AuthorVersion, ref: AuthorRef, publicKeyMultibase: string): boolean {
   try {

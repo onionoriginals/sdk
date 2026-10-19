@@ -113,8 +113,10 @@ export interface OriginalsReport {
   /** Whether the asset log is the latest, under the freshness policy and the retained versionId (P7.6). */
   assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
   fork: OriginalsFork | null;
-  /** Unwitnessed and unanchored: claimed ordering only (P7.6). */
-  ordering: "claimed";
+  /** Ordering of the checkpoint: witnessed when threshold witnesses approved it, otherwise claimed only (P7.6, P9.8). */
+  ordering: "claimed" | "witnessed";
+  /** The entry that activated witnesses. Entries before it keep claimed ordering (P7.6). */
+  witnessedFrom: string | null;
   deactivated: boolean;
   state: AssetState | null;
   /** The derived DID document at the checkpoint (P3.8). */
@@ -271,7 +273,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       copies,
     },
     fork,
-    ordering: "claimed",
+    ordering: selected?.witnessed ? "witnessed" : "claimed",
+    witnessedFrom: log.entries.find((v) => v.witnessList !== null)?.entry.versionId ?? null,
     deactivated: log.deactivated,
     state: state?.asset ?? null,
     document: selected ? deriveDocument(prefix) : null,
@@ -295,7 +298,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (report.resources.status !== "available") reasons.push(`resources-${report.resources.status}`);
   if (!head) reasons.push("no-verified-entry");
   // P7.9: an unwitnessed head signed by a key the latest author DID no longer lists is never current.
-  if (head && latest) {
+  // A witnessed head was approved against the author DID's latest state at the time (P9.8).
+  if (head && latest && !head.witnessed) {
     const ref = (head.entry.state as unknown as EntryState).author;
     const signedWith = history.versions.find((v) => v.versionId === ref.versionId);
     let key: string | undefined;

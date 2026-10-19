@@ -13,10 +13,13 @@ export class Author {
   readonly update: ProofSigner = localSigner("Ed25519", seed(90));
   entries: LogEntry[] = [];
   did = "";
+  /** The witness declaration (plan 011 §2.2) in each new document, if any. */
+  witnesses: JsonObject | null = null;
   private n = 0;
 
-  static async create(keys: Array<{ fragment: string; secret: Uint8Array }>): Promise<Author> {
+  static async create(keys: Array<{ fragment: string; secret: Uint8Array }>, witnesses: JsonObject | null = null): Promise<Author> {
     const a = new Author();
+    a.witnesses = witnesses;
     a.entries = [await createLog({
       versionTime: a.time(),
       parameters: { method: "did:vh:1.0", scid: "{SCID}", updateKeys: [a.update.publicKeyMultibase] },
@@ -42,6 +45,7 @@ export class Author {
       id: did,
       verificationMethod: keys.map((k) => ({ id: `${did}#${k.fragment}`, type: "Multikey", controller: did, publicKeyMultibase: localSigner("Ed25519", k.secret).publicKeyMultibase })),
       assertionMethod: keys.map((k) => `${did}#${k.fragment}`),
+      ...(this.witnesses ? { service: [{ id: `${did}#originals-witnesses`, type: "OriginalsWitnesses", serviceEndpoint: this.witnesses }] } : {}),
     };
   }
 
@@ -49,6 +53,11 @@ export class Author {
     this.entries.push(await appendEntry(this.entries[this.entries.length - 1], {
       versionTime: this.time(), parameters: {}, state: this.document(this.did, keys), sign: this.signUpdate(),
     }));
+  }
+
+  async deactivate() {
+    const last = this.entries[this.entries.length - 1];
+    this.entries.push(await appendEntry(last, { versionTime: this.time(), parameters: { deactivated: true }, state: last.state, sign: this.signUpdate() }));
   }
 
   get versionId() {
