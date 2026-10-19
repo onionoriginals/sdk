@@ -104,6 +104,14 @@ Rules this implies:
 - The migrate entry names its sat by adding a `did:btco:` alias.
 - `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Witness proofs use `eddsa-jcs-2022` only, with did:key Ed25519 (see S3). It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
 - Files: `did.jsonl` and `did-witness.json`, as did:vh requires at a `src` location.
+- Further PROVISIONAL rules, as implemented in PR 3:
+  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Their order is fixed at genesis.
+  - Media types are RFC 6838 `type/subtype`, without parameters. `size` is the exact byte length.
+  - A descriptor's `mediaType` or `size` changes only together with its digest.
+  - A deactivation changes no resource.
+  - `transitions` lists resources in resource order.
+  - The derived document's `#files` service has type `OriginalsFiles`, and its `serviceEndpoint` maps each resource id to its current descriptor.
+  - `alsoKnownAs` is omitted while there are no aliases.
 
 ### 2.2 Author keys and witness declaration in the author DID (D2, D3) — owner decision: ordinary DID constructs
 
@@ -155,8 +163,8 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 |---|---|---|---|
 | **1** | 0 | Pins manifest; rewrite `specs/README.md`, `CLAUDE.md`; replace `packages/sdk/V3.md` with `packages/sdk/ORIGINALS.md` (contract doc); §12 matrix registry with all rows `todo` | docs only |
 | **2** | 1 | `@originals/vh` json/crypto/log/didvh: strict JSON, JCS, eddsa-jcs-2022, bip340-jcs-2025 (own impl on `@noble/curves` v2), VH-Log engine + hooks, plain did:vh | VH-Log spec example vectors (entry hash `QmQ6FJ4…`); W3C eddsa-jcs-2022 vectors; bip340 cross-check against `@did-btcr2/cryptosuite` as a **devDependency only**; Node ESM + browser-safety on new entries |
-| **3** | 1 | `@originals/vh/originals` + `webvh` (verify only): state schema, transitions, author binding, derived DID doc, report, evidence codec | All local §12 rows (create/edit/verify, digest, genesis, chain, binding, method/relationship, JWK key, suites, two proofs, null/omit metadata, null name, counters, unchanged digest, resource set, deactivation agreement, duplicate keys, unsigned field, unlisted digest alg, limits, archive traversal, generic resolver rejection, derived doc) |
-| **4** | 1 | SDK local slice: `create`/`edit`/`deactivate`/`package`/`load`, drafts, durable store, signer contract, new CLI (`originals`) | Fresh-process test: package in one process, verify in another with no key and network disabled; interrupted-commit test; signer-rejection test |
+| **3** | 1 | `@originals/vh/originals` + `webvh` (verify only): state schema, transitions, author binding, derived DID doc, builders, verification report (the evidence codec moved to PR 4, with packaging) | All local §12 rows (create/edit/verify, digest, genesis, chain, binding, method/relationship, JWK key, suites, two proofs, null/omit metadata, null name, counters, unchanged digest, resource set, deactivation agreement, duplicate keys, unsigned field, unlisted digest alg, limits, archive traversal, generic resolver rejection, derived doc) |
+| **4** | 1 | SDK local slice: `create`/`edit`/`deactivate`/`package`/`load`, drafts, durable store, signer contract, evidence package codec (ZIP), new CLI (`originals`) | Fresh-process test: package in one process, verify in another with no key and network disabled; interrupted-commit test; signer-rejection test |
 | **5** | 1 | **Deletion**: `packages/cel` entirely; SDK `v3/`, `lifecycle/`, `migration/`, `kinds/`, `cel/cli/`, `examples/`, `playground/`, previous-SDK tests and `docs/history/previous-sdk`; landing switched to the new local API (see Q4 for hosted/Bitcoin routes) | Full repo build/typecheck/lint/test green; `verify:esm`, `verify:browser` |
 | **6** | 2 | Author-DID rotation and deactivation, incomplete identity evidence, freshness policy, retained versionIds per Original and author DID, forks reported as unresolved conflicts (Q5) | §12 rows: removed key (unwitnessed), added key without asset entry, stale author history, old prefix as current, divergent branches, older-prefix import |
 | **7** | 3 | Witnesses: reference witness (P9.8 obligations, 60 s freshness, last-approved tracking), witness client, publish entry (activate witnesses + did:webvh alias, P3.6 two-way binding), hosted layout, exact-snapshot public reader, P9.7 serving headers | Witness rows; hosted mixed snapshot; alias both directions; SSRF/redirect/size rows |

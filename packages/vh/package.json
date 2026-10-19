@@ -2,7 +2,7 @@
   "name": "@originals/vh",
   "version": "0.1.0",
   "private": true,
-  "description": "Verifiable History for the Originals Protocol: strict JSON/JCS, eddsa-jcs-2022 and bip340-jcs-2025, a VH-Log engine and did:vh; browser-safe",
+  "description": "Verifiable History for the Originals Protocol: strict JSON/JCS, eddsa-jcs-2022 and bip340-jcs-2025, a VH-Log engine, did:vh, did:webvh and the originals:1.0 extension; browser-safe",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,6 +37,16 @@
       "types": "./dist/didvh/index.d.ts",
       "import": "./dist/didvh/index.js",
       "default": "./dist/didvh/index.js"
+    },
+    "./webvh": {
+      "types": "./dist/webvh/index.d.ts",
+      "import": "./dist/webvh/index.js",
+      "default": "./dist/webvh/index.js"
+    },
+    "./originals": {
+      "types": "./dist/originals/index.d.ts",
+      "import": "./dist/originals/index.js",
+      "default": "./dist/originals/index.js"
     },
     "./package.json": "./package.json"
   },

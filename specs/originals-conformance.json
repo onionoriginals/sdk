@@ -13,7 +13,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Verifier: create, edit and fresh verification without a key. Evidence packages and the fresh-process run come with the SDK (PR 4)."
     },
     {
       "id": "C12-02",
@@ -22,7 +26,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-03",
@@ -31,11 +38,12 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/log.test.ts"
+        "packages/vh/tests/log.test.ts",
+        "packages/vh/tests/originals.test.ts"
       ],
-      "note": "VH-Log engine: a changed genesis fails by proof, entry hash or SCID binding, and invalidates the log. did:vh identifier binding is in didvh.test.ts; the asset identifier is covered in PR 3."
+      "note": "Asset state id, did:vh resolution of another SCID, and VH-Log genesis binding."
     },
     {
       "id": "C12-04",
@@ -44,11 +52,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/log.test.ts"
-      ],
-      "note": "VH-Log engine: changed byte, reordered and missing entries. Asset-log level in PR 3."
+        "packages/vh/tests/log.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-05",
@@ -57,7 +65,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-06",
@@ -66,7 +77,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-07",
@@ -75,7 +89,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-08",
@@ -95,7 +112,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-10",
@@ -104,7 +124,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Verifier reports partial availability per resource version. Partial evidence packages come with PR 4."
     },
     {
       "id": "C12-11",
@@ -113,7 +137,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "State carries no counter; versions are derived. The SDK's caller-supplied counter is checked in PR 4."
     },
     {
       "id": "C12-12",
@@ -158,7 +186,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-17",
@@ -167,7 +198,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Builder semantics (replace, keep, null removes). The SDK edit API is checked in PR 4."
     },
     {
       "id": "C12-18",
@@ -176,7 +211,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Builder rejects a null name. The SDK edit API is checked in PR 4."
     },
     {
       "id": "C12-19",
@@ -185,7 +224,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-20",
@@ -203,7 +245,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-22",
@@ -432,7 +477,11 @@
         2,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Unwitnessed case: historically valid, never current (P7.9). Witnessed and anchored cases in PRs 7 and 9."
     },
     {
       "id": "C12-47",
@@ -534,7 +583,11 @@
         3,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "Unanchored case: a deactivated author DID makes the Original non-current. Witness refusal (PR 7) and anchored case (PR 9) remain."
     },
     {
       "id": "C12-58",
@@ -543,7 +596,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-59",
@@ -561,8 +617,11 @@
       "phases": [
         1
       ],
-      "status": "todo",
-      "note": "Owner decision Q6 (plan S8): tested as 'author key not under assertionMethod: author binding failure'. Pending a spec edit."
+      "status": "covered",
+      "note": "Tested as 'author key not under assertionMethod' (owner decision Q6, plan S8); pending the spec edit.",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-61",
@@ -571,7 +630,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-62",
@@ -580,7 +642,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-63",
@@ -589,11 +654,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/crypto.test.ts"
-      ],
-      "note": "Multikey decoding rejects raw, P-256, truncated, uncompressed and JWK keys. Author-DID verification-method check in PR 3."
+        "packages/vh/tests/crypto.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-64",
@@ -602,7 +667,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-65",
@@ -611,7 +679,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-66",
@@ -674,7 +745,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-73",
@@ -692,7 +766,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-75",
@@ -719,7 +796,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-78",
@@ -728,7 +808,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-79",
@@ -737,11 +820,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/didvh.test.ts"
-      ],
-      "note": "did:vh resolver rejects an unknown extension's log by method value (test extension). Originals log in PR 3."
+        "packages/vh/tests/didvh.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-80",
@@ -750,11 +833,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/didvh.test.ts"
-      ],
-      "note": "did:vh resolver rejects moving between plain did:vh and an extension (test extension). Originals log in PR 3."
+        "packages/vh/tests/didvh.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-81",
@@ -763,11 +846,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/crypto.test.ts"
-      ],
-      "note": "Crypto layer rejects every other cryptosuite. Asset-log entry level in PR 3."
+        "packages/vh/tests/crypto.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-82",
@@ -776,7 +859,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-83",
@@ -803,7 +889,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-86",
@@ -830,11 +919,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/json.test.ts"
-      ],
-      "note": "Strict JSON rejects duplicate keys. Unsigned state fields in PR 3."
+        "packages/vh/tests/json.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-89",
@@ -843,7 +932,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-90",
@@ -861,11 +953,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/log.test.ts"
-      ],
-      "note": "VH-Log engine reports the last valid prefix as limit-exceeded. Identity history limits in PR 3."
+        "packages/vh/tests/log.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-92",

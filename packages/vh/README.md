@@ -11,15 +11,18 @@ builtins or `Buffer` in any entry.
 | `@originals/vh/crypto` | base58btc multibase, sha2-256 multihash, Ed25519 and compressed secp256k1 Multikeys, did:key verification methods, `eddsa-jcs-2022` and `bip340-jcs-2025` proofs |
 | `@originals/vh/log` | The generic VH-Log engine: SCID, entry hashes, parameters, update keys and pre-rotation, keys from a controller (VH-Log PR 11), witness thresholds, versionTime precision (PR 8), comparing copies with retained versionIds and `minCopies`, version selection, building entries |
 | `@originals/vh/didvh` | did:vh resolution with logs passed directly, and the extension mechanism (did:vh PR 3) |
+| `@originals/vh/webvh` | did:webvh 1.0 on VH-Log (didwebvh PR 302): identifier rules, DID-to-HTTPS transformation, portability, implicit services, resolution of logs passed directly |
+| `@originals/vh/originals` | The `originals:1.0` extension: asset state rules, author DID histories and binding (P5.2, P5.3, P5.8, P5.11), the derived DID document, entry builders and `verifyOriginal`'s report |
 
 The root entry re-exports all of them, plus `OriginalsError` and its error
 categories.
 
 ## Status against plan 011
 
-This is PR 2. Later PRs add these, in order:
-- the `originals:1.0` extension and did:webvh (PR 3);
-- retrieval from `src` and from watchers (PR 7);
+PRs 2 and 3 are in. Later PRs add these, in order:
+- the SDK's local workflow and the evidence package (PR 4);
+- author DID rotation, freshness and forks (PR 6);
+- witnesses, the did:webvh alias, and retrieval from `src` and from watchers (PR 7);
 - authoritative sources and alternative encodings (PR 9).
 
 The engine compares copies it is given (`resolveCopies`). Until retrieval
