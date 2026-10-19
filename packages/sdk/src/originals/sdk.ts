@@ -54,9 +54,9 @@ import {
   type RetainedVersions,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
-import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
+import { didWebvhFilesUrl } from "@originals/vh/webvh";
 import { MANIFEST, authorPath, readEvidence, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
-import { HOSTED_PREFIX, type HostedFetch } from "./hosting.js";
+import { HOSTED_PREFIX, fetchWebvhEvidence, type HostedFetch } from "./hosting.js";
 import { writeZip } from "./zip.js";
 import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import { MemoryStore, headOf, staleHead, type OriginalsStore, type StoredOriginal } from "./store.js";
@@ -652,9 +652,7 @@ export class OriginalsSDK {
         throw error;
       }
     };
-    const logUrl = didWebvhLogUrl(aliasDid);
-    const aliasWitness = await optional(logUrl.replace(/did\.jsonl$/, "did-witness.json"));
-    const alias: AliasEvidence = { did: aliasDid, log: text(await fetch(logUrl)), ...(aliasWitness ? { witness: parseJson(text(aliasWitness)) } : {}) };
+    const alias = await fetchWebvhEvidence(aliasDid, fetch);
 
     const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
     const files = new Map<string, Uint8Array>();

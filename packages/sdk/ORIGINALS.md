@@ -191,7 +191,16 @@ profile, reads the author DID from its own source and refuses state more than
 entry once the author DID is deactivated, and refuses an entry that does not
 extend the last one it approved unless it extends a witnessed entry that is not
 an ancestor of it (P9.8). It records each approval in a `WitnessLedger` before
-returning the proof; deployments need a durable ledger.
+returning the proof; deployments use `FileWitnessLedger`
+(`@originals/sdk/originals/fs`).
+
+Witnesses are reached over HTTP with `httpWitnessClient({ id, endpoint })`
+and served with `witnessHandler(witness)` (PROVISIONAL protocol
+`originals-witness/0.1`: `GET` returns `{ protocol, id }`, `POST { original,
+log, witness }` returns `{ proof }` or `{ error: { category, code, message } }`,
+so a refusal keeps its section 6 category and code). `webvhAuthorSource(fetch)`
+lets a witness read did:webvh author DIDs itself; `apps/witness` is the
+deployable service (owner decision Q13).
 
 ## Hosted publication — phase 3 (implemented)
 

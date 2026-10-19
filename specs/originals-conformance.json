@@ -477,6 +477,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/witness-http.test.ts",
         "packages/sdk/tests/unit/originals/witness.test.ts"
       ]
     },

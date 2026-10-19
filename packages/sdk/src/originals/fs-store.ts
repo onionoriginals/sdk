@@ -16,6 +16,10 @@
  * are removed when the store is opened. One process may write a store at a
  * time; commits within that process are serialized per Original.
  *
+ * `FileWitnessLedger` keeps a witness's last approval per Original in the same
+ * way: <dir>/<sha256(original)>.json, replaced atomically before the witness
+ * returns a proof (P9.8).
+ *
  * Node modules are loaded lazily, so importing this entry is safe anywhere;
  * opening a store needs Node.
  */
@@ -24,6 +28,7 @@ import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import { headOf, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal } from "./store.js";
+import type { WitnessLedger } from "./witness.js";
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
@@ -207,5 +212,44 @@ export class FileStore implements OriginalsStore {
 
   async list(): Promise<string[]> {
     return (await fs.readdir(join(this.root, "originals"))).map((scid) => `did:vh:${scid}`);
+  }
+}
+
+/** A durable `WitnessLedger` for a deployed witness (Node only). */
+export class FileWitnessLedger implements WitnessLedger {
+  private constructor(private readonly dir: string) {}
+
+  static async open(dir: string): Promise<FileWitnessLedger> {
+    await loadNode();
+    await fs.mkdir(dir, { recursive: true });
+    for (const name of await fs.readdir(dir)) if (name.endsWith(".tmp")) await fs.rm(join(dir, name), { force: true });
+    return new FileWitnessLedger(dir);
+  }
+
+  private file(original: string): string {
+    return join(this.dir, `${hashHex(original)}.json`);
+  }
+
+  async get(original: string): Promise<string[] | undefined> {
+    try {
+      const record = JSON.parse(await fs.readFile(this.file(original), "utf8")) as { original?: unknown; versionIds?: unknown };
+      return record.original === original && Array.isArray(record.versionIds) ? (record.versionIds as string[]) : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  async put(original: string, versionIds: string[]): Promise<void> {
+    const tmp = `${this.file(original)}.${randomHex(6)}.tmp`;
+    const handle = await fs.open(tmp, "wx");
+    try {
+      await handle.writeFile(JSON.stringify({ original, versionIds }));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmp, this.file(original));
+    await fsyncDir(this.dir);
   }
 }

@@ -157,6 +157,25 @@ jobs:
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 
+  witness:
+    name: Witness service typechecks and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies (bun)
+        run: bun install
+
+      # apps/witness is outside the ./packages/* filter, like the landing app.
+      - name: Typecheck and test the witness service against the built SDK
+        run: bun run witness:check
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

@@ -13,6 +13,8 @@
  * repeats the same snapshot and creates no transition (P9.2). The public
  * reader (`OriginalsSDK.loadPublished`) verifies that exact snapshot (P9.1).
  */
+import { OriginalsError } from "@originals/vh";
+import { parseJson } from "@originals/vh/json";
 import type { AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
 import { readZip } from "./zip.js";
@@ -61,4 +63,22 @@ export function servingHeaders(mediaType: string): Record<string, string> {
     "Referrer-Policy": "no-referrer",
     ...(ACTIVE.test(mediaType) ? { "Content-Disposition": "attachment" } : {}),
   };
+}
+
+/**
+ * A did:webvh's log and witness file from where did:webvh publishes them. The
+ * log is required; a missing witness file is simply absent. Used for alias
+ * logs and for author DIDs a witness reads itself (P9.8).
+ */
+export async function fetchWebvhEvidence(did: string, fetch: HostedFetch): Promise<AliasEvidence> {
+  const logUrl = didWebvhLogUrl(did);
+  const text = (data: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(data);
+  const log = text(await fetch(logUrl));
+  let witness: Uint8Array | undefined;
+  try {
+    witness = await fetch(logUrl.replace(/did\.jsonl$/, "did-witness.json"));
+  } catch (error) {
+    if (!(error instanceof OriginalsError && error.category === "unavailable-bytes")) throw error;
+  }
+  return { did, log, ...(witness ? { witness: parseJson(text(witness)) } : {}) };
 }

@@ -30,7 +30,8 @@
     "release": "changeset publish",
     "regtest": "bun scripts/regtest/run.ts",
     "regtest:browser": "bun scripts/regtest/run.ts --browser",
-    "regtest:install": "bun scripts/regtest/install.ts"
+    "regtest:install": "bun scripts/regtest/install.ts",
+    "witness:check": "turbo run build --filter='./packages/*' && cd apps/witness && bun run typecheck && bun test"
   },
   "author": "Aviary Tech",
   "license": "MIT",

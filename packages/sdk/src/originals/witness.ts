@@ -23,6 +23,7 @@ import { OriginalsError, type ErrorCategory } from "@originals/vh";
 import { localSigner, type DataIntegrityProof, type ProofSigner } from "@originals/vh/crypto";
 import { canonicalize, isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { createWitnessProof, type LogEntry, type WitnessFileEntry } from "@originals/vh/log";
+import { fetchWebvhEvidence, type HostedFetch } from "./hosting.js";
 import {
   authorKey,
   namedVersion,
@@ -177,4 +178,21 @@ export class OriginalsWitness implements WitnessClient {
     if (!last || !last.includes(entry.versionId)) await this.ledger.put(request.original, ids);
     return createWitnessProof(this.signer, entry.versionId, "eddsa-jcs-2022", new Date(now).toISOString());
   }
+}
+
+/**
+ * An author state source that reads did:webvh author DIDs from where they are
+ * published, each time it is asked (P9.8: never from the request). Other
+ * methods have no location to read, so the witness refuses their entries.
+ */
+export function webvhAuthorSource(fetch: HostedFetch, clock: () => number = () => Date.now()): AuthorStateSource {
+  return async (did) => {
+    if (!did.startsWith("did:webvh:")) return undefined;
+    try {
+      return { evidence: await fetchWebvhEvidence(did, fetch), retrievedAt: clock() };
+    } catch (error) {
+      if (error instanceof OriginalsError) return undefined;
+      throw error;
+    }
+  };
 }
