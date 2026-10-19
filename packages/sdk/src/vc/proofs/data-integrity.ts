@@ -1,4 +1,4 @@
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../utils/telemetry.js';
 import { EdDSACryptosuiteManager, type DataIntegrityProof } from '../cryptosuites/eddsa.js';
 
 export interface VerificationResult { verified: boolean; errors?: string[] }

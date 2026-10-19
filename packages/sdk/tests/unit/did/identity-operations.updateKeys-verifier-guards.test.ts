@@ -14,7 +14,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 import { createDIDOriginal, updateDIDOriginal } from '../../../src/did/identity-operations';
 
 /** Assert the thrown value is the named StructuredError. */
@@ -32,7 +32,7 @@ async function expectStructuredError(fn: () => Promise<unknown>, code: string): 
 async function makeSigner(keyType: 'Ed25519' | 'ES256K' = 'Ed25519') {
   const { KeyManager } = await import('../../../src/did/KeyManager');
   const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-  const { multikey } = await import('@originals/cel');
+  const { multikey } = await import('../../../src/crypto/Multikey');
   const { prepareDataForSigning } = await import('didwebvh-ts');
 
   const keyManager = new KeyManager();

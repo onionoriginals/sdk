@@ -28,24 +28,10 @@ export interface EventLoggingConfig {
   'batch:started'?: LogLevel | false;
   'batch:completed'?: LogLevel | false;
   'batch:failed'?: LogLevel | false;
-  'migration:started'?: LogLevel | false;
-  'migration:validated'?: LogLevel | false;
-  'migration:checkpointed'?: LogLevel | false;
-  'migration:in_progress'?: LogLevel | false;
-  'migration:anchoring'?: LogLevel | false;
-  'migration:completed'?: LogLevel | false;
-  'migration:failed'?: LogLevel | false;
-  'migration:rolledback'?: LogLevel | false;
-  'migration:quarantine'?: LogLevel | false;
   'batch:progress'?: LogLevel | false;
   'key:unpersisted'?: LogLevel | false;
   'did:log-unhosted'?: LogLevel | false;
-  'cel:append-skipped'?: LogLevel | false;
-  'cel:append-inscribe-skipped'?: LogLevel | false;
-  'cel:inscribe-cost'?: LogLevel | false;
-  'cel:inscribe-declined'?: LogLevel | false;
   'resource:inscribed'?: LogLevel | false;
-  'cel:host-failed'?: LogLevel | false;
   'key:rotated'?: LogLevel | false;
 }
 
@@ -64,24 +50,10 @@ const DEFAULT_EVENT_CONFIG: EventLoggingConfig = {
   'batch:started': 'info',
   'batch:completed': 'info',
   'batch:failed': 'warn',
-  'migration:started': 'info',
-  'migration:validated': 'info',
-  'migration:checkpointed': 'info',
-  'migration:in_progress': 'info',
-  'migration:anchoring': 'info',
-  'migration:completed': 'info',
-  'migration:failed': 'warn',
-  'migration:rolledback': 'warn',
-  'migration:quarantine': 'error',
   'batch:progress': 'debug',
   'key:unpersisted': 'warn',
   'did:log-unhosted': 'warn',
-  'cel:append-skipped': 'warn',
-  'cel:append-inscribe-skipped': 'warn',
-  'cel:inscribe-cost': 'info',
-  'cel:inscribe-declined': 'warn',
   'resource:inscribed': 'info',
-  'cel:host-failed': 'warn',
   'key:rotated': 'info'
 };
 
@@ -120,23 +92,9 @@ export class EventLogger {
       // levels for these, so they must actually be subscribed — otherwise the
       // configured levels are dead settings.
       'batch:progress',
-      'migration:started',
-      'migration:validated',
-      'migration:checkpointed',
-      'migration:in_progress',
-      'migration:anchoring',
-      'migration:completed',
-      'migration:failed',
-      'migration:rolledback',
-      'migration:quarantine',
       'key:unpersisted',
       'did:log-unhosted',
-      'cel:append-skipped',
-      'cel:append-inscribe-skipped',
-      'cel:inscribe-cost',
-      'cel:inscribe-declined',
       'resource:inscribed',
-      'cel:host-failed',
       'key:rotated'
     ];
     
@@ -253,31 +211,8 @@ export class EventLogger {
         };
         break;
 
-      case 'cel:append-skipped':
-        message = 'CEL append skipped';
-        data = {
-          assetId: event.asset.id,
-          reason: event.reason
-        };
-        break;
 
-      case 'cel:inscribe-declined':
-        message = 'Paid btco append declined at confirm gate';
-        data = {
-          assetId: event.asset.id,
-          appendKind: event.appendKind,
-          estimate: event.estimate
-        };
-        break;
 
-      case 'cel:host-failed':
-        message = 'CEL hosting failed';
-        data = {
-          assetId: event.asset.id,
-          target: event.target,
-          error: event.error
-        };
-        break;
         
       case 'resource:version:created':
         message = 'Resource version created';
@@ -328,10 +263,10 @@ export class EventLogger {
         break;
         
       default: {
-        // Migration and batch-progress events carry flat, self-describing
-        // payloads; log them generically so their configured levels apply.
+        // Batch-progress events carry flat, self-describing payloads; log
+        // them generically so their configured level applies.
         const genericType = (event as { type: string }).type;
-        if (genericType.startsWith('migration:') || genericType === 'batch:progress') {
+        if (genericType === 'batch:progress') {
           const rest = { ...(event as unknown as Record<string, unknown>) };
           delete rest.type;
           delete rest.timestamp;

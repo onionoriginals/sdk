@@ -11,7 +11,7 @@
 import { describe, test, expect } from 'bun:test';
 
 import { DIDManager } from '../../../src/did/DIDManager';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 import type { OriginalsConfig, WebVHNetworkName } from '../../../src/types';
 
 const baseConfig: OriginalsConfig = {
@@ -22,7 +22,7 @@ const baseConfig: OriginalsConfig = {
 
 const sourceDoc = () => ({
   '@context': ['https://www.w3.org/ns/did/v1'],
-  id: 'did:cel:domain-required-531',
+  id: 'did:vh:domain-required-531',
 });
 
 /** Assert the thrown value is the named domain-required StructuredError. */
@@ -83,8 +83,8 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
   }, 15000);
 
   // #722: a mixed-case domain is a valid hostname and must be normalized,
-  // not merely accepted verbatim (which would later fail deep in CEL history
-  // verification instead of at this seam).
+  // not merely accepted verbatim (which would later fail deep in did:webvh
+  // resolution instead of at this seam).
   test('a mixed-case domain is lowercased rather than passed through verbatim (#722)', async () => {
     const manager = new DIDManager({ ...baseConfig });
     const result = await manager.createDIDWebVH({ domain: 'Example.COM', paths: ['user', 'alice'] });
@@ -105,7 +105,7 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
   });
 });
 
-describe('createDIDWebVH applies the CEL WebVH domain canonicalizer', () => {
+describe('createDIDWebVH applies the WebVH domain canonicalizer', () => {
   async function codeOf(fn: () => Promise<unknown>): Promise<unknown> {
     try {
       await fn();
@@ -203,24 +203,3 @@ describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
   }, 15000);
 });
 
-describe('default CEL 3 SDK identity utilities require the caller host', () => {
-  test('missing hosts fail through both inherited public methods', async () => {
-    const { OriginalsSDK } = await import('../../../src/core/OriginalsSDK3');
-    const sdk = OriginalsSDK.create();
-    await expectDomainRequired(() =>
-      // @ts-expect-error Missing domain is rejected by the public type and runtime.
-      sdk.did.createDIDWebVH({ paths: ['identity'] })
-    );
-    await expectDomainRequired(() =>
-      // @ts-expect-error Missing domain is rejected by the public type and runtime.
-      sdk.did.migrateToDIDWebVH(sourceDoc())
-    );
-  });
-
-  test('explicit host succeeds through the default SDK', async () => {
-    const { OriginalsSDK } = await import('../../../src/core/OriginalsSDK3');
-    const sdk = OriginalsSDK.create();
-    const result = await sdk.did.createDIDWebVH({ domain: 'example.com', paths: ['identity'] });
-    expect(result.did).toContain(':example.com:identity');
-  });
-});

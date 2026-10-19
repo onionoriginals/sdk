@@ -1,5 +1,5 @@
 import type { Utxo } from '../types/bitcoin.js';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
 import {
   isSegwitScriptPubKey,
   isProtectedUtxo,

@@ -25,10 +25,10 @@ import type {
 import type { OriginalsConfig } from '../../../src/types';
 
 // ─── satoshi-validation ─────────────────────────────────────────────────────
-import { parseSatoshiIdentifier } from '@originals/cel';
+import { parseSatoshiIdentifier } from '../../../src/utils/satoshi-validation';
 
 // ─── encoding ───────────────────────────────────────────────────────────────
-import { utf8 } from '@originals/cel/encoding';
+import { utf8 } from '../../../src/utils/encoding';
 
 // ─── OrdHttpProvider ────────────────────────────────────────────────────────
 import { OrdHttpProvider } from '../../../src/adapters/providers/OrdHttpProvider';

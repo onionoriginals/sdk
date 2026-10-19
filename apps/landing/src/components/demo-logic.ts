@@ -1,6 +1,7 @@
 /** Shared creator decisions and request helpers, independent of React rendering. */
 import { contentByteLength, type ResourceContent } from '../sdk/resource-view';
 import { demo } from '../content';
+import { featureEnabled } from '../sdk/features';
 import { ANON_IDENTITY } from '../sdk/engine-identity';
 import type { BtcNetworkFlag } from '../sdk/network-flag';
 import type { SigningStatus } from '../auth/turnkey-session';
@@ -173,6 +174,9 @@ export function inscribeStepView(
  * so the one thing it must never do is describe the OTHER tier's Bitcoin step.
  */
 export function demoSubhead(real: boolean, network: BtcNetworkFlag = 'off'): string {
+  // While anchoring is rebuilt (features.ts), no build has a real Bitcoin path,
+  // so no tier is told its last step adds to Bitcoin or invited to sign in for it.
+  if (!featureEnabled('bitcoinAnchoring')) return `${demo.subhead} ${demo.subheadSimulated}`;
   if (real) return `${demo.subhead} ${network === 'regtest' ? demo.regtest.subhead : demo.subheadReal}`;
   // "Sign in to inscribe for real" is only true on a build that HAS a real
   // path. On a mock build signing in changes nothing, so it stays unsaid.
@@ -411,19 +415,19 @@ export function depositBadgeLabel(
 export interface InscriptionContentInput {
   resource: { content: ResourceContent };
   metadata?: { content: string };
-  celLog: readonly unknown[];
+  history: readonly unknown[];
 }
 
 export function inscriptionContentBytes(asset: InscriptionContentInput): number {
   const utf8 = (s: string) => new TextEncoder().encode(s).length;
-  // Conservative pre-funding hint: the final signed migrate entry does not
-  // exist until the identity sat is selected. The transaction builder prices
+  // Conservative pre-funding hint: the final signed anchoring entry does not
+  // exist until the sat is selected. The transaction builder prices
   // the complete actual media+CBOR envelope before any broadcast.
   const BITCOIN_MIGRATION_ALLOWANCE = 2_048;
   return (
     contentByteLength(asset.resource.content) +
     utf8(asset.metadata?.content ?? '') +
-    utf8(JSON.stringify(asset.celLog)) +
+    utf8(JSON.stringify(asset.history)) +
     BITCOIN_MIGRATION_ALLOWANCE
   );
 }

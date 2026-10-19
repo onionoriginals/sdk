@@ -1,6 +1,6 @@
 import type { OrdinalsProvider } from '../../adapters/types.js';
 import { OrdinalsClient } from '../OrdinalsClient.js';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../utils/telemetry.js';
 
 export interface SignetProviderOptions {
   /** URL of the ord node (e.g. http://localhost:80 or https://signet.ordinals.com) */

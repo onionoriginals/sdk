@@ -150,7 +150,7 @@ describe('the disclosed categories match what the code stores', () => {
   test('the server-storage section names each durable tree the stores write', () => {
     // originals-store: hosted logs + bytes, users/<sub>.json index.
     expect(/did:webvh log|DID log/i.test(ALL)).toBe(true);
-    expect(/event log|CEL/i.test(ALL)).toBe(true);
+    expect(/signed history/i.test(ALL)).toBe(true);
     // inscriptions-store: the signed pair kept before broadcast.
     expect(/signed commit and reveal|commit and reveal/i.test(ALL)).toBe(true);
     // deposits/ + deposit-state/: the binding, the last trusted read, the alert.

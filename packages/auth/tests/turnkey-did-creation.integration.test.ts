@@ -23,7 +23,8 @@ import { describe, test, expect, spyOn } from 'bun:test';
 // Import the SDK first — its noble-init module configures @noble/ed25519's
 // hashes.sha512 before any crypto operations run, so we don't need to
 // configure it ourselves.
-import { CredentialManager, DIDManager, OriginalsSDK, StructuredError, Verifier, encoding } from '@originals/sdk';
+import * as sdk from '@originals/sdk';
+import { CredentialManager, DIDManager, StructuredError, Verifier, encoding } from '@originals/sdk';
 import * as ed25519Module from '@noble/ed25519';
 import { TurnkeyDIDSigner, createDIDWithTurnkey } from '../src/client/turnkey-did-signer';
 import { TurnkeySessionExpiredError } from '../src/client/turnkey-client';
@@ -124,7 +125,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
     const signingCalls = { count: 0 };
     const turnkeyClient = makeRealSigningClient(update.privateKeyBytes, signingCalls);
     const apiClient = spyOn(turnkeyClient, 'apiClient');
-    const createDID = spyOn(OriginalsSDK, 'createDIDOriginal');
+    const createDID = spyOn(sdk, 'createDIDOriginal');
     const account = {
       address: 'key_addr_update',
       path: "m/44'/501'/1'/0'",

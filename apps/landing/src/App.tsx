@@ -1,6 +1,3 @@
-import { Explore } from './pages/Explore';
-import { ExploreOriginal } from './pages/ExploreOriginal';
-import { exploreDidFromPath } from './router';
 import { useEffect, useState } from 'react';
 import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
@@ -10,9 +7,7 @@ import { RealExample } from './components/RealExample';
 import { Protocol } from './components/Protocol';
 import { Developers } from './components/Developers';
 import { Footer } from './components/Footer';
-import { useLocationPath, routeForPath, didFromPath } from './router';
-import { YourOriginals } from './pages/YourOriginals';
-import { OriginalDetail } from './pages/OriginalDetail';
+import { useLocationPath, routeForPath } from './router';
 import { LegalPage, legalRouteDoc } from './pages/Legal';
 import { smokeAutoRunAllowed } from './sdk/network-flag';
 import { RecordLine } from './components/RecordLine';
@@ -33,12 +28,8 @@ function RoutedApp() {
   return (
     <div className={`eclipse${route === 'landing' ? '' : ' eclipse-interior'}`}>
       <Nav />
-      {route === 'explore' ? <Explore /> : route === 'explore-original' ? <ExploreOriginal did={exploreDidFromPath(path)!} /> : legalDoc ? (
+      {legalDoc ? (
         <LegalPage doc={legalDoc} />
-      ) : route === 'original-detail' ? (
-        <OriginalDetail did={didFromPath(path)!} />
-      ) : route === 'your-originals' ? (
-        <YourOriginals />
       ) : (
         <main>
           <Hero />
@@ -56,8 +47,10 @@ function RoutedApp() {
 }
 
 /**
- * Headless CI harness (?smoke=1): creates and independently reloads a local signed asset, then dumps
- * the result for scripts/smoke.mjs to assert on. Not linked from the page.
+ * Headless CI harness (?smoke=1): creates a signed Original, packages its
+ * evidence, and verifies that package in a fresh SDK with no key (spec section
+ * 7), then dumps the result for scripts/smoke.mjs to assert on. Not linked
+ * from the page.
  *
  * R12: the auto-run is MOCK-BUILD ONLY. It executes unauthenticated on load,
  * so on a real-network build it would drive the real provider path from an
@@ -86,15 +79,17 @@ function SmokeTest() {
       engine.on((e) => events.push(e.type));
       const art = generateArtwork('Smoke Test', 'Artwork', 1);
       const s1 = await engine.create('Smoke Test', 'Artwork', art.svg);
-      const { OriginalsSDK } = await import('@originals/sdk');
-      const envelope = JSON.stringify(engine.asset!.serialize());
-      const recovered = await OriginalsSDK.create().lifecycle.loadAsset(envelope);
-      if (!recovered.verification.verified || recovered.asset.id !== engine.asset!.id) {
-        throw new Error('Fresh local verification did not recover the same asset');
+      const { OriginalsSDK, MemoryStore } = await import('@originals/sdk/originals');
+      const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
+      const { report } = await reader.load(await engine.evidencePackage());
+      const verified = report.history.status === 'valid' && report.authorBinding.status === 'valid' &&
+        report.identityEvidence.status === 'complete' && report.resources.status === 'available';
+      if (!verified || report.original !== s1.did) {
+        throw new Error('Fresh verification of the evidence package did not reproduce the same Original');
       }
       setOut(
         JSON.stringify(
-          { layer: s1.layer, assetId: recovered.asset.id, verified: true, events },
+          { layer: s1.layer, assetId: report.original, verified: true, events },
           null,
           2
         )

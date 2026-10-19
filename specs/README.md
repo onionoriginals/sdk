@@ -10,8 +10,7 @@ The SDK is being rebuilt on the Originals Protocol. That protocol replaces the
 CEL 3 design outright: each Original is a `did:vh` log under the Originals
 did:vh extension, signed by its author's DID. The delivery plan is
 [`plans/011-originals-vh-replacement.md`](../plans/011-originals-vh-replacement.md).
-Until its phases land, parts of the code still implement CEL 3. That code is
-scheduled for deletion and is not a compatibility target.
+The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
@@ -66,20 +65,17 @@ do not establish public-host or mainnet behavior.
 
 None of the documents below states a requirement for the current protocol. No
 Originals were issued under these formats, so no conversion, migration or
-legacy verification path exists for them. The CEL 3 documents are deleted
-together with the code that implements them.
+legacy verification path exists for them.
 
-- [`originals-asset-identity.md`](originals-asset-identity.md),
-  [`originals-cel-v3-profile.md`](originals-cel-v3-profile.md),
-  [`originals-cel-v3.schema.json`](originals-cel-v3.schema.json),
-  [`originals-cel-v3-authority.md`](originals-cel-v3-authority.md) and
-  [`btco-inscription-shape.md`](btco-inscription-shape.md) — the CEL 3
-  (`originals/cel/3`) contract that the Originals Protocol replaces.
-- [`originals-cel-v3-profile.proposed.md`](originals-cel-v3-profile.proposed.md),
-  [`did-cel-method.md`](did-cel-method.md) and
-  [`gap-analysis.md`](gap-analysis.md) — earlier CEL drafts and comparisons.
+- The CEL 3 (`originals/cel/3`) documents were deleted with the code that
+  implemented them in plan 011 PR 5: `originals-asset-identity.md`,
+  `originals-cel-v3-profile.md`, `originals-cel-v3-profile.proposed.md`,
+  `originals-cel-v3.schema.json`, `originals-cel-v3-authority.md`,
+  `btco-inscription-shape.md` and `did-cel-method.md`. Their last versions are
+  at [`onionoriginals/sdk@00fc683`](https://github.com/onionoriginals/sdk/tree/00fc683d0aa7f746904a14fa1f88336f09711ff5/specs).
+- [`gap-analysis.md`](gap-analysis.md) — an earlier CEL comparison.
 - [`../ORIGINALS_PROTOCOL_SPECIFICATION.md`](../ORIGINALS_PROTOCOL_SPECIFICATION.md) —
-  the original v1.0 draft.
+  a pointer to the original v1.0 draft, also deleted.
 
 [`specs/auth/`](auth/) documents the separate `@originals/auth` package API
 surface. It is not part of the asset protocol contract indexed here.

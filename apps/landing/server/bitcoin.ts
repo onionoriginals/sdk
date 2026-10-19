@@ -17,7 +17,6 @@ import { verifyToken } from '@originals/auth/server';
 import type { OrdinalsProvider } from '@originals/sdk';
 import { isValidBitcoinAddress, validateSatoshiNumber, validateInscriptionReveal, StructuredError } from '@originals/sdk';
 import { json, type Handler } from './router';
-import { isAuthorizedReinscription } from './reinscription';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import { outpointsOf } from './inscriptions-store';
@@ -1956,11 +1955,10 @@ export function createBitcoinRoutes(deps: {
       // Fee inputs remain strictly ordinal-free; no client-provided flag can
       // bypass the fresh controller, sat alignment and exact delta checks.
       const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);
-      const authorized = fees.ok && fees.ordinalBearing === 0 && await isAuthorizedReinscription({
-        provider, network, identity: declaredUtxos[0], reveal, address: changeAddress,
-        inscriptionIds: () => deps.ordinals!.outpointInscriptions(declaredUtxos[0]),
-      });
-      if (!authorized) return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'An inscribed input requires an authorized CEL continuation on the identity sat; fee inputs must carry no inscriptions.' }, 400);
+      // Spending an inscribed input would continue an anchored Original on its
+      // sat. That authorization is rebuilt on the Originals Protocol with
+      // Bitcoin anchoring (plan 011, PR 10); until then it is always refused.
+      return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'Inscribed inputs cannot be spent here yet; fee inputs must carry no inscriptions.' }, 400);
     }
 
     // Outpoint idempotency: one pending inscription per funding UTXO. A retry

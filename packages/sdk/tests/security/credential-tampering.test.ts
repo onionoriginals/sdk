@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { CredentialManager } from '../../src/vc/CredentialManager';
 import { DIDManager } from '../../src/did/DIDManager';
 import { registerVerificationMethod } from '../../src/vc/documentLoader';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import * as ed25519 from '@noble/ed25519';
 import type { VerifiableCredential } from '../../src/types';
 

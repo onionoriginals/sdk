@@ -4,4 +4,6 @@
  * carry mock providers (plan 043).
  */
 export { OrdMockProvider } from '../adapters/providers/OrdMockProvider.js';
+export type { OrdMockState } from '../adapters/providers/OrdMockProvider.js';
+export type { InscriptionParts } from '../adapters/types.js';
 export { FeeOracleMock } from '../adapters/FeeOracleMock.js';

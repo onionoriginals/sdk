@@ -11,7 +11,7 @@ import { describe, test, expect } from 'bun:test';
 import { base58 } from '@scure/base';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58AddressToEd25519Multikey } from '../../../src/crypto/addressToMultikey';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
 
 describe('base58AddressToEd25519Multikey', () => {
   const publicKey = ed25519.getPublicKey(ed25519.utils.randomSecretKey());

@@ -1,17 +1,17 @@
 /**
- * createDIDOriginal applies the CEL WebVH path-segment rule (canonicalWebVHPaths)
- * before signing, so it never mints a DID CEL's parseAssetAlias cannot read back.
+ * createDIDOriginal applies the WebVH path-segment rule (canonicalWebVHPaths)
+ * before signing, so it never mints a DID the did:webvh parser cannot read back.
  */
 
 import { describe, test, expect } from 'bun:test';
-import { StructuredError } from '@originals/cel';
-import { parseAssetAlias } from '@originals/cel/v3';
+import { StructuredError } from '../../../src/utils/telemetry';
+import { parseDidWebvh } from '@originals/vh';
 import { createDIDOriginal } from '../../../src/did/identity-operations.js';
 
 async function makeSigner() {
   const { KeyManager } = await import('../../../src/did/KeyManager.js');
   const { Ed25519Signer } = await import('../../../src/crypto/Signer.js');
-  const { multikey } = await import('@originals/cel');
+  const { multikey } = await import('../../../src/crypto/Multikey');
   const { prepareDataForSigning } = await import('didwebvh-ts');
 
   const keyPair = await new KeyManager().generateKeyPair('Ed25519');
@@ -64,10 +64,10 @@ async function expectRejected(paths: unknown, code: string): Promise<void> {
 }
 
 describe('createDIDOriginal paths', () => {
-  test('percent-encodes decoded segments into a DID CEL can parse back', async () => {
+  test('percent-encodes decoded segments into a DID the did:webvh parser reads back', async () => {
     const { did } = await (await create(['hello world', 'x~y', 'hello!world', 'café'])).run;
     expect(did).toEndWith(':example.com:hello%20world:x%7Ey:hello%21world:caf%C3%A9');
-    expect(parseAssetAlias(did).layer).toBe('webvh');
+    expect(parseDidWebvh(did).path).toEqual(['hello world', 'x~y', 'hello!world', 'café']);
   }, 20000);
 
   test('keeps a colon inside one segment', async () => {

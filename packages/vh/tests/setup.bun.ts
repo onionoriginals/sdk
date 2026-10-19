@@ -1,4 +1,4 @@
-// Setup file for the @originals/vh Bun tests (mirrors @originals/cel): blocks
+// Setup file for the @originals/vh Bun tests (mirrors the SDK's): blocks
 // unmocked network calls and fails the run on an escaped promise rejection.
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, spyOn, setDefaultTimeout } from 'bun:test';

@@ -18,10 +18,10 @@
 import { describe, test, expect } from 'bun:test';
 
 // ── Source imports ────────────────────────────────────────────────────────────
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 import { MetricsCollector } from '../../../src/utils/MetricsCollector';
-import { base58, multibase } from '@originals/cel/encoding';
-import { multikey as cryptoMultikey } from '@originals/cel';
+import { base58, multibase } from '../../../src/utils/encoding';
+import { multikey as cryptoMultikey } from '../../../src/crypto/Multikey';
 import { CircuitBreaker } from '../../../src/utils/circuit-breaker';
 import { withRetry } from '../../../src/utils/retry';
 import type { OrdinalsProvider } from '../../../src/adapters/types';

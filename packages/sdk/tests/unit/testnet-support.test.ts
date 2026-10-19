@@ -1,14 +1,9 @@
 import { describe, test, expect } from 'bun:test';
-import { btcoDidPrefix, btcoDidFromSatoshi, multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import { createBtcoDidDocument } from '../../src/did/createBtcoDidDocument.js';
 import { validateBitcoinAddress, isValidBitcoinAddress } from '../../src/utils/bitcoin-address.js';
 
 describe('SDK testnet (testnet4) support', () => {
-  test('btcoDidPrefix maps testnet to did:btco:test', () => {
-    expect(btcoDidPrefix('testnet')).toBe('did:btco:test');
-    expect(btcoDidFromSatoshi('123456', 'testnet')).toBe('did:btco:test:123456');
-  });
-
   test('createBtcoDidDocument mints a did:btco:test id on testnet', () => {
     const publicKey = Uint8Array.from(
       '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'.match(/../g)!,

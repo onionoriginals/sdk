@@ -1,6 +1,5 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, spyOn } from 'bun:test';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import { DIDDocument, AssetResource } from '../../../src/types';
 
 const resources: AssetResource[] = [
@@ -8,10 +7,10 @@ const resources: AssetResource[] = [
 ];
 
 describe('DIDManager', () => {
-  const sdk = OriginalsSDK.create();
+  const sdk = createManagers();
 
-  // createDIDPeer removed (did:peer purge, did:cel Phase 4·5/5): did:cel is the
-  // sole genesis layer; the did:peer creation path and its unit tests are gone.
+  // createDIDPeer removed (did:peer purge): the did:peer creation path and
+  // its unit tests are gone.
 
   test('migrateToDIDWebVH converts to did:webvh (expected to fail until implemented)', async () => {
     const didDoc: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:xyz' };
@@ -166,11 +165,11 @@ describe('DIDManager', () => {
 });
 
 /** Inlined from DIDManager.createBtco.part.ts */
-import { multikey } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
 
 describe('DIDManager.createBtcoDidDocument method', () => {
   test('creates btco DID document via manager wrapper', () => {
-    const sdk = OriginalsSDK.create();
+    const sdk = createManagers();
     const pub = new Uint8Array(32).fill(1);
     const doc = sdk.did.createBtcoDidDocument('123', 'mainnet', { publicKey: pub, keyType: 'Ed25519' });
     expect(doc.id).toBe('did:btco:123');
@@ -186,7 +185,7 @@ describe('DIDManager.createBtcoDidDocument method', () => {
 
 import { DIDManager } from '../../../src/did/DIDManager';
 
-// getLayerFromDID removed (did:peer purge, did:cel Phase 4·5/5): the private
+// getLayerFromDID removed (did:peer purge): the private
 // layer-from-DID helper is gone; layer is derived by OriginalsAsset.determineCurrentLayer.
 
 
@@ -198,7 +197,7 @@ import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
 
 describe('DIDManager.resolveDID catch path', () => {
   test('returns null when resolver throws', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockImplementationOnce(async () => { throw new Error('resolver failed'); });
     const res = await sdk.did.resolveDID('did:btco:123');
@@ -290,7 +289,7 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
 
 describe('DIDManager.resolveDID covers btco method variants', () => {
   test('resolves did:btco:test:* via resolver', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:1' } });
     const res = await sdk.did.resolveDID('did:btco:test:1');
@@ -299,7 +298,7 @@ describe('DIDManager.resolveDID covers btco method variants', () => {
   });
 
   test('resolves did:btco:sig:* via resolver', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:sig:2' } });
     const res = await sdk.did.resolveDID('did:btco:sig:2');
@@ -322,31 +321,4 @@ describe('DIDManager.validateDIDDocument false branch', () => {
 });
 
 
-import { createCelDidDocument } from '@originals/cel';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
-
-describe('DIDManager.resolveDID did:cel branch (#Phase2 Task 8)', () => {
-  test('returns null on a cache miss — no fake resolution', async () => {
-    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
-    expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
-  });
-
-  test('returns a cached did:cel document (cache-only resolution)', async () => {
-    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: false } as any);
-    const did = 'did:cel:uEiCachedDigest';
-    const doc = createCelDidDocument(did, 'z6MkfakePublicKey');
-    await dm.cache.set(did, doc);
-    expect(await dm.resolveDID(did)).toEqual(doc);
-  });
-
-  test('warns naming resolveDidCel(did, log) when logging is enabled', async () => {
-    const dm = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', enableLogging: true } as any);
-    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      expect(await dm.resolveDID('did:cel:uEiUnknownDigest')).toBeNull();
-      expect(warnSpy.mock.calls.some(args => args.join(' ').includes('resolveDidCel'))).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-});

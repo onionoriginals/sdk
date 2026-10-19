@@ -7,7 +7,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { inscribeOnSat, prepareInscriptionOnSat, resumeInscriptionOnSat, submitPreparedInscriptionOnSat } from '../../../src/bitcoin/inscribe-on-sat';
 import type { InscriptionRecoveryStore } from '../../../src/bitcoin/inscription-recovery';
 import { getScureNetwork } from '../../../src/bitcoin/transactions/commit';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 
 const key = new Uint8Array(32).fill(1);
 const payment = btc.p2wpkh(secp256k1.getPublicKey(key), getScureNetwork('regtest'));

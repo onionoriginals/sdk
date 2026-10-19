@@ -56,8 +56,8 @@ async function makeTempDir(): Promise<{ dir: string; cleanup: () => Promise<void
 // DID-001 — create did:peer with empty resources → valid DID doc
 // ---------------------------------------------------------------------------
 
-// DID-001 removed (did:peer purge, did:cel Phase 4·5/5): createDIDPeer and the
-// did:peer creation path are gone; did:cel is the sole genesis layer.
+// DID-001 removed (did:peer purge): createDIDPeer and the
+// did:peer creation path are gone.
 
 // ---------------------------------------------------------------------------
 // DID-006 — create did:webvh with mock external signer
@@ -91,7 +91,7 @@ describe('DID-006 — did:webvh with external (mock Turnkey-style) signer', () =
 
     // Import the Ed25519 signing infrastructure used internally
     const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-    const { multikey } = await import('@originals/cel');
+    const { multikey } = await import('../../../src/crypto/Multikey');
     const internalSigner = new Ed25519Signer();
 
     // We also need prepareDataForSigning from didwebvh-ts

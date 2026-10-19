@@ -5,7 +5,7 @@
  */
 
 import { Turnkey } from '@turnkey/sdk-server';
-import { OriginalsSDK, StructuredError, canonicalDidKeyVm, encoding, signingInput } from '@originals/sdk';
+import { StructuredError, canonicalDidKeyVm, createDIDOriginal, encoding, signingInput, verifyDIDSignature } from '@originals/sdk';
 import { turnkeySignBytes } from '../turnkey-sign-bytes.js';
 import type { TurnkeyWalletAccount } from '../types.js';
 import { withTokenExpiration } from './turnkey-client.js';
@@ -68,7 +68,7 @@ export class TurnkeyDIDSigner {
 
   /**
    * Signs pre-canonicalized, pre-hashed bytes — the capability that lets a
-   * Turnkey key author CEL events and sign credentials, not just did:webvh
+   * Turnkey key sign arbitrary byte preimages and credentials, not just did:webvh
    * logs. `signerFromExternalSigner` requires exactly this.
    */
   async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {
@@ -102,7 +102,7 @@ export class TurnkeyDIDSigner {
     publicKey: Uint8Array
   ): Promise<boolean> {
     try {
-      return await OriginalsSDK.verifyDIDSignature(signature, message, publicKey);
+      return await verifyDIDSignature(signature, message, publicKey);
     } catch (error) {
       console.error('[TurnkeyDIDSigner] Error verifying signature:', error);
       return false;
@@ -111,7 +111,7 @@ export class TurnkeyDIDSigner {
 }
 
 /**
- * Create a DID:WebVH using OriginalsSDK.createDIDOriginal() with Turnkey signing.
+ * Create a DID:WebVH using the SDK's createDIDOriginal() with Turnkey signing.
  * The update account must declare CURVE_ED25519 for WebVH method-log custody.
  * @throws {StructuredError} TURNKEY_UPDATE_KEY_CURVE_INVALID for any other curve.
  */
@@ -159,7 +159,7 @@ export async function createDIDWithTurnkey(params: {
   );
 
   // Use SDK's createDIDOriginal
-  const result = await OriginalsSDK.createDIDOriginal({
+  const result = await createDIDOriginal({
     type: 'did',
     domain,
     signer,

@@ -1,7 +1,6 @@
 /**
  * Deferred inscription build result (#407 phase 2): either bare content bytes,
- * or content plus the CBOR metadata to attach (the anchoring inscription's
- * `{ didDocument, celLog }` provenance).
+ * or content plus the CBOR metadata to attach.
  */
 export type InscriptionParts = Uint8Array | { content: Uint8Array; metadata?: Record<string, unknown> };
 
@@ -27,8 +26,8 @@ export interface FeeOracleAdapter {
 }
 
 export interface OrdinalsProvider {
-  /** Complete CEL 3 observation; omission explicitly means the provider cannot resolve new-format assets. */
-  getSatSnapshot?(satoshi: string): Promise<import("@originals/cel/v3").SatSnapshot>;
+  /** Complete, stable observation of one sat; omission means the provider cannot supply one. */
+  getSatSnapshot?(satoshi: string): Promise<import('../bitcoin/sat-snapshot-types.js').SatSnapshot>;
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
     // Optional: deferred-content providers may not echo built content back.
@@ -38,9 +37,7 @@ export interface OrdinalsProvider {
     vout: number;
     satoshi?: string;
     blockHeight?: number;
-    // Inscription CBOR metadata (#407 phase 2): the anchoring inscription's
-    // content is the asset media, and its metadata carries the byte-light
-    // provenance (`{ didDocument, celLog }`). Absent for content-only inscriptions.
+    // Inscription CBOR metadata (#407 phase 2). Absent for content-only inscriptions.
     metadata?: Record<string, unknown>;
   } | null>;
   /**
@@ -110,8 +107,8 @@ export interface OrdinalsProvider {
     data?: Uint8Array;
     /**
      * Deferred content: called with the pinned satoshi between commit and
-     * reveal, so content (and metadata) that must embed its own sat (a did:btco
-     * DID document / the byte-light celLog) can be constructed. Provide exactly
+     * reveal, so content (and metadata) that must embed its own sat (e.g. a
+     * did:btco DID document) can be constructed. Provide exactly
      * one of data / buildContent. May return bare bytes (content only) or
      * `{ content, metadata }` — the returned metadata wins over the static
      * `metadata` param below (#407 phase 2).
@@ -146,46 +143,6 @@ export interface OrdinalsProvider {
    * must never rewrite the inscribed DID document from it.
    */
   getSatOwnership?(satoshi: string): Promise<{ address: string; outpoint: string } | null>;
-  /**
-   * Enumerate on-chain btco DID-doc anchorings whose `alsoKnownAs` back-links
-   * this did:cel (first-anchor-wins uniqueness). `blockHeight` is the
-   * canonical ordering signal; a missing height fails uniqueness closed.
-   *
-   * Two conformance tiers (#473):
-   * - FULL: enumerate every back-linked anchoring on ANY sat. Needs an index
-   *   over inscription content/metadata (OrdMockProvider's in-memory state, or
-   *   an app-maintained index). Enables cross-sat legitimate-duplicate
-   *   detection via authenticated competitors (#402).
-   * - SAT-SCOPED: enumerate only the anchorings on `opts.satoshi` — the log's
-   *   own anchored sat, which the verifier always passes. Ord exposes no
-   *   did:cel back-link index, so the shipped production providers
-   *   (QuickNodeProvider, OrdHttpProvider) implement this tier from
-   *   getInscriptionsBySatoshi + getInscriptionById. It proves the claimed
-   *   anchoring EXISTS on-chain, back-linked and height-confirmed; it CANNOT
-   *   see a competing anchoring on another sat, so cross-sat first-anchor
-   *   canonicality is NOT checked. Behaviourally identical to the accepted
-   *   didDocument-omitting degraded mode (see verifyUniqueness): the #402
-   *   anti-front-running property is unaffected (fail-closed, competitors
-   *   never counted); only cross-sat dupe detection is suppressed.
-   * A sat-scoped implementation MUST fail loudly when called without
-   * `opts.satoshi` — never fabricate an empty enumeration.
-   *
-   * `didDocument` (#402) is the inscribed did:btco document with its
-   * DataIntegrityProof, used to authenticate a competing anchoring on a
-   * DIFFERENT sat (a competitor counts only if signed by a key in the verified
-   * log's authorized-key history). Optional/backward-compatible: an omitted
-   * `didDocument` means the competitor cannot be authenticated and does not
-   * count toward canonicality.
-   *
-   * KEEP IN SYNC with the identical guarantee on OrdinalsLookup in
-   * packages/cel/src/types.ts.
-   */
-  getAnchoringsForDidCel?(didCel: string, opts?: { satoshi?: string }): Promise<Array<{
-    satoshi: string;
-    inscriptionId: string;
-    blockHeight?: number;
-    didDocument?: Record<string, unknown>;
-  }>>;
   transferInscription(
     inscriptionId: string,
     toAddress: string,

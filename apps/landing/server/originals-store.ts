@@ -1,4 +1,3 @@
-import { parseDocument, verifyHistory } from '@originals/sdk/cel';
 /**
  * Durable, filesystem-backed store for signed-in users' Originals.
  *
@@ -330,18 +329,11 @@ export function createOriginalsStore(opts: {
     const idx = readIndex(subOrgId);
     const keys = Object.keys(idx.sizes);
     return idx.originals.map((o) => {
-      const prefix = resourcePrefix(o.did);
-      let resourceKey: string | undefined;
-      let signedMediaType: string | undefined;
-      if (prefix) {
-        try {
-          const document = parseDocument(new Uint8Array(readFileSync(keyToPath(hostedDir, prefix.replace(/resources\/$/, 'cel.json')))), 'json');
-          const state = verifyHistory(document).state;
-          const primary = state.aliases.includes(o.did) ? state.resources[0] : undefined;
-          const key = primary ? prefix + primary.digestMultibase : undefined;
-          if (key && keys.includes(key)) { resourceKey = key; signedMediaType = primary!.mediaType; }
-        } catch { /* Unverified summaries have no authenticated cover. */ }
-      }
+      // A cover image needs an authenticated history to vouch for it. Hosted
+      // Originals are rebuilt on the Originals Protocol (plan 011, PR 8);
+      // until then no summary has one.
+      const resourceKey: string | undefined = undefined;
+      const signedMediaType: string | undefined = undefined;
       return {
         ...o,
         resourceUrl: resourceKey ? `https://${resourceKey}` : undefined,

@@ -2,9 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { MetricsCollector } from '../../../src/utils/MetricsCollector';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { DIDManager } from '../../../src/did/DIDManager';
-import { OriginalsSDK } from '../../../src/core/OriginalsSDK';
 import type { OriginalsConfig } from '../../../src/types';
-import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 const testConfig: OriginalsConfig = {
   network: 'regtest',
@@ -96,11 +94,8 @@ describe('Metrics Integration', () => {
       didManager = new DIDManager(testConfig, metrics);
     });
 
-    // createDIDPeer op-metric test removed (did:peer purge, did:cel Phase 4·5/5):
-    // the did.createDIDPeer operation no longer exists.
-
     test('should track migrateToDIDWebVH operation', async () => {
-      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-webvh' };
+      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:vh:metrics-webvh' };
       const migrated = await didManager.migrateToDIDWebVH(sourceDoc, 'example.com');
       expect(migrated.didDocument.id).toContain('did:webvh:');
 
@@ -110,7 +105,7 @@ describe('Metrics Integration', () => {
     });
 
     test('should track migrateToDIDBTCO operation', async () => {
-      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-btco' };
+      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:vh:metrics-btco' };
       const migrated = await didManager.migrateToDIDBTCO(sourceDoc, '12345');
       expect(migrated.id).toContain('did:btco:');
 
@@ -148,7 +143,7 @@ describe('Metrics Integration', () => {
     test('should track failed operations with error count', async () => {
       try {
         await didManager.migrateToDIDBTCO(
-          { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:test' },
+          { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:vh:test' },
           '-1'
         );
       } catch {
@@ -158,81 +153,6 @@ describe('Metrics Integration', () => {
       const opMetrics = metrics.getOperationMetrics('did.migrateToDIDBTCO');
       expect(opMetrics).not.toBeNull();
       expect(opMetrics!.errorCount).toBe(1);
-    });
-  });
-
-  describe('OriginalsSDK shared metrics', () => {
-    test('should share MetricsCollector across all managers', () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
-        network: 'regtest',
-        defaultKeyType: 'Ed25519',
-        webvhNetwork: 'magby',
-      });
-
-      // The SDK's metrics instance should be accessible
-      expect(sdk.metrics).toBeDefined();
-      expect(sdk.metrics).toBeInstanceOf(MetricsCollector);
-    });
-
-    test('should aggregate metrics from all managers', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
-        network: 'regtest',
-        defaultKeyType: 'Ed25519',
-        webvhNetwork: 'magby',
-      });
-
-      // Create an asset via LifecycleManager (mints a did:cel genesis; does not
-      // call DIDManager). Exercise a DIDManager op separately so the "aggregate
-      // across managers" assertion still has DID metrics.
-      const asset = await sdk.lifecycle.createAsset([{
-        id: 'test.js',
-        type: 'code',
-        contentType: 'application/javascript',
-        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }]);
-      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-agg' }, 'example.com');
-
-      expect(asset).toBeDefined();
-
-      // Check that metrics were recorded across managers
-      const allMetrics = sdk.metrics.getMetrics();
-      expect(allMetrics.assetsCreated).toBeGreaterThanOrEqual(1);
-
-      // DIDManager should have tracked a DID operation
-      const didMetrics = sdk.metrics.getOperationMetrics('did.migrateToDIDWebVH');
-      expect(didMetrics).not.toBeNull();
-      expect(didMetrics!.count).toBeGreaterThanOrEqual(1);
-
-      // LifecycleManager should have tracked createAsset
-      const lcMetrics = sdk.metrics.getOperationMetrics('lifecycle.createAsset');
-      expect(lcMetrics).not.toBeNull();
-      expect(lcMetrics!.count).toBeGreaterThanOrEqual(1);
-    });
-
-    test('should export aggregated Prometheus metrics', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
-        network: 'regtest',
-        defaultKeyType: 'Ed25519',
-        webvhNetwork: 'magby',
-      });
-
-      await sdk.lifecycle.createAsset([{
-        id: 'test.js',
-        type: 'code',
-        contentType: 'application/javascript',
-        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
-      }]);
-      // createAsset no longer routes through DIDManager; exercise a DIDManager
-      // op directly so the multi-manager Prometheus assertion holds.
-      await sdk.did.migrateToDIDWebVH({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:metrics-prom' }, 'example.com');
-
-      const prometheus = sdk.metrics.export('prometheus');
-
-      // Should contain label-based operation metrics from multiple managers
-      expect(prometheus).toContain('originals_assets_created_total');
-      expect(prometheus).toContain('originals_operation_total{operation="did.migrateToDIDWebVH"}');
-      expect(prometheus).toContain('originals_operation_total{operation="lifecycle.createAsset"}');
-      expect(prometheus).toContain('originals_uptime_milliseconds');
     });
   });
 });

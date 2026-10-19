@@ -12,7 +12,7 @@ const makeDIDDoc = (id: string): DIDDocument => ({
 // Build an OrdMockProvider that resolves a specific did:btco:<sat> to `doc`.
 // The DIDManager cache-integration tests below need a DID with a real
 // cache-miss → fetch path; did:peer creation is gone (did:peer purge,
-// did:cel Phase 4·5/5), so we use a resolvable did:btco instead.
+// the did:peer purge), so we use a resolvable did:btco instead.
 const makeBtcoProvider = (sat: string, doc: DIDDocument): OrdMockProvider =>
   new OrdMockProvider({
     inscriptionsById: new Map([[`insc-${sat}`, {
@@ -407,7 +407,7 @@ describe('DIDCache', () => {
 
   describe('OriginalsSDK config passthrough', () => {
     test('should pass storage adapter from OriginalsConfig to DIDCache', async () => {
-      const { OriginalsSDK } = await import('../../../src');
+      const { createManagers } = await import('../../fixtures/managers');
       const storageMap = new Map<string, DIDCacheEntry>();
       const storage: DIDCacheStorage = {
         get: async (key: string) => storageMap.get(key) ?? null,
@@ -419,7 +419,7 @@ describe('DIDCache', () => {
 
       const sat = '700001';
       const did = `did:btco:${sat}`;
-      const sdk = OriginalsSDK.create({
+      const sdk = createManagers({
         network: 'mainnet',
         ordinalsProvider: makeBtcoProvider(sat, makeDIDDoc(did)),
         didCache: {

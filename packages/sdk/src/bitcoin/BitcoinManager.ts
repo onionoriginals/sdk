@@ -5,15 +5,15 @@ import {
 } from '../types/index.js';
 import type { FeeOracleAdapter, OrdinalsProvider, InscriptionParts } from '../adapters/index.js';
 import type { OperationLock } from '../utils/OperationLock.js';
-import { emitTelemetry, StructuredError } from '@originals/cel';
+import { emitTelemetry, StructuredError } from '../utils/telemetry.js';
 import { validateBitcoinAddress } from '../utils/bitcoin-address.js';
-import { validateSatoshiNumber } from '@originals/cel';
+import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 
 /**
  * Upper bound on any fee rate the SDK will use, whether caller-provided or
  * returned by a fee oracle / ordinals provider. Guards against a misbehaving or
  * compromised estimator draining funds via an absurd sat/vB value. Exported so
- * quote-only paths (LifecycleManager.estimateCost) apply the same cap
+ * quote-only paths apply the same cap
  * (issue #351).
  */
 export const MAX_REASONABLE_FEE_RATE = 10_000; // sat/vB
@@ -40,7 +40,7 @@ export class BitcoinManager {
 
   /**
    * The configured ordinals provider, if any. Exposed so verification paths
-   * (e.g. CEL bitcoin witness proof checks) can query the chain through the
+   * can query the chain through the
    * same provider that made the inscriptions.
    */
   get ordinalsProvider(): OrdinalsProvider | undefined {

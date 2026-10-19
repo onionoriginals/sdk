@@ -1,44 +1,25 @@
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../src/index';
+import { OriginalsSDK, MemoryStore } from '../src/index';
 import { validateDID, validateCredential } from '../src/utils/validation';
 
 describe('OriginalsSDK', () => {
-  test('should create SDK instance', () => {
-    const sdk = OriginalsSDK.create();
+  test('creates an instance over an explicit store and author source', () => {
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
     expect(sdk).toBeInstanceOf(OriginalsSDK);
-    expect(sdk.did).toBeDefined();
-    expect(sdk.credentials).toBeDefined();
-    expect(sdk.lifecycle).toBeDefined();
-    expect(sdk.bitcoin).toBeDefined();
   });
 
   test('should validate DIDs correctly', () => {
     expect(validateDID('did:key:z6Mk123456')).toBe(true);
+    expect(validateDID('did:vh:QmExample')).toBe(true);
     expect(validateDID('did:webvh:example.com:123')).toBe(true);
     expect(validateDID('did:btco:1234567890abcdef')).toBe(true);
     expect(validateDID('invalid-did')).toBe(false);
     expect(validateDID('did:web:example.com')).toBe(false); // wrong method
     expect(validateDID('did:peer:123456')).toBe(false); // did:peer support removed
+    expect(validateDID('did:cel:uEiExample')).toBe(false); // CEL 3 identifiers were deleted (plan 011 PR 5)
   });
 
-  test('should validate layer transitions', () => {
-    // Test cases for valid layer transitions
-    const validTransitions = [
-      ['did:cel', 'did:webvh'],
-      ['did:cel', 'did:btco'],
-      ['did:webvh', 'did:btco']
-    ];
-
-    const invalidTransitions = [
-      ['did:webvh', 'did:cel'],
-      ['did:btco', 'did:cel'],
-      ['did:btco', 'did:webvh']
-    ];
-
-    // These would be tested with actual implementation
-    expect(validTransitions.length).toBe(3);
-    expect(invalidTransitions.length).toBe(3);
+  test('validateCredential requires the VCDM 2.0 context', () => {
+    expect(validateCredential({ '@context': ['https://www.w3.org/2018/credentials/v1'] } as never)).toBe(false);
   });
 });
-
-

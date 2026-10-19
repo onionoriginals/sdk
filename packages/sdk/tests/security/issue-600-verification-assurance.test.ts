@@ -3,19 +3,15 @@
  * returned a green boolean while silently skipping a security-relevant check
  * (status, chain freshness) instead of reporting it as unknown/failed.
  *
- * Two entry points are covered:
- *  - `CredentialManager.verifyCredential`, which used to hardcode
- *    `checkStatus: false` — a credential declaring `credentialStatus` verified
- *    on signature alone with no way to tell status was never evaluated.
- *  - `UnifiedVerifier`, whose credential branch did the same, and whose
- *    event-log branch didn't surface whether head-freshness actually ran.
+ * Covered: `CredentialManager.verifyCredential`, which used to hardcode
+ * `checkStatus: false` — a credential declaring `credentialStatus` verified
+ * on signature alone with no way to tell status was never evaluated.
  */
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src';
-import { multikey } from '@originals/cel';
+import { createManagers, type Managers } from '../fixtures/managers';
+import { multikey } from '../../src/crypto/Multikey';
 import * as ed from '@noble/ed25519';
 import { DIDManager } from '../../src/did/DIDManager';
-import { UnifiedVerifier } from '../../src/verify/UnifiedVerifier';
 
 /**
  * did:key signing helper. The verificationMethod MUST be the fragmented
@@ -25,8 +21,7 @@ import { UnifiedVerifier } from '../../src/verify/UnifiedVerifier';
  * loader's did:key self-certifying synthesis only fires for a fragment
  * lookup. A bare-DID verificationMethod silently falls back to a legacy
  * proof with no `cryptosuite`, which the strict DI-only `Verifier` class
- * (used directly by UnifiedVerifier, and internally for status-list-credential
- * trust checks) rejects as "Unsupported cryptosuite: undefined".
+ * (used internally for status-list-credential trust checks) rejects as "Unsupported cryptosuite: undefined".
  */
 function vmFor(pkMb: string): string {
   return `did:key:${pkMb}#${pkMb}`;
@@ -42,7 +37,7 @@ async function makeKeyPair() {
 }
 
 async function makeSignedCredentialWithStatus(
-  sdk: OriginalsSDK,
+  sdk: Managers,
   statusListId: string,
   index: number
 ) {
@@ -61,7 +56,7 @@ async function makeSignedCredentialWithStatus(
 }
 
 async function signStatusList(
-  sdk: OriginalsSDK,
+  sdk: Managers,
   statusListVC: unknown,
   skMb: string,
   vm: string
@@ -71,7 +66,7 @@ async function signStatusList(
 
 describe('CredentialManager.verifyCredential is safe by default (issue #600)', () => {
   test('fails closed on a declared credentialStatus when no statusListResolver is configured', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/1', 5);
 
     // Before the fix, verifyCredential hardcoded checkStatus:false: a
@@ -82,7 +77,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
   });
 
   test('a credential with no credentialStatus is unaffected (still verifies on signature alone)', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const { skMb, issuer, vm } = await makeKeyPair();
     const unsigned = {
       '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
@@ -96,7 +91,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
   });
 
   test('checks status and passes once a statusListResolver reports the credential is not revoked', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const listId = 'https://example.com/status/600/2';
     const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 1);
     const unsignedList = sdk.statusList.createStatusListCredential({
@@ -117,7 +112,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
   });
 
   test('checks status and fails once the resolved status list reports revocation', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const listId = 'https://example.com/status/600/3';
     const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 2);
     const unsignedList = sdk.statusList.createStatusListCredential({
@@ -138,7 +133,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
     // Verifier.verifyCredential's whole-body try/catch. A resolver network
     // failure — not a bug — must resolve to `false`, not reject the promise
     // and abort the caller's flow.
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/9', 0);
     sdk.credentials.statusListResolver = async () => {
       throw new Error('network unreachable');
@@ -148,7 +143,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
   });
 
   test('verifyCredentialSignature is explicitly signature-only: it ignores a declared credentialStatus', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const listId = 'https://example.com/status/600/4';
     const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 3);
     const unsignedList = sdk.statusList.createStatusListCredential({ id: listId, issuer, statusPurpose: 'revocation' });
@@ -170,7 +165,7 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
     // double-evaluate status (once via its own explicit statusListCredential
     // argument, once via a manager-configured resolver) and could fail
     // closed for the wrong reason.
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     const listId = 'https://example.com/status/600/5';
     const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 4);
     const unsignedList = sdk.statusList.createStatusListCredential({ id: listId, issuer, statusPurpose: 'revocation' });
@@ -185,131 +180,3 @@ describe('CredentialManager.verifyCredential is safe by default (issue #600)', (
   });
 });
 
-describe('UnifiedVerifier reports what it actually checked (issue #600)', () => {
-  const didManager = new DIDManager({} as never);
-
-  test('a credential with no declared status: assurance.status is "checked" (vacuously)', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const { skMb, issuer, vm } = await makeKeyPair();
-    const signed = await sdk.credentials.signCredential(
-      {
-        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-        type: ['VerifiableCredential'],
-        issuer,
-        issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:example:subject-600c' },
-      } as any,
-      skMb,
-      vm
-    );
-
-    const unified = new UnifiedVerifier(didManager);
-    const res = await unified.verify(signed);
-    expect(res.verified).toBe(true);
-    expect(res.assurance).toEqual({ signature: 'checked', status: 'checked' });
-  });
-
-  test('a credential with an explicit empty credentialStatus array: assurance.status is "checked" (vacuously), same as undeclared', async () => {
-    // Regression (Greptile review of PR #653): `credentialStatus: []` is
-    // truthy, so a bare `!credential.credentialStatus` check treated it as
-    // "declared but uncheckable" and required a statusListResolver — diverging
-    // from CredentialManager/Verifier.checkCredentialStatus, which normalizes
-    // through credentialStatusEntries() and correctly treats zero entries
-    // (singleton absent OR an explicit empty array) as vacuously verified.
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const { skMb, issuer, vm } = await makeKeyPair();
-    const signed = await sdk.credentials.signCredential(
-      {
-        '@context': ['https://www.w3.org/2018/credentials/v1', 'https://originals.build/context'],
-        type: ['VerifiableCredential'],
-        issuer,
-        issuanceDate: new Date().toISOString(),
-        credentialSubject: { id: 'did:example:subject-600h' },
-        credentialStatus: [],
-      } as any,
-      skMb,
-      vm
-    );
-
-    const unified = new UnifiedVerifier(didManager);
-    const res = await unified.verify(signed);
-    // No statusListResolver configured — this must NOT fail closed, since
-    // Verifier.checkCredentialStatus itself would not require one here.
-    expect(res.verified).toBe(true);
-    expect(res.assurance).toEqual({ signature: 'checked', status: 'checked' });
-  });
-
-  test('a credential declaring credentialStatus with no statusListResolver: unknown, and fails closed', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/6', 0);
-
-    const unified = new UnifiedVerifier(didManager);
-    const res = await unified.verify(signed);
-    expect(res.assurance.signature).toBe('checked');
-    expect(res.assurance.status).toBe('unknown');
-    // Unknown must never read as a pass: verified still fails closed.
-    expect(res.verified).toBe(false);
-    expect(res.errors.join(' ')).toMatch(/statusListResolver/i);
-  });
-
-  test('signatureOnly explicitly opts out of status checking, and reports it as unknown rather than checked', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const listId = 'https://example.com/status/600/7';
-    const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 1);
-    const unsignedList = sdk.statusList.createStatusListCredential({ id: listId, issuer, statusPurpose: 'revocation' });
-    const revokedList = sdk.statusList.setStatus(unsignedList, 1, true);
-    const statusListVC = await signStatusList(sdk, revokedList, skMb, vm);
-
-    const unified = new UnifiedVerifier(didManager, {
-      statusListResolver: async () => statusListVC,
-      signatureOnly: true,
-    });
-    const res = await unified.verify(signed);
-    // A resolver IS configured and WOULD report revoked, but signatureOnly
-    // means it is deliberately not consulted — signature-only verification
-    // must not silently inherit the revoked verdict, but it also must not
-    // silently claim the credential is good on the status dimension.
-    expect(res.verified).toBe(true);
-    expect(res.assurance).toEqual({ signature: 'checked', status: 'unknown' });
-  });
-
-  test('the same declared-revoked credential fails once a statusListResolver is actually configured', async () => {
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const listId = 'https://example.com/status/600/8';
-    const { signed, issuer, skMb, vm } = await makeSignedCredentialWithStatus(sdk, listId, 6);
-    const unsignedList = sdk.statusList.createStatusListCredential({ id: listId, issuer, statusPurpose: 'revocation' });
-    const revokedList = sdk.statusList.setStatus(unsignedList, 6, true);
-    const statusListVC = await signStatusList(sdk, revokedList, skMb, vm);
-
-    const unified = new UnifiedVerifier(didManager, { statusListResolver: async () => statusListVC });
-    const res = await unified.verify(signed);
-    expect(res.assurance).toEqual({ signature: 'checked', status: 'failed' });
-    expect(res.verified).toBe(false);
-  });
-
-  test('a rejecting statusListResolver produces a failed-closed result rather than a rejected promise', async () => {
-    // Regression (review of PR #634): a resolver network failure must never
-    // escape verify() as a thrown exception — it always returns a result.
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
-    const { signed } = await makeSignedCredentialWithStatus(sdk, 'https://example.com/status/600/10', 0);
-
-    const unified = new UnifiedVerifier(didManager, {
-      statusListResolver: async () => {
-        throw new Error('network unreachable');
-      },
-    });
-    const res = await unified.verify(signed);
-    expect(res.verified).toBe(false);
-    expect(res.assurance.status).toBe('unknown');
-    expect(res.errors.join(' ')).toMatch(/network unreachable/);
-  });
-
-  test('an event log with no ordinalsProvider reports freshness as unknown, not silently checked', async () => {
-    const unified = new UnifiedVerifier(didManager);
-    // Structurally-minimal event log with no witness proof: routing/assurance
-    // reporting is what's asserted here, not chain-proof validity.
-    const res = await unified.verify({ events: [] } as any);
-    expect(res.kind).toBe('eventLog');
-    expect(res.assurance.freshness).toBe('unknown');
-  });
-});

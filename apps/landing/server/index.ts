@@ -1,4 +1,3 @@
-import { createExploreRoutes } from './explore';
 import { createInMemorySessionStorage, type SessionStorage, type SubOrgLock } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { json, type Handler } from './router';
@@ -75,7 +74,7 @@ if (import.meta.main) {
   const distDir = new URL('../dist/', import.meta.url).pathname;
   const server = Bun.serve({
     port: Number(process.env.PORT ?? 8787),
-    fetch: buildFetch({ apiRoutes, hostStore, distDir, originals, explore: createExploreRoutes({ store: originalsStore, dataDir }) }),
+    fetch: buildFetch({ apiRoutes, hostStore, distDir, originals }),
   });
   console.log(`[auth-server] listening on http://localhost:${server.port}`);
 }

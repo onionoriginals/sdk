@@ -10,7 +10,7 @@
  * so the wire shape cannot drift between them.
  */
 import { base64 } from '@scure/base';
-import type { SatSnapshot } from '@originals/sdk/cel';
+import type { SatSnapshot } from '@originals/sdk';
 
 export function encodeSatSnapshot(snapshot: SatSnapshot): unknown {
   return {

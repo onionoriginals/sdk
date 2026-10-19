@@ -1,15 +1,14 @@
-import type { SatSnapshot } from '@originals/cel/v3';
+import type { SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
 import { readSatSnapshot, type SatSnapshotBudget } from './sat-snapshot.js';
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
-import { enumerateAnchoringsOnSat, type DidCelAnchoring } from '../anchoring-enumeration.js';
-import { StructuredError } from '@originals/cel';
-import { validateSatoshiNumber } from '@originals/cel';
-import { decode as decodeCbor } from '@originals/cel/cbor';
-import { hexToBytes } from '@originals/cel/encoding';
+import { StructuredError } from '../../utils/telemetry.js';
+import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 import { readResponseBodyCapped, ResponseTooLargeError } from '../response-body-limit.js';
 
 export interface QuickNodeProviderOptions {
-  /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
+  /** Bounds the whole sat snapshot scan, not only each HTTP request. */
   snapshotBudget?: SatSnapshotBudget;
   /**
    * Full QuickNode endpoint URL including the token path, e.g.
@@ -44,7 +43,7 @@ export interface QuickNodeProviderOptions {
    *   deployments where content hashes matter.
    */
   contentEncoding?: 'base64' | 'utf8' | 'auto';
-  /** Explicit ord-compatible base URL serving raw /content/:id and /r/metadata/:id. Used for CEL 3 snapshots instead of their JSON-RPC wrappers. */
+  /** Explicit ord-compatible base URL serving raw /content/:id and /r/metadata/:id. Used for sat snapshots instead of their JSON-RPC wrappers. */
   contentBaseUrl?: string;
 }
 
@@ -544,7 +543,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
   }
 
   /**
-   * Complete CEL 3 evidence from the Ordinals & Runes add-on and active Core blocks.
+   * Complete sat snapshot from the Ordinals & Runes add-on and active Core blocks.
    * Pin contentEncoding to the endpoint's wire contract: 'utf8' for the
    * documented literal text result, 'base64' only for gateways configured to
    * encode binary content that way. Auto mode
@@ -557,7 +556,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
    */
   async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
     if (!this.contentBaseUrl && this.contentEncoding === 'auto') throw new StructuredError(
-      'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'CEL 3 snapshots require an explicit contentEncoding wire contract',
+      'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'Sat snapshots require an explicit contentEncoding wire contract',
     );
     return readSatSnapshot({
       rpc: (method, params, signal) => this.rpcCall(method, params, undefined, signal),
@@ -641,16 +640,6 @@ export class QuickNodeProvider implements OrdinalsProvider {
     return ids
       .filter((x): x is string => typeof x === 'string' && INSCRIPTION_ID_RE.test(x))
       .map((inscriptionId) => ({ inscriptionId }));
-  }
-
-  /**
-   * SAT-SCOPED tier of the OrdinalsProvider contract (#473): enumerates only
-   * the anchorings on `opts.satoshi` via ord_getSat + ord_getInscription.
-   * Proves the claimed anchoring exists back-linked and confirmed on that sat;
-   * does NOT check cross-sat canonicality. Throws without a sat scope.
-   */
-  async getAnchoringsForDidCel(didCel: string, opts?: { satoshi?: string }): Promise<DidCelAnchoring[]> {
-    return enumerateAnchoringsOnSat(this, didCel, opts?.satoshi, 'QuickNodeProvider');
   }
 
   async broadcastTransaction(txHexOrObj: unknown): Promise<string> {

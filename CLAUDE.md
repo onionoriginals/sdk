@@ -22,10 +22,10 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   `didwebvh-ts` (did:webvh 1.0). Those DIDs are verified by our own engine
   under experimental did:webvh (PR 302).
 - The CEL 3 implementation (`packages/cel`, `packages/sdk/src/v3`,
-  `OriginalsSDK3.ts`) and the earlier formats are scheduled for deletion. Do
-  not extend them, add compatibility shims for them, or port their APIs. No
-  Originals were issued under them, so there is no conversion, migration or
-  legacy verifier.
+  `OriginalsSDK3.ts`) and the earlier formats were deleted in plan 011 PR 5.
+  Do not reintroduce them, add compatibility shims for them, or port their
+  APIs. No Originals were issued under them, so there is no conversion,
+  migration or legacy verifier.
 
 ## Contracts to preserve
 

@@ -1,9 +1,9 @@
 import { VerifiableCredential, VerifiablePresentation } from '../types/index.js';
-import { multikey, MultikeyType } from '@originals/cel';
+import { multikey, MultikeyType } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
 
 /**
  * True when the error is a SECURITY refusal that must fail closed (never fall
@@ -89,7 +89,7 @@ export class Issuer {
     const documentLoader = options.documentLoader || createDocumentLoader(this.didManager);
     // Best-effort existence check only: the Issuer signs with its own
     // verification method, so an unresolvable DID (e.g. a key registered
-    // out-of-band, or an unhosted did:cel) must not block issuance.
+    // out-of-band, or an unhosted DID) must not block issuance.
     // A RETIRED (revoked/compromised) verification method is different —
     // signing with it must fail closed, so that loader error propagates.
     try {

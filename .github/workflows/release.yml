@@ -106,7 +106,7 @@ jobs:
         id: check
         run: |
           should=false
-          for dir in packages/cel packages/vh packages/sdk packages/auth; do
+          for dir in packages/vh packages/sdk packages/auth; do
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
             set +e
@@ -145,7 +145,7 @@ jobs:
     steps:
       # This publish job has no token fallback (see the OIDC step below) — it
       # authenticates purely via npm trusted publishing, which requires a
-      # trusted publisher registered on npmjs.com for EACH of @originals/cel, @originals/vh,
+      # trusted publisher registered on npmjs.com for EACH of @originals/vh,
       # @originals/sdk, and @originals/auth. There is no read-only API to
       # confirm that registration from CI (npm whoami cannot validate OIDC
       # trust; the exchange only happens during an actual publish attempt),
@@ -157,7 +157,7 @@ jobs:
       - name: Confirm npm trusted publishing is registered for all packages
         if: vars.NPM_TRUSTED_PUBLISHING_READY != 'true'
         run: |
-          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/cel, @originals/vh, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/RELEASE_TOKEN_ROTATION.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
+          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/vh, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/RELEASE_TOKEN_ROTATION.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
           exit 1
 
       - name: Checkout
@@ -224,7 +224,7 @@ jobs:
       # generated automatically for a public repo under trusted publishing —
       # `NPM_CONFIG_PROVENANCE` is not needed and would be redundant.
       #
-      # All three packages (cel, sdk, auth) need their own trusted publisher
+      # All three packages (vh, sdk, auth) need their own trusted publisher
       # registered before this can succeed; if only some are registered,
       # `changeset publish` can publish those and fail on the rest. That is
       # recoverable, not corrupting: finish registering the remaining

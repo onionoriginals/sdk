@@ -14,7 +14,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 import { createDIDOriginal, updateDIDOriginal } from '../../../src/did/identity-operations.js';
 
 /** Assert the thrown value is the named domain-required StructuredError. */
@@ -32,7 +32,7 @@ async function expectDomainRequired(fn: () => Promise<unknown>): Promise<void> {
 async function makeSigner() {
   const { KeyManager } = await import('../../../src/did/KeyManager.js');
   const { Ed25519Signer } = await import('../../../src/crypto/Signer.js');
-  const { multikey } = await import('@originals/cel');
+  const { multikey } = await import('../../../src/crypto/Multikey');
   const { prepareDataForSigning } = await import('didwebvh-ts');
 
   const keyManager = new KeyManager();
@@ -109,7 +109,7 @@ describe('#678 — createDIDOriginal refuses to guess/mint at a blank domain', (
   }, 20000);
 });
 
-describe('createDIDOriginal/updateDIDOriginal apply the CEL WebVH domain canonicalizer', () => {
+describe('createDIDOriginal/updateDIDOriginal apply the WebVH domain canonicalizer', () => {
   test('createDIDOriginal rejects 127.0.0.1 with INVALID_DOMAIN before signing', async () => {
     const { signer, keyPair } = await makeSigner();
     let signs = 0;

@@ -1,10 +1,10 @@
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from './telemetry.js';
 
 /**
  * A process-local, non-reentrant, keyed mutex. A single shared instance is
- * threaded through OriginalsConfig so LifecycleManager, MigrationManager and
- * BitcoinManager coordinate on ONE lock instead of each keeping its own
- * per-instance in-flight Set (issue #303). Keyed by the canonical DID and
+ * threaded through OriginalsConfig so every BitcoinManager built from it
+ * coordinates on ONE lock instead of each keeping its own per-instance
+ * in-flight Set (issue #303). Keyed by the canonical DID and
  * claimed at the money-spending point (BitcoinManager.inscribeData), a second
  * concurrent inscription of the same DID cannot double-pay regardless of which
  * manager initiates it.

@@ -8,11 +8,9 @@
   "files": [
     "dist",
     "README.md",
-    "V3.md",
     "LICENSE"
   ],
   "bin": {
-    "originals-cel": "./dist/v3/cli.js",
     "originals": "./dist/originals/cli.js"
   },
   "sideEffects": false,
@@ -21,11 +19,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./cel": {
-      "types": "./dist/cel/index.d.ts",
-      "import": "./dist/cel/index.js",
-      "default": "./dist/cel/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
@@ -36,16 +29,6 @@
       "types": "./dist/types/public.d.ts",
       "import": "./dist/types/public.js",
       "default": "./dist/types/public.js"
-    },
-    "./v3": {
-      "types": "./dist/v3/index.d.ts",
-      "import": "./dist/v3/index.js",
-      "default": "./dist/v3/index.js"
-    },
-    "./asset-envelope": {
-      "types": "./dist/asset-envelope.d.ts",
-      "import": "./dist/asset-envelope.js",
-      "default": "./dist/asset-envelope.js"
     },
     "./originals": {
       "types": "./dist/originals/index.d.ts",
@@ -62,13 +45,12 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit -p .",
-    "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-cel3.ts",
-    "test": "bun test tests/integration && bun test tests/unit && bun test tests/security && bun test tests/stress && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
-    "test:coverage": "bun test tests/integration tests/unit --coverage",
+    "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-originals.ts",
+    "test": "bun test tests/unit && bun test tests/security && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
+    "test:coverage": "bun test tests/unit --coverage",
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
-    "test:ci": "bash -o pipefail -c 'bun test tests/integration tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
+    "test:ci": "bash -o pipefail -c 'bun test tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
     "test:security": "bun test tests/security",
-    "test:stress": "bun test tests/stress",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""
   },
@@ -97,12 +79,12 @@
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.1.0",
-    "@originals/cel": "^2.0.0",
     "@originals/vh": "^0.1.0",
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.2.0",
     "b58": "^4.0.3",
     "bitcoinjs-lib": "^7.0.2",
+    "cborg": "^6.1.1",
     "didwebvh-ts": "^2.8.0",
     "fflate": "^0.8.3",
     "jsonld": "^9.0.0",

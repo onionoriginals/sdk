@@ -15,11 +15,11 @@ import {
 import { StatusListManager, parseStatusListIndex, type StatusCheckResult } from './StatusListManager.js';
 import { canonicalizeDocument } from '../utils/serialization.js';
 import { computeCredentialDigest } from '../utils/credential-digest.js';
-import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '@originals/cel/encoding';
+import { encodeBase64UrlMultibase, decodeBase64UrlMultibase } from '../utils/encoding.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { signerForKeyType } from '../crypto/Signer.js';
-import { multikey } from '@originals/cel';
+import { multikey } from '../crypto/Multikey.js';
 import { DIDManager } from '../did/DIDManager.js';
 import { Issuer, VerificationMethodLike, isSecuritySigningRefusal } from './Issuer.js';
 import { createDocumentLoader } from './documentLoader.js';
@@ -29,7 +29,7 @@ import { validateStatusListCredentialTrust } from './statusListTrust.js';
 import { credentialStatusEntries, isCredentialStatusEntry, describeMalformedStatusEntry } from './credentialStatus.js';
 import { MultiSigManager } from './MultiSigManager.js';
 import type { MetricsCollector } from '../utils/MetricsCollector.js';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
 
 // ===== Credential Factory Types =====
 
@@ -682,8 +682,7 @@ export class CredentialManager {
       // decodePrivateKey throws a raw Error on malformed multibase input;
       // callers of the public signCredential seam need a stable .code to
       // branch on (CLAUDE.md: "Use StructuredError ... appropriate to the
-      // public seam"), matching LifecycleManager's INVALID_KEY for the same
-      // failure mode.
+      // public seam").
       throw new StructuredError(
         'INVALID_KEY',
         `Invalid privateKeyMultibase: ${(e as Error).message}`
@@ -811,8 +810,7 @@ export class CredentialManager {
       const docWithVMs = didDoc as DIDDocWithVMs;
       const vms = docWithVMs?.verificationMethod;
       if (Array.isArray(vms)) {
-        // Two-stage matching, mirroring the CEL key resolver
-        // (cel/keyResolver.ts): match the verification method by exact id
+        // Two-stage matching: match the verification method by exact id
         // first, then fall back to matching the fragment. DID documents may
         // publish a verification method under a relative id (e.g. "#keys-1")
         // while the proof references the absolute form
@@ -870,8 +868,8 @@ export class CredentialManager {
    * ```typescript
    * const credential = await credentialManager.issueResourceCredential(
    *   resource,
-   *   'did:cel:abc...',
-   *   'did:cel:creator...'
+   *   'did:vh:Qmabc...',
+   *   'did:vh:Qmcreator...'
    * );
    * // Sign the credential with your key
    * const signed = await credentialManager.signCredential(credential, privateKey, vmId);
@@ -980,9 +978,9 @@ export class CredentialManager {
    * @example
    * ```typescript
    * const credential = await credentialManager.issueMigrationCredential(
-   *   'did:cel:abc...',
+   *   'did:vh:Qmabc...',
    *   'did:webvh:example.com:asset',
-   *   'did:cel',
+   *   'did:vh',
    *   'did:webvh',
    *   'did:webvh:example.com:publisher'
    * );

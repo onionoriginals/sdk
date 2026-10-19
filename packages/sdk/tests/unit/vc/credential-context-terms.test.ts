@@ -5,28 +5,25 @@ import type { OriginalsConfig } from '../../../src/types';
 import { DIDManager } from '../../../src/did/DIDManager';
 
 /**
- * #371 (narrowed): the ONLY credential the live lifecycle emits is the
- * `ResourceMigrated` credential from `LifecycleManager.issuePublicationCredential`
- * (attached to `asset.credentials` during publishToWeb). Its subject
+ * #371 (narrowed): a `ResourceMigrated` credential's subject
  * ({ id, migratedTo, resourceId, fromLayer, toLayer, migratedAt }) must be fully
  * defined by the Originals context the credential declares — otherwise `@vocab`
  * absorbs the undefined terms into a different namespace (`…/vocab#X`) than the
- * defined ones. Verification is CEL-based (verifyEventLog never reads credentials),
- * so this is about the emitted credential being well-formed JSON-LD, and a guard
+ * defined ones. This is about the emitted credential being well-formed JSON-LD, and a guard
  * so a new ResourceMigrated subject field can't ship without a context entry.
  *
  * The other CredentialManager factory methods (MigrationCompleted /
  * OwnershipTransferred / ResourceCreated / ResourceUpdated) and the
  * KeyRecoveryCredential have NO internal callers — deliberately not gold-plated
- * here; whether they stay at all is the VC-vs-CEL question in #370/#405.
+ * here; whether they stay at all is the question in #370/#405.
  */
 const config = { network: 'regtest', defaultKeyType: 'Ed25519' } as unknown as OriginalsConfig;
 const cm = new CredentialManager(config, new DIDManager(config as never));
 
-// Mirror the subject issuePublicationCredential builds (LifecycleManager).
+// A ResourceMigrated subject with every declared field.
 const resourceMigrated = cm.createResourceCredential(
   'ResourceMigrated',
-  { id: 'did:cel:x', migratedTo: 'did:webvh:x', resourceId: 'res-1', fromLayer: 'did:cel', toLayer: 'did:webvh', migratedAt: '2026-01-01T00:00:00Z' } as never,
+  { id: 'did:vh:x', migratedTo: 'did:webvh:x', resourceId: 'res-1', fromLayer: 'did:vh', toLayer: 'did:webvh', migratedAt: '2026-01-01T00:00:00Z' } as never,
   'did:key:zIssuer'
 );
 

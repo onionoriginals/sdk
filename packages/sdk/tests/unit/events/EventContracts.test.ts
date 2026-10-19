@@ -11,19 +11,8 @@ import type {
   BatchCompletedEvent,
   BatchFailedEvent,
   BatchProgressEvent,
-  MigrationStartedEvent,
-  MigrationValidatedEvent,
-  MigrationCheckpointedEvent,
-  MigrationInProgressEvent,
-  MigrationAnchoringEvent,
-  MigrationCompletedEvent,
-  MigrationFailedEvent,
-  MigrationRolledbackEvent,
-  MigrationQuarantineEvent,
   OriginalsEvent,
 } from '../../../src/events/types';
-import type { MigrationError } from '../../../src/migration/types';
-import { MigrationErrorType } from '../../../src/migration/types';
 
 /**
  * Golden contract tests for event payload shapes.
@@ -275,145 +264,6 @@ describe('Event contract tests — exact payload shapes', () => {
       'batchId', 'completed', 'failed', 'operation', 'progress', 'timestamp', 'total', 'type',
     ]);
   });
-
-  test('MigrationStartedEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:started' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      sourceDid: 'did:peer:z123',
-      targetLayer: 'did:webvh',
-    } satisfies MigrationStartedEvent;
-
-    expect(sortedKeys(event)).toEqual(['migrationId', 'sourceDid', 'targetLayer', 'timestamp', 'type']);
-  });
-
-  test('MigrationValidatedEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:validated' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      valid: true,
-    } satisfies MigrationValidatedEvent;
-
-    expect(sortedKeys(event)).toEqual(['migrationId', 'timestamp', 'type', 'valid']);
-  });
-
-  test('MigrationCheckpointedEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:checkpointed' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      checkpointId: 'cp-1',
-    } satisfies MigrationCheckpointedEvent;
-
-    expect(sortedKeys(event)).toEqual(['checkpointId', 'migrationId', 'timestamp', 'type']);
-  });
-
-  test('MigrationInProgressEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:in_progress' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      currentOperation: 'resolving DID',
-      progress: 0.3,
-    } satisfies MigrationInProgressEvent;
-
-    expect(sortedKeys(event)).toEqual(['currentOperation', 'migrationId', 'progress', 'timestamp', 'type']);
-  });
-
-  test('MigrationAnchoringEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:anchoring' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      transactionId: 'tx789',
-    } satisfies MigrationAnchoringEvent;
-
-    expect(sortedKeys(event)).toEqual(['migrationId', 'timestamp', 'transactionId', 'type']);
-  });
-
-  test('MigrationCompletedEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:completed' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      sourceDid: 'did:peer:z123',
-      targetDid: 'did:webvh:z456',
-    } satisfies MigrationCompletedEvent;
-
-    expect(sortedKeys(event)).toEqual(['migrationId', 'sourceDid', 'targetDid', 'timestamp', 'type']);
-  });
-
-  test('MigrationFailedEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:failed' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      // The emitter (MigrationManager.handleMigrationError) emits a
-      // MigrationError, so the contract must accept that exact shape.
-      error: {
-        type: MigrationErrorType.UNKNOWN_ERROR,
-        code: 'DID_RESOLVE_ERROR',
-        message: 'DID resolution failed',
-        timestamp: Date.now(),
-      } satisfies MigrationError,
-    } satisfies MigrationFailedEvent;
-
-    expect(sortedKeys(event)).toEqual(['error', 'migrationId', 'timestamp', 'type']);
-  });
-
-  test('MigrationFailedEvent.error accepts the full MigrationError payload emitted by MigrationManager', () => {
-    // This mirrors the object constructed at MigrationManager.ts (handleMigrationError),
-    // which is what is actually passed to emitEvent('migration:failed', ...).
-    const migrationError: MigrationError = {
-      type: MigrationErrorType.UNKNOWN_ERROR,
-      code: 'MIGRATION_FAILED',
-      message: 'boom',
-      technicalDetails: 'stack trace here',
-      suggestedRecovery: 'retry',
-      migrationId: 'mig-1',
-      sourceDid: 'did:peer:abc',
-      targetDid: 'did:webvh:example.com:abc',
-      timestamp: Date.now(),
-      stack: 'Error: boom\n  at ...',
-    };
-
-    const event = {
-      type: 'migration:failed' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      error: migrationError,
-    } satisfies MigrationFailedEvent;
-
-    // The contract field must surface MigrationError-specific properties.
-    expect(event.error.type).toBe(MigrationErrorType.UNKNOWN_ERROR);
-    expect(event.error.code).toBe('MIGRATION_FAILED');
-    expect(typeof event.error.timestamp).toBe('number');
-  });
-
-  test('MigrationRolledbackEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:rolledback' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      checkpointId: 'cp-1',
-    } satisfies MigrationRolledbackEvent;
-
-    expect(sortedKeys(event)).toEqual(['checkpointId', 'migrationId', 'timestamp', 'type']);
-  });
-
-  test('MigrationQuarantineEvent has exactly the declared fields', () => {
-    const event = {
-      type: 'migration:quarantine' as const,
-      timestamp,
-      migrationId: 'mig-1',
-      checkpointId: 'cp-1',
-      reason: 'Inconsistent state detected',
-    } satisfies MigrationQuarantineEvent;
-
-    expect(sortedKeys(event)).toEqual(['checkpointId', 'migrationId', 'reason', 'timestamp', 'type']);
-  });
 });
 
 describe('OriginalsEvent union — discriminated by type field', () => {
@@ -432,19 +282,10 @@ describe('OriginalsEvent union — discriminated by type field', () => {
       'batch:failed',
       'batch:progress',
       'resource:version:created',
-      'migration:started',
-      'migration:validated',
-      'migration:checkpointed',
-      'migration:in_progress',
-      'migration:anchoring',
-      'migration:completed',
-      'migration:failed',
-      'migration:rolledback',
-      'migration:quarantine',
     ];
 
     const unique = new Set(allTypes);
     expect(unique.size).toBe(allTypes.length);
-    expect(allTypes.length).toBe(20);
+    expect(allTypes.length).toBe(11);
   });
 });

@@ -15,9 +15,6 @@ const vhEntries = Object.values(vhExports)
   .map((value) => `packages/vh/${value.import.replace(/^\.\//, '')}`);
 const additionalEntries = [
   ...vhEntries,
-  'packages/sdk/dist/lifecycle/LifecycleManager.js',
-  'packages/sdk/dist/lifecycle/OriginalsAsset.js',
-  'packages/cel/dist/index.js',
   'packages/auth/dist/index.js',
   'packages/auth/dist/client/index.js',
 ];
@@ -28,6 +25,8 @@ function checkFixture(t, changedEntry, source) {
   mkdirSync(join(root, 'scripts'));
   writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
   copyFileSync(new URL('./check-browser-safety.mjs', import.meta.url), join(root, 'scripts/check-browser-safety.mjs'));
+  mkdirSync(join(root, 'packages/sdk'), { recursive: true });
+  writeFileSync(join(root, 'packages/sdk/package.json'), JSON.stringify({ type: 'module', exports: sdkExports }));
   for (const entry of [...sdkEntries, ...additionalEntries]) {
     mkdirSync(dirname(join(root, entry)), { recursive: true });
     writeFileSync(join(root, entry), entry === changedEntry ? source : 'export const safe = true;');
@@ -54,7 +53,7 @@ test('browser gate rejects an eager Node builtin in an @originals/vh entry', (t)
   assert.ok(result.stderr.includes(`✗ ${target}`));
 });
 
-for (const entry of ['v3/index.js', 'testing/index.js', 'types/public.js']) {
+for (const entry of ['index.js', 'originals/index.js', 'testing/index.js', 'types/public.js']) {
   const target = `packages/sdk/dist/${entry}`;
   test(`browser gate rejects an eager Node builtin in ${entry}`, (t) => {
     const result = checkFixture(t, target, "import 'node:fs';");

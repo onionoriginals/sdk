@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { createBitcoinCoreChainValidator } from '../packages/sdk/dist/index.js';
+import { createBitcoinCoreChainValidator } from '../packages/sdk/dist/bitcoin/chain-validation.js';
 test('Node fetch authenticates a Core RPC endpoint using headers', async () => {
   const hash = 'a'.repeat(64); let requests = 0;
   const server = createServer((req, res) => {

@@ -90,13 +90,13 @@ boundaries and encoded as UTF-8. Hashes, byte counts, hosted bodies, and ordinal
 content use the original bytes. New SDK envelopes use version 4 and canonical
 `ni` asset identity; strict version-3 Originals envelopes remain readable.
 The signed event format is unchanged CEL 3. See
-[the current identity contract](../../specs/originals-asset-identity.md) and
-[SDK 4 migration](../MIGRATION_4.0.md).
+[the CEL 3 identity contract](https://github.com/onionoriginals/sdk/blob/00fc683d0aa7f746904a14fa1f88336f09711ff5/specs/originals-asset-identity.md) and
+[SDK 4 migration](https://github.com/onionoriginals/sdk/blob/00fc683d0aa7f746904a14fa1f88336f09711ff5/docs/MIGRATION_4.0.md) (both deleted in plan 011 PR 5).
 
 The journey verifies raw media with CEL CBOR metadata at the Bitcoin boundary,
 then exact delta publications (including log-only `application/cel` bodies),
 controller rotation, sale/reacquisition, reorgs and deactivation. No DID document
-is inscribed. It enforces the [inscription decision](../../specs/btco-inscription-shape.md).
+is inscribed. It enforces the [inscription decision](https://github.com/onionoriginals/sdk/blob/00fc683d0aa7f746904a14fa1f88336f09711ff5/specs/btco-inscription-shape.md).
 
 ## SDK and landing configuration
 

@@ -18,7 +18,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { WebVHManager, computeNextKeyHash, normalizeUpdateKey } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 
 describe('normalizeUpdateKey', () => {
   const multikey = 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';

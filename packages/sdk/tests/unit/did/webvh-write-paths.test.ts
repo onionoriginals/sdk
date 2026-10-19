@@ -1,4 +1,3 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for the did:webvh write-path cluster (issues #338, #339,
  * #334): WebVHManager's calls into didwebvh-ts must match the options the
@@ -21,7 +20,7 @@ import { describe, test, expect, spyOn } from 'bun:test';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Verifier } from '../../../src/did/Ed25519Verifier';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import type { DIDDocument, VerifiableCredential } from '../../../src/types';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
@@ -375,7 +374,7 @@ describe('#334 — relationship arrays reference the published signing VM', () =
   }, 30000);
 
   test('create → resolve from log → verifyCredential succeeds (the #334 repro)', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const created = await sdk.did.createDIDWebVH({ domain: 'example.com' });
 
     // Resolve the document from the signed log — the correct trust path a
@@ -420,7 +419,7 @@ describe('#334 — relationship arrays reference the published signing VM', () =
       prepareDataForSigning: (document: Record<string, unknown>, proof: Record<string, unknown>) => Promise<Uint8Array>;
     };
     const { Ed25519Signer } = await import('../../../src/crypto/Signer');
-    const { multikey } = await import('@originals/cel');
+    const { multikey } = await import('../../../src/crypto/Multikey');
     const raw = new Ed25519Signer();
     const externalSigner = {
       getVerificationMethodId: () => `did:key:${keyPair.publicKey}`,

@@ -19,7 +19,7 @@
  */
 
 import * as ed from '@noble/ed25519';
-import { OriginalsSDK, encoding, base58AddressToEd25519Multikey } from '@originals/sdk';
+import { encoding, base58AddressToEd25519Multikey, createDIDOriginal, prepareDIDDataForSigning } from '@originals/sdk';
 import type { ExternalSigner, ExternalVerifier } from '@originals/sdk';
 import { turnkeySignBytes } from '@originals/auth';
 import { asTurnkeyApiClient, type TurnkeyBitcoinClient } from './turnkey-session';
@@ -74,7 +74,7 @@ export class BrowserWebVHSigner implements ExternalSigner, ExternalVerifier {
     document: Record<string, unknown>;
     proof: Record<string, unknown>;
   }): Promise<{ proofValue: string }> {
-    const bytes = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
+    const bytes = await prepareDIDDataForSigning(input.document, input.proof);
     const signature = await ed.signAsync(bytes, this.privateKey);
     return { proofValue: encoding.multibase.encode(signature, 'base58btc') };
   }
@@ -127,7 +127,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
     if (typeof this.client.signRawPayload !== 'function') {
       throw new WebVHIdentityError('no-key', 'This Turnkey client cannot sign raw payloads');
     }
-    const bytes = await OriginalsSDK.prepareDIDDataForSigning(input.document, input.proof);
+    const bytes = await prepareDIDDataForSigning(input.document, input.proof);
     const signature = await turnkeySignBytes(
       { turnkeyClient: asTurnkeyApiClient(this.client), organizationId: this.subOrgId, signWith: this.signWith },
       bytes
@@ -191,7 +191,7 @@ export async function buildUserWebVHDid(
 ): Promise<WebVHDidResult> {
   const publicKeyMultibase = signer.getPublicKeyMultibase();
   const authorship = opts.authorshipPublicKeyMultibase;
-  const result = await OriginalsSDK.createDIDOriginal({
+  const result = await createDIDOriginal({
     type: 'did',
     domain: opts.domain,
     signer,

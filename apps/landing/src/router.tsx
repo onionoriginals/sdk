@@ -9,37 +9,15 @@
  */
 import { useEffect, useState } from 'react';
 
-export type RouteName = 'landing' | 'explore' | 'explore-original' | 'your-originals' | 'original-detail' | 'privacy' | 'terms';
+// /explore and /me (hosted and inscribed Originals) are rebuilt on the Originals
+// Protocol with web publication and Bitcoin anchoring (plan 011, PRs 8 and 10).
+// Until then their paths fall through to the landing page.
+export type RouteName = 'landing' | 'privacy' | 'terms';
 
 export function routeForPath(pathname: string): RouteName {
-  if (pathname === '/explore') return 'explore';
-  if (pathname.startsWith('/explore/') && exploreDidFromPath(pathname)) return 'explore-original';
-  if (pathname === '/me') return 'your-originals';
-  if (pathname.startsWith('/me/') && didFromPath(pathname)) return 'original-detail';
   if (pathname === '/privacy') return 'privacy';
   if (pathname === '/terms') return 'terms';
   return 'landing';
-}
-
-/** Path for a single Original's detail page. The DID is one encoded segment. */
-export function originalPath(did: string): string {
-  return `/me/${encodeURIComponent(did)}`;
-}
-
-/**
- * The DID encoded in an '/me/<did>' path, or null when the path isn't one
- * (including a malformed percent-encoding, which decodeURIComponent throws on).
- */
-export function didFromPath(pathname: string): string | null {
-  if (!pathname.startsWith('/me/')) return null;
-  const seg = pathname.slice('/me/'.length);
-  if (!seg || seg.includes('/')) return null;
-  try {
-    const did = decodeURIComponent(seg);
-    return did.startsWith('did:') ? did : null;
-  } catch {
-    return null;
-  }
 }
 
 const NAV_EVENT = 'originals:navigate';
@@ -90,9 +68,4 @@ export function useLocationPath(): string {
     };
   }, []);
   return path;
-}
-
-export function exploreOriginalPath(did: string): string { return `/explore/${encodeURIComponent(did)}`; }
-export function exploreDidFromPath(pathname: string): string | null {
-  return pathname.startsWith('/explore/') ? didFromPath('/me/' + pathname.slice('/explore/'.length)) : null;
 }

@@ -14,7 +14,7 @@ credential.
 
 Trusted publishing requires a publisher registered on npmjs.com for **each**
 published package — this is npm account configuration, not something a
-workflow change can do. For every package (`@originals/cel`, `@originals/vh`, `@originals/sdk`,
+workflow change can do. For every package (`@originals/vh`, `@originals/sdk`,
 `@originals/auth`):
 
 1. Sign into npmjs.com, open the package's Settings, and add a GitHub Actions
@@ -84,9 +84,9 @@ npm's 90-day maximum for write-capable granular tokens, October 25 is an upper
 bound for a token created no later than that update, not a confirmed expiry.
 Verify the actual date in npm before relying on it.
 
-All three packages already exist in the registry: `@originals/sdk`,
-`@originals/cel`, and `@originals/auth`. Earlier instructions saying CEL needed
-its first package publication are obsolete. Grant access to the `@originals`
+The released packages are `@originals/vh`, `@originals/sdk` and
+`@originals/auth`. `@originals/cel` is no longer released from this repository:
+its source was deleted in plan 011 PR 5. Grant access to the `@originals`
 scope or explicitly include all three packages.
 
 The subsequent read-only runner check confirmed the stored token expires at
@@ -146,7 +146,7 @@ release, at which point the token and this rotation chore can be retired.
    `NPM_TOKEN_EXPIRES_AT` (ISO date). Do not substitute the secret-update date or
    the 90-day upper bound.
 5. Run the read-only credential observations. Inspect account and token scope
-   independently; confirm SDK, CEL and auth are all covered.
+   independently; confirm vh, SDK and auth are all covered.
 6. Revoke the superseded token in npm after validating the replacement. Replacing
    a GitHub secret does not revoke the old npm credential.
 

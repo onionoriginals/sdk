@@ -1,4 +1,3 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Security regressions for the 2026-07 issue batch:
  *
@@ -18,11 +17,11 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import * as ed25519 from '@noble/ed25519';
 import { Verifier } from '../../src/vc/Verifier';
 import { Issuer, isSecuritySigningRefusal } from '../../src/vc/Issuer';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import { registerVerificationMethod } from '../../src/vc/documentLoader';
 import { DIDManager } from '../../src/did/DIDManager';
-import { OriginalsSDK } from '../previous-sdk';
-import { StructuredError } from '@originals/cel';
+import { createManagers } from '../fixtures/managers';
+import { StructuredError } from '../../src/utils/telemetry';
 import { MockOrdinalsProvider } from '../mocks/adapters';
 import { MemoryStorageAdapter } from '../../src/storage/MemoryStorageAdapter';
 import type { MultiSigPolicy, VerifiableCredential } from '../../src/types';
@@ -112,7 +111,7 @@ describe('#340 — Verifier.verifyCredentialMultiSig enforces validity and revoc
 
 describe('#345 — low-level revocation helpers bind the supplied list', () => {
   test('checkRevocationStatus rejects a status list whose id differs from the credential reference', () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
     const entry = sdk.statusList.allocateStatusEntry('https://issuer.example/status/1', 3, 'revocation');
     const credential = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -189,27 +188,3 @@ describe('#312 — cross-network did:btco documents cannot be served from cache'
   });
 });
 
-describe('#351 — cost quotes apply the MAX_REASONABLE_FEE_RATE cap', () => {
-  test('an absurd fee-oracle estimate is ignored for estimateCost quotes', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
-      network: 'regtest',
-      storageAdapter: new MemoryStorageAdapter(),
-      ordinalsProvider: new MockOrdinalsProvider(),
-      feeOracle: { estimateFeeRate: async () => 5_000_000 } // compromised estimator
-    } as never);
-    const asset = await sdk.lifecycle.createAsset([
-      {
-        id: 'res1',
-        type: 'text',
-        content: 'hello world',
-        contentType: 'text/plain',
-        hash: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
-      }
-    ]);
-
-    const estimate = await sdk.lifecycle.estimateCost(asset, 'did:btco');
-    // The absurd oracle rate is skipped; the quote falls through to the next
-    // source (mock provider) or the conservative default — never 5M sat/vB.
-    expect(estimate.feeRate).toBeLessThanOrEqual(10_000);
-  });
-});

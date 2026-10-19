@@ -1,6 +1,6 @@
 import { DIDDocument, VerificationMethod } from '../types/did.js';
-import { multikey, MultikeyType } from '@originals/cel';
-import { canonicalizeSatoshi } from '@originals/cel';
+import { multikey, MultikeyType } from '../crypto/Multikey.js';
+import { canonicalizeSatoshi } from '../utils/satoshi-validation.js';
 
 export type BitcoinNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 

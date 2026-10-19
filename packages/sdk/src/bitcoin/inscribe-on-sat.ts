@@ -2,8 +2,8 @@ import * as btc from '@scure/btc-signer';
 import { Utxo } from '../types/bitcoin.js';
 import { BitcoinSigner } from '../types/common.js';
 import { OrdinalsProvider } from '../adapters/types.js';
-import { StructuredError } from '@originals/cel';
-import { validateSatoshiNumber } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
+import { validateSatoshiNumber } from '../utils/satoshi-validation.js';
 import { createCommitTransaction, createRevealTransaction } from './transactions/commit.js';
 import { scriptPubKeyForAddress } from './transfer.js';
 import { submitPreparedInscriptionOnSat } from './inscription-recovery.js';
@@ -76,7 +76,7 @@ export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Prom
   const v = validateSatoshiNumber(satoshi);
   if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Provider returned invalid sat: ${v.error}`);
 
-  // 2) Build content embedding did:btco:<sat> (caller's closure appends the CEL migrate event).
+  // 2) Build content embedding did:btco:<sat> (the caller's closure).
   const { content, contentType, metadata } = await buildContent(satoshi);
 
   // 3) Unsigned commit: the declared funding inputs (identity first),

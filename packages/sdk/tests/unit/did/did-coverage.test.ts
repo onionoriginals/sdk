@@ -24,7 +24,7 @@ import { DIDManager } from '../../../src/did/DIDManager';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
 import type { ExternalSigner, ExternalVerifier, OriginalsConfig } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
@@ -93,8 +93,8 @@ async function buildMockExternalSigner(keyManager: KeyManager): Promise<{
 // DID-001 — Create did:peer with ES256K key type → ES256K key material encoded
 // ---------------------------------------------------------------------------
 
-// DID-001 removed (did:peer purge, did:cel Phase 4·5/5): createDIDPeer and the
-// did:peer creation path are gone; did:cel is the sole genesis layer.
+// DID-001 removed (did:peer purge): createDIDPeer and the
+// did:peer creation path are gone.
 
 // ---------------------------------------------------------------------------
 // DID-002 — migrateToDIDWebVH requires an explicit domain (#531)
@@ -109,7 +109,7 @@ describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
     'webvhNetwork=%s → omitting domain throws WEBVH_DOMAIN_REQUIRED (no default host)',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
-      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: `did:cel:did002-${webvhNetwork}` };
+      const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: `did:vh:did002-${webvhNetwork}` };
 
       let thrown: unknown;
       try {
@@ -128,7 +128,7 @@ describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
       webvhNetwork: 'magby',
     });
 
-    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:cel:did002-override' };
+    const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:vh:did002-override' };
     const webDoc = (await manager.migrateToDIDWebVH(sourceDoc, 'custom.example.com')).didDocument;
 
     expect(webDoc.id).toContain('custom.example.com');

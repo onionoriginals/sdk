@@ -1,4 +1,3 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for the multi-issue review sweep. Per CLAUDE.md,
  * security-sensitive code requires coverage under tests/security/ — these
@@ -11,13 +10,10 @@ import { DIDCache } from '../../src/did/DIDCache';
 import { MultiSigManager } from '../../src/vc/MultiSigManager';
 import { DIDManager } from '../../src/did/DIDManager';
 import { KeyManager } from '../../src/did/KeyManager';
-import { AuditLogger } from '../../src/migration/audit/AuditLogger';
-import { validateAndNormalizeDomain } from '../../src/lifecycle/domainUtils';
-import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '@originals/cel';
+import { validateSatoshiNumber, MAX_SATOSHI_SUPPLY } from '../../src/utils/satoshi-validation';
 import { MetricsCollector } from '../../src/utils/MetricsCollector';
 import type { DIDDocument } from '../../src/types';
 import type { MultiSigPolicy, OriginalsConfig, VerifiableCredential } from '../../src/types';
-import { MigrationStateEnum } from '../../src/migration/types';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 
 describe('DID cache returns copies, not internal references (issue #291)', () => {
@@ -126,66 +122,6 @@ describe('Multi-sig sessions reject unverified contributions (issue #287)', () =
   });
 });
 
-describe('Migration audit log is tamper-resistant (issue #281)', () => {
-  const config = { network: 'regtest' } as unknown as OriginalsConfig;
-
-  const makeRecord = (sourceDid: string, targetDid: string) => ({
-    migrationId: 'mig-1',
-    timestamp: 1_700_000_000_000,
-    initiator: 'tester',
-    sourceDid,
-    sourceLayer: 'peer' as const,
-    targetDid,
-    targetLayer: 'webvh' as const,
-    finalState: MigrationStateEnum.COMPLETED,
-    validationResults: { valid: true, errors: [] } as never,
-    costActual: {} as never,
-    duration: 5,
-    errors: [],
-    metadata: {},
-  });
-
-  test('getMigrationHistory returns copies; caller mutation cannot corrupt the log', async () => {
-    const logger = new AuditLogger(config);
-    await logger.logMigration(makeRecord('did:peer:src', 'did:webvh:example.com:dst') as never);
-
-    const history = await logger.getMigrationHistory('did:peer:src');
-    expect(history.length).toBe(1);
-    // Tamper with the returned records.
-    history.pop();
-    const again = await logger.getMigrationHistory('did:peer:src');
-    expect(again.length).toBe(1);
-
-    again[0].finalState = MigrationStateEnum.FAILED;
-    const third = await logger.getMigrationHistory('did:peer:src');
-    expect(third[0].finalState).toBe(MigrationStateEnum.COMPLETED);
-  });
-
-  test('records are not shared between the source and target DID histories', async () => {
-    const logger = new AuditLogger(config);
-    await logger.logMigration(makeRecord('did:peer:src', 'did:webvh:example.com:dst') as never);
-
-    const srcHistory = await logger.getMigrationHistory('did:peer:src');
-    srcHistory[0].targetDid = 'did:webvh:evil:pwned';
-
-    const dstHistory = await logger.getMigrationHistory('did:webvh:example.com:dst');
-    expect(dstHistory[0].targetDid).toBe('did:webvh:example.com:dst');
-  });
-});
-
-describe('Domain validation rejects malformed IPv4 (issue #292)', () => {
-  test('out-of-range octets are rejected', () => {
-    expect(() => validateAndNormalizeDomain('999.999.999.999')).toThrow(/0-255|Invalid domain/);
-    expect(() => validateAndNormalizeDomain('256.1.1.1')).toThrow(/0-255|Invalid domain/);
-  });
-
-  test('valid IPv4 and hostnames still pass', () => {
-    expect(validateAndNormalizeDomain('192.168.1.1')).toBe('192.168.1.1');
-    expect(validateAndNormalizeDomain('example.com')).toBe('example.com');
-    expect(validateAndNormalizeDomain('localhost')).toBe('localhost');
-  });
-});
-
 describe('Satoshi upper bound excludes non-existent ordinals (issue #292)', () => {
   test('the nominal 21M-BTC figure is now rejected', () => {
     expect(MAX_SATOSHI_SUPPLY).toBe(2_099_999_997_689_999);
@@ -194,34 +130,6 @@ describe('Satoshi upper bound excludes non-existent ordinals (issue #292)', () =
 
   test('the true last ordinal is accepted', () => {
     expect(validateSatoshiNumber('2099999997689999').valid).toBe(true);
-  });
-});
-
-describe('publishToWeb rejects path-traversal in did:webvh (issue #274)', () => {
-  test('a did:webvh whose path segments contain ".." is rejected', async () => {
-    const { OriginalsSDK } = await import('../previous-sdk');
-    const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
-    const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
-    ]);
-
-    // A crafted SCID-form DID with traversal segments after the domain.
-    const malicious = 'did:webvh:QmSCIDplaceholderplaceholderplaceholder:example.com:..:..:etc';
-    await expect(sdk.lifecycle.publishToWeb(asset, malicious)).rejects.toThrow(/path segment|Invalid did:webvh/i);
-  });
-
-  test('a domain that percent-decodes to a traversal path is rejected', async () => {
-    const { OriginalsSDK } = await import('../previous-sdk');
-    const { MemoryStorageAdapter } = await import('../../src/storage/MemoryStorageAdapter');
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), storageAdapter: new MemoryStorageAdapter(), network: 'regtest' });
-    const asset = await sdk.lifecycle.createAsset([
-      { id: 'r1', type: 'text', content: 'hello', contentType: 'text/plain', hash: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824' },
-    ]);
-
-    // did:webvh:{SCID}:{domain} where the domain decodes to '../../etc'.
-    const malicious = 'did:webvh:QmSCIDplaceholderplaceholderplaceholder:..%2F..%2Fetc';
-    await expect(sdk.lifecycle.publishToWeb(asset, malicious)).rejects.toThrow(/Invalid domain|Invalid did:webvh/i);
   });
 });
 

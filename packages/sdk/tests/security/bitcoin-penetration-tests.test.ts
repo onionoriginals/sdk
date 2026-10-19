@@ -6,17 +6,15 @@
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { OriginalsSDK } from '../../src/core/OriginalsSDK';
 import { OrdMockProvider } from '../../src/adapters/providers/OrdMockProvider';
 import { BitcoinManager } from '../../src/bitcoin/BitcoinManager';
 import { PSBTBuilder } from '../../src/bitcoin/PSBTBuilder';
 import { selectUtxos, selectResourceUtxos } from '../../src/bitcoin/utxo-selection';
 import { validateBitcoinAddress } from '../../src/utils/bitcoin-address';
-import { validateSatoshiNumber, parseSatoshiIdentifier } from '@originals/cel';
+import { validateSatoshiNumber, parseSatoshiIdentifier } from '../../src/utils/satoshi-validation';
 import type { Utxo, ResourceUtxo, OriginalsConfig } from '../../src/types';
 
 describe('Bitcoin Penetration Tests - Security Audit', () => {
-  let sdk: OriginalsSDK;
   let bitcoinManager: BitcoinManager;
   let config: OriginalsConfig;
 
@@ -27,7 +25,6 @@ describe('Bitcoin Penetration Tests - Security Audit', () => {
       ordinalsProvider: new OrdMockProvider(),
       enableLogging: false
     };
-    sdk = OriginalsSDK.create(config);
     bitcoinManager = new BitcoinManager(config);
   });
 

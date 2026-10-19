@@ -9,8 +9,8 @@ const config: any = {
 };
 
 // Regression test for plan 028: CredentialManager.resolveVerificationMethodMultibase
-// fallback must use two-stage matching (exact id, then fragment), mirroring the CEL
-// keyResolver. Previously the fallback used an exact string match only, so a DID
+// fallback must use two-stage matching (exact id, then fragment). Previously the
+// fallback used an exact string match only, so a DID
 // document that publishes a verification method under a *relative* id
 // (e.g. "#keys-1") would not be found when the proof references the *absolute*
 // form ("did:webvh:example.com:asset#keys-1"), causing legitimate credentials

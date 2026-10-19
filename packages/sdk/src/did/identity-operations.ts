@@ -4,7 +4,7 @@ import type {
   VerificationMethod,
   ServiceEndpoint,
 } from "../types/did.js";
-import { StructuredError } from "@originals/cel";
+import { StructuredError } from '../utils/telemetry.js';
 import { createDID } from "didwebvh-ts";
 import { requireWebVHDomain } from "./DIDManager.js";
 import {

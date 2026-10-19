@@ -1,4 +1,3 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Bitcoin coverage gap tests
  *
@@ -9,7 +8,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import { OrdMockProvider } from '../../../src/adapters/providers/OrdMockProvider';
 import { PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder';
 import { createCommitTransaction } from '../../../src/bitcoin/transactions/commit';
@@ -34,7 +33,7 @@ function makeUtxo(value: number, index = 0): Utxo {
 
 /** Create an SDK backed by OrdMockProvider (regtest). */
 function makeSdk(feeRate?: number) {
-  return OriginalsSDK.create({ keyStore: new MockKeyStore(),
+  return createManagers({ keyStore: new MockKeyStore(),
     network: 'regtest',
     ordinalsProvider: new OrdMockProvider({ feeRate: feeRate ?? 5 })
   } as any);
@@ -285,7 +284,7 @@ describe('BITCOIN-005: getSatoshiFromInscription happy path', () => {
   });
 
   test('returns null when no ordinalsProvider is configured', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'regtest' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), network: 'regtest' });
     const result = await sdk.bitcoin.getSatoshiFromInscription('any-id');
     expect(result).toBeNull();
   });
@@ -587,7 +586,7 @@ describe('BITCOIN-019: createCommitTransaction happy path', () => {
 describe('BITCOIN-020: fee rate resolution (oracle preferred, provider fallback)', () => {
   test('feeOracle value is used when present (overrides provider)', async () => {
     const oracleRate = 42;
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: new OrdMockProvider({ feeRate: 5 }),
       feeOracle: { estimateFeeRate: async () => oracleRate }
@@ -600,7 +599,7 @@ describe('BITCOIN-020: fee rate resolution (oracle preferred, provider fallback)
 
   test('provider estimateFee is used as fallback when no feeOracle is set', async () => {
     const providerRate = 7;
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: new OrdMockProvider({ feeRate: providerRate })
       // no feeOracle
@@ -613,7 +612,7 @@ describe('BITCOIN-020: fee rate resolution (oracle preferred, provider fallback)
 
   test('feeOracle returning non-finite value falls back to provider', async () => {
     // BitcoinManager skips non-finite oracle values and falls back to ord provider
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: new OrdMockProvider({ feeRate: 5 }),
       feeOracle: { estimateFeeRate: async () => NaN }
@@ -625,7 +624,7 @@ describe('BITCOIN-020: fee rate resolution (oracle preferred, provider fallback)
   });
 
   test('feeOracle throwing falls back gracefully to provider', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: new OrdMockProvider({ feeRate: 5 }),
       feeOracle: {
@@ -673,7 +672,7 @@ describe('BITCOIN-020: fee rate resolution (oracle preferred, provider fallback)
       async estimateFee() { return 0; } // invalid → triggers last-resort
     };
 
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: zeroFeeProvider
     } as any);

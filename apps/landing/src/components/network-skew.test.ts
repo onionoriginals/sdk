@@ -90,6 +90,7 @@ test('regtest completion and description name the local chain and provide no pub
   const { completionCopy, demoSubhead, inscribeStepView } = await import('./demo-logic');
   expect(completionCopy(false, 'regtest').lead).toMatch(/local.*regtest/i);
   expect(completionCopy(false, 'regtest').explorerLabel).toBeNull();
-  expect(demoSubhead(true, 'regtest')).toContain('test coins');
+  // While anchoring is off (features.ts) no tier's subhead promises a regtest Bitcoin step.
+  expect(demoSubhead(true, 'regtest')).toMatch(/return soon/i);
   expect(inscribeStepView(true, 'regtest').description).toContain('bcrt');
 });

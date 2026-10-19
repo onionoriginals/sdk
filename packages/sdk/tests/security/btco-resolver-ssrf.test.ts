@@ -1,6 +1,5 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, afterEach } from 'bun:test';
-import { OriginalsSDK } from '../previous-sdk';
+import { createManagers } from '../fixtures/managers';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient';
 import { OrdinalsClientProviderAdapter } from '../../src/did/providers/OrdinalsClientProviderAdapter';
 import { MockKeyStore } from '../mocks/MockKeyStore';
@@ -176,7 +175,7 @@ describe('OrdinalsClientProviderAdapter same-origin RELATIVE content_url canonic
       return { ok: false, status: 404, statusText: 'Not Found', async text() { return ''; }, async json() { return {}; } };
     });
 
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
     const resolved = await sdk.did.resolveDID('did:btco:123456');
 
     expect(resolved).not.toBeNull();
@@ -206,7 +205,7 @@ describe('DIDManager bitcoinRpcUrl resolution path (end to end)', () => {
       return { ok: false, status: 404, statusText: 'Not Found', async text() { return ''; }, async json() { return {}; } };
     });
 
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), network: 'mainnet', bitcoinRpcUrl: BASE });
     await sdk.did.resolveDID('did:btco:123456');
 
     // The internal address must never have been requested.

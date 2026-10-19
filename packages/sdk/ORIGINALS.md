@@ -9,8 +9,8 @@ PR merges. Choices the spec leaves open are marked PROVISIONAL. The governing
 documents are listed in [`specs/README.md`](../../specs/README.md), and rule
 IDs (P5.3) refer to the Originals Protocol.
 
-This contract replaces the CEL 3 guide in [`V3.md`](V3.md). Nothing written
-under CEL 3 is read, converted or migrated.
+This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
+011 PR 5. Nothing written under CEL 3 is read, converted or migrated.
 
 ## Model
 

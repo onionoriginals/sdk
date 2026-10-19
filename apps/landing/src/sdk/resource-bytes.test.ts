@@ -28,7 +28,7 @@ describe('binary creator resources', () => {
     const source = { content: png, filename: 'mine.png', contentType: 'image/png' };
     const original = await engine.create('Mine', 'upload', source);
     const same = await engine.update('Mine', 'upload', { ...source, content: new Uint8Array(png) });
-    expect(same.celLog.length).toBe(original.celLog.length);
+    expect(same.history.length).toBe(original.history.length);
     const changed = new Uint8Array(png); changed[changed.length - 1] = 2;
     const updated = await engine.update('Mine', 'upload', { ...source, content: changed });
     expect(updated.resource.version).toBe(2);
@@ -47,7 +47,7 @@ describe('binary creator resources', () => {
       expect(contentBytes(original.resource.content)).toEqual(bytes);
       expect(resourceMatchesSource(source, original.resource)).toBe(true);
       const updated = await engine.update('Mine', 'upload', source);
-      expect(updated.celLog.length).toBe(original.celLog.length);
+      expect(updated.history.length).toBe(original.history.length);
       expect(updated.resource.hash).toBe(original.resource.hash);
     }
   });
@@ -79,7 +79,7 @@ describe('binary creator resources', () => {
   });
 });
 
-test('arbitrary binary upload (not PNG/SVG/text) preserves exact bytes through hash, deposit quote and hosted round-trip', async () => {
+test('arbitrary binary upload (not PNG/SVG/text) preserves exact bytes through hash and deposit quote', async () => {
   const { inscriptionContentBytes } = await import('../components/demo-logic');
   const blob = Uint8Array.from([0, 1, 2, 3, 255, 254, 253, 10, 0, 128, 42, 7]);
   const source = await readAssetFile(new File([blob], 'payload.bin'));
@@ -96,36 +96,4 @@ test('arbitrary binary upload (not PNG/SVG/text) preserves exact bytes through h
   // the delta actually proves the binary payload is counted.
   const withoutResourceBytes = inscriptionContentBytes({ ...state, resource: { ...state.resource, content: new Uint8Array(0) } });
   expect(inscriptionContentBytes(state) - withoutResourceBytes).toBe(blob.length);
-
-  const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
-  const { OriginalsSDK, createLocalSigner } = await import('@originals/sdk');
-  const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(2));
-  const sdk = OriginalsSDK.create({ signer, network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519', enableLogging: false });
-  const asset = await sdk.lifecycle.createAsset([{ id: 'payload.bin', mediaType: 'application/octet-stream', content: blob }]);
-  const cel = JSON.parse(JSON.stringify(asset.celLog));
-  const ref = hostedResourceRefs(cel)[0];
-  const built = hostedAssetEnvelope(cel, { [ref.segment]: blob });
-  if ('problem' in built) throw new Error(built.problem.message);
-  expect(built.envelope.resources[0].content).toEqual({ encoding: 'base64', data: btoa(String.fromCharCode(...blob)) });
-  const revived = await new DemoEngine().hydrate(JSON.parse(JSON.stringify(built.envelope)));
-  expect(revived.resource.content).toEqual(blob);
-  expect(revived.resource.hash).toBe(hex.encode(sha256(blob)));
-});
-
-test('hosted PNG bytes become a tagged base64 envelope that verifies in a fresh engine', async () => {
-  const { OriginalsSDK, createLocalSigner } = await import('@originals/sdk');
-  const { hostedAssetEnvelope, hostedResourceRefs } = await import('./hosted-envelope');
-  const signer = createLocalSigner('Ed25519', new Uint8Array(32).fill(1));
-  const sdk = OriginalsSDK.create({ signer, network: 'regtest', webvhNetwork: 'magby', defaultKeyType: 'Ed25519', enableLogging: false });
-  const asset = await sdk.lifecycle.createAsset([{ id: 'mine.png', mediaType: 'image/png', content: png }]);
-  const cel = JSON.parse(JSON.stringify(asset.celLog));
-  const ref = hostedResourceRefs(cel)[0];
-  const built = hostedAssetEnvelope(cel, { [ref.segment]: png });
-  if ('problem' in built) throw new Error(built.problem.message);
-  expect(built.envelope.version).toBe(4);
-  expect(built.envelope.resources[0].content).toEqual({ encoding: 'base64', data: btoa(String.fromCharCode(...png)) });
-  const engine = new DemoEngine();
-  const revived = await engine.hydrate(JSON.parse(JSON.stringify(built.envelope)));
-  expect(revived.resource.content).toEqual(png);
-  expect(revived.resource.hash).toBe(hex.encode(sha256(png)));
 });

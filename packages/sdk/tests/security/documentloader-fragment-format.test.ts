@@ -5,7 +5,7 @@ import {
   registerVerificationMethod,
   verificationMethodRegistry
 } from '../../src/vc/documentLoader';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import * as ed25519 from '@noble/ed25519';
 
 /**

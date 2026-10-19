@@ -10,11 +10,11 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../src/core/OriginalsSDK';
+import { createManagers } from '../fixtures/managers';
 import { VerifiableCredential, CredentialSubject } from '../../src/types';
 import * as secp256k1 from '@noble/secp256k1';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import { MockKeyStore } from '../mocks/MockKeyStore';
 
 function makeSubject(id: string): CredentialSubject {
@@ -58,7 +58,7 @@ function printStats(label: string, durations: number[]) {
 describe('Credential Signing Performance', () => {
   describe('Credential creation baselines', () => {
     test('createResourceCredential throughput', async () => {
-      const sdk = OriginalsSDK.create();
+      const sdk = createManagers();
       const iterations = 50;
       const durations: number[] = [];
 
@@ -79,7 +79,7 @@ describe('Credential Signing Performance', () => {
 
   describe('EdDSA (Ed25519) signing baselines', () => {
     test('Ed25519 sign credential', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -102,7 +102,7 @@ describe('Credential Signing Performance', () => {
     });
 
     test('Ed25519 verify credential', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -132,7 +132,7 @@ describe('Credential Signing Performance', () => {
     });
 
     test('Ed25519 sign+verify round-trip', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -160,7 +160,7 @@ describe('Credential Signing Performance', () => {
 
   describe('ES256K (secp256k1) signing baselines', () => {
     test('ES256K sign credential', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
       const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk, true);
       const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -183,7 +183,7 @@ describe('Credential Signing Performance', () => {
     });
 
     test('ES256K verify credential', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
       const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk, true);
       const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -210,7 +210,7 @@ describe('Credential Signing Performance', () => {
     });
 
     test('ES256K sign+verify round-trip', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
       const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk, true);
       const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');
@@ -238,7 +238,7 @@ describe('Credential Signing Performance', () => {
 
   describe('Throughput under load', () => {
     test('concurrent credential signing', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -267,7 +267,7 @@ describe('Credential Signing Performance', () => {
 
   describe('Regression guards', () => {
     test('Ed25519 signing should not regress beyond 10x baseline', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const sk = ed25519.utils.randomSecretKey();
       const pk = await ed25519.getPublicKeyAsync(sk);
       const skMb = multikey.encodePrivateKey(sk, 'Ed25519');
@@ -296,7 +296,7 @@ describe('Credential Signing Performance', () => {
     });
 
     test('ES256K signing should not regress beyond 10x baseline', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'ES256K' });
       const sk = secp256k1.utils.randomSecretKey();
       const pk = secp256k1.getPublicKey(sk, true);
       const skMb = multikey.encodePrivateKey(sk, 'Secp256k1');

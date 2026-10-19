@@ -12,13 +12,12 @@ export interface StorageAdapter {
   //
   // The returned URL is a locator this adapter can itself read back through
   // getObject/exists — it is NOT automatically the WebVH permanent hosted URL.
-  // HostedAssets.publish() (packages/sdk/src/v3/hosted.ts) requires this to
-  // equal exactly `https://${domain}/${path}` for a hosted publish to
-  // succeed; an adapter whose locator uses another scheme (e.g.
-  // MemoryStorageAdapter's `mem://`) or a different path shape is a valid
-  // general-purpose StorageAdapter but cannot satisfy hosted publication
-  // without wrapping (see HostedMemoryStorageAdapter, and
-  // LocalStorageAdapterOptions.originDomain) — see issue #780.
+  // Hosted publication needs it to equal exactly `https://${domain}/${path}`;
+  // an adapter whose locator uses another scheme (e.g. MemoryStorageAdapter's
+  // `mem://`) or a different path shape is a valid general-purpose
+  // StorageAdapter but cannot satisfy hosted publication without wrapping
+  // (see HostedMemoryStorageAdapter, and LocalStorageAdapterOptions.originDomain)
+  // — see issue #780.
   putObject(domain: string, path: string, content: Uint8Array | string, options?: PutOptions): Promise<string>;
 
   // Reads content from a path under a domain root

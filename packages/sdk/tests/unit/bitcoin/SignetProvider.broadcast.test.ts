@@ -6,7 +6,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { SignetProvider } from '../../../src/bitcoin/providers/SignetProvider';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });

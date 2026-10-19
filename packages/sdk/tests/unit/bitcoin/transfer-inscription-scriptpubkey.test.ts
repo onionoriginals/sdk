@@ -1,6 +1,5 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect } from 'bun:test';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import type { OrdinalsProvider } from '../../../src/adapters';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
@@ -60,7 +59,7 @@ const createNoVinVoutProvider = (): OrdinalsProvider =>
 
 describe('BitcoinManager.transferInscription returns only provider-attested data (#290)', () => {
   test('does not fabricate vin/vout and does not mutate the caller inscription', async () => {
-    const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(),
+    const sdk = createManagers({ keyStore: new MockKeyStore(),
       network: 'regtest',
       ordinalsProvider: createNoVinVoutProvider()
     } as any);

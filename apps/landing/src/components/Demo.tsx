@@ -12,7 +12,8 @@ import { useAuth } from '../auth/useAuth';
 import { generateArtwork, generateName, ART_STYLES } from '../sdk/artwork';
 import type { AssetSource } from '../sdk/engine';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
-import { CelChain } from './CelChain';
+import { HistoryChain } from './HistoryChain';
+import { featureEnabled } from '../sdk/features';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import {
@@ -251,12 +252,12 @@ export function Demo() {
     return () => io.disconnect();
   }, [getEngine]);
 
-  const celLog = asset?.celLog ?? [];
+  const history = asset?.history ?? [];
 
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [celLog.length]);
+  }, [history.length]);
 
   // FR2: a second invocation is a no-op regardless of which surface fired it —
   // the money button, the revise button, or a double-click on either.
@@ -331,6 +332,28 @@ export function Demo() {
   };
   const publish = () =>
     run('created', 'publishing', 'published', (engine) => engine.publish());
+
+  // The Original's evidence package: its signed history, its author's DID and
+  // its files, verifiable anywhere with no account and no key (spec section 7).
+  const [packaging, setPackaging] = useState(false);
+  const downloadEvidence = async () => {
+    setPackaging(true);
+    try {
+      const engine = await getEngine();
+      const bytes = await engine.evidencePackage();
+      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/zip' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${(title.trim() || 'original').replace(/[^\w.-]+/g, '-')}.originals.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[originals-demo]', err);
+      setError(demoFailureMessage(err));
+    } finally {
+      setPackaging(false);
+    }
+  };
 
   // Config-skew guard: resolve the server's network once, before any flow that
   // could show a deposit address. null = not yet known. UNCONDITIONAL (R11):
@@ -744,14 +767,18 @@ export function Demo() {
 
                 <ol className="demo-steps">
                   {demo.steps.map((s, i) => {
+                    // Publishing and anchoring wait on later phases (features.ts).
+                    const unavailable = (i === 1 && !featureEnabled('hostedPublication')) || (i === 2 && !featureEnabled('bitcoinAnchoring'));
                     const state =
-                      step > i
-                        ? 'done'
-                        : step === i
-                          ? stepPhases[i].includes(phase)
-                            ? 'busy'
-                            : 'ready'
-                          : 'locked';
+                      unavailable
+                        ? 'locked'
+                        : step > i
+                          ? 'done'
+                          : step === i
+                            ? stepPhases[i].includes(phase)
+                              ? 'busy'
+                              : 'ready'
+                            : 'locked';
                     return (
                       <li
                         key={s.id}
@@ -775,7 +802,13 @@ export function Demo() {
                               <span className="dot" />
                               {s.label}
                             </span>
-                            {i === 2 && inscribeView.simulated && (
+                            {unavailable && (
+                              <span className="demo-sim-badge">
+                                <span className="dot" aria-hidden="true" />
+                                {demo.unavailable.badge}
+                              </span>
+                            )}
+                            {!unavailable && i === 2 && inscribeView.simulated && (
                               // Stays put in every state, including 'done' —
                               // the signal has to outlive the run it labels.
                               <span className="demo-sim-badge">
@@ -784,15 +817,19 @@ export function Demo() {
                               </span>
                             )}
                           </div>
-                          <p>{i === 2 ? inscribeView.description : s.description}</p>
+                          <p>
+                            {unavailable
+                              ? i === 1 ? demo.unavailable.hostedPublication : demo.unavailable.bitcoinAnchoring
+                              : i === 2 ? inscribeView.description : s.description}
+                          </p>
                           {/* R7: an anonymous publish is temporary and shares a
                               demo path. Said HERE — in the publish step, from
                               first paint — because after the log exists is too
                               late to decide to sign in first. */}
-                          {i === 1 && durabilityNote && (
+                          {i === 1 && !unavailable && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
-                          {state !== 'done' && (
+                          {state !== 'done' && !unavailable && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
                             // so its "this is not Bitcoin" signal is the
@@ -829,7 +866,7 @@ export function Demo() {
                               page. BELOW the button, though: above it, this
                               sat directly on top of "Run the simulation" and
                               read as that button's price. */}
-                          {i === 2 && costNote && (
+                          {i === 2 && !unavailable && costNote && (
                             <p className="demo-step-note demo-cost-note">{costNote}</p>
                           )}
                         </div>
@@ -837,6 +874,21 @@ export function Demo() {
                     );
                   })}
                 </ol>
+
+                {asset && (
+                  <div className="demo-evidence">
+                    <button
+                      type="button"
+                      className="btn demo-step-btn"
+                      disabled={packaging || busy}
+                      data-busy={packaging || undefined}
+                      onClick={downloadEvidence}
+                    >
+                      {packaging ? demo.evidence.pending : demo.evidence.action}
+                    </button>
+                    <p className="demo-step-note">{demo.evidence.note}</p>
+                  </div>
+                )}
 
                 {canRevise && asset && (
                   <div className="demo-revise" data-pending={pendingRevision || undefined}>
@@ -1117,8 +1169,8 @@ export function Demo() {
                     onClick={() => setTab('events')}
                   >
                     {demo.eventLog.title}
-                    {celLog.length > 0 && (
-                      <span className="demo-tab-count">{celLog.length}</span>
+                    {history.length > 0 && (
+                      <span className="demo-tab-count">{history.length}</span>
                     )}
                   </button>
                   <button
@@ -1141,7 +1193,7 @@ export function Demo() {
 
                 {tab === 'events' && (
                   <div className="demo-log-wrap">
-                    {celLog.length === 0 ? (
+                    {history.length === 0 ? (
                       <div className="demo-log-zero">
                         <p className="demo-log-zero-title">
                           <span className="demo-log-cursor" aria-hidden="true" />
@@ -1159,7 +1211,7 @@ export function Demo() {
                       </div>
                     ) : (
                       <div className="cel-chain-scroll" ref={logRef}>
-                        <CelChain entries={celLog} />
+                        <HistoryChain entries={history} />
                       </div>
                     )}
                   </div>

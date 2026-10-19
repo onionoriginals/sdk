@@ -7,8 +7,7 @@ on:
     paths:
       - 'packages/sdk/src/**'
       - 'packages/sdk/typedoc.json'
-      # The docs build now compiles this too — see the build step below.
-      - 'packages/cel/src/**'
+      # The docs build compiles this too — see the build step below.
       - 'packages/vh/src/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
@@ -38,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      # typedoc typechecks packages/sdk/src, which imports @originals/cel.
+      # typedoc typechecks packages/sdk/src, which imports @originals/vh.
       # That workspace package resolves through its package.json `exports`,
       # which points at ./dist — so with nothing built, every one of those
       # imports is TS2307 "cannot find module" and typedoc exits 3. Build the

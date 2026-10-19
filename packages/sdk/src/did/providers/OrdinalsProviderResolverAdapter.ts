@@ -51,7 +51,7 @@ export class OrdinalsProviderResolverAdapter implements ResourceProviderLike {
   }
 
   // Diagnostic/classification data only. BtcoDidResolver never constructs a
-  // DID from this; SDK CEL assets must pass the lifecycle verification gate.
+  // DID from this.
   getMetadata(inscriptionId: string): Promise<Record<string, unknown> | null> {
     // Reuse the record already loaded for classification. A separate fetch
     // here could fail and be swallowed by the generic resolver as "no metadata".

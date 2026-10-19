@@ -1,9 +1,8 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { MultiSigManager } from '../../../src/vc/MultiSigManager';
 import { CredentialManager } from '../../../src/vc/CredentialManager';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import { DIDManager } from '../../../src/did/DIDManager';
 import type {
   VerifiableCredential,
@@ -14,7 +13,8 @@ import type {
   ExternalSigner,
 } from '../../../src/types';
 import * as ed25519 from '@noble/ed25519';
-import { multikey, StructuredError } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
+import { StructuredError } from '../../../src/utils/telemetry';
 import { MockKeyStore } from '../../mocks/MockKeyStore';
 
 /**
@@ -1104,7 +1104,7 @@ describe('MultiSigManager', () => {
 
   describe('CredentialManager multi-sig integration', () => {
     test('signCredentialMultiSig via CredentialManager', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1124,7 +1124,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig via CredentialManager', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1145,7 +1145,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig rejects a single proof repeated to fake the threshold', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 2,
         total: 3,
@@ -1169,7 +1169,7 @@ describe('MultiSigManager', () => {
     });
 
     test('verifyCredentialMultiSig counts a valid proof even when preceded by an invalid one from the same signer', async () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const policy: MultiSigPolicy = {
         required: 1,
         total: 1,
@@ -1194,7 +1194,7 @@ describe('MultiSigManager', () => {
 
 
     test('multiSig() returns a MultiSigManager instance', () => {
-      const sdk = OriginalsSDK.create({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ keyStore: new MockKeyStore(), defaultKeyType: 'Ed25519' });
       const msm = sdk.credentials.multiSig();
       expect(msm).toBeInstanceOf(MultiSigManager);
     });

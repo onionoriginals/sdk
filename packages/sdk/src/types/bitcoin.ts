@@ -9,8 +9,7 @@ export interface OrdinalsInscription {
   txid: string;
   vout: number;
   blockHeight?: number;
-  // Inscription CBOR metadata (#407 phase 2): `{ didDocument, celLog }` for
-  // anchoring inscriptions whose content is the asset media.
+  // Inscription CBOR metadata (#407 phase 2), when the inscription carries one.
   metadata?: Record<string, unknown>;
 }
 
@@ -108,8 +107,7 @@ export interface ResourceUtxoSelectionResult {
 
 export const DUST_LIMIT_SATS = 546;
 
-// Canonical definition lives in @originals/cel (signer adapters take it).
-export type { KeyPair } from '@originals/cel';
+export type { KeyPair } from './keys.js';
 
 export type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 
