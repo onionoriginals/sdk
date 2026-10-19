@@ -12,7 +12,7 @@
  */
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { schnorr, secp256k1 } from "@noble/curves/secp256k1.js";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { base58 } from "@scure/base";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalBytes, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
@@ -88,7 +88,11 @@ export function encodeMultikey(type: KeyType, publicKey: Uint8Array): string {
   return multibaseEncode(new Uint8Array([...prefix, ...publicKey]));
 }
 
-/** Decode a public-key Multikey. Only canonical Ed25519 and compressed secp256k1 keys decode. */
+/**
+ * Decode a public-key Multikey: Ed25519 (32 bytes) or compressed secp256k1
+ * (33 bytes, prefix 02 or 03). Decoding is syntactic; whether the bytes are an
+ * admissible point is decided when a proof is verified (vh-log-interop-0 §2).
+ */
 export function decodeMultikey(publicKeyMultibase: string): DecodedMultikey {
   if (typeof publicKeyMultibase !== "string") fail("invalid-evidence", "MULTIKEY_INVALID", "publicKeyMultibase must be a string");
   const bytes = multibaseDecode(publicKeyMultibase);
@@ -97,12 +101,6 @@ export function decodeMultikey(publicKeyMultibase: string): DecodedMultikey {
     if (bytes[0] !== prefix[0] || bytes[1] !== prefix[1]) continue;
     const publicKey = bytes.slice(2);
     if (publicKey.length !== length) fail("invalid-evidence", "MULTIKEY_INVALID", `${type} Multikey must carry ${length} bytes`);
-    try {
-      if (type === "Ed25519") ed25519.Point.fromBytes(publicKey);
-      else secp256k1.Point.fromBytes(publicKey);
-    } catch {
-      fail("invalid-evidence", "MULTIKEY_INVALID", `${type} Multikey is not a valid point`);
-    }
     if (type === "secp256k1" && publicKey[0] !== 2 && publicKey[0] !== 3) {
       fail("invalid-evidence", "MULTIKEY_INVALID", "secp256k1 Multikey must be compressed");
     }
@@ -129,6 +127,58 @@ export function didKeyMultikey(verificationMethod: string): string {
 export function didKeyOf(publicKeyMultibase: string): string {
   decodeMultikey(publicKeyMultibase);
   return `did:key:${publicKeyMultibase}`;
+}
+
+// ---------------------------------------------------------------------------
+// Ed25519 verification
+
+const ED_P = 2n ** 255n - 19n;
+const ED_L = 2n ** 252n + 27742317777372353535851937790883648493n;
+/** y coordinates of the eight small-order points; masking the sign bit covers all 14 encodings. */
+const SMALL_ORDER_Y = new Set([
+  0n,
+  1n,
+  2707385501144840649318225287225658788936804267575313519463743609750303402022n,
+  55188659117513257062467267217118295137698188065244968500265048394206261417927n,
+  ED_P - 1n,
+]);
+
+function littleEndian(bytes: Uint8Array): bigint {
+  let n = 0n;
+  for (let i = bytes.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(bytes[i]);
+  return n;
+}
+
+function admissiblePoint(bytes: Uint8Array): boolean {
+  const y = littleEndian(bytes) & ((1n << 255n) - 1n);
+  return y < ED_P && !SMALL_ORDER_Y.has(y);
+}
+
+/**
+ * Ed25519 verification under RFC 8032 with the vh-log-interop-0 acceptance
+ * rules: canonical encodings of A and R, neither of small order, S < L, and the
+ * uncofactored equation [S]B = R + [k]A with k = SHA-512(R ‖ A ‖ M) mod L.
+ * noble's own verify uses the cofactored equation, which accepts signatures
+ * with a low-order residue, so the equation is checked here. Only public data
+ * is involved, so variable-time arithmetic is acceptable.
+ */
+export function verifyEd25519(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean {
+  if (publicKey.length !== 32 || signature.length !== 64) return false;
+  const rBytes = signature.subarray(0, 32);
+  const s = littleEndian(signature.subarray(32));
+  if (!admissiblePoint(publicKey) || !admissiblePoint(rBytes) || s >= ED_L) return false;
+  try {
+    const A = ed25519.Point.fromBytes(publicKey, false);
+    const R = ed25519.Point.fromBytes(rBytes, false);
+    const hashInput = new Uint8Array(64 + message.length);
+    hashInput.set(rBytes, 0);
+    hashInput.set(publicKey, 32);
+    hashInput.set(message, 64);
+    const k = littleEndian(sha512(hashInput)) % ED_L;
+    return ed25519.Point.BASE.multiplyUnsafe(s).equals(R.add(A.multiplyUnsafe(k)));
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +221,13 @@ function requireSuite(name: unknown): CryptosuiteName {
 
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-/** Build the proof configuration: the proof without proofValue, with the document's @context. */
-function proofConfig(document: JsonObject, options: JsonObject): JsonObject {
+/**
+ * Build the proof configuration: the proof without proofValue, with the
+ * document's @context. `created` is checked only when creating a proof, where
+ * Data Integrity raises PROOF_GENERATION_ERROR; a verifier accepts any value
+ * (vh-log-interop-0 section 2), since it is covered by the signature anyway.
+ */
+function proofConfig(document: JsonObject, options: JsonObject, creating = false): JsonObject {
   const config: JsonObject = {};
   for (const [key, value] of Object.entries(options)) {
     if (value === undefined || key === "proofValue") continue;
@@ -184,7 +239,7 @@ function proofConfig(document: JsonObject, options: JsonObject): JsonObject {
   if (typeof config.verificationMethod !== "string" || typeof config.proofPurpose !== "string") {
     fail("invalid-evidence", "PROOF_INVALID", "proof needs verificationMethod and proofPurpose strings");
   }
-  if (config.created !== undefined && (typeof config.created !== "string" || !DATE_TIME.test(config.created))) {
+  if (creating && config.created !== undefined && (typeof config.created !== "string" || !DATE_TIME.test(config.created))) {
     fail("invalid-evidence", "PROOF_INVALID", "proof created must be an XML Schema dateTime");
   }
   if (document["@context"] !== undefined && config["@context"] === undefined) config["@context"] = document["@context"];
@@ -230,7 +285,7 @@ export async function createProof(
     fail("unsupported-profile", "CRYPTOSUITE_KEY_MISMATCH", `${suite} needs a ${CRYPTOSUITES[suite]} key`);
   }
   const unsecured = withoutUndefined(document);
-  const config = proofConfig(unsecured, options as JsonObject);
+  const config = proofConfig(unsecured, options as JsonObject, true);
   const signature = await signer.sign(proofHashData(unsecured, config));
   return { ...(config as DataIntegrityProof), proofValue: multibaseEncode(signature) };
 }
@@ -271,7 +326,7 @@ export function verifyProof(document: JsonObject, proof: DataIntegrityProof, pub
   const data = proofHashData(unsecured, options);
   try {
     return key.type === "Ed25519"
-      ? ed25519.verify(signature, data, key.publicKey)
+      ? verifyEd25519(key.publicKey, data, signature)
       : schnorr.verify(signature, data, key.publicKey.slice(1));
   } catch {
     return false;

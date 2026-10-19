@@ -101,3 +101,22 @@ describe("JCS (RFC 8785)", () => {
     expect(() => canonicalize({ a: undefined } as never)).toThrow(OriginalsError);
   });
 });
+
+describe("interop parsing (vh-log-interop-0 profile)", () => {
+  const lenient = { duplicateKeys: "last", lossyNumbers: true } as const;
+
+  test("the last duplicate key wins, and only when asked", () => {
+    expect(parseJson('{"a":1,"a":2}', lenient)).toEqual({ a: 2 });
+    expect(() => parseJson('{"a":1,"a":2}')).toThrow(OriginalsError);
+  });
+
+  test("numbers parse as IEEE doubles, and -0 becomes 0", () => {
+    expect(canonicalize(parseJson("[123456789012345678,-0,1.0]", lenient))).toBe("[123456789012345680,0,1]");
+  });
+
+  test("overflow and lone surrogates are still rejected", () => {
+    expect(() => parseJson("1e400", lenient)).toThrow(OriginalsError);
+    expect(() => parseJson('"\\ud800"', lenient)).toThrow(OriginalsError);
+  });
+});
+

@@ -20,7 +20,21 @@ export interface ParseLimits {
   maxBytes?: number;
   /** Maximum nesting depth of arrays and objects. */
   maxDepth?: number;
+  /**
+   * `reject` (the default, Originals P5.7) or `last`, where the last value
+   * wins as in mainstream parsers. `last` exists only for the
+   * vh-log-interop-0 profile; nothing Originals verifies uses it.
+   */
+  duplicateKeys?: "reject" | "last";
+  /**
+   * Accept integer literals beyond 2^53 - 1 as their nearest double, and `-0`
+   * as `0` (RFC 8785's number model). Off by default; vh-log-interop-0 only.
+   */
+  lossyNumbers?: boolean;
 }
+
+/** The parse behaviour the vh-log-interop-0 profile pins (vh repository, profile section 4). */
+export const INTEROP_PARSE: Readonly<ParseLimits> = Object.freeze({ duplicateKeys: "last", lossyNumbers: true });
 
 const DEFAULT_MAX_DEPTH = 64;
 
@@ -46,10 +60,13 @@ const NUMBER = /-?(?:0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y;
 
 class Parser {
   private at = 0;
+  private readonly maxDepth: number;
   constructor(
     private readonly text: string,
-    private readonly maxDepth: number,
-  ) {}
+    private readonly options: ParseLimits,
+  ) {
+    this.maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  }
 
   parseDocument(): JsonValue {
     const value = this.value(0);
@@ -101,7 +118,7 @@ class Parser {
       if (this.text[this.at] !== '"') syntax("expected a string key", this.at);
       const keyAt = this.at;
       const key = this.string();
-      if (seen.has(key)) {
+      if (seen.has(key) && this.options.duplicateKeys !== "last") {
         throw new OriginalsError("invalid-evidence", "JSON_DUPLICATE_KEY", `duplicate key ${JSON.stringify(key)} at offset ${keyAt}`);
       }
       seen.add(key);
@@ -185,7 +202,11 @@ class Parser {
     this.at += literal.length;
     const value = Number(literal);
     const integerLiteral = match[1] === undefined && match[2] === undefined;
-    if (!Number.isFinite(value) || Object.is(value, -0) || (integerLiteral && !Number.isSafeInteger(value))) {
+    if (!Number.isFinite(value)) {
+      throw new OriginalsError("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${literal} overflows a double`);
+    }
+    if (this.options.lossyNumbers) return value === 0 ? 0 : value;
+    if (Object.is(value, -0) || (integerLiteral && !Number.isSafeInteger(value))) {
       throw new OriginalsError("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${literal} cannot be represented exactly`);
     }
     return value;
@@ -197,7 +218,7 @@ export function parseJson(text: string, limits: ParseLimits = {}): JsonValue {
   if (limits.maxBytes !== undefined && text.length > limits.maxBytes) {
     throw new OriginalsError("limit-exceeded", "JSON_TOO_LARGE", `JSON text exceeds ${limits.maxBytes} bytes`);
   }
-  return new Parser(text, limits.maxDepth ?? DEFAULT_MAX_DEPTH).parseDocument();
+  return new Parser(text, limits).parseDocument();
 }
 
 /** Parse JSON Lines: one strict value per line; a final newline is optional, blank lines are not. */
@@ -210,7 +231,7 @@ export function parseJsonLines(text: string, limits: ParseLimits = {}): JsonValu
     if (line.length === 0) {
       throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
     }
-    return new Parser(line, limits.maxDepth ?? DEFAULT_MAX_DEPTH).parseDocument();
+    return new Parser(line, limits).parseDocument();
   });
 }
 

@@ -15,6 +15,7 @@ import {
   type LogEntry,
   type LogVerification,
   type Specialisation,
+  vhHash,
 } from "../src/log/index.js";
 
 const fixture = parseJson(
@@ -42,6 +43,12 @@ const sign = (signer = k2) => signWith(signer, { cryptosuite: "eddsa-jcs-2022", 
 const clone = <T>(value: T): T => structuredClone(value);
 const verify = (entries: unknown[], witnessFile: unknown = fixture.witnessA, specialisation = webvhLike, extra = {}) =>
   verifyLog(entries, { specialisation, witnessFile, now: NOW, ...extra });
+
+/** Re-sign an altered entry as-is, so that only the check under test fails. */
+async function resign(entry: LogEntry, signer = k2): Promise<LogEntry> {
+  const { proof: _proof, ...unsigned } = entry;
+  return { ...entry, proof: await sign(signer)(unsigned as unknown as JsonObject) };
+}
 
 function failedAt(result: LogVerification, index: number, code: string) {
   expect(result.failure?.index).toBe(index);
@@ -100,30 +107,48 @@ describe("VH-Log engine against didwebvh-ts 2.8.0 output", () => {
 });
 
 describe("C12-04: broken chain or reordered entry", () => {
-  test("a changed byte breaks the entry hash and ends the valid prefix", async () => {
+  test("a changed byte fails the proof and ends the valid prefix", async () => {
     const log = clone(fixture.logA);
     (log[1].state as JsonObject).controller = "did:example:other";
+    failedAt(await verify(log), 1, "PROOF_SIGNATURE");
+  });
+
+  test("a re-signed changed entry still fails its entry hash", async () => {
+    const log = clone(fixture.logA);
+    (log[1].state as JsonObject).controller = "did:example:other";
+    log[1] = await resign(log[1]);
     failedAt(await verify(log), 1, "ENTRY_HASH_MISMATCH");
   });
 
-  test("a changed first entry invalidates the whole log", async () => {
+  test("C12-03: a changed first entry invalidates the whole log, by hash or by SCID", async () => {
     const log = clone(fixture.logA);
     (log[0].state as JsonObject).controller = "did:example:other";
-    const result = await verify(log);
-    failedAt(result, 0, "SCID_MISMATCH");
-    expect(result.scid).toBeNull();
+    const unsigned = await verify(log);
+    failedAt(unsigned, 0, "PROOF_SIGNATURE");
+    expect(unsigned.scid).toBeNull();
+    log[0] = await resign(log[0], k1);
+    failedAt(await verify(log), 0, "ENTRY_HASH_MISMATCH");
+    // With the entry hash recomputed too, only the SCID binding catches it.
+    const { proof: _p, ...body } = log[0];
+    log[0] = await resign({ ...log[0], versionId: `1-${vhHash({ ...(body as unknown as JsonObject), versionId: log[0].parameters.scid as string })}` }, k1);
+    failedAt(await verify(log), 0, "SCID_MISMATCH");
   });
 
-  test("reordered or missing entries are rejected", async () => {
-    failedAt(await verify([fixture.logA[0], fixture.logA[2], fixture.logA[1]]), 1, "VERSION_NUMBER");
-    failedAt(await verify([fixture.logA[1]]), 0, "VERSION_NUMBER");
+  test("reordered or renumbered entries are rejected", async () => {
+    failedAt(await verify([fixture.logA[0], fixture.logA[2], fixture.logA[1]]), 1, "PREROTATION_UPDATE_KEYS");
+    failedAt(await verify([fixture.logA[1]]), 0, "VERSION_MISSING");
+    const renumbered = clone(fixture.logA);
+    renumbered[1] = await resign({ ...renumbered[1], versionId: renumbered[1].versionId.replace(/^2-/, "3-") });
+    failedAt(await verify(renumbered), 1, "VERSION_NUMBER");
   });
 
   test("an entry hash that is not a sha2-256 multihash is unsupported", async () => {
     const log = clone(fixture.logA);
-    log[1].versionId = "2-" + "8".repeat(46);
-    expect((await verify(log)).failure?.index).toBe(1);
-    log[1].versionId = "2-QmfFTzmYhf-x";
+    log[1] = await resign({ ...log[1], versionId: "2-" + "8".repeat(46) });
+    const result = await verify(log);
+    expect(result.failure?.index).toBe(1);
+    expect(result.failure?.error.category).toBe("unsupported-profile");
+    log[1] = await resign({ ...log[1], versionId: "2-QmfFTzmYhf-x" });
     failedAt(await verify(log), 1, "VERSION_ID_FORMAT");
   });
 });
@@ -194,7 +219,9 @@ describe("parameters", () => {
     failedAt(await verify([first, await withParameters({ logVersion: "vh-log:1.0" })]), 1, "PARAMETER_UNKNOWN");
     failedAt(await verify([first, await withParameters({ scid: first.parameters.scid as string })]), 1, "PARAMETER_SCID");
     failedAt(await verify([first, await withParameters({ ttl: -1 })]), 1, "PARAMETER_INVALID");
-    failedAt(await verify([first, await withParameters({ watchers: ["http://watcher.example"] })]), 1, "PARAMETER_INVALID");
+    failedAt(await verify([first, await withParameters({ watchers: ["ftp://watcher.example"] })]), 1, "PARAMETER_INVALID");
+    failedAt(await verify([first, await withParameters({ watchers: ["https:///path"] })]), 1, "PARAMETER_INVALID");
+    expect((await verify([first, await withParameters({ watchers: ["http://watcher.example", "https://w.example/x"] })])).failure).toBeUndefined();
     failedAt(await verify([first, await withParameters({ portable: "yes" })]), 1, "PARAMETER_INVALID");
   });
 
@@ -236,13 +263,10 @@ describe("proofs", () => {
       sign: signWith(k2, { cryptosuite: "eddsa-jcs-2022", verificationMethod: vm(k2), proofPurpose: "authentication" }),
     });
     failedAt(await verify([first, auth]), 1, "PROOF_PURPOSE");
-    // Entry 2 ends pre-rotation, so entry 3 is checked against entry 2's keys.
-    const bip = localSigner("secp256k1", new Uint8Array(32).fill(5));
-    const schnorr = await appendEntry(fixture.logA[1], {
-      versionTime: "2026-10-18T12:00:03Z", parameters: {}, state: first.state,
-      sign: signWith(bip, { cryptosuite: "bip340-jcs-2025", verificationMethod: vm(bip) }),
-    });
-    failedAt(await verify([first, fixture.logA[1], schnorr]), 2, "CRYPTOSUITE_NOT_PERMITTED");
+    // An authorized key whose proof names a suite the version does not permit.
+    const other = await appendEntry(fixture.logA[1], { versionTime: "2026-10-18T12:00:03Z", parameters: {}, state: first.state, sign: sign(k2) });
+    other.proof[0].cryptosuite = "bip340-jcs-2025";
+    failedAt(await verify([first, fixture.logA[1], other]), 2, "CRYPTOSUITE_NOT_PERMITTED");
   });
 
   test("an entry with members VH-Log does not define is rejected", async () => {

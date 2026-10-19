@@ -11,6 +11,7 @@ import {
   multibaseEncode,
   proofHashData,
   sha256Multihash,
+  verifyEd25519,
   verifyProof,
   type DataIntegrityProof,
 } from "../src/crypto/index.js";
@@ -178,3 +179,43 @@ describe("cryptosuite policy (P5.12)", () => {
     expect(errorCode(() => verifyProof(document, { ...base, proofValue: undefined } as never, pk))).toBe("PROOF_INVALID");
   });
 });
+
+describe("Ed25519 acceptance (vh-log-interop-0 profile, section 2)", () => {
+  const corpus = (name: string) =>
+    JSON.parse(readFileSync(new URL(`./fixtures/vh-interop/ed25519/${name}`, import.meta.url), "utf8")) as unknown;
+
+  test("C2SP CCTV: rejects low-order and non-canonical points and low-order residues, nothing else", () => {
+    const rejectFlags = ["low_order_A", "low_order_R", "non_canonical_A", "non_canonical_R", "low_order_residue"];
+    const cases = corpus("cctv.json") as Array<{ number: number; key: string; sig: string; msg: string; flags?: string[] }>;
+    const wrong = cases.filter((v) => {
+      const accept = !(v.flags ?? []).some((f) => rejectFlags.includes(f));
+      return verifyEd25519(hex.decode(v.key), new TextEncoder().encode(v.msg), hex.decode(v.sig)) !== accept;
+    });
+    expect(cases.length).toBe(914);
+    expect(wrong.map((v) => v.number)).toEqual([]);
+  });
+
+  test("Wycheproof: valid and invalid outcomes as published", () => {
+    const { testGroups } = corpus("wycheproof.json") as { testGroups: Array<{ publicKey: { pk: string }; tests: Array<{ tcId: number; msg: string; sig: string; result: string }> }> };
+    const wrong: number[] = [];
+    let count = 0;
+    for (const group of testGroups) {
+      for (const t of group.tests) {
+        count++;
+        const sig = t.sig.length % 2 === 0 ? hex.decode(t.sig) : new Uint8Array(0);
+        if (verifyEd25519(hex.decode(group.publicKey.pk), hex.decode(t.msg), sig) !== (t.result === "valid")) wrong.push(t.tcId);
+      }
+    }
+    expect(count).toBe(151);
+    expect(wrong).toEqual([]);
+  });
+
+  test("a Multikey decodes syntactically; an inadmissible point fails only when verifying", () => {
+    const identity = new Uint8Array(32);
+    identity[0] = 1; // y = 1: the identity point, order 1
+    const mk = encodeMultikey("Ed25519", identity);
+    expect(decodeMultikey(mk).type).toBe("Ed25519");
+    expect(verifyEd25519(identity, new Uint8Array(64), new Uint8Array(64))).toBe(false);
+  });
+});
+

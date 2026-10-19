@@ -9,9 +9,9 @@
  * check has passed, and an entry without a threshold of approvals also ends
  * the valid prefix.
  *
- * Not here yet, by design: comparing copies and retained versionIds (plan 011,
- * PR 6), retrieval (PR 7), authoritative sources and alternative encodings
- * (PR 9).
+ * Comparing copies, retained versionIds and minCopies are in `resolveCopies`.
+ * Not here yet, by design: retrieval (plan 011, PR 7), authoritative sources
+ * and alternative encodings (PR 9).
  */
 import {
   CRYPTOSUITES,
@@ -106,6 +106,11 @@ export interface Specialisation {
   versionTime?: { fractionalDigits?: number; minIntervalSeconds?: number };
   /** Maximum proofs per entry; unlimited when absent. */
   maxProofs?: number;
+  /**
+   * `reject` (the default) or `ignore`, which is VH-Log's own rule for
+   * parameters a resolver does not recognise. Originals and did:vh reject.
+   */
+  unknownParameters?: "reject" | "ignore";
   keys: { kind: "updateKeys" } | ControllerKeys;
   /** Witness identifier to Multikey. Defaults to did:key (did:vh, did:webvh). */
   witnessKey?(id: string): string;
@@ -252,11 +257,24 @@ function validateWitness(value: JsonValue, spec: Specialisation, version: Versio
   }
 }
 
-function isHttpsUrl(value: string): boolean {
+/**
+ * VH-Log lists watchers as URLs. This applies the syntactic rule pinned by
+ * vh-log-interop-0: printable ASCII, an http or https scheme and a non-empty
+ * authority. Retrieval applies its own, stricter rules (P8.5).
+ */
+function isWatcherUrl(value: string): boolean {
+  return /^[\x21-\x7e]+$/.test(value) && /^https?:\/\/[^/?#]/.test(value);
+}
+
+/** Run a parameter check, reporting any failure inside it as PARAMETER_INVALID. */
+function asParameterError<T>(name: string, check: () => T): T {
   try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
+    return check();
+  } catch (error) {
+    if (error instanceof OriginalsError && error.code !== "PARAMETER_INVALID") {
+      throw new OriginalsError("invalid-evidence", "PARAMETER_INVALID", `parameter ${name}: ${error.message}`);
+    }
+    throw error;
   }
 }
 
@@ -270,7 +288,9 @@ function applyParameters(
   for (const [name, value] of Object.entries(parameters)) {
     if (value === null) fail("invalid-evidence", "PARAMETER_NULL", `parameter ${name} is null`);
     const known = name === spec.versionParameter || VH_PARAMETERS.has(name) || (spec.extraParameters && Object.prototype.hasOwnProperty.call(spec.extraParameters, name));
-    if (!known) fail("invalid-evidence", "PARAMETER_UNKNOWN", `parameter ${name} is not defined by VH-Log or ${spec.name}`);
+    if (!known && (spec.unknownParameters !== "ignore" || name === "logVersion")) {
+      fail("invalid-evidence", "PARAMETER_UNKNOWN", `parameter ${name} is not defined by VH-Log or ${spec.name}`);
+    }
     if (controller && (name === "updateKeys" || name === "nextKeyHashes")) {
       fail("invalid-evidence", "PARAMETER_FORBIDDEN", `${name} must not be set in a log whose keys come from a controller`);
     }
@@ -278,7 +298,7 @@ function applyParameters(
 
   // Version parameter.
   const versionValue = parameters[spec.versionParameter];
-  if (first && versionValue === undefined) fail("invalid-evidence", "PARAMETER_REQUIRED", `the first entry must set ${spec.versionParameter}`);
+  if (first && versionValue === undefined) fail("unsupported-profile", "VERSION_MISSING", `the first entry must set ${spec.versionParameter}`);
   if (versionValue !== undefined) {
     if (typeof versionValue !== "string" || !Object.prototype.hasOwnProperty.call(spec.versions, versionValue)) {
       fail("unsupported-profile", "VERSION_UNSUPPORTED", `${spec.versionParameter} ${JSON.stringify(versionValue)} is not supported`);
@@ -293,7 +313,6 @@ function applyParameters(
   // scid.
   if (first) {
     if (typeof parameters.scid !== "string") fail("invalid-evidence", "PARAMETER_REQUIRED", "the first entry must set scid");
-    requireVhHash(parameters.scid, "PARAMETER_INVALID");
   } else if (parameters.scid !== undefined) {
     fail("invalid-evidence", "PARAMETER_SCID", "scid may appear only in the first entry");
   }
@@ -302,7 +321,7 @@ function applyParameters(
   if (parameters.updateKeys !== undefined) {
     if (!isStringArray(parameters.updateKeys)) invalidParameter("updateKeys", "must be an array of Multikeys");
     for (const key of parameters.updateKeys) {
-      const type = decodeMultikey(key).type;
+      const type = asParameterError("updateKeys", () => decodeMultikey(key).type);
       if (!version.entrySuites.some((suite) => CRYPTOSUITES[suite] === type)) {
         invalidParameter("updateKeys", `key ${key} has a type no permitted cryptosuite uses`);
       }
@@ -312,13 +331,13 @@ function applyParameters(
   }
   if (parameters.nextKeyHashes !== undefined) {
     if (!isStringArray(parameters.nextKeyHashes)) invalidParameter("nextKeyHashes", "must be an array of hashes");
-    for (const hash of parameters.nextKeyHashes) requireVhHash(hash, "PARAMETER_INVALID");
+    for (const hash of parameters.nextKeyHashes) asParameterError("nextKeyHashes", () => requireVhHash(hash, "PARAMETER_INVALID"));
   }
 
-  if (parameters.witness !== undefined) validateWitness(parameters.witness, spec, version);
+  if (parameters.witness !== undefined) asParameterError("witness", () => validateWitness(parameters.witness, spec, version));
   if (parameters.watchers !== undefined) {
-    if (!isStringArray(parameters.watchers) || !parameters.watchers.every(isHttpsUrl)) {
-      invalidParameter("watchers", "must be an array of https URLs");
+    if (!isStringArray(parameters.watchers) || !parameters.watchers.every(isWatcherUrl)) {
+      invalidParameter("watchers", "must be an array of http(s) URLs");
     }
   }
   if (parameters.deactivated !== undefined && typeof parameters.deactivated !== "boolean") invalidParameter("deactivated", "must be a boolean");
@@ -365,8 +384,11 @@ export function parseVersionTime(value: unknown, fractionalDigits = 0): number {
   if (!match) return bad();
   const [, y, mo, d, h, mi, s, fraction] = match;
   if (fraction !== undefined && fraction.length > Math.min(fractionalDigits, 3)) return bad();
-  const time = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s, fraction ? Number(fraction.padEnd(3, "0")) : 0);
-  const date = new Date(time);
+  // setUTCFullYear, unlike Date.UTC, does not map years 0-99 to 1900-1999.
+  const date = new Date(0);
+  date.setUTCFullYear(+y, +mo - 1, +d);
+  date.setUTCHours(+h, +mi, +s, fraction ? Number(fraction.padEnd(3, "0")) : 0);
+  const time = date.getTime();
   if (date.getUTCFullYear() !== +y || date.getUTCMonth() !== +mo - 1 || date.getUTCDate() !== +d || date.getUTCHours() !== +h || date.getUTCMinutes() !== +mi || date.getUTCSeconds() !== +s) {
     return bad();
   }
@@ -380,14 +402,16 @@ const ENTRY_MEMBERS = ["versionId", "versionTime", "parameters", "state", "proof
 const VERSION_ID = /^([1-9]\d*)-([1-9A-HJ-NP-Za-km-z]+)$/;
 
 function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
-  if (!isJsonObject(raw)) fail("invalid-evidence", "ENTRY_MEMBERS", "a log entry must be a JSON object");
+  if (!isJsonObject(raw)) fail("invalid-evidence", "LOG_LINE_INVALID", "a log line must be a JSON object");
   const keys = Object.keys(raw);
   if (keys.length !== ENTRY_MEMBERS.length || !ENTRY_MEMBERS.every((key) => keys.includes(key))) {
     fail("invalid-evidence", "ENTRY_MEMBERS", "a log entry has exactly versionId, versionTime, parameters, state and proof");
   }
-  if (typeof raw.versionId !== "string") fail("invalid-evidence", "VERSION_ID_FORMAT", "versionId must be a string");
+  if (typeof raw.versionId !== "string" || typeof raw.versionTime !== "string") {
+    fail("invalid-evidence", "ENTRY_MEMBERS", "versionId and versionTime must be strings");
+  }
   if (!isJsonObject(raw.parameters) || !isJsonObject(raw.state)) fail("invalid-evidence", "ENTRY_MEMBERS", "parameters and state must be objects");
-  if (!Array.isArray(raw.proof)) fail("invalid-evidence", "PROOF_MISSING", "proof must be an array");
+  if (!Array.isArray(raw.proof)) fail("invalid-evidence", "ENTRY_MEMBERS", "proof must be an array");
   if (limits.maxEntryBytes !== undefined && JSON.stringify(raw).length > limits.maxEntryBytes) {
     fail("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${limits.maxEntryBytes} bytes`);
   }
@@ -405,26 +429,57 @@ async function verifyEntry(
   now: number,
 ): Promise<VerifiedEntry> {
   const spec = options.specialisation;
+  // Checks run in VH-Log's step order, as vh-log-interop-0 section 4 pins it, so
+  // the first failing check names the error: deactivation, structure,
+  // parameters (with pre-rotation), proofs, versionId, versionTime, SCID, state.
+  if (previous?.active.deactivated) fail("deactivated", "ENTRY_AFTER_DEACTIVATION", "no entry may follow a deactivating entry");
   const entry = checkStructure(raw, options.limits ?? {});
 
-  // versionId (VH-Log Read step 3).
+  // Parameters (VH-Log Read step 1) and pre-rotation (step 7, which concerns only parameters).
+  const { active, version } = applyParameters(entry.parameters, previous?.active, spec);
+  let authorizedKeys: string[] = [];
+  if (spec.keys.kind === "updateKeys") {
+    const prerotation = (previous?.active.nextKeyHashes.length ?? 0) > 0;
+    if (prerotation) {
+      if (entry.parameters.updateKeys === undefined) fail("invalid-evidence", "PREROTATION_UPDATE_KEYS", "pre-rotation requires explicit updateKeys");
+      if (entry.parameters.nextKeyHashes === undefined) fail("invalid-evidence", "PREROTATION_NEXT_KEY_HASHES", "pre-rotation requires an explicit nextKeyHashes");
+      for (const key of active.updateKeys) {
+        if (!previous!.active.nextKeyHashes.includes(keyHash(key))) fail("unauthorized-key", "PREROTATION_KEY", `key ${key} was not committed by the previous entry`);
+      }
+    }
+    authorizedKeys = !previous || prerotation ? active.updateKeys : previous.active.updateKeys;
+  }
+
+  // Proofs (step 2): key form, then authorization, then the proof itself.
+  if (entry.proof.length === 0) fail("invalid-evidence", "PROOF_MISSING", "an entry needs a proof");
+  if (spec.maxProofs !== undefined && entry.proof.length > spec.maxProofs) {
+    fail("invalid-evidence", "PROOF_COUNT", `an entry may carry at most ${spec.maxProofs} proof(s)`);
+  }
+  const context: EntryContext = { index, entry, previous, scid: active.scid, active, version };
+  const document = withoutProof(entry);
+  for (const proof of entry.proof) {
+    if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
+    let key: string;
+    if (spec.keys.kind === "updateKeys") {
+      key = asProofError(() => didKeyMultikey(proof.verificationMethod));
+      if (!authorizedKeys.includes(key)) fail("unauthorized-key", "UNAUTHORIZED_KEY", `${proof.verificationMethod} is not an active update key`);
+    } else {
+      key = await spec.keys.authorize({ ...context, proof });
+    }
+    if (proof.proofPurpose !== "assertionMethod") fail("invalid-evidence", "PROOF_PURPOSE", "proofPurpose must be assertionMethod");
+    if (!isCryptosuite(proof.cryptosuite) || !version.entrySuites.includes(proof.cryptosuite)) {
+      fail("unsupported-profile", "CRYPTOSUITE_NOT_PERMITTED", `cryptosuite ${JSON.stringify(proof.cryptosuite)} is not permitted by ${active.version}`);
+    }
+    if (!asProofError(() => verifyProof(document, proof, key))) {
+      fail("invalid-evidence", "PROOF_SIGNATURE", `proof by ${proof.verificationMethod} does not verify`);
+    }
+  }
+
+  // versionId (step 3).
   const id = VERSION_ID.exec(entry.versionId);
   if (!id) fail("invalid-evidence", "VERSION_ID_FORMAT", "versionId must be <number>-<entry hash>");
   const versionNumber = Number(id[1]);
   if (versionNumber !== index + 1) fail("invalid-evidence", "VERSION_NUMBER", `entry ${index + 1} has version number ${versionNumber}`);
-  if (previous?.active.deactivated) fail("deactivated", "ENTRY_AFTER_DEACTIVATION", "no entry may follow a deactivating entry");
-
-  // Parameters (step 1).
-  const { active, version } = applyParameters(entry.parameters, previous?.active, spec);
-
-  // SCID (step 5) before the entry hash, so a changed genesis reports identity failure first.
-  if (index === 0) {
-    const scid = active.scid;
-    const preliminary = replaceText(withoutProof({ ...entry, versionId: SCID_PLACEHOLDER }), scid, SCID_PLACEHOLDER) as JsonObject;
-    if (computeScid(preliminary) !== scid) fail("invalid-evidence", "SCID_MISMATCH", "the SCID does not match the first entry");
-  }
-
-  // Entry hash (step 3).
   requireVhHash(id[2], "VERSION_ID_FORMAT");
   const predecessor = previous?.entry.versionId ?? active.scid;
   if (vhHash({ ...withoutProof(entry), versionId: predecessor }) !== id[2]) {
@@ -442,41 +497,12 @@ async function verifyEntry(
     fail("invalid-evidence", "VERSION_TIME_FUTURE", "versionTime is too far in the future");
   }
 
-  // Pre-rotation (step 7) determines the active keys, so it precedes the proof check.
-  let authorizedKeys: string[] = [];
-  if (spec.keys.kind === "updateKeys") {
-    const prerotation = (previous?.active.nextKeyHashes.length ?? 0) > 0;
-    if (prerotation) {
-      if (entry.parameters.updateKeys === undefined) fail("invalid-evidence", "PREROTATION_UPDATE_KEYS", "pre-rotation requires explicit updateKeys");
-      if (entry.parameters.nextKeyHashes === undefined) fail("invalid-evidence", "PREROTATION_NEXT_KEY_HASHES", "pre-rotation requires an explicit nextKeyHashes");
-      for (const key of active.updateKeys) {
-        if (!previous!.active.nextKeyHashes.includes(keyHash(key))) fail("unauthorized-key", "PREROTATION_KEY", `key ${key} was not committed by the previous entry`);
-      }
-    }
-    authorizedKeys = !previous || prerotation ? active.updateKeys : previous.active.updateKeys;
-  }
-
-  // Proofs (step 2).
-  if (entry.proof.length === 0) fail("invalid-evidence", "PROOF_MISSING", "an entry needs a proof");
-  if (spec.maxProofs !== undefined && entry.proof.length > spec.maxProofs) {
-    fail("invalid-evidence", "PROOF_COUNT", `an entry may carry at most ${spec.maxProofs} proof(s)`);
-  }
-  const context: EntryContext = { index, entry, previous, scid: active.scid, active, version };
-  const document = withoutProof(entry);
-  for (const proof of entry.proof) {
-    if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
-    if (proof.proofPurpose !== "assertionMethod") fail("invalid-evidence", "PROOF_PURPOSE", "proofPurpose must be assertionMethod");
-    if (!isCryptosuite(proof.cryptosuite) || !version.entrySuites.includes(proof.cryptosuite)) {
-      fail("unsupported-profile", "CRYPTOSUITE_NOT_PERMITTED", `cryptosuite ${JSON.stringify(proof.cryptosuite)} is not permitted by ${active.version}`);
-    }
-    let key: string;
-    if (spec.keys.kind === "updateKeys") {
-      key = didKeyMultikey(proof.verificationMethod);
-      if (!authorizedKeys.includes(key)) fail("unauthorized-key", "UNAUTHORIZED_KEY", `${proof.verificationMethod} is not an active update key`);
-    } else {
-      key = await spec.keys.authorize({ ...context, proof });
-    }
-    if (!verifyProof(document, proof, key)) fail("invalid-evidence", "PROOF_SIGNATURE", `proof by ${proof.verificationMethod} does not verify`);
+  // SCID (step 5), first entry only.
+  if (index === 0) {
+    const scid = active.scid;
+    requireVhHash(scid, "SCID_MISMATCH");
+    const preliminary = replaceText(withoutProof({ ...entry, versionId: SCID_PLACEHOLDER }), scid, SCID_PLACEHOLDER) as JsonObject;
+    if (computeScid(preliminary) !== scid) fail("invalid-evidence", "SCID_MISMATCH", "the SCID does not match the first entry");
   }
 
   // State (step 6).
@@ -486,6 +512,18 @@ async function verifyEntry(
   // VH-Log: a change from {} is active immediately; a replacement or removal applies after the entry.
   const witnessList = prior ?? witnessListOf(active.witness);
   return { entry, versionNumber, time, active, witnessList, witnessed: false };
+}
+
+/** Report a malformed proof as PROOF_INVALID; keep CRYPTOSUITE_* codes. */
+function asProofError<T>(check: () => T): T {
+  try {
+    return check();
+  } catch (error) {
+    if (error instanceof OriginalsError && !error.code.startsWith("CRYPTOSUITE_") && !error.code.startsWith("PROOF_")) {
+      throw new OriginalsError("invalid-evidence", "PROOF_INVALID", error.message);
+    }
+    throw error;
+  }
 }
 
 function parseWitnessFile(value: unknown): WitnessFileEntry[] {
@@ -553,10 +591,12 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions): Pro
   // Witnesses, only after every non-witness check (VH-Log "Verifying Witness Proofs During Resolution").
   if (verified.some((v) => v.witnessList)) {
     let file: WitnessFileEntry[] = [];
+    let malformed: OriginalsError | undefined;
     try {
       file = parseWitnessFile(options.witnessFile);
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
+      malformed = error;
     }
     const versionIds = new Set(verified.map((v) => v.entry.versionId));
     const rulesById = new Map(verified.map((v) => [v.entry.versionId, options.specialisation.versions[v.active.version]]));
@@ -564,6 +604,11 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions): Pro
     for (let i = 0; i < verified.length; i++) {
       const list = verified[i].witnessList;
       if (!list) continue;
+      if (malformed) {
+        failure = { index: i, versionId: verified[i].entry.versionId, error: malformed };
+        verified.length = i;
+        break;
+      }
       const listed = new Set(list.witnesses.map((w) => w.id.normalize("NFC")));
       const distinct = new Set<string>();
       for (let j = i; j < verified.length; j++) {
@@ -590,6 +635,206 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions): Pro
     active: last?.active ?? null,
     deactivated: last?.active.deactivated ?? false,
     failure,
+  };
+}
+
+/**
+ * Verify a log file's text. Lines are parsed one at a time, so a line that is
+ * not strict JSON ends the valid prefix there, like any other failing entry.
+ */
+export async function verifyLogText(text: string, options: VerifyOptions & { parse?: ParseLimits }): Promise<LogVerification> {
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  const lines = text.length === 0 ? [] : body.split("\n");
+  const entries: unknown[] = [];
+  let parseFailure: LogFailure | undefined;
+  for (let index = 0; index < lines.length; index++) {
+    try {
+      if (lines[index].length === 0) throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
+      entries.push(parseJson(lines[index], options.parse));
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+      parseFailure = { index, error };
+      break;
+    }
+  }
+  if (lines.length === 0) {
+    parseFailure = { index: 0, error: new OriginalsError("invalid-evidence", "LOG_EMPTY", "the log has no entries") };
+  }
+  const result = await verifyLog(entries, options);
+  if (!parseFailure || result.failure) return result;
+  return { ...result, failure: parseFailure };
+}
+
+// ---------------------------------------------------------------------------
+// Comparing copies (VH-Log "Comparing Copies of a Log" and "Resolution Options")
+
+export interface LogCopy {
+  source: string;
+  /** The log file text, unless the copy could not be retrieved. */
+  log?: string;
+  witnessFile?: unknown;
+  /** Why the copy could not be retrieved. */
+  unavailable?: string;
+}
+
+export type CopyStatus = "current" | "behind" | "invalid" | "unavailable";
+
+export interface CopyReport {
+  source: string;
+  versionId?: string;
+  status: CopyStatus;
+}
+
+export interface ResolutionWarning {
+  code: "copy-behind" | "copy-invalid" | "copy-unavailable" | "invalid-entries" | "retained-version-not-found";
+  source?: string;
+  message: string;
+}
+
+export interface ForkReport {
+  /** The version number of the first entry at which the copies differ. */
+  version: number;
+  copies: Array<{ source: string; versionId: string }>;
+}
+
+export interface CopiesResolution {
+  /** The verified reference copy, or null when no copy could be used. */
+  reference: LogVerification | null;
+  referenceSource?: string;
+  copies: CopyReport[];
+  warnings: ResolutionWarning[];
+  fork?: ForkReport;
+  /** Set when fewer than minCopies copies are current or behind. */
+  insufficientCopies?: boolean;
+}
+
+interface Candidate {
+  copy: LogCopy;
+  /** Parsed versionIds, line by line (undefined when a line has none). */
+  versionIds: Array<string | undefined>;
+  verification?: LogVerification;
+  status?: CopyStatus;
+}
+
+function versionIdsOf(text: string): Array<string | undefined> {
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return (text.length === 0 ? [] : body.split("\n")).map((line) => {
+    try {
+      const value = JSON.parse(line) as unknown;
+      return isJsonObject(value) && typeof value.versionId === "string" ? value.versionId : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/**
+ * Resolve from several copies of one log: the primary first, then each copy
+ * in order. The first copy that passes verification in full (every entry
+ * valid and witnessed) is the reference; others are compared by a single
+ * versionId, and only a diverging or extending copy is verified again. Two
+ * verified copies that diverge are a fork, which fails resolution for every
+ * version. With a single copy and no retained versionId, partial validity is
+ * kept, as in an ordinary resolution.
+ */
+export async function resolveCopies(
+  primary: LogCopy,
+  others: LogCopy[],
+  options: VerifyOptions & { parse?: ParseLimits; retainedVersionId?: string; minCopies?: number },
+): Promise<CopiesResolution> {
+  const candidates: Candidate[] = [primary, ...others].map((copy) => ({ copy, versionIds: copy.log === undefined ? [] : versionIdsOf(copy.log) }));
+  const verify = async (c: Candidate) => {
+    c.verification ??= await verifyLogText(c.copy.log!, { ...options, witnessFile: c.copy.witnessFile });
+    return c.verification;
+  };
+  const passes = (v: LogVerification) => v.failure === undefined;
+  const warnings: ResolutionWarning[] = [];
+  let fork: ForkReport | undefined;
+
+  let reference: Candidate | undefined;
+  for (const c of candidates) {
+    if (c.copy.log === undefined) {
+      c.status = "unavailable";
+      continue;
+    }
+    if (reference) break;
+    if (passes(await verify(c))) reference = c;
+    else if (others.length > 0) c.status = "invalid";
+  }
+  if (!reference && others.length === 0 && primary.log !== undefined) {
+    // One copy: ordinary resolution, with partial validity and its own failure.
+    await verify(candidates[0]);
+    reference = candidates[0];
+  }
+
+  const lastId = (c: Candidate) => c.versionIds[c.versionIds.length - 1];
+  if (reference) {
+    for (const c of candidates) {
+      if (c === reference || c.status === "unavailable" || c.status === "invalid") continue;
+      const ref = reference.versionIds;
+      if (c.versionIds.length <= ref.length) {
+        const k = c.versionIds.length;
+        if (k > 0 && lastId(c) === ref[k - 1]) continue; // same log, possibly behind
+      } else if (c.versionIds[ref.length - 1] === lastId(reference)) {
+        // Extends the reference: verify, and on success it becomes the reference.
+        if (passes(await verify(c))) reference = c;
+        else c.status = "invalid";
+        continue;
+      }
+      // Diverges.
+      if (!passes(await verify(c))) {
+        c.status = "invalid";
+        continue;
+      }
+      let k = 0;
+      while (k < Math.min(c.versionIds.length, ref.length) && c.versionIds[k] === ref[k]) k++;
+      fork = {
+        version: k + 1,
+        copies: [reference, c].map((x) => ({ source: x.copy.source, versionId: x.versionIds[k] ?? "" })),
+      };
+      break;
+    }
+  }
+
+  if (reference && !fork && options.retainedVersionId !== undefined) {
+    const retained = options.retainedVersionId;
+    const number = Number(/^(\d+)-/.exec(retained)?.[1] ?? NaN);
+    const at = reference.versionIds[number - 1];
+    if (!Number.isInteger(number) || number < 1) {
+      fail("invalid-evidence", "SELECTOR_INVALID", "retainedVersionId is not a versionId");
+    } else if (at === undefined) {
+      warnings.push({ code: "retained-version-not-found", message: `the log has fewer than ${number} entries; it may have been truncated or rolled back` });
+    } else if (at !== retained) {
+      fork = { version: number, copies: [{ source: reference.copy.source, versionId: at }, { source: "retained", versionId: retained }] };
+    }
+  }
+
+  const copies: CopyReport[] = candidates.map((c) => {
+    const versionId = lastId(c);
+    if (c.status === "unavailable") return { source: c.copy.source, status: "unavailable" };
+    if (c.status === "invalid") return { source: c.copy.source, versionId, status: "invalid" };
+    if (reference && c.versionIds.length === reference.versionIds.length && versionId === lastId(reference)) {
+      return { source: c.copy.source, versionId, status: "current" };
+    }
+    if (reference && c.versionIds.length < reference.versionIds.length && versionId === reference.versionIds[c.versionIds.length - 1]) {
+      return { source: c.copy.source, versionId, status: "behind" };
+    }
+    return { source: c.copy.source, versionId, status: "invalid" };
+  });
+  for (const [i, report] of copies.entries()) {
+    const c = candidates[i];
+    if (report.status === "behind") warnings.push({ code: "copy-behind", source: report.source, message: `copy is ${reference!.versionIds.length - c.versionIds.length} entries behind the reference copy` });
+    if (report.status === "invalid") warnings.push({ code: "copy-invalid", source: report.source, message: `copy failed verification at entry ${(c.verification?.failure?.index ?? 0) + 1}` });
+    if (report.status === "unavailable") warnings.push({ code: "copy-unavailable", source: report.source, message: c.copy.unavailable ?? "copy could not be retrieved" });
+  }
+  const usable = copies.filter((c) => c.status === "current" || c.status === "behind").length;
+  return {
+    reference: fork ? null : (reference?.verification ?? null),
+    referenceSource: fork ? undefined : reference?.copy.source,
+    copies,
+    warnings,
+    fork,
+    insufficientCopies: options.minCopies !== undefined && usable < options.minCopies,
   };
 }
 
@@ -667,9 +912,10 @@ export async function createWitnessProof(
   signer: ProofSigner,
   versionId: string,
   cryptosuite: CryptosuiteName = "eddsa-jcs-2022",
+  created?: string,
 ): Promise<DataIntegrityProof> {
   const vm = `did:key:${signer.publicKeyMultibase}#${signer.publicKeyMultibase}`;
-  const [proof] = await signWith(signer, { cryptosuite, verificationMethod: vm })({ versionId });
+  const [proof] = await signWith(signer, { cryptosuite, verificationMethod: vm, created })({ versionId });
   return proof;
 }
 
@@ -677,6 +923,15 @@ export async function createWitnessProof(
 export function serializeLog(entries: LogEntry[]): string {
   return entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
 }
+
+/** The plain VH-Log 1.0 specialisation: `logVersion`, SHA-256 and eddsa-jcs-2022, unknown parameters ignored. */
+export const vhLog10: Specialisation = {
+  name: "vh-log",
+  versionParameter: "logVersion",
+  versions: { "vh-log:1.0": { vhLog: "vh-log:1.0", rank: 1, entrySuites: ["eddsa-jcs-2022"], witnessSuites: ["eddsa-jcs-2022"] } },
+  keys: { kind: "updateKeys" },
+  unknownParameters: "ignore",
+};
 
 /** Parse a log file (strict JSON Lines). Structural checks happen in `verifyLog`. */
 export function parseLog(text: string, limits?: ParseLimits): JsonValue[] {

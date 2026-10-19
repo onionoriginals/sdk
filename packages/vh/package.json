@@ -42,12 +42,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc -p tsconfig.interop.json",
     "test": "bun test tests/",
     "test:coverage": "bun test tests/ --coverage",
     "test:ci": "bash -o pipefail -c 'bun test tests/ --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
     "lint": "eslint \"src/**/*.ts\"",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "interop:driver": "bun interop/driver.ts"
   },
   "keywords": [
     "originals",

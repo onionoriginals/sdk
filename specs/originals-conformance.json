@@ -31,7 +31,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/log.test.ts"
+      ],
+      "note": "VH-Log engine: a changed genesis fails by proof, entry hash or SCID binding, and invalidates the log. did:vh identifier binding is in didvh.test.ts; the asset identifier is covered in PR 3."
     },
     {
       "id": "C12-04",
