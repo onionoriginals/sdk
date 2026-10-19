@@ -1,10 +1,10 @@
 import { KeyManager } from './KeyManager.js';
-import { multikey } from '@originals/cel';
+import { multikey } from '../crypto/Multikey.js';
 import { signingInput } from '../crypto/signingInput.js';
 import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
-import { StructuredError } from '@originals/cel';
-import { canonicalWebVHPaths, isWebVHPathSegment } from '@originals/cel/v3';
+import { StructuredError } from '../utils/telemetry.js';
+import { canonicalWebVHPaths, isWebVHPathSegment } from './webvh-names.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**
@@ -23,7 +23,7 @@ async function loadNodeModules(): Promise<{ fs: typeof import('fs'); path: typeo
 }
 
 /**
- * Validate and DID-encode caller-supplied decoded `paths` with the CEL rule,
+ * Validate and DID-encode caller-supplied decoded `paths` with the shared did:webvh rule,
  * as `StructuredError`s for the identity seams.
  */
 export function requireWebVHPaths(paths: unknown): string[] {

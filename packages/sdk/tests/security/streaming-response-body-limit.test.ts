@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import { readResponseBodyCapped, ResponseTooLargeError } from '../../src/adapters/response-body-limit';
 import { QuickNodeProvider } from '../../src/adapters/providers/QuickNodeProvider';
 import { OrdHttpProvider } from '../../src/adapters/providers/OrdHttpProvider';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../src/utils/telemetry';
 
 /**
  * Issue #606: a chunked/streamed response has no reliable Content-Length, so

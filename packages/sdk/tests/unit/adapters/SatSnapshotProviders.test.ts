@@ -73,7 +73,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   return { provider, calls };
 }
 
-for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} CEL 3 snapshot`, () => {
+for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snapshot`, () => {
   test('reads complete ownership and publication bytes without the inverse address index', async () => {
     const { provider, calls } = fixture(kind, { status: { address_index: false } });
     const result = await provider.getSatSnapshot('123');

@@ -111,21 +111,20 @@ describe('step 3 states its own tier', () => {
 });
 
 describe('the section subhead', () => {
-  test('the signed-in tier’s subhead does not hand the Bitcoin steps to a mock', () => {
-    expect(demoSubhead(true)).not.toMatch(/mock|coming soon|testnet/i);
-    expect(demoSubhead(true)).toMatch(/bitcoin/i);
+  // Bitcoin anchoring is off while it is rebuilt on the Originals Protocol
+  // (features.ts), so no build has a real path: every tier hears the same thing.
+  test('while anchoring is off, every tier is told publishing and Bitcoin return, and what works now', () => {
+    for (const [real, network] of [[true, 'mainnet'], [false, 'mainnet'], [false, 'off'], [true, 'regtest']] as const) {
+      expect(demoSubhead(real, network)).toMatch(/return soon/i);
+      expect(demoSubhead(real, network)).toMatch(/download its signed history/i);
+    }
   });
 
-  test('the anonymous tier’s subhead names the Bitcoin deployment requirement', () => {
-    expect(demoSubhead(false, 'mainnet')).toMatch(/requires|funded|deployment/i);
-    expect(demoSubhead(false, 'off')).toMatch(/requires|funded|deployment/i);
-  });
-
-  test('only a build with a real path invites the visitor to sign in for one', () => {
-    expect(demoSubhead(false, 'mainnet')).toMatch(/sign in/i);
-    // On a mock build, signing in changes nothing — `demoTier` keeps every
-    // visitor simulated — so the invitation would be its own false promise.
-    expect(demoSubhead(false, 'off')).not.toMatch(/sign in/i);
+  test('no build invites a visitor to sign in for a Bitcoin path that is not there', () => {
+    for (const network of ['mainnet', 'testnet4', 'regtest', 'off'] as const) {
+      expect(demoSubhead(false, network)).not.toMatch(/sign in/i);
+    }
+    expect(demoSubhead(true, 'mainnet')).not.toMatch(/your own BTC pays|adds it to Bitcoin/i);
     expect(demoTier('off', true).real).toBe(false);
   });
 });

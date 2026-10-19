@@ -243,7 +243,7 @@ export class Verifier {
    * did:key — the one self-certifying method with no separate relationship
    * document by design — skips the check when unresolvable, falling back to
    * the controller binding plus signature verification that already ran.
-   * Every other DID method (did:webvh, did:btco, did:cel, and any future
+   * Every other DID method (did:webvh, did:btco, and any future
    * method DIDManager learns to resolve) fails closed when its document is
    * unavailable, rather than allow-listing only the methods known today —
    * an unlisted method must not silently regain the fail-open behavior this

@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterEach, afterAll, beforeEach, spy
 import { Verifier } from '../../../src/vc/Verifier';
 import { Issuer } from '../../../src/vc/Issuer';
 import * as ed25519 from '@noble/ed25519';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
 import { registerVerificationMethod, verificationMethodRegistry } from '../../../src/vc/documentLoader';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { StatusListManager } from '../../../src/vc/StatusListManager';

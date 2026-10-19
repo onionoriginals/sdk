@@ -39,7 +39,7 @@ import type {
   ResourceType,
 } from './types.js';
 import { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './types.js';
-import { base64 } from '@originals/cel/encoding';
+import { base64 } from '../utils/encoding.js';
 import { normalizeResource, resourceContentBytes } from '../utils/resource-content.js';
 
 /**

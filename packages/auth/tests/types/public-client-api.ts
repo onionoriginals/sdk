@@ -1,6 +1,6 @@
 // Compile against the installed @originals/auth export map, independently of
 // the package's own src tsconfig. Mirrors
-// packages/sdk/tests/types/public-cel3.ts: exercises the exact positional
+// packages/sdk/tests/types/public-originals.ts: exercises the exact positional
 // signatures specs/auth/client-api.md documents, so a signature change that
 // silently breaks a documented example fails this compile step instead of
 // only being caught by prose review (#716's own recommended next step).

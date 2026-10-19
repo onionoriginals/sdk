@@ -18,7 +18,8 @@ import { withSecuringContext } from './Issuer.js';
 import { DataIntegrityProofManager } from './proofs/data-integrity.js';
 import { createDocumentLoader } from './documentLoader.js';
 import { EdDSACryptosuiteManager, type DataIntegrityProof } from './cryptosuites/eddsa.js';
-import { multikey, StructuredError } from '@originals/cel';
+import { multikey } from '../crypto/Multikey.js';
+import { StructuredError } from '../utils/telemetry.js';
 import { describeMultiSigProofFailure } from './multiSigProofFormat.js';
 
 /**
@@ -36,7 +37,7 @@ export class MultiSigManager {
 
   /**
    * @param didManager - Enables resolution of non-did:key signer verification
-   *   methods (did:webvh/did:btco/did:cel) and verification of
+   *   methods (did:webvh/did:btco) and verification of
    *   `eddsa-rdfc-2022` (Data Integrity) proofs. Without it, only did:key
    *   signers with legacy (cryptosuite-less) proofs can be verified.
    */
@@ -598,7 +599,7 @@ export class MultiSigManager {
     try {
       keyType = multikey.decodePrivateKey(privateKeyMultibase).type;
     } catch (e) {
-      // Same public-seam contract as LifecycleManager/CredentialManager's
+      // Same public-seam contract as CredentialManager's
       // INVALID_KEY: a caller catching by .code must see the same code for
       // the same underlying failure (a malformed multibase private key).
       throw new StructuredError(

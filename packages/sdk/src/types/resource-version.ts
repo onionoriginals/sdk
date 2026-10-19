@@ -2,8 +2,7 @@
  * Canonical resource versioning types.
  *
  * This is the single source of truth for resource version metadata and history.
- * Both the resources module (ResourceManager) and lifecycle module (ResourceVersioning)
- * MUST import from here instead of defining their own copies.
+ * The resources module (ResourceManager) MUST import from here instead of defining their own copies.
  */
 
 /**

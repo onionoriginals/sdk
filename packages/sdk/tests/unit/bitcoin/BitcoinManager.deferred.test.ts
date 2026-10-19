@@ -25,7 +25,7 @@ describe('BitcoinManager.inscribeData deferred content', () => {
 
   test('threads static metadata through to the inscription (#407 phase 2)', async () => {
     const bm = new BitcoinManager(config);
-    const metadata = { didDocument: { id: 'did:btco:reg:9' }, celLog: { events: [] } };
+    const metadata = { didDocument: { id: 'did:btco:reg:9' }, history: { entries: [] } };
     const inscription = await bm.inscribeData(
       Buffer.from('media'),
       'image/png',

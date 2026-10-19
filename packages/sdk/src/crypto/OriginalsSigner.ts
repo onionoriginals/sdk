@@ -6,15 +6,12 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { multikey } from '@originals/cel';
+import { multikey } from './Multikey.js';
 import { signerForKeyType } from './Signer.js';
 import { signingInput } from './signingInput.js';
-import { CEL_CRYPTOSUITE, CEL_PROOF_TYPE } from '@originals/cel';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
 import type { KeyStore, ExternalSigner } from '../types/common.js';
 import type { KeyPair } from '../types/bitcoin.js';
-import type { DataIntegrityProof } from '@originals/cel';
-import type { CelSigner } from '@originals/cel/legacy';
 
 export interface OriginalsSigner {
   /** Absolute verification method id, e.g. "did:key:z6Mk…#z6Mk…". */
@@ -26,9 +23,8 @@ export interface OriginalsSigner {
 }
 
 /**
- * The canonical `did:key` verification method for a Multikey public key —
- * the identity CEL authorship uses regardless of the signer's ambient
- * `verificationMethodId` (CEL verification is offline did:key-only).
+ * The canonical `did:key` verification method for a Multikey public key:
+ * `did:key:<mk>#<mk>`.
  */
 export function canonicalDidKeyVm(publicKeyMultibase: string): string {
   return `did:key:${publicKeyMultibase}#${publicKeyMultibase}`;
@@ -74,7 +70,7 @@ export function signerFromKeyPair(keyPair: KeyPair): OriginalsSigner {
 
 /**
  * Wraps a {@link KeyStore} entry as an {@link OriginalsSigner}. The private key
- * is looked up lazily on EVERY sign (matching `createKeyStoreCelSigner`):
+ * is looked up lazily on EVERY sign:
  * rotation-fresh, and key absence fails at sign time, not construction time.
  *
  * The public key is taken from `publicKeyMultibase` when given, else derived
@@ -142,40 +138,7 @@ export function signerFromExternalSigner(
 }
 
 /**
- * Legacy bridge: an {@link OriginalsSigner} as a CEL signer. Ed25519-only (CEL
- * is Ed25519 end-to-end — anything else throws). Proofs are stamped with the
- * canonical `did:key` VM derived from the signer's public key, NOT its ambient
- * `verificationMethodId`: CEL verification is offline did:key-only, and this is
- * what `celSignerFromKeyPair` has always done.
- */
-export function toCelSigner(s: OriginalsSigner): CelSigner {
-  const decoded = multikey.decodePublicKey(s.publicKeyMultibase);
-  if (decoded.type !== 'Ed25519') {
-    throw new StructuredError('CEL_ED25519_REQUIRED',
-      `CEL events must be signed with Ed25519; got ${decoded.type}. Use a dedicated Ed25519 signer.`);
-  }
-  const verificationMethod = canonicalDidKeyVm(s.publicKeyMultibase);
-  return async (data: unknown): Promise<DataIntegrityProof> => {
-    // Config first, then sign over config + event (plan 042).
-    const config = {
-      type: CEL_PROOF_TYPE,
-      cryptosuite: CEL_CRYPTOSUITE,
-      created: new Date().toISOString(),
-      verificationMethod,
-      proofPurpose: 'assertionMethod',
-    };
-    const sig = await s.signBytes(
-      signingInput.celEvent(
-        data as { type: unknown; data?: unknown; previousEvent?: unknown },
-        config
-      )
-    );
-    return { ...config, proofValue: multikey.encodeMultibase(sig) };
-  };
-}
-
-/**
- * Legacy bridge: an {@link OriginalsSigner} as a didwebvh-compatible
+ * Bridge: an {@link OriginalsSigner} as a didwebvh-compatible
  * {@link ExternalSigner}. Correct by construction — its `sign()` is exactly
  * `signingInput.didWebvh` + `signBytes`, so it can never sign the wrong bytes.
  */

@@ -5,7 +5,7 @@
  *  AUTH-009/happy  Server TurnkeyWebVHSigner.sign → { proofValue } multibase, 64-byte Ed25519 sig length
  *  AUTH-009/happy  Server TurnkeyWebVHSigner.verify → boolean (false for invalid/wrong key)
  *  AUTH-010/happy  createTurnkeySigner deprecated positional form returns TurnkeyWebVHSigner
- *  AUTH-021/happy  Client TurnkeyDIDSigner.verify → boolean (uses OriginalsSDK.verifyDIDSignature; false for wrong key)
+ *  AUTH-021/happy  Client TurnkeyDIDSigner.verify → boolean (uses verifyDIDSignature; false for wrong key)
  *  AUTH-022/happy  createDIDWithTurnkey → { did, didDocument, didLog } — SKIPPED (see note)
  *  AUTH-022/error  createDIDWithTurnkey session expiry → throws TurnkeySessionExpiredError, onExpired invoked
  */
@@ -260,7 +260,7 @@ describe('[AUTH-010] createTurnkeySigner – deprecated positional form', () => 
 
 // ─── AUTH-021: Client TurnkeyDIDSigner.verify ────────────────────────────────
 
-describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSignature', () => {
+describe('[AUTH-021] TurnkeyDIDSigner.verify – uses verifyDIDSignature', () => {
   const FIXTURE_PUBKEY_MULTIBASE = 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp';
 
   function makeMockClient() {
@@ -308,7 +308,7 @@ describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSign
       FIXTURE_PUBKEY_MULTIBASE
     );
 
-    // Correct key → true (verifies that OriginalsSDK.verifyDIDSignature is actually used)
+    // Correct key → true (verifies that verifyDIDSignature is actually used)
     const correctResult = await signer.verify(signature, message, pubKeyCorrect);
     expect(correctResult).toBe(true);
 
@@ -317,7 +317,7 @@ describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSign
     expect(wrongResult).toBe(false);
   });
 
-  test('verify → returns false when public key has invalid size (OriginalsSDK throws → caught → false)', async () => {
+  test('verify → returns false when public key has invalid size (verifyDIDSignature throws → caught → false)', async () => {
     const client = makeMockClient();
     const signer = new TurnkeyDIDSigner(
       client,
@@ -334,7 +334,7 @@ describe('[AUTH-021] TurnkeyDIDSigner.verify – uses OriginalsSDK.verifyDIDSign
     expect(result).toBe(false);
   });
 
-  test('verify → returns true for a valid Ed25519 signature (delegates to OriginalsSDK)', async () => {
+  test('verify → returns true for a valid Ed25519 signature (delegates to the SDK)', async () => {
     const ed25519 = await import('@noble/ed25519');
 
     const privKey = new Uint8Array(32).fill(11);
@@ -378,7 +378,7 @@ describe('[AUTH-022] createDIDWithTurnkey', () => {
   };
 
   test.skip('[AUTH-022/happy] returns { did, didDocument, didLog } with valid webvh DID', async () => {
-    // SKIP REASON: createDIDWithTurnkey calls OriginalsSDK.createDIDOriginal() which
+    // SKIP REASON: createDIDWithTurnkey calls createDIDOriginal() which
     // invokes didwebvh-ts internally. That library performs real Ed25519 proof
     // verification immediately after each signing round (via signer.verify()).
     // A mocked Turnkey signRawPayload returning arbitrary bytes (VALID_R/VALID_S)
@@ -389,12 +389,12 @@ describe('[AUTH-022] createDIDWithTurnkey', () => {
     //   (a) Real Ed25519 private key wrapped in Turnkey-shaped mock: requires
     //       knowing the private key corresponding to FIXTURE_UPDATE_KEY, which
     //       is a third-party fixture from didwebvh-ts — private key unavailable.
-    //   (b) Generating a fresh keypair and using it as updateKey: OriginalsSDK
+    //   (b) Generating a fresh keypair and using it as updateKey: the SDK
     //       would need the signer's signRawPayload to return the ACTUAL Ed25519
     //       signature, which means calling ed25519.sign() inside the mock — this
     //       creates a circular dependency where the mock needs to implement the
     //       real signing logic, defeating the purpose of mocking Turnkey.
-    //   (c) Mocking OriginalsSDK.createDIDOriginal: impossible from a test file
+    //   (c) Mocking createDIDOriginal: impossible from a test file
     //       without modifying src/ or using module interop unavailable in bun:test.
     //
     // The AUTH-022/error path below is testable because the mock throws before

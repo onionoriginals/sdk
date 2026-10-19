@@ -5,7 +5,7 @@ import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { RegtestProvider } from '../../../packages/sdk/src/adapters/providers/RegtestProvider';
 import { createCommitTransaction, createRevealTransaction } from '../../../packages/sdk/src/bitcoin/transactions/commit';
-import { createBitcoinCoreChainValidator } from '../../../packages/sdk/src/v3/chain-validation';
+import { createBitcoinCoreChainValidator } from '../../../packages/sdk/src/bitcoin/chain-validation';
 import { startRegtest } from '../../../scripts/regtest/environment';
 
 // Run from the repository root after installing workspace dependencies:

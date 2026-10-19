@@ -1,5 +1,5 @@
 import { base64 } from '@scure/base';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from './telemetry.js';
 import type { AssetResource, AssetResourceInput } from '../types/common.js';
 
 /** JSON encoding for raw bytes in version-2 asset envelopes. */

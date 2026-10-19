@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { LocalStorageAdapter } from '../../../src/storage/LocalStorageAdapter';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 
 describe('LocalStorageAdapter originDomain mode (#780)', () => {
   let tempDir: string;

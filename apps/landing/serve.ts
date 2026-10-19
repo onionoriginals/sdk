@@ -1,4 +1,3 @@
-import { createExploreRoutes } from './server/explore';
 /**
  * Production server for the landing app (Railway) — single service.
  *
@@ -203,22 +202,14 @@ function canonicalWebvhHost(): string | undefined {
 
 const api = buildApiRoutes();
 
-// Read-only Bitcoin access for the public Explore cold-start verifier
-// (`/api/explore/sat-snapshot/:sat`) — deliberately independent of whether
-// Turnkey/JWT auth is configured, since a signed-out visitor with no account
-// must still be able to independently re-verify an already-published
-// Original's accepted on-sat history from public inputs alone (#527). Reuses
-// the same provider construction as the authenticated money path; exposes
-// only getSatSnapshot through that surface — never funding, signing or
-// broadcast capability.
-const exploreSatProvider = isBitcoinConfigured() ? createFaucetProviderFromEnv() : undefined;
+// The public Explore verifier (/api/explore*) returns with web publication on
+// the Originals Protocol (plan 011, PR 8).
 
 const server = Bun.serve({
   port,
   hostname: '0.0.0.0',
   fetch: buildFetch({
     apiRoutes: api?.routes ?? null,
-    explore: createExploreRoutes({ store: originalsStore, dataDir: originalsDataDir, satProvider: exploreSatProvider }),
     publications: originalsStore,
     hostStore,
     distDir: DIST,

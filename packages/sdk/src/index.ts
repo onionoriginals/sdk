@@ -2,43 +2,58 @@
 // No side-effect imports here: noble sync-hash config happens at point of use
 // (crypto/Signer.ts, did/KeyManager.ts), so `sideEffects: false` holds.
 
-import { OriginalsSDK } from './core/OriginalsSDK3.js';
+/**
+ * `@originals/sdk`: the Originals Protocol SDK (plan 011). The root exports the
+ * Originals workflow from `./originals/` (create, edit, load, verify, evidence
+ * packages) together with the DID, credential, storage, Bitcoin and provider
+ * utilities that it builds on. See ORIGINALS.md for the consumer contract.
+ */
 
-// Main exports
-export { OriginalsSDK } from './core/OriginalsSDK3.js';
-export type { 
+// The Originals workflow: OriginalsSDK, signers, stores, evidence packages.
+export * from './originals/index.js';
+export { OriginalsSDK as default } from './originals/sdk.js';
+
+// did:webvh identity operations (author DIDs), as plain functions.
+export {
+  createOriginal,
+  createDIDOriginal,
+  updateOriginal,
+  updateDIDOriginal,
+  verifyDIDSignature,
+  prepareDIDDataForSigning,
+} from './did/identity-operations.js';
+export type {
   OriginalResult,
   CreateOriginalOptions,
   UpdateOriginalOptions,
   CreateDIDOriginalOptions,
-  UpdateDIDOriginalOptions
+  UpdateDIDOriginalOptions,
+  VerificationMethodInput,
 } from './did/identity-operations.js';
-export { OriginalsAsset } from './v3/OriginalsAsset.js';
-export { ASSET_ENVELOPE_FORMAT, ASSET_ENVELOPE_VERSION, ASSET_LIMITS } from './v3/envelope.js';
-export type { AssetEnvelope, AssetResource, AssetResourceInput, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, LocalResource } from './v3/types.js';
 
 // Type exports
-export type { LayerType, AppendFailurePolicy, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner } from './types/common.js';
+export type { LayerType, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner, OriginalsConfig, AssetResource, AssetResourceInput } from './types/common.js';
 export * from './types/did.js';
 export * from './types/credentials.js';
 export * from './types/bitcoin.js';
 export * from './types/network.js';
 export * from './types/multisig.js';
 
-// Manager exports
+// DID managers and helpers
 export { DIDManager, type CreateWebVHOptions, type CreateWebVHResult } from './did/DIDManager.js';
 export { computeNextKeyHash, normalizeUpdateKey } from './did/WebVHManager.js';
 export { DIDCache, type DIDCacheConfig, type DIDCacheStorage, type DIDCacheEntry } from './did/DIDCache.js';
 export { KeyManager } from './did/KeyManager.js';
 export { Ed25519Verifier } from './did/Ed25519Verifier.js';
-export * as encoding from '@originals/cel/encoding';
-export { 
+
+// Verifiable credentials
+export {
   CredentialManager,
   type ResourceCreatedSubject,
   type ResourceUpdatedSubject,
   type MigrationSubject,
   type OwnershipSubject,
-  type CredentialChainOptions
+  type CredentialChainOptions,
 } from './vc/CredentialManager.js';
 export {
   StatusListManager,
@@ -46,22 +61,6 @@ export {
   type StatusCheckResult,
 } from './vc/StatusListManager.js';
 export { BitstringStatusList } from './vc/BitstringStatusList.js';
-export { LifecycleManager } from './v3/OriginalsSDK.js';
-export type { CreateAssetOptions } from './v3/types.js';
-export type { OriginalsSDKOptions, OriginalsConfig } from './core/OriginalsSDK3.js';
-export { createLocalSigner, type CelSigner } from '@originals/cel/v3';
-export { BitcoinManager } from './bitcoin/BitcoinManager.js';
-export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
-export { buildTransferTransaction } from './bitcoin/transfer.js';
-export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo.js';
-export { 
-  selectUtxos as selectUtxosSimple,
-  selectResourceUtxos,
-  selectUtxosForPayment,
-  tagResourceUtxos,
-  estimateTransactionSize
-} from './bitcoin/utxo-selection.js';
-export { calculateFee } from './bitcoin/fee-calculation.js';
 // Remote-signer verification toolkit (plan 043): the verifier, the EdDSA suite
 // (shared signing-input construction), and the JSON-LD document loader.
 export { Verifier } from './vc/Verifier.js';
@@ -69,9 +68,11 @@ export type { StatusListResolver } from './vc/Verifier.js';
 export { EdDSACryptosuiteManager } from './vc/cryptosuites/eddsa.js';
 export { createDocumentLoader } from './vc/documentLoader.js';
 export { MultiSigManager } from './vc/MultiSigManager.js';
+
+// Storage adapters
 export * from './storage/index.js';
 
-// Resource management exports
+// Resource management
 export { ResourceManager } from './resources/index.js';
 export type {
   Resource,
@@ -86,45 +87,7 @@ export type {
 } from './resources/index.js';
 export { MIME_TYPE_MAP, DEFAULT_RESOURCE_CONFIG } from './resources/index.js';
 
-// Crypto exports
-export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer.js';
-export { multikey } from '@originals/cel';
-export type { MultikeyType } from '@originals/cel';
-
-// Signer abstraction (plan 039): one root interface, one signing-input
-// namespace, adapters in both directions, and the conformance harness (040).
-export type { OriginalsSigner } from './crypto/OriginalsSigner.js';
-export {
-  canonicalDidKeyVm,
-  signerFromKeyPair,
-  signerFromKeyStore,
-  signerFromExternalSigner,
-  toExternalSigner,
-} from './crypto/OriginalsSigner.js';
-export { signingInput, type SigningDocumentLoader } from './crypto/signingInput.js';
-export { assertSignerConformance } from './crypto/signerConformance.js';
-export { MockRemoteSigner } from './crypto/MockRemoteSigner.js';
-// Custody backends hand back addresses, not Multikeys (plan 045).
-export { base58AddressToEd25519Multikey } from './crypto/addressToMultikey.js';
-
-// Independent typed event utility. The CEL 3 lifecycle returns explicit results
-// and does not emit the preceding implementation's asset lifecycle payloads.
-export { EventEmitter } from './events/EventEmitter.js';
-
-// Migration system (EXPERIMENTAL — intentionally NOT part of the public API).
-//
-// The `MigrationManager` subsystem (validation pipeline, checkpoints, rollback,
-// audit log, state machine) is experimental and is NOT the migration path used
-// in production: `OriginalsSDK`/`LifecycleManager` run their own
-// migrate/publish/inscribe flow and never instantiate `MigrationManager`
-// (issue #279). Re-exporting it from the package entry point advertised unused
-// machinery as a supported API, so it is deliberately not exported here. It
-// remains importable from its module path for experimentation, at the caller's
-// own risk. Only the `MigrationError` type remains for consumers of the independent
-// typed EventEmitter utility; this does not export the migration engine.
-export type { MigrationError } from './migration/types.js';
-
-// Kind system exports
+// Kind system
 export {
   OriginalKind,
   KindRegistry,
@@ -161,7 +124,33 @@ export {
   DocumentValidator,
 } from './kinds/index.js';
 
-// Observability exports
+// Crypto: key signers, Multikey, and the byte-signer abstraction (plan 039).
+// The byte signer is exported as `ByteSigner`: the root `OriginalsSigner` is
+// the Originals entry signer from `./originals/`.
+export { Signer, ES256KSigner, Ed25519Signer, ES256Signer, Bls12381G2Signer } from './crypto/Signer.js';
+export { multikey } from './crypto/Multikey.js';
+export type { MultikeyType } from './crypto/Multikey.js';
+export type { OriginalsSigner as ByteSigner } from './crypto/OriginalsSigner.js';
+export {
+  canonicalDidKeyVm,
+  signerFromKeyPair,
+  signerFromKeyStore,
+  signerFromExternalSigner,
+  toExternalSigner,
+} from './crypto/OriginalsSigner.js';
+export { signingInput, type SigningDocumentLoader } from './crypto/signingInput.js';
+export { assertSignerConformance } from './crypto/signerConformance.js';
+export { MockRemoteSigner } from './crypto/MockRemoteSigner.js';
+// Custody backends hand back addresses, not Multikeys (plan 045).
+export { base58AddressToEd25519Multikey } from './crypto/addressToMultikey.js';
+
+// Encoding (namespaced: member names such as encode/decode would collide).
+export * as encoding from './utils/encoding.js';
+
+// Independent typed event utility.
+export { EventEmitter } from './events/EventEmitter.js';
+
+// Observability
 export {
   MetricsCollector,
   type OperationMetrics,
@@ -173,10 +162,7 @@ export { EventLogger } from './utils/EventLogger.js';
 export type { EventLoggingConfig } from './utils/EventLogger.js';
 export { OperationLock } from './utils/OperationLock.js';
 
-// Utility exports. retry/circuit-breaker are internal infrastructure, not API
-// (plan 043); they remain importable in-repo but are no longer re-exported.
-// satoshi-validation / telemetry / sha256Bytes moved to @originals/cel — named
-// re-exports (not `export *`) so the SDK surface stays exactly what it was.
+// Utilities. retry/circuit-breaker are internal infrastructure, not API (plan 043).
 export * from './utils/validation.js';
 export * from './utils/bitcoin-address.js';
 export {
@@ -185,45 +171,54 @@ export {
   canonicalizeSatoshi,
   parseSatoshiIdentifier,
   assertValidSatoshi,
-} from '@originals/cel';
-export type { SatoshiValidationResult } from '@originals/cel';
+} from './utils/satoshi-validation.js';
+export type { SatoshiValidationResult } from './utils/satoshi-validation.js';
 export * from './utils/serialization.js';
-export { StructuredError, emitTelemetry, emitError } from '@originals/cel';
-export type { TelemetryLevel, TelemetryEvent, TelemetryHooks } from '@originals/cel';
-export { sha256Bytes } from '@originals/cel';
+export { StructuredError, emitTelemetry, emitError } from './utils/telemetry.js';
+export type { TelemetryLevel, TelemetryEvent, TelemetryHooks } from './utils/telemetry.js';
+export { sha256Bytes } from './utils/hash.js';
 
-// Adapter exports (custom integrations). Test doubles (OrdMockProvider,
-// FeeOracleMock) moved to '@originals/sdk/testing' (plan 043).
+// Bitcoin
+export { BitcoinManager } from './bitcoin/BitcoinManager.js';
+export { OrdinalsClient } from './bitcoin/OrdinalsClient.js';
+export { buildTransferTransaction } from './bitcoin/transfer.js';
+export { selectUtxos, UtxoSelectionError, estimateFeeSats } from './bitcoin/utxo.js';
+export {
+  selectUtxos as selectUtxosSimple,
+  selectResourceUtxos,
+  selectUtxosForPayment,
+  tagResourceUtxos,
+  estimateTransactionSize,
+} from './bitcoin/utxo-selection.js';
+export { calculateFee } from './bitcoin/fee-calculation.js';
+export { prepareInscriptionOnSat, submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from './bitcoin/inscribe-on-sat.js';
+export { validateInscriptionReveal } from './bitcoin/inscription-recovery.js';
+export type { InscribeOnSatResult, PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionRecoveryRecord, InscriptionBroadcastState } from './bitcoin/inscribe-on-sat.js';
+export {
+  normalizeInscriptionId,
+  normalizeSatpoint,
+  normalizeTxid,
+  digestBytes,
+} from './bitcoin/sat-snapshot-types.js';
+export type {
+  SatSnapshot,
+  BitcoinNetwork,
+  ChainTip,
+  CreationPosition,
+  PublicationObservation,
+  IndependentContentEvidence,
+} from './bitcoin/sat-snapshot-types.js';
+export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from './bitcoin/chain-validation.js';
+export { createBitcoinCoreContentValidator, type BitcoinCoreContentValidatorOptions, type ContentValidator } from './bitcoin/content-validation.js';
+
+// Providers (custom integrations). Test doubles (OrdMockProvider,
+// FeeOracleMock) live in '@originals/sdk/testing' (plan 043).
 export { SignetProvider } from './bitcoin/providers/SignetProvider.js';
 export type { SignetProviderOptions } from './bitcoin/providers/SignetProvider.js';
 export { QuickNodeProvider } from './adapters/providers/QuickNodeProvider.js';
 export type { QuickNodeProviderOptions } from './adapters/providers/QuickNodeProvider.js';
 export { RegtestProvider } from './adapters/providers/RegtestProvider.js';
 export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers/RegtestProvider.js';
+export { OrdHttpProvider } from './adapters/providers/OrdHttpProvider.js';
+export type { SatSnapshotReader, SatSnapshotBudget } from './adapters/providers/sat-snapshot.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
-
-// One public CEL 3 parser, proof verifier and state fold.
-export { verifyHistory, checkpointFromHistory, parseDocument, encodeDocument, validateDocument, eventDigest, signEvent, verifyEntry, createNonce, digestBytes, CelError, CEL_LIMITS } from '@originals/cel/v3';
-export type { CelDocument, CelEntry, CelEvent, Operation, ControllerProof, VerifiedHistory, HistoryCheckpoint, AssetState, Algorithm, Cryptosuite } from '@originals/cel/v3';
-
-// Default export
-export default OriginalsSDK;
-/** Minimal local-only entry using the same CEL 3 lifecycle as the default SDK. */
-export * as v3 from './v3/index.js';
-
-export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution, ResourceAvailability, IndependentEnumerationSource } from "./v3/resolution.js";
-
-export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from "./v3/hosted.js";
-
-export { fetchPublicReachabilityCheck } from "./v3/hosted.js";
-
-export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from "./v3/bitcoin.js";
-
-export { prepareInscriptionOnSat, submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from './bitcoin/inscribe-on-sat.js';
-export { validateInscriptionReveal } from './bitcoin/inscription-recovery.js';
-export type { InscribeOnSatResult, PreparedInscriptionOnSat, InscriptionRecoveryStore, InscriptionRecoveryRecord, InscriptionBroadcastState } from './bitcoin/inscribe-on-sat.js';
-
-export { readEnvelope as parseAssetEnvelope, inspectAssetEnvelope, type AssetEnvelopeInspection } from "./v3/envelope.js";
-
-export { createBitcoinCoreChainValidator, type BitcoinCoreChainValidatorOptions, type ChainValidator } from "./v3/chain-validation.js";
-export { createBitcoinCoreContentValidator, type BitcoinCoreContentValidatorOptions, type ContentValidator } from "./v3/content-validation.js";

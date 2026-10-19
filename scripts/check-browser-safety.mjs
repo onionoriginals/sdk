@@ -19,19 +19,21 @@ import { spawnSync } from 'node:child_process';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Every JavaScript entry of the @originals/sdk export map, so a new subpath is
+ * guarded the moment it is published. `originals/index.js` is the browser-first
+ * Originals workflow; the other SDK entries reach Node-only paths lazily.
+ */
+const SDK_BROWSER_FIRST = new Set(['originals/index.js']);
+const sdkExports = JSON.parse(readFileSync(resolve(ROOT, 'packages/sdk/package.json'), 'utf8')).exports ?? {};
+const SDK_ENTRIES = Object.values(sdkExports)
+  .filter((value) => typeof value === 'object' && value !== null && typeof value.import === 'string' && value.import.endsWith('.js'))
+  .map((value) => value.import.replace(/^\.\/dist\//, ''))
+  .map((entry) => ({ dist: 'packages/sdk/dist', entry, browserFirst: SDK_BROWSER_FIRST.has(entry) }));
+
 /** Entry points that must stay importable in a browser, per package dist. */
 const GUARDED_ENTRIES = [
-  { dist: 'packages/sdk/dist', entry: 'index.js' },
-  { dist: 'packages/sdk/dist', entry: 'lifecycle/LifecycleManager.js' },
-  { dist: 'packages/sdk/dist', entry: 'lifecycle/OriginalsAsset.js' },
-  { dist: 'packages/sdk/dist', entry: 'cel/index.js' },
-  { dist: 'packages/sdk/dist', entry: 'v3/index.js' },
-  { dist: 'packages/sdk/dist', entry: 'testing/index.js' },
-  { dist: 'packages/sdk/dist', entry: 'types/public.js' },
-  { dist: 'packages/sdk/dist', entry: 'asset-envelope.js', browserFirst: true },
-  { dist: 'packages/sdk/dist', entry: 'originals/index.js', browserFirst: true },
-  { dist: 'packages/sdk/dist', entry: 'originals/fs-store.js' },
-  { dist: 'packages/cel/dist', entry: 'index.js', browserFirst: true },
+  ...SDK_ENTRIES,
   { dist: 'packages/vh/dist', entry: 'index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'json/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'crypto/index.js', browserFirst: true },
@@ -51,7 +53,8 @@ const GUARDED_ENTRIES = [
  * see it — a guarded entry can reference it and still pass. In a browser
  * without a bundler shim that is a ReferenceError on first use.
  *
- * This GATES only the `browserFirst` entries (@originals/cel, @originals/vh, @originals/auth),
+ * This GATES only the `browserFirst` entries (@originals/vh, @originals/auth and the
+ * SDK's Originals workflow entry),
  * whose whole reason to exist is running in a browser. The SDK's entries import
  * Node-only paths (inscription builders, server providers) that a browser
  * consumer can import but would never call, so Buffer there is reported as a

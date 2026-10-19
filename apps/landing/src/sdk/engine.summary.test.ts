@@ -12,7 +12,7 @@ describe('honesty labels', () => {
     expect(demo.steps[1].description.toLowerCase()).toMatch(/available on this site/);
   });
 
-  test('asset:created summary names its ni identity, not "a private did:peer identity"', async () => {
+  test('asset:created summary names its did:vh identity', async () => {
     const engine = new DemoEngine();
     const summaries: string[] = [];
     engine.on((e) => {
@@ -20,7 +20,7 @@ describe('honesty labels', () => {
     });
     await engine.create('Test Piece', 'Artwork', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect(summaries.length).toBe(1);
-    expect(summaries[0]).toContain('did:cel:u');
+    expect(summaries[0]).toMatch(/^Created did:vh:/);
     expect(summaries[0]).not.toContain('did:peer identity');
   });
 });

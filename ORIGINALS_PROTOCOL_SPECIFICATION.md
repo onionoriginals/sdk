@@ -1,15 +1,13 @@
 # Originals Protocol Specification
 
-The v1.0-DRAFT specification that used to live at this path has moved to
-[`docs/history/previous-sdk/ORIGINALS_PROTOCOL_SPECIFICATION.md`](docs/history/previous-sdk/ORIGINALS_PROTOCOL_SPECIFICATION.md).
-It is historical context, not the current normative contract.
+The v1.0-DRAFT specification that used to live at this path, and the CEL 3
+contract that followed it, were deleted with the code that implemented them
+(plan 011, PR 5). Their last versions are at `onionoriginals/sdk@00fc683`:
+[the v1.0 draft](https://github.com/onionoriginals/sdk/blob/00fc683d0aa7f746904a14fa1f88336f09711ff5/docs/history/previous-sdk/ORIGINALS_PROTOCOL_SPECIFICATION.md)
+and [the CEL 3 documents](https://github.com/onionoriginals/sdk/tree/00fc683d0aa7f746904a14fa1f88336f09711ff5/specs).
 
-For SDK 3.0.0, the normative asset contract is:
-
-- [CEL wire and proof profile](specs/originals-cel-v3-profile.md)
-- [controller authority and publication fold](specs/originals-cel-v3-authority.md)
-- [Bitcoin inscription shape](specs/btco-inscription-shape.md)
-
-See [`packages/sdk/V3.md`](packages/sdk/V3.md) for the implemented public
-interfaces, and [`CLAUDE.md`](CLAUDE.md) for repository-wide guidance on
-where protocol behavior is defined.
+The governing documents for the Originals Protocol are listed in
+[`specs/README.md`](specs/README.md). The SDK consumer contract is
+[`packages/sdk/ORIGINALS.md`](packages/sdk/ORIGINALS.md), and
+[`CLAUDE.md`](CLAUDE.md) gives repository-wide guidance on where protocol
+behavior is defined.

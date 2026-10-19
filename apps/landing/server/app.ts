@@ -1,4 +1,3 @@
-import type { createExploreRoutes } from './explore';
 import type { OriginalsStore } from './originals-store';
 import { file } from 'bun';
 import { normalize } from 'node:path';
@@ -111,7 +110,6 @@ export function buildFetch(deps: {
   originals?: OriginalsRoutes | null;
   // Already-published bytes remain readable even when sign-in is unavailable.
   publications?: Pick<OriginalsStore, 'serve'>;
-  explore?: ReturnType<typeof createExploreRoutes>;
   // How many proxies sit in front of this process. Snapshotted at construction
   // from TRUSTED_PROXY_HOPS; tests pass it explicitly.
   trustedProxyHops?: number;
@@ -193,15 +191,6 @@ export function buildFetch(deps: {
     if (req.method === 'GET' && path.startsWith('/api/btc/sat-snapshot/')) {
       const handler = apiRoutes?.['GET /api/btc/sat-snapshot/:sat'];
       if (handler) return handler(req, url, clientIp);
-    }
-
-    if (
-      deps.explore &&
-      (path === '/api/explore' ||
-        path === '/api/explore/original' ||
-        path.startsWith('/api/explore/sat-snapshot/'))
-    ) {
-      return deps.explore.handle(req, url, clientIp);
     }
 
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404

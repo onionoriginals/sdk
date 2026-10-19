@@ -13,7 +13,7 @@ import { Verifier } from '../../../src/vc/Verifier';
 import { StatusListManager } from '../../../src/vc/StatusListManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { DIDManager } from '../../../src/did/DIDManager';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
 import {
   verificationMethodRegistry,
   registerVerificationMethod,

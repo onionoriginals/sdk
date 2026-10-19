@@ -2,12 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../src/utils/telemetry';
 import { LocalStorageAdapter } from '../../src/storage/LocalStorageAdapter.js';
 import { SignetProvider } from '../../src/bitcoin/providers/SignetProvider.js';
 import { OrdinalsClient } from '../../src/bitcoin/OrdinalsClient.js';
-import { MigrationManager } from '../../src/migration/MigrationManager.js';
-import { MigrationErrorType } from '../../src/migration/types.js';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -149,23 +147,4 @@ describe('reported error contracts #833–836', () => {
       });
     }
   }
-  test('#836 migration factory returns StructuredError and preserves metadata', () => {
-    // Factory-only test avoids singleton state and unsupported legacy migration setup.
-    const factory = (MigrationManager.prototype as unknown as {
-      createMigrationError(type: MigrationErrorType, code: string, message: string, migrationId?: string, details?: Record<string, unknown>):
-        StructuredError & { type: MigrationErrorType; migrationId?: string };
-    }).createMigrationError;
-    const details = { errors: [{ code: 'INVALID_INPUT' }] };
-    const error = factory.call(MigrationManager.prototype, MigrationErrorType.VALIDATION_ERROR, 'VALIDATION_FAILED', 'test message', 'mig-1', details);
-    expect(error).toBeInstanceOf(StructuredError);
-    expect(error.code).toBe('VALIDATION_FAILED');
-    expect(error.message).toBe('test message');
-    expect(error.type).toBe(MigrationErrorType.VALIDATION_ERROR);
-    expect(error.migrationId).toBe('mig-1');
-    expect(error.details).toBe(details);
-    const bare = factory.call(MigrationManager.prototype, MigrationErrorType.VALIDATION_ERROR, 'VALIDATION_FAILED', 'test');
-    expect(bare).toBeInstanceOf(StructuredError);
-    expect(bare.details).toBeUndefined();
-    expect(bare.migrationId).toBeUndefined();
-  });
 });

@@ -176,7 +176,7 @@ describe('OrdMockProvider', () => {
   // #407 phase 2: inscription CBOR metadata round-trip.
   test('static metadata round-trips through getInscriptionById', async () => {
     const prov = new OrdMockProvider();
-    const metadata = { didDocument: { id: 'did:btco:reg:42' }, celLog: { events: [] } };
+    const metadata = { didDocument: { id: 'did:btco:reg:42' }, history: { entries: [] } };
     const res = await prov.createInscription({
       data: Buffer.from('media-bytes'),
       contentType: 'image/png',
@@ -194,7 +194,7 @@ describe('OrdMockProvider', () => {
       contentType: 'image/png',
       buildContent: (sat: string) => ({
         content: Buffer.from('deferred-media'),
-        metadata: { didDocument: { id: `did:btco:reg:${sat}` }, celLog: { events: [1] } }
+        metadata: { didDocument: { id: `did:btco:reg:${sat}` }, history: { entries: [1] } }
       })
     });
     const fetched = await prov.getInscriptionById(res.inscriptionId);
@@ -222,18 +222,4 @@ describe('OrdMockProvider', () => {
     const fetched = await prov.getInscriptionById(res.inscriptionId);
     expect((fetched?.metadata as { didDocument: { id: string } }).didDocument.id).toBe('did:btco:reg:1');
   });
-
-  test('getAnchoringsForDidCel reads alsoKnownAs from metadata.didDocument', async () => {
-    const prov = new OrdMockProvider();
-    const didCel = 'did:cel:zabc';
-    await prov.createInscription({
-      data: Buffer.from('media-not-a-did-doc'),
-      contentType: 'image/png',
-      metadata: { didDocument: { id: 'did:btco:reg:7', alsoKnownAs: [didCel] } }
-    });
-    const anchorings = await prov.getAnchoringsForDidCel(didCel);
-    expect(anchorings.length).toBe(1);
-    expect(anchorings[0].satoshi).toBeTruthy();
-  });
 });
-

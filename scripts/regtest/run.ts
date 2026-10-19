@@ -9,7 +9,7 @@ const binaries = process.env.BITCOIND_BIN && process.env.ORD_BIN
   ? { BITCOIND_BIN: process.env.BITCOIND_BIN, ORD_BIN: process.env.ORD_BIN }
   : await installRegtestTools();
 
-for (const cwd of ['packages/cel', 'packages/vh', 'packages/sdk', 'packages/auth']) {
+for (const cwd of ['packages/vh', 'packages/sdk', 'packages/auth']) {
   const build = Bun.spawn([process.execPath, 'run', 'build'], {
     cwd: root + cwd, stdout: 'inherit', stderr: 'inherit',
   });
@@ -24,30 +24,13 @@ const check = Bun.spawn([process.execPath, 'run', 'typecheck:regtest'], {
 });
 if (await check.exited) throw new Error('Regtest harness typecheck failed');
 
+// The creator journey (create, publish, inscribe, fault recovery) and its
+// browser variant ran the CEL 3 flow, which plan 011 PR 5 deleted. They return
+// with Bitcoin anchoring on the Originals Protocol (PR 10). Until then this
+// runs the generic Core/ord checks below.
 if (process.argv.includes('--browser')) {
-  const browser = Bun.spawn([process.execPath, 'apps/landing/scripts/regtest-browser.ts'], {
-    cwd: root,
-    env: { ...process.env, ...binaries },
-    stdout: 'inherit', stderr: 'inherit',
-  });
-  process.exit(await browser.exited);
-}
-
-const scenarios = process.env.REGTEST_FAULT
-  ? [process.env.REGTEST_FAULT]
-  : ['none', 'reveal-rejected', 'commit-response-lost'];
-for (const fault of scenarios) {
-  const receipt = process.env.REGTEST_RECEIPT?.replace(/\.json$/, '');
-  const journey = Bun.spawn([process.execPath, 'apps/landing/scripts/regtest-journey.ts'], {
-    cwd: root,
-    env: {
-      ...process.env, ...binaries, REGTEST_FAULT: fault,
-      ...(receipt ? { REGTEST_RECEIPT: `${receipt}-${fault}.json` } : {}),
-      ...(process.env.REGTEST_LOGS_DIR ? { REGTEST_LOGS_DIR: `${process.env.REGTEST_LOGS_DIR}/${fault}` } : {}),
-    },
-    stdout: 'inherit', stderr: 'inherit',
-  });
-  if (await journey.exited) process.exit(journey.exitCode ?? 1);
+  console.log('regtest: the browser creator journey returns with Bitcoin anchoring (plan 011, PR 10); nothing to run.');
+  process.exit(0);
 }
 
 const capabilityReceipt = process.env.REGTEST_RECEIPT?.replace(/\.json$/, '');

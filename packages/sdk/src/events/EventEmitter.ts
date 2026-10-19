@@ -126,7 +126,7 @@ export class EventEmitter {
    * emitter.emit({
    *   type: 'asset:created',
    *   timestamp: new Date().toISOString(),
-   *   asset: { id: 'did:cel:123', layer: 'did:cel', resourceCount: 1 }
+   *   asset: { id: 'did:vh:Qm123', layer: 'did:vh', resourceCount: 1 }
    * });
    * ```
    */

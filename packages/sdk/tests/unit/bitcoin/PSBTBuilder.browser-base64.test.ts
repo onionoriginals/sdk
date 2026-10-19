@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { Buffer } from 'node:buffer';
 import { createContext, runInContext } from 'node:vm';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../../src/utils/telemetry';
 import * as utxo from '../../../src/bitcoin/utxo.js';
 import type { BuildPsbtParams, PSBTBuilder } from '../../../src/bitcoin/PSBTBuilder.js';
 
@@ -23,7 +23,7 @@ function builderInContext(globals: Record<string, unknown>) {
     exports: {},
     require: (id: string) => {
       if (id === './utxo.js') return utxo;
-      if (id === '@originals/cel') return { StructuredError };
+      if (id === '../utils/telemetry.js') return { StructuredError };
       throw new Error(`Unexpected import: ${id}`);
     },
   });

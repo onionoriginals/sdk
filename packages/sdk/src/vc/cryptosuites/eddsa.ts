@@ -1,6 +1,7 @@
 import { base58 } from '@scure/base';
 import * as ed25519 from '@noble/ed25519';
-import { multikey, StructuredError } from '@originals/cel';
+import { multikey } from '../../crypto/Multikey.js';
+import { StructuredError } from '../../utils/telemetry.js';
 import { signingInput } from '../../crypto/signingInput.js';
 
 // Re-export canonical DataIntegrityProof from shared types
@@ -71,7 +72,7 @@ export class EdDSACryptosuiteManager {
       // the DID document so verifiers can recognise it as no longer valid;
       // accepting a signature from it would let an attacker holding the old
       // private key forge credentials, defeating key rotation / compromise
-      // recovery. Mirrors the CEL key resolver (src/cel/keyResolver.ts).
+      // recovery.
       const vm = vmDoc.document as { revoked?: unknown; compromised?: unknown };
       if (vm?.revoked) throw new Error('Verification method has been revoked');
       if (vm?.compromised) throw new Error('Verification method has been marked as compromised');

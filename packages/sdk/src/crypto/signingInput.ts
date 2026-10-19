@@ -1,17 +1,17 @@
 /**
- * The four signing preimages of this SDK, consolidated (plan 039).
+ * The signing preimages of this SDK's DID and credential paths, consolidated
+ * (plan 039). Asset log entries are signed by `@originals/vh`, not here.
  *
  * Invariant: the SDK canonicalizes and hashes; a signer only ever signs the
- * opaque bytes these functions return. Every internal signing path routes
- * through here, so "which bytes do I sign?" has exactly one answer per context
- * and the four constructions cannot drift apart again.
+ * opaque bytes these functions return, so "which bytes do I sign?" has exactly
+ * one answer per context.
  *
  * Heavy dependencies (jsonld, didwebvh-ts) are loaded lazily so this module is
  * safe to import from the browser-slim entry points.
  */
 
-import { sha256Bytes, StructuredError } from '@originals/cel';
-import { celProofSigningInput, committedFields, witnessSigningBytes } from '@originals/cel/legacy';
+import { sha256Bytes } from '../utils/hash.js';
+import { StructuredError } from '../utils/telemetry.js';
 
 /** Minimal documentLoader shape (same contract the VC stack uses). */
 export type SigningDocumentLoader = (url: string) => Promise<{ document: unknown }>;
@@ -24,32 +24,6 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 export const signingInput = {
-  /**
-   * CEL controller-proof preimage: JCS bytes of the committed fields
-   * `{ type, data, previousEvent? }` — exactly what `verifyEventLog`
-   * reconstructs and verifies. Stray keys are never signed.
-   */
-  celEvent(
-    entry: { type: unknown; data?: unknown; previousEvent?: unknown },
-    proofConfig: Record<string, unknown>
-  ): Uint8Array {
-    // The proof configuration is part of the signature since plan 042 — pass
-    // the proof you are about to emit, minus its proofValue.
-    return celProofSigningInput(
-      committedFields(entry as { type: unknown; data: unknown; previousEvent?: unknown }),
-      proofConfig
-    );
-  },
-
-  /**
-   * CEL witness-attestation preimage: UTF-8 bytes of the JSON-quoted digest
-   * (surrounding quotes INCLUDED). See `witnessSigningBytes` for why signing
-   * the raw digest bytes instead silently never verifies.
-   */
-  witness(digestMultibase: string): Uint8Array {
-    return witnessSigningBytes(digestMultibase);
-  },
-
   /**
    * did:webvh log-entry preimage, exactly didwebvh-ts's construction:
    * sha256(JCS(proof)) || sha256(JCS(document)). Delegates to the library so

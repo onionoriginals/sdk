@@ -21,7 +21,6 @@
     "test:coverage": "turbo run test:coverage --filter='./packages/*'",
     "test:ci": "turbo run test:ci --filter='./packages/*'",
     "test:security": "turbo run test:security --filter='./packages/*'",
-    "test:stress": "turbo run test:stress --filter='./packages/*'",
     "lint": "turbo run lint --filter='./packages/*'",
     "format": "turbo run format --filter='./packages/*'",
     "dev": "turbo run dev --filter='./packages/*'",

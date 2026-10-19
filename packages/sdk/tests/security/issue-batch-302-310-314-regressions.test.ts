@@ -8,9 +8,6 @@
  *   signature toward the threshold. The SDK now canonicalizes+hashes and the
  *   signer signs those exact bytes (via signBytes); a wrong-preimage signature
  *   is rejected and cannot count.
- * - #314: CEL witness proofs must be signed over the JSON-quoted digest bytes
- *   the verifier reconstructs; a witness signing the raw decoded digest bytes
- *   must be reported unverified, not silently accepted.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -18,11 +15,7 @@ import * as ed25519 from '@noble/ed25519';
 import { MultiSigManager } from '../../src/vc/MultiSigManager';
 import { KeyManager } from '../../src/did/KeyManager';
 import { DIDManager } from '../../src/did/DIDManager';
-import { multikey } from '@originals/cel';
-import { verifyEventLog } from '@originals/cel/legacy';
-import { canonicalizeEntryForChain, witnessSigningBytes } from '@originals/cel/legacy';
-import { computeDigestMultibase, decodeDigestMultibase } from '@originals/cel';
-import type { EventLog } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import type { ExternalSigner, MultiSigPolicy, VerifiableCredential } from '../../src/types';
 
 const config = { network: 'regtest' as const, defaultKeyType: 'Ed25519' as const };
@@ -88,74 +81,5 @@ describe('#310 — external multi-sig contributions must sign the SDK-canonicali
     const result = await manager.verifyMultiSig(signed, policy);
     expect(result.verified).toBe(true);
     expect(result.validSignatures).toBe(1);
-  });
-});
-
-describe('#314 — witness proofs must sign the digest preimage the verifier reconstructs', () => {
-  async function buildLog(witnessSign: (digest: string, key: Uint8Array) => Promise<Uint8Array>) {
-    const controllerSk = ed25519.utils.randomSecretKey();
-    const controllerPk = new Uint8Array(await (ed25519 as any).getPublicKeyAsync(controllerSk));
-    const controllerPub = multikey.encodePublicKey(controllerPk, 'Ed25519');
-    const controllerVm = `did:key:${controllerPub}#${controllerPub}`;
-
-    const eventData = { name: 'Attested Asset' };
-    // Reproduce the controller-proof signing convention used by the SDK.
-    const { canonicalizeEvent } = await import('@originals/cel/legacy');
-    const controllerSig = await (ed25519 as any).signAsync(
-      canonicalizeEvent({ type: 'create', data: eventData }),
-      controllerSk,
-    );
-
-    const witnessSk = ed25519.utils.randomSecretKey();
-    const witnessPk = new Uint8Array(await (ed25519 as any).getPublicKeyAsync(witnessSk));
-    const witnessVm = 'did:webvh:witness.example.com#key-ed25519';
-
-    const digest = computeDigestMultibase(canonicalizeEntryForChain({ type: 'create', data: eventData, proof: [] } as any));
-    const witnessSig = await witnessSign(digest, witnessSk);
-
-    const log: EventLog = {
-      events: [{
-        type: 'create',
-        data: eventData,
-        proof: [
-          {
-            type: 'DataIntegrityProof',
-            cryptosuite: 'eddsa-jcs-2022',
-            created: '2026-01-20T12:00:00Z',
-            verificationMethod: controllerVm,
-            proofPurpose: 'assertionMethod',
-            proofValue: multikey.encodeMultibase(new Uint8Array(controllerSig)),
-          },
-          {
-            type: 'DataIntegrityProof',
-            cryptosuite: 'eddsa-jcs-2022',
-            created: '2026-01-20T12:00:00Z',
-            verificationMethod: witnessVm,
-            proofPurpose: 'assertionMethod',
-            proofValue: multikey.encodeMultibase(new Uint8Array(witnessSig)),
-            witnessedAt: '2026-01-20T12:00:00Z',
-          } as any,
-        ],
-      }],
-    };
-    const resolveKey = async (method: string): Promise<Uint8Array | null> =>
-      method === witnessVm ? witnessPk : null;
-    return { log, resolveKey };
-  }
-
-  test('a witness signing the JSON-quoted digest (witnessSigningBytes) is accepted', async () => {
-    const { log, resolveKey } = await buildLog(async (digest, key) =>
-      new Uint8Array(await (ed25519 as any).signAsync(witnessSigningBytes(digest), key)),
-    );
-    const result = await verifyEventLog(log, { resolveKey });
-    expect(result.events[0].witnessProofs![0].verified).toBe(true);
-  });
-
-  test('a witness signing the raw decoded digest bytes is reported unverified', async () => {
-    const { log, resolveKey } = await buildLog(async (digest, key) =>
-      new Uint8Array(await (ed25519 as any).signAsync(decodeDigestMultibase(digest), key)),
-    );
-    const result = await verifyEventLog(log, { resolveKey });
-    expect(result.events[0].witnessProofs![0].verified).toBe(false);
   });
 });

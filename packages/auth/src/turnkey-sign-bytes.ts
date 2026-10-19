@@ -4,8 +4,8 @@
  * Both the server and client signers had their own copy of this — hex-encode,
  * pick a hash function, concatenate r‖s, check 64 bytes — kept in sync by
  * comment. They now share it, and because it is byte-level it satisfies
- * `OriginalsSigner.signBytes` / `ExternalSigner.signBytes` directly, so a
- * Turnkey key can author CEL events and sign credentials rather than only
+ * `ByteSigner.signBytes` / `ExternalSigner.signBytes` directly, so a
+ * Turnkey key can sign arbitrary byte preimages and credentials rather than only
  * did:webvh logs.
  *
  * Browser-safe: hex conversion goes through @noble/hashes, not `Buffer`. This

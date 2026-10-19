@@ -5,9 +5,9 @@
  * throws a `SIGNER_NONCONFORMANT` StructuredError naming the exact violation.
  */
 
-import { multikey, type MultikeyType } from '@originals/cel';
+import { multikey, type MultikeyType } from './Multikey.js';
 import { signerForKeyType } from './Signer.js';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
 import type { OriginalsSigner } from './OriginalsSigner.js';
 
 // Ed25519/Bls signatures have fixed lengths; ECDSA compact signatures are 64.

@@ -59,7 +59,7 @@ test('an empty address index cannot hide an unindexed Core tip', async () => {
   await expect(provider.getAddressUtxos('bcrt1qqqq')).rejects.toThrow('current Bitcoin Core tip');
 });
 
-test('CEL 3 snapshots retain raw metadata and derive reveal order from active Core blocks', async () => {
+test('sat snapshots retain raw metadata and derive reveal order from active Core blocks', async () => {
   const txid = 'a'.repeat(64), hash = 'b'.repeat(64), id = txid + 'i0';
   server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
     if (req.method === 'POST') {

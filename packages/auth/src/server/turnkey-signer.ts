@@ -98,7 +98,7 @@ export class TurnkeyWebVHSigner implements ExternalSigner, ExternalVerifier {
 
   /**
    * Signs pre-canonicalized, pre-hashed bytes — the capability that lets a
-   * Turnkey key author CEL events and sign credentials, not just did:webvh
+   * Turnkey key sign arbitrary byte preimages and credentials, not just did:webvh
    * logs. `signerFromExternalSigner` requires exactly this.
    */
   async signBytes(data: Uint8Array): Promise<{ signature: Uint8Array }> {

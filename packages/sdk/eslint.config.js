@@ -38,8 +38,6 @@ export default tseslint.config(
       'apps/',
       '*.js',
       'tests/',
-      'src/examples/',
-      'src/playground/',
     ],
   }
 );

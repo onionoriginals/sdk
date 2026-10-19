@@ -1,6 +1,7 @@
-import { parseAssetAlias, type BitcoinNetwork, type SatSnapshot } from '@originals/cel/v3';
-import { StructuredError } from '@originals/cel';
-import { hexToBytes } from '@originals/cel/encoding';
+import type { BitcoinNetwork, SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
+import { MAX_SATOSHI_SUPPLY } from '../../utils/satoshi-validation.js';
+import { StructuredError } from '../../utils/telemetry.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 /** Transport seam for ord's complete /sat, /inscription and raw /r/metadata views. */
 export interface SatSnapshotReader {
@@ -27,7 +28,7 @@ const hash = (value: unknown): value is string => typeof value === 'string' && /
 const chains: Record<string, BitcoinNetwork> = { main: 'mainnet', mainnet: 'mainnet', test: 'testnet', testnet: 'testnet', testnet3: 'testnet', testnet4: 'testnet', signet: 'signet', regtest: 'regtest' };
 const networkOf = (value: unknown): BitcoinNetwork | undefined => typeof value === 'string' && Object.prototype.hasOwnProperty.call(chains, value) ? chains[value] : undefined;
 
-/** No decoded metadata, delegated bytes, incomplete bodies or moving index can attest a CEL 3 head. */
+/** One complete, stable sat observation: no decoded metadata, delegated bytes, incomplete bodies or moving index. */
 export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, budget: SatSnapshotBudget = {}): Promise<SatSnapshot> {
   const timeoutMs = budget.timeoutMs ?? 30_000;
   const maxRequests = budget.maxRequests ?? 512;
@@ -69,7 +70,10 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
 }
 
 async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
-  parseAssetAlias('did:btco:' + satoshi);
+  // Canonical decimal sat number within supply: no leading zeros, sign or whitespace.
+  if (!/^(0|[1-9]\d{0,15})$/.test(satoshi) || BigInt(satoshi) > BigInt(MAX_SATOSHI_SUPPLY)) {
+    throw new StructuredError('INVALID_SATOSHI', 'Invalid canonical sat number');
+  }
   const readTip = async () => {
     const info = object(await reader.rpc('getblockchaininfo', []));
     const network = networkOf(info.chain);

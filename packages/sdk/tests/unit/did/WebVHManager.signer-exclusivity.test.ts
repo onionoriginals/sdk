@@ -1,11 +1,10 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 import { describe, test, expect } from 'bun:test';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { OriginalsSDK } from '../../previous-sdk';
+import { createManagers } from '../../fixtures/managers';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey } from '@originals/cel';
-import { StructuredError } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
+import { StructuredError } from '../../../src/utils/telemetry';
 import type { ExternalSigner, ExternalVerifier } from '../../../src/types';
 
 /**
@@ -69,7 +68,7 @@ describe('keyPair/externalSigner mutual exclusion', () => {
   }, 15000);
 
   test('DIDManager.createDIDWebVH throws when both are provided', async () => {
-    const sdk = OriginalsSDK.create();
+    const sdk = createManagers();
     const km = new KeyManager();
     const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
     const otherKeyPair = await km.generateKeyPair('Ed25519');
@@ -85,7 +84,7 @@ describe('keyPair/externalSigner mutual exclusion', () => {
   }, 15000);
 
   test('DIDManager.migrateToDIDWebVH throws when both are provided', async () => {
-    const sdk = OriginalsSDK.create();
+    const sdk = createManagers();
     const km = new KeyManager();
     const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
     const otherKeyPair = await km.generateKeyPair('Ed25519');
@@ -125,7 +124,7 @@ describe('externalSigner result has no fake keyPair', () => {
   }, 20000);
 
   test('DIDManager.createDIDWebVH with externalSigner omits keyPair entirely', async () => {
-    const sdk = OriginalsSDK.create();
+    const sdk = createManagers();
     const km = new KeyManager();
     const { signer, verifier, keyPair } = await buildMockExternalSigner(km);
 
@@ -152,7 +151,7 @@ describe('externalSigner result has no fake keyPair', () => {
 
 describe('DIDManager.createDIDWebVH path-segment validation (delegated to WebVHManager)', () => {
   test('malformed path segments error early', async () => {
-    const sdk = OriginalsSDK.create();
+    const sdk = createManagers();
     await expect(sdk.did.createDIDWebVH({
       domain: 'example.com',
       paths: ['..', 'x'],

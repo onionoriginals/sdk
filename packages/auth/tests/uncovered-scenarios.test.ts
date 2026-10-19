@@ -1093,12 +1093,12 @@ describe('[AUTH-029] createDIDWithTurnkey', () => {
   }
 
   test.skip('happy path: returns { did, didDocument, didLog }', async () => {
-    // SKIP REASON: createDIDWithTurnkey calls OriginalsSDK.createDIDOriginal() which
+    // SKIP REASON: createDIDWithTurnkey calls createDIDOriginal() which
     // invokes didwebvh-ts internally. That library performs real Ed25519 proof
     // verification immediately after signing (via signer.verify()). A mocked Turnkey
     // signRawPayload returning random bytes will always fail that verification.
     // To test this end-to-end we would need either: (a) a real Ed25519 key pair to
-    // produce a valid signature, or (b) a way to mock OriginalsSDK.createDIDOriginal
+    // produce a valid signature, or (b) a way to mock createDIDOriginal
     // from a test file without modifying src/. Neither is possible without infra changes.
     // The onExpired test below (which never reaches signing) IS covered.
     const client = makeCreateDIDClient();

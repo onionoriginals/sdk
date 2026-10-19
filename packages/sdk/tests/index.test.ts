@@ -1,32 +1,40 @@
 import { describe, test, expect } from 'bun:test';
 import * as SDK from '../src';
-import { MigrationManager } from '../src/migration';
+import { OriginalsSDK as Workflow } from '../src/originals/sdk';
 
 describe('package exports', () => {
-  test('exports core classes and utils', () => {
-    expect(SDK.OriginalsSDK).toBeDefined();
-    expect(SDK.OriginalsAsset).toBeDefined();
-    expect(SDK.DIDManager).toBeDefined();
-    expect(SDK.KeyManager).toBeDefined();
-    expect(SDK.CredentialManager).toBeDefined();
-    expect(SDK.LifecycleManager).toBeDefined();
-    expect(SDK.BitcoinManager).toBeDefined();
-    expect(SDK.OrdinalsClient).toBeDefined();
-    expect(SDK.Signer).toBeDefined();
-    expect(SDK.ES256KSigner).toBeDefined();
-    expect(SDK.Ed25519Signer).toBeDefined();
-    expect(SDK.ES256Signer).toBeDefined();
+  test('the root OriginalsSDK is the Originals workflow class', () => {
+    expect(SDK.OriginalsSDK).toBe(Workflow);
+    expect(SDK.default).toBe(Workflow);
+    expect(SDK.MemoryStore).toBeDefined();
+    expect(SDK.keySigner).toBeDefined();
+    expect(SDK.readZip).toBeDefined();
+    expect(SDK.writeZip).toBeDefined();
   });
 
-  // Issue #279: the experimental MigrationManager subsystem is intentionally NOT
-  // part of the public API (it is unused in production and its safety machinery
-  // protects no real path). It must not be re-exported from the package entry
-  // point, but must remain importable from its module path for experimentation.
-  test('does not re-export the experimental MigrationManager from the package root', () => {
-    expect((SDK as Record<string, unknown>).MigrationManager).toBeUndefined();
-    // Still available at its module path (subsystem itself is intact).
-    expect(MigrationManager).toBeDefined();
+  test('exports the kept DID, credential, Bitcoin and crypto utilities', () => {
+    for (const name of [
+      'DIDManager', 'KeyManager', 'CredentialManager', 'BitcoinManager', 'OrdinalsClient',
+      'Signer', 'ES256KSigner', 'Ed25519Signer', 'ES256Signer', 'Ed25519Verifier',
+      'StructuredError', 'multikey', 'canonicalDidKeyVm', 'signingInput', 'encoding',
+      'QuickNodeProvider', 'OrdHttpProvider', 'RegtestProvider', 'MemoryStorageAdapter',
+      'prepareInscriptionOnSat', 'validateInscriptionReveal', 'validateSatoshiNumber',
+      'isValidBitcoinAddress', 'base58AddressToEd25519Multikey', 'normalizeInscriptionId',
+      'normalizeSatpoint', 'createBitcoinCoreChainValidator', 'createBitcoinCoreContentValidator',
+    ]) {
+      expect((SDK as Record<string, unknown>)[name], name).toBeDefined();
+    }
+  });
+
+  test('did:webvh identity operations are plain functions', () => {
+    for (const name of ['createDIDOriginal', 'updateDIDOriginal', 'verifyDIDSignature', 'prepareDIDDataForSigning', 'createOriginal', 'updateOriginal']) {
+      expect(typeof (SDK as Record<string, unknown>)[name], name).toBe('function');
+    }
+  });
+
+  test('the deleted CEL 3 and earlier asset APIs are gone', () => {
+    for (const name of ['OriginalsAsset', 'LifecycleManager', 'MigrationManager', 'v3', 'verifyHistory', 'parseAssetEnvelope', 'CelError', 'createLocalSigner']) {
+      expect((SDK as Record<string, unknown>)[name], name).toBeUndefined();
+    }
   });
 });
-
-

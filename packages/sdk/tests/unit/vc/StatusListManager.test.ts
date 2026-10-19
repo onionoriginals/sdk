@@ -711,8 +711,8 @@ describe('StatusListManager', () => {
     });
 
     test('verifyCredentialWithStatus detects revoked credentials', async () => {
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification so the test focuses on
       // bit-level status detection (trust checks have dedicated tests).
       // verifyCredentialWithStatus checks signature via verifyCredentialSignature
@@ -768,8 +768,8 @@ describe('StatusListManager', () => {
       // an array, silently skipping the whole revocation check — a revoked
       // credential verified as not-revoked. Wrapping the identical entry in an
       // array must produce the identical (revoked) outcome as the singleton.
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -807,8 +807,8 @@ describe('StatusListManager', () => {
       // Every declared credentialStatus entry must be evaluated: a mix of one
       // supported (not-revoked) entry and one unsupported entry must still
       // fail, not silently pass because the supported entry alone looked fine.
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -846,8 +846,8 @@ describe('StatusListManager', () => {
       // A non-object array element (attacker-controlled JSON) must not crash
       // `.type` property access in the status-evaluation loop — it must fail
       // the credential closed with a clear error instead.
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -879,8 +879,8 @@ describe('StatusListManager', () => {
       // suspension entries backed by two distinct lists. Passing an array of
       // status list credentials must let every entry be checked against the
       // list it actually names, not just the first/only one supplied.
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -928,8 +928,8 @@ describe('StatusListManager', () => {
     });
 
     test('#592 verifyCredentialWithStatus fails closed on an entry whose list was not among the supplied lists', async () => {
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       (sdk.credentials as any).verifyCredential = async () => true;
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -962,8 +962,8 @@ describe('StatusListManager', () => {
     });
 
     test('verifyCredentialWithStatus detects suspended credentials', async () => {
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
       // Unsigned fixtures — stub proof verification (see note above).
       (sdk.credentials as any).verifyCredentialSignature = async () => true;
 
@@ -1006,8 +1006,8 @@ describe('StatusListManager', () => {
     });
 
     test('verifyCredentialWithStatus errors when status list not provided', async () => {
-      const { OriginalsSDK } = await import('../../../src');
-      const sdk = OriginalsSDK.create({ onAppendFailure: 'skip', defaultKeyType: 'Ed25519' });
+      const { createManagers } = await import('../../fixtures/managers');
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
 
       const entry = sdk.statusList.allocateStatusEntry(
         'https://example.com/status/1',
@@ -1037,10 +1037,10 @@ describe('StatusListManager', () => {
       // reported only an error string. A caller gating on `verified`/`revoked`
       // would treat a possibly-revoked credential as valid. It must fail closed,
       // mirroring the Data Integrity path (Verifier.verifyCredential).
-      const { OriginalsSDK } = await import('../../../src');
-      const { multikey } = await import('@originals/cel');
+      const { createManagers } = await import('../../fixtures/managers');
+      const { multikey } = await import('../../../src/crypto/Multikey');
       const ed = await import('@noble/ed25519');
-      const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+      const sdk = createManagers({ defaultKeyType: 'Ed25519' });
 
       const sk = ed.utils.randomSecretKey();
       const pk = await ed.getPublicKeyAsync(sk);
@@ -1107,19 +1107,13 @@ describe('StatusListManager', () => {
       expect(revoked.revoked).toBe(true);
       expect(revoked.verified).toBe(false);
     });
-
-    test('SDK exposes statusList on top-level instance', async () => {
-      const { OriginalsSDK, StatusListManager } = await import('../../../src');
-      const sdk = OriginalsSDK.create();
-      expect(sdk.statusList).toBeInstanceOf(StatusListManager);
-    });
   });
 });
 
 describe('status list credential trust checks (issue #238)', () => {
   test('verifyCredentialWithStatus rejects a fabricated status list (revocation bypass attempt)', async () => {
-    const { OriginalsSDK } = await import('../../../src');
-    const sdk = OriginalsSDK.create({ defaultKeyType: 'Ed25519' });
+    const { createManagers } = await import('../../fixtures/managers');
+    const sdk = createManagers({ defaultKeyType: 'Ed25519' });
     // Main credential signature is treated as valid so the status-path checks
     // are isolated. verifyCredentialWithStatus checks signature via
     // verifyCredentialSignature, the explicitly-named signature-only entry

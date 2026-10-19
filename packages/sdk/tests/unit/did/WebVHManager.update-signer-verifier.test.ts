@@ -1,9 +1,8 @@
-// Previous-format regression; CEL 3 public behavior is tested in CelV3DefaultJourney.
 /**
  * Regression tests for issue #702: WebVHManager.updateDIDWebVH omitted the
  * signer-as-verifier fallback that createDIDWebVH already has. A signer that
  * implements both ExternalSigner and ExternalVerifier (the documented
- * pattern in packages/sdk/V3.md, and the exact shape of
+ * pattern, and the exact shape of
  * TurnkeyWebVHSigner/TurnkeyDIDSigner) worked on createDIDWebVH without a
  * separate `verifier` argument, but threw on updateDIDWebVH with the
  * identical signer.
@@ -12,7 +11,8 @@ import { describe, test, expect } from 'bun:test';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
 import { Ed25519Signer } from '../../../src/crypto/Signer';
-import { multikey, StructuredError } from '@originals/cel';
+import { multikey } from '../../../src/crypto/Multikey';
+import { StructuredError } from '../../../src/utils/telemetry';
 import type { ExternalSigner, ExternalVerifier } from '../../../src/types';
 
 /** A signer that ALSO implements verify — mirrors TurnkeyWebVHSigner's shape. */
@@ -75,8 +75,8 @@ describe('#702 — updateDIDWebVH falls back to the signer as verifier', () => {
   }, 30000);
 
   test('DIDManager.updateDIDWebVH (delegated) also accepts the dual signer without a separate verifier', async () => {
-    const { OriginalsSDK } = await import('../../previous-sdk');
-    const sdk = OriginalsSDK.create();
+    const { createManagers } = await import('../../fixtures/managers');
+    const sdk = createManagers();
     const km = new KeyManager();
     const { signer, keyPair } = await buildDualSignerVerifier(km);
 

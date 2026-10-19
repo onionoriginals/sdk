@@ -1,17 +1,14 @@
-/** Public types match the default CEL 3 asset API. */
-export type { LayerType, AppendFailurePolicy, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner } from './common.js';
+/** Public types of `@originals/sdk`, importable from `@originals/sdk/types`. */
+export type * from '../originals/index.js';
+export type { LayerType, KeyStore, ExternalSigner, ExternalVerifier, BitcoinSigner, OriginalsConfig, AssetResource, AssetResourceInput } from './common.js';
 export type * from './did.js';
 export type * from './credentials.js';
 export type * from './bitcoin.js';
 export type * from './network.js';
 export type * from './multisig.js';
-export type { OriginalsSDKOptions, OriginalsConfig } from '../core/OriginalsSDK3.js';
-export type { AssetResource, AssetResourceInput, AssetEnvelope, AssetUpdate, AssetVerification, MutationOptions, MutationResult, LoadedAsset, LoadAssetOptions, CreateAssetOptions, LocalResource } from '../v3/types.js';
-export type { CelSigner, AssetState, VerifiedHistory, HistoryCheckpoint } from '@originals/cel/v3';
-export type { SatProvider, AssetResolution, AssetResolutionOptions, AssetDIDResolution, ResourceAvailability } from '../v3/resolution.js';
-export type { WebPublicationOptions, PreparedWebPublication, PublishedWebAsset, HostedEvidence, HostingEvidence, PublicReachabilityCheck, HostedAssetsOptions } from '../v3/hosted.js';
-export type { BitcoinPublicationOptions, PreparedBitcoinPublication, BitcoinSubmissionOptions, SubmittedBitcoinAsset } from '../v3/bitcoin.js';
+export type { OriginalResult, CreateOriginalOptions, UpdateOriginalOptions, CreateDIDOriginalOptions, UpdateDIDOriginalOptions, VerificationMethodInput } from '../did/identity-operations.js';
+export type { SatSnapshot, BitcoinNetwork, ChainTip, CreationPosition, PublicationObservation, IndependentContentEvidence } from '../bitcoin/sat-snapshot-types.js';
 export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRecoveryStore, InscriptionBroadcastState } from '../bitcoin/inscription-recovery.js';
-
-export type { ChainValidator, BitcoinCoreChainValidatorOptions } from "../v3/chain-validation.js";
-export type { ContentValidator, BitcoinCoreContentValidatorOptions } from '../v3/content-validation.js';
+export type { ChainValidator, BitcoinCoreChainValidatorOptions } from '../bitcoin/chain-validation.js';
+export type { ContentValidator, BitcoinCoreContentValidatorOptions } from '../bitcoin/content-validation.js';
+export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from '../adapters/types.js';

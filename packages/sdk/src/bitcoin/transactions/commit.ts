@@ -8,7 +8,7 @@
  */
 
 import * as btc from '@scure/btc-signer';
-import { StructuredError } from '@originals/cel';
+import { StructuredError } from '../../utils/telemetry.js';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { Utxo, ResourceUtxo } from '../../types/bitcoin.js';
@@ -590,7 +590,7 @@ export async function createCommitTransaction(
   // Add metadata if provided. Pre-encoded bytes are written as raw `unknown` tag/data pushes,
   // never through `tags.metadata`: micro-ordinals' own CBOR encoder cannot encode a JS `number`
   // in [2^32, 2^53), which would otherwise permanently block the default inline publication path
-  // for an otherwise-valid CEL document. See ordinals-tags.ts. A plain object still goes through
+  // for otherwise-valid pre-encoded metadata. See ordinals-tags.ts. A plain object still goes through
   // micro-ordinals' encoder unchanged, for callers with no such large-integer risk.
   if (metadata instanceof Uint8Array) {
     if (metadata.length > 0) tags.unknown = metadataTagChunks(metadata);

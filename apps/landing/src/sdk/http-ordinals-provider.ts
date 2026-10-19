@@ -9,7 +9,7 @@
  * never silently fabricate on-chain data in the browser.
  */
 import { base64 } from "@scure/base";
-import type { SatSnapshot } from "@originals/sdk/cel";
+import type { SatSnapshot } from "@originals/sdk";
 import type { OrdinalsProvider } from "@originals/sdk";
 
 export class HttpOrdinalsProvider implements OrdinalsProvider {

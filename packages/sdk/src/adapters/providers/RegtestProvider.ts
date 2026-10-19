@@ -1,12 +1,11 @@
-import type { SatSnapshot } from "@originals/cel/v3";
+import type { SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
 import { readSatSnapshot, type SatSnapshotBudget } from "./sat-snapshot.js";
 import type { OrdinalsProvider } from '../types.js';
-import { enumerateAnchoringsOnSat } from '../anchoring-enumeration.js';
-import { decode as decodeCbor } from '@originals/cel/cbor';
-import { hexToBytes } from '@originals/cel/encoding';
+import { decode as decodeCbor } from '../../utils/cbor.js';
+import { hexToBytes } from '../../utils/encoding.js';
 
 export interface RegtestProviderOptions {
-  /** Bounds the whole CEL 3 evidence scan, not only each HTTP request. */
+  /** Bounds the whole sat snapshot scan, not only each HTTP request. */
   snapshotBudget?: SatSnapshotBudget;
   ordUrl: string;
   rpcUrl: string;
@@ -160,7 +159,7 @@ export class RegtestProvider implements OrdinalsProvider {
     return String(sat);
   }
 
-  /** Complete, stable CEL 3 observation using ord 0.29's sat enumeration and raw CBOR endpoint.
+  /** Complete, stable sat observation using ord 0.29's sat enumeration and raw CBOR endpoint.
    * Block creation order comes from Core's active blocks, never inscription numbers or current location.
    */
   async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
@@ -228,10 +227,6 @@ export class RegtestProvider implements OrdinalsProvider {
         status: { confirmed: output.confirmations > 0 }, spent: output.spent };
     }));
     return outputs.filter(output => !output.spent);
-  }
-
-  getAnchoringsForDidCel(didCel: string, options?: { satoshi?: string }) {
-    return enumerateAnchoringsOnSat(this, didCel, options?.satoshi, 'RegtestProvider');
   }
 
   createInscription(): Promise<never> { return Promise.reject(new Error('Use the SDK sat-selected transaction builder')); }

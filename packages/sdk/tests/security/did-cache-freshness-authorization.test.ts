@@ -3,7 +3,7 @@ import { DIDManager } from '../../src/did/DIDManager';
 import { Verifier } from '../../src/vc/Verifier';
 import { Issuer } from '../../src/vc/Issuer';
 import { createDocumentLoader } from '../../src/vc/documentLoader';
-import { multikey } from '@originals/cel';
+import { multikey } from '../../src/crypto/Multikey';
 import * as ed25519 from '@noble/ed25519';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -79,7 +79,7 @@ describe('current-authority resolution wiring (issue #602)', () => {
     // when 'current' was requested — the metadata must say so honestly
     // rather than mislabel a cache hit as a fresh network read.
     const didManager = new DIDManager({ network: 'mainnet' } as any);
-    const celDid = 'did:cel:uEiAexampleGenesisDigest';
+    const celDid = 'did:vh:QmExampleGenesisDigest';
     const celDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: celDid } as any;
     await didManager.cache.set(celDid, celDoc);
 
@@ -141,7 +141,7 @@ describe('mutable DID cache cannot supply current authority (issue #602)', () =>
 
       // Current-authority resolution MUST NOT be satisfied by the pinned
       // stale snapshot: it must bypass the cache and observe the real
-      // rotation, exactly like Verifier/DocumentLoader/the CEL key resolver
+      // rotation, exactly like Verifier/DocumentLoader
       // now require for authorization decisions.
       const current = await verifier.resolveDID(created.did, { mode: 'current' });
       expect(current?.verificationMethod?.[0]?.publicKeyMultibase).toBe(rotated.newKeyPair.publicKey);

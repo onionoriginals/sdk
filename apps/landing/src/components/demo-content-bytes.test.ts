@@ -12,7 +12,7 @@ import { describe, test, expect } from 'bun:test';
 import { inscriptionContentBytes } from './demo-logic';
 import type { DemoAssetState } from '../sdk/engine';
 
-const entry = (i: number): DemoAssetState['celLog'][number] => ({
+const entry = (i: number): DemoAssetState['history'][number] => ({
   type: i === 0 ? 'create' : 'update',
   data: { note: `event ${i}`.repeat(20) },
   ...(i > 0 ? { previousEvent: 'u'.repeat(50) } : {}),
@@ -24,7 +24,7 @@ const asset = (over: Partial<DemoAssetState> = {}): DemoAssetState => ({
   did: 'did:cel:u'.padEnd(60, 'x'),
   resource: { id: 'artwork.svg', hash: 'h', contentType: 'image/svg+xml', content: '<svg/>', version: 1 },
   credentials: 0,
-  celLog: [entry(0)],
+  history: [entry(0)],
   ...over,
 });
 
@@ -43,8 +43,8 @@ describe('inscriptionContentBytes', () => {
   });
 
   test('grows with the log — every event ships in the reveal', () => {
-    const one = inscriptionContentBytes(asset({ celLog: [entry(0)] }));
-    const five = inscriptionContentBytes(asset({ celLog: [0, 1, 2, 3, 4].map(entry) }));
+    const one = inscriptionContentBytes(asset({ history: [entry(0)] }));
+    const five = inscriptionContentBytes(asset({ history: [0, 1, 2, 3, 4].map(entry) }));
     expect(five).toBeGreaterThan(one);
   });
 

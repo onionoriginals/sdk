@@ -5,8 +5,8 @@ import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
 import { createBtcoDidDocument } from './createBtcoDidDocument.js';
 import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
 import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
-import { StructuredError } from '@originals/cel';
-import { multikey } from '@originals/cel';
+import { StructuredError } from '../utils/telemetry.js';
+import { multikey } from '../crypto/Multikey.js';
 import { WebVHManager } from './WebVHManager.js';
 import { Ed25519Verifier } from './Ed25519Verifier.js';
 import type {
@@ -15,11 +15,8 @@ import type {
   RecoverWebVHOptions,
   RecoverWebVHResult,
 } from './WebVHManager.js';
-import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '@originals/cel';
-import { resolveDidCel, DID_CEL_PREFIX } from '@originals/cel';
-import { parseEventLogJson } from '@originals/cel';
-import { createDidManagerKeyResolver } from '@originals/cel';
-import { canonicalizeWebVHDomain } from '@originals/cel/v3';
+import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
+import { canonicalizeWebVHDomain } from './webvh-names.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
@@ -101,9 +98,9 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * must fail loudly rather than mint a DID at a host nobody serves (#531). The
  * configured webvhNetwork tier deliberately does NOT supply a default here.
  *
- * A non-blank domain is canonicalized by CEL's `canonicalizeWebVHDomain`
+ * A non-blank domain is canonicalized by `canonicalizeWebVHDomain`
  * (identity policy: a DNS host, punycode host or `localhost`, `URL#host` spelling), which
- * throws a `CelError` (a `StructuredError`) `INVALID_DOMAIN` otherwise.
+ * throws a `StructuredError` `INVALID_DOMAIN` otherwise.
  */
 export function requireWebVHDomain(domain: string | undefined): string {
   if (typeof domain !== 'string' || domain.trim().length === 0) {
@@ -122,12 +119,7 @@ export class DIDManager {
   private readonly metrics?: MetricsCollector;
   public readonly cache: DIDCache;
 
-  constructor(private config: OriginalsConfig, metrics?: MetricsCollector,
-    private readonly resolveVerifiedBtco?: (
-      did: string,
-      resolveKey: (verificationMethod: string) => Promise<Uint8Array | null>
-    ) => Promise<DIDDocument | null>,
-    private readonly capabilities?: { assetResolution: 'unavailable' }) {
+  constructor(private config: OriginalsConfig, metrics?: MetricsCollector) {
     this.metrics = metrics;
     this.cache = new DIDCache({
       ...(config.didCache || {}),
@@ -140,7 +132,7 @@ export class DIDManager {
   }
 
   /**
-   * Migrate a genesis DID document (did:cel) to a real did:webvh.
+   * Migrate a DID document to a real did:webvh.
    *
    * The migration goes through WebVHManager.createDIDWebVH (didwebvh-ts
    * createDID), so the resulting DID has a genuine SCID and a signed DID log
@@ -381,48 +373,8 @@ export class DIDManager {
     }
   }
 
-  /**
-   * Reads the persisted CEL for a did:cel from the storage adapter at the
-   * conventional key LifecycleManager writes (`cel/<suffix>.json`). Supports
-   * both duck-typed adapter shapes in the same priority order as the writes
-   * (legacy `get(key)` first, canonical `getObject(domain, path)` second).
-   * Any miss or adapter failure returns null — resolution then stays
-   * honest-null instead of crashing.
-   */
-  private async readStoredCelLog(did: string): Promise<string | null> {
-    const storage = (this.config as { storageAdapter?: unknown }).storageAdapter;
-    if (!storage || typeof storage !== 'object') return null;
-    const path = `${did.slice(DID_CEL_PREFIX.length)}.json`;
-
-    const decode = (value: unknown): string | null => {
-      if (typeof value === 'string') return value;
-      if (value instanceof Uint8Array) return new TextDecoder().decode(value);
-      if (value && typeof value === 'object') {
-        const content = (value as { content?: unknown }).content;
-        if (typeof content === 'string') return content;
-        if (content instanceof Uint8Array) return new TextDecoder().decode(content);
-      }
-      return null;
-    };
-
-    try {
-      const withGet = storage as { get?: (key: string) => Promise<unknown> };
-      if (typeof withGet.get === 'function') {
-        const found = decode(await withGet.get(`cel/${path}`));
-        if (found !== null) return found;
-      }
-      const withGetObject = storage as { getObject?: (domain: string, path: string) => Promise<unknown> };
-      if (typeof withGetObject.getObject === 'function') {
-        return decode(await withGetObject.getObject('cel', path));
-      }
-    } catch {
-      // A throwing storage adapter must not crash resolution.
-    }
-    return null;
-  }
-
   async resolveDID(did: string, options?: DIDResolutionOptions): Promise<DIDDocument | null> {
-    return this.resolveDIDWithPath(did, options, new Set());
+    return this.resolveDIDTracked(did, options);
   }
 
   /**
@@ -430,8 +382,8 @@ export class DIDManager {
    * came from cache, an explicit offline snapshot, or a live re-resolution,
    * plus when it was resolved and whether the cache entry is pinned
    * (issue #602). Security-sensitive authorization decisions should request
-   * `mode: 'current'` (as `Verifier`, `DocumentLoader`, and the CEL key
-   * resolver already do internally) rather than branch on this metadata.
+   * `mode: 'current'` (as `Verifier` and `DocumentLoader` already do
+   * internally) rather than branch on this metadata.
    */
   async resolveDIDWithFreshness(
     did: string,
@@ -495,48 +447,13 @@ export class DIDManager {
     };
   }
 
-  private async resolveDIDWithPath(
+  private async resolveDIDTracked(
     did: string,
-    options: DIDResolutionOptions | undefined,
-    btcoPath: ReadonlySet<string>
+    options: DIDResolutionOptions | undefined
   ): Promise<DIDDocument | null> {
     return this.track('did.resolveDID', async () => {
-      if (this.capabilities?.assetResolution === 'unavailable' && (did.startsWith('did:cel:') || did.startsWith('did:btco:'))) {
-        throw new StructuredError('ASSET_RESOLUTION_UNAVAILABLE', 'CEL 3 asset DID resolution is not yet connected; load an asset envelope to verify local history');
-      }
       // Network guard must precede the cache read (issue #312).
       this.assertBtcoNetworkMatchesProvider(did);
-
-      // SDK assets use media content plus a witnessed CEL in ordinal metadata.
-      // Share the asset reader's verification gate and re-read Bitcoin state:
-      // a cached document must not survive a removed inscription after a reorg.
-      if (did.startsWith('did:btco:') && this.config.ordinalsProvider && this.resolveVerifiedBtco) {
-        if (btcoPath.has(did)) return null;
-        // This path belongs to one verification chain. A manager-wide in-flight
-        // set would incorrectly reject independent concurrent reads of one DID.
-        const nextPath = new Set(btcoPath).add(did);
-        try {
-          const adapter = new OrdinalsProviderResolverAdapter(this.config.ordinalsProvider);
-          const resolved = await new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent }).resolve(did);
-          const hasAnchor = (document: unknown): boolean => {
-            if (!document || typeof document !== 'object') return false;
-            const service = (document as { service?: unknown }).service;
-            return Array.isArray(service) && service.some((s: unknown) =>
-              typeof s === 'object' && s !== null && 'type' in s && s.type === 'OriginalsCelAnchor');
-          };
-          // Even a malformed CEL claim must not downgrade to ordinary DID
-          // resolution. Inspect the whole sat history, not just the selected doc.
-          const hasCelClaim = resolved.inscriptions?.some(inscription => {
-            const metadata = inscription.metadata;
-            return hasAnchor(inscription.didDocument) || (metadata !== null &&
-              ('celLog' in metadata || 'events' in metadata || hasAnchor(metadata.didDocument)));
-          });
-          if (resolved.didDocument && !hasCelClaim) return resolved.didDocument;
-          return await this.resolveVerifiedBtco(did, createDidManagerKeyResolver({
-            resolveDID: nestedDid => this.resolveDIDWithPath(nestedDid, { skipCache: true }, nextPath)
-          }));
-        } catch { return null; }
-      }
 
       // Check cache first (unless skipCache is set, or the caller requested
       // `mode: 'current'` for a mutable method). did:webvh authority can be
@@ -545,9 +462,8 @@ export class DIDManager {
       // cached (however recent, and even pinned) pre-rotation document as
       // current-authority evidence — that cache can only be invalidated by
       // this same DIDManager instance's own mutations (issue #602). Other
-      // methods are unaffected: did:btco already re-reads verified chain
-      // state above regardless of cache, and did:key never populates this
-      // cache at all (it's synthesized locally by DocumentLoader).
+      // methods are unaffected: did:key never populates this cache at all
+      // (it is synthesized locally by DocumentLoader).
       const requiresFreshResolution = options?.mode === 'current' && did.startsWith('did:webvh:');
       if (!options?.skipCache && !requiresFreshResolution) {
         let cached: DIDDocument | null = null;
@@ -567,10 +483,8 @@ export class DIDManager {
       // resolve, pushing the error far downstream.
       let result: DIDDocument | null = null;
       try {
-        // did:peer is not a supported method (removed entirely — protocol
-        // forward paths and read paths are did:key/did:cel-based); it falls
-        // through to the unsupported-method null below like any other
-        // unknown method.
+        // did:peer is not a supported method; it falls through to the
+        // unsupported-method null below like any other unknown method.
         if (did.startsWith('did:btco:')) {
           if (this.config.ordinalsProvider) {
             // Cross-network guard already enforced pre-cache by
@@ -643,34 +557,6 @@ export class DIDManager {
             if (this.config.enableLogging) {
               console.warn('Failed to resolve did:webvh:', err);
             }
-          }
-        } else if (did.startsWith(DID_CEL_PREFIX)) {
-          // Persistence-backed resolution (Phase 3): LifecycleManager persists
-          // the asset's CEL at the conventional `cel/<suffix>.json` key at
-          // genesis and after every successful append. Read it back, parse it
-          // through the JSON gate, and resolve via resolveDidCel — which
-          // verifies the WHOLE chain against the DID before folding the
-          // current controller into a document (never a fabricated one). The
-          // DIDManager-backed key resolver and the configured ordinalsProvider
-          // are threaded so rotated and btco-anchored (witness-proofed) logs
-          // verify too; without a provider those fail closed to null.
-          const json = await this.readStoredCelLog(did);
-          if (json !== null) {
-            try {
-              const log = parseEventLogJson(json);
-              result = await resolveDidCel(did, log, {
-                resolveKey: createDidManagerKeyResolver(this),
-                ordinalsProvider: this.config.ordinalsProvider
-              });
-            } catch {
-              // Parse failure → the honest null below.
-              result = null;
-            }
-          }
-          if (!result && this.config.enableLogging) {
-            console.warn(
-              `did:cel could not be resolved from storage; callers holding the event log can use resolveDidCel(did, log) from the cel module. Returning null for ${did}`
-            );
           }
         } else if (this.config.enableLogging) {
           console.warn(`Unsupported DID method for resolution: ${did}`);

@@ -7,9 +7,8 @@
  * persisted alert rather than from anything a poll happened to catch.
  */
 import { describe, test, expect } from 'bun:test';
-import { demo, yourOriginals } from '../content';
+import { demo } from '../content';
 import { depositErrorMessage, depositErrorBadge } from './demo-logic';
-import { depositAlertMessage } from '../pages/YourOriginals';
 
 describe('indexer-unavailable copy (R28)', () => {
   test('content.ts carries both indexer states, distinct from the fee one', () => {
@@ -67,38 +66,4 @@ describe('the stuck state on return (R31)', () => {
     expect(line).toMatch(/don.t send email/i);
   });
 
-  test('yourOriginals carries the persisted-alert copy', () => {
-    expect(typeof yourOriginals.depositAlert.heading).toBe('string');
-    expect(typeof yourOriginals.depositAlert.unavailable).toBe('string');
-    expect(typeof yourOriginals.depositAlert.busy).toBe('string');
-    expect(typeof yourOriginals.depositAlert.heldPrefix).toBe('string');
-    expect(typeof yourOriginals.depositAlert.heldSuffix).toBe('string');
-  });
-
-  test('an alert renders as copy, with the held balance when there is one', () => {
-    const held = depositAlertMessage({
-      kind: 'indexer_unavailable',
-      address: 'bc1qexample',
-      network: 'mainnet',
-      heldSats: 40_000,
-      firstSeenAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    expect(held).toContain(yourOriginals.depositAlert.unavailable);
-    expect(held).toContain('40,000');
-    expect(held).toContain('bc1qexample');
-
-    const empty = depositAlertMessage({
-      kind: 'indexer_rate_limited',
-      address: 'bc1qexample',
-      network: 'mainnet',
-      heldSats: 0,
-      firstSeenAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    expect(empty).toBe(yourOriginals.depositAlert.busy);
-
-    expect(depositAlertMessage(null)).toBeNull();
-    expect(depositAlertMessage(undefined)).toBeNull();
-  });
 });

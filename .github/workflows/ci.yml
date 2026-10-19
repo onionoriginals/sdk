@@ -117,7 +117,7 @@ jobs:
           node --test scripts/verify-esm.test.mjs
           node scripts/verify-esm.mjs
 
-      - name: Verify SDK public types match the default CEL 3 API
+      - name: Verify SDK public types match the Originals root API
         working-directory: packages/sdk
         run: bun run typecheck:public
 

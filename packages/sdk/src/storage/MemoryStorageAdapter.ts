@@ -2,9 +2,8 @@ import { GetObjectResult, StorageAdapter } from './StorageAdapter.js';
 
 type DomainPath = string;
 
-// Shared across all instances by design: LifecycleManager constructs a fresh
-// fallback MemoryStorageAdapter per publish, and published resources must
-// remain retrievable through later instances. Use `MemoryStorageAdapter.clear()`
+// Shared across all instances by design: published resources must remain
+// retrievable through later instances. Use `MemoryStorageAdapter.clear()`
 // for isolation between tests or tenants.
 const globalStore: Map<DomainPath, Uint8Array> = new Map();
 
