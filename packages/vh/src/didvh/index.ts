@@ -94,7 +94,7 @@ export interface DidVhResolution {
   log?: LogVerification;
 }
 
-function failure(error: DidVhError, detail: string, code?: string): DidVhResolution {
+export function failure(error: DidVhError, detail: string, code?: string): DidVhResolution {
   return {
     didResolutionMetadata: { error, problemDetails: { type: `https://w3id.org/security#${error}`, title: error, detail, ...(code ? { code } : {}) } },
     didDocument: null,
@@ -112,15 +112,8 @@ function specialisationFor(firstMethod: unknown, extensions: DidVhExtension[]): 
   return { spec: didVh };
 }
 
-export async function resolveDidVh(did: string, options: DidVhResolutionOptions): Promise<DidVhResolution> {
-  if (typeof did !== "string" || !DID_VH.test(did)) return failure("invalidDid", "the DID does not match the did:vh ABNF");
-
-  const extensions = options.extensions ?? [];
-  for (const extension of extensions) {
-    if (Object.keys(extension.methods).some((m) => m.startsWith("did:vh:"))) {
-      return failure("invalidOptions", `extension ${extension.name} claims a did:vh method value`);
-    }
-  }
+/** Errors for the did:vh / did:webvh resolution option rules; null when they hold. */
+export function checkResolutionOptions(options: DidVhResolutionOptions): DidVhResolution | null {
   if ((options.didLog === undefined) === (options.src === undefined)) return failure("invalidOptions", "exactly one of didLog and src must be given");
   if (options.didWitness !== undefined && options.didLog === undefined) return failure("invalidOptions", "didWitness may be given only with didLog");
   const selectors = [options.versionId, options.versionTime, options.versionNumber].filter((v) => v !== undefined);
@@ -139,24 +132,31 @@ export async function resolveDidVh(did: string, options: DidVhResolutionOptions)
   if (options.checkWatchers !== undefined || options.extraWatchers !== undefined || options.minCopies !== undefined) {
     return failure("featureNotSupported", "checkWatchers, extraWatchers and minCopies are not supported yet");
   }
+  return null;
+}
 
-  let entries: unknown[];
+/** The entries passed in `didLog`, or a resolution error. */
+export function entriesOf(options: DidVhResolutionOptions): unknown[] | DidVhResolution {
   try {
-    entries = typeof options.didLog === "string" ? parseLog(options.didLog) : options.didLog!;
+    return typeof options.didLog === "string" ? parseLog(options.didLog) : options.didLog!;
   } catch (error) {
     if (error instanceof OriginalsError) return failure("invalidDid", error.message, error.code);
     throw error;
   }
-  const firstParameters = isJsonObject(entries[0]) && isJsonObject(entries[0].parameters) ? entries[0].parameters : {};
-  const { spec, extension } = specialisationFor(firstParameters.method, extensions);
-  const log = await verifyLog(entries, { specialisation: spec, witnessFile: options.didWitness, now: options.now, limits: options.limits });
+}
 
+/** Select the requested version of a verified log and build the result and metadata. */
+export function finishResolution(
+  log: LogVerification,
+  entries: unknown[],
+  options: DidVhResolutionOptions,
+  document: (selected: VerifiedEntry, prefix: VerifiedEntry[]) => JsonObject,
+): DidVhResolution {
   if (log.entries.length === 0) {
     const error = log.failure?.error;
     return failure("invalidDid", error?.message ?? "the DID log is empty", error?.code);
   }
-  if (log.scid !== did.slice("did:vh:".length)) return failure("invalidDid", "the log's SCID is not the DID's");
-
+  const selectors = [options.versionId, options.versionTime, options.versionNumber].filter((v) => v !== undefined);
   let selected: VerifiedEntry | undefined;
   try {
     selected = selectVersion(log, options);
@@ -178,18 +178,17 @@ export async function resolveDidVh(did: string, options: DidVhResolutionOptions)
   const prefix = log.entries.slice(0, selected.versionNumber);
   const deactivated = log.deactivated;
   const witness = last.active.witness;
-  const document = extension?.deriveDocument ? extension.deriveDocument(prefix) : selected.entry.state;
   const warnings = log.failure ? [{ code: "invalid-entries", message: `entries from ${log.failure.index + 1} failed verification: ${log.failure.error.message}` }] : undefined;
 
   return {
     didResolutionMetadata: { contentType: "application/did+json", ...(warnings ? { warnings } : {}) },
-    didDocument: deactivated && selectors.length === 0 ? null : document,
+    didDocument: deactivated && selectors.length === 0 ? null : document(selected, prefix),
     didDocumentMetadata: {
       versionId: selected.entry.versionId,
       versionTime: selected.entry.versionTime,
       created: first.entry.versionTime,
       updated: last.entry.versionTime,
-      scid: log.scid,
+      scid: log.scid!,
       deactivated,
       ttl: String(last.active.ttl),
       ...(Object.keys(witness).length > 0
@@ -199,4 +198,26 @@ export async function resolveDidVh(did: string, options: DidVhResolutionOptions)
     },
     log,
   };
+}
+
+export async function resolveDidVh(did: string, options: DidVhResolutionOptions): Promise<DidVhResolution> {
+  if (typeof did !== "string" || !DID_VH.test(did)) return failure("invalidDid", "the DID does not match the did:vh ABNF");
+
+  const extensions = options.extensions ?? [];
+  for (const extension of extensions) {
+    if (Object.keys(extension.methods).some((m) => m.startsWith("did:vh:"))) {
+      return failure("invalidOptions", `extension ${extension.name} claims a did:vh method value`);
+    }
+  }
+  const invalid = checkResolutionOptions(options);
+  if (invalid) return invalid;
+  const entries = entriesOf(options);
+  if (!Array.isArray(entries)) return entries;
+
+  const firstParameters = isJsonObject(entries[0]) && isJsonObject(entries[0].parameters) ? entries[0].parameters : {};
+  const { spec, extension } = specialisationFor(firstParameters.method, extensions);
+  const log = await verifyLog(entries, { specialisation: spec, witnessFile: options.didWitness, now: options.now, limits: options.limits });
+  if (log.entries.length > 0 && log.scid !== did.slice("did:vh:".length)) return failure("invalidDid", "the log's SCID is not the DID's");
+  return finishResolution(log, entries, options, (selected, prefix) =>
+    extension?.deriveDocument ? extension.deriveDocument(prefix) : selected.entry.state);
 }

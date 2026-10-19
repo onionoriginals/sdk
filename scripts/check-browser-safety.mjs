@@ -35,6 +35,8 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/vh/dist', entry: 'crypto/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'log/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'didvh/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'webvh/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'originals/index.js', browserFirst: true },
   // @originals/auth's root is types + the isomorphic turnkeySignBytes, and its
   // client entry runs in a browser by definition. Neither was guarded, which is
   // how a Buffer-dependent "isomorphic" export shipped green (plan 046, item 2).
