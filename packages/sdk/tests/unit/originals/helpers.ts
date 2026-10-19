@@ -55,8 +55,8 @@ export class Author {
     return this.entries[this.entries.length - 1].versionId;
   }
 
-  evidence(): AuthorDidEvidence {
-    return { did: this.did, log: serializeLog(this.entries) };
+  evidence(entries = this.entries): AuthorDidEvidence {
+    return { did: this.did, log: serializeLog(entries) };
   }
 
   ref(fragment: string): AuthorRef {

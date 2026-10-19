@@ -104,7 +104,11 @@
         3,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/freshness.test.ts"
+      ],
+      "note": "Unwitnessed case: historically authorized at the named version, ordering claimed, never current (P7.9). Witnessed (PR 7) and anchored (PR 9) cases remain."
     },
     {
       "id": "C12-09",
@@ -276,7 +280,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/freshness.test.ts",
+        "packages/sdk/tests/unit/originals/freshness.test.ts"
+      ]
     },
     {
       "id": "C12-23",
@@ -285,7 +293,12 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/freshness.test.ts",
+        "packages/sdk/tests/unit/originals/freshness.test.ts"
+      ],
+      "note": "Owner decision Q5: every branch is reported and none is current until anchoring settles it (P9.16)."
     },
     {
       "id": "C12-24",
@@ -498,6 +511,7 @@
       ],
       "status": "partial",
       "coveredBy": [
+        "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
       "note": "Unwitnessed case: historically valid, never current (P7.9). Witnessed and anchored cases in PRs 7 and 9."
@@ -627,7 +641,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/freshness.test.ts"
+      ]
     },
     {
       "id": "C12-60",
@@ -776,7 +793,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/freshness.test.ts",
+        "packages/sdk/tests/unit/originals/freshness.test.ts"
+      ]
     },
     {
       "id": "C12-74",

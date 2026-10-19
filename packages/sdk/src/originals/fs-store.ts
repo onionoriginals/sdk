@@ -3,7 +3,10 @@
  *
  *   <root>/originals/<scid>/did.jsonl   the committed log
  *   <root>/resources/<digest>           content-addressed bytes
+ *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl
+ *                                       valid branches that diverge from it
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
+ *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
  *
  * Every write goes to a temporary file that is fsynced and then renamed over
  * its target, and the directory is fsynced after the rename, so a commit is
@@ -32,6 +35,7 @@ type Fs = typeof import("node:fs/promises");
 let fs: Fs;
 let randomHex: (bytes: number) => string;
 const join = (...parts: string[]) => parts.join("/");
+const hashHex = (text: string) => hex.encode(sha256(new TextEncoder().encode(text)));
 
 async function loadNode(): Promise<void> {
   fs ??= await import("node:fs/promises");
@@ -64,12 +68,17 @@ export class FileStore implements OriginalsStore {
     await mkdir(join(root, "originals"), { recursive: true });
     await mkdir(join(root, "resources"), { recursive: true });
     await mkdir(join(root, "authors"), { recursive: true });
+    await mkdir(join(root, "retained"), { recursive: true });
     for (const scid of await readdir(join(root, "originals"))) {
       for (const name of await readdir(join(root, "originals", scid))) {
         if (name.endsWith(".tmp")) await rm(join(root, "originals", scid, name), { force: true });
       }
+      const branches = join(root, "originals", scid, "branches");
+      for (const name of await readdir(branches).catch(() => [] as string[])) {
+        if (name.endsWith(".tmp")) await rm(join(branches, name), { force: true });
+      }
     }
-    for (const dir of ["resources", "authors"]) {
+    for (const dir of ["resources", "authors", "retained"]) {
       for (const name of await readdir(join(root, dir))) {
         if (name.endsWith(".tmp")) await rm(join(root, dir, name), { force: true });
       }
@@ -135,22 +144,60 @@ export class FileStore implements OriginalsStore {
     }
   }
 
-  private authorFile(did: string): string {
-    return `${hex.encode(sha256(new TextEncoder().encode(did)))}.json`;
+  private didFile(did: string): string {
+    return `${hashHex(did)}.json`;
+  }
+
+  private async readText(path: string): Promise<string | undefined> {
+    try {
+      return await fs.readFile(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
   }
 
   async putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void> {
-    await this.writeAtomically(join(this.root, "authors"), this.authorFile(evidence.did), JSON.stringify(evidence));
+    await this.writeAtomically(join(this.root, "authors"), this.didFile(evidence.did), JSON.stringify(evidence));
   }
 
   async getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined> {
     try {
-      const evidence = JSON.parse(await fs.readFile(join(this.root, "authors", this.authorFile(did)), "utf8")) as AuthorDidEvidence;
+      const evidence = JSON.parse(await fs.readFile(join(this.root, "authors", this.didFile(did)), "utf8")) as AuthorDidEvidence;
       return evidence.did === did ? evidence : undefined;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
+  }
+
+  async getRetained(did: string): Promise<string | undefined> {
+    const text = await this.readText(join(this.root, "retained", this.didFile(did)));
+    if (text === undefined) return undefined;
+    const record = JSON.parse(text) as { did?: unknown; versionId?: unknown };
+    return record.did === did && typeof record.versionId === "string" ? record.versionId : undefined;
+  }
+
+  async putRetained(did: string, versionId: string): Promise<void> {
+    await this.writeAtomically(join(this.root, "retained"), this.didFile(did), JSON.stringify({ did, versionId }));
+  }
+
+  async putBranch(did: string, log: string): Promise<void> {
+    const dir = join(this.dirOf(did), "branches");
+    await fs.mkdir(dir, { recursive: true });
+    const name = `${hashHex(log)}.jsonl`;
+    if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, log);
+  }
+
+  async getBranches(did: string): Promise<string[]> {
+    const dir = join(this.dirOf(did), "branches");
+    const names = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".jsonl")).sort();
+    const out: string[] = [];
+    for (const name of names) {
+      const log = await this.readText(join(dir, name));
+      if (log !== undefined) out.push(log);
+    }
+    return out;
   }
 
   async list(): Promise<string[]> {

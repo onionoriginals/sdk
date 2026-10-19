@@ -5,6 +5,10 @@
  * commit therefore leaves the prior log or the new one, never a checkpoint
  * whose bytes were not stored. Staged bytes may remain; they are content
  * addressed and are never a committed version on their own (P6.1).
+ *
+ * A store also keeps what freshness checks need (P7.8): the highest versionId
+ * verified for each Original and each author DID, and any valid branch that
+ * diverges from the committed log, so a fork stays visible (P6.6, Q5).
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
@@ -33,6 +37,12 @@ export interface OriginalsStore {
   /** Keep author DID evidence that arrived with imported Originals. Verified on every read. */
   putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void>;
   getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined>;
+  /** The highest versionId verified for an Original or an author DID. The SDK never lowers it. */
+  getRetained(did: string): Promise<string | undefined>;
+  putRetained(did: string, versionId: string): Promise<void>;
+  /** Keep a valid branch of an Original that diverges from its committed log. */
+  putBranch(did: string, log: string): Promise<void>;
+  getBranches(did: string): Promise<string[]>;
   list(): Promise<string[]>;
 }
 
@@ -53,6 +63,8 @@ export class MemoryStore implements OriginalsStore {
   private readonly originals = new Map<string, StoredOriginal>();
   private readonly resources = new Map<string, Uint8Array>();
   private readonly authors = new Map<string, AuthorDidEvidence>();
+  private readonly retained = new Map<string, string>();
+  private readonly branches = new Map<string, string[]>();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -83,6 +95,25 @@ export class MemoryStore implements OriginalsStore {
   getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined> {
     const evidence = this.authors.get(did);
     return Promise.resolve(evidence ? structuredClone(evidence) : undefined);
+  }
+
+  getRetained(did: string): Promise<string | undefined> {
+    return Promise.resolve(this.retained.get(did));
+  }
+
+  putRetained(did: string, versionId: string): Promise<void> {
+    this.retained.set(did, versionId);
+    return Promise.resolve();
+  }
+
+  putBranch(did: string, log: string): Promise<void> {
+    const known = this.branches.get(did) ?? [];
+    if (!known.includes(log)) this.branches.set(did, [...known, log]);
+    return Promise.resolve();
+  }
+
+  getBranches(did: string): Promise<string[]> {
+    return Promise.resolve([...(this.branches.get(did) ?? [])]);
   }
 
   /** Forget stored bytes, as a store that lost them would. */
