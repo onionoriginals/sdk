@@ -59,7 +59,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         return Promise.resolve(authorKey(namedVersion(history, ref), ref));
       },
     },
-    validateEntry: ({ entry, previous, scid, index }) => {
+    validateEntry: ({ entry, previous, scid, index, active }) => {
       const set = entry.parameters.witness;
       if (isJsonObject(set) && Object.keys(set).length === 0) {
         const wasActive = Object.keys(previous?.active.witness ?? {}).length > 0;
@@ -72,6 +72,11 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         if (declared === null || canonicalize(declared) !== canonicalize(set)) {
           fail("invalid-evidence", "WITNESS_NOT_DECLARED", "the witness parameter must equal the author DID's declaration at the named version (P9.9)");
         }
+      }
+      // A published Original is hosted, and a hosted Original is witnessed (P9.8).
+      const asset = (entry.state as unknown as Partial<EntryState>).asset;
+      if (Array.isArray(asset?.aliases) && asset.aliases.length > 0 && Object.keys(active.witness).length === 0) {
+        fail("invalid-evidence", "ALIAS_REQUIRES_WITNESSES", "an entry that lists a did:webvh alias needs active witnesses (P9.8)");
       }
       checkEntryState(entry.state, {
         scid,

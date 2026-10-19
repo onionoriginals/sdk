@@ -18,6 +18,11 @@
  *   parameter to the author DID's declaration on a head the caller confirms.
  *   From then on every commit collects threshold approvals from the declared
  *   witnesses before anything is stored; refusals leave the head unchanged.
+ * - Publication (P3.6, P9.8): `publish` lists a did:webvh alias that already
+ *   points back to the Original, activating the declared witnesses in the same
+ *   entry if they are not active. `loadPublished` is the public reader: it
+ *   retrieves the hosted snapshot through the alias and verifies that exact
+ *   checkpoint (P9.1).
  * - An import that diverges from the committed log keeps the other branch.
  *   From then on the Original reports the fork, with every branch, and is not
  *   current; edits continue on the local branch. Only anchoring settles a
@@ -31,11 +36,14 @@ import {
   prepareCreateOriginal,
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
+  checkAlias,
   namedVersion,
   resourceDigest,
   verifyAuthorHistory,
   verifyOriginal,
   witnessDeclaration,
+  type AliasEvidence,
+  type AliasReport,
   type AssetState,
   type AuthorDidEvidence,
   type AuthorRef,
@@ -46,7 +54,10 @@ import {
   type RetainedVersions,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
-import { readEvidence, writeEvidence, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
+import { MANIFEST, authorPath, readEvidence, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { HOSTED_PREFIX, type HostedFetch } from "./hosting.js";
+import { writeZip } from "./zip.js";
 import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import { MemoryStore, headOf, staleHead, type OriginalsStore, type StoredOriginal } from "./store.js";
 import type { WitnessClient } from "./witness.js";
@@ -148,6 +159,17 @@ export interface WitnessRefusal {
   message: string;
 }
 
+export interface PublishedOriginal extends LoadedEvidence {
+  alias: AliasReport;
+  /**
+   * The exact hosted snapshot verifies: valid history ending at the manifest's
+   * checkpoint, author binding, complete identity evidence, every resource's
+   * bytes, and the alias in both directions (P9.1, P3.6). Whether it is the
+   * latest state is `report.current`, under the freshness policy.
+   */
+  verified: boolean;
+}
+
 export interface ImportResult {
   status: "imported" | "already-current" | "kept-newer-local" | "conflict";
   original: OriginalView;
@@ -218,6 +240,20 @@ function originalOf(log: string): string | undefined {
   }
 }
 
+function aliasesOf(log: string): string[] {
+  const out = new Set<string>();
+  for (const line of lines(log)) {
+    try {
+      const entry = JSON.parse(line) as { state?: { asset?: { aliases?: unknown } } };
+      const aliases = entry.state?.asset?.aliases;
+      if (Array.isArray(aliases)) for (const a of aliases) if (typeof a === "string") out.add(a);
+    } catch {
+      // Verification reports the malformed line.
+    }
+  }
+  return [...out];
+}
+
 function digestsOf(log: string): string[] {
   const digests = new Set<string>();
   for (const line of lines(log)) {
@@ -286,13 +322,24 @@ export class OriginalsSDK {
     for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
   }
 
+  /** Alias logs this store keeps for the aliases a log lists (stored with the DID evidence). */
+  private async aliasEvidence(log: string, supplied: AliasEvidence[] = []): Promise<AliasEvidence[]> {
+    const out: AliasEvidence[] = [];
+    for (const did of aliasesOf(log)) {
+      const found = supplied.find((a) => a.did === did) ?? (await this.store.getAuthorEvidence(did));
+      if (found) out.push(found);
+    }
+    return out;
+  }
+
   private async verify(
     { log, witness }: StoredOriginal,
-    options: { checkpoint?: string; extra?: ReadonlyMap<string, Uint8Array> } = {},
+    options: { checkpoint?: string; extra?: ReadonlyMap<string, Uint8Array>; aliases?: AliasEvidence[] } = {},
   ): Promise<OriginalsReport> {
     const { checkpoint, extra } = options;
     return verifyOriginal({
       log,
+      aliases: await this.aliasEvidence(log, options.aliases),
       ...(witness !== undefined ? { witnessFile: witness } : {}),
       authors: await this.authorEvidence(authorDidsOf(log)),
       bytes: await this.storedBytes(log, extra),
@@ -375,7 +422,7 @@ export class OriginalsSDK {
     return this.prepareUpdate(did, input, false);
   }
 
-  private async prepareUpdate(did: string, input: EditInput, activate: boolean): Promise<Draft> {
+  private async prepareUpdate(did: string, input: EditInput, activate: boolean, aliases?: string[]): Promise<Draft> {
     const { log, head, view } = await this.parentOf(did, input.parent);
     const witness = await this.witnessParameter(log, input.author, activate);
     const bytes = new Map<string, Uint8Array>();
@@ -396,6 +443,7 @@ export class OriginalsSDK {
       resources,
       author: input.author,
       ...(witness ? { witness } : {}),
+      ...(aliases ? { aliases } : {}),
     });
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes };
   }
@@ -446,6 +494,24 @@ export class OriginalsSDK {
 
   async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner }): Promise<CommitResult> {
     return this.commit(await this.prepareDeactivate(did, input), input.signer);
+  }
+
+  /**
+   * Publish to the web (P3.6, P9.8): one entry that lists `alias` and, if they
+   * are not active yet, activates the witnesses the author DID declares. The
+   * alias log must already point back to this Original, and it is kept with
+   * the store's DID evidence so later reads confirm it.
+   */
+  async publish(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; alias: AliasEvidence }): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer", "alias"], "publish input");
+    const check = await checkAlias(did, input.alias, input.alias.did, this.clock());
+    if (check.status !== "confirmed") {
+      sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${input.alias.did} does not point to ${did}: ${check.reason ?? check.message ?? check.status}`);
+    }
+    const active = Object.keys(activeWitness((await this.stored(did)).log)).length > 0;
+    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, !active, [input.alias.did]);
+    await this.store.putAuthorEvidence(input.alias);
+    return this.commit(draft, input.signer);
   }
 
   // ---------------------------------------------------------------- committing
@@ -544,8 +610,12 @@ export class OriginalsSDK {
 
   /** Verify an evidence package without storing it. Needs no key and no network (P7.3). */
   async load(zip: Uint8Array): Promise<LoadedEvidence> {
-    const contents = readEvidence(zip, this.options.archiveLimits);
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits));
+  }
+
+  private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = []): Promise<LoadedEvidence> {
     const report = await verifyOriginal({
+      aliases: await this.aliasEvidence(contents.log, aliases),
       log: contents.log,
       authors: await this.authorEvidence(authorDidsOf(contents.log), contents.authors),
       bytes: contents.bytes,
@@ -562,6 +632,57 @@ export class OriginalsSDK {
     const actuallyComplete = report.resources.missing.length === 0 && report.identityEvidence.status === "complete";
     if ((m.completeness === "complete") !== actuallyComplete) reasons.push("manifest-completeness-mismatch");
     return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons };
+  }
+
+  /**
+   * The public reader (P9.1, P3.6). Retrieve the snapshot hosted under the
+   * alias did:webvh's `#files` base with `fetch`, and verify that exact
+   * checkpoint with no key. The archive bounds of `load` apply to the
+   * assembled files. Missing bytes leave a partial, unverified result; an
+   * alias that does not name this Original in both directions gives no result
+   * (ALIAS_NOT_CONFIRMED).
+   */
+  async loadPublished(aliasDid: string, fetch: HostedFetch): Promise<PublishedOriginal> {
+    const text = (data: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(data);
+    const optional = async (url: string): Promise<Uint8Array | undefined> => {
+      try {
+        return await fetch(url);
+      } catch (error) {
+        if (error instanceof OriginalsError && error.category === "unavailable-bytes") return undefined;
+        throw error;
+      }
+    };
+    const logUrl = didWebvhLogUrl(aliasDid);
+    const aliasWitness = await optional(logUrl.replace(/did\.jsonl$/, "did-witness.json"));
+    const alias: AliasEvidence = { did: aliasDid, log: text(await fetch(logUrl)), ...(aliasWitness ? { witness: parseJson(text(aliasWitness)) } : {}) };
+
+    const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
+    const files = new Map<string, Uint8Array>();
+    const put = async (path: string, required: boolean) => {
+      const data = required ? await fetch(`${base}${path}`) : await optional(`${base}${path}`);
+      if (data) files.set(path, data);
+      return data;
+    };
+    await put(MANIFEST, true);
+    const log = text((await put("asset/did.jsonl", true))!);
+    await put("asset/did-witness.json", false);
+    for (const did of authorDidsOf(log)) {
+      if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
+    }
+    for (const digest of digestsOf(log)) await put(`resources/${digest}`, false);
+
+    const loaded = await this.loadContents(readEvidence(writeZip(files), this.options.archiveLimits), [alias]);
+    const r = loaded.report;
+    const aliasReport = r.aliases.find((a) => a.did === aliasDid) ?? (await checkAlias(r.original ?? "", alias, aliasDid, this.clock()));
+    if (aliasReport.status !== "confirmed" || loaded.manifest.original !== r.original) {
+      sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${aliasDid} and the Original it is served with do not name each other`, { report: r });
+    }
+    const reasons = [...loaded.reasons];
+    if (r.head !== loaded.manifest.checkpoint) reasons.push("snapshot-history-is-not-its-checkpoint");
+    const verified =
+      r.history.status === "valid" && r.authorBinding.status === "valid" && r.identityEvidence.status === "complete" &&
+      r.resources.status === "available" && r.checkpoint === loaded.manifest.checkpoint && r.head === loaded.manifest.checkpoint && r.fork === null;
+    return { ...loaded, reasons, alias: aliasReport, verified };
   }
 
   /**

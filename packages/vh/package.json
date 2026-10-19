@@ -37,6 +37,11 @@
       "import": "./dist/didvh/index.js",
       "default": "./dist/didvh/index.js"
     },
+    "./fetch": {
+      "types": "./dist/fetch/index.d.ts",
+      "import": "./dist/fetch/index.js",
+      "default": "./dist/fetch/index.js"
+    },
     "./webvh": {
       "types": "./dist/webvh/index.d.ts",
       "import": "./dist/webvh/index.js",

@@ -39,6 +39,7 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/vh/dist', entry: 'crypto/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'log/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'didvh/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'fetch/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'webvh/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'originals/index.js', browserFirst: true },
   // @originals/auth's root is types + the isomorphic turnkeySignBytes, and its
