@@ -1,5 +1,5 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. Phases follow spec section 10 and plans/011.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011.",
   "spec": {
     "repository": "aviarytech/originals-spec",
     "commit": "d64fdbe4aef3d12e26109e7eeab28da569169e05",
@@ -31,7 +31,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/log.test.ts"
+      ],
+      "note": "VH-Log engine: a changed genesis fails by proof, entry hash or SCID binding, and invalidates the log. did:vh identifier binding is in didvh.test.ts; the asset identifier is covered in PR 3."
     },
     {
       "id": "C12-04",
@@ -40,7 +44,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/log.test.ts"
+      ],
+      "note": "VH-Log engine: changed byte, reordered and missing entries. Asset-log level in PR 3."
     },
     {
       "id": "C12-05",
@@ -581,7 +589,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/crypto.test.ts"
+      ],
+      "note": "Multikey decoding rejects raw, P-256, truncated, uncompressed and JWK keys. Author-DID verification-method check in PR 3."
     },
     {
       "id": "C12-64",
@@ -725,7 +737,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/didvh.test.ts"
+      ],
+      "note": "did:vh resolver rejects an unknown extension's log by method value (test extension). Originals log in PR 3."
     },
     {
       "id": "C12-80",
@@ -734,7 +750,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/didvh.test.ts"
+      ],
+      "note": "did:vh resolver rejects moving between plain did:vh and an extension (test extension). Originals log in PR 3."
     },
     {
       "id": "C12-81",
@@ -743,7 +763,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/crypto.test.ts"
+      ],
+      "note": "Crypto layer rejects every other cryptosuite. Asset-log entry level in PR 3."
     },
     {
       "id": "C12-82",
@@ -806,7 +830,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/json.test.ts"
+      ],
+      "note": "Strict JSON rejects duplicate keys. Unsigned state fields in PR 3."
     },
     {
       "id": "C12-89",
@@ -833,7 +861,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/log.test.ts"
+      ],
+      "note": "VH-Log engine reports the last valid prefix as limit-exceeded. Identity history limits in PR 3."
     },
     {
       "id": "C12-92",

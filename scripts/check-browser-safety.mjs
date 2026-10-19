@@ -30,6 +30,11 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/sdk/dist', entry: 'types/public.js' },
   { dist: 'packages/sdk/dist', entry: 'asset-envelope.js', browserFirst: true },
   { dist: 'packages/cel/dist', entry: 'index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'json/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'crypto/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'log/index.js', browserFirst: true },
+  { dist: 'packages/vh/dist', entry: 'didvh/index.js', browserFirst: true },
   // @originals/auth's root is types + the isomorphic turnkeySignBytes, and its
   // client entry runs in a browser by definition. Neither was guarded, which is
   // how a Buffer-dependent "isomorphic" export shipped green (plan 046, item 2).
@@ -42,7 +47,7 @@ const GUARDED_ENTRIES = [
  * see it — a guarded entry can reference it and still pass. In a browser
  * without a bundler shim that is a ReferenceError on first use.
  *
- * This GATES only the `browserFirst` entries (@originals/cel, @originals/auth),
+ * This GATES only the `browserFirst` entries (@originals/cel, @originals/vh, @originals/auth),
  * whose whole reason to exist is running in a browser. The SDK's entries import
  * Node-only paths (inscription builders, server providers) that a browser
  * consumer can import but would never call, so Buffer there is reported as a

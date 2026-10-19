@@ -9,7 +9,12 @@ const sdkExports = JSON.parse(readFileSync(new URL('../packages/sdk/package.json
 const sdkEntries = Object.values(sdkExports)
   .filter((value) => typeof value === 'object' && value.import?.endsWith('.js'))
   .map((value) => `packages/sdk/${value.import.replace(/^\.\//, '')}`);
+const vhExports = JSON.parse(readFileSync(new URL('../packages/vh/package.json', import.meta.url), 'utf8')).exports;
+const vhEntries = Object.values(vhExports)
+  .filter((value) => typeof value === 'object' && value.import?.endsWith('.js'))
+  .map((value) => `packages/vh/${value.import.replace(/^\.\//, '')}`);
 const additionalEntries = [
+  ...vhEntries,
   'packages/sdk/dist/lifecycle/LifecycleManager.js',
   'packages/sdk/dist/lifecycle/OriginalsAsset.js',
   'packages/cel/dist/index.js',
@@ -34,6 +39,19 @@ test('browser gate inspects every SDK JavaScript export', (t) => {
   const result = checkFixture(t);
   assert.equal(result.status, 0, result.stderr);
   for (const entry of sdkEntries) assert.ok(result.stdout.includes(`✓ ${entry} —`), `uninspected export: ${entry}`);
+});
+
+test('browser gate inspects every @originals/vh JavaScript export', (t) => {
+  const result = checkFixture(t);
+  assert.equal(result.status, 0, result.stderr);
+  for (const entry of vhEntries) assert.ok(result.stdout.includes(`✓ ${entry} —`), `uninspected export: ${entry}`);
+});
+
+test('browser gate rejects an eager Node builtin in an @originals/vh entry', (t) => {
+  const target = 'packages/vh/dist/log/index.js';
+  const result = checkFixture(t, target, "import 'node:fs';");
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.ok(result.stderr.includes(`✗ ${target}`));
 });
 
 for (const entry of ['v3/index.js', 'testing/index.js', 'types/public.js']) {
