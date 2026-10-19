@@ -1,7 +1,7 @@
 /** Read-only npm observations. Never prints a credential, token identifier or raw response. */
 import { pathToFileURL } from 'node:url';
 
-const packages = ['@originals/sdk', '@originals/cel', '@originals/auth'];
+const packages = ['@originals/sdk', '@originals/vh', '@originals/cel', '@originals/auth'];
 export async function inspectNpmCredential(token, request = fetch) {
   if (!token) return { authenticated: false, reason: 'missing_credential' };
   const get = async (path) => {

@@ -1,9 +1,9 @@
 # @originals/vh
 
 Verifiable History for the [Originals Protocol](../../specs/README.md): the
-layers under each Original's `did:vh` asset log. The package is private and
-unpublished while plan 011 is in progress. It is browser-safe, with no Node
-builtins or `Buffer` in any entry.
+layers under each Original's `did:vh` asset log, and a dependency of
+`@originals/sdk`. It is published with the SDK's releases, and is
+browser-safe, with no Node builtins or `Buffer` in any entry.
 
 | Subpath | Contents |
 |---|---|

@@ -9,6 +9,7 @@ on:
       - 'packages/sdk/typedoc.json'
       # The docs build now compiles this too — see the build step below.
       - 'packages/cel/src/**'
+      - 'packages/vh/src/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
