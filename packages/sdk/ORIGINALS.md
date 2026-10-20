@@ -576,13 +576,19 @@ layer, once, terminally, to one sat (P9.10):
 
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
-// Inscribe the head entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out of the
-// browser-first entry). The first funding UTXO must hold the sat at offset 0, and the head must be the
-// next entry Bitcoin can accept: the anchoring entry, then the entry after Bitcoin's head (HEAD_NOT_NEXT):
+// Inscribe the next committed entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out
+// of the browser-first entry). The first funding UTXO must hold the sat at offset 0. The entry is the next
+// one Bitcoin can accept: the anchoring entry until Bitcoin shows the anchor, then the entry after
+// Bitcoin's head. `versionId` names one explicitly; it is refused unless it is that entry (HEAD_NOT_NEXT):
 const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, provider, clock });
 await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore }); // persists before each broadcast
 // after a crash: resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider, recoveryStore }) sends the same pair
 const published = await readAnchored(sdk, did, { provider, clock });          // what Bitcoin shows: the durable boundary (P9.4)
+const pending = await nextPendingEntry(sdk, did, { provider, clock });        // { committed, accepted, acceptedHeight, next, queue, remaining }
+// Catching up, one step at a time, from a fresh read and the recorded pairs (their commit txids):
+const plan = await catchUp({ sdk, did, provider, clock, recoveryStore, recoveryIds });
+// plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeInscriptionOnSat(plan.recoveryId))
+//            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
 // Or by hand: pass what an adapter read from the sat:
 // Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
 const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
@@ -596,6 +602,23 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 // Without any copy of the log: verifyOriginal({ bitcoin: [evidence], authors }) (P9.17, P9.18).
 ```
 
+- Three heads are kept apart. The committed head is the stored log's last
+  entry, signed locally. A prepared or pending publication is a pair in the
+  recovery store, built or broadcast; it never advances anything (P9.4). The
+  accepted head is the last entry Bitcoin shows on the sat under the
+  1-confirmation policy, re-read every time. Entries between the accepted head
+  and the committed head are published in order, each inscribed verbatim (the
+  stored signed line, the same versionId and parent), never re-signed or
+  rebased (P9.6). `catchUp` keeps one publication in flight: it resumes a
+  recorded pair for the next entry rather than preparing another, waits while
+  its reveal is unconfirmed or not yet indexed, skips records for entries
+  Bitcoin already accepted, and prepares a replacement only when Bitcoin
+  confirmed and ignored the earlier inscription (`replaces`). So each accepted
+  inscription lands in a later block than the one before (P9.13), and a
+  reorganisation re-derives the queue from the head Bitcoin shows. A head
+  Bitcoin shows that the store does not hold is refused
+  (`BITCOIN_HEAD_NOT_STORED`); nothing is rebased onto it. The recovery store
+  has no listing, so the caller passes the recovery ids it saved.
 - The anchoring entry is an ordinary update that adds the sat's did:btco alias
   (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere, P14.12;
   the did:btco method does not yet define the prefixes, proposed upstream as
