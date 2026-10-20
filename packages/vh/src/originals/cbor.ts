@@ -3,8 +3,9 @@
  * plan 012 §3.8). Only what a JSON DID document needs: unsigned and negative
  * integers within the safe range, text strings, arrays, maps with text keys,
  * true, false and null, all definite-length. Indefinite lengths, byte
- * strings, tags, floats, undefined, duplicate keys and trailing bytes are
- * rejected, so a metadata blob decodes one way or not at all.
+ * strings, tags, floats, undefined, duplicate keys, a `__proto__` key and
+ * trailing bytes are rejected, and a leading BOM in text is kept, so a
+ * metadata blob decodes one way or not at all.
  */
 import { fail } from "../errors.js";
 import type { JsonValue } from "../json/index.js";
@@ -18,7 +19,7 @@ function invalid(message: string): never {
 /** Decode `bytes` as one strict CBOR data item. */
 export function decodeCbor(bytes: Uint8Array): JsonValue {
   let at = 0;
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const need = (n: number) => {
     if (at + n > bytes.length) invalid("truncated");
   };
@@ -64,6 +65,7 @@ export function decodeCbor(bytes: Uint8Array): JsonValue {
         for (let k = 0; k < n; k++) {
           const key = item(depth + 1);
           if (typeof key !== "string") invalid("map keys must be text");
+          if (key === "__proto__") invalid("a __proto__ key would set the prototype");
           if (Object.prototype.hasOwnProperty.call(out, key)) invalid(`duplicate key ${key}`);
           out[key] = item(depth + 1);
         }

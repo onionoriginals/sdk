@@ -334,9 +334,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       if (h.failure) noteFailure(h.did, { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` });
       const retained = retainedAuthors[h.did];
       if (retained !== undefined) {
-        const at = h.versions[versionNumberOf(retained) - 1];
-        if (!at) staleAuthors.add(h.did);
-        else if (at.versionId !== retained) {
+        // By versionId: a did:btco version is an inscription id, with no number in it.
+        const found = h.versions.some((v) => v.versionId === retained);
+        const sameNumber = h.versions[versionNumberOf(retained) - 1];
+        if (!found && !sameNumber) staleAuthors.add(h.did);
+        else if (!found) {
           forkedAuthors.add(h.did);
           noteFailure(h.did, { code: "AUTHOR_DID_FORK", message: `DID ${h.did} diverges from the retained version ${retained}` });
         }

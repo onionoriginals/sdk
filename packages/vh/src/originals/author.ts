@@ -135,8 +135,8 @@ export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: 
  * A did:btco author DID's versions, from its sat (P5.13; did:btco method
  * v0.2.0, owner decision Q15). A version is a confirmed inscription whose
  * Ordinals metadata is a CBOR DID document with this DID as its `id`, in chain
- * order. A document with `deactivated: true` is terminal: later inscriptions
- * on the sat are not versions. Control is the sat's holder, so there are no
+ * order. A document with `deactivated: true` is terminal, even as the first:
+ * later inscriptions on the sat are not versions. Control is the sat's holder, so there are no
  * update keys. An entry names a version by its inscription id (PROVISIONAL).
  */
 function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions): AuthorHistory {
@@ -167,12 +167,11 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
     const position = { height: i.height, transactionIndex: i.transactionIndex, inscriptionIndex: i.inscriptionIndex };
     const deactivated = doc.deactivated === true;
     const previous = versions[versions.length - 1];
-    if (deactivated && !previous) continue;
     versions.push({
       versionId: i.id,
       versionNumber: versions.length + 1,
       time: i.inscriptionTime,
-      document: deactivated ? previous.document : doc,
+      document: deactivated && previous ? previous.document : doc,
       updateKeys: [],
       deactivated,
       position,

@@ -243,7 +243,7 @@ export function anchoringIndex(entries: unknown[]): number {
 
 function decode(content: Uint8Array): LogEntry[] | undefined {
   try {
-    const entries = parseLog(new TextDecoder("utf-8", { fatal: true }).decode(content));
+    const entries = parseLog(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content));
     return entries.length > 0 && entries.every(isJsonObject) ? (entries as unknown as LogEntry[]) : undefined;
   } catch (error) {
     if (error instanceof OriginalsError || error instanceof TypeError) return undefined;
