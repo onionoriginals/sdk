@@ -56,3 +56,15 @@ const restart = Bun.spawn([process.execPath, 'scripts/regtest/restart-check.ts']
   stdout: 'inherit', stderr: 'inherit',
 });
 if (await restart.exited) process.exit(restart.exitCode ?? 1);
+
+// Anchored Originals end to end (plan 011 PR 10): anchor, reinscribe, reorg, crash and resume.
+const originals = Bun.spawn([process.execPath, 'scripts/regtest/originals-anchor.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(restartReceipt ? { ORIGINALS_REGTEST_EVIDENCE: `${restartReceipt}-originals.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { ORIGINALS_REGTEST_LOGS: `${process.env.REGTEST_LOGS_DIR}/originals` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await originals.exited) process.exit(originals.exitCode ?? 1);
