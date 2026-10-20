@@ -43,7 +43,7 @@ export async function hostedFiles(
   return files;
 }
 
-const ACTIVE = /^(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|text\/javascript|application\/javascript|application\/ecmascript)\b/i;
+const ACTIVE = /^(?:text\/html|text\/xml|text\/xsl|text\/javascript|image\/svg\+xml|application\/(?:xml|xhtml\+xml|[\w.-]+\+xml|javascript|ecmascript|pdf))\b/i;
 
 /**
  * Response headers for serving a resource (P9.7): its signed media type, no

@@ -744,7 +744,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/alias.test.ts"
+        "packages/vh/tests/alias.test.ts",
+        "packages/sdk/tests/unit/originals/hosting.test.ts"
       ]
     },
     {

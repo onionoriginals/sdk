@@ -34,6 +34,8 @@ describe("address classification", () => {
       "0.0.0.0", "10.1.2.3", "100.64.0.1", "127.0.0.1", "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.0.0.8",
       "192.0.2.1", "192.168.1.1", "198.18.0.1", "198.51.100.7", "203.0.113.9", "224.0.0.1", "240.0.0.1", "255.255.255.255",
       "::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:7f00:1", "64:ff9b::a00:1", "2001:db8::1", "100::1",
+      // Special-purpose ranges that can reach private space through a relay or translator.
+      "64:ff9b:1::a9fe:a9fe", "2002:7f00:1::", "2002:a9fe:a9fe::1", "2001::1", "2001:0:4136:e378::1", "fec0::1", "::ffff:0:7f00:1", "192.88.99.1",
     ]) expect(isPublicAddress(a), a).toBe(false);
     for (const a of ["93.184.215.14", "8.8.8.8", "172.32.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) expect(isPublicAddress(a), a).toBe(true);
     expect(isPublicAddress("not an address")).toBe(false);
@@ -94,6 +96,10 @@ describe("other refusals", () => {
   test("a response that does not arrive in time", async () => {
     const never: FetchTransport = ({ signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
     await refused(safeFetch("https://example.com/x", { resolve: publicDns, transport: never, timeoutMs: 20 }), "FETCH_TIMEOUT");
+  });
+
+  test("a DNS lookup that hangs counts against the timeout", async () => {
+    await refused(safeFetch("https://example.com/x", { resolve: () => new Promise(() => undefined), transport: transport({}), timeoutMs: 20 }), "FETCH_TIMEOUT");
   });
 
   test("a hostname that does not resolve", async () => {

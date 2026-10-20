@@ -110,6 +110,16 @@ describe("the public reader verifies one exact snapshot (P9.1)", () => {
     await expect(stranger().loadPublished(alias.did, host(mixed, didWebvhFilesUrl(alias.did)))).rejects.toMatchObject({ code: "ALIAS_NOT_CONFIRMED" });
   });
 
+  test("C12-66: a did:webvh that points at an Original whose state does not list it gives no result", async () => {
+    const { sdk, alice, signer } = await published();
+    // Another Original, never published: an attacker's did:webvh claims it and hosts its real evidence.
+    const c = await sdk.create({ name: "Never published", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const claim = await aliasFor(c.original.did, "evil.example");
+    const files = await hostedFiles(sdk, c.original.did, claim);
+    await expect(stranger().loadPublished(claim.did, host(files, didWebvhFilesUrl(claim.did)))).rejects.toMatchObject({ code: "ALIAS_NOT_CONFIRMED" });
+  });
+
   test("missing bytes leave an explicitly partial, unverified result (P7.4)", async () => {
     const { alias, files } = await published();
     const partial = new Map(files);
@@ -137,5 +147,8 @@ describe("serving resources (P9.7)", () => {
       expect(h["Content-Security-Policy"]).toContain("script-src 'none'");
     }
     expect(servingHeaders("image/jpeg")["X-Content-Type-Options"]).toBe("nosniff");
+    for (const type of ["application/rss+xml", "application/xslt+xml", "text/xsl", "application/pdf", "image/svg+xml; charset=utf-8"]) {
+      expect(servingHeaders(type)["Content-Disposition"], type).toBe("attachment");
+    }
   });
 });

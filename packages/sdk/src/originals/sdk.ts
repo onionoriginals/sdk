@@ -569,8 +569,10 @@ export class OriginalsSDK {
 
     const loaded = await this.loadContents(readEvidence(writeZip(files), this.options.archiveLimits), [alias]);
     const r = loaded.report;
-    const aliasReport = r.aliases.find((a) => a.did === aliasDid) ?? (await checkAlias(r.original ?? "", alias, aliasDid, this.clock()));
-    if (aliasReport.status !== "confirmed" || loaded.manifest.original !== r.original) {
+    // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
+    // merely points at an Original gives no result through it.
+    const aliasReport = r.aliases.find((a) => a.did === aliasDid);
+    if (!aliasReport || aliasReport.status !== "confirmed" || loaded.manifest.original !== r.original) {
       sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${aliasDid} and the Original it is served with do not name each other`, { report: r });
     }
     const reasons = [...loaded.reasons];

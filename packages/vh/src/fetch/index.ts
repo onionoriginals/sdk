@@ -88,6 +88,7 @@ function v4Public([a, b, c]: number[]): boolean {
   if (a === 172 && b >= 16 && b <= 31) return false;
   if (a === 192 && b === 168) return false;
   if (a === 192 && b === 0 && (c === 0 || c === 2)) return false; // IETF protocol assignments, TEST-NET-1
+  if (a === 192 && b === 88 && c === 99) return false; // 6to4 relay anycast
   if (a === 198 && (b === 18 || b === 19)) return false; // benchmarking
   if (a === 198 && b === 51 && c === 100) return false; // TEST-NET-2
   if (a === 203 && b === 0 && c === 113) return false; // TEST-NET-3
@@ -103,6 +104,7 @@ export function isPublicAddress(address: string): boolean {
   if (!v6) return false;
   const zero = (from: number, to: number) => v6.slice(from, to).every((b) => b === 0);
   if (zero(0, 10) && v6[10] === 0xff && v6[11] === 0xff) return v4Public(v6.slice(12)); // IPv4-mapped
+  if (zero(0, 8) && v6[8] === 0xff && v6[9] === 0xff && zero(10, 12)) return v4Public(v6.slice(12)); // IPv4-translated
   if (v6[0] === 0x00 && v6[1] === 0x64 && v6[2] === 0xff && v6[3] === 0x9b && zero(4, 12)) return v4Public(v6.slice(12)); // NAT64
   if (zero(0, 16) || (zero(0, 15) && v6[15] === 1)) return false; // unspecified, loopback
   if (zero(0, 12)) return false; // IPv4-compatible (deprecated)
@@ -110,6 +112,10 @@ export function isPublicAddress(address: string): boolean {
   if (v6[0] === 0xfe && (v6[1] & 0xc0) === 0x80) return false; // link-local
   if (v6[0] === 0xff) return false; // multicast
   if (v6[0] === 0x20 && v6[1] === 0x01 && v6[2] === 0x0d && v6[3] === 0xb8) return false; // documentation
+  if (v6[0] === 0x00 && v6[1] === 0x64 && v6[2] === 0xff && v6[3] === 0x9b && v6[4] === 0x00 && v6[5] === 0x01) return false; // local-use NAT64
+  if (v6[0] === 0x20 && v6[1] === 0x02) return false; // 6to4, which embeds an IPv4 address
+  if (v6[0] === 0x20 && v6[1] === 0x01 && (v6[2] & 0xfe) === 0x00) return false; // IETF protocol assignments, incl. Teredo
+  if (v6[0] === 0xfe && (v6[1] & 0xc0) === 0xc0) return false; // site-local (deprecated)
   if (v6[0] === 0x01 && v6[1] === 0x00 && zero(2, 8)) return false; // discard-only
   return true;
 }
@@ -129,8 +135,9 @@ const nodeTransport: FetchTransport = async ({ url, address, signal }) => {
     const request = https.request(
       {
         host: address,
-        // TLS verifies the certificate against the hostname, not the address.
-        servername: url.hostname,
+        // TLS verifies the certificate against the hostname, not the address. SNI never carries
+        // an IP address (RFC 6066), so an IP-literal locator sends none.
+        ...(/^[\d.]+$|^\[/.test(url.hostname) ? {} : { servername: url.hostname }),
         port: url.port ? Number(url.port) : 443,
         path: `${url.pathname}${url.search}`,
         method: "GET",
@@ -164,23 +171,34 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
   if (url.protocol !== "https:") refuse("FETCH_SCHEME", `only https is retrieved, not ${url.protocol}`);
   if (url.username || url.password) refuse("FETCH_CREDENTIALS", "a locator may not carry credentials");
 
+  // The whole request, DNS included, is bounded in time.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout"))));
+  aborted.catch(() => undefined);
   const host = url.hostname;
   const literal = host.startsWith("[") || ipv4(host) !== undefined;
   let addresses: string[];
   if (literal) addresses = [host.replace(/^\[|\]$/g, "")];
   else {
     try {
-      addresses = await (options.resolve ?? nodeResolve)(host);
+      addresses = await Promise.race([(options.resolve ?? nodeResolve)(host), aborted]);
     } catch {
+      clearTimeout(timer);
+      if (controller.signal.aborted) refuse("FETCH_TIMEOUT", `${host} did not resolve within ${timeoutMs} ms`);
       refuse("FETCH_DNS", `${host} does not resolve`);
     }
   }
-  if (addresses.length === 0) refuse("FETCH_DNS", `${host} does not resolve`);
+  if (addresses.length === 0) {
+    clearTimeout(timer);
+    refuse("FETCH_DNS", `${host} does not resolve`);
+  }
   const blocked = addresses.find((a) => !isPublicAddress(a));
-  if (blocked) refuse("FETCH_PRIVATE_ADDRESS", `${host} resolves to ${blocked}, which is not a public address`);
+  if (blocked) {
+    clearTimeout(timer);
+    refuse("FETCH_PRIVATE_ADDRESS", `${host} resolves to ${blocked}, which is not a public address`);
+  }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await (options.transport ?? nodeTransport)({ url, address: addresses[0], signal: controller.signal });
     if (response.status >= 300 && response.status < 400) refuse("FETCH_REDIRECT", `${url.href} redirects; redirects are not followed`);
