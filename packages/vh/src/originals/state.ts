@@ -7,6 +7,7 @@
 import { multibaseDecode, multibaseEncode, sha256Multihash, decodeSha256Multihash } from "../crypto/index.js";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
+import { parseDidWebvh } from "../webvh/index.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
@@ -21,8 +22,12 @@ export const ORIGINALS_LIMITS = Object.freeze({
 });
 
 export type Operation = "create" | "update" | "deactivate";
-/** Operations later phases define: publish (web alias, PR 7) and migrate (anchoring, PR 9). */
-const LATER_OPERATIONS = new Set(["publish", "migrate"]);
+/**
+ * Operations later phases define: migrate (anchoring, PR 9). PROVISIONAL (D1):
+ * publication is an ordinary update that lists a did:webvh alias (plan 011,
+ * PR 7b), so there is no publish operation.
+ */
+const LATER_OPERATIONS = new Set(["migrate"]);
 
 export interface ResourceDescriptor {
   id: string;
@@ -142,10 +147,17 @@ export function checkAsset(value: unknown): AssetState {
     ids.add(d.id);
   });
   if (!Array.isArray(a.aliases) || !a.aliases.every((x) => typeof x === "string")) invalid("STATE_ALIASES", "aliases must be an array of DIDs");
-  if (a.aliases.length > 0) {
-    // did:webvh aliases arrive with publication (plan 011, PR 7) and did:btco with anchoring (PR 9).
-    fail("unsupported-profile", "STATE_ALIASES_UNSUPPORTED", "aliases are not supported by this verifier yet");
+  // PROVISIONAL (plan 011, PR 7b): at most one did:webvh alias. did:btco aliases arrive with anchoring (PR 9).
+  for (const alias of a.aliases) {
+    if (alias.startsWith("did:btco:")) fail("unsupported-profile", "STATE_ALIASES_UNSUPPORTED", "did:btco aliases arrive with anchoring (plan 011, PR 9)");
+    if (!alias.startsWith("did:webvh:")) invalid("STATE_ALIASES", `${alias} is not a did:webvh alias`);
+    try {
+      parseDidWebvh(alias);
+    } catch {
+      invalid("STATE_ALIASES", `${alias} is not a valid did:webvh`);
+    }
   }
+  if (a.aliases.length > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh alias");
   return a as unknown as AssetState;
 }
 
@@ -177,6 +189,16 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   }
   checkAuthorRef(s.author);
   const asset = checkAsset(s.asset);
+
+  // PROVISIONAL (plan 011, PR 7b): layers move one way. An Original starts local, and
+  // once published keeps a did:webvh alias, moving only within that alias's SCID (P9.3).
+  if (ctx.index === 0 && asset.aliases.length > 0) invalid("STATE_ALIASES", "an Original starts local: genesis lists no alias");
+  const before = ctx.previous?.asset.aliases[0];
+  if (before !== undefined) {
+    const now = asset.aliases[0];
+    if (now === undefined) invalid("STATE_ALIASES", "a published Original keeps its did:webvh alias");
+    if (parseDidWebvh(now).scid !== parseDidWebvh(before).scid) invalid("STATE_ALIASES", "a did:webvh alias moves only within its own SCID (P9.3)");
+  }
 
   // Deactivation agrees in both directions (P6.5).
   const deactivating = operation === "deactivate";

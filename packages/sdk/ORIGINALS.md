@@ -1,7 +1,9 @@
 # Originals SDK: the Originals Protocol contract
 
 **Status: target contract, partly implemented.** Phases 1 (local use) and 2
-(author DID rotation, freshness and forks) are in `@originals/sdk/originals`. This document describes what
+(author DID rotation, freshness and forks) and phase 3 (hosted publication)
+are in `@originals/sdk/originals`; the landing's hosted path is plan 011 PR 8.
+This document describes what
 `@originals/sdk` provides once the phases of
 [plan 011](../../plans/011-originals-vh-replacement.md) land. Each section
 names the phase that delivers it. API names are provisional until that phase's
@@ -162,12 +164,47 @@ authors who need protection should anchor early; and a host can show an old
 prefix to a first-time reader (retained versionIds protect repeat readers).
 Bitcoin anchoring gives proven ordering, a single history and an owner.
 
-## Hosted publication — phase 3
+## Hosted publication — phase 3 (implemented)
 
-Publishing to the web requires an explicit domain and adds a did:webvh alias.
-The alias is its own small log, bound in both directions with the did:vh
-(P3.6). The public reader verifies one exact snapshot (P9.1). Fetches apply the
-VH-Log retrieval rules (P8.5), and active content is served isolated (P9.7).
+The author creates a did:webvh alias log on their domain whose document lists
+the Original in `alsoKnownAs` (PROVISIONAL, plan 011 S4; the two logs have
+different SCIDs). Publishing is an ordinary update that lists the alias in the
+asset state (PROVISIONAL: there is no separate publish operation):
+
+```ts
+await sdk.publish(did, { parent, author, signer, alias }); // alias: { did, log, witness? }
+const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> under the alias's #files base
+```
+
+An alias counts only in both directions: the asset state lists it and its
+latest document points back (P3.6). Reports list each alias as `confirmed`,
+`not-confirmed` (with a reason), `unavailable` or `invalid`; an unconfirmed
+alias never changes the Original's own result, and the alias log never
+supplies state. Asset-log rules (PROVISIONAL): genesis lists no alias; at most
+one did:webvh alias; once listed it stays, moving only within its own SCID
+(P9.3). `verifyOriginalByAlias`
+reaches an Original through its alias and fails with `ALIAS_NOT_CONFIRMED`
+unless both directions hold.
+
+Hosted layout (PROVISIONAL), relative to the alias's `#files` base: the alias
+log where did:webvh publishes it, and the Original's evidence package unpacked
+under `originals/`. The files for a checkpoint are deterministic, so a retried
+publication repeats the same snapshot (P9.2). The public reader:
+
+```ts
+import { safeFetch } from "@originals/vh/fetch";
+const r = await reader.loadPublished(aliasDid, async (url) => (await safeFetch(url)).bytes);
+r.verified; // the exact snapshot: history ending at its checkpoint, binding, identity, every byte, the alias
+r.report.current; // whether it is the latest, under the freshness policy
+```
+
+`@originals/vh/fetch` retrieves HTTPS only, with no credentials, no redirects,
+no private or special-use address before or after DNS (connecting to the
+vetted address), and caps on size and time; every refusal is
+`unavailable-bytes` (P8.5). `servingHeaders(mediaType)` gives the P9.7 headers:
+the signed type, `nosniff`, a script-free sandboxing CSP, and `attachment` for
+active types. Hosts must also serve resources from an origin without user
+credentials, and clients must escape names and metadata.
 
 ## Bitcoin anchoring and ownership — phase 4
 

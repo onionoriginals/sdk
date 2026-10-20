@@ -8,3 +8,4 @@ export * from "./signer.js";
 export * from "./store.js";
 export * from "./evidence.js";
 export { readZip, writeZip, crc32, checkArchivePath, ZIP_LIMITS, type ZipLimits } from "./zip.js";
+export * from "./hosting.js";

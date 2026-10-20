@@ -8,3 +8,4 @@ export * from "./author.js";
 export * from "./profile.js";
 export * from "./build.js";
 export * from "./verify.js";
+export * from "./alias.js";

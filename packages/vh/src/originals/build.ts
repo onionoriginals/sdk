@@ -40,6 +40,8 @@ export interface PrepareUpdateInput {
   /** New descriptors for existing resources, by id. Others are unchanged. */
   resources?: ResourceDescriptor[];
   author: AuthorRef;
+  /** Replaces the aliases: listing a did:webvh alias publishes the Original (PROVISIONAL, plan 011 PR 7b). */
+  aliases?: string[];
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -94,6 +96,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     name: input.name ?? previous.name,
     ...(metadata !== null && metadata !== undefined ? { metadata } : {}),
     resources: previous.resources.map((r) => changes.get(r.id) ?? r),
+    aliases: input.aliases ?? previous.aliases,
   };
 }
 
