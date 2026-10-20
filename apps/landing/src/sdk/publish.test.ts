@@ -13,9 +13,14 @@ import { createLocalAuthor } from './local-author';
 import { aliasName, publishOriginal } from './publish';
 import { DOMAIN, SUB, host } from './publish.fixture';
 
+// didwebvh-ts stamps the alias log with the real time, so the SDK clocks follow it: a fixed
+// date made publication fail once the wall clock passed it ("versionTime is too far in the future").
+const START = Date.now();
+const LATER = START + 3_600_000;
+
 async function authored() {
-  const author = await createLocalAuthor(new Date('2026-10-20T10:00:00Z'));
-  let t = Date.parse('2026-10-20T10:00:01Z');
+  const author = await createLocalAuthor(new Date(START));
+  let t = START + 1000;
   const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], freshness: 'asserted', clock: () => (t += 250) });
   const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>');
   const c = await sdk.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: svg }], author: author.ref, signer: author.signer });
@@ -36,7 +41,7 @@ describe('publishing from the landing (plan 011, PR 8)', () => {
     expect(published.baseUrl).toBe(`https://${DOMAIN}/${slug}/${aliasName(did)}/`);
     expect(published.commit?.original.report.aliases).toEqual([{ did: published.alias.did, status: 'confirmed' }]);
 
-    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => Date.parse('2026-10-20T11:00:00Z') });
+    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
     const r = await stranger.loadPublished(published.alias.did, read);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.original).toBe(did);
@@ -54,7 +59,7 @@ describe('publishing from the landing (plan 011, PR 8)', () => {
     const again = await publishOriginal({ sdk, did, parent: checkpoint, author: author.ref, signer: author.signer, aliasSigner, domain: DOMAIN, slug, hosting: upload, alias: first.alias });
     expect(again.commit).toBeNull();
     expect((await sdk.get(did)).checkpoint).toBe(checkpoint);
-    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => Date.parse('2026-10-20T11:00:00Z') });
+    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
     expect((await stranger.loadPublished(first.alias.did, read)).verified).toBe(true);
   });
 
