@@ -1,1045 +1,126 @@
-import { describe, test, expect, beforeEach, afterEach, afterAll, mock } from 'bun:test';
-import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
-import type { ResourceProviderLike, BtcoInscriptionData } from '../../../src/did/BtcoDidResolver';
-import type { DIDDocument } from '../../../src/types/did';
-
-describe('BtcoDidResolver', () => {
-  let provider: ResourceProviderLike;
-  let originalFetch: any;
-
-  beforeEach(() => {
-    provider = {
-      getSatInfo: mock(),
-      resolveInscription: mock(),
-      getMetadata: mock()
-    };
-    originalFetch = (global as any).fetch;
-    (global as any).fetch = mock();
-  });
-
-  afterEach(() => {
-    (global as any).fetch = originalFetch;
-  });
-
-  test('invalid DID format path', async () => {
-    const resolver = new BtcoDidResolver();
-    const res = await resolver.resolve('did:btc:123');
-    expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata.error).toBe('invalidDid');
-    expect(res.resolutionMetadata.message).toMatch(/Invalid BTCO DID format/);
-  });
-
-  test('missing provider path', async () => {
-    const resolver = new BtcoDidResolver();
-    const res = await resolver.resolve('did:btco:123');
-    expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata.error).toBe('noProvider');
-    expect(res.resolutionMetadata.message).toBe('No provider supplied');
-  });
-
-  test('provider.getSatInfo failure path', async () => {
-    provider.getSatInfo.mockRejectedValue(new Error('boom'));
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:100');
-    expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata.error).toBe('notFound');
-    expect(res.resolutionMetadata.message).toMatch('Failed to retrieve inscriptions for satoshi 100: boom');
-  });
-
-  test('zero inscriptions path', async () => {
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [] });
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:101');
-    expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata.error).toBe('notFound');
-    expect(res.resolutionMetadata.message).toBe('No inscriptions found on satoshi 101');
-  });
-
-  test('fetch content HTTP error path', async () => {
-    const inscriptionId = 'insc1';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 100,
-      content_type: 'text/plain',
-      content_url: 'https://example.com/content'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:100');
-    expect(res.didDocument).toBeNull();
-    expect(res.inscriptions).toBeDefined();
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.inscriptionId).toBe(inscriptionId);
-    expect(entry.error).toBe('Failed to fetch content: HTTP 500: Internal Server Error');
-    expect(res.resolutionMetadata.totalInscriptions).toBe(1);
-  });
-
-  test('metadata missing/null path', async () => {
-    const inscriptionId = 'insc2';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 123,
-      content_type: 'text/plain',
-      content_url: 'http://local/content2'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:123' });
-    provider.getMetadata.mockRejectedValue(new Error('no meta'));
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:123');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.metadata).toBeNull();
-    expect(entry.didDocument).toBeUndefined();
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('invalid DID document: mismatched ID', async () => {
-    const inscriptionId = 'insc3';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 124,
-      content_type: 'text/plain',
-      content_url: 'http://local/content3'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:124' });
-    const badDoc: DIDDocument = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:999'
-    };
-    provider.getMetadata.mockResolvedValue(badDoc);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:124');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(entry.didDocument).toBeUndefined();
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('invalid DID document structure: missing @context', async () => {
-    const inscriptionId = 'insc4';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 125,
-      content_type: 'text/plain',
-      content_url: 'http://local/content4'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'did:btco:125' });
-    // Missing @context
-    provider.getMetadata.mockResolvedValue({ id: 'did:btco:125' });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:125');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('invalid DID document structure: missing id', async () => {
-    const inscriptionId = 'insc5';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 126,
-      content_type: 'text/plain',
-      content_url: 'http://local/content5'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'did:btco:126' });
-    // Missing id
-    provider.getMetadata.mockResolvedValue({ '@context': ['https://www.w3.org/ns/did/v1'] });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:126');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('invalid DID document structure: wrong types (verificationMethod not array)', async () => {
-    const inscriptionId = 'insc6';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 127,
-      content_type: 'text/plain',
-      content_url: 'http://local/content6'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:127' });
-    provider.getMetadata.mockResolvedValue({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:127',
-      verificationMethod: { id: 'x' } // wrong type
-    });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:127');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('deactivation marker path (🔥)', async () => {
-    const inscriptionId = 'insc7';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 128,
-      content_type: 'text/plain',
-      content_url: 'http://local/content7'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:128 🔥' });
-    provider.getMetadata.mockResolvedValue({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:128'
-    });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe('DID has been deactivated');
-    expect(entry.didDocument).toBeNull();
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('a tombstone for a longer sat number does not deactivate a prefix DID', async () => {
-    // Regression: the DID marker pattern was start-anchored but not
-    // digit-bounded, so resolving did:btco:128 prefix-matched a
-    // `did:btco:1280 🔥` inscription and wrongly reported deactivation.
-    const inscriptionId = 'insc-prefix';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 128,
-      content_type: 'text/plain',
-      content_url: 'http://local/content-prefix'
-    });
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => 'BTCO DID: did:btco:1280 🔥' });
-    provider.getMetadata.mockResolvedValue(null);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(false);
-    expect(entry.deactivated).toBeUndefined();
-    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
-  });
-
-  test('a valid DID document containing 🔥 in a field is an update, not a tombstone', async () => {
-    // Regression: deactivation was gated on content.includes('🔥'), so a full
-    // DID document that merely carried the emoji in a field (a service
-    // description, name, alsoKnownAs, …) was misclassified as a deactivation
-    // tombstone — nulling the document and reporting the DID as deactivated.
-    // Only the human-readable marker form ("BTCO DID: did:btco:<sat> 🔥")
-    // deactivates a DID; a valid document is an update.
-    const docContent = JSON.stringify({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:128',
-      verificationMethod: [{
-        id: 'did:btco:128#key-0',
-        type: 'Multikey',
-        controller: 'did:btco:128',
-        publicKeyMultibase: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
-      }],
-      service: [{
-        id: 'did:btco:128#site',
-        type: 'LinkedDomains',
-        serviceEndpoint: 'https://example.com',
-        description: 'My hot 🔥 collection'
-      }]
-    });
-    const inscriptionId = 'insc-doc-fire';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 128,
-      content_type: 'application/json',
-      content_url: 'http://local/content-doc-fire'
-    });
-    provider.getMetadata.mockResolvedValue(null);
-    (global as any).fetch.mockResolvedValue({ ok: true, text: async () => docContent });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.deactivated).toBeUndefined();
-    expect(entry.didDocument).not.toBeNull();
-    expect(res.didDocument).not.toBeNull();
-    expect(res.didDocument?.id).toBe('did:btco:128');
-    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
-  });
-
-  test('a marker tombstone with arbitrary JSON appended still deactivates (no document-guard bypass)', async () => {
-    // Regression: a document-based tombstone guard could be bypassed by
-    // appending a minimal object with the expected id after the marker line —
-    // e.g. "BTCO DID: did:btco:128 🔥\n{\"id\":\"did:btco:128\"}". That parses to
-    // an object whose id matches, which would slip past a `!isDidDocument` guard
-    // and fall back to an older document instead of reporting deactivation.
-    // Tombstone detection keys off the start-anchored marker pattern, so the
-    // trailing JSON does not matter.
-    const inscriptionId = 'insc-marker-json';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 128,
-      content_type: 'text/plain',
-      content_url: 'http://local/content-marker-json'
-    });
-    provider.getMetadata.mockResolvedValue(null);
-    (global as any).fetch.mockResolvedValue({
-      ok: true,
-      text: async () => 'BTCO DID: did:btco:128 🔥\n{"id":"did:btco:128"}'
-    });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.deactivated).toBe(true);
-    expect(entry.didDocument).toBeNull();
-    expect(res.didDocument).toBeNull();
-    expect(res.didDocumentMetadata.deactivated).toBe(true);
-  });
-
-  test('marker + JSON document form with 🔥 only inside the JSON body is an update, not a tombstone (issue #269)', async () => {
-    // Regression: for the combined "marker line + JSON document" form the
-    // marker pattern matches, and the 🔥 scan used to cover the ENTIRE content
-    // — so a legitimate document update whose JSON merely contained 🔥 (e.g. a
-    // service description) permanently bricked the DID. The scan must cover
-    // only the marker line (the content before the JSON body).
-    const docContent = JSON.stringify({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:128',
-      service: [{
-        id: 'did:btco:128#drops',
-        type: 'LinkedDomains',
-        serviceEndpoint: 'https://example.com',
-        description: '🔥 drops'
-      }]
-    });
-    const inscriptionId = 'insc-marker-doc-fire';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 128,
-      content_type: 'application/json',
-      content_url: 'http://local/content-marker-doc-fire'
-    });
-    provider.getMetadata.mockResolvedValue(null);
-    (global as any).fetch.mockResolvedValue({
-      ok: true,
-      text: async () => `BTCO DID: did:btco:128\n${docContent}`
-    });
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.deactivated).toBeUndefined();
-    expect(entry.didDocument).not.toBeNull();
-    expect(res.didDocument).not.toBeNull();
-    expect(res.didDocument?.id).toBe('did:btco:128');
-    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
-  });
-
-  test('tombstone after a valid document deactivates the DID (no fallback to older document)', async () => {
-    const docContent = JSON.stringify({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:128',
-      verificationMethod: [{
-        id: 'did:btco:128#key-0',
-        type: 'Multikey',
-        controller: 'did:btco:128',
-        publicKeyMultibase: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
-      }]
-    });
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: ['insc-doc', 'insc-tombstone'] });
-    provider.resolveInscription.mockImplementation(async (id: string) => ({
-      id,
-      sat: 128,
-      content_type: 'text/plain',
-      content_url: `http://local/content/${id}`
-    }));
-    provider.getMetadata.mockResolvedValue(null);
-    (global as any).fetch.mockImplementation(async (url: string) => ({
-      ok: true,
-      text: async () => url.includes('insc-doc') ? docContent : 'BTCO DID: did:btco:128 🔥'
-    }));
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    expect(res.didDocument).toBeNull();
-    expect(res.didDocumentMetadata.deactivated).toBe(true);
-    expect(res.resolutionMetadata.message).toBe('DID has been deactivated');
-  });
-
-  test('a newer valid document after an old tombstone still resolves', async () => {
-    const docContent = JSON.stringify({
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:128',
-      verificationMethod: [{
-        id: 'did:btco:128#key-0',
-        type: 'Multikey',
-        controller: 'did:btco:128',
-        publicKeyMultibase: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
-      }]
-    });
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: ['insc-tombstone', 'insc-doc'] });
-    provider.resolveInscription.mockImplementation(async (id: string) => ({
-      id,
-      sat: 128,
-      content_type: 'text/plain',
-      content_url: `http://local/content/${id}`
-    }));
-    provider.getMetadata.mockResolvedValue(null);
-    (global as any).fetch.mockImplementation(async (url: string) => ({
-      ok: true,
-      text: async () => url.includes('insc-doc') ? docContent : 'BTCO DID: did:btco:128 🔥'
-    }));
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:128');
-    expect(res.didDocument?.id).toBe('did:btco:128');
-    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
-  });
-
-  test('provider.resolveInscription failure path triggers outer catch', async () => {
-    const inscriptionId = 'insc8';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockRejectedValue(new Error('resolution failed'));
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:129');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe('Failed to process inscription: resolution failed');
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('getSatInfo failure without message uses String(e) fallback', async () => {
-    // throw a non-Error to trigger || String(e)
-    provider.getSatInfo.mockRejectedValue('nope');
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:200');
-    expect(res.resolutionMetadata.error).toBe('notFound');
-    expect(res.resolutionMetadata.message).toContain('nope');
-  });
-
-  test('fetch content rejection without message uses String(err) fallback', async () => {
-    const inscriptionId = 'ins-fallback';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 300,
-      content_type: 'text/plain',
-      content_url: 'http://local/content-fallback'
-    });
-    (global as any).fetch = mock(() => Promise.reject('netdown'));
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:300');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe('Failed to fetch content: netdown');
-  });
-
-  test('resolveInscription failure without message uses String(err) fallback', async () => {
-    const inscriptionId = 'ins-outer-fallback';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockRejectedValue('boom');
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:400');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe('Failed to process inscription: boom');
-  });
-
-  test('inscription not found branch', async () => {
-    const inscriptionId = 'insc9';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue(undefined as any);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:130');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe(`Inscription ${inscriptionId} not found`);
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('network prefixes mapping via private getDidPrefix', () => {
-    const resolver = new BtcoDidResolver({ provider });
-    const prefixRegtest = (resolver as any).getDidPrefix('regtest');
-    const prefixSignet = (resolver as any).getDidPrefix('signet');
-    const prefixTestnet = (resolver as any).getDidPrefix('test');
-    const prefixMain = (resolver as any).getDidPrefix('mainnet');
-    expect(prefixRegtest).toBe('did:btco:reg');
-    expect(prefixSignet).toBe('did:btco:sig');
-    expect(prefixTestnet).toBe('did:btco:test');
-    expect(prefixMain).toBe('did:btco');
-  });
-});
-
 /**
- * Regression (security, plans/032): the DID document MUST be parsed from the
- * on-chain inscription CONTENT, never from the off-chain ord metadata endpoint.
- *
- * Previously the resolver only pattern-checked the content and then returned the
- * `getMetadata()` object as the DID document. An attacker controlling the
- * metadata endpoint could inject forged verification methods and forge
- * signatures on a did:btco identity.
+ * did:btco resolution per the did:btco method v0.2.0 (plan 011 PR 9c): the
+ * DID document is the inscription's CBOR metadata; versions follow chain
+ * order; deactivation is terminal; an unreadable inscription fails closed.
  */
-describe('BtcoDidResolver uses inscription content (not ord metadata) as DID document', () => {
-  let provider: ResourceProviderLike;
-  let originalFetch: any;
+import { describe, expect, test } from 'bun:test';
+import { encodeCbor } from '@originals/vh/originals';
+import { BtcoDidResolver, parseBtcoDid } from '../../../src/did/BtcoDidResolver.js';
+import { btcoDidDeactivationInscription, btcoDidInscription, createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument.js';
+import type { PublicationObservation, SatSnapshot } from '../../../src/bitcoin/sat-snapshot-types.js';
 
-  const legitDoc: DIDDocument = {
-    '@context': ['https://www.w3.org/ns/did/v1'],
-    id: 'did:btco:500',
-    verificationMethod: [
-      {
-        id: 'did:btco:500#0',
-        type: 'Multikey',
-        controller: 'did:btco:500',
-        publicKeyMultibase: 'zLEGITIMATEKEY'
-      } as any
-    ],
-    authentication: ['did:btco:500#0']
+const SAT = '1234567890';
+const DID = `did:btco:reg:${SAT}`;
+const KEY = new Uint8Array(32).fill(7);
+const T = 1_760_000_000;
+
+let n = 0;
+type Body = { metadata?: Uint8Array | null; content?: string; contentType?: string; unreadable?: boolean };
+function publication(height: number, body: Body, transactionIndex = 1): PublicationObservation {
+  const id = `${(n++).toString(16).padStart(64, '0')}i0`;
+  return {
+    id, revealTxid: id.slice(0, 64), network: 'regtest', sat: SAT, confirmed: true,
+    creation: { height, blockHash: 'bb'.repeat(32), transactionIndex, inscriptionIndex: 0 },
+    body: body.unreadable ? { status: 'unavailable' } : { status: 'complete', mediaType: body.contentType ?? 'text/plain', bytes: new TextEncoder().encode(body.content ?? 'x'), metadata: body.metadata ?? null },
   };
-
-  beforeEach(() => {
-    provider = {
-      getSatInfo: mock(),
-      resolveInscription: mock(),
-      getMetadata: mock()
-    };
-    originalFetch = (global as any).fetch;
-  });
-
-  afterEach(() => {
-    (global as any).fetch = originalFetch;
-  });
-
-  test('forged metadata is ignored; resolved document comes from content', async () => {
-    const inscriptionId = 'insc-sec-1';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 500,
-      content_type: 'application/json',
-      content_url: 'http://local/content-sec-1'
-    });
-    // On-chain inscription content carries the legitimate DID document JSON.
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => JSON.stringify(legitDoc)
-    }));
-    // Malicious ord metadata endpoint returns a FORGED document with an
-    // attacker-controlled verification method.
-    const forgedDoc: DIDDocument = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:500',
-      verificationMethod: [
-        {
-          id: 'did:btco:500#attacker',
-          type: 'Multikey',
-          controller: 'did:btco:500',
-          publicKeyMultibase: 'zATTACKERKEY'
-        } as any
-      ],
-      authentication: ['did:btco:500#attacker']
-    };
-    provider.getMetadata.mockResolvedValue(forgedDoc);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:500');
-
-    expect(res.didDocument).not.toBeNull();
-    const vmIds = (res.didDocument!.verificationMethod || []).map((vm: any) => vm.id);
-    // The attacker's metadata key MUST NOT appear in the resolved document.
-    expect(vmIds).toContain('did:btco:500#0');
-    expect(vmIds).not.toContain('did:btco:500#attacker');
-    const keys = (res.didDocument!.verificationMethod || []).map((vm: any) => vm.publicKeyMultibase);
-    expect(keys).toContain('zLEGITIMATEKEY');
-    expect(keys).not.toContain('zATTACKERKEY');
-  });
-
-  test('resolves from content even when metadata is null', async () => {
-    const inscriptionId = 'insc-sec-2';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 500,
-      content_type: 'application/json',
-      content_url: 'http://local/content-sec-2'
-    });
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      // Optional 'BTCO DID: ' marker prefix before the JSON document.
-      text: async () => 'BTCO DID: ' + JSON.stringify(legitDoc)
-    }));
-    provider.getMetadata.mockResolvedValue(null);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:500');
-
-    expect(res.didDocument).not.toBeNull();
-    expect(res.didDocument!.id).toBe('did:btco:500');
-  });
-
-  test('content matches pattern but is not a valid DID-document JSON -> error', async () => {
-    const inscriptionId = 'insc-sec-3';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 500,
-      content_type: 'text/plain',
-      content_url: 'http://local/content-sec-3'
-    });
-    // Matches the DID pattern but is not parseable as a DID document.
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => 'BTCO DID: did:btco:500'
-    }));
-    // Even a perfectly valid metadata document must not rescue this.
-    provider.getMetadata.mockResolvedValue(legitDoc);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:500');
-
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.isValidDid).toBe(true);
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(entry.didDocument).toBeUndefined();
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('content document with mismatched id is rejected', async () => {
-    const inscriptionId = 'insc-sec-4';
-    provider.getSatInfo.mockResolvedValue({ inscription_ids: [inscriptionId] });
-    provider.resolveInscription.mockResolvedValue({
-      id: inscriptionId,
-      sat: 500,
-      content_type: 'application/json',
-      content_url: 'http://local/content-sec-4'
-    });
-    const mismatched: DIDDocument = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:btco:999'
-    };
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => 'BTCO DID: did:btco:500\n' + JSON.stringify(mismatched)
-    }));
-    provider.getMetadata.mockResolvedValue(null);
-
-    const resolver = new BtcoDidResolver({ provider });
-    const res = await resolver.resolve('did:btco:500');
-    const entry = (res.inscriptions as BtcoInscriptionData[])[0];
-    expect(entry.error).toBe('Invalid DID document structure or mismatched ID');
-    expect(res.didDocument).toBeNull();
-  });
-});
-
-/** Inlined from BtcoDidResolver.branches.part.ts */
-// duplicate imports removed during inlining
-
-const makeProvider = (overrides: Partial<ResourceProviderLike> = {}): ResourceProviderLike => ({
-  async getSatInfo(_sat: string) { return { inscription_ids: ['ins-1'] }; },
-  async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-  async getMetadata(_id: string) { return { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:1' }; },
-  ...overrides
-});
-
-describe('BtcoDidResolver branches', () => {
-  const originalFetch = global.fetch as any;
-  beforeEach(() => {
-    (global as any).fetch = mock(async (url: string) => ({ ok: true, status: 200, statusText: 'OK', text: async () => `BTCO DID: did:btco:1` }));
-  });
-  afterAll(() => {
-    (global as any).fetch = originalFetch;
-  });
-
-  test('invalid DID format', async () => {
-    const r = new BtcoDidResolver();
-    const res = await r.resolve('did:wrong:123');
-    expect(res.didDocument).toBeNull();
-    expect(res.resolutionMetadata?.error).toBe('invalidDid');
-  });
-
-  test('no provider supplied', async () => {
-    const r = new BtcoDidResolver();
-    const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata?.error).toBe('noProvider');
-  });
-
-  test('provider getSatInfo throws', async () => {
-    const provider = makeProvider({ getSatInfo: async () => { throw new Error('boom'); } });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata?.error).toBe('notFound');
-  });
-
-  test('no inscriptions found', async () => {
-    const provider = makeProvider({ getSatInfo: async () => ({ inscription_ids: [] }) });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata?.error).toBe('notFound');
-  });
-
-  test('resolveInscription undefined', async () => {
-    const provider = makeProvider({ resolveInscription: async () => undefined as any });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('not found');
-  });
-
-  test('fetch not ok', async () => {
-    (global as any).fetch = mock(async () => ({ ok: false, status: 500, statusText: 'ERR', text: async () => '' }));
-    const provider = makeProvider();
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('Failed to fetch content');
-  });
-
-  test('metadata throws and content does not match pattern', async () => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'hello world' }));
-    const provider = makeProvider({ getMetadata: async () => { throw new Error('x'); } });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.didDocument).toBeNull();
-  });
-
-  test('valid did doc selected as latest and network prefixes', async () => {
-    // The DID document is carried in the on-chain CONTENT; content_url is
-    // http://c/<inscriptionId> per makeProvider, so vary the document by id.
-    (global as any).fetch = mock(async (url: string) => {
-      const id = String(url).split('/').pop();
-      const docId = id === 'ins-b' ? 'did:btco:reg:2' : 'did:btco:reg:999';
-      return {
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        text: async () => JSON.stringify({ '@context': ['https://www.w3.org/ns/did/v1'], id: docId })
-      };
-    });
-    const provider = makeProvider({
-      getSatInfo: async () => ({ inscription_ids: ['ins-a', 'ins-b'] }),
-      getMetadata: async () => null
-    });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:reg:2');
-    expect(res.didDocument?.id).toBe('did:btco:reg:2');
-    expect(res.resolutionMetadata.network).toBe('reg');
-  });
-
-  test('deactivated content with flame emoji on a DID tombstone', async () => {
-    // A real tombstone carries the human-readable DID marker; a bare 🔥 with
-    // no DID reference must NOT deactivate (it could be unrelated content).
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1 🔥' }));
-    const provider = makeProvider();
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('deactivated');
-    expect(res.didDocumentMetadata.deactivated).toBe(true);
-  });
-
-  test('bare flame emoji with no DID reference does not deactivate', async () => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'just some 🔥 text' }));
-    const provider = makeProvider();
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].deactivated).toBeUndefined();
-    expect(res.didDocumentMetadata.deactivated).toBeUndefined();
-  });
-});
-
-
-
-
-/** Inlined from BtcoDidResolver.deactivation-keep-error.part.ts */
-
-describe('BtcoDidResolver deactivation preserves existing error', () => {
-  test('when content contains flame and error already set, it remains', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['a'] } as any; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const originalFetch = global.fetch as any;
-    (global as any).fetch = async () => ({ ok: true, text: async () => 'BTCO DID: did:btco:1 🔥' }) as any;
-    const res = await r.resolve('did:btco:1');
-    (global as any).fetch = originalFetch;
-    // Since metadata is null, error was set earlier to 'Invalid DID document...' or remains null then set to deactivated message
-    const entry = res.inscriptions![0];
-    expect(entry.didDocument).toBeNull();
-    // Ensure an error string exists (branch where !inscriptionData.error is false/true covered by setup)
-    expect(typeof entry.error).toBe('string');
-  });
-});
-
-
-
-
-/** Inlined from BtcoDidResolver.deactivation-preserve-existing-error.part.ts */
-
-describe('BtcoDidResolver deactivation takes precedence', () => {
-  test('flame content reports deactivation regardless of ord metadata', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['a'] } as any; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() {
-        // Off-chain metadata is never consulted for the document; a tombstoned
-        // (flame) inscription must report deactivation, not a metadata-derived state.
-        return { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:999' } as any;
-      }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const originalFetch = global.fetch as any;
-    (global as any).fetch = async () => ({ ok: true, text: async () => 'BTCO DID: did:btco:1 🔥' }) as any;
-    const res = await r.resolve('did:btco:1');
-    (global as any).fetch = originalFetch;
-    const entry = res.inscriptions![0];
-    expect(entry.didDocument).toBeNull();
-    expect(entry.error).toBe('DID has been deactivated');
-  });
-});
-
-
-
-
-/** Inlined from BtcoDidResolver.invalid-context.part.ts */
-
-describe('BtcoDidResolver invalid @context branch', () => {
-  const provider: ResourceProviderLike = {
-    async getSatInfo() { return { inscription_ids: ['i1'] }; },
-    async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-    async getMetadata() { return { '@context': ['https://example.org/other'], id: 'did:btco:1' }; }
+}
+function snapshot(publications: PublicationObservation[], extra: Partial<SatSnapshot> = {}): SatSnapshot {
+  const heights = [...new Set(publications.map((p) => p.creation!.height))];
+  return {
+    network: 'regtest', sat: SAT,
+    tipBefore: { height: 100, hash: 'aa'.repeat(32) }, tipAfter: { height: 100, hash: 'aa'.repeat(32) }, indexTip: { height: 100, hash: 'aa'.repeat(32) },
+    indexHealthy: true, enumerationComplete: true,
+    blocks: heights.map((h) => ({ height: h, hash: 'bb'.repeat(32), txids: [], time: T + h * 600 })),
+    publications,
+    ownership: { owner: 'bcrt1qholder', satpoint: `${'cc'.repeat(32)}:1:0` },
+    ...extra,
   };
+}
+const resolver = (s: SatSnapshot) => new BtcoDidResolver({ satSnapshot: () => Promise.resolve(s) });
+const doc = (marker?: string) => ({ ...createBtcoDidDocument(SAT, 'regtest', { publicKey: KEY, keyType: 'Ed25519' }), ...(marker ? { alsoKnownAs: [marker] } : {}) });
+const version = (height: number, d = doc(), tx = 1) => publication(height, { metadata: btcoDidInscription(d).metadata, content: DID }, tx);
 
-  const originalFetch = global.fetch as any;
-  beforeEach(() => {
-    (global as any).fetch = mock(async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => 'BTCO DID: did:btco:1' }));
-  });
-  afterAll(() => { (global as any).fetch = originalFetch; });
-
-  test('filters out invalid contexts', async () => {
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.didDocument).toBeNull();
-  });
-});
-
-
-
-
-/** Inlined from BtcoDidResolver.invalid-doc.part.ts */
-
-describe('BtcoDidResolver invalid doc @context branch', () => {
-  test('metadata without did context fails validation', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['ins-1'] }; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() { return { '@context': ['https://example.org/other'], id: 'did:btco:1' } as any; }
-    };
-    const originalFetch = global.fetch as any;
-    (global as any).fetch = async () => ({ ok: true, text: async () => 'BTCO DID: did:btco:1' });
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('Invalid DID document');
-    (global as any).fetch = originalFetch;
+describe('did:btco identifiers', () => {
+  test('parses the network prefix and sat, and rejects anything else', () => {
+    expect(parseBtcoDid(`did:btco:${SAT}`)).toEqual({ satNumber: SAT, network: 'mainnet' });
+    expect(parseBtcoDid(DID)).toEqual({ satNumber: SAT, network: 'regtest' });
+    expect(parseBtcoDid('did:btco:sig:0')).toEqual({ satNumber: '0', network: 'signet' });
+    for (const bad of ['did:btco:01', 'did:btco:main:1', 'did:btco:1.5', 'did:btco:2099999997690000', `${DID}/0`]) expect(parseBtcoDid(bad)).toBeNull();
   });
 });
 
-
-
-
-/** Inlined from BtcoDidResolver.more-branches.part.ts */
-
-describe('BtcoDidResolver more branches', () => {
-  const originalFetch = global.fetch as any;
-  afterEach(() => { (global as any).fetch = originalFetch; });
-
-  test('parseBtcoDid invalid returns error via resolve', async () => {
-    const r = new BtcoDidResolver({ provider: { getSatInfo: async () => ({ inscription_ids: [] }), resolveInscription: async () => ({} as any), getMetadata: async () => null } });
-    const res = await r.resolve('did:btco:abc');
-    expect(res.resolutionMetadata.error).toBe('invalidDid');
+describe('resolution (did:btco method v0.2.0)', () => {
+  test('the latest version in chain order is the document; metadata names it, with times and the holder', async () => {
+    const v1 = version(10, doc('one'));
+    const art = publication(11, { content: 'art', contentType: 'image/png' });
+    const v2 = version(12, doc('two'));
+    const r = await resolver(snapshot([v2, art, v1])).resolve(DID);
+    expect(r.resolutionMetadata.error).toBeUndefined();
+    expect(r.didDocument?.alsoKnownAs).toEqual(['two']);
+    expect(r.resolutionMetadata.versions).toEqual([v1.id, v2.id]);
+    expect(r.didDocumentMetadata).toEqual({
+      created: new Date((T + 10 * 600) * 1000).toISOString(),
+      updated: new Date((T + 12 * 600) * 1000).toISOString(),
+      inscriptionId: v2.id,
+      network: 'regtest',
+      ownership: { address: 'bcrt1qholder', outpoint: `${'cc'.repeat(32)}:1` },
+    });
   });
 
-  test('getSatInfo returns inscription_ids property missing -> empty handled', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return {} as any; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata.error).toBe('notFound');
+  test('a document in the content, or a 🔥 marker, is not a version: only metadata counts', async () => {
+    const asContent = publication(10, { content: JSON.stringify(doc()), contentType: 'application/json' });
+    const marker = publication(11, { content: `BTCO DID: ${DID} 🔥` });
+    expect((await resolver(snapshot([asContent, marker])).resolve(DID)).resolutionMetadata.error).toBe('notFound');
+    const v1 = version(9);
+    const r = await resolver(snapshot([v1, marker])).resolve(DID);
+    expect(r.didDocument?.id).toBe(DID);
+    expect(r.didDocumentMetadata.deactivated).toBeUndefined();
   });
 
-  test('resolveInscription throws -> caught as process error', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['x'] } as any; },
-      async resolveInscription() { throw new Error('boom'); },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('Failed to process inscription');
+  test('a deactivation document is terminal: later documents are not versions', async () => {
+    const v1 = version(10);
+    const off = publication(11, { metadata: btcoDidDeactivationInscription(DID).metadata });
+    const later = version(12, doc('after'));
+    const r = await resolver(snapshot([v1, off, later])).resolve(DID);
+    expect(r.didDocument).toBeNull();
+    expect(r.didDocumentMetadata.deactivated).toBe(true);
+    expect(r.resolutionMetadata.versions).toEqual([v1.id, off.id]);
   });
 
-  test('getSatInfo throws non-Error -> uses String(e) branch', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { throw 5 as any; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.resolutionMetadata.message).toContain('5');
+  test('metadata that is not strict CBOR, or names another DID, is not a version', async () => {
+    const indefinite = publication(10, { metadata: new Uint8Array([0xbf, 0x62, 0x69, 0x64, 0x61, 0x78, 0xff]) });
+    const other = publication(11, { metadata: encodeCbor({ ...doc(), id: 'did:btco:reg:1' }) });
+    expect((await resolver(snapshot([indefinite, other])).resolve(DID)).resolutionMetadata.error).toBe('notFound');
   });
 
-  test('fetch throws non-Error -> uses String(err) branch', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['x'] } as any; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-      async getMetadata() { return null as any; }
-    };
-    const originalFetch = global.fetch as any;
-    (global as any).fetch = async () => { throw 7 as any; };
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('7');
-    (global as any).fetch = originalFetch;
+  test('versions in the same block follow transaction order', async () => {
+    const later = version(10, doc('later'), 5);
+    const earlier = version(10, doc('earlier'), 2);
+    expect((await resolver(snapshot([later, earlier])).resolve(DID)).didDocument?.alsoKnownAs).toEqual(['later']);
   });
 
-  test('process inscription catch non-Error -> String(err) branch', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['x'] } as any; },
-      async resolveInscription() { throw 'oops' as any; },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider });
-    const res = await r.resolve('did:btco:1');
-    expect(res.inscriptions?.[0].error).toContain('oops');
+  test('an unreadable inscription, an incomplete read or a failed read fails closed', async () => {
+    const r1 = await resolver(snapshot([version(10), publication(11, { unreadable: true })])).resolve(DID);
+    expect(r1.resolutionMetadata.error).toBe('unresolvable');
+    expect(r1.didDocument).toBeNull();
+    expect((await resolver(snapshot([version(10)], { enumerationComplete: false })).resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
+    const failing = new BtcoDidResolver({ satSnapshot: () => Promise.reject(new Error('index behind')) });
+    expect((await failing.resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
+  });
+
+  test('a DID for another network than the read is refused', async () => {
+    expect((await resolver(snapshot([version(10)])).resolve(`did:btco:${SAT}`)).resolutionMetadata.error).toBe('networkMismatch');
+    expect((await resolver(snapshot([])).resolve('did:btco:x')).resolutionMetadata.error).toBe('invalidDid');
   });
 });
 
-// keep single import; duplicate removed
-
-describe('BtcoDidResolver isValidDidDocument branches', () => {
-  const resolver: any = new BtcoDidResolver({} as any);
-
-  test('rejects non-object', () => {
-    expect(resolver['isValidDidDocument'](null)).toBe(false);
-    expect(resolver['isValidDidDocument']('x')).toBe(false);
-  });
-
-  test('rejects missing id or non-string id', () => {
-    expect(resolver['isValidDidDocument']({ '@context': ['https://www.w3.org/ns/did/v1'] })).toBe(false);
-    expect(resolver['isValidDidDocument']({ '@context': ['https://www.w3.org/ns/did/v1'], id: 123 })).toBe(false);
-  });
-
-  test('rejects missing @context and unsupported context', () => {
-    expect(resolver['isValidDidDocument']({ id: 'did:btco:1' })).toBe(false);
-    expect(resolver['isValidDidDocument']({ id: 'did:btco:1', '@context': ['https://example.org/not-did'] })).toBe(false);
-  });
-
-  test('rejects non-array verificationMethod/authentication', () => {
-    const base = { id: 'did:btco:1', '@context': ['https://www.w3.org/ns/did/v1'] } as any;
-    expect(resolver['isValidDidDocument']({ ...base, verificationMethod: {} })).toBe(false);
-    expect(resolver['isValidDidDocument']({ ...base, authentication: {} })).toBe(false);
-  });
-});
-
-
-
-
-/** Inlined from BtcoDidResolver.signet.part.ts */
-
-describe('BtcoDidResolver signet and error branches', () => {
-  const originalFetch = global.fetch as any;
-  beforeEach(() => {
-    // DID document (with the string-form w3id @context) carried in the content.
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => JSON.stringify({ '@context': 'https://w3id.org/did/v1', id: 'did:btco:sig:3' })
-    }));
-  });
-  afterAll(() => {
-    (global as any).fetch = originalFetch;
-  });
-
-  const providerOk: ResourceProviderLike = {
-    async getSatInfo() { return { inscription_ids: ['i1'] }; },
-    async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-    async getMetadata() { return null as any; }
-  };
-
-  test('signet prefix resolution and w3id context accepted', async () => {
-    const r = new BtcoDidResolver({ provider: providerOk });
-    const res = await r.resolve('did:btco:sig:3');
-    expect(res.didDocument?.id).toBe('did:btco:sig:3');
-  });
-
-  test('resolveInscription throws -> inscription error path', async () => {
-    const providerErr: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: ['i1'] }; },
-      async resolveInscription() { throw new Error('bad'); },
-      async getMetadata() { return null as any; }
-    };
-    const r = new BtcoDidResolver({ provider: providerErr });
-    const res = await r.resolve('did:btco:sig:3');
-    expect(res.inscriptions?.[0].error).toContain('Failed to process inscription');
-  });
-});
-
-/**
- * Regression: BtcoDidResolver must recognize the testnet prefix `did:btco:test:`.
- * satoshi-validation, BitcoinManager, and DIDManager.resolveDID all accept/route
- * `did:btco:test:<sat>`, but the resolver previously rejected it with
- * `invalidDid`, making testnet DIDs unresolvable. See plans/027.
- */
-describe('BtcoDidResolver testnet prefix (did:btco:test)', () => {
-  const originalFetch = global.fetch as any;
-  beforeEach(() => {
-    (global as any).fetch = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => 'BTCO DID: ' + JSON.stringify({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:3' })
-    }));
-  });
-  afterAll(() => {
-    (global as any).fetch = originalFetch;
-  });
-
-  const providerOk: ResourceProviderLike = {
-    async getSatInfo() { return { inscription_ids: ['i1'] }; },
-    async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: 'http://c/' + id }; },
-    async getMetadata() { return null as any; }
-  };
-
-  test('testnet DID is not rejected as invalidDid and resolves', async () => {
-    const r = new BtcoDidResolver({ provider: providerOk });
-    const res = await r.resolve('did:btco:test:3');
-    expect(res.resolutionMetadata.error).not.toBe('invalidDid');
-    expect(res.resolutionMetadata.network).toBe('test');
-    expect(res.didDocument?.id).toBe('did:btco:test:3');
+describe('writing did:btco inscriptions (v0.2.0)', () => {
+  test('the document travels as CBOR metadata; the deactivation names only the DID', () => {
+    const d = doc();
+    const i = btcoDidInscription(d);
+    expect(new TextDecoder().decode(i.content)).toBe(DID);
+    expect(i.metadata).toEqual(encodeCbor(d as never));
+    const off = btcoDidDeactivationInscription(DID);
+    expect(off.metadata).toEqual(encodeCbor({ '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/did-resolution/v1'], id: DID, deactivated: true }));
   });
 });

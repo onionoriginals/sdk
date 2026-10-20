@@ -22,9 +22,10 @@ import * as os from 'os';
 import { DIDManager } from '../../../src/did/DIDManager';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { KeyManager } from '../../../src/did/KeyManager';
-import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
+import { BtcoDidResolver, parseBtcoDid } from '../../../src/did/BtcoDidResolver';
+import { btcoDidInscription, createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument';
+import type { SatSnapshot } from '../../../src/bitcoin/sat-snapshot-types';
 import type { ExternalSigner, ExternalVerifier, OriginalsConfig } from '../../../src/types';
-import type { ResourceProviderLike } from '../../../src/did/BtcoDidResolver';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -687,128 +688,49 @@ describe('DID-013 — recovery marks compromised key with ISO-8601 timestamp', (
 // ---------------------------------------------------------------------------
 
 describe('DID-015 — did:btco regtest prefix handling', () => {
-  /**
-   * Build a mock ResourceProviderLike that serves a synthetic did:btco:reg:<sat>
-   * document when queried with the correct regtest DID prefix.
-   */
-  function buildRegtestProvider(satNumber: string): ResourceProviderLike {
-    const inscriptionId = `regtest-inscription-${satNumber}i0`;
-    const mockContentUrl = `http://localhost:8080/content/${inscriptionId}`;
-
+  // A did:btco:reg:<sat> resolves from a regtest sat read; its document is
+  // the inscription's CBOR metadata (did:btco method v0.2.0; plan 011 PR 9c).
+  const SAT = '1234567890';
+  function regtestSnapshot(publications: SatSnapshot['publications']): SatSnapshot {
     return {
-      async getSatInfo(_sat: string) {
-        return { inscription_ids: [inscriptionId] };
-      },
-      async resolveInscription(id: string) {
-        return {
-          id,
-          sat: parseInt(satNumber),
-          content_type: 'text/plain',
-          content_url: mockContentUrl,
-        };
-      },
-      async getMetadata(_id: string) {
-        // Off-chain metadata is non-authoritative; the document lives in content.
-        return null;
-      },
+      network: 'regtest', sat: SAT,
+      tipBefore: { height: 10, hash: 'aa'.repeat(32) }, tipAfter: { height: 10, hash: 'aa'.repeat(32) }, indexTip: { height: 10, hash: 'aa'.repeat(32) },
+      indexHealthy: true, enumerationComplete: true,
+      blocks: [{ height: 5, hash: 'bb'.repeat(32), txids: [], time: 1_760_000_000 }],
+      publications,
+      ownership: { owner: null, satpoint: null },
     };
   }
+  const withDocument = (did: string): SatSnapshot['publications'] => {
+    const doc = createBtcoDidDocument(SAT, 'regtest', { publicKey: new Uint8Array(32).fill(3), keyType: 'Ed25519' });
+    expect(doc.id).toBe(did);
+    const i = btcoDidInscription(doc);
+    return [{
+      id: `${'e'.repeat(64)}i0`, revealTxid: 'e'.repeat(64), network: 'regtest', sat: SAT, confirmed: true,
+      creation: { height: 5, blockHash: 'bb'.repeat(32), transactionIndex: 1, inscriptionIndex: 0 },
+      body: { status: 'complete', mediaType: i.contentType, bytes: i.content, metadata: i.metadata },
+    }];
+  };
 
-  test('resolves did:btco:reg:<sat> — uses "reg" prefix for regtest DIDs', async () => {
-    const satNumber = '4999999999';
-    const did = `did:btco:reg:${satNumber}`;
-    const provider = buildRegtestProvider(satNumber);
-    const mockDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: did };
-
-    // Mock fetch to return the authoritative DID document as the inscription
-    // content (the resolver must parse the document from content, not metadata).
-    const originalFetch = (global as unknown as { fetch: unknown }).fetch;
-    (global as unknown as { fetch: unknown }).fetch = async (_url: string) => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => `BTCO DID: ${JSON.stringify(mockDoc)}`,
-    });
-
-    try {
-      const resolver = new BtcoDidResolver({ provider });
-      const result = await resolver.resolve(did);
-
-      // Must resolve to a non-null document
-      expect(result.didDocument).not.toBeNull();
-      expect(result.didDocument?.id).toBe(did);
-
-      // Network metadata must reflect "reg"
-      expect(result.resolutionMetadata.network).toBe('reg');
-    } finally {
-      (global as unknown as { fetch: unknown }).fetch = originalFetch;
-    }
+  test('parseBtcoDid extracts the regtest network from did:btco:reg:<sat>', () => {
+    expect(parseBtcoDid(`did:btco:reg:${SAT}`)).toEqual({ satNumber: SAT, network: 'regtest' });
   });
 
-  test('parseBtcoDid correctly extracts regtest network from did:btco:reg:<sat>', () => {
-    const resolver = new BtcoDidResolver();
-    // Access the private method via type assertion for testing
-    const parsed = (resolver as unknown as {
-      parseBtcoDid: (did: string) => { satNumber: string; network: string; path?: string } | null
-    }).parseBtcoDid('did:btco:reg:12345');
-
-    expect(parsed).not.toBeNull();
-    expect(parsed!.satNumber).toBe('12345');
-    expect(parsed!.network).toBe('reg');
+  test('resolves did:btco:reg:<sat> from a regtest read', async () => {
+    const did = `did:btco:reg:${SAT}`;
+    const resolver = new BtcoDidResolver({ satSnapshot: () => Promise.resolve(regtestSnapshot(withDocument(did))) });
+    const result = await resolver.resolve(did);
+    expect(result.didDocument?.id).toBe(did);
+    expect(result.didDocumentMetadata.network).toBe('regtest');
   });
 
-  test('getDidPrefix returns "did:btco:reg" for regtest variants', () => {
-    const resolver = new BtcoDidResolver();
-    const getPrefix = (resolver as unknown as { getDidPrefix: (n: string) => string }).getDidPrefix;
-
-    expect(getPrefix.call(resolver, 'reg')).toBe('did:btco:reg');
-    expect(getPrefix.call(resolver, 'regtest')).toBe('did:btco:reg');
+  test('did:btco:reg DID with no inscriptions returns notFound', async () => {
+    const resolver = new BtcoDidResolver({ satSnapshot: () => Promise.resolve(regtestSnapshot([])) });
+    expect((await resolver.resolve(`did:btco:reg:${SAT}`)).resolutionMetadata.error).toBe('notFound');
   });
 
-  test('did:btco:reg DID with no inscriptions returns notFound error', async () => {
-    const provider: ResourceProviderLike = {
-      async getSatInfo() { return { inscription_ids: [] }; },
-      async resolveInscription(id: string) { return { id, sat: 0, content_type: 'text/plain', content_url: `http://local/${id}` }; },
-      async getMetadata() { return null as unknown as Record<string, unknown>; },
-    };
-
-    const resolver = new BtcoDidResolver({ provider });
-    const result = await resolver.resolve('did:btco:reg:9999');
-
-    expect(result.didDocument).toBeNull();
-    expect(result.resolutionMetadata.error).toBe('notFound');
-    // Note: when createErrorResult is returned (early exit paths), the network field
-    // is NOT populated — only error and message are set. This is the actual behavior.
-    expect(result.resolutionMetadata.network).toBeUndefined();
-  });
-
-  test('DIDManager.migrateToDIDBTCO produces did:btco:reg: prefix when webvhNetwork is magby (dev→regtest)', async () => {
-    const config: OriginalsConfig = {
-      network: 'regtest',
-      defaultKeyType: 'Ed25519',
-      webvhNetwork: 'magby', // magby maps to regtest
-    };
-    const manager = new DIDManager(config);
-
-    const km = new KeyManager();
-    const kp = await km.generateKeyPair('Ed25519');
-
-    const didDoc = {
-      '@context': ['https://www.w3.org/ns/did/v1'],
-      id: 'did:peer:migrate-to-btco-test',
-      verificationMethod: [{
-        id: 'did:peer:migrate-to-btco-test#keys-0',
-        type: 'Multikey',
-        controller: 'did:peer:migrate-to-btco-test',
-        publicKeyMultibase: kp.publicKey,
-      }],
-      authentication: ['did:peer:migrate-to-btco-test#keys-0'],
-    };
-
-    const btcoDoc = await manager.migrateToDIDBTCO(didDoc, '12345678901');
-
-    // magby→regtest must produce the reg: prefix
-    expect(btcoDoc.id).toMatch(/^did:btco:reg:/);
-    expect(btcoDoc.id).toContain('12345678901');
+  test('a mainnet DID read from a regtest sat is refused', async () => {
+    const resolver = new BtcoDidResolver({ satSnapshot: () => Promise.resolve(regtestSnapshot(withDocument(`did:btco:reg:${SAT}`))) });
+    expect((await resolver.resolve(`did:btco:${SAT}`)).resolutionMetadata.error).toBe('networkMismatch');
   });
 });

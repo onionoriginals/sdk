@@ -17,8 +17,10 @@ const makeBtcoProvider = (sat: string, doc: DIDDocument): OrdMockProvider =>
   new OrdMockProvider({
     inscriptionsById: new Map([[`insc-${sat}`, {
       inscriptionId: `insc-${sat}`,
-      content: Buffer.from(JSON.stringify(doc), 'utf8'),
-      contentType: 'application/json',
+      // did:btco method v0.2.0: the DID document is the inscription's metadata.
+      content: new TextEncoder().encode(doc.id),
+      contentType: 'text/plain',
+      metadata: doc as unknown as Record<string, unknown>,
       txid: `tx-${sat}`,
       vout: 0,
       satoshi: sat,

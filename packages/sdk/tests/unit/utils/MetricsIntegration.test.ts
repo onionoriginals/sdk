@@ -122,8 +122,9 @@ describe('Metrics Integration', () => {
       const provider = new OrdMockProvider({
         inscriptionsById: new Map([[`insc-${sat}`, {
           inscriptionId: `insc-${sat}`,
-          content: Buffer.from(JSON.stringify(doc), 'utf8'),
-          contentType: 'application/json',
+          content: new TextEncoder().encode(did),
+          contentType: 'text/plain',
+          metadata: doc,
           txid: `tx-${sat}`,
           vout: 0,
           satoshi: sat,
