@@ -232,9 +232,12 @@ no verified copy of is incomplete identity evidence (P5.6).
 Read from Bitcoin with the sat reader, following the did:btco method v0.2.0:
 the newest inscription carrying CBOR DID-document metadata whose `id` is the
 DID is the current version; earlier ones are versions in chain order;
-deactivation is terminal. The SDK's existing resolver reads the document from
-inscription content and a 🔥 marker instead (decision C). An anchoring entry
-naming the author DID's own sat is rejected (P5.13).
+deactivation is terminal. Entries name a version by its inscription id
+(PROVISIONAL; P5.13 says "by its identifier"). The Originals verifier follows
+this from PR 9b. The SDK's legacy resolver still reads the document from
+inscription content and a 🔥 marker; moving it and its writer to the method's
+metadata is PR 9c (decision C). An anchoring entry naming the author DID's own
+sat is rejected (P5.13).
 
 ### 3.9 Ownership report (P9.11)
 

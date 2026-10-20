@@ -718,7 +718,17 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   `authoritative-source-changed`, and an author DID version that would reject
   an accepted inscription as `retroactive-revocation-conflict`.
 - Ownership is the anchoring sat's holder, always provisional, never authority
-  (P9.11, P9.12). did:btco author DIDs arrive in PR 9b. Spending requires the
+  (P9.11, P9.12).
+- **did:btco author DIDs** (P5.13; method v0.2.0): supply
+  `{ did, bitcoin: await satEvidence(snapshotOfTheDidSat, …) }` as the author
+  evidence. A version is a confirmed inscription on the DID's sat whose CBOR
+  metadata is the DID document (strictly decoded), in chain order; an entry
+  names its version by inscription id (PROVISIONAL); `deactivated: true` is
+  terminal. Anchored entries are checked against the versions before them in
+  chain order, so a version later in the same block is not in effect. An
+  Original is never anchored to its author DID's own sat. A did:btco author's
+  history is read from Bitcoin, not packaged: packages list it as missing
+  identity evidence. Spending requires the
   owner's explicit approval, and release evidence comes from real Core/ord
   regtest.
 

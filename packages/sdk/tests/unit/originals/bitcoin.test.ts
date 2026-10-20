@@ -6,13 +6,14 @@
  */
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
-import { ORIGINALS_INSCRIPTION_TYPE } from "@originals/vh/originals";
+import { localSigner } from "@originals/vh/crypto";
+import { ORIGINALS_INSCRIPTION_TYPE, encodeCbor } from "@originals/vh/originals";
 import type { SatSnapshot } from "../../../src/bitcoin/sat-snapshot-types.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileClockStore } from "../../../src/originals/fs-store.js";
-import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip, satEvidence, writeZip, type BlockInfo } from "../../../src/originals/index.js";
+import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, keySigner, readZip, readEvidence, satEvidence, writeZip, type BlockInfo } from "../../../src/originals/index.js";
 import { signerPath } from "../../../src/originals/evidence.js";
 import { SyntheticChain, memoryClockStore } from "../../../scripts/bench-inscription-clock.js";
 import { Author, bytes, seed } from "./helpers.js";
@@ -28,10 +29,10 @@ const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63
 const clockOver = (times: number[]) =>
   new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
-function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array; body?: SatSnapshot["publications"][number]["body"] }>, tip = 10): SatSnapshot {
+function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array; body?: SatSnapshot["publications"][number]["body"] }>, tip = 10, sat = SAT): SatSnapshot {
   return {
     network: "regtest",
-    sat: SAT,
+    sat,
     tipBefore: { height: tip, hash: "aa".repeat(32) },
     tipAfter: { height: tip, hash: "aa".repeat(32) },
     indexTip: { height: tip, hash: "aa".repeat(32) },
@@ -42,7 +43,7 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
       id: p.id,
       revealTxid: p.id.slice(0, 64),
       network: "regtest",
-      sat: SAT,
+      sat,
       confirmed: true,
       creation: { height: p.height, blockHash: p.blockHash ?? hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
       body: p.body ?? (p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: p.metadata ?? null }),
@@ -634,3 +635,30 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(evidence.inscriptions[1].inscriptionTime).toBe((B + 180) * 1000);
   });
 });
+
+describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
+  test("an Original by a did:btco author verifies from the author's sat; its package lists that identity as missing", async () => {
+    const AUTHOR_SAT = "9000000000";
+    const author = btcoAlias("regtest", AUTHOR_SAT);
+    const key = localSigner("Ed25519", KEY);
+    const doc = {
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      id: author,
+      verificationMethod: [{ id: `${author}#orig`, type: "Multikey", controller: author, publicKeyMultibase: key.publicKeyMultibase }],
+      assertionMethod: [`${author}#orig`],
+    };
+    const docId = `${"f".repeat(64)}i0`;
+    const read = await satEvidence(snapshot([{ id: docId, height: 2, content: "art", mediaType: "image/png", metadata: encodeCbor(doc) }], 10, AUTHOR_SAT), { clock: clockOver(HEADERS), ownerConfirmations: 4, index: "ord-a" });
+    expect(read.inscriptions[0].metadata).toEqual(encodeCbor(doc));
+    let t = Date.parse("2026-10-18T13:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), freshness: "asserted", clock: () => (t += 1000) });
+    const ref = { did: author, verificationMethod: `${author}#orig`, versionId: docId };
+    const c = await sdk.create({ name: "By a did:btco author", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    expect(c.original.current, JSON.stringify(c.original.report.reasons)).toBe(true);
+    const pkg = await sdk.package(c.original.did);
+    expect(pkg.manifest.missing).toEqual([{ kind: "identity", did: author, role: "author" }]);
+    expect(readEvidence(pkg.bytes).authors).toEqual([]);
+  });
+});
+

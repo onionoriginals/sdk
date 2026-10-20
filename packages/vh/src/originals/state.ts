@@ -412,6 +412,18 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   const satOf = (aliases: string[]) => aliases.find((x) => x.startsWith("did:btco:"));
   const before = ctx.previous ? webOf(ctx.previous.asset.aliases) : undefined;
   const now = webOf(asset.aliases);
+  // A did:btco author DID's own sat is never the anchoring sat of an Original naming it (P5.13).
+  const anchoring = satOf(asset.aliases);
+  const authorDid = (s.author as { did?: unknown }).did;
+  if (anchoring !== undefined && typeof authorDid === "string" && authorDid.startsWith("did:btco:")) {
+    const a = parseBtcoAlias(anchoring);
+    try {
+      const b = parseBtcoAlias(authorDid);
+      if (a.network === b.network && a.sat === b.sat) invalid("STATE_ANCHOR", "the anchoring sat is the author DID's own sat (P5.13)");
+    } catch (error) {
+      if (error instanceof OriginalsError && error.code === "STATE_ANCHOR") throw error;
+    }
+  }
   const anchoredTo = ctx.previous ? satOf(ctx.previous.asset.aliases) : undefined;
   if (anchoredTo !== undefined) {
     // Anchoring is terminal (P9.10): once the did:btco alias is listed it never changes or goes.

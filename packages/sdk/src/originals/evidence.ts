@@ -69,6 +69,7 @@ export function writeEvidence(contents: EvidenceContents): Uint8Array {
   files.set(MANIFEST, encoder.encode(`${JSON.stringify(contents.manifest, null, 2)}\n`));
   files.set("asset/did.jsonl", encoder.encode(contents.log));
   for (const author of contents.authors) {
+    if (author.log === undefined) continue; // a did:btco history is read from Bitcoin, not packaged
     const base = signerPath(author.did);
     files.set(`${base}/did.jsonl`, encoder.encode(typeof author.log === "string" ? author.log : author.log.map((e) => `${JSON.stringify(e)}\n`).join("")));
     if (author.witness !== undefined) files.set(`${base}/did-witness.json`, encoder.encode(JSON.stringify(author.witness)));

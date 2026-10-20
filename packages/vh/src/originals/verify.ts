@@ -38,7 +38,8 @@ import {
   type VerifiedEntry,
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
-import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor, type SatEvidence } from "./bitcoin.js";
+import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor } from "./bitcoin.js";
+import type { SatEvidence } from "./btco.js";
 import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";

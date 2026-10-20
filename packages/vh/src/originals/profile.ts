@@ -116,12 +116,15 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       if (editor) fail("incomplete-evidence", "EDITOR_HISTORY_MISSING", `no verified history for editor DID ${signer.did} (P7.1, P5.6)`, { did: signer.did, role: "editor" });
       fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`, { did: ref.did, role: "author" });
     }
-    // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier entry named.
-    // Keyed by identity, so a did:webvh named at another location is the same signer (P5.14).
+    // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier
+    // entry named, ordered by the signer DID's own history: versionId number, or chain order
+    // for did:btco (P5.13). Keyed by identity, so a did:webvh named at another location is the
+    // same signer (P5.14).
     const through = namedThrough(named, previous);
     const identity = identityKey(signer.did);
     const before = through.get(identity);
-    if (before !== undefined && versionNumberOf(signer.versionId) < versionNumberOf(before)) {
+    const order = (id: string) => history.versions.find((v) => v.versionId === id)?.versionNumber ?? (history.method === "did:btco" ? NaN : versionNumberOf(id));
+    if (before !== undefined && order(signer.versionId) < order(before)) {
       fail("invalid-evidence", editor ? "SIGNER_VERSION_REGRESSED" : "AUTHOR_VERSION_REGRESSED", `an entry may not name an older ${role} DID version than the signer's previous entry (P5.8)`);
     }
     const version = namedVersion(history, signer);
