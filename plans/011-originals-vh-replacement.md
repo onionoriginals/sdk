@@ -6,7 +6,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@d64fdbe4aef3d12e26109e7eeab28da569169e05` | Editor's Draft 0.1 |
+| Originals Protocol | `aviarytech/originals-spec@b8e8323560b8c313bed96dd8074daf2b1cf374e0` | Editor's Draft 0.1; re-pinned from `d64fdbe` after PR #33 (Q14), which renumbered §12 rows from C12-34 on |
 | VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `7bae699a` | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
@@ -189,7 +189,7 @@ a trusted publisher can be registered for it.
 - **S1 — resolved by the owner (Q5): only Bitcoin settles forks.** *Where:* P6.6 against VH-Log "Comparing Copies of a Log".
   - *Issue:* VH-Log says a resolver **MUST** fail resolution when two verified copies diverge. P6.6 instead lets a signed declaration make one branch current, and no VH-Log hook permits that.
   - *Decision:* forks that are not on Bitcoin are not settled. A verifier reports them as an unresolved conflict (`logForked`), and no branch is current. The only thing that settles a fork is the Bitcoin authoritative source (VH-Log PR 2, P9.13, P9.16). Abandonment declarations are dropped.
-  - *Spec edits needed:* remove the declaration mechanism from P6.6, so that divergent valid branches are always an unresolved conflict and are never current. Drop the declaration clauses from P9.16 and D5. Replace §12 rows C12-24 and C12-25 with "fork not on Bitcoin: unresolved conflict, no branch current", and drop C12-40.
+  - *Spec edits needed:* remove the declaration mechanism from P6.6, so that divergent valid branches are always an unresolved conflict and are never current. Drop the declaration clauses from P9.16 and D5. Replace §12 rows C12-24 and C12-25 with "fork not on Bitcoin: unresolved conflict, no branch current", and drop C12-37 (C12-40 before the re-pin).
 - **S2 — resolved by the owner (Q7): reworded.** *Where:* P9.9, "An asset log's witness parameter MUST equal the declaration in the author DID version that the entry references".
   - *Issue:* read literally, this rule breaks things in two ways. Every Original by an author who declares witnesses would need witnesses active, so no local Originals would be possible for that author. And the migrate entry, which **MUST** set `{}`, could never comply.
   - *Fix (accepted by the owner, Q7):* reword it as "An entry that sets the witness parameter to a value other than `{}` MUST set it equal to the declaration in the author DID version the entry references." The rest of P9.9 stays. Implementation proceeds on the reworded rule.
@@ -216,10 +216,10 @@ a trusted publisher can be registered for it.
     - P5.3: "is listed under assertionMethod" (drop "and in that version's Originals declaration").
     - P5.11: "SHOULD be used only for Originals entries". Keep "MUST NOT be an updateKey of the author DID's own log".
     - P9.9: superseded by S9 (no witnesses).
-    - §12 C12-60: "Author key not under assertionMethod: author binding failure".
+    - §12 C12-52 (C12-60 before the re-pin): "Author key not under assertionMethod: author binding failure".
     - D2 and D3: record the encoding.
 
-- **S9 — owner decision Q14 departs from P9.8, P9.9 and related rules (witnesses).**
+- **S9 — resolved in the spec (originals-spec PR #33, merged 2026-10-20; now pinned): owner decision Q14, no witnesses.**
   - *Issue:* once activated, witnesses cannot be removed (P9.9), and every later entry, including the one that replaces them and the anchoring entry (P9.10), needs threshold approval from the current set. Losing a threshold of witnesses permanently freezes every hosted Original that uses them. Originals witnesses are also stateful services beyond did:webvh witnesses (60-second author DID reads, a last-approved ledger, independence from the host).
   - *Decision:* asset logs do not use witnesses. Unanchored Originals have claimed ordering only; Bitcoin anchoring gives proven ordering and a single history. Author DIDs keep their own method's witnesses.
   - *Accepted consequences:* a stolen author key can create a branch before its removal (never current after removal, P7.9; an unresolved fork until anchoring, Q5); the first valid anchor wins (P9.16), so a key thief holding a sat can win that race; a host can serve an old prefix to a first-time reader (retained versionIds protect repeat readers, P7.8).

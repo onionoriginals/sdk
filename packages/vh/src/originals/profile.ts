@@ -4,7 +4,7 @@
  * entry (P5.2), by the author key the entry names (P5.3). versionTime carries
  * milliseconds (VH-Log PR 8; owner decision Q8).
  *
- * No witnesses (owner decision Q14; plan 011, S9): an asset log never sets the
+ * No witnesses (P9.8, P9.9; owner decision Q14): an asset log never sets the
  * VH witness parameter to anything but `{}`. Unanchored Originals have claimed
  * ordering only; Bitcoin anchoring gives proven ordering and a single history.
  * Author DIDs keep their own method's witnesses, which this does not affect.

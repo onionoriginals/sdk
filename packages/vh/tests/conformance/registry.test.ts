@@ -35,9 +35,9 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  test("registers all 93 rows with unique ids", () => {
-    expect(registry.rows.length).toBe(93);
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(93);
+  test("registers all 84 rows with unique ids", () => {
+    expect(registry.rows.length).toBe(84);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(84);
   });
 
   test("every cited row exists and is marked partial or covered, with the citing files", () => {

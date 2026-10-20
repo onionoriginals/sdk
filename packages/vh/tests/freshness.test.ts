@@ -30,7 +30,7 @@ const verify = (log: LogEntry[], authors: VhAuthor[], extra: Partial<Options> = 
   verifyOriginal({ log, authors: authors.map((a) => a.evidence()), now: NOW, bytes: allBytes, freshness: "asserted", ...extra });
 
 describe("author DID rotation (P5.10)", () => {
-  test("C12-59: a key the author DID added signs with no asset log entry for the change", async () => {
+  test("C12-51: a key the author DID added signs with no asset log entry for the change", async () => {
     const { alice, key, genesis, cropped, at } = await harbor();
     const added = seeded(22);
     await alice.rotate([{ fragment: "orig", signer: key }, { fragment: "studio", signer: added }]);
@@ -42,7 +42,7 @@ describe("author DID rotation (P5.10)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("C12-08 (unwitnessed): an entry naming an old author DID version with a backdated time is never current", async () => {
+  test("C12-08 (unanchored): an entry naming an old author DID version with a backdated time is never current", async () => {
     const { alice, sign, genesis, cropped } = await harbor();
     const v1 = alice.versionId;
     await alice.rotate([{ fragment: "orig2", signer: seeded(23) }]); // the author removes the stolen key
@@ -55,7 +55,7 @@ describe("author DID rotation (P5.10)", () => {
     expect(r.reasons).toContain("head-key-not-in-latest-author-document");
   });
 
-  test("C12-46 (unwitnessed): every entry signed by a removed key stays valid history but not current", async () => {
+  test("C12-41 (unanchored): every entry signed by a removed key stays valid history but not current", async () => {
     const { alice, genesis, cropped } = await harbor();
     await alice.rotate([{ fragment: "orig2", signer: seeded(23) }]);
     const r = await verify([genesis, cropped], [alice]);
@@ -158,7 +158,7 @@ describe("C12-23: divergent valid branches are an unresolved fork (P2.1, P6.6, Q
 });
 
 describe("author DID freshness (P7.8)", () => {
-  test("C12-73: stale author DID history served with a current asset log is not currently authorized", async () => {
+  test("C12-64: stale author DID history served with a current asset log is not currently authorized", async () => {
     const { alice, genesis, cropped } = await harbor();
     const before = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: seeded(21) }, { fragment: "spare", signer: seeded(24) }]);

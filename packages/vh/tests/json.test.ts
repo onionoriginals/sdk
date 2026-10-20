@@ -25,7 +25,7 @@ describe("strict JSON parsing (P5.7)", () => {
     });
   });
 
-  test("C12-88: rejects duplicate keys, at any depth", () => {
+  test("C12-79: rejects duplicate keys, at any depth", () => {
     rejects('{"a":1,"a":2}', "JSON_DUPLICATE_KEY");
     rejects('{"x":{"b":1,"b":1}}', "JSON_DUPLICATE_KEY");
     // An escaped spelling of the same key is still the same key.

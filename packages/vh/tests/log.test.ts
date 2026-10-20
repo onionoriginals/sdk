@@ -342,7 +342,7 @@ describe("selecting a version and limits", () => {
     expect(() => selectVersion(result, { versionNumber: 1, versionId: "x" })).toThrow();
   });
 
-  test("C12-91 (engine): a history beyond the limit reports the last valid prefix as limit-exceeded", async () => {
+  test("C12-82 (engine): a history beyond the limit reports the last valid prefix as limit-exceeded", async () => {
     const result = await verify(fixture.logA, fixture.witnessA, webvhLike, { limits: { maxEntries: 2 } });
     expect(result.entries.length).toBe(2);
     expect(result.failure?.index).toBe(2);

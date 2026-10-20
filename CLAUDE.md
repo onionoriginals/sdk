@@ -48,8 +48,8 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   missing item is an explicit incomplete result, never a pass (section 7).
 - **Layers move one way.** An Original moves from local to web, and from
   either to Bitcoin. Anchoring is terminal and happens once (P9.10, P9.16).
-- **No witnesses.** Asset logs never activate VH witnesses (owner decision
-  Q14). Unanchored ordering is claimed only; Bitcoin anchoring is how an
+- **No witnesses.** Asset logs never activate VH witnesses (P9.8, P9.9;
+  owner decision Q14). Unanchored ordering is claimed only; Bitcoin anchoring is how an
   Original gets proven ordering and a single history. Author DIDs keep their
   own method's witnesses.
 - **Spec first.** Where a pinned document is ambiguous or contradicts itself

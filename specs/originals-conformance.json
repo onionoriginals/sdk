@@ -2,7 +2,7 @@
   "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "d64fdbe4aef3d12e26109e7eeab28da569169e05",
+    "commit": "b8e8323560b8c313bed96dd8074daf2b1cf374e0",
     "section": "12"
   },
   "rows": [
@@ -98,7 +98,7 @@
     {
       "id": "C12-08",
       "test": "Old identity version with claimed old time",
-      "requiredResult": "Witnessed: witness ordering applies. Unwitnessed: ordering unproven; no timestamp-only acceptance. Anchored: checked against the author DID state at the inscription time (P9.15)",
+      "requiredResult": "Unanchored: ordering unproven; no timestamp-only acceptance. Anchored: checked against the author DID state at the inscription time (P9.15)",
       "phases": [
         2,
         3,
@@ -108,7 +108,7 @@
       "coveredBy": [
         "packages/vh/tests/freshness.test.ts"
       ],
-      "note": "Unwitnessed case: historically authorized at the named version, ordering claimed, never current (P7.9). The witnessed case is moot under owner decision Q14; the anchored case arrives in PR 9."
+      "note": "Unanchored case: historically authorized at the named version, ordering claimed, never current (P7.9). The anchored case arrives in PR 9."
     },
     {
       "id": "C12-09",
@@ -394,7 +394,7 @@
     },
     {
       "id": "C12-34",
-      "test": "Anchoring an Original whose log never activated witnesses",
+      "test": "Anchoring an Original from the local or web layer",
       "requiredResult": "Accepted; ordering before the anchor claimed only; uniqueness not established; ownership provisional",
       "phases": [
         4
@@ -403,26 +403,6 @@
     },
     {
       "id": "C12-35",
-      "test": "Migrate entry, after witnesses are active, that leaves the witness parameter set or is not approved by the witnesses",
-      "requiredResult": "Rejected",
-      "phases": [
-        4
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-36",
-      "test": "Migrate entry that activates witnesses on a log that never had them",
-      "requiredResult": "Rejected",
-      "phases": [
-        4
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-37",
       "test": "Entry after anchoring that adds a did:webvh alias when the anchoring entry’s state listed none",
       "requiredResult": "Rejected",
       "phases": [
@@ -431,7 +411,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-38",
+      "id": "C12-36",
       "test": "Two valid anchoring entries for one Original on different sats",
       "requiredResult": "The first in chain order is the anchor; the other and its descendants are a conflicting anchor, not current, conferring no ownership",
       "phases": [
@@ -440,17 +420,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-39",
-      "test": "Unwitnessed anchor of a branch forked before witnesses were activated on another known branch",
-      "requiredResult": "Conflicting anchor; not current",
-      "phases": [
-        4
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-40",
+      "id": "C12-37",
       "test": "Later anchoring entry that declares an earlier anchored branch abandoned",
       "requiredResult": "Declaration ignored; the first anchor stands",
       "phases": [
@@ -460,7 +430,7 @@
       "note": "Owner decision Q5 (plan S1): fork declarations are dropped, so this row is moot. Pending a spec edit."
     },
     {
-      "id": "C12-41",
+      "id": "C12-38",
       "test": "Anchoring entry inscribed on a sat other than the one it names",
       "requiredResult": "Not an anchor",
       "phases": [
@@ -469,27 +439,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-42",
-      "test": "Witness asked to approve an entry that does not extend the last entry it approved",
-      "requiredResult": "Refused",
-      "phases": [
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-43",
-      "test": "Entry inscribed on the anchoring sat without witness proofs",
-      "requiredResult": "Accepted; no witnesses after anchoring",
-      "phases": [
-        4
-      ],
-      "status": "todo",
-      "note": "Under owner decision Q14 no entry carries witness proofs; this becomes: an entry inscribed on the anchoring sat is accepted on its author signature (PR 9)."
-    },
-    {
-      "id": "C12-44",
+      "id": "C12-39",
       "test": "Publication at the same or a lower block height than the previous accepted one",
       "requiredResult": "Not accepted",
       "phases": [
@@ -498,7 +448,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-45",
+      "id": "C12-40",
       "test": "Bitcoin failure, retry or reorganization",
       "requiredResult": "Durable boundary follows adapter policy, not pending intent",
       "phases": [
@@ -507,9 +457,9 @@
       "status": "todo"
     },
     {
-      "id": "C12-46",
+      "id": "C12-41",
       "test": "Entry signed by a key removed from the author DID",
-      "requiredResult": "Witnessed: refused by witnesses and not current. Unwitnessed: historically authorized, ordering unproven, never current. Anchored: rejected if its inscription time is at or after the removal’s versionTime",
+      "requiredResult": "Unanchored: historically authorized, ordering unproven, never current. Anchored: rejected if its inscription time is at or after the removal’s versionTime",
       "phases": [
         2,
         4
@@ -519,10 +469,10 @@
         "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "Unwitnessed case: historically valid, never current (P7.9). The witnessed case is moot under owner decision Q14; the anchored case arrives in PR 9."
+      "note": "Unanchored case: historically valid, never current (P7.9). The anchored case arrives in PR 9."
     },
     {
-      "id": "C12-47",
+      "id": "C12-42",
       "test": "Accepted anchored entry whose key the author DID later removes",
       "requiredResult": "Remains current",
       "phases": [
@@ -531,7 +481,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-48",
+      "id": "C12-43",
       "test": "Author DID deactivated after an Original is anchored",
       "requiredResult": "Accepted state remains current; entries inscribed later rejected",
       "phases": [
@@ -540,7 +490,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-49",
+      "id": "C12-44",
       "test": "Anchored entry naming an author DID version newer than its inscription time",
       "requiredResult": "Checked against the named version",
       "phases": [
@@ -549,7 +499,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-50",
+      "id": "C12-45",
       "test": "Block whose timestamp is earlier than an ancestor’s",
       "requiredResult": "Inscription time is the greatest ancestor timestamp",
       "phases": [
@@ -558,7 +508,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-51",
+      "id": "C12-46",
       "test": "Author DID history missing through an inscription time",
       "requiredResult": "Incomplete identity evidence; not reported as current",
       "phases": [
@@ -567,7 +517,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-52",
+      "id": "C12-47",
       "test": "Author DID version published with a versionTime before an already accepted inscription it would reject",
       "requiredResult": "Retroactive revocation conflict reported; result not silently changed",
       "phases": [
@@ -576,50 +526,9 @@
       "status": "todo"
     },
     {
-      "id": "C12-53",
-      "test": "Entry changes the witness parameter to a list the author DID does not declare",
-      "requiredResult": "Rejected",
-      "phases": [
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-54",
-      "test": "Entry sets the witness parameter to an empty object after witnesses are active",
-      "requiredResult": "Rejected",
-      "phases": [
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-55",
-      "test": "Entry after witness activation without enough witness proofs, whatever the deployment",
-      "requiredResult": "Not current",
-      "phases": [
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-56",
-      "test": "Entries before witness activation, signed by a key later removed",
-      "requiredResult": "Ordering unproven; not made current by activation",
-      "phases": [
-        2,
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-57",
+      "id": "C12-48",
       "test": "Any entry after the author DID is deactivated",
-      "requiredResult": "Not anchored: refused by witnesses; Original reported as non-current. Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
+      "requiredResult": "Not anchored: Original reported as non-current. Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
       "phases": [
         2,
         3,
@@ -629,10 +538,10 @@
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "Unanchored case: a deactivated author DID makes the Original non-current. Witness refusal is moot under owner decision Q14; the anchored case arrives in PR 9."
+      "note": "Unanchored case: a deactivated author DID makes the Original non-current. The anchored case arrives in PR 9."
     },
     {
-      "id": "C12-58",
+      "id": "C12-49",
       "test": "Entry that sets updateKeys or nextKeyHashes",
       "requiredResult": "Rejected",
       "phases": [
@@ -644,7 +553,19 @@
       ]
     },
     {
-      "id": "C12-59",
+      "id": "C12-50",
+      "test": "Asset log entry that sets the witness parameter to anything other than an empty object",
+      "requiredResult": "Rejected",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
+    },
+    {
+      "id": "C12-51",
       "test": "Entry signed by a key the author DID added, with no asset log entry for the change",
       "requiredResult": "Accepted",
       "phases": [
@@ -656,20 +577,20 @@
       ]
     },
     {
-      "id": "C12-60",
+      "id": "C12-52",
       "test": "Author key not in the author DID’s Originals declaration",
       "requiredResult": "Author binding failure",
       "phases": [
         1
       ],
       "status": "covered",
-      "note": "Tested as 'author key not under assertionMethod' (owner decision Q6, plan S8); pending the spec edit.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
-      ]
+      ],
+      "note": "Tested as 'author key not under assertionMethod' (owner decision Q6, plan S8); pending the spec edit."
     },
     {
-      "id": "C12-61",
+      "id": "C12-53",
       "test": "Author DID versionId absent from signed state",
       "requiredResult": "Rejected",
       "phases": [
@@ -681,7 +602,7 @@
       ]
     },
     {
-      "id": "C12-62",
+      "id": "C12-54",
       "test": "Verification method from another DID, with a different controller, or under authentication only",
       "requiredResult": "Author binding failure",
       "phases": [
@@ -693,7 +614,7 @@
       ]
     },
     {
-      "id": "C12-63",
+      "id": "C12-55",
       "test": "Key expressed as JWK or a different multikey encoding",
       "requiredResult": "Author binding failure",
       "phases": [
@@ -706,7 +627,7 @@
       ]
     },
     {
-      "id": "C12-64",
+      "id": "C12-56",
       "test": "Later entry names a different author DID, or an older author DID version than its predecessor",
       "requiredResult": "Rejected",
       "phases": [
@@ -718,7 +639,7 @@
       ]
     },
     {
-      "id": "C12-65",
+      "id": "C12-57",
       "test": "Author DID using a method the profile does not list",
       "requiredResult": "Rejected",
       "phases": [
@@ -730,7 +651,7 @@
       ]
     },
     {
-      "id": "C12-66",
+      "id": "C12-58",
       "test": "Anchored Original with a did:btco author DID, verified from Bitcoin alone",
       "requiredResult": "Author binding checked against inscribed DID versions in chain order",
       "phases": [
@@ -739,7 +660,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-67",
+      "id": "C12-59",
       "test": "did:btco author DID version inscribed after an Originals inscription in the same block",
       "requiredResult": "Not in effect for that inscription",
       "phases": [
@@ -748,7 +669,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-68",
+      "id": "C12-60",
       "test": "Anchoring entry naming the author DID’s own did:btco sat",
       "requiredResult": "Rejected",
       "phases": [
@@ -757,7 +678,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-69",
+      "id": "C12-61",
       "test": "Inscription on a did:btco author DID’s sat after its deactivation",
       "requiredResult": "Not a version; author DID remains deactivated",
       "phases": [
@@ -766,7 +687,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-70",
+      "id": "C12-62",
       "test": "Anchored Original whose did:vh or did:webvh author DID log is unavailable",
       "requiredResult": "Incomplete identity evidence; not reported as current",
       "phases": [
@@ -775,17 +696,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-71",
-      "test": "Witness cannot obtain author DID state no more than 60 seconds old",
-      "requiredResult": "Entry refused",
-      "phases": [
-        3
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
-    },
-    {
-      "id": "C12-72",
+      "id": "C12-63",
       "test": "Two proofs in the proof array",
       "requiredResult": "Rejected",
       "phases": [
@@ -797,7 +708,7 @@
       ]
     },
     {
-      "id": "C12-73",
+      "id": "C12-64",
       "test": "Stale author DID history served with a current asset log",
       "requiredResult": "Identity freshness not established; not reported as currently authorized",
       "phases": [
@@ -810,7 +721,7 @@
       ]
     },
     {
-      "id": "C12-74",
+      "id": "C12-65",
       "test": "VH-valid log that fails Originals rules, read through a generic resolver",
       "requiredResult": "Not reported as Originals-verified",
       "phases": [
@@ -822,7 +733,7 @@
       ]
     },
     {
-      "id": "C12-75",
+      "id": "C12-66",
       "test": "did:webvh whose document points to a did:vh that does not list it",
       "requiredResult": "Not an alias; no Originals result through that did:webvh",
       "phases": [
@@ -831,7 +742,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-76",
+      "id": "C12-67",
       "test": "Asset state lists a did:webvh whose document points elsewhere",
       "requiredResult": "Alias not confirmed; the did:vh still verifiable directly",
       "phases": [
@@ -840,7 +751,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-77",
+      "id": "C12-68",
       "test": "Served DID document for the did:vh that differs from the one derived from the log",
       "requiredResult": "Ignored; the derived document is used",
       "phases": [
@@ -852,7 +763,7 @@
       ]
     },
     {
-      "id": "C12-78",
+      "id": "C12-69",
       "test": "Derived DID document",
       "requiredResult": "Same for every resolver; `controller`, `alsoKnownAs` and `#files` match the author DID and asset state",
       "phases": [
@@ -864,7 +775,7 @@
       ]
     },
     {
-      "id": "C12-79",
+      "id": "C12-70",
       "test": "Plain did:vh resolver given an Originals log",
       "requiredResult": "Rejected by its unrecognised `method` value",
       "phases": [
@@ -877,7 +788,7 @@
       ]
     },
     {
-      "id": "C12-80",
+      "id": "C12-71",
       "test": "Later entry that moves the log between plain did:vh and the Originals extension",
       "requiredResult": "Rejected",
       "phases": [
@@ -890,7 +801,7 @@
       ]
     },
     {
-      "id": "C12-81",
+      "id": "C12-72",
       "test": "Proof using a cryptosuite other than `eddsa-jcs-2022` or `bip340-jcs-2025`",
       "requiredResult": "Rejected",
       "phases": [
@@ -903,7 +814,7 @@
       ]
     },
     {
-      "id": "C12-82",
+      "id": "C12-73",
       "test": "Entry whose state is a delta rather than the full asset state",
       "requiredResult": "Rejected",
       "phases": [
@@ -915,7 +826,7 @@
       ]
     },
     {
-      "id": "C12-83",
+      "id": "C12-74",
       "test": "Inscription carrying a compact delta",
       "requiredResult": "Decoded to the full entry; hashes and proofs checked over the decoded entry",
       "phases": [
@@ -924,7 +835,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-84",
+      "id": "C12-75",
       "test": "Inscription that does not decode deterministically",
       "requiredResult": "Rejected",
       "phases": [
@@ -933,7 +844,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-85",
+      "id": "C12-76",
       "test": "Lifecycle status deactivated without VH deactivated: true, or the reverse",
       "requiredResult": "Rejected",
       "phases": [
@@ -945,7 +856,7 @@
       ]
     },
     {
-      "id": "C12-86",
+      "id": "C12-77",
       "test": "Older prefix imported over a newer local history",
       "requiredResult": "Local current state not rolled back",
       "phases": [
@@ -957,7 +868,7 @@
       ]
     },
     {
-      "id": "C12-87",
+      "id": "C12-78",
       "test": "Log file larger than the profile cap",
       "requiredResult": "Fetch refused; reported as unavailable",
       "phases": [
@@ -966,7 +877,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-88",
+      "id": "C12-79",
       "test": "Entry with duplicate JSON keys or an unsigned state field",
       "requiredResult": "Parse failure; no verified state",
       "phases": [
@@ -979,7 +890,7 @@
       ]
     },
     {
-      "id": "C12-89",
+      "id": "C12-80",
       "test": "Resource digest with an unlisted algorithm",
       "requiredResult": "Unsupported-profile failure",
       "phases": [
@@ -991,7 +902,7 @@
       ]
     },
     {
-      "id": "C12-90",
+      "id": "C12-81",
       "test": "Locator resolving or redirecting to a private address",
       "requiredResult": "Fetch refused; reported as unavailable",
       "phases": [
@@ -1000,7 +911,7 @@
       "status": "todo"
     },
     {
-      "id": "C12-91",
+      "id": "C12-82",
       "test": "History or identity history beyond profile limits",
       "requiredResult": "Last valid prefix reported, labelled limit-exceeded; never complete or current",
       "phases": [
@@ -1013,7 +924,7 @@
       ]
     },
     {
-      "id": "C12-92",
+      "id": "C12-83",
       "test": "Archive with a symbolic link, `..` path or duplicate entry",
       "requiredResult": "Rejected before extraction",
       "phases": [
@@ -1025,7 +936,7 @@
       ]
     },
     {
-      "id": "C12-93",
+      "id": "C12-84",
       "test": "SVG resource containing script, or a name containing markup",
       "requiredResult": "Not executed on the platform origin or in a client",
       "phases": [

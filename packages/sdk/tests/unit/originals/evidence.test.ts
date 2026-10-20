@@ -81,7 +81,7 @@ describe("evidence packages (section 7)", () => {
     expect((await bare.get(did)).report.identityEvidence.status).toBe("complete");
   });
 
-  test("C12-86: importing an older prefix never rolls back newer local history", async () => {
+  test("C12-77: importing an older prefix never rolls back newer local history", async () => {
     const { sdk, alice, did, v1, v2 } = await harbor();
     const older = await sdk.package(did, { checkpoint: v1 });
     const newer = await sdk.package(did);
@@ -104,7 +104,7 @@ describe("evidence packages (section 7)", () => {
   });
 });
 
-describe("C12-92: untrusted archives are bounded and checked before extraction (P7.5)", () => {
+describe("C12-83: untrusted archives are bounded and checked before extraction (P7.5)", () => {
   const raw = (name: string, extra: Partial<Parameters<typeof encodeZip>[0][number]> = {}) => ({ name, data: bytes("x"), ...extra });
   const fails = (zip: Uint8Array, code: string, limits?: Parameters<typeof readZip>[1]) => {
     let caught: unknown;

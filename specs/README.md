@@ -14,7 +14,7 @@ The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
-| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/d64fdbe4aef3d12e26109e7eeab28da569169e05/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@d64fdbe4aef3d12e26109e7eeab28da569169e05`, Editor's Draft 0.1 | Asset state, author binding, operations, evidence packages, hosting, witnesses, anchoring and ownership. Rules are cited by ID (for example P5.3). |
+| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/b8e8323560b8c313bed96dd8074daf2b1cf374e0/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@b8e8323560b8c313bed96dd8074daf2b1cf374e0`, Editor's Draft 0.1 | Asset state, author binding, operations, evidence packages, hosting, witnesses, anchoring and ownership. Rules are cited by ID (for example P5.3). |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
 | VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `7bae699a` keys from a controller | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
@@ -45,9 +45,9 @@ These owner decisions (plan section 6) depart from the pinned text until the
 spec is edited:
 - Only Bitcoin settles a fork; P6.6's abandonment declarations are dropped (S1).
 - Author keys are ordinary `assertionMethod` keys (S8).
-- Asset logs do not use witnesses; unanchored ordering is claimed only, and
-  Bitcoin anchoring gives proven ordering (S9, Q14). This supersedes S2's
-  rewording of P9.9 for asset logs.
+
+Owner decision Q14 (S9: asset logs use no witnesses) is now in the pinned
+spec (originals-spec PR #33, P9.8 and P9.9), so it is no longer a departure.
 
 Rows these decisions make moot are `not-applicable` in the conformance matrix.
 
@@ -57,7 +57,7 @@ Each departure is cited in code where it applies.
 
 [`originals-conformance.json`](originals-conformance.json) registers every row
 of the Originals spec's section 12 matrix under a stable ID (`C12-01` to
-`C12-93`), together with the delivery phase that covers it. A row counts as
+`C12-84`), together with the delivery phase that covers it. A row counts as
 covered only when a test cites its ID. Until then it stays `todo`.
 
 Positive checkpoints come with positive and negative fixtures, pinned
