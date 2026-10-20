@@ -108,6 +108,19 @@ describe("did:webvh parameters and portability", () => {
     expect((await error([portable, wrongScid], didOf(portable), 2)).problemDetails?.code).toBe("WEBVH_STATE_ID");
   });
 
+  test("an update-key proof may name its key as a bare did:key, as didwebvh-ts signers do (VH-Log \"Authorized Keys\")", async () => {
+    const bare = signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${key.publicKeyMultibase}` });
+    const one = await createLog({ versionTime: "2026-10-18T10:00:00Z", parameters: { method: "did:webvh:1.0", scid: "{SCID}", updateKeys: [key.publicKeyMultibase] }, state: { id: "did:webvh:{SCID}:example.com" }, sign: bare });
+    const two = await appendEntry(one, { versionTime: "2026-10-18T10:00:01Z", parameters: {}, state: one.state, sign: bare });
+    const result = await resolve(didOf(two), { didLog: [one, two] });
+    expect(result.didResolutionMetadata.error).toBeUndefined();
+    expect(result.didDocumentMetadata.versionId).toBe(two.versionId);
+    // A bare did:key for a key that is not an update key is still unauthorized.
+    const other = localSigner("Ed25519", new Uint8Array(32).fill(10));
+    const stranger = await appendEntry(one, { versionTime: "2026-10-18T10:00:01Z", parameters: {}, state: one.state, sign: signWith(other, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${other.publicKeyMultibase}` }) });
+    expect((await error([one, stranger], didOf(one), 2)).problemDetails).toBeDefined();
+  });
+
   test("portable can only be enabled at genesis; logVersion and other methods are rejected", async () => {
     const one = await genesis();
     const later = await appendEntry(one, { versionTime: "2026-10-18T10:00:01Z", parameters: { portable: true }, state: one.state, sign });

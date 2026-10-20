@@ -461,7 +461,7 @@ async function verifyEntry(
     if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
     let key: string;
     if (spec.keys.kind === "updateKeys") {
-      key = asProofError(() => didKeyMultikey(proof.verificationMethod));
+      key = asProofError(() => didKeyMultikey(proof.verificationMethod, { fragment: "optional" }));
       if (!authorizedKeys.includes(key)) fail("unauthorized-key", "UNAUTHORIZED_KEY", `${proof.verificationMethod} is not an active update key`);
     } else {
       key = await spec.keys.authorize({ ...context, proof });
