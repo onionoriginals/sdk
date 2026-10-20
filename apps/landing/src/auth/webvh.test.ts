@@ -185,3 +185,34 @@ describe('a failed read never overwrites a published identity', () => {
     expect(key()).toContain(slug());
   });
 });
+
+describe('a signed-in author DID verifies as Originals identity evidence', () => {
+  test('the DID log the landing builds, and an Original signed with its #key-1, verify as current', async () => {
+    const { MemoryStore, OriginalsSDK, keySigner } = await import('@originals/sdk/originals');
+    const { verifyAuthorHistory } = await import('@originals/vh/originals');
+    const identity = ed.utils.randomSecretKey();
+    const authorship = ed.utils.randomSecretKey();
+    const signer = new BrowserWebVHSigner(identity, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(identity)));
+    const built = await buildUserWebVHDid(signer, {
+      domain: 'magby.originals.build',
+      slug: 'user-regression0001',
+      authorshipPublicKeyMultibase: ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(authorship)),
+    });
+    const evidence = { did: built.did, log: (built.didLog as unknown[]).map((e) => `${JSON.stringify(e)}\n`).join('') };
+    // didwebvh-ts signers name the update key as a bare did:key; VH-Log accepts that.
+    const history = await verifyAuthorHistory(evidence);
+    expect(history.failure).toBeUndefined();
+    expect(history.versions.length).toBe(1);
+
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [evidence], freshness: 'asserted' });
+    const author = { did: built.did, verificationMethod: `${built.did}#key-1`, versionId: history.versions[0].versionId };
+    const c = await sdk.create({
+      name: 'Signed in',
+      resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: new TextEncoder().encode('<svg/>') }],
+      author,
+      signer: keySigner({ keyType: 'Ed25519', secretKey: authorship, verificationMethod: author.verificationMethod }),
+    });
+    if (c.kind !== 'original') throw new Error('expected an Original');
+    expect(c.original.current, JSON.stringify(c.original.report.reasons)).toBe(true);
+  });
+});
