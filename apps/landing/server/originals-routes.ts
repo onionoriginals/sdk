@@ -1,7 +1,7 @@
 /**
  * Auth-gated routes for durable per-user Originals.
  *
- *   PUT /api/originals/host/<encoded key>   store did:webvh log/cel/resource bytes
+ *   PUT /api/originals/host/<encoded key>   store a hosted file (hosted-layout.ts)
  *   POST /api/originals                     record an Original summary
  *   GET  /api/originals                     list the user's Originals
  *   serve(url)                              durable read at the resolver URL
@@ -14,45 +14,15 @@ import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import type { OriginalsStore, OriginalInscription } from './originals-store';
+import { bytesMatchDigest, classifyHostedKey, hostedContentType, signedMediaType } from './hosted-layout';
 
 const HOST_PREFIX = '/api/originals/host/';
 
 // Reject a declared body larger than this before buffering it — the store's
 // per-user 25 MiB quota is the real ceiling; no single did:webvh artifact
-// (log/cel/resource) comes close, so this is generous headroom, not a limit
+// (log, evidence file or resource) comes close, so this is generous headroom, not a limit
 // users hit.
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-
-/** A content digest suffix — multibase base64url, always 'u'-prefixed. */
-const DIGEST_MULTIBASE = /^u[A-Za-z0-9_-]+$/;
-/** The CEL copy's filename: the did:cel digest plus `.json`. */
-const CEL_COPY_FILE = /^u[A-Za-z0-9_-]+\.json$/;
-
-/**
- * A host key must name an artifact the SDK actually publishes: `<segs…>/did.jsonl`,
- * `<segs…>/cel.json`, `<segs…>/resources/<multibase>`, or the layer-agnostic CEL
- * copy `cel/<multibase>.json`. This confines every authed PUT to those shapes
- * and — crucially — makes it impossible to plant bytes at a path that would
- * SHADOW the app's own static assets (`index.html`, `assets/app-*.js`).
- * `buildFetch` runs `originals.serve` before the SPA/static fallback, so an
- * unconfined key like `<host>/assets/app-abc.js` would otherwise be served (as a
- * forced download, via untrustedHeaders) to every visitor, breaking the page.
- * Cross-user OVERWRITE of a claimed key is separately blocked by the store's
- * owner sidecar.
- */
-function isWebvhArtifactKey(key: string): boolean {
-  const segs = key.split('/');
-  const last = segs[segs.length - 1];
-  if (last === 'did.jsonl' || last === 'cel.json') return true;
-  // The SDK's layer-agnostic CEL copy, `cel/<did:cel digest>.json`
-  // (LifecycleManager.persistCelArtifacts) — the conventional key
-  // DIDManager.resolveDID's did:cel branch reads back. Exactly two segments and
-  // a content-derived digest, so `serve` can only ever reach it as host `cel`
-  // plus `/<digest>.json`: it cannot name a path on the app's own origin.
-  if (segs.length === 2 && segs[0] === 'cel' && CEL_COPY_FILE.test(last)) return true;
-  // Published resource: `…/resources/<base64url-multibase>` (multibase 'u' prefix).
-  return segs[segs.length - 2] === 'resources' && DIGEST_MULTIBASE.test(last);
-}
 
 /** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
 function userSlug(sub: string): string {
@@ -127,32 +97,10 @@ export function createOriginalsRoutes(deps: {
     const key = decodeKey(url);
     if (key === null) return json({ error: 'bad_key' }, 400);
     if (!key) return json({ error: 'missing_key' }, 400);
-    // Confine writes to did:webvh artifact paths so a user can't shadow the
-    // app's own static assets (served by originals.serve before the fallback).
-    if (!isWebvhArtifactKey(key)) return json({ error: 'forbidden_path' }, 403);
-    // Namespace guard: a `user-<slug>` path segment is a per-user namespace —
-    // only its owner may write there. Blocks pre-squatting another user's
-    // PREDICTABLE publisher DID path (`user-<victim>/did.jsonl`), which the
-    // store's first-writer-wins owner sidecar alone can't (it only protects an
-    // already-claimed key). Asset paths are hash-derived (not `user-`-prefixed),
-    // so they stay open and are overwrite-protected by the sidecar.
-    const nsSeg = key.split('/')[1]; // [0] is the host
-    if (nsSeg && nsSeg.startsWith('user-') && nsSeg !== userSlug(sub)) {
-      return json({ error: 'forbidden_namespace' }, 403);
-    }
-    const segments = key.split('/');
-    if (nsSeg === 'published') {
-      if (segments[2] !== 'accounts' || segments[3] !== sub || !segments[4] ||
-          !/^u[A-Za-z0-9_-]+$/.test(segments[4]) ||
-          !((segments.length === 6 && ['did.jsonl', 'cel.json'].includes(segments[5])) ||
-            (segments.length === 7 && segments[5] === 'resources' && DIGEST_MULTIBASE.test(segments[6])))) {
-        return json({ error: 'forbidden_namespace' }, 403);
-      }
-    } else if (nsSeg !== userSlug(sub) &&
-               !(nsSeg && /^u[A-Za-z0-9_-]+$/.test(nsSeg)) &&
-               !(segments.length === 2 && segments[0] === 'cel')) {
-      return json({ error: 'forbidden_namespace' }, 403);
-    }
+    // Only the hosted layout, inside the caller's own namespace (hosted-layout.ts):
+    // no write can shadow the app's static assets or another author's files.
+    const hosted = classifyHostedKey(key, userSlug(sub));
+    if (!hosted) return json({ error: 'forbidden_path' }, 403);
     // Cap the upload before buffering the whole body into memory (the rate
     // limiter bounds request COUNT, not per-request size).
     const declared = Number(req.headers.get('content-length'));
@@ -161,7 +109,19 @@ export function createOriginalsRoutes(deps: {
     }
     const bytes = new Uint8Array(await req.arrayBuffer());
     if (bytes.byteLength > MAX_UPLOAD_BYTES) return json({ error: 'payload_too_large' }, 413);
-    const contentType = req.headers.get('content-type') ?? 'application/octet-stream';
+    // The server labels every file itself. A resource takes the media type of
+    // its signed descriptor in the Original's asset log, uploaded first, and
+    // must be the bytes its digest names (P9.7).
+    let contentType: string;
+    if (hosted.kind === 'resource') {
+      if (!bytesMatchDigest(bytes, hosted.digest)) return json({ error: 'digest_mismatch' }, 422);
+      const log = store.read(sub, hosted.assetLogKey);
+      const mediaType = log.ok ? signedMediaType(await log.text(), hosted.digest) : null;
+      if (!mediaType) return json({ error: 'resource_not_in_log' }, 409);
+      contentType = mediaType;
+    } else {
+      contentType = hostedContentType(hosted);
+    }
     try {
       store.saveBytes(sub, key, bytes, contentType);
     } catch (e) {

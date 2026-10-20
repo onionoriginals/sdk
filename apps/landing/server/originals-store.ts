@@ -2,7 +2,7 @@
  * Durable, filesystem-backed store for signed-in users' Originals.
  *
  * Two trees under `dataDir`:
- *   hosted/<host>/<path>      the did:webvh log / cel / resource bytes (public;
+ *   hosted/<host>/<path>      did:webvh logs and hosted Originals (public; see hosted-layout.ts;
  *                             served at the resolver's exact URL). A sibling
  *                             <file>.ctype holds the content-type so serve()
  *                             survives a restart.

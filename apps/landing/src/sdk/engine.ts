@@ -13,10 +13,14 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { MemoryStore, OriginalsSDK, type OriginalView, type OriginalsSigner } from "@originals/sdk/originals";
-import type { AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
+import { didWebvhLogUrl } from "@originals/vh/webvh";
+import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
-import { ensureAuthorshipAccount, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
-import { readUserWebVHDid } from "../auth/webvh";
+import { ensureAuthorshipAccount, ensureIdentityAccount, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
+import { DEFAULT_WEBVH_DOMAIN, TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
+import { FEATURES, type Feature } from "./features";
+import { publishOriginal, type HostedUpload } from "./publish";
 import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
 import { short } from "./format";
 import { createLocalAuthor } from "./local-author";
@@ -111,6 +115,14 @@ interface LogLine {
   };
 }
 
+/** Where an Original is published, and the key that controls its alias (P3.7). */
+export interface PublishTarget {
+  upload: HostedUpload;
+  domain: string;
+  slug: string;
+  aliasSigner: () => Promise<WebVHSigner>;
+}
+
 interface Authoring {
   ref: AuthorRef;
   signer: OriginalsSigner;
@@ -138,9 +150,23 @@ export class DemoEngine {
   /** The last Bitcoin submission; always null until anchoring returns (PR 10). */
   lastSubmission: { broadcast?: string } | null = null;
 
-  constructor(opts?: { authed?: boolean; subOrgId?: string; networkFlag?: BtcNetworkFlag }) {
+  private readonly features: Record<Feature, boolean>;
+  private readonly target?: PublishTarget;
+  private alias: AliasEvidence | null = null;
+
+  constructor(opts?: {
+    authed?: boolean;
+    subOrgId?: string;
+    networkFlag?: BtcNetworkFlag;
+    /** Overrides FEATURES, for tests. */
+    features?: Partial<Record<Feature, boolean>>;
+    /** Overrides the signed-in account's host and Turnkey identity key, for tests. */
+    publishTarget?: PublishTarget;
+  }) {
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
+    this.features = { ...FEATURES, ...opts?.features };
+    this.target = opts?.publishTarget;
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     this.tier = demoTier(opts?.networkFlag ?? btcNetwork(), this.authed);
   }
@@ -255,9 +281,53 @@ export class DemoEngine {
     return this.snapshot();
   }
 
-  /** Web publication returns with hosted Originals (plan 011, PR 8). */
-  publish(): Promise<DemoAssetState> {
-    return Promise.reject(new FeatureUnavailableError("hostedPublication", "Publishing to the web returns with hosted Originals and witnesses."));
+  /**
+   * Publish to the web (plan 011, PR 8): a did:webvh alias in the author's own
+   * namespace, the publish entry, and the hosted files (./publish.ts). Off until
+   * the owner's public-host proof passes (owner decision Q13). A retry reuses
+   * the alias and repeats the same snapshot (P9.2).
+   */
+  async publish(): Promise<DemoAssetState> {
+    if (!this.features.hostedPublication) {
+      throw new FeatureUnavailableError("hostedPublication", "Publishing to the web is not open yet.");
+    }
+    if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
+    const authoring = await this.author();
+    const target = this.target ?? this.accountTarget();
+    const result = await publishOriginal({
+      sdk: this.sdk,
+      did: this.did,
+      parent: this.view.checkpoint,
+      author: authoring.ref,
+      signer: authoring.signer,
+      aliasSigner: await target.aliasSigner(),
+      domain: target.domain,
+      slug: target.slug,
+      hosting: target.upload,
+      ...(this.alias ? { alias: this.alias } : {}),
+    });
+    this.alias = result.alias;
+    this.view = await this.sdk.get(this.did);
+    await this.refresh();
+    this.emit("asset:published", `Published ${short(this.did)} as ${short(result.alias.did)}`, { alias: result.alias.did, baseUrl: result.baseUrl });
+    return this.snapshot();
+  }
+
+  /** The signed-in account's host namespace, with its Turnkey identity key controlling the alias. */
+  private accountTarget(): PublishTarget {
+    const subOrgId = this.subOrgId;
+    if (!this.authed || !subOrgId) throw new Error("Sign in to publish: an Original's web address lives in your account.");
+    return {
+      upload: new DurableHostingStorageAdapter(),
+      domain: DEFAULT_WEBVH_DOMAIN,
+      slug: userWebvhSlug(subOrgId),
+      aliasSigner: async () => {
+        const { openSessionKey } = await import("../auth/turnkey-browser-client");
+        const client = (await openSessionKey(subOrgId)).client as unknown as TurnkeyBitcoinClient;
+        const address = await ensureIdentityAccount(client, subOrgId);
+        return new TurnkeyWebVHSigner(client, subOrgId, address, base58AddressToEd25519Multikey(address));
+      },
+    };
   }
 
   /** Bitcoin anchoring returns with plan 011, PR 10. */
@@ -279,9 +349,11 @@ export class DemoEngine {
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
+    const alias = state.aliases[0];
     return {
-      layer: "did:vh",
+      layer: alias ? "did:webvh" : "did:vh",
       did: this.did,
+      ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
       author: view.report.identityEvidence.author ?? "",
       resource: {
         id: primary.id,
