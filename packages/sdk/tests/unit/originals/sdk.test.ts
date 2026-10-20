@@ -177,4 +177,16 @@ describe("C12-20: import, then edit without authority", () => {
     await rejects(reader.edit(original.did, { parent: view.checkpoint, name: "Mine", author: alice.ref("orig"), signer: intruder }), "invalid-evidence", "COMMIT_VERIFICATION_FAILED");
     expect((await reader.get(original.did)).checkpoint).toBe(view.checkpoint);
   });
+
+  test("an edit with no signer at all is a structured unauthorized-key error, and nothing is written (#976)", async () => {
+    const { sdk, alice, original } = await harbor();
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    await reader.import((await sdk.package(original.did)).bytes);
+    // A JavaScript caller, or one holding no key after an import, passes no signer.
+    const noSigner = { parent: original.checkpoint, name: "Mine", author: alice.ref("orig") } as unknown as Parameters<OriginalsSDK["edit"]>[1];
+    await rejects(reader.edit(original.did, noSigner), "unauthorized-key", "SIGNER_REQUIRED");
+    const draft = await reader.prepareEdit(original.did, { parent: original.checkpoint, name: "Mine", author: alice.ref("orig") });
+    await rejects(reader.commit(draft, { sign: "not a function" } as unknown as OriginalsSigner), "unauthorized-key", "SIGNER_REQUIRED");
+    expect((await reader.get(original.did)).checkpoint).toBe(original.checkpoint);
+  });
 });

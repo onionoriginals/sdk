@@ -454,6 +454,10 @@ export class OriginalsSDK {
 
   /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
   async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
+    // Holding evidence is not authority (P8.4): with no usable signer there is nothing to sign with.
+    if (typeof signer !== "object" || signer === null || typeof signer.sign !== "function") {
+      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author key`);
+    }
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
       return { status: "duplicate", original: await this.get(draft.original) };
