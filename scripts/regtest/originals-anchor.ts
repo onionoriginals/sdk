@@ -71,7 +71,7 @@ try {
   };
   const clock = new InscriptionClock(async (height) => {
     const hash = await env.rpc<string>('getblockhash', [height]);
-    return (await env.rpc<{ time: number }>('getblockheader', [hash])).time;
+    return { time: (await env.rpc<{ time: number }>('getblockheader', [hash])).time, hash };
   });
 
   // The author: a did:vh with one Originals key, separate from its update key (P5.11).
@@ -107,7 +107,7 @@ try {
   const anchored = await sdk.anchor(did, { parent: created.original.checkpoint, author, signer, sat: satDid });
   assert.equal(anchored.original.report.anchoring?.status, 'unverified');
 
-  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider });
+  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock });
   assert.equal(anchorPair.versionId, anchored.original.checkpoint);
   const sent = await submitPreparedInscriptionOnSat({ prepared: anchorPair.prepared, provider, recoveryStore });
   assert.equal(sent.broadcast, 'reveal_broadcast');
@@ -127,7 +127,7 @@ try {
   // 2. Edit, and reinscribe on the same sat by spending the output that holds it.
   const edit = await sdk.edit(did, { parent: v1.checkpoint, name: 'Harbor at dawn, on Bitcoin', author, signer });
   const holding = await outputOf(anchorPair.prepared.revealTxId, 0);
-  const editPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider });
+  const editPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock });
   assert.equal((await submitPreparedInscriptionOnSat({ prepared: editPair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
   const editBlock = (await env.mine())[0];
   const v2 = await readAnchored(sdk, did, { provider, clock });
@@ -137,11 +137,11 @@ try {
   assert.equal(v2.current, true, JSON.stringify(v2.report.reasons));
   evidence.edit = { inscription: editPair.prepared.inscriptionId, block: editBlock, ownership: v2.report.ownership };
 
-  step('3: wrong sat');
-  // 3. A pair whose first funding UTXO holds another sat is refused.
+  step('3: already inscribed');
+  // 3. The head Bitcoin already shows is not inscribed again (P9.13).
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, fundingUtxos: [await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider }),
-    (error: unknown) => (error as { code?: string }).code === 'WRONG_SAT',
+    prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock }),
+    (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
   );
 
   step('4: reorg');
@@ -166,20 +166,29 @@ try {
   step('5: crash and resume');
   // 5. A crash after the commit broadcast: the record survives, resume sends the same pair.
   const third = await sdk.edit(did, { parent: restored.checkpoint, name: 'Harbor at dusk', author, signer });
-  const thirdPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider });
+  // A pair whose first funding UTXO holds another sat is refused, so only the holder extends it.
+  await assert.rejects(
+    prepareEntryInscription({ sdk, did, fundingUtxos: [await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock }),
+    (error: unknown) => (error as { code?: string }).code === 'WRONG_SAT',
+  );
+  const thirdPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock });
   const crashing = Object.create(provider) as RegtestProvider;
   crashing.broadcastTransaction = (raw: unknown) => (raw === thirdPair.prepared.revealTxHex ? Promise.reject(new Error('process died before the reveal')) : provider.broadcastTransaction(raw));
   const crashed = await submitPreparedInscriptionOnSat({ prepared: thirdPair.prepared, provider: crashing, recoveryStore }).catch((error: unknown) => ({ error }));
   const stored = records.get(thirdPair.prepared.commitTxId);
   assert.ok(stored && stored.broadcast !== 'reveal_broadcast', `the record shows the reveal unsent: ${stored?.broadcast}`);
+  await assert.rejects(env.rpc('getmempoolentry', [thirdPair.prepared.revealTxId]), 'the reveal never reached the node');
   await env.mine();
+  assert.equal((await provider.getTransactionStatus(thirdPair.prepared.commitTxId)).confirmed, true, 'the commit is mined');
+  assert.equal((await provider.getTransactionStatus(thirdPair.prepared.revealTxId)).confirmed, false, 'the reveal is not');
   const midway = await readAnchored(sdk, did, { provider, clock });
-  assert.equal(midway.head, edit.original.checkpoint, 'a pending reveal never advances the boundary (P9.4)');
+  assert.equal(midway.head, edit.original.checkpoint, 'a commit without its reveal never advances the boundary (P9.4)');
   const resumed = await resumeInscriptionOnSat({ recoveryId: thirdPair.prepared.commitTxId, provider, recoveryStore });
   assert.equal(resumed.revealTxId, thirdPair.prepared.revealTxId, 'resume rebroadcasts the same pair (P9.6)');
   await env.mine();
   const v3 = await readAnchored(sdk, did, { provider, clock });
   assert.equal(v3.head, third.original.checkpoint);
+  assert.equal(v3.report.anchoring?.accepted.at(-1)?.inscription, thirdPair.prepared.inscriptionId, 'the resumed pair is the one Bitcoin shows');
   assert.equal(v3.current, true, JSON.stringify(v3.report.reasons));
   evidence.retry = { crashed: 'error' in (crashed as object) ? String((crashed as { error: unknown }).error) : (crashed as { broadcast: string }).broadcast, recordState: stored?.broadcast, resumed: resumed.broadcast, head: v3.head };
 
@@ -190,7 +199,13 @@ try {
   assert.equal(v4.head, third.original.checkpoint);
   assert.equal(v4.report.anchoring?.superseded, 1);
   assert.notEqual(v4.head, local.original.checkpoint);
-  evidence.uninscribed = { signed: local.original.checkpoint, head: v4.head, superseded: v4.report.anchoring?.superseded };
+  // An entry after it cannot be inscribed first: Bitcoin would never accept it (P9.13).
+  await sdk.edit(did, { parent: local.original.checkpoint, name: 'Skips one', author, signer });
+  await assert.rejects(
+    prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(thirdPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock }),
+    (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
+  );
+  evidence.uninscribed = { signed: local.original.checkpoint, head: v4.head, superseded: v4.report.anchoring?.superseded, skipRefused: 'HEAD_NOT_NEXT' };
 
   evidence.result = 'passed';
   const summary = JSON.stringify(evidence, null, 2);
