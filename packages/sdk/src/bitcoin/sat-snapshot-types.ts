@@ -47,7 +47,7 @@ export interface SatSnapshot {
   indexHealthy: boolean;
   enumerationComplete: boolean;
   /** Active-chain blocks established by the adapter at this snapshot; includes complete ordered reveal tx lists. */
-  blocks: { height: number; hash: string; txids: string[] }[];
+  blocks: { height: number; hash: string; txids: string[]; /** Header timestamp, seconds; inscription time needs it (P9.15). */ time?: number }[];
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };

@@ -29,7 +29,15 @@ export class VhAuthor {
     return author;
   }
 
+  /** The versionTime of the next author DID version, when a test needs a specific one. */
+  timeOverride: string | null = null;
+
   private time(): string {
+    if (this.timeOverride) {
+      const t = this.timeOverride.replace(/\.000Z$/, "Z");
+      this.timeOverride = null;
+      return t;
+    }
     return `2026-10-18T09:${String(Math.floor(this.seconds / 60)).padStart(2, "0")}:${String(this.seconds++ % 60).padStart(2, "0")}Z`;
   }
 

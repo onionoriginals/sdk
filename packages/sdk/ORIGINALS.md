@@ -559,12 +559,45 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
-## Bitcoin anchoring and ownership — phase 4
+## Bitcoin anchoring and ownership — phase 4 (verifier implemented; writer in PR 10)
 
-An Original can be anchored from the local or the web layer, once, terminally,
-to one sat (P9.10). After that, the inscriptions on the sat decide the log
-(P9.13), each checked against the author DID's state at its inscription time
-(P9.15). The inscription encoding (D6) will be proposed before any writer code
-is written. With no witnesses (Q14), the anchor is the first valid anchoring
-entry in chain order, and ownership is reported as provisional (P9.16). Spending requires the owner's explicit
-approval, and release evidence comes from real Core/ord regtest.
+The representation is [plan 012](../../plans/012-bitcoin-representation.md)
+(owner decision Q15). An Original can be anchored from the local or the web
+layer, once, terminally, to one sat (P9.10):
+
+```ts
+await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
+// The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
+const clock = new InscriptionClock((height) => blockTime(height));          // running max of header times (P9.15)
+const evidence = await satEvidence(snapshot, { clock, ownerConfirmations });  // from the SDK's sat reader
+const view = await sdk.get(did, { bitcoin: [evidence] });                     // also load(zip, { bitcoin })
+view.report.anchoring; // anchor, conflicting anchors, accepted and ignored inscriptions (with reasons), tip
+view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes }
+```
+
+- The anchoring entry is an ordinary update that adds the sat's did:btco alias
+  (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere,
+  PROVISIONAL). From then on the alias never changes, and an Original anchored
+  without a did:webvh alias never gains one.
+- Every inscription carries one complete entry as
+  `application/vnd.originals.vh+jsonl` (PROVISIONAL), with no did:btco
+  metadata. The history before the anchor comes from the supplied copy and
+  must chain to the anchoring entry.
+- Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
+  from 1 confirmation (depth reported) when it extends the head at a strictly
+  greater height and passes the author checks at its inscription time
+  (P9.15). Entries only in a copy are not current. The anchor is the first
+  valid anchoring entry in chain order across the sats supplied; others are
+  conflicting anchors, never current (P9.16).
+- After anchoring, deactivating the author DID leaves the accepted state
+  current and refuses later inscriptions; a key the author removes later does
+  not unseat entries accepted before (P9.15).
+- An anchored log with no Bitcoin evidence is `unverified`, and one whose
+  evidence holds no valid anchor is `not-anchored`; neither is current. A
+  retained versionId that Bitcoin no longer includes is reported as
+  `authoritative-source-changed`, and an author DID version that would reject
+  an accepted inscription as `retroactive-revocation-conflict`.
+- Ownership is the anchoring sat's holder, always provisional, never authority
+  (P9.11, P9.12). did:btco author DIDs arrive in PR 9b. Spending requires the
+  owner's explicit approval, and release evidence comes from real Core/ord
+  regtest.

@@ -33,7 +33,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
       switch (method) {
         case 'getblockchaininfo': result = { chain, blocks: 100, bestblockhash: ++tips > 1 ? options.coreAfterHash ?? hash : hash }; break;
         case 'getblockhash': result = hash; break;
-        case 'getblock': result = { hash, height: 100, confirmations: 1, tx: options.blockTxs ?? ['c'.repeat(64), txid] }; break;
+        case 'getblock': result = { hash, height: 100, confirmations: 1, time: 1_760_000_000, tx: options.blockTxs ?? ['c'.repeat(64), txid] }; break;
         case 'ord_getStatus': result = ++statuses > 1 ? { ...status, ...options.statusAfter } : status; break;
         case 'ord_getBlockHash': result = ++indexHashes > 1 ? options.indexAfterHash ?? hash : hash; break;
         case 'ord_getSat': result = sat; break;

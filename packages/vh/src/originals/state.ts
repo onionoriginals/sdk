@@ -8,6 +8,7 @@ import { multibaseDecode, multibaseEncode, sha256Multihash, decodeSha256Multihas
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
+import { parseBtcoAlias } from "./btco.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
@@ -265,17 +266,24 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
     ids.add(d.id);
   });
   if (!Array.isArray(a.aliases) || !a.aliases.every((x) => typeof x === "string")) invalid("STATE_ALIASES", "aliases must be an array of DIDs");
-  // PROVISIONAL (plan 011, PR 7b): at most one did:webvh alias. did:btco aliases arrive with anchoring (PR 9).
+  // PROVISIONAL (plan 011 PR 7b, plan 012 §3.1): at most one did:webvh alias and one did:btco alias.
+  let webvh = 0;
+  let btco = 0;
   for (const alias of a.aliases) {
-    if (alias.startsWith("did:btco:")) fail("unsupported-profile", "STATE_ALIASES_UNSUPPORTED", "did:btco aliases arrive with anchoring (plan 011, PR 9)");
-    if (!alias.startsWith("did:webvh:")) invalid("STATE_ALIASES", `${alias} is not a did:webvh alias`);
+    if (alias.startsWith("did:btco:")) {
+      parseBtcoAlias(alias);
+      btco++;
+      continue;
+    }
+    if (!alias.startsWith("did:webvh:")) invalid("STATE_ALIASES", `${alias} is not a did:webvh or did:btco alias`);
     try {
       parseDidWebvh(alias);
     } catch {
       invalid("STATE_ALIASES", `${alias} is not a valid did:webvh`);
     }
+    webvh++;
   }
-  if (a.aliases.length > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh alias");
+  if (webvh > 1 || btco > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh and one did:btco alias");
   if (a.editors !== undefined) checkEditors(a.editors, a.resources as unknown as ResourceDescriptor[], authorDid);
   return a as unknown as AssetState;
 }
@@ -398,11 +406,20 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   // PROVISIONAL (plan 011, PR 7b): layers move one way. An Original starts local, and
   // once published keeps a did:webvh alias, moving only within that alias's SCID (P9.3).
   if (ctx.index === 0 && asset.aliases.length > 0) invalid("STATE_ALIASES", "an Original starts local: genesis lists no alias");
-  const before = ctx.previous?.asset.aliases[0];
+  const webOf = (aliases: string[]) => aliases.find((x) => x.startsWith("did:webvh:"));
+  const satOf = (aliases: string[]) => aliases.find((x) => x.startsWith("did:btco:"));
+  const before = ctx.previous ? webOf(ctx.previous.asset.aliases) : undefined;
+  const now = webOf(asset.aliases);
   if (before !== undefined) {
-    const now = asset.aliases[0];
     if (now === undefined) invalid("STATE_ALIASES", "a published Original keeps its did:webvh alias");
     if (parseDidWebvh(now).scid !== parseDidWebvh(before).scid) invalid("STATE_ALIASES", "a did:webvh alias moves only within its own SCID (P9.3)");
+  }
+  // Anchoring is terminal (P9.10): once the did:btco alias is listed it never changes or goes,
+  // and an Original anchored without a did:webvh alias never gains one.
+  const anchoredTo = ctx.previous ? satOf(ctx.previous.asset.aliases) : undefined;
+  if (anchoredTo !== undefined) {
+    if (satOf(asset.aliases) !== anchoredTo) invalid("STATE_ANCHOR", "an anchored Original names its sat for good (P9.10)");
+    if (before === undefined && now !== undefined) invalid("STATE_ANCHOR", "an Original anchored without a web alias never gains one (P9.10)");
   }
 
   // Deactivation agrees in both directions (P6.5).
