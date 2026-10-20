@@ -108,6 +108,11 @@ describe('resolution (did:btco method v0.2.0)', () => {
     expect((await failing.resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
   });
 
+  test('a read during which the chain tip moved is unresolvable', async () => {
+    const moved = snapshot([version(10)], { tipAfter: { height: 101, hash: 'dd'.repeat(32) } });
+    expect((await resolver(moved).resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
+  });
+
   test('a DID for another network than the read is refused', async () => {
     expect((await resolver(snapshot([version(10)])).resolve(`did:btco:${SAT}`)).resolutionMetadata.error).toBe('networkMismatch');
     expect((await resolver(snapshot([])).resolve('did:btco:x')).resolutionMetadata.error).toBe('invalidDid');

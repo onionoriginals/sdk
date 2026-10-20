@@ -44,9 +44,9 @@ export interface OrdinalsClientOptions {
  * indexer), so a `content_url` it returns must never be followed to an
  * arbitrary host or scheme — that is a Server-Side Request Forgery vector
  * (e.g. http://169.254.169.254/… cloud metadata, file:///…). Relative URLs
- * resolve against the endpoint and stay same-origin.  * hardening in OrdHttpProvider and OrdinalsClientProviderAdapter, which
- * protected the adapter but left this client exposed on the SignetProvider
- * read path (issue #343).
+ * resolve against the endpoint and stay same-origin. Mirrors the #265/#322
+ * hardening in OrdHttpProvider; before it, this client was exposed on the
+ * SignetProvider read path (issue #343).
  */
 function resolveSameOrigin(candidate: string, baseUrl: string): string {
   let parsed: URL;
