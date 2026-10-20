@@ -110,7 +110,7 @@ export function createOriginalsRoutes(deps: {
     const bytes = new Uint8Array(await req.arrayBuffer());
     if (bytes.byteLength > MAX_UPLOAD_BYTES) return json({ error: 'payload_too_large' }, 413);
     // The server labels every file itself. A resource takes the media type of
-    // its signed descriptor in the Original's asset log, uploaded first, and
+    // its descriptor in the Original's asset log, uploaded first, and
     // must be the bytes its digest names (P9.7).
     let contentType: string;
     if (hosted.kind === 'resource') {

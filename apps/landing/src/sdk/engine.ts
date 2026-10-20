@@ -237,6 +237,7 @@ export class DemoEngine {
       signer,
     });
     if (result.kind !== "original") throw new Error("The Original was not signed.");
+    this.alias = null;
     this.did = result.original.did;
     this.view = result.original;
     await this.refresh();
@@ -305,8 +306,10 @@ export class DemoEngine {
       slug: target.slug,
       hosting: target.upload,
       ...(this.alias ? { alias: this.alias } : {}),
+      onAlias: (alias) => {
+        this.alias = alias;
+      },
     });
-    this.alias = result.alias;
     this.view = await this.sdk.get(this.did);
     await this.refresh();
     this.emit("asset:published", `Published ${short(this.did)} as ${short(result.alias.did)}`, { alias: result.alias.did, baseUrl: result.baseUrl });

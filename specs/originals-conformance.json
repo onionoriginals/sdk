@@ -963,7 +963,7 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/hosting.test.ts"
       ],
-      "note": "Serving headers: servingHeaders in the SDK, and the landing host labels each resource with its signed media type and serves it nosniff, sandboxed and as an attachment (apps/landing/server/tests/originals-routes.test.ts). Escaping names and metadata in every client remains."
+      "note": "Serving headers: servingHeaders in the SDK, and the landing host labels each resource with the media type its uploaded asset log declares and serves it nosniff, sandboxed and as an attachment (apps/landing/server/tests/originals-routes.test.ts). Escaping names and metadata in every client remains."
     }
   ]
 }

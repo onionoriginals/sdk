@@ -12,7 +12,7 @@
  * 3. The hosted files: the alias log and the evidence package unpacked under
  *    `originals/` (hostedFiles), uploaded to the author's own namespace. The
  *    asset log goes before the resources, because the host labels each
- *    resource from its signed descriptor (server/hosted-layout.ts). The files
+ *    resource from its descriptor in the uploaded log (server/hosted-layout.ts). The files
  *    for a checkpoint are deterministic, so a retry repeats the same snapshot
  *    (P9.2).
  */
@@ -71,6 +71,12 @@ export interface PublishInput {
   hosting: HostedUpload;
   /** An alias already published for this Original, when retrying (P9.2). */
   alias?: AliasEvidence;
+  /**
+   * Called with a newly built alias before anything is signed or uploaded, so
+   * the caller can keep it for a retry: once the publish entry lists it, no
+   * other alias can take its place.
+   */
+  onAlias?: (alias: AliasEvidence) => void | Promise<void>;
 }
 
 export interface Published {
@@ -81,9 +87,14 @@ export interface Published {
 }
 
 export async function publishOriginal(input: PublishInput): Promise<Published> {
+  const listed = (await input.sdk.get(input.did)).state.aliases.filter((a) => a.startsWith("did:webvh:"));
+  if (!input.alias && listed.length > 0) {
+    throw new Error(`${input.did} already lists ${listed[0]}; publish again with that alias's log.`);
+  }
   const alias = input.alias ?? (await buildOriginalAlias(input.aliasSigner, { domain: input.domain, slug: input.slug, original: input.did }));
-  const listed = (await input.sdk.get(input.did)).state.aliases.includes(alias.did);
-  const commit = listed ? null : await input.sdk.publish(input.did, { parent: input.parent, author: input.author, signer: input.signer, alias });
+  if (!input.alias) await input.onAlias?.(alias);
+  if (listed.length > 0 && !listed.includes(alias.did)) throw new Error(`${input.did} already lists ${listed[0]}, not ${alias.did}.`);
+  const commit = listed.length > 0 ? null : await input.sdk.publish(input.did, { parent: input.parent, author: input.author, signer: input.signer, alias });
   const baseUrl = didWebvhFilesUrl(alias.did);
   const baseKey = baseUrl.slice("https://".length);
   const files = [...(await hostedFiles(input.sdk, input.did, alias))].sort(([a], [b]) => uploadOrder(a) - uploadOrder(b) || a.localeCompare(b));
