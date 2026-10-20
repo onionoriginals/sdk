@@ -19,14 +19,20 @@ The Originals journey asserts each step on real transactions:
    ownership of the reveal output (P9.11, P9.16).
 2. An edit is reinscribed on the same sat by spending the output that holds it
    (P9.12, P9.13).
-3. A pair whose first funding UTXO holds another sat is refused.
+3. The head Bitcoin already shows is not inscribed again (`HEAD_NOT_NEXT`,
+   P9.13).
 4. A reorganisation replaces the edit's block with empty blocks: the edit drops
-   to the mempool and the verifier reports `authoritative-source-changed`; the
-   next block includes it again (P9.5).
-5. A crash after the commit broadcast leaves a durable recovery record;
-   resuming rebroadcasts the same signed pair, and the published boundary
-   advances only when the reveal is mined (P9.4, P9.6).
-6. An entry the author signs but nobody inscribes is never current (P9.12).
+   to the mempool and the verifier reports `authoritative-source-changed`
+   against the version Bitcoin showed before (the read retains only what
+   Bitcoin accepted); the next block includes it again (P9.5). The inscription
+   clock follows the reorganisation by block hash.
+5. A pair whose first funding UTXO holds another sat is refused (`WRONG_SAT`).
+   A crash after the commit broadcast leaves a durable recovery record; the
+   reveal never reaches the node, and with the commit mined the published
+   boundary does not move. Resuming rebroadcasts the same signed pair, and the
+   inscription Bitcoin then shows is that pair's (P9.4, P9.6).
+6. An entry the author signs but nobody inscribes is never current (P9.12),
+   and an entry after it cannot be inscribed first (`HEAD_NOT_NEXT`).
 
 `REGTEST_RECEIPT=/absolute/path/receipt.json` writes receipts (the Originals
 journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Core
