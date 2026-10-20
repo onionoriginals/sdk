@@ -568,10 +568,10 @@ layer, once, terminally, to one sat (P9.10):
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
 // The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
-const clock = new InscriptionClock((height) => blockTime(height));          // running max of header times (P9.15)
+const clock = new InscriptionClock(async (height) => ({ time, hash }));   // running max of header times (P9.15), reorg-aware
 const evidence = await satEvidence(snapshot, { clock, ownerConfirmations });  // from the SDK's sat reader
 const view = await sdk.get(did, { bitcoin: [evidence] });                     // also load(zip, { bitcoin })
-view.report.anchoring; // anchor, conflicting anchors, accepted and ignored inscriptions (with reasons), tip
+view.report.anchoring; // anchor, conflicting and unresolved anchors, accepted and ignored inscriptions (with reasons), tip
 view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes }
 ```
 
@@ -586,14 +586,22 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 - Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
   from 1 confirmation (depth reported) when it extends the head at a strictly
   greater height and passes the author checks at its inscription time
-  (P9.15). Entries only in a copy are not current. The anchor is the first
-  valid anchoring entry in chain order across the sats supplied; others are
-  conflicting anchors, never current (P9.16).
+  (P9.15). Entries only in a copy are not current, and a copy can neither fork
+  nor make stale an anchored log. Only the anchor and accepted inscriptions
+  have `anchored` ordering. The anchor is the first valid anchoring entry in
+  chain order across the sats supplied; others, on the same sat or another,
+  are conflicting anchors, never current (P9.16). An earlier anchoring entry
+  the copy cannot check (too little or a different history) is listed as
+  `unresolved`, and the result is not current (`earlier-anchor-unresolved`).
+- The clock checks each inscription's block hash: it rewinds past a
+  reorganisation and refuses a block no longer on the chain
+  (`BLOCK_NOT_ON_CHAIN`).
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).
 - An anchored log with no Bitcoin evidence is `unverified`, and one whose
-  evidence holds no valid anchor is `not-anchored`; neither is current. A
+  evidence holds no valid anchor is `not-anchored`; neither is current, and
+  neither advances the retained versionId. A
   retained versionId that Bitcoin no longer includes is reported as
   `authoritative-source-changed`, and an author DID version that would reject
   an accepted inscription as `retroactive-revocation-conflict`.
