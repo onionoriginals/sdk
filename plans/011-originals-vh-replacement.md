@@ -39,7 +39,7 @@ A new package **`@originals/vh`** (`packages/vh`) replaces `@originals/cel`. Eac
 bytes ─▶ strict JSON lines ─▶ VH-Log engine (specialisation = originals:1.0)
           │  hash chain, SCID, versionTime, parameters, proof shape/suite
           │  controller-keys hook ─▶ AuthorDidResolver(did, versionId) ─▶ P5.3 binding
-          │  witness hook (if active) ─▶ did:key witness proofs, threshold, P9.9 equality
+          │  witness parameter ─▶ refused unless {} (no witnesses, Q14)
           │  authoritative-source hook (anchored) ─▶ sat assembly P9.13/P9.15/P9.16
           ▼
      Originals state rules (P4.x, P5.1, P5.8, P6.5, P9.10) ─▶ derived DID doc (P3.8)
@@ -102,8 +102,8 @@ const view = await sdk.load(pkg);                                   // read-only
 Rules this implies:
 - `transitions` MUST list exactly the resources whose digest changed against the parent's asset state, and is empty at genesis except `from: null`. An unchanged digest does not advance a version (P4.4).
 - The migrate entry names its sat by adding a `did:btco:` alias.
-- `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Witness proofs use `eddsa-jcs-2022` only, with did:key Ed25519 (see S3). It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
-- Files: `did.jsonl` and `did-witness.json`, as did:vh requires at a `src` location.
+- `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Asset logs use no witnesses (Q14); S3's witness-proof suite applies only if that is ever revisited. It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
+- Files: `did.jsonl`, as did:vh requires at a `src` location (no `did-witness.json`, Q14).
 - Further PROVISIONAL rules, as implemented in PR 3:
   - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Their order is fixed at genesis.
   - Media types are RFC 6838 `type/subtype`, without parameters. `size` is the exact byte length.
@@ -118,7 +118,7 @@ Rules this implies:
 The owner chose ordinary DID document constructs over a dedicated declaration (Q6):
 
 - **Keys.** Any verification method embedded in the author DID document and listed under `assertionMethod` may sign the author's Originals. P5.3 is checked as: embedded (not a reference into another document), in `assertionMethod`, `controller` equal to the author DID, type `Multikey`, and a `publicKeyMultibase` that verifies the proof. A key that is also an update key of the author DID's own log is rejected, because that is still checkable (P5.11).
-- **Witnesses.** The witness list and threshold are a standard DID service:
+- **Witnesses — superseded by Q14.** Asset logs use no witnesses, so author DIDs declare none for Originals. The design below was the PR 7a proposal and is kept for the record:
 
 ```json
 { "id": "<authorDid>#originals-witnesses", "type": "OriginalsWitnesses",
@@ -167,8 +167,9 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **4** | 1 | SDK local slice: `create`/`edit`/`deactivate`/`package`/`load`, drafts, durable store, signer contract, evidence package codec (ZIP), new CLI (`originals`) | Fresh-process test: package in one process, verify in another with no key and network disabled; interrupted-commit test; signer-rejection test |
 | **5** | 1 | **Deletion**: `packages/cel` entirely; SDK `v3/`, `core/`, `lifecycle/`, `migration/`, `cel/`, `examples/`, `playground/`, `verify/`, previous-SDK tests and `docs/history/previous-sdk`. The non-history modules stay (`vc/`, `storage/`, `events/`, `kinds/`, `resources/`, DID, Bitcoin and providers; owner decision Q12), with the cel utilities they need moved into the SDK. The landing runs on the new SDK: signed-in authors sign with their did:webvh `#key-1` (auth pulled forward from PR 8, Q12), and signed-out visitors use a browser-local did:vh. Hosted, Bitcoin, `/explore` and `/me` are off (Q4) | Full repo build/typecheck/lint/test green; `verify:esm`, `verify:browser` |
 | **6** | 2 | Author-DID rotation and deactivation, incomplete identity evidence, freshness policy, retained versionIds per Original and author DID, forks reported as unresolved conflicts (Q5) | §12 rows: removed key (unwitnessed), added key without asset entry, stale author history, old prefix as current, divergent branches, older-prefix import |
-| **7** | 3 | Witnesses: reference witness (P9.8 obligations, 60 s freshness, last-approved tracking), witness client, publish entry (activate witnesses + did:webvh alias, P3.6 two-way binding), hosted layout, exact-snapshot public reader, P9.7 serving headers | Witness rows; hosted mixed snapshot; alias both directions; SSRF/redirect/size rows |
-| **8** | 3 | `@originals/auth`: separate Originals key (P5.11) + declaration service on author DID; landing hosted path; Boop adapter notes (Boop repo is out of this repo — documented, not changed) | auth tests; landing hosted journey |
+| **7a** | 3 | No witnesses (Q14, S9): the asset log refuses a witness parameter; witness-only §12 rows become not-applicable. A witness design (declaration, reference witness, witness service) was built in PRs #961 and #963 and withdrawn | Witness parameter refused; registry check for not-applicable rows |
+| **7b** | 3 | Hosting: publish entry (did:webvh alias, P3.6 two-way binding), hosted layout, exact-snapshot public reader, P9.7 serving headers, `@originals/vh/fetch` | Hosted mixed snapshot; alias both directions; SSRF/redirect/size rows |
+| **8** | 3 | `@originals/auth` and the landing's hosted path: author-controlled alias on originals.build (Q13), landing server hosting the layout with P9.7 headers, publish flow behind `hostedPublication` (off); Boop adapter notes (Boop repo is out of this repo — documented, not changed) | auth tests; landing hosted journey on fixtures |
 | **9** | 4 | Bitcoin representation proposal → then did:btco (author + alias), sat assembly (P9.13), inscription-time checks (P9.15), anchor selection (P9.16), ownership report (P9.11) against fixtures | Bitcoin §12 rows on fixtures |
 | **10** | 4 | Writer/provider: prepare/submit/retry/durable boundary, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
 
@@ -214,9 +215,15 @@ a trusted publisher can be registered for it.
   - *Spec edits needed:*
     - P5.3: "is listed under assertionMethod" (drop "and in that version's Originals declaration").
     - P5.11: "SHOULD be used only for Originals entries". Keep "MUST NOT be an updateKey of the author DID's own log".
-    - P9.9: the declaration is the witness list and threshold, carried in a DID service.
+    - P9.9: superseded by S9 (no witnesses).
     - §12 C12-60: "Author key not under assertionMethod: author binding failure".
     - D2 and D3: record the encoding.
+
+- **S9 — owner decision Q14 departs from P9.8, P9.9 and related rules (witnesses).**
+  - *Issue:* once activated, witnesses cannot be removed (P9.9), and every later entry, including the one that replaces them and the anchoring entry (P9.10), needs threshold approval from the current set. Losing a threshold of witnesses permanently freezes every hosted Original that uses them. Originals witnesses are also stateful services beyond did:webvh witnesses (60-second author DID reads, a last-approved ledger, independence from the host).
+  - *Decision:* asset logs do not use witnesses. Unanchored Originals have claimed ordering only; Bitcoin anchoring gives proven ordering and a single history. Author DIDs keep their own method's witnesses.
+  - *Accepted consequences:* a stolen author key can create a branch before its removal (never current after removal, P7.9; an unresolved fork until anchoring, Q5); the first valid anchor wins (P9.16), so a key thief holding a sat can win that race; a host can serve an old prefix to a first-time reader (retained versionIds protect repeat readers, P7.8).
+  - *Spec edits needed:* P9.8 (drop the hosted-witness requirement and witness obligations); P9.9 (drop the witness list; an asset log entry that sets a non-empty witness parameter MUST be rejected); P9.10 (drop the witnessed-migrate branch); P9.16 (every anchor is unwitnessed); P5.10 and P6.5 (drop the witness-refusal clauses); P7.6 (drop the activation clause); section 2, D3 and section 11 (ordering is claimed off-chain, proven on anchoring); section 12 (rows C12-35, 36, 39, 42, 53, 54, 55, 56 and 71 moot; a new row for a refused witness parameter). Sent to the spec thread on 2026-10-19.
 
 ## 5. bip340-jcs-2025: build vs. depend
 
@@ -241,3 +248,5 @@ The algorithm itself is small: JCS, then `sha256(sha256(config) ‖ sha256(doc))
 - **Q10 — VH-Log PR 1.** It is treated as merged too (witnesses verify a candidate without its own witness threshold).
 - **Q11 — `@originals/vh` on npm.** Public, published with the SDK's releases (section 3.1).
 - **Q12 — PR 5 shape (2026-10-18).** One PR. The non-history SDK modules stay. The landing's signed-in authoring moves forward from PR 8: the user's did:webvh already keeps its Turnkey authorship key (`#key-1`, assertionMethod) separate from its identity update key (`#key-0`), so it signs Originals directly.
+- **Q13 — hosted landing (2026-10-19).** Signed-in authors' aliases live on originals.build, and each alias log's update key is in the author's Turnkey wallet (P3.7). `hostedPublication` stays off until the owner's public-host proof passes. (Its witness-service part is superseded by Q14.)
+- **Q14 — no witnesses (2026-10-19; S9).** Asset logs do not use witnesses. Anyone who needs proven ordering anchors on Bitcoin. This withdraws the PR 7a witness design and the PR 8a witness service, supersedes Q7 for asset logs, and leaves Q13's alias decision in place.

@@ -41,12 +41,15 @@ ambiguous or conflict (S1–S8). Where a finding blocks implementation, work on
 that rule stops until the spec is corrected. Code never silently diverges from
 the pinned text.
 
-Three owner decisions (plan section 6) depart from the pinned text until the
+These owner decisions (plan section 6) depart from the pinned text until the
 spec is edited:
 - Only Bitcoin settles a fork; P6.6's abandonment declarations are dropped (S1).
-- Author keys are ordinary `assertionMethod` keys, and the witness list is a
-  DID service (S8).
-- P9.9's witness-parameter rule is reworded (S2).
+- Author keys are ordinary `assertionMethod` keys (S8).
+- Asset logs do not use witnesses; unanchored ordering is claimed only, and
+  Bitcoin anchoring gives proven ordering (S9, Q14). This supersedes S2's
+  rewording of P9.9 for asset logs.
+
+Rows these decisions make moot are `not-applicable` in the conformance matrix.
 
 Each departure is cited in code where it applies.
 

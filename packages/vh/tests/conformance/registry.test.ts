@@ -5,8 +5,10 @@ import { join } from "node:path";
 /**
  * Keeps specs/originals-conformance.json honest: a section 12 row is cited by
  * a test (as C12-NN) exactly when its status says it is partly or fully covered.
+ * A row an owner decision makes moot is not-applicable, names the decision in
+ * its note, and is cited by no test.
  */
-interface Row { id: string; test: string; phases: number[]; status: "todo" | "partial" | "covered"; coveredBy?: string[] }
+interface Row { id: string; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string }
 const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as { rows: Row[] };
 
 function testFiles(dir: string): string[] {
@@ -50,7 +52,14 @@ describe("section 12 conformance registry", () => {
 
   test("no row claims coverage without a citing test", () => {
     for (const row of registry.rows) {
-      if (row.status !== "todo") expect(cited.has(row.id), `${row.id} claims ${row.status}`).toBe(true);
+      if (row.status === "partial" || row.status === "covered") expect(cited.has(row.id), `${row.id} claims ${row.status}`).toBe(true);
+    }
+  });
+
+  test("a not-applicable row names the owner decision and is cited by no test", () => {
+    for (const row of registry.rows.filter((r) => r.status === "not-applicable")) {
+      expect(row.note ?? "", `${row.id} note`).toMatch(/owner decision Q\d+/i);
+      expect(cited.has(row.id), `${row.id} is not-applicable but cited`).toBe(false);
     }
   });
 });

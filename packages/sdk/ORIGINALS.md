@@ -22,7 +22,7 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
   did:webvh and did:btco. Every entry carries exactly one proof, by an
   `assertionMethod` key of the author DID at the author DID version the entry
   names. That key must not also be an update key of the author DID's own log.
-  A hosted author declares its witnesses in a DID service (plan 011, S8). Accepted
+  Asset logs do not use witnesses (owner decision Q14). Accepted
   cryptosuites are `eddsa-jcs-2022` and `bip340-jcs-2025`.
 - Keys rotate in the author DID only. The asset log has no update keys.
 - The DID document of the did:vh is derived from the log. It is never stored or
@@ -93,7 +93,7 @@ The `originals` command verifies a package offline:
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · not-established · stale against the retained versionId (P7.8) |
 | `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure |
-| `ordering` | claimed · witnessed · anchored (P7.6) |
+| `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
@@ -150,14 +150,24 @@ replaces stored author DID evidence with an older or diverging history.
 Stores implement `getRetained`/`putRetained` and `putBranch`/`getBranches` in
 addition to the phase 1 methods; `MemoryStore` and `FileStore` do.
 
-## Hosted publication and witnesses — phase 3
+## No witnesses (owner decision Q14)
 
-Publishing to the web requires an explicit domain. The publish entry activates
-the witnesses declared in the author DID (at least three, P9.8) and adds a
-did:webvh alias. The alias is its own small log, bound in both directions with
-the did:vh (P3.6). The public reader verifies one exact snapshot (P9.1).
-Fetches apply the VH-Log retrieval rules (P8.5), and active content is served
-isolated (P9.7). The witness parameter follows the reworded P9.9 (plan 011, S2).
+Asset logs never activate VH witnesses: an entry that sets the witness
+parameter to anything but `{}` is rejected (`WITNESS_NOT_PERMITTED`). On the
+local and web layers an Original is author-signed with claimed ordering.
+Accepted consequences: a stolen author key can make a branch before its
+removal, which is never current once the key is removed (P7.9) but stays an
+unresolved fork until anchoring; the first valid anchor wins (P9.16), so
+authors who need protection should anchor early; and a host can show an old
+prefix to a first-time reader (retained versionIds protect repeat readers).
+Bitcoin anchoring gives proven ordering, a single history and an owner.
+
+## Hosted publication — phase 3
+
+Publishing to the web requires an explicit domain and adds a did:webvh alias.
+The alias is its own small log, bound in both directions with the did:vh
+(P3.6). The public reader verifies one exact snapshot (P9.1). Fetches apply the
+VH-Log retrieval rules (P8.5), and active content is served isolated (P9.7).
 
 ## Bitcoin anchoring and ownership — phase 4
 
@@ -165,6 +175,6 @@ An Original can be anchored from the local or the web layer, once, terminally,
 to one sat (P9.10). After that, the inscriptions on the sat decide the log
 (P9.13), each checked against the author DID's state at its inscription time
 (P9.15). The inscription encoding (D6) will be proposed before any writer code
-is written. Ownership is reported as provisional unless more than half of the
-witnesses approved the anchor (P9.16). Spending requires the owner's explicit
+is written. With no witnesses (Q14), the anchor is the first valid anchoring
+entry in chain order, and ownership is reported as provisional (P9.16). Spending requires the owner's explicit
 approval, and release evidence comes from real Core/ord regtest.

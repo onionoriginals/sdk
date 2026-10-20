@@ -470,8 +470,17 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
     const publish = await resign(log[2], { ...log[2].state, transitions: [], operation: "publish" }, sign);
     failedWith(await report([...log, publish], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
-    const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: { threshold: 1, witnesses: [{ id: `did:key:${seeded(5).publicKeyMultibase}` }] } });
-    failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_SUPPORTED_YET", "unsupported-profile");
+  });
+
+  test("an asset log never activates witnesses; an empty witness parameter is a no-op (owner decision Q14)", async () => {
+    const { alice, log, sign } = await harbor();
+    const witnesses = { threshold: 2, witnesses: [5, 6, 7].map((n) => ({ id: `did:key:${seeded(n).publicKeyMultibase}` })) };
+    const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: witnesses });
+    failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_PERMITTED", "invalid-evidence");
+    const empty = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: {} });
+    const r = await report([...log, empty], [alice], { freshness: "asserted" });
+    expect(r.history.status).toBe("valid");
+    expect(r.ordering).toBe("claimed");
   });
 
   test("digests are multibase base58btc sha2-256 multihashes (PROVISIONAL, D4)", () => {

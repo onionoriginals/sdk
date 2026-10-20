@@ -1,5 +1,5 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision.",
   "spec": {
     "repository": "aviarytech/originals-spec",
     "commit": "d64fdbe4aef3d12e26109e7eeab28da569169e05",
@@ -108,7 +108,7 @@
       "coveredBy": [
         "packages/vh/tests/freshness.test.ts"
       ],
-      "note": "Unwitnessed case: historically authorized at the named version, ordering claimed, never current (P7.9). Witnessed (PR 7) and anchored (PR 9) cases remain."
+      "note": "Unwitnessed case: historically authorized at the named version, ordering claimed, never current (P7.9). The witnessed case is moot under owner decision Q14; the anchored case arrives in PR 9."
     },
     {
       "id": "C12-09",
@@ -307,8 +307,8 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Owner decision Q5 (plan S1): declarations are dropped. Proposed replacement row: fork not on Bitcoin is an unresolved conflict, no branch current. Pending a spec edit."
+      "status": "not-applicable",
+      "note": "Owner decision Q5 (plan S1): fork declarations are dropped; C12-23 covers the replacement: a fork not on Bitcoin is an unresolved conflict with no current branch. Pending a spec edit."
     },
     {
       "id": "C12-25",
@@ -317,8 +317,8 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Owner decision Q5 (plan S1): declarations are dropped. Proposed replacement row: fork not on Bitcoin is an unresolved conflict, no branch current. Pending a spec edit."
+      "status": "not-applicable",
+      "note": "Owner decision Q5 (plan S1): fork declarations are dropped; C12-23 covers the replacement: a fork not on Bitcoin is an unresolved conflict with no current branch. Pending a spec edit."
     },
     {
       "id": "C12-26",
@@ -408,7 +408,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-36",
@@ -417,7 +418,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-37",
@@ -444,7 +446,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-40",
@@ -453,8 +456,8 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Owner decision Q5 (plan S1): declarations are dropped, so this row is moot. Pending a spec edit."
+      "status": "not-applicable",
+      "note": "Owner decision Q5 (plan S1): fork declarations are dropped, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-41",
@@ -472,7 +475,8 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-43",
@@ -481,7 +485,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Under owner decision Q14 no entry carries witness proofs; this becomes: an entry inscribed on the anchoring sat is accepted on its author signature (PR 9)."
     },
     {
       "id": "C12-44",
@@ -514,7 +519,7 @@
         "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "Unwitnessed case: historically valid, never current (P7.9). Witnessed and anchored cases in PRs 7 and 9."
+      "note": "Unwitnessed case: historically valid, never current (P7.9). The witnessed case is moot under owner decision Q14; the anchored case arrives in PR 9."
     },
     {
       "id": "C12-47",
@@ -577,7 +582,8 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-54",
@@ -586,7 +592,8 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-55",
@@ -595,7 +602,8 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-56",
@@ -605,7 +613,8 @@
         2,
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-57",
@@ -620,7 +629,7 @@
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "Unanchored case: a deactivated author DID makes the Original non-current. Witness refusal (PR 7) and anchored case (PR 9) remain."
+      "note": "Unanchored case: a deactivated author DID makes the Original non-current. Witness refusal is moot under owner decision Q14; the anchored case arrives in PR 9."
     },
     {
       "id": "C12-58",
@@ -772,7 +781,8 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "not-applicable",
+      "note": "Owner decision Q14 (plan S9): Originals asset logs do not use witnesses, so this row is moot. Pending a spec edit."
     },
     {
       "id": "C12-72",

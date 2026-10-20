@@ -2,9 +2,9 @@
  * A file-system store (Node only; `@originals/sdk/originals/fs`).
  *
  *   <root>/originals/<scid>/did.jsonl   the committed log
- *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl
  *                                       valid branches that diverge from it
+ *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
  *
