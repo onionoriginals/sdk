@@ -193,6 +193,77 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
   });
 });
 
+describe("review fixes (PR 9a)", () => {
+  test("a copy holding entries past the Bitcoin head neither replaces it, forks it nor makes it stale", async () => {
+    const { alice, copy, anchor, ref, sign } = await anchored();
+    const ahead = await updateOriginal(anchor, { versionTime: time(20), name: "Only in a copy", author: ref, sign });
+    const sideways = await updateOriginal(anchor, { versionTime: time(21), name: "Another copy", author: ref, sign });
+    const copies = [{ source: "a", log: serializeLog([...copy, ahead]) }, { source: "b", log: serializeLog([...copy, sideways]) }];
+    const r = await verify(copy, alice, [sat([inscribe(anchor, 10)])], { copies });
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.fork).toBeNull();
+    expect(r.assetFreshness.status).toBe("asserted");
+    expect(r.ordering).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("an entry after the anchor is anchored only when Bitcoin accepted it", async () => {
+    const { alice, copy, anchor, ref, sign } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Inscribed", author: ref, sign });
+    const r = await verify([...copy, next], alice, [sat([inscribe(anchor, 10), inscribe(next, 20)])], { checkpoint: copy[1].versionId });
+    expect(r.ordering).toBe("claimed"); // before the anchor
+    const at = await verify([...copy, next], alice, [sat([inscribe(anchor, 10), inscribe(next, 20)])], { checkpoint: next.versionId });
+    expect(at.ordering).toBe("anchored");
+  });
+
+  test("an anchored log read without Bitcoin evidence, or with no anchor on it, never advances the retained version", async () => {
+    const { alice, copy, anchor, ref, sign } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Not inscribed", author: ref, sign });
+    const unverified = await verify([...copy, next], alice, undefined, { retained: { original: copy[1].versionId } });
+    expect(unverified.retain.original).toBe(copy[1].versionId);
+    const none = await verify([...copy, next], alice, [sat([])]);
+    expect(none.retain.original).toBeNull();
+    const inscribed = await verify([...copy, next], alice, [sat([inscribe(anchor, 10)])]);
+    expect(inscribed.retain.original).toBe(anchor.versionId);
+  });
+
+  test("an earlier anchoring entry the copy cannot check leaves the anchor unresolved, not current", async () => {
+    const { alice, copy, genesis, ref, sign, anchor } = await anchored();
+    const branch = await updateOriginal(genesis, { versionTime: time(3), name: "Another history", author: ref, sign });
+    const earlier = await updateOriginal(branch, { versionTime: time(9), aliases: [SAT], author: ref, sign });
+    const elsewhere = await updateOriginal(branch, { versionTime: time(9), aliases: [OTHER_SAT], author: ref, sign });
+    for (const [evidence, unchecked] of [
+      [[sat([inscribe(earlier, 9), inscribe(anchor, 10)])], earlier],
+      [[sat([inscribe(anchor, 10)]), sat([inscribe(elsewhere, 9)], OTHER_SAT)], elsewhere],
+    ] as const) {
+      const r = await verify(copy, alice, [...evidence]);
+      expect(r.anchoring?.anchor?.versionId).toBe(anchor.versionId);
+      expect(r.anchoring?.unresolved).toEqual([expect.objectContaining({ versionId: unchecked.versionId, height: 9 })]);
+      expect(r.reasons).toContain("earlier-anchor-unresolved");
+      expect(r.current).toBe(false);
+    }
+    // A later one the copy cannot check changes nothing.
+    const later = await verify(copy, alice, [sat([inscribe(anchor, 10), inscribe(earlier, 11)])]);
+    expect(later.anchoring?.unresolved).toEqual([]);
+  });
+
+  test("C12-36: a second anchoring entry on the same sat is a conflicting anchor", async () => {
+    const { alice, copy, renamed, anchor, ref, sign } = await anchored();
+    const second = await updateOriginal(renamed, { versionTime: time(11), name: "Second anchor", aliases: [SAT], author: ref, sign });
+    const r = await verify(copy, alice, [sat([inscribe(anchor, 10), inscribe(second, 12)])]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.conflicting).toEqual([expect.objectContaining({ sat: SAT, versionId: second.versionId, height: 12 })]);
+    expect(r.anchoring?.ignored).toEqual([]);
+  });
+
+  test("Bitcoin evidence for a log that does not parse is reported as unused", async () => {
+    const { alice, anchor } = await anchored();
+    const r = await verifyOriginal({ log: "not a log\n", authors: [alice.evidence()], now: NOW, bytes: allBytes, bitcoin: [sat([inscribe(anchor, 10)])] });
+    expect(r.reasons).toContain("bitcoin-evidence-unused");
+    expect(r.current).toBe(false);
+  });
+});
+
 describe("author checks at inscription time (P9.15)", () => {
   test("C12-41 (anchored): an inscription made after the author removed its key is rejected", async () => {
     const { alice, copy, anchor, ref, sign } = await anchored();

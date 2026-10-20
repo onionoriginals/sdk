@@ -353,13 +353,16 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries) => verifyLog(entries, verifyOptions), histories);
     input = assembly.entries;
   }
+  const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
   const supplied = (): Promise<LogVerification> =>
     typeof input === "string" ? verifyLogText(input, verifyOptions) : verifyLog(input, verifyOptions);
   let log: LogVerification;
   let fork: OriginalsFork | null = null;
   let copies: CopyReport[] = [];
   let stale = false;
-  if ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined) {
+  // Once anchored, Bitcoin decides from the anchor on: a copy can neither fork the log nor
+  // make it stale (P9.13, P9.16). A retained version Bitcoin dropped is reported below.
+  if (!onBitcoin && ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined)) {
     const text = typeof input === "string" ? input : input.map((e) => `${JSON.stringify(e)}\n`).join("");
     const resolution = await resolveCopies({ source: "supplied", log: text }, options.copies ?? [], {
       ...verifyOptions,
@@ -379,8 +382,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const failure = log.failure ? toFailure(log.failure.index, log.failure.versionId, log.failure.error) : undefined;
 
   const head = log.entries[log.entries.length - 1];
-  const anchorVersion = assembly?.report.anchor ? versionNumberOf(assembly.report.anchor.versionId) : Infinity;
-  const anchored = (v: VerifiedEntry | undefined) => v !== undefined && v.versionNumber >= anchorVersion;
+  // Anchored ordering only for what Bitcoin accepted: the anchor and the inscriptions after it.
+  const inscribed = new Set(onBitcoin ? [onBitcoin.anchor!.versionId, ...onBitcoin.accepted.map((a) => a.versionId)] : []);
+  const anchored = (v: VerifiedEntry | undefined) => v !== undefined && inscribed.has(v.entry.versionId);
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
@@ -471,7 +475,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     historicallyAuthorizedOnly: anchorVersion === Infinity ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
     current: false,
     reasons,
-    retain: { original: retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null), authors: retainedAuthors },
+    // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
+    retain: {
+      original: assembly && !onBitcoin ? (options.retained?.original ?? null) : retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null),
+      authors: retainedAuthors,
+    },
   };
   for (const h of histories) {
     const latestId = h.versions[h.versions.length - 1]?.versionId;
@@ -493,6 +501,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (report.historicallyAuthorizedOnly.length > 0) reasons.push("historically-authorized-only");
   if (assembly?.report.status === "unverified") reasons.push("bitcoin-evidence-missing");
   if (assembly?.report.status === "not-anchored") reasons.push("anchor-not-found-on-bitcoin");
+  if (onBitcoin && onBitcoin.unresolved.length > 0) reasons.push("earlier-anchor-unresolved");
+  if (!raw && (options.bitcoin?.length ?? 0) > 0) reasons.push("bitcoin-evidence-unused");
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
     if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");

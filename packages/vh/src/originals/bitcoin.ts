@@ -11,7 +11,10 @@
  * - The history before the anchor comes from a copy of the log, and the
  *   anchoring entry must extend it (decision A).
  * - The anchor is the first valid anchoring entry, in chain order, inscribed
- *   on the sat it names. Any other is a conflicting anchor (P9.16).
+ *   on the sat it names. Any other, on that sat or another, is a conflicting
+ *   anchor (P9.16). An earlier anchoring entry the copy cannot check, because
+ *   it holds too little history or a different one, leaves the anchor
+ *   unresolved.
  * - After the anchor, an inscription is accepted when it extends the head, at
  *   a strictly greater height (P9.13), and passes the author checks at its
  *   inscription time (P9.15). Everything else is ignored and reported.
@@ -88,6 +91,11 @@ export interface AnchoringReport {
   anchor: Placed | null;
   /** Valid anchoring entries other than the anchor; never current (P9.16). */
   conflicting: Placed[];
+  /**
+   * Anchoring entries before the anchor in chain order that the copy cannot
+   * check. While any remain, one of them may be the real anchor (P9.16).
+   */
+  unresolved: Placed[];
   /** Inscriptions accepted after the anchor, in chain order. */
   accepted: Placed[];
   ignored: Array<{ sat: string; inscription: string; versionId?: string; reason: IgnoredReason }>;
@@ -194,9 +202,27 @@ export async function assembleFromBitcoin(copy: unknown[], evidence: SatEvidence
     return entry;
   };
 
-  // The first valid anchoring entry on each sat that names it and extends the copy.
+  const place = (sat: string, i: SatInscription, entry: unknown): Placed => ({
+    sat, inscription: i.id, versionId: (entry as LogEntry).versionId, height: i.height, confirmations: i.confirmations, inscriptionTime: i.inscriptionTime,
+  });
+  /** The anchoring entry's log when `entry` is a valid anchor on `sat` extending the copy, else why not. */
+  const asAnchor = async (sat: string, i: SatInscription, entry: LogEntry): Promise<unknown[] | IgnoredReason> => {
+    const named = satNamedBy(entry);
+    if (named === undefined) return "not-an-anchoring-entry";
+    if (named !== sat) return "names-another-sat";
+    const n = versionNumberOf(entry.versionId);
+    if (!Number.isInteger(n) || n < 2 || n - 1 > prefix.length) return "does-not-extend-copy";
+    const base = [...prefix.slice(0, n - 1), entry];
+    const v = await verify(base);
+    if (!passes(v, base.length)) return v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-copy" : "invalid-entry";
+    return checkAtInscriptionTime(entry, i.inscriptionTime, histories) ?? base;
+  };
+
+  // The first valid anchoring entry on each sat that names it and extends the copy. An
+  // anchoring entry on its sat that the copy cannot check is kept, in case it came first.
   interface Candidate { evidence: SatEvidence; inscription: SatInscription; entries: unknown[]; rest: SatInscription[] }
   const candidates: Candidate[] = [];
+  const unchecked: Array<{ inscription: SatInscription; placed: Placed }> = [];
   for (const e of evidence) {
     const sat = parseBtcoAlias(e.sat).did;
     const ordered = [...e.inscriptions].sort(chainOrder);
@@ -204,45 +230,26 @@ export async function assembleFromBitcoin(copy: unknown[], evidence: SatEvidence
       const i = ordered[k];
       const entry = usable(sat, i);
       if (!entry) continue;
-      const named = satNamedBy(entry);
-      if (named === undefined) {
-        ignore(sat, i, "not-an-anchoring-entry", entry);
+      const result = await asAnchor(sat, i, entry);
+      if (typeof result === "string") {
+        ignore(sat, i, result, entry);
+        if (result === "does-not-extend-copy") unchecked.push({ inscription: i, placed: place(sat, i, entry) });
         continue;
       }
-      if (named !== sat) {
-        ignore(sat, i, "names-another-sat", entry);
-        continue;
-      }
-      const n = versionNumberOf(entry.versionId);
-      if (!Number.isInteger(n) || n < 2 || n - 1 > prefix.length) {
-        ignore(sat, i, "does-not-extend-copy", entry);
-        continue;
-      }
-      const base = [...prefix.slice(0, n - 1), entry];
-      const v = await verify(base);
-      if (!passes(v, base.length)) {
-        ignore(sat, i, v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-copy" : "invalid-entry", entry);
-        continue;
-      }
-      const author = checkAtInscriptionTime(entry, i.inscriptionTime, histories);
-      if (author) {
-        ignore(sat, i, author, entry);
-        continue;
-      }
-      candidates.push({ evidence: e, inscription: i, entries: base, rest: ordered.slice(k + 1) });
+      candidates.push({ evidence: e, inscription: i, entries: result, rest: ordered.slice(k + 1) });
       break;
     }
   }
 
   const named = copyAnchor >= 0 ? satNamedBy(copy[copyAnchor])! : undefined;
-  const place = (sat: string, i: SatInscription, entry: unknown): Placed => ({
-    sat, inscription: i.id, versionId: (entry as LogEntry).versionId, height: i.height, confirmations: i.confirmations, inscriptionTime: i.inscriptionTime,
-  });
   if (candidates.length === 0) {
     const status = evidence.length === 0 ? "unverified" : "not-anchored";
     return {
       entries: status === "unverified" ? copy : prefix,
-      report: { sat: named ?? evidence[0]?.sat ?? "", status, anchor: null, conflicting: [], accepted: [], ignored, superseded: 0, uniqueness: "not-established", tip: evidence[0]?.tip ?? null },
+      report: {
+        sat: named ?? evidence[0]?.sat ?? "", status, anchor: null, conflicting: [], unresolved: unchecked.map((u) => u.placed), accepted: [], ignored, superseded: 0,
+        uniqueness: "not-established", tip: evidence[0]?.tip ?? null,
+      },
       owner: null,
       rejectedByAuthorState,
     };
@@ -254,6 +261,7 @@ export async function assembleFromBitcoin(copy: unknown[], evidence: SatEvidence
   const anchorEntry = chosen.entries[chosen.entries.length - 1];
   const anchor = place(sat, chosen.inscription, anchorEntry);
   const conflicting = others.map((c) => place(parseBtcoAlias(c.evidence.sat).did, c.inscription, c.entries[c.entries.length - 1]));
+  const unresolved = unchecked.filter((u) => chainOrder(u.inscription, chosen.inscription) < 0).map((u) => u.placed);
 
   const head = [...chosen.entries];
   const accepted: Placed[] = [];
@@ -266,14 +274,15 @@ export async function assembleFromBitcoin(copy: unknown[], evidence: SatEvidence
       continue;
     }
     const n = versionNumberOf(entry.versionId);
-    if (n !== head.length + 1) {
-      ignore(sat, i, "does-not-extend-head", entry);
-      continue;
-    }
     const candidate = [...head, entry];
-    const v = await verify(candidate);
-    if (!passes(v, candidate.length)) {
-      ignore(sat, i, v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", entry);
+    const v = n === head.length + 1 ? await verify(candidate) : null;
+    if (!v || !passes(v, candidate.length)) {
+      // Another valid anchoring entry on this sat is a conflicting anchor (P9.16).
+      if (n - 1 <= prefix.length && Array.isArray(await asAnchor(sat, i, entry))) {
+        conflicting.push(place(sat, i, entry));
+        continue;
+      }
+      ignore(sat, i, !v || v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", entry);
       continue;
     }
     const author = checkAtInscriptionTime(entry, i.inscriptionTime, histories);
@@ -291,7 +300,7 @@ export async function assembleFromBitcoin(copy: unknown[], evidence: SatEvidence
   const owner = chosen.evidence.owner;
   return {
     entries: head,
-    report: { sat, status: "anchored", anchor, conflicting, accepted, ignored, superseded, uniqueness: "not-established", tip: chosen.evidence.tip },
+    report: { sat, status: "anchored", anchor, conflicting, unresolved, accepted, ignored, superseded, uniqueness: "not-established", tip: chosen.evidence.tip },
     owner: owner ? { status: "provisional", sat, output: owner.output, ...(owner.address ? { address: owner.address } : {}), confirmations: owner.confirmations, indexes: chosen.evidence.indexes } : null,
     rejectedByAuthorState,
   };

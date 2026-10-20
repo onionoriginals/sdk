@@ -3,7 +3,8 @@
  *
  * `InscriptionClock` computes inscription times (P9.15): the greatest block
  * timestamp of a block and all its ancestors, so it never decreases along the
- * chain even when a block's own timestamp does. `satEvidence` turns a sat
+ * chain even when a block's own timestamp does. It follows reorganisations by
+ * block hash. `satEvidence` turns a sat
  * snapshot from the SDK's sat reader into the evidence `verifyOriginal`
  * takes. A publication whose body the reader could not establish fails the
  * whole read: a copy is no substitute for what Bitcoin includes (VH-Log PR 2).
@@ -12,8 +13,8 @@ import { OriginalsError } from "@originals/vh";
 import type { SatEvidence, SatInscription } from "@originals/vh/originals";
 import type { BitcoinNetwork, SatSnapshot } from "../bitcoin/sat-snapshot-types.js";
 
-/** A block's header timestamp in seconds, by height on the active chain. */
-export type BlockTime = (height: number) => Promise<number>;
+/** The block at a height on the active chain: its header timestamp in seconds and its hash. */
+export type BlockHeader = (height: number) => Promise<{ time: number; hash: string }>;
 
 /**
  * Running maximum of block timestamps from genesis. The first call walks the
@@ -22,19 +23,41 @@ export type BlockTime = (height: number) => Promise<number>;
  * every header once.
  */
 export class InscriptionClock {
-  private readonly maxima: number[] = [];
+  private readonly blocks: Array<{ hash: string; max: number }> = [];
 
-  constructor(private readonly blockTime: BlockTime) {}
+  constructor(private readonly header: BlockHeader) {}
 
-  /** Inscription time at `height`, epoch milliseconds. */
-  async at(height: number): Promise<number> {
+  /**
+   * Inscription time at `height`, epoch milliseconds. Given the block's
+   * `hash`, a cache built on a chain since reorganised is first rewound to the
+   * fork point, and a block no longer on the active chain is refused.
+   */
+  async at(height: number, hash?: string): Promise<number> {
     if (!Number.isInteger(height) || height < 0) throw new OriginalsError("invalid-evidence", "BLOCK_HEIGHT_INVALID", `${height} is not a block height`);
-    for (let h = this.maxima.length; h <= height; h++) {
-      const t = await this.blockTime(h);
-      if (!Number.isInteger(t) || t < 0) throw new OriginalsError("unavailable-bytes", "BLOCK_TIME_UNAVAILABLE", `no timestamp for block ${h}`);
-      this.maxima.push(Math.max(t, this.maxima[h - 1] ?? 0));
+    if (hash !== undefined && this.blocks[height] && this.blocks[height].hash !== hash) await this.rewind(height);
+    for (let h = this.blocks.length; h <= height; h++) {
+      const block = await this.read(h);
+      this.blocks.push({ hash: block.hash, max: Math.max(block.time, this.blocks[h - 1]?.max ?? 0) });
     }
-    return this.maxima[height] * 1000;
+    if (hash !== undefined && this.blocks[height].hash !== hash) {
+      throw new OriginalsError("invalid-evidence", "BLOCK_NOT_ON_CHAIN", `block ${hash} is not at height ${height} on the active chain`);
+    }
+    return this.blocks[height].max * 1000;
+  }
+
+  /** Drop cached blocks from the highest at or below `height` that the active chain no longer has. */
+  private async rewind(height: number): Promise<void> {
+    let h = Math.min(height, this.blocks.length - 1);
+    while (h >= 0 && (await this.read(h)).hash !== this.blocks[h].hash) h--;
+    this.blocks.length = h + 1;
+  }
+
+  private async read(height: number): Promise<{ time: number; hash: string }> {
+    const block = await this.header(height);
+    if (!Number.isInteger(block?.time) || block.time < 0 || typeof block.hash !== "string" || !block.hash) {
+      throw new OriginalsError("unavailable-bytes", "BLOCK_TIME_UNAVAILABLE", `no header for block ${height}`);
+    }
+    return block;
   }
 }
 
@@ -71,7 +94,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
       transactionIndex: p.creation.transactionIndex,
       inscriptionIndex: p.creation.inscriptionIndex,
       confirmations,
-      inscriptionTime: await options.clock.at(p.creation.height),
+      inscriptionTime: await options.clock.at(p.creation.height, p.creation.blockHash),
       mediaType: p.body.mediaType,
       content: p.body.bytes,
     });

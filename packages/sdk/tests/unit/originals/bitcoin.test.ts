@@ -17,7 +17,10 @@ const T = Date.parse("2026-10-18T12:00:00Z") / 1000;
 
 /** Header timestamps that go backwards at heights 2 and 5. */
 const HEADERS = [T, T + 600, T + 300, T + 900, T + 1800, T + 1500];
-const clockOver = (times: number[]) => new InscriptionClock(async (h) => times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600);
+/** A distinct 64-hex block hash per height and chain. */
+const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63, "0")}`;
+const clockOver = (times: number[]) =>
+  new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
 function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean }>, tip = 10): SatSnapshot {
   return {
@@ -35,7 +38,7 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
       network: "regtest",
       sat: SAT,
       confirmed: true,
-      creation: { height: p.height, blockHash: "bb".repeat(32), transactionIndex: 1, inscriptionIndex: 0 },
+      creation: { height: p.height, blockHash: hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
       body: p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: null },
     })),
     ownership: { owner: "bcrt1qowner", satpoint: `${"cc".repeat(32)}:0:0` },
@@ -53,8 +56,26 @@ describe("inscription time (P9.15)", () => {
   });
 
   test("a missing header timestamp is unavailable evidence, never a guess", async () => {
-    const clock = new InscriptionClock(async () => Number.NaN);
+    const clock = new InscriptionClock(async () => ({ time: Number.NaN, hash: hashAt(0) }));
     await expect(clock.at(0)).rejects.toMatchObject({ code: "BLOCK_TIME_UNAVAILABLE" });
+  });
+
+  test("a reorganisation rewinds the clock to the fork point; a block no longer on the chain is refused", async () => {
+    let chain = HEADERS.map((time, h) => ({ time, hash: hashAt(h) }));
+    const clock = new InscriptionClock(async (h) => chain[h]);
+    expect(await clock.at(5, hashAt(5))).toBe((T + 1800) * 1000);
+    // Blocks 4 and 5 are replaced by blocks with earlier timestamps.
+    chain = [...chain.slice(0, 4), { time: T + 1000, hash: hashAt(4, "f") }, { time: T + 1100, hash: hashAt(5, "f") }];
+    expect(await clock.at(5, hashAt(5, "f"))).toBe((T + 1100) * 1000);
+    expect(await clock.at(4, hashAt(4, "f"))).toBe((T + 1000) * 1000);
+    expect(await clock.at(3, hashAt(3))).toBe((T + 900) * 1000);
+    await expect(clock.at(4, hashAt(4))).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+  });
+
+  test("an inscription in a block the clock does not find on the chain fails the read", async () => {
+    const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n" }]);
+    s.publications[0].creation!.blockHash = hashAt(4, "f");
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1 })).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
   });
 });
 
