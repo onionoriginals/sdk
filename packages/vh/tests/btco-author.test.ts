@@ -76,6 +76,45 @@ describe("strict CBOR for DID documents", () => {
   });
 });
 
+describe("review fixes (PR 9b)", () => {
+  test("CBOR refuses a __proto__ key and keeps a leading BOM in text, so neither decodes two ways", () => {
+    const proto = [0xa1, 0x69, ...new TextEncoder().encode("__proto__"), 0xa0];
+    expect(() => decodeCbor(new Uint8Array(proto))).toThrow(/__proto__/);
+    expect(decodeCbor(new Uint8Array([0x64, 0xef, 0xbb, 0xbf, 0x61]))).toBe("\uFEFFa");
+  });
+
+  test("C12-61: a deactivation inscribed as the first document is terminal", async () => {
+    const off = version(10, { "@context": ["https://www.w3.org/ns/did/v1"], id: AUTHOR, deactivated: true });
+    const after = version(11, document([{ fragment: "orig", signer: KEY }]));
+    const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [off, after]) });
+    expect(h.versions.map((v) => [v.versionId, v.deactivated])).toEqual([[off.id, true]]);
+  });
+
+  test("a retained did:btco author version is found by its inscription id", async () => {
+    const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const options = { log: [genesis], now: NOW, bytes: allBytes, freshness: "asserted" as const, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }] };
+    const r = await verifyOriginal({ ...options, retained: { authors: { [AUTHOR]: v1.id } } });
+    expect(r.identityEvidence.freshness).toBe("asserted");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    const gone = await verifyOriginal({ ...options, retained: { authors: { [AUTHOR]: id() } } });
+    expect(gone.identityEvidence.freshness).toBe("stale");
+  });
+
+  test("an inscription whose content starts with a BOM is undecodable", async () => {
+    const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
+    const content = bytes(`\uFEFF${serializeLog([genesis, anchor])}`);
+    const r = await verifyOriginal({
+      log: [genesis, anchor], now: NOW, bytes: allBytes, freshness: "asserted",
+      authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }],
+      bitcoin: [sat(SAT, [at(31, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content })])],
+    });
+    expect(r.anchoring?.ignored[0]?.reason).toBe("undecodable");
+  });
+});
+
 describe("did:btco author histories (P5.13)", () => {
   test("versions are DID documents in metadata, in chain order; other inscriptions are not versions", async () => {
     const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
