@@ -8,7 +8,8 @@
  *   second DNS answer cannot rebind it.
  * - Redirects are never followed: a 3xx is a refusal.
  * - Size is bounded by the declared length and by the bytes that arrive, and
- *   the whole request is bounded in time.
+ *   the whole request is bounded in time. A caller's `signal` (for example a
+ *   whole-operation deadline) can end it sooner.
  *
  * Every refusal is an `unavailable-bytes` error: the caller reports the item
  * as unavailable, never as verified. The default transport and resolver use
@@ -35,6 +36,8 @@ export type FetchTransport = (request: { url: URL; address: string; signal: Abor
 export interface SafeFetchOptions {
   maxBytes?: number;
   timeoutMs?: number;
+  /** Ends the request early, as a timeout does; the refusal is FETCH_ABORTED. */
+  signal?: AbortSignal;
   /** Resolve a hostname to every address it has. Defaults to Node's `dns.lookup` with `all: true`. */
   resolve?: (hostname: string) => Promise<string[]>;
   transport?: FetchTransport;
@@ -171,9 +174,23 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
   if (url.protocol !== "https:") refuse("FETCH_SCHEME", `only https is retrieved, not ${url.protocol}`);
   if (url.username || url.password) refuse("FETCH_CREDENTIALS", "a locator may not carry credentials");
 
-  // The whole request, DNS included, is bounded in time.
+  if (options.signal?.aborted) refuse("FETCH_ABORTED", `${url.href} was not requested: the caller aborted`);
+
+  // The whole request, DNS included, is bounded in time and by the caller's signal.
   const controller = new AbortController();
+  let callerAborted = false;
+  const onCallerAbort = () => {
+    callerAborted = true;
+    controller.abort();
+  };
+  options.signal?.addEventListener("abort", onCallerAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const done = () => {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onCallerAbort);
+  };
+  const stopped = (what: string): never =>
+    callerAborted ? refuse("FETCH_ABORTED", `${what}: the caller aborted`) : refuse("FETCH_TIMEOUT", `${what} within ${timeoutMs} ms`);
   const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout"))));
   aborted.catch(() => undefined);
   const host = url.hostname;
@@ -184,18 +201,18 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
     try {
       addresses = await Promise.race([(options.resolve ?? nodeResolve)(host), aborted]);
     } catch {
-      clearTimeout(timer);
-      if (controller.signal.aborted) refuse("FETCH_TIMEOUT", `${host} did not resolve within ${timeoutMs} ms`);
+      done();
+      if (controller.signal.aborted) stopped(`${host} did not resolve`);
       refuse("FETCH_DNS", `${host} does not resolve`);
     }
   }
   if (addresses.length === 0) {
-    clearTimeout(timer);
+    done();
     refuse("FETCH_DNS", `${host} does not resolve`);
   }
   const blocked = addresses.find((a) => !isPublicAddress(a));
   if (blocked) {
-    clearTimeout(timer);
+    done();
     refuse("FETCH_PRIVATE_ADDRESS", `${host} resolves to ${blocked}, which is not a public address`);
   }
 
@@ -225,9 +242,9 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
     return { url: url.href, bytes, ...(mediaType ? { mediaType } : {}) };
   } catch (error) {
     if (error instanceof OriginalsError) throw error;
-    if (controller.signal.aborted) refuse("FETCH_TIMEOUT", `${url.href} did not answer within ${timeoutMs} ms`);
+    if (controller.signal.aborted) stopped(`${url.href} did not answer`);
     refuse("FETCH_FAILED", `${url.href} could not be retrieved`);
   } finally {
-    clearTimeout(timer);
+    done();
   }
 }

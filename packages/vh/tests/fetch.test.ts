@@ -102,6 +102,16 @@ describe("other refusals", () => {
     await refused(safeFetch("https://example.com/x", { resolve: () => new Promise(() => undefined), transport: transport({}), timeoutMs: 20 }), "FETCH_TIMEOUT");
   });
 
+  test("a caller's abort signal ends the request (a whole-operation deadline)", async () => {
+    const never: FetchTransport = ({ signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 20);
+    await refused(safeFetch("https://example.com/x", { resolve: publicDns, transport: never, signal: controller.signal }), "FETCH_ABORTED");
+    const seen: string[] = [];
+    await refused(safeFetch("https://example.com/x", { resolve: publicDns, transport: transport({}, seen), signal: AbortSignal.abort() }), "FETCH_ABORTED");
+    expect(seen).toEqual([]);
+  });
+
   test("a hostname that does not resolve", async () => {
     await refused(safeFetch("https://example.invalid/x", { resolve: () => Promise.resolve([]), transport: transport({}) }), "FETCH_DNS");
   });
