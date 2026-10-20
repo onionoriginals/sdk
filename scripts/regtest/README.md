@@ -19,8 +19,8 @@ The Originals journey asserts each step on real transactions:
    ownership of the reveal output (P9.11, P9.16).
 2. An edit is reinscribed on the same sat by spending the output that holds it
    (P9.12, P9.13).
-3. The head Bitcoin already shows is not inscribed again (`HEAD_NOT_NEXT`,
-   P9.13).
+3. The head Bitcoin already shows is not inscribed again when asked for
+   explicitly (`HEAD_NOT_NEXT`, P9.13).
 4. A reorganisation replaces the edit's block with empty blocks: the edit drops
    to the mempool and the verifier reports `authoritative-source-changed`
    against the version Bitcoin showed before (the read retains only what
@@ -33,6 +33,19 @@ The Originals journey asserts each step on real transactions:
    inscription Bitcoin then shows is that pair's (P9.4, P9.6).
 6. An entry the author signs but nobody inscribes is never current (P9.12),
    and an entry after it cannot be inscribed first (`HEAD_NOT_NEXT`).
+7. Catching up: the two uninscribed entries are published with `catchUp`, one
+   block at a time, re-reading Bitcoin's accepted head before each. The
+   process dies after the first commit broadcast; the next step resumes that
+   recorded pair (same reveal), and while its reveal is unmined the step waits
+   rather than preparing it again. Each accepted inscription is at a strictly
+   greater height, and once Bitcoin shows the committed head there is nothing
+   to inscribe (`NOTHING_TO_INSCRIBE`) (P9.4, P9.6, P9.13).
+8. A second Original is edited before its anchoring entry is published:
+   catching up inscribes the anchoring entry first (asking for the edit first
+   is `HEAD_NOT_NEXT`), then the edit in a later block.
+
+The recovery store in this journey is in memory: step 7 shows resuming within
+one process, not after a process restart.
 
 `REGTEST_RECEIPT=/absolute/path/receipt.json` writes receipts (the Originals
 journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Core

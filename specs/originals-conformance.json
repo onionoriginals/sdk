@@ -374,7 +374,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
       ]
     },
     {
@@ -400,7 +401,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
       ]
     },
     {
@@ -517,7 +519,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
       ]
     },
     {
