@@ -136,6 +136,12 @@ jobs:
           node --test scripts/check-browser-safety.test.mjs
           node scripts/check-browser-safety.mjs
 
+      # Issue #976 section A: create, export, verify offline, import and
+      # continue, and the negative cases, each phase in a fresh process with
+      # the network off. A few seconds; the receipt is printed to the log.
+      - name: Local release acceptance (fresh processes, offline)
+        run: node scripts/acceptance/local-release.mjs --out "$RUNNER_TEMP/originals-acceptance"
+
   landing:
     name: Landing app typechecks, tests and builds
     runs-on: ubuntu-latest
