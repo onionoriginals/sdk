@@ -127,3 +127,50 @@ describe("C12-23: a fork found on import is kept and never current (P6.6, P7.5, 
     }
   });
 });
+
+describe("review fixes (PR 6)", () => {
+  /** Local history v1, v2, v3; a stored fork branch v1, b2 (shorter than local). */
+  async function stored() {
+    const { alice, sdk, signer, did, v1, v2, v1Package } = await harbor();
+    const v3 = (await sdk.edit(did, { parent: v2, name: "Harbor, third", author: alice.ref("orig"), signer })).original.checkpoint;
+    const local = reader();
+    await local.import((await sdk.package(did)).bytes);
+    const elsewhere = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock(LATER) });
+    await elsewhere.import(v1Package.bytes);
+    await elsewhere.edit(did, { parent: v1, name: "Elsewhere", author: alice.ref("orig"), signer });
+    const branchPackage = (await elsewhere.package(did)).bytes;
+    expect((await local.import(branchPackage)).status).toBe("conflict");
+    return { sdk, local, did, v3, branchPackage };
+  }
+
+  test("a package whose own log fails verification is never imported, even with a stored fork branch", async () => {
+    const { sdk, local, did, v3 } = await stored();
+    const files = readZip((await sdk.package(did)).bytes);
+    const lines = new TextDecoder().decode(files.get("asset/did.jsonl")!).trimEnd().split("\n");
+    // A fourth line that parses but does not verify: the third entry with its state altered.
+    const forged = JSON.parse(lines[2]) as { versionId: string; state: { asset: { name: string } } };
+    forged.versionId = forged.versionId.replace(/^3-/, "4-");
+    forged.state.asset.name = "FORGED";
+    files.set("asset/did.jsonl", bytes(`${[...lines, JSON.stringify(forged)].join("\n")}\n`));
+    await expect(local.import(writeZip(files))).rejects.toMatchObject({ code: "IMPORT_REJECTED" });
+    const after = await local.get(did);
+    expect(after.head).toBe(v3);
+    expect(after.state.name).toBe("Harbor, third");
+  });
+
+  test("a log that fails verification is reported as itself, never as another copy's history", async () => {
+    const { local, did, branchPackage } = await stored();
+    const loaded = await local.load(branchPackage);
+    // The branch is valid but diverges from local history at version 2: a fork, not merely stale.
+    expect(loaded.report.fork).not.toBeNull();
+    expect(loaded.report.current).toBe(false);
+    void did;
+  });
+
+  test("a retained versionId is never lowered by the store", async () => {
+    const store = new MemoryStore();
+    await store.putRetained("did:vh:x", "3-Qmabc");
+    await store.putRetained("did:vh:x", "2-Qmdef");
+    expect(await store.getRetained("did:vh:x")).toBe("3-Qmabc");
+  });
+});

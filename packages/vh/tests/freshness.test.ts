@@ -4,6 +4,7 @@
  * P7.6, P7.8, P7.9; owner decision Q5).
  */
 import { describe, expect, test } from "bun:test";
+import type { JsonObject } from "../src/json/index.js";
 import { serializeLog, type LogEntry } from "../src/log/index.js";
 import { createOriginal, resourceDigest, updateOriginal, verifyOriginal, type OriginalsReport } from "../src/originals/index.js";
 import { NOW, VhAuthor, bytes, clock, photo, seeded } from "./helpers/originals.js";
@@ -94,16 +95,26 @@ describe("asset log freshness and retained versionIds (P7.6, P7.8)", () => {
     expect(r.retain).toEqual({ original: cropped.versionId, authors: { [alice.did]: alice.versionId } });
   });
 
-  test("a copy that extends the supplied log is used, and the supplied copy is reported behind", async () => {
+  test("a copy ahead of the supplied log makes it stale; the supplied log is still what is reported", async () => {
     const { alice, genesis, cropped } = await harbor();
     const r = await verify([genesis], [alice], { copies: [{ source: "mirror", log: serializeLog([genesis, cropped]) }] });
-    expect(r.head).toBe(cropped.versionId);
+    expect(r.head).toBe(genesis.versionId);
+    expect(r.assetFreshness.status).toBe("stale");
     expect(r.assetFreshness.copies).toEqual([
       { source: "supplied", versionId: genesis.versionId, status: "behind" },
       { source: "mirror", versionId: cropped.versionId, status: "current" },
     ]);
     expect(r.fork).toBeNull();
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.current).toBe(false);
+  });
+
+  test("a supplied log that fails verification is reported as failing, never as a copy's history", async () => {
+    const { alice, genesis, cropped } = await harbor();
+    const broken = { ...cropped, state: { ...cropped.state, asset: { ...(cropped.state as JsonObject).asset as JsonObject, name: "forged" } } };
+    const r = await verify([genesis, broken as LogEntry], [alice], { copies: [{ source: "mirror", log: serializeLog([genesis, cropped]) }] });
+    expect(r.history.status).not.toBe("valid");
+    expect(r.head).toBe(genesis.versionId);
+    expect(r.current).toBe(false);
   });
 });
 

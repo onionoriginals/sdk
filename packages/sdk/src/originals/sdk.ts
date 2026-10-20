@@ -228,16 +228,30 @@ export class OriginalsSDK {
 
   /** What this store retains about a log's Original and author DIDs: retained versionIds and known branches (P7.8). */
   private async comparisons(log: string): Promise<Pick<VerifyOriginalOptions, "retained" | "copies">> {
+    // The genesis id is unverified here: a malformed one simply has nothing to compare with.
+    const quietly = async <T>(read: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await read();
+      } catch (error) {
+        if (error instanceof OriginalsError) return fallback;
+        throw error;
+      }
+    };
     const did = originalOf(log);
     const retained: RetainedVersions = { authors: {} };
-    const original = did ? await this.store.getRetained(did) : undefined;
+    const original = did ? await quietly(() => this.store.getRetained(did), undefined) : undefined;
     if (original) retained.original = original;
     for (const author of authorDidsOf(log)) {
-      const version = await this.store.getRetained(author);
+      const version = await quietly(() => this.store.getRetained(author), undefined);
       if (version) retained.authors![author] = version;
     }
-    const branches = did ? await this.store.getBranches(did) : [];
-    return { retained, copies: branches.map((branch, i) => ({ source: `branch-${i + 1}`, log: branch })) };
+    const branches = did ? await quietly(() => this.store.getBranches(did), []) : [];
+    const copies = branches.map((branch, i) => ({ source: `branch-${i + 1}`, log: branch }));
+    // A log that is not this store's committed one is also compared with the committed log, so
+    // a shorter log that diverges from local history is a fork, not merely stale (P6.6, P7.8).
+    const committed = did ? (await quietly(() => this.store.get(did), undefined))?.log : undefined;
+    if (committed !== undefined && committed !== log) copies.unshift({ source: "local", log: committed });
+    return { retained, copies };
   }
 
   /** Keep the highest versionIds a report verified. The report never lowers them. */
@@ -457,6 +471,11 @@ export class OriginalsSDK {
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });
+    }
+    // The verified head must be the package's own last entry: nothing else may be stored (P7.5).
+    const own = versionIds(contents.log);
+    if (r.head !== own[own.length - 1]) {
+      sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
     const did = r.original;
     const incoming = versionIds(contents.log);

@@ -21,7 +21,7 @@ import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 import { hex } from "@scure/base";
-import { headOf, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal } from "./store.js";
+import { headOf, higherVersion, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal } from "./store.js";
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
@@ -179,7 +179,14 @@ export class FileStore implements OriginalsStore {
   }
 
   async putRetained(did: string, versionId: string): Promise<void> {
-    await this.writeAtomically(join(this.root, "retained"), this.didFile(did), JSON.stringify({ did, versionId }));
+    // Serialized per DID and never lowered, so a concurrent read cannot undo a newer retain (P7.8).
+    const key = `retained:${did}`;
+    const run = (this.locks.get(key) ?? Promise.resolve()).then(async () => {
+      const higher = higherVersion(await this.getRetained(did), versionId);
+      await this.writeAtomically(join(this.root, "retained"), this.didFile(did), JSON.stringify({ did, versionId: higher }));
+    });
+    this.locks.set(key, run.catch(() => undefined));
+    return run;
   }
 
   async putBranch(did: string, log: string): Promise<void> {

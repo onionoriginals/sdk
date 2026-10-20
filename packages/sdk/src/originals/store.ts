@@ -46,6 +46,15 @@ export interface OriginalsStore {
   list(): Promise<string[]>;
 }
 
+/**
+ * The higher of two retained versionIds, so a store never lowers one (P7.8). VH versionIds
+ * compare by version number; ids without one (a did:btco version) are replaced as given.
+ */
+export function higherVersion(current: string | undefined, next: string): string {
+  const n = (id: string) => Number(/^(\d+)-/.exec(id)?.[1] ?? NaN);
+  return current !== undefined && n(current) > n(next) ? current : next;
+}
+
 /** The versionId of a log's last line, or null for an empty log. */
 export function headOf(log: string | undefined): string | null {
   if (!log) return null;
@@ -102,7 +111,7 @@ export class MemoryStore implements OriginalsStore {
   }
 
   putRetained(did: string, versionId: string): Promise<void> {
-    this.retained.set(did, versionId);
+    this.retained.set(did, higherVersion(this.retained.get(did), versionId));
     return Promise.resolve();
   }
 

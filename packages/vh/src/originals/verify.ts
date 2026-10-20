@@ -7,9 +7,9 @@
  *
  * Freshness (P7.6, P7.8): a caller may supply other copies of the asset log
  * and the highest versionIds it has verified before, for the Original and for
- * each author DID. Copies are compared as VH-Log describes. A log shorter than
- * the retained versionId is stale; one that diverges from it, or from another
- * valid copy, is a fork. Forks stay unresolved: every branch is reported and
+ * each author DID. Copies are compared as VH-Log describes, but the supplied
+ * log is always the one reported: a log shorter than the retained versionId or
+ * than another valid copy is stale; one that diverges from either is a fork. Forks stay unresolved: every branch is reported and
  * none is current, whatever its timestamps (P2.1, P6.6; owner decision Q5).
  * Only anchoring settles a fork (P9.16, plan 011 PR 9).
  */
@@ -217,8 +217,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     copies = resolution.copies;
     stale = resolution.warnings.some((w) => w.code === "retained-version-not-found");
     if (resolution.fork) fork = { version: resolution.fork.version, branches: resolution.fork.copies };
-    // On a fork the report describes the supplied branch, never as current.
-    log = resolution.reference ?? (await supplied());
+    // The supplied log is always judged as itself: copies only add fork and freshness
+    // evidence, never replace it. A valid copy ahead of it makes it stale (P7.6). On a fork the
+    // report describes the supplied branch, never as current.
+    log = await supplied();
+    if (!resolution.fork && resolution.reference && resolution.reference.entries.length > log.entries.length) stale = true;
   } else {
     log = await supplied();
   }
