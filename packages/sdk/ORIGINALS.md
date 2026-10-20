@@ -569,6 +569,8 @@ layer, once, terminally, to one sat (P9.10):
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
 // The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
 const clock = new InscriptionClock(async (height) => ({ time, hash }));   // running max of header times (P9.15), reorg-aware
+// A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).
+const served = new InscriptionClock(header, { network: "mainnet", headers, store: fileClockStore(path), maxRequests: 1000 });
 const evidence = await satEvidence(snapshot, { clock, ownerConfirmations });  // from the SDK's sat reader
 const view = await sdk.get(did, { bitcoin: [evidence] });                     // also load(zip, { bitcoin })
 view.report.anchoring; // anchor, conflicting and unresolved anchors, accepted and ignored inscriptions (with reasons), tip
@@ -595,7 +597,9 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   `unresolved`, and the result is not current (`earlier-anchor-unresolved`).
 - The clock checks each inscription's block hash: it rewinds past a
   reorganisation and refuses a block no longer on the chain
-  (`BLOCK_NOT_ON_CHAIN`).
+  (`BLOCK_NOT_ON_CHAIN`). Before reading past the blocks it holds, it checks
+  the highest one against the active chain, so an orphaned block's maximum
+  never carries into the new chain (#971).
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).
@@ -609,3 +613,58 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   (P9.11, P9.12). did:btco author DIDs arrive in PR 9b. Spending requires the
   owner's explicit approval, and release evidence comes from real Core/ord
   regtest.
+
+### Inscription time at scale (#973)
+
+The running maximum (P9.15) depends on every header from genesis, so a
+reader derives it once and keeps it. `InscriptionClock` takes, besides the
+single-header source:
+
+- `headers(from, count, signal)`: a batched source, one request per `batch`
+  (default 2000) headers, for example a JSON-RPC batch of `getblockhash` and
+  `getblockheader`. Returning `prev` (Core's `previousblockhash`) lets the
+  clock check that each block extends the one before it, so a reorganisation
+  during a read cannot splice two chains together.
+- `store`: a `ClockStore` (`load`/`save` of opaque bytes) with the `network`
+  it follows. `fileClockStore(path)` from `@originals/sdk/originals/fs`
+  writes one file atomically (Node only); a server can keep the same bytes in
+  any blob store. The state holds the network, every block hash and running
+  maximum, and a CRC-32. On restart the clock checks the network tag and the
+  genesis hash (one request; another network or chain is refused with
+  `CLOCK_STORE_NETWORK_MISMATCH` or `BLOCK_SOURCE_NETWORK_MISMATCH`), and
+  discards a damaged state (`stats.discarded = "corrupt"`) and rebuilds.
+  A saved boundary is then checked against the active chain like any other,
+  rewinding to the fork point by galloping and bisection. The store saves
+  after `saveEvery` (default 144) new blocks and on `flush()`; an older
+  saved state is only slower, never wrong. The bytes are the reader's own
+  derived state, not a checkpoint to download or share. The byte format
+  and the defaults are PROVISIONAL.
+- `maxRequests` (default 10,000 per `at` call) and `signal` (per clock, per
+  call or through `satEvidence`): running out or being cancelled is
+  `incomplete-evidence` (`BLOCK_TIME_BUDGET_EXCEEDED`, `BLOCK_TIME_ABORTED`),
+  never a guessed time. What was derived is kept, so a retry continues.
+
+A read of a block the clock holds, by hash, costs no request: the hash fixes
+the block's ancestry. Any other read costs one boundary check plus the new
+or reorganised blocks. `bun run --cwd packages/sdk bench:clock` runs a
+deterministic 900,000-header synthetic chain (204,786 blocks with a timestamp
+earlier than their parent's) through a cold start, warm reads and restarts
+with a file store, and checks every sampled time against an independently
+rebuilt clock. On an Apple M4 (Bun 1.2.22, in-process source; `--rtt-ms 1`
+adds a delay per request):
+
+| Scenario | Requests | Headers | Latency | With 1 ms per request |
+| --- | ---: | ---: | ---: | ---: |
+| Cold start, batch 2000 | 450 | 900,000 | 422 ms | 959 ms |
+| Save state (32.4 MB file) | 0 | 0 | 114 ms | 106 ms |
+| Warm reads of known blocks, x10,000 | 0 | 0 | 13 ms | 21 ms |
+| Warm read, 1 new block | 2 | 2 | 0.3 ms | 3.6 ms |
+| Restart, read a known block (load and check) | 1 | 1 | 74 ms | 84 ms |
+| Restart, then 6 new blocks | 2 | 7 | 0.1 ms | 3.6 ms |
+| Restart across a 6-block reorganisation (+3) | 8 | 16 | 74 ms | 88 ms |
+| Cold start, one request per header | 900,010 | 900,010 | 602 ms | about 15 min (projected, not run) |
+| Cold start, default budget, one per header | 10,000, then refused | 10,000 | 7 ms | |
+
+The counts are exact and asserted by `tests/unit/originals/clock-bench.test.ts`
+on a 20,000-header chain; the latencies exclude a real node's own cost of
+serving 900,000 headers, which bounds a production cold start.
