@@ -22,7 +22,7 @@ const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63
 const clockOver = (times: number[]) =>
   new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
-function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean }>, tip = 10): SatSnapshot {
+function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string }>, tip = 10): SatSnapshot {
   return {
     network: "regtest",
     sat: SAT,
@@ -38,7 +38,7 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
       network: "regtest",
       sat: SAT,
       confirmed: true,
-      creation: { height: p.height, blockHash: hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
+      creation: { height: p.height, blockHash: p.blockHash ?? hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
       body: p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: null },
     })),
     ownership: { owner: "bcrt1qowner", satpoint: `${"cc".repeat(32)}:0:0` },
@@ -70,6 +70,52 @@ describe("inscription time (P9.15)", () => {
     expect(await clock.at(4, hashAt(4, "f"))).toBe((T + 1000) * 1000);
     expect(await clock.at(3, hashAt(3))).toBe((T + 900) * 1000);
     await expect(clock.at(4, hashAt(4))).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+  });
+
+  test("#971: a read past the cache first checks the cached boundary, so an orphaned block's maximum never carries over (C12-45)", async () => {
+    let headers = [
+      { time: 10, hash: "1".repeat(64) },
+      { time: 20, hash: "2".repeat(64) },
+      { time: 100, hash: "3".repeat(64) },
+    ];
+    const clock = new InscriptionClock(async (height) => headers[height]);
+    expect(await clock.at(2, headers[2].hash)).toBe(100_000);
+
+    headers = [
+      headers[0],
+      headers[1],
+      { time: 30, hash: "4".repeat(64) },
+      { time: 40, hash: "5".repeat(64) },
+    ];
+    expect(await clock.at(3, headers[3].hash)).toBe(40_000);
+    expect(await clock.at(2, headers[2].hash)).toBe(30_000);
+    await expect(clock.at(2, "3".repeat(64))).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+  });
+
+  test("#971: cached and fresh clocks agree after shallower and deeper reorganisations, with decreasing timestamps (C12-45)", async () => {
+    let seed = 0x9e3779b9;
+    const random = () => ((seed = (Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 2 ** 32);
+    let fork = 0;
+    const block = (time: number) => ({ time, hash: hashAt(fork, "b").slice(0, 32) + Math.floor(random() * 2 ** 32).toString(16).padStart(8, "0") + "0".repeat(24) });
+    // Timestamps wander up and down around a rising trend, as Bitcoin's do within its rules.
+    const extend = (chain: Array<{ time: number; hash: string }>, n: number) => {
+      for (let i = 0; i < n; i++) chain.push(block(T + chain.length * 600 + Math.floor((random() - 0.6) * 7200)));
+    };
+    let chain: Array<{ time: number; hash: string }> = [];
+    extend(chain, 40);
+    const cached = new InscriptionClock(async (h) => chain[h]);
+    for (let round = 0; round < 60; round++) {
+      // Replace the top `depth` blocks (shallow and deep), then grow past the old tip or not.
+      fork++;
+      const depth = [1, 2, 3, 8, 20, 35][round % 6];
+      chain = chain.slice(0, Math.max(1, chain.length - depth));
+      extend(chain, depth + Math.floor(random() * 4) - 1);
+      const fresh = new InscriptionClock(async (h) => chain[h]);
+      const heights = [chain.length - 1, Math.floor(random() * chain.length), Math.max(0, chain.length - depth - 1)];
+      for (const h of round % 2 ? heights : heights.reverse()) {
+        expect(await cached.at(h, chain[h].hash)).toBe(await fresh.at(h, chain[h].hash));
+      }
+    }
   });
 
   test("an inscription in a block the clock does not find on the chain fails the read", async () => {
@@ -120,5 +166,49 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(view.report.ordering).toBe("anchored");
     expect(view.report.ownership).toMatchObject({ status: "provisional", output: `${"cc".repeat(32)}:0`, confirmations: 3 });
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
+  });
+
+  test("#971: an orphaned block's later timestamp does not carry into the new chain and push an edit past the author's key rotation (C12-41, C12-45)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T10:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const ref = alice.ref("orig");
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const sat = btcoAlias("regtest", SAT);
+    const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: ref, signer, sat });
+    const edited = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor at dawn", author: ref, signer });
+    const lines = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!).trimEnd().split("\n");
+    const [anchorLine, editLine] = lines.slice(-2).map((l) => `${l}\n`);
+
+    const B = Date.parse("2026-10-18T10:10:00Z") / 1000;
+    // Chain A: the edit is inscribed at height 2, whose header claims a time 50 minutes on.
+    let chain = [
+      { time: B, hash: hashAt(0) },
+      { time: B + 60, hash: hashAt(1) },
+      { time: B + 3000, hash: hashAt(2) },
+    ];
+    const clock = new InscriptionClock(async (h) => chain[h]);
+    const first = await satEvidence(snapshot([
+      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLine },
+      { id: `${"f".repeat(64)}i0`, height: 2, content: editLine },
+    ]), { clock, ownerConfirmations: 1 });
+    expect(first.inscriptions[1].inscriptionTime).toBe((B + 3000) * 1000);
+
+    // Block 2 is reorganised away; the edit is re-included at height 3 of the new chain, at 10:13.
+    chain = [chain[0], chain[1], { time: B + 120, hash: hashAt(2, "b") }, { time: B + 180, hash: hashAt(3, "b") }];
+    // The author removes the key at 10:30: after the edit's true inscription time, before the orphaned one.
+    await alice.rotate([{ fragment: "orig2", secret: seed(22) }], "2026-10-18T10:30:00Z");
+    t = Date.parse("2026-10-18T12:00:00Z");
+    const evidence = await satEvidence(snapshot([
+      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLine },
+      { id: `${"f".repeat(64)}i0`, height: 3, content: editLine, blockHash: hashAt(3, "b") },
+    ]), { clock, ownerConfirmations: 1 });
+    const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
+    expect(view.report.anchoring?.ignored, JSON.stringify(view.report.anchoring?.ignored)).toEqual([]);
+    expect(view.checkpoint).toBe(edited.original.checkpoint);
+    expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
+    expect(evidence.inscriptions[1].inscriptionTime).toBe((B + 180) * 1000);
   });
 });

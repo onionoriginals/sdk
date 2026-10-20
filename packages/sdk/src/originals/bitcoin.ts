@@ -28,13 +28,18 @@ export class InscriptionClock {
   constructor(private readonly header: BlockHeader) {}
 
   /**
-   * Inscription time at `height`, epoch milliseconds. Given the block's
-   * `hash`, a cache built on a chain since reorganised is first rewound to the
-   * fork point, and a block no longer on the active chain is refused.
+   * Inscription time at `height`, epoch milliseconds. Before the cache is
+   * extended past its last block, that block is checked against the active
+   * chain, so an orphaned block's maximum never carries into the new chain
+   * (P9.15, #971). Given the block's `hash`, a cache built on a chain since
+   * reorganised is first rewound to the fork point, and a block no longer on
+   * the active chain is refused.
    */
   async at(height: number, hash?: string): Promise<number> {
     if (!Number.isInteger(height) || height < 0) throw new OriginalsError("invalid-evidence", "BLOCK_HEIGHT_INVALID", `${height} is not a block height`);
-    if (hash !== undefined && this.blocks[height] && this.blocks[height].hash !== hash) await this.rewind(height);
+    const top = this.blocks.length - 1;
+    if (height > top && top >= 0) await this.rewind(top);
+    else if (hash !== undefined && this.blocks[height] && this.blocks[height].hash !== hash) await this.rewind(height);
     for (let h = this.blocks.length; h <= height; h++) {
       const block = await this.read(h);
       this.blocks.push({ hash: block.hash, max: Math.max(block.time, this.blocks[h - 1]?.max ?? 0) });

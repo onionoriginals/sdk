@@ -531,6 +531,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/originals.test.ts",
