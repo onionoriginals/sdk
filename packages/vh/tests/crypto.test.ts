@@ -83,11 +83,14 @@ describe("multibase, multihash and multikey", () => {
     expect(errorCode(() => decodeMultikey({ kty: "OKP" } as never))).toBe("MULTIKEY_INVALID");
   });
 
-  test("did:key verification methods must repeat the key as their fragment", () => {
+  test("did:key verification methods repeat the key as their fragment, which entry proofs may omit", () => {
     const mk = json(w3c("keyPair.json")).publicKeyMultibase as string;
     expect(didKeyMultikey(`did:key:${mk}#${mk}`)).toBe(mk);
     expect(errorCode(() => didKeyMultikey(`did:key:${mk}#key-1`))).toBe("DID_KEY_INVALID");
+    // Witness proofs need the fragment (did:webvh); an entry proof's bare did:key resolves to the same key (VH-Log "Authorized Keys").
     expect(errorCode(() => didKeyMultikey(`did:key:${mk}`))).toBe("DID_KEY_INVALID");
+    expect(didKeyMultikey(`did:key:${mk}`, { fragment: "optional" })).toBe(mk);
+    expect(errorCode(() => didKeyMultikey(`did:key:${mk}#key-1`, { fragment: "optional" }))).toBe("DID_KEY_INVALID");
     expect(errorCode(() => didKeyMultikey(`did:web:example.com#${mk}`))).toBe("DID_KEY_INVALID");
   });
 });
