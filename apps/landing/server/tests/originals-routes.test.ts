@@ -294,7 +294,7 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
     expect((await put(`${base}/resources/${digest}`, bytes)).status).toBe(200);
   });
 
-  test('C12-84: a resource is served with its signed media type, isolated, whatever the uploader claimed (P9.7)', async () => {
+  test('C12-84: a resource is served with the media type its asset log declares, isolated, whatever the uploader claimed (P9.7)', async () => {
     const { fetchFn, put } = setup();
     await put(`${base}/asset/did.jsonl`, log);
     await put(`${base}/resources/${digest}`, bytes, 'text/html');
@@ -304,6 +304,26 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('content-security-policy')).toContain('sandbox');
     expect(res.headers.get('content-disposition')).toBe('attachment');
+  });
+
+  test('a key that decodes again into another namespace is refused', async () => {
+    const { put } = setup();
+    // %2F survives the route's decode and would become "/" in the store's.
+    expect((await put(`demo.example.com%2Fuser-sub-2/user-sub-1/${NAME}/did.jsonl`, '{}')).status).toBe(403);
+    expect((await put(`demo.example.com/user-sub-1/${NAME}%2Fdid.jsonl`, '{}')).status).toBe(403);
+    for (const host of ['..', '.', 'a..b', '-x.com', 'a b.com', 'a\\b']) {
+      expect((await put(`${host}/user-sub-1/${NAME}/did.jsonl`, '{}')).status, host).toBe(403);
+    }
+    expect((await put(`localhost:8080/user-sub-1/${NAME}/did.jsonl`, '{}')).status).toBe(200);
+  });
+
+  test('a declared media type that is not a bare type/subtype is not served', async () => {
+    const { put } = setup();
+    for (const mediaType of ['text/html\r\nx-evil: 1', 'image/svg+xml; charset=utf-8', 'svg', '']) {
+      const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'a', mediaType, size: bytes.length, digest }] } } })}\n`;
+      expect((await put(`${base}/asset/did.jsonl`, bad)).status).toBe(200);
+      expect((await put(`${base}/resources/${digest}`, bytes)).status, JSON.stringify(mediaType)).toBe(409);
+    }
   });
 
   test('logs and evidence files get the server\'s content types', async () => {

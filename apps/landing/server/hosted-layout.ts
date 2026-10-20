@@ -13,16 +13,21 @@
  *                                                      resources/<digest>)
  *
  * Every write is inside the caller's own namespace, so no shape can shadow the
- * app's static assets or another author's files. The server assigns every
- * content type itself: a resource is served with the media type its signed
- * descriptor declares in the Original's asset log, never one the uploader
- * chose (P9.7).
+ * app's static assets or another author's files. A key holds no `%` or `\`,
+ * because the store decodes it once more. The server assigns every content
+ * type itself: a resource is served with the media type its descriptor
+ * declares in the uploaded asset log, never a header the uploader chose
+ * (P9.7). The host does not verify that log; readers do.
  */
 import { resourceDigest } from '@originals/vh/originals';
 
 const NAME = /^o-[1-9A-HJ-NP-Za-km-z]{16}$/;
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
+const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOST = new RegExp(`^${LABEL}(?:\\.${LABEL})*(?::\\d{1,5})?$`, 'i');
+// A bare `type/subtype` (RFC 6838 restricted names), with no parameters.
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
 
 export type HostedKey =
   | { kind: 'identity-log' }
@@ -32,8 +37,9 @@ export type HostedKey =
 
 /** Classify `key` for the author whose namespace is `slug`, or null when it is not a hosted file of theirs. */
 export function classifyHostedKey(key: string, slug: string): HostedKey | null {
+  if (/[%\\]/.test(key)) return null;
   const [host, ns, ...rest] = key.split('/');
-  if (!host || ns !== slug || rest.length === 0) return null;
+  if (!host || !HOST.test(host) || ns !== slug || rest.length === 0) return null;
   if (rest.length === 1 && rest[0] === 'did.jsonl') return { kind: 'identity-log' };
   const [name, ...file] = rest;
   if (!NAME.test(name)) return null;
@@ -61,9 +67,10 @@ export function hostedContentType(k: Exclude<HostedKey, { kind: 'resource' }>): 
 }
 
 /**
- * The media type the asset log's signed descriptors give `digest`, or null
- * when no entry lists it. The public reader verifies the log itself; this only
- * decides how the host labels bytes it already holds.
+ * The media type the uploaded asset log's descriptors give `digest`, or null
+ * when no entry lists it or the latest one is not a bare `type/subtype`. The
+ * host does not verify the log; the public reader does. This only decides how
+ * the host labels bytes it already holds.
  */
 export function signedMediaType(assetLog: string, digest: string): string | null {
   let found: string | null = null;
@@ -72,7 +79,7 @@ export function signedMediaType(assetLog: string, digest: string): string | null
     try {
       const entry = JSON.parse(line) as { state?: { asset?: { resources?: Array<{ digest?: unknown; mediaType?: unknown }> } } };
       for (const r of entry.state?.asset?.resources ?? []) {
-        if (r.digest === digest && typeof r.mediaType === 'string') found = r.mediaType;
+        if (r.digest === digest) found = typeof r.mediaType === 'string' && MEDIA_TYPE.test(r.mediaType) ? r.mediaType : null;
       }
     } catch {
       return null;
