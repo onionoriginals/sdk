@@ -122,7 +122,8 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       if (observed.hash !== blockHash || observed.height !== info.height || !integer(observed.confirmations) || observed.confirmations < 1 ||
           !Array.isArray(observed.tx) || !observed.tx.length || !observed.tx.every(hash) || new Set(observed.tx).size !== observed.tx.length)
         throw new Error('Active block observation unavailable');
-      block = { height: info.height, hash: blockHash, txids: observed.tx };
+      if (!integer(observed.time)) throw new Error('Active block timestamp unavailable');
+      block = { height: info.height, hash: blockHash, txids: observed.tx, time: observed.time };
       blocks.set(info.height, block);
     }
     const transactionIndex = block.txids.indexOf(txid);

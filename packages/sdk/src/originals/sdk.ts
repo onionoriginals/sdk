@@ -51,6 +51,7 @@ import {
   signerLocation,
   verifyAuthorHistory,
   verifyOriginal,
+  parseBtcoAlias,
   type AliasEvidence,
   type AliasReport,
   type AssetState,
@@ -63,6 +64,7 @@ import {
   type ResourceDescriptor,
   type ResourceVersion,
   type RetainedVersions,
+  type SatEvidence,
   type ValidAsOf,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
@@ -839,13 +841,14 @@ export class OriginalsSDK {
     return out;
   }
 
-  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<OriginalsReport> {
+  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[]): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
     const bytes = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         log,
+        ...(bitcoin ? { bitcoin } : {}),
         aliases,
         authors,
         bytes,
@@ -871,10 +874,15 @@ export class OriginalsSDK {
     return stored.log;
   }
 
-  /** The verified state of a stored Original, at its head or an exact checkpoint (P3.2). */
-  async get(did: string, options: { checkpoint?: string } = {}): Promise<OriginalView> {
+  /**
+   * The verified state of a stored Original, at its head or an exact
+   * checkpoint (P3.2). For an anchored Original, pass what an adapter read
+   * from the anchoring sat (`satEvidence`): Bitcoin then decides the log from
+   * the anchor on, and without it the result is unverified (P9.12, P9.13).
+   */
+  async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[] } = {}): Promise<OriginalView> {
     const log = await this.stored(did);
-    const report = await this.verify(log, options.checkpoint);
+    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin);
     await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
@@ -1006,6 +1014,21 @@ export class OriginalsSDK {
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [input.alias.did]);
     assertHostable(await this.stored(did));
     await this.store.putAuthorEvidence(input.alias);
+    return this.commit(draft, input.signer);
+  }
+
+  /**
+   * The anchoring entry (P9.10; plan 012 §3.1): an ordinary update that adds
+   * the sat's did:btco alias. It counts only once inscribed on that sat; until
+   * then reads report the Original as unverified on Bitcoin. Inscribing it is
+   * the Bitcoin writer's job (plan 011, PR 10).
+   */
+  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string }): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer", "sat"], "anchor input");
+    parseBtcoAlias(input.sat);
+    const aliases = (await this.get(did)).state.aliases;
+    if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
+    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, input.sat]);
     return this.commit(draft, input.signer);
   }
 
@@ -1258,15 +1281,22 @@ export class OriginalsSDK {
    * no network unless `identityFetch` is configured; its requests are then
    * bounded by a budget of their own (`retrievalLimits`).
    */
-  async load(zip: Uint8Array): Promise<LoadedEvidence> {
-    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package");
+  async load(zip: Uint8Array, options: { bitcoin?: SatEvidence[] } = {}): Promise<LoadedEvidence> {
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin);
   }
 
-  private async loadContents(contents: EvidenceContents, from: "package" | "host", aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
+  private async loadContents(
+    contents: EvidenceContents,
+    from: "package" | "host",
+    aliases: AliasEvidence[] = [],
+    retrieval?: Retrieval,
+    bitcoin?: SatEvidence[],
+  ): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
+        ...(bitcoin ? { bitcoin } : {}),
         aliases: aliasEvidence,
         log: contents.log,
         authors,

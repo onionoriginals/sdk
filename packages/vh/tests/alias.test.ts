@@ -149,9 +149,9 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
     expect(after.reasons).toEqual(["not-anchored"]);
   });
 
-  test("aliases other than one did:webvh are refused; did:btco arrives with anchoring", async () => {
+  test("aliases are at most one did:webvh and one did:btco; other DID methods are refused", async () => {
     const { alice, at, sign, ref, publish, alias, log } = await published();
-    for (const aliases of [[alias.did, alias.did], ["did:web:example.com"], [alias.did, "did:btco:1234"]]) {
+    for (const aliases of [[alias.did, alias.did], ["did:web:example.com"], [alias.did, "did:btco:1234", "did:btco:5678"], [alias.did, "did:btco:sats"]]) {
       const bad = await updateOriginal(publish, { versionTime: at(), aliases, author: ref, sign }).catch((e: unknown) => e);
       if (bad instanceof OriginalsError) {
         expect(bad.code).toMatch(/^STATE_ALIASES/);

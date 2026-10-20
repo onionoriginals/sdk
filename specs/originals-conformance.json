@@ -123,11 +123,11 @@
         3,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/freshness.test.ts"
-      ],
-      "note": "Unanchored case: historically authorized at the named version, ordering claimed, never current (P7.9). The anchored case arrives in PR 9."
+      ]
     },
     {
       "id": "C12-09",
@@ -359,7 +359,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-28",
@@ -369,7 +372,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-29",
@@ -379,7 +385,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-30",
@@ -389,7 +398,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-31",
@@ -399,7 +411,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-32",
@@ -409,7 +424,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-33",
@@ -419,7 +437,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-34",
@@ -429,7 +450,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-35",
@@ -439,7 +463,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-36",
@@ -449,7 +476,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-38",
@@ -459,7 +489,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-39",
@@ -469,7 +502,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-40",
@@ -479,7 +515,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-41",
@@ -490,13 +529,13 @@
         2,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/originals.test.ts",
         "packages/vh/tests/unanchored.test.ts"
-      ],
-      "note": "Unanchored case: historically authorized only, never current (P7.9). The anchored case belongs to the Bitcoin branch."
+      ]
     },
     {
       "id": "C12-42",
@@ -506,7 +545,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-43",
@@ -516,7 +558,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-44",
@@ -526,7 +571,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-45",
@@ -536,7 +584,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-46",
@@ -546,7 +597,11 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ],
+      "note": "Author DID history missing entirely makes the anchored Original incomplete, not current. A history that stops short of an inscription time needs the freshness checks of P7.8 against the inscription time, which arrive with the writer (PR 10)."
     },
     {
       "id": "C12-47",
@@ -556,7 +611,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-48",
@@ -568,13 +626,13 @@
         3,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/originals.test.ts",
         "packages/vh/tests/unanchored.test.ts"
-      ],
-      "note": "Unanchored case covered: the author DID's deactivation is reported and every entry is historically authorized only (P7.9, P6.5). The anchored case belongs to the Bitcoin branch."
+      ]
     },
     {
       "id": "C12-49",
@@ -716,7 +774,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
     },
     {
       "id": "C12-59",
@@ -726,7 +785,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
     },
     {
       "id": "C12-60",
@@ -736,7 +796,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
     },
     {
       "id": "C12-61",
@@ -746,7 +807,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
     },
     {
       "id": "C12-62",
@@ -756,7 +818,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-63",
@@ -914,7 +979,8 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "todo",
+      "note": "Owner decision Q15 (B): inscriptions carry full entries for now, so no compact encoding exists to decode yet (P9.14 MAY)."
     },
     {
       "id": "C12-75",
@@ -924,7 +990,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-76",
