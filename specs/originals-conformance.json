@@ -886,7 +886,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/fetch.test.ts"
+        "packages/vh/tests/fetch.test.ts",
+        "packages/sdk/tests/unit/originals/hosting.test.ts"
       ]
     },
     {

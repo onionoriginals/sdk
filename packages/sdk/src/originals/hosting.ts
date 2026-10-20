@@ -13,12 +13,72 @@
  * repeats the same snapshot and creates no transition (P9.2). The public
  * reader (`OriginalsSDK.loadPublished`) verifies that exact snapshot (P9.1).
  */
+import { FETCH_LIMITS } from "@originals/vh/fetch";
 import type { AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
 import { readZip } from "./zip.js";
 
-/** Retrieve one hosted file, or throw an `unavailable-bytes` OriginalsError. `@originals/vh/fetch`'s `safeFetch` fits. */
-export type HostedFetch = (url: string) => Promise<Uint8Array>;
+/**
+ * What `loadPublished` allows one request (issue #970). A fetcher should
+ * honour all three; `safeFetch` accepts them as its options. One that ignores
+ * them is still bounded: the SDK checks the size it returns and stops waiting
+ * when the request's time or the whole operation's runs out.
+ */
+export interface HostedFetchOptions {
+  /**
+   * The most bytes the response may have: the per-file cap or what is left of
+   * the whole-operation byte budget, whichever is smaller. A larger response
+   * should be refused with the code FETCH_TOO_LARGE, as `safeFetch` does.
+   */
+  maxBytes: number;
+  /** How long this request may take: its own timeout or what is left of the whole operation's, whichever is shorter. */
+  timeoutMs: number;
+  /** Aborted when the request's time runs out, at the whole-operation deadline or when the caller aborts. */
+  signal: AbortSignal;
+}
+
+/**
+ * Retrieve one hosted file, or throw an `unavailable-bytes` OriginalsError.
+ * `@originals/vh/fetch`'s `safeFetch` fits:
+ * `async (url, options) => (await safeFetch(url, options)).bytes`.
+ */
+export type HostedFetch = (url: string, options: HostedFetchOptions) => Promise<Uint8Array>;
+
+/**
+ * Whole-operation bounds on `loadPublished` (issue #970). PROVISIONAL: these
+ * are implementation limits, not protocol rules. Exhausting one is a
+ * `limit-exceeded` OriginalsError, RETRIEVAL_BUDGET_EXCEEDED, never a result.
+ */
+export interface RetrievalLimits {
+  /**
+   * Requests in one call, failed and optional ones included. The plan
+   * derived from the asset log (asset witness, each author's log and witness,
+   * each resource) must fit before any of it is requested.
+   */
+  maxRequests?: number;
+  /**
+   * Bytes accepted in one call, counted as responses arrive: the alias log
+   * and witness as well as the snapshot. Defaults to the SDK's
+   * `archiveLimits.maxTotalBytes` (else `ZIP_LIMITS.maxTotalBytes`), the most
+   * `load` accepts in one package; the snapshot's own files are also held to
+   * that archive limit, and their number to `archiveLimits.maxEntries`.
+   */
+  maxTotalBytes?: number;
+  /** Bytes in one response. Defaults to `FETCH_LIMITS.maxBytes`, the profile's per-file cap (P7.7). */
+  maxFileBytes?: number;
+  /** Milliseconds for one request. Defaults to `FETCH_LIMITS.timeoutMs`. */
+  requestTimeoutMs?: number;
+  /** Milliseconds for the whole call, so slow or absent optional files cannot multiply the per-request timeout. */
+  timeoutMs?: number;
+}
+
+/** PROVISIONAL defaults for `RetrievalLimits`; `maxTotalBytes` follows the archive limits. */
+export const RETRIEVAL_LIMITS = Object.freeze({
+  maxRequests: 1_024,
+  maxFileBytes: FETCH_LIMITS.maxBytes,
+  requestTimeoutMs: FETCH_LIMITS.timeoutMs,
+  timeoutMs: 120_000,
+});
 
 export const HOSTED_PREFIX = "originals/";
 

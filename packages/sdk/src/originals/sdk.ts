@@ -48,9 +48,9 @@ import {
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
-import { MANIFEST, authorPath, readEvidence, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
-import { HOSTED_PREFIX, type HostedFetch } from "./hosting.js";
-import { writeZip } from "./zip.js";
+import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
+import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import { MemoryStore, headOf, staleHead, type OriginalsStore } from "./store.js";
 import type { ZipLimits } from "./zip.js";
@@ -68,7 +68,13 @@ export interface OriginalsSDKOptions {
   freshness?: "asserted";
   /** Milliseconds since the epoch; used for entry timestamps and verification time. */
   clock?: () => number;
+  /** Bounds on one evidence package: `load`, `import`, and the snapshot `loadPublished` retrieves. */
   archiveLimits?: ZipLimits;
+  /**
+   * Whole-operation bounds on `loadPublished` (PROVISIONAL; `RETRIEVAL_LIMITS`).
+   * Its byte budget defaults to `archiveLimits.maxTotalBytes`.
+   */
+  retrievalLimits?: RetrievalLimits;
 }
 
 export interface ResourceInput {
@@ -533,41 +539,56 @@ export class OriginalsSDK {
   /**
    * The public reader (P9.1, P3.6). Retrieve the snapshot hosted under the
    * alias did:webvh's `#files` base with `fetch`, and verify that exact
-   * checkpoint with no key. The archive bounds of `load` apply to the
-   * assembled files. Missing bytes leave a partial, unverified result; an
-   * alias that does not name this Original in both directions gives no result
-   * (ALIAS_NOT_CONFIRMED).
+   * checkpoint with no key. Missing bytes leave a partial, unverified result;
+   * an alias that does not name this Original in both directions gives no
+   * result (ALIAS_NOT_CONFIRMED).
+   *
+   * Retrieval is bounded as a whole (issue #970; `retrievalLimits`, which
+   * follow `archiveLimits`): the number of requests, the bytes accepted, and
+   * the time, as well as `options.signal`. The manifest is checked, and the
+   * requests the unverified asset log asks for are checked for shape and
+   * number, before any of them is made; a line without that shape stops
+   * them all with SNAPSHOT_LOG_INVALID (its rule's category). An exhausted
+   * budget is a `limit-exceeded` RETRIEVAL_BUDGET_EXCEEDED error, a caller's
+   * abort RETRIEVAL_ABORTED; neither is ever a result.
    */
-  async loadPublished(aliasDid: string, fetch: HostedFetch): Promise<PublishedOriginal> {
+  async loadPublished(aliasDid: string, fetch: HostedFetch, options: { signal?: AbortSignal } = {}): Promise<PublishedOriginal> {
+    const retrieval = new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, options.signal);
+    try {
+      return await this.retrievePublished(aliasDid, retrieval);
+    } finally {
+      retrieval.close();
+    }
+  }
+
+  private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
     const text = (data: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(data);
-    const optional = async (url: string): Promise<Uint8Array | undefined> => {
-      try {
-        return await fetch(url);
-      } catch (error) {
-        if (error instanceof OriginalsError && error.category === "unavailable-bytes") return undefined;
-        throw error;
-      }
-    };
     const logUrl = didWebvhLogUrl(aliasDid);
-    const aliasWitness = await optional(logUrl.replace(/did\.jsonl$/, "did-witness.json"));
-    const alias: AliasEvidence = { did: aliasDid, log: text(await fetch(logUrl)), ...(aliasWitness ? { witness: parseJson(text(aliasWitness)) } : {}) };
+    const aliasWitness = await retrieval.get(logUrl.replace(/did\.jsonl$/, "did-witness.json"), { required: false, archive: false });
+    const aliasLog = (await retrieval.get(logUrl, { required: true, archive: false }))!;
+    const alias: AliasEvidence = { did: aliasDid, log: text(aliasLog), ...(aliasWitness ? { witness: parseJson(text(aliasWitness)) } : {}) };
 
     const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
     const files = new Map<string, Uint8Array>();
     const put = async (path: string, required: boolean) => {
-      const data = required ? await fetch(`${base}${path}`) : await optional(`${base}${path}`);
+      const data = await retrieval.get(`${base}${path}`, { required, archive: true });
       if (data) files.set(path, data);
       return data;
     };
-    await put(MANIFEST, true);
+    readManifest((await put(MANIFEST, true))!);
     const log = text((await put("asset/did.jsonl", true))!);
+    // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
+    const plan = retrievalPlan(log);
+    const planned = 1 + 2 * plan.authors.length + plan.digests.length;
+    retrieval.plan(planned, files.size + planned);
     await put("asset/did-witness.json", false);
-    for (const did of authorDidsOf(log)) {
+    for (const did of plan.authors) {
       if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
     }
-    for (const digest of digestsOf(log)) await put(`resources/${digest}`, false);
+    for (const digest of plan.digests) await put(`resources/${digest}`, false);
 
-    const loaded = await this.loadContents(readEvidence(writeZip(files), this.options.archiveLimits), [alias]);
+    // Every file is already within the budget and the archive limits; no archive is assembled.
+    const loaded = await this.loadContents(readEvidenceFiles(files), [alias]);
     const r = loaded.report;
     // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
     // merely points at an Original gives no result through it.

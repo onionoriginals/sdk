@@ -193,14 +193,41 @@ publication repeats the same snapshot (P9.2). The public reader:
 
 ```ts
 import { safeFetch } from "@originals/vh/fetch";
-const r = await reader.loadPublished(aliasDid, async (url) => (await safeFetch(url)).bytes);
+const r = await reader.loadPublished(aliasDid, async (url, options) => (await safeFetch(url, options)).bytes, { signal });
 r.verified; // the exact snapshot: history ending at its checkpoint, binding, identity, every byte, the alias
 r.report.current; // whether it is the latest, under the freshness policy
 ```
 
+Retrieval is bounded as a whole, not only per file (issue #970). These are
+implementation limits (PROVISIONAL), set with the SDK's `retrievalLimits`:
+
+| Limit | Default | Bounds |
+| --- | --- | --- |
+| `maxRequests` | 1,024 | requests in one call, failed and optional ones included |
+| `maxTotalBytes` | `archiveLimits.maxTotalBytes` (512 MiB) | bytes accepted in one call, counted as they arrive, alias log included |
+| `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response (P7.7) |
+| `requestTimeoutMs` | `FETCH_LIMITS.timeoutMs` (15 s) | one request |
+| `timeoutMs` | 120 s | the whole call, so slow or absent optional files cannot multiply the per-request timeout |
+
+The snapshot's own files are also held to `archiveLimits`, the bounds `load`
+applies to one package: at most `maxEntries` files and `maxTotalBytes` bytes.
+The manifest is checked first. The asset log is unverified, so before anything
+it asks for is requested, every line must carry a well-formed author reference
+and asset state (else `SNAPSHOT_LOG_INVALID`, in the category of the rule it
+breaks), and the whole plan (asset witness, each author's log and witness, each
+resource) must fit the request and file limits. Each request gets
+`{ maxBytes, timeoutMs, signal }`: the smaller of its own cap and what is left
+of the budget. A fetcher that ignores them is still bounded, because the SDK
+checks every returned size and stops waiting at the deadline. Exhausting a
+budget is a `limit-exceeded` error, `RETRIEVAL_BUDGET_EXCEEDED`, whose
+`details.limit` names the limit (`requests`, `bytes`, `archive-bytes`,
+`archive-entries` or `time`). Aborting `signal` is `RETRIEVAL_ABORTED`. Neither
+is ever a result, and nothing is assembled into an archive.
+
 `@originals/vh/fetch` retrieves HTTPS only, with no credentials, no redirects,
 no private or special-use address before or after DNS (connecting to the
-vetted address), and caps on size and time; every refusal is
+vetted address), and caps on size and time, which a caller's `signal` can end
+sooner (FETCH_ABORTED); every refusal is
 `unavailable-bytes` (P8.5). `servingHeaders(mediaType)` gives the P9.7 headers:
 the signed type, `nosniff`, a script-free sandboxing CSP, and `attachment` for
 active types. Hosts must also serve resources from an origin without user
