@@ -1,4 +1,7 @@
+import type { JsonValue } from '@originals/vh/json';
+import { encodeCbor } from '@originals/vh/originals';
 import type { InscriptionParts, OrdinalsProvider } from '../types.js';
+import type { BitcoinNetwork, SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
 
 export interface OrdMockState {
   inscriptionsById: Map<string, {
@@ -14,6 +17,8 @@ export interface OrdMockState {
   inscriptionsBySatoshi: Map<string, string[]>;
   ownershipBySatoshi: Map<string, { address: string; outpoint: string }>;
   feeRate: number;
+  /** The network its sat snapshots report; mainnet unless set. */
+  network?: BitcoinNetwork;
 }
 
 /** In-memory chain double implementing the SDK's OrdinalsProvider. */
@@ -53,6 +58,30 @@ export class OrdMockProvider implements OrdinalsProvider {
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
     // Keep it well inside the 0..2.1e15 sat supply range.
     return String(100000000 + (h % 2000000000000000));
+  }
+
+  /**
+   * A complete sat read from the in-memory state, for did:btco resolution in
+   * tests. Inscriptions keep their append order (as transaction order in one
+   * block when no height is set); object metadata is served as strict CBOR.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+    const network = this.state.network ?? 'mainnet';
+    const records = (this.state.inscriptionsBySatoshi.get(satoshi) || []).map((id) => this.state.inscriptionsById.get(id)).filter((r) => r !== undefined);
+    const height = (r: (typeof records)[number]) => r.blockHeight ?? 1;
+    const tip = { height: Math.max(1, ...records.map(height)), hash: '00'.repeat(32) };
+    const owned = this.state.ownershipBySatoshi.get(satoshi);
+    return {
+      network, sat: satoshi, tipBefore: tip, tipAfter: tip, indexTip: tip, indexHealthy: true, enumerationComplete: true,
+      blocks: [...new Set(records.map(height))].map((h) => ({ height: h, hash: '00'.repeat(32), txids: [], time: 1_700_000_000 + h * 600 })),
+      publications: records.map((r, k) => ({
+        id: r.inscriptionId, revealTxid: r.txid, network, sat: satoshi, confirmed: true,
+        creation: { height: height(r), blockHash: '00'.repeat(32), transactionIndex: k, inscriptionIndex: 0 },
+        body: { status: 'complete' as const, mediaType: r.contentType, bytes: r.content, metadata: r.metadata ? encodeCbor(r.metadata as JsonValue) : null },
+      })),
+      ownership: { owner: owned?.address ?? null, satpoint: owned ? `${owned.outpoint}:0` : null },
+    };
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
