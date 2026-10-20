@@ -3,6 +3,9 @@ import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
 import { DemoEngine, FeatureUnavailableError } from './engine';
 import { generateArtwork } from './artwork';
 import { FEATURES } from './features';
+import * as ed from '@noble/ed25519';
+import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
+import { DOMAIN, SUB, host } from './publish.fixture';
 
 async function created() {
   const engine = new DemoEngine();
@@ -61,5 +64,29 @@ describe('DemoEngine on the Originals Protocol', () => {
   test('a signed-in engine needs a subOrg to find its author DID', async () => {
     const engine = new DemoEngine({ authed: true });
     await expect(engine.create('x', 'Orbits', generateArtwork('x', 'Orbits', 1).svg)).rejects.toThrow(/Sign in again/);
+  });
+
+  test('with hosted publication on, publishing gives the Original a did:webvh that a stranger can verify through', async () => {
+    const { upload, read } = host();
+    const secret = ed.utils.randomSecretKey();
+    const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
+    const engine = new DemoEngine({
+      features: { hostedPublication: true },
+      publishTarget: { upload, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+    });
+    const state = await engine.create('Harbor at dawn', 'Orbits', generateArtwork('Harbor at dawn', 'Orbits', 7).svg);
+    const published = await engine.publish();
+    expect(published.layer).toBe('did:webvh');
+    expect(published.webvhDid).toMatch(/^did:webvh:/);
+    expect(published.webvhLogUrl).toBe(`https://${DOMAIN}/${userWebvhSlug(SUB)}/${published.webvhDid!.split(':').pop()}/did.jsonl`);
+    expect(published.history.length).toBe(state.history.length + 1);
+    // A retry appends nothing and keeps the alias (P9.2).
+    const again = await engine.publish();
+    expect(again.history.length).toBe(published.history.length);
+    expect(again.webvhDid).toBe(published.webvhDid);
+    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
+    const r = await stranger.loadPublished(published.webvhDid!, read);
+    expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.report.original).toBe(state.did);
   });
 });

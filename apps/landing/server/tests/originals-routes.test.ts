@@ -7,6 +7,7 @@ import { serializeCookie } from '../cookies';
 import { createOriginalsStore } from '../originals-store';
 import { createOriginalsRoutes } from '../originals-routes';
 import { buildFetch } from '../app';
+import { resourceDigest } from '@originals/vh/originals';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -39,7 +40,7 @@ describe('originals routes — auth gating', () => {
     const store = tmpStore();
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const endpoint = `http://demo.local/api/originals/host/${encodeURIComponent(key)}`;
     const cookie = cookieFor('sub-1');
 
@@ -54,7 +55,7 @@ describe('originals routes — auth gating', () => {
     expect(await getRes.text()).toBe('{"v":1}');
 
     // A key this user never wrote → 404, which the adapter maps to null.
-    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/nope/did.jsonl')}`;
+    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/o-111111111111111a/did.jsonl')}`;
     const missRes = await fetchFn(new Request(missUrl, { headers: { cookie } }));
     expect(missRes.status).toBe(404);
   });
@@ -71,18 +72,16 @@ describe('originals routes — auth gating', () => {
     };
     expect((await shadow('magby.originals.build/assets/app-abc123.js')).status).toBe(403);
     expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
-    // A bare 'resources/<name>' whose name isn't a multibase is refused too.
+    // CEL-era shapes and anything outside the hosted layout are refused.
     expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
-    // A 'cel/…' key that isn't the content-digest copy is refused.
-    expect((await shadow('cel/index.html')).status).toBe(403);
-    expect((await shadow('cel/evil.json')).status).toBe(403); // no 'u' multibase prefix
-    expect((await shadow('cel/uAbc.json/../../index.html')).status).toBe(403);
-    expect((await shadow('magby.originals.build/cel/uAbc.json')).status).toBe(403); // 2 segments only
-    // But real did:webvh artifacts are allowed.
+    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(403);
+    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(403);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/cel.json')).status).toBe(403);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/../../index.html')).status).toBe(403);
+    // The hosted layout in the caller's own namespace is allowed.
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
-    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(200);
-    // …as is the SDK's layer-agnostic CEL copy (persistCelArtifacts).
-    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(200);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
@@ -102,7 +101,7 @@ describe('originals routes — auth gating', () => {
 
   test('a second user cannot overwrite the first user’s object (403)', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
     const put = (sub: string) =>
       routes.hostPut(
@@ -119,10 +118,9 @@ describe('originals routes — auth gating', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'originals-routes-'));
     const store = createOriginalsStore({ dataDir });
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store });
-    // A hash-derived asset path (`u<...>` segment), not a `user-<slug>`
-    // namespace — this is the class of key the namespace guard leaves open to
-    // any signed-in user, relying solely on the store's owner sidecar (#690).
-    const key = 'demo.example.com/uEiExample/resources/uJZtLeUr';
+    // Every hosted key is inside its author's namespace; the owner sidecar still
+    // guards against claiming bytes whose ownership was never recorded (#690).
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json';
     // Simulate the crash window this store's write ordering closes: resource
     // bytes on disk with no `.owner` sidecar (store-level coverage of the
     // same state lives in originals-store.test.ts). This must fail closed at
@@ -140,7 +138,7 @@ describe('originals routes — auth gating', () => {
       );
     };
     expect((await put('sub-1')).status).toBe(409);
-    expect((await put('sub-2')).status).toBe(409);
+    expect((await put('sub-2')).status).toBe(403); // not sub-2's namespace at all
   });
 
   test('pre-squat blocked: cannot write another user’s namespace even when unclaimed (403)', async () => {
@@ -242,7 +240,7 @@ describe('originals routes — auth gating', () => {
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
 
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const putRes = await fetchFn(
       new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, {
         method: 'PUT',
@@ -253,7 +251,7 @@ describe('originals routes — auth gating', () => {
     expect(putRes.status).toBe(200);
 
     // Anyone GETting the resolver URL gets the durable object via the serve fallback.
-    const getRes = await fetchFn(new Request('http://demo.example.com/user-sub-1/abc/did.jsonl'));
+    const getRes = await fetchFn(new Request('http://demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl'));
     expect(getRes.status).toBe(200);
     expect(await getRes.text()).toBe('{"v":1}');
     expect(getRes.headers.get('content-disposition')).toBe('attachment');
@@ -270,17 +268,49 @@ function noopHostStore() {
 }
 
 
-describe('CEL 3 account namespace', () => {
-  test('an authenticated attacker cannot squat an absent account publication', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
-    const put = (sub: string, key: string) => {
-      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
-      return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor(sub) }, body: '{}' }), url, sub);
-    };
-    const key = 'demo.test/published/accounts/victim/uEiExample/cel.json';
-    expect((await put('attacker', key)).status).toBe(403);
-    expect((await put('victim', key)).status).toBe(200);
-    expect((await put('attacker', 'demo.test/assets/cel.json')).status).toBe(403);
-    expect((await put('attacker', 'demo.test/published/anonymous/uEiExample/cel.json')).status).toBe(403);
+describe('hosted Original layout (plan 011, PR 8)', () => {
+  const NAME = 'o-9xKpQ2mN4vR7tW1z';
+  const base = `demo.example.com/user-sub-1/${NAME}/originals`;
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const digest = resourceDigest(bytes);
+  const log = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', size: bytes.length, digest }] } } })}\n`;
+
+  function setup() {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (key: string, body: BodyInit, contentType = 'text/html') =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'content-type': contentType, cookie: cookieFor('sub-1') }, body }));
+    return { fetchFn, put };
+  }
+
+  test('a resource must be listed in the uploaded asset log and match its digest', async () => {
+    const { put } = setup();
+    expect((await put(`${base}/resources/${digest}`, bytes)).status).toBe(409); // log not uploaded yet
+    expect((await put(`${base}/asset/did.jsonl`, log)).status).toBe(200);
+    expect((await put(`${base}/resources/${digest}`, new TextEncoder().encode('other bytes'))).status).toBe(422);
+    const unlisted = resourceDigest(new TextEncoder().encode('not in the log'));
+    expect((await put(`${base}/resources/${unlisted}`, new TextEncoder().encode('not in the log'))).status).toBe(409);
+    expect((await put(`${base}/resources/${digest}`, bytes)).status).toBe(200);
+  });
+
+  test('C12-84: a resource is served with its signed media type, isolated, whatever the uploader claimed (P9.7)', async () => {
+    const { fetchFn, put } = setup();
+    await put(`${base}/asset/did.jsonl`, log);
+    await put(`${base}/resources/${digest}`, bytes, 'text/html');
+    const res = await fetchFn(new Request(`http://${base}/resources/${digest}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/svg+xml');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    expect(res.headers.get('content-disposition')).toBe('attachment');
+  });
+
+  test('logs and evidence files get the server\'s content types', async () => {
+    const { fetchFn, put } = setup();
+    await put(`${base}/asset/did.jsonl`, log);
+    await put(`${base}/originals-evidence.json`, '{}');
+    expect((await fetchFn(new Request(`http://${base}/asset/did.jsonl`))).headers.get('content-type')).toBe('application/jsonl');
+    expect((await fetchFn(new Request(`http://${base}/originals-evidence.json`))).headers.get('content-type')).toBe('application/json');
   });
 });
