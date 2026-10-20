@@ -51,6 +51,7 @@
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
     "test:ci": "bash -o pipefail -c 'bun test tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
     "test:security": "bun test tests/security",
+    "bench:clock": "bun scripts/bench-inscription-clock.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""
   },

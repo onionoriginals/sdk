@@ -57,11 +57,15 @@
  *
  * Node modules are loaded lazily, so importing this entry is safe anywhere;
  * opening a store needs Node.
+ *
+ * `fileClockStore(path)` persists an `InscriptionClock` (#973) in one file,
+ * written the same way.
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 import { hex } from "@scure/base";
+import type { ClockStore } from "./bitcoin.js";
 import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
 
 export interface FileStoreFaults {
@@ -305,6 +309,48 @@ async function fsyncDir(dir: string): Promise<void> {
   } finally {
     await handle.close();
   }
+}
+
+async function writeAtomically(dir: string, name: string, data: Uint8Array | string, beforeRename?: () => void): Promise<void> {
+  const tmp = join(dir, `${name}.${randomHex(6)}.tmp`);
+  const handle = await fs.open(tmp, "wx");
+  try {
+    await handle.writeFile(data);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  beforeRename?.();
+  await fs.rename(tmp, join(dir, name));
+  await fsyncDir(dir);
+}
+
+/**
+ * An `InscriptionClock` store in one file (Node only). Saves replace the file
+ * atomically; a missing file loads as nothing saved. The clock checks the
+ * bytes itself, so a damaged file is rebuilt and one for another network is
+ * refused. One process should write a file at a time.
+ */
+export function fileClockStore(path: string): ClockStore {
+  const slash = path.lastIndexOf("/");
+  const dir = slash < 0 ? "." : path.slice(0, slash) || "/";
+  const name = path.slice(slash + 1);
+  return {
+    async load() {
+      await loadNode();
+      try {
+        return new Uint8Array(await fs.readFile(path));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+    },
+    async save(state) {
+      await loadNode();
+      await fs.mkdir(dir, { recursive: true });
+      await writeAtomically(dir, name, state);
+    },
+  };
 }
 
 export class FileStore implements OriginalsStore {
