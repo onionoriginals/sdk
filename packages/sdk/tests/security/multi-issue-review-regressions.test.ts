@@ -144,7 +144,7 @@ describe('did:btco resolution rejects cross-network DIDs (issue #267)', () => {
 
   test('a matching-network DID is not rejected by the cross-network guard', async () => {
     const { OrdMockProvider } = await import('../../src/adapters/providers/OrdMockProvider');
-    const provider = new OrdMockProvider();
+    const provider = new OrdMockProvider({ network: 'regtest' });
     const dm = new DIDManager({ network: 'regtest', ordinalsProvider: provider } as unknown as OriginalsConfig);
 
     // No inscription exists, so this resolves to null — but it must NOT throw a

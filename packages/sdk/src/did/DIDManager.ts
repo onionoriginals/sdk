@@ -111,6 +111,11 @@ export function requireWebVHDomain(domain: string | undefined): string {
   return canonicalizeWebVHDomain(domain, { identity: true });
 }
 
+/** Methods whose documents can change without this instance's knowledge, so `mode: 'current'` reads them again. */
+function changesElsewhere(did: string): boolean {
+  return did.startsWith('did:webvh:') || did.startsWith('did:btco:');
+}
+
 export class DIDManager {
   private webvhManager?: WebVHManager;
   private readonly metrics?: MetricsCollector;
@@ -335,13 +340,14 @@ export class DIDManager {
   /**
    * Cross-network did:btco guard (issue #267). The configured ordinalsProvider
    * is pinned to one Bitcoin network, so a DID whose encoded network differs
-   * must be rejected — otherwise an attacker can inscribe "did:btco:reg:N"
-   * content on mainnet sat N and have it resolve as the regtest DID. This runs
+   * must be rejected — otherwise an attacker can inscribe a "did:btco:reg:N"
+   * document on mainnet sat N and have it resolve as the regtest DID. This runs
    * BEFORE the cache lookup: DIDCache supports a pluggable persistent storage
-   * adapter that may be shared between SDK instances on different networks (or
-   * populated via the bitcoinRpcUrl branch, which deliberately resolves any
-   * network), so a cached cross-network document must not bypass the guard
-   * (issue #312). It is a prefix parse of the DID string — no provider query.
+   * adapter that may be shared between SDK instances on different networks, so
+   * a cached cross-network document must not bypass the guard (issue #312). It
+   * is a prefix parse of the DID string — no provider query. Where the SDK's
+   * network is unknown, the resolver compares the DID with the sat read's own
+   * network, and a mismatch there fails the same way.
    */
   private assertBtcoNetworkMatchesProvider(did: string): void {
     if (!did.startsWith('did:btco:') || !this.config.ordinalsProvider) return;
@@ -400,13 +406,13 @@ export class DIDManager {
     }
 
     // `mode: 'current'` only actually makes `resolveDID` bypass its cache for
-    // did:webvh (the one method whose cache entry can go stale behind this
-    // instance's back — see the `requiresFreshResolution` gate above). For
-    // every other method, `resolveDID` may still legitimately serve a cached
-    // document even when 'current' was requested, so this must check the
-    // cache itself rather than assume a network read happened — otherwise a
-    // genuine cache hit gets mislabeled `source: 'network', fresh: true`.
-    const bypassesCache = options?.mode === 'current' && did.startsWith('did:webvh:');
+    // did:webvh and did:btco (the methods whose cache entry can go stale
+    // behind this instance's back — see `changesElsewhere`). For every other
+    // method, `resolveDID` may still legitimately serve a cached document even
+    // when 'current' was requested, so this must check the cache itself rather
+    // than assume a network read happened — otherwise a genuine cache hit gets
+    // mislabeled `source: 'network', fresh: true`.
+    const bypassesCache = options?.mode === 'current' && changesElsewhere(did);
 
     if (!bypassesCache) {
       const cached = await this.cache.getWithMetadata(did);
@@ -454,14 +460,15 @@ export class DIDManager {
 
       // Check cache first (unless skipCache is set, or the caller requested
       // `mode: 'current'` for a mutable method). did:webvh authority can be
-      // rotated/recovered by another process/host at any time; a verifier
+      // rotated/recovered by another process/host at any time, and a did:btco
+      // by whoever holds its sat inscribing a new version; a verifier
       // deciding whether a key is PRESENTLY authorized must not accept a
       // cached (however recent, and even pinned) pre-rotation document as
       // current-authority evidence — that cache can only be invalidated by
       // this same DIDManager instance's own mutations (issue #602). Other
       // methods are unaffected: did:key never populates this cache at all
       // (it is synthesized locally by DocumentLoader).
-      const requiresFreshResolution = options?.mode === 'current' && did.startsWith('did:webvh:');
+      const requiresFreshResolution = options?.mode === 'current' && changesElsewhere(did);
       if (!options?.skipCache && !requiresFreshResolution) {
         let cached: DIDDocument | null = null;
         try {
@@ -498,6 +505,9 @@ export class DIDManager {
           }
           const resolver = new BtcoDidResolver({ satSnapshot: (sat) => provider.getSatSnapshot!(sat) });
           const resolved = await resolver.resolve(did);
+          if (resolved.resolutionMetadata.error === 'networkMismatch') {
+            throw new StructuredError('BTCO_NETWORK_MISMATCH', `Cannot resolve ${did}: ${resolved.resolutionMetadata.message ?? 'the provider reads another network'}`);
+          }
           result = resolved.didDocument || null;
         } else if (did.startsWith('did:webvh:')) {
           try {

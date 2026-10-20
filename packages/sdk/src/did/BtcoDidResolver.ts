@@ -78,6 +78,10 @@ export class BtcoDidResolver {
     if (snapshot.sat !== satNumber || !snapshot.enumerationComplete || !snapshot.indexHealthy) {
       return failed('unresolvable', `The sat ${satNumber} was not read in full`, { satNumber, network });
     }
+    // One stable read: a tip that moved during it may have changed what it saw.
+    if (snapshot.tipBefore.height !== snapshot.tipAfter.height || snapshot.tipBefore.hash !== snapshot.tipAfter.hash) {
+      return failed('unresolvable', `The chain moved while the sat ${satNumber} was read`, { satNumber, network });
+    }
     const blockTime = new Map(snapshot.blocks.map((b) => [b.height, b.time]));
     const evidence: SatEvidence = {
       sat: did,
