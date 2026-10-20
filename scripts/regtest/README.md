@@ -1,36 +1,38 @@
-# CEL 3 release journey
+# Regtest journeys
 
 Run `bun run regtest` from the repository root. The runner verifies and installs
-pinned Bitcoin Core 31.1 and ord 0.29.0 binaries, builds the workspace packages,
-typechecks the harness, and runs three disposable chains sequentially:
+pinned Bitcoin Core 31.1 and ord 0.29.0 binaries (SHA-256 checked), builds the
+workspace packages, typechecks the harness, and runs disposable chains in turn:
 
-- normal commit/reveal delivery;
-- reveal rejection, followed by recovery from a recreated server/store through
-  the background sweep without a browser retry;
-- commit accepted by Core with its response lost, followed by exact-pair recovery
-  from the recreated server/store.
+- `apps/landing/scripts/sat-snapshot-no-address.ts`: one SDK-built inscription,
+  a sat snapshot without the address index, a real sat transfer, and chain
+  validation against an independent Core node;
+- `scripts/regtest/restart-check.ts`: Core and ord restarts;
+- `scripts/regtest/originals-anchor.ts`: anchored Originals end to end (plan 011
+  PR 10, plan 012).
 
-`REGTEST_FAULT` selects one scenario (`none`, `reveal-rejected`, or
-`commit-response-lost`). `REGTEST_RECEIPT=/absolute/path/receipt.json` writes a
-JSON receipt per scenario, and `REGTEST_LOGS_DIR` captures the Core and ord logs.
-Set both `BITCOIND_BIN` and `ORD_BIN` to use already installed binaries. The
-runner does not download dependencies or use a public Bitcoin network.
+The Originals journey asserts each step on real transactions:
 
-The journey uses the public CEL 3 SDK, actual HTTPS upload and Bitcoin submission
-routes, and fresh Core/ord observations. A disposable CA authenticates
-`regtest.localhost` without changing system trust. This reserved loopback hostname
-must resolve locally on the runner. Resource bodies and CBOR metadata are read
-back from mined inscriptions; they are not synthesized from the writer result.
+1. A local Original is anchored to a sat the wallet holds, and the anchoring
+   entry is inscribed on it. Broadcast but unmined, it does not count (P9.4);
+   mined, the Original verifies as anchored and current, with provisional
+   ownership of the reveal output (P9.11, P9.16).
+2. An edit is reinscribed on the same sat by spending the output that holds it
+   (P9.12, P9.13).
+3. A pair whose first funding UTXO holds another sat is refused.
+4. A reorganisation replaces the edit's block with empty blocks: the edit drops
+   to the mempool and the verifier reports `authoritative-source-changed`; the
+   next block includes it again (P9.5).
+5. A crash after the commit broadcast leaves a durable recovery record;
+   resuming rebroadcasts the same signed pair, and the published boundary
+   advances only when the reveal is mined (P9.4, P9.6).
+6. An entry the author signs but nobody inscribes is never current (P9.12).
 
-Each scenario checks local creation, a separate genuine WebVH method log and CEL
-publication, full PNG boundary publication, exact signed-pair persistence,
-boundary reorganization and reconfirmation, six-confirmation byte retirement,
-and fresh JSON/resource/DID recovery. Later transactions check a controller
-rotation plus update in one log-only delta, rotation rollback on an empty
-replacement branch, reconfirmation, a real sat sale and reacquisition, a new raw
-resource version, and terminal deactivation. Possession never changes the CEL
-head or reauthorizes a retired key.
+`REGTEST_RECEIPT=/absolute/path/receipt.json` writes receipts (the Originals
+journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Core
+and ord logs. Set both `BITCOIND_BIN` and `ORD_BIN` to use installed binaries.
+The runner uses no public Bitcoin network and spends nothing outside regtest.
 
-The signer is a disposable local key through `TurnkeySatSigner`. This proves the
-adapter transaction path, not a live Turnkey service call or production hosting.
-It does not replace the separately required owner mainnet release proof.
+The signer is a disposable local key. This proves the transaction path, not a
+live Turnkey call, a hosted deployment or mainnet; the owner's mainnet release
+proof is separate.

@@ -40,6 +40,11 @@
       "import": "./dist/originals/fs-store.js",
       "default": "./dist/originals/fs-store.js"
     },
+    "./originals/bitcoin": {
+      "types": "./dist/originals/bitcoin-writer.d.ts",
+      "import": "./dist/originals/bitcoin-writer.js",
+      "default": "./dist/originals/bitcoin-writer.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

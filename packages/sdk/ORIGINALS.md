@@ -568,7 +568,7 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
-## Bitcoin anchoring and ownership — phase 4 (verifier implemented; writer in PR 10)
+## Bitcoin anchoring and ownership — phase 4 (implemented in the SDK; the landing's path is PR 10b)
 
 The representation is [plan 012](../../plans/012-bitcoin-representation.md)
 (owner decision Q15). An Original can be anchored from the local or the web
@@ -576,7 +576,13 @@ layer, once, terminally, to one sat (P9.10):
 
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
-// The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
+// Inscribe the head entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out of the
+// browser-first entry). The first funding UTXO must hold the sat at offset 0:
+const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, provider });
+await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore }); // persists before each broadcast
+// after a crash: resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider, recoveryStore }) sends the same pair
+const published = await readAnchored(sdk, did, { provider, clock });          // what Bitcoin shows: the durable boundary (P9.4)
+// Or by hand: pass what an adapter read from the sat:
 // Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
 const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
 // A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).

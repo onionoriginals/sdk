@@ -195,7 +195,8 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **9a** | 4 | Bitcoin verifier on fixtures (plan 012): anchoring entry and alias rules, assembly over sat snapshots supplied as evidence (no Bitcoin `src` yet; plan 012 §3.4), chain order, inscription time, P9.15 for did:vh/did:webvh authors, anchors and conflicting anchors, ownership report, reorg reporting | Bitcoin §12 rows on recorded fixtures |
 | **9b** | 4 | did:btco author DIDs in the Originals verifier per the method spec v0.2.0 (CBOR metadata, chain order, terminal deactivation) | §12 rows 58–61 |
 | **9c** | 4 | The SDK's legacy did:btco resolver and writer (`BtcoDidResolver`, `DIDManager.migrateToDIDBTCO`) moved to method v0.2.0 metadata, replacing the content-based convention (Q15 C) | Legacy did:btco tests on v0.2.0 |
-| **10** | 4 | Writer/provider: anchor and reinscribe through the sat inscription builder and recovery store, durable boundary and retries, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
+| **10** | 4 | SDK writer: `prepareEntryInscription` on the anchoring sat through the sat inscription builder and recovery store, `readAnchored`, durable boundary and retries (P9.4–P9.6) | **Real Core 31.1 / ord 0.29.0 regtest** journey (`scripts/regtest/originals-anchor.ts`): anchor, reinscribe, wrong sat, reorg, crash and resume, uninscribed entry; no mainnet/testnet spending |
+| **10b** | 4 | Landing: anchoring behind `bitcoinAnchoring` (off); `server/bitcoin.ts` reinscription of the Original's own sat in place of its refusal of inscribed inputs, and reconciliation of Originals inscriptions | Landing regtest journey |
 
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
