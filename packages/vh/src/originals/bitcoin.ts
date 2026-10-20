@@ -37,7 +37,7 @@ import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
 import { parseLog, type LogEntry, type LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
-import { btcoAliasOf, parseBtcoAlias, type BitcoinNetwork, type BtcoAlias } from "./btco.js";
+import { btcoAliasOf, chainOrder, parseBtcoAlias, type BtcoAlias, type SatEvidence, type SatInscription } from "./btco.js";
 import { signerOf, type AuthorRef, type EntryState } from "./state.js";
 
 /** The media type of an Originals inscription (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
@@ -45,63 +45,6 @@ export const ORIGINALS_INSCRIPTION_TYPE = "application/vnd.originals.vh+jsonl";
 
 /** The largest inscription body, in bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
 export const ORIGINALS_INSCRIPTION_MAX_BYTES = 350_000;
-
-/**
- * One inscription, as one index reports it. The same shape serves any sat:
- * an Original's anchoring sat, or a did:btco signer DID's sat (P5.13).
- */
-export interface SatInscription {
-  id: string;
-  /** The sat number, in decimal, that the index reports the inscription on (P9.10). */
-  sat: string;
-  /** The network the index read it from (P9.10). */
-  network: BitcoinNetwork;
-  height: number;
-  transactionIndex: number;
-  inscriptionIndex: number;
-  /** 0 while unconfirmed. */
-  confirmations: number;
-  /** The greatest block timestamp of its block and the block's ancestors, epoch ms (P9.15). */
-  inscriptionTime: number;
-  mediaType: string;
-  content: Uint8Array;
-  /** The inscription's raw metadata, or null or absent when it carries none. Originals inscriptions carry none (P9.17). */
-  metadata?: Uint8Array | null;
-  /**
-   * Set when the reader observed the inscription but did not establish its
-   * own body; `content` is then empty and `metadata` absent. PROVISIONAL.
-   * - `delegated`, `content-encoding`: its body is another inscription's, or
-   *   encoded, and P9.14 defines no encoding. It is never an Originals entry
-   *   (an Originals media type is rejected, `unsupported-encoding`; P9.14,
-   *   P9.17) and never a did:btco version (P5.13).
-   * - `not-read`: its body was past the reader's byte budget, or not asked
-   *   for. An unread Originals inscription is missing evidence: the
-   *   verification fails (`SAT_READ_INCOMPLETE`, P9.17), unless `contentLength`
-   *   or `metadataPresent` already rejects it.
-   * Inscriptions of other media types are not Originals inscriptions either way.
-   */
-  unsupported?: "delegated" | "content-encoding" | "not-read";
-  /** For a `not-read` inscription, the body length the index reports. PROVISIONAL. */
-  contentLength?: number;
-  /** For a `not-read` inscription: it carries metadata, which the reader did not read. PROVISIONAL. */
-  metadataPresent?: boolean;
-}
-
-/** What one index reported for one sat at one tip. */
-export interface SatEvidence {
-  /**
-   * The did:btco alias whose sat this read was asked about. A label only:
-   * each inscription counts for it by the sat and network the index reports
-   * (P9.10).
-   */
-  sat: string;
-  /** Which index served the read (P9.11). Reads of one sat by different indexes are compared. */
-  index: string;
-  tip: { height: number; hash: string };
-  inscriptions: SatInscription[];
-  /** The output holding the sat now, or null when the adapter observed none. */
-  owner: { output: string; address?: string; confirmations: number } | null;
-}
 
 /** Why an inscription did not count for the sat it was read under. */
 export type PlacementReason = "not-on-sat" | "other-network" | "placement-disputed" | "after-disputed-placement";
@@ -135,10 +78,6 @@ function sameReport(a: SatInscription, b: SatInscription): boolean {
     a.inscriptionTime === b.inscriptionTime && a.mediaType === b.mediaType && sameBytes(a.content, b.content) && sameBytes(a.metadata, b.metadata) &&
     (a.unsupported ?? null) === (b.unsupported ?? null) && (a.contentLength ?? null) === (b.contentLength ?? null) &&
     (a.metadataPresent ?? false) === (b.metadataPresent ?? false);
-}
-
-export function chainOrder(a: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">, b: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">): number {
-  return a.height - b.height || a.transactionIndex - b.transactionIndex || a.inscriptionIndex - b.inscriptionIndex;
 }
 
 /**
@@ -324,18 +263,22 @@ function signerRefOf(entry: unknown): AuthorRef | undefined {
 /**
  * P9.15: the signer DID's state at an inscription is the later of the version
  * the entry names and the latest version whose versionTime is no later than
- * the inscription time. The key must hold in that state, which must not be
- * deactivated. (A did:btco signer DID is selected by chain order instead,
- * P5.13; that arrives with did:btco author DIDs.)
+ * the inscription time; for a did:btco signer DID, the versions in effect are
+ * those before the inscription in chain order (P5.13). The key must hold in
+ * that state, which must not be deactivated.
  */
-export function checkAtInscriptionTime(entry: LogEntry, inscriptionTime: number, histories: AuthorHistory[]): IgnoredReason | null {
+export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
   const ref = signerRefOf(entry);
   const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
   if (!ref || !history) return "author-version-unavailable";
   const named = history.versions.find((v) => v.versionId === ref.versionId);
   if (!named) return "author-version-unavailable";
+  // For a did:btco author DID, the versions in effect are those before the inscription in chain order (P5.13).
   let before: AuthorVersion | undefined;
-  for (const v of history.versions) if (v.time <= inscriptionTime) before = v;
+  for (const v of history.versions) {
+    const inEffect = v.position ? chainOrder(v.position, inscription) < 0 : v.time <= inscription.inscriptionTime;
+    if (inEffect) before = v;
+  }
   const state = before && before.versionNumber > named.versionNumber ? before : named;
   if (state.deactivated) return "author-deactivated-at-inscription-time";
   let key: string;
@@ -462,7 +405,7 @@ export async function assembleFromBitcoin(
       const code = v.failure?.error.code;
       return [code && CHAIN_CODES.has(code) ? "not-one-log" : "invalid-entry", code];
     }
-    const author = checkAtInscriptionTime(last, i.inscriptionTime, histories);
+    const author = checkAtInscriptionTime(last, i, histories);
     return author ? [author] : entries;
   };
 
@@ -569,7 +512,7 @@ export async function assembleFromBitcoin(
       ignoreLater(sat, i, entry, !v || v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", v?.failure?.error.code);
       continue;
     }
-    const author = checkAtInscriptionTime(entry, i.inscriptionTime, histories);
+    const author = checkAtInscriptionTime(entry, i, histories);
     if (author) {
       ignoreLater(sat, i, entry, author);
       continue;

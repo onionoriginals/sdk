@@ -19,6 +19,8 @@ import { parseLog, verifyLog, type LogFailure } from "../log/index.js";
 import { didVh } from "../didvh/index.js";
 import { didWebvh, parseDidWebvh } from "../webvh/index.js";
 import { ORIGINALS_LIMITS, type AuthorRef } from "./state.js";
+import { chainOrder, parseBtcoAlias, type SatEvidence } from "./btco.js";
+import { decodeCbor } from "./cbor.js";
 
 /** The author DID methods the baseline profile lists (P5.8). did:btco arrives with Bitcoin (plan 011, PR 9). */
 export type AuthorMethod = "did:vh" | "did:webvh" | "did:btco";
@@ -28,11 +30,15 @@ export function authorMethod(did: string): AuthorMethod {
   return fail("unsupported-profile", "AUTHOR_METHOD_NOT_LISTED", `author DID ${did} uses a method the profile does not list`);
 }
 
-/** The author DID's log and witness file, as supplied in evidence. */
+/**
+ * The author DID's history, as supplied in evidence: the log and witness file
+ * of a did:vh or did:webvh, or what an adapter read from a did:btco's sat
+ * (P5.13).
+ */
 export interface AuthorDidEvidence {
   /** The identity DID: the DID the asset log's signed state names (P5.14). */
   did: string;
-  log: string | unknown[];
+  log?: string | unknown[];
   witness?: unknown;
   /**
    * PROVISIONAL (P5.14, P7.8): the URL this log was just retrieved from, with
@@ -50,6 +56,8 @@ export interface AuthorDidEvidence {
    */
   obtainedAt?: string;
   source?: EvidenceSource;
+  /** A did:btco's history: what an adapter read from the DID's sat (P5.13). */
+  bitcoin?: SatEvidence;
 }
 
 /**
@@ -68,6 +76,8 @@ export interface AuthorVersion {
   /** The author DID log's update keys in effect after this version. */
   updateKeys: string[];
   deactivated: boolean;
+  /** A did:btco version's chain position (P5.13). */
+  position?: { height: number; transactionIndex: number; inscriptionIndex: number };
 }
 
 export interface AuthorHistory {
@@ -87,9 +97,10 @@ export interface AuthorHistoryOptions {
 /** Verify a did:vh or did:webvh author DID log. Invalid trailing entries are dropped and reported. */
 export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions = {}): Promise<AuthorHistory> {
   const method = authorMethod(evidence.did);
-  if (method === "did:btco") fail("unsupported-profile", "AUTHOR_METHOD_NOT_IMPLEMENTED", "did:btco author DIDs are verified from Bitcoin (plan 011, PR 9)");
+  if (method === "did:btco") return btcoHistory(evidence, options);
   let entries: unknown[];
   try {
+    if (evidence.log === undefined) fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no log for author DID ${evidence.did}`);
     entries = typeof evidence.log === "string" ? parseLog(evidence.log) : evidence.log;
   } catch (error) {
     if (!(error instanceof OriginalsError)) throw error;
@@ -118,6 +129,59 @@ export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: 
     return { did: evidence.did, method, versions: [], failure: { index: 0, error: new OriginalsError("invalid-evidence", "AUTHOR_LOG_MISMATCH", "the supplied log is not this DID's own log from its genesis (P5.14)") } };
   }
   return { did: evidence.did, method, versions, ...(log.failure ? { failure: log.failure } : {}) };
+}
+
+/**
+ * A did:btco author DID's versions, from its sat (P5.13; did:btco method
+ * v0.2.0, owner decision Q15). A version is a confirmed inscription whose
+ * Ordinals metadata is a CBOR DID document with this DID as its `id`, in chain
+ * order. A document with `deactivated: true` is terminal: later inscriptions
+ * on the sat are not versions. Control is the sat's holder, so there are no
+ * update keys. An entry names a version by its inscription id (PROVISIONAL).
+ */
+function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions): AuthorHistory {
+  const did = evidence.did;
+  const failed = (category: "incomplete-evidence" | "invalid-evidence", code: string, message: string): AuthorHistory =>
+    ({ did, method: "did:btco", versions: [], failure: { index: 0, error: new OriginalsError(category, code, message) } });
+  let alias;
+  try {
+    alias = parseBtcoAlias(did);
+  } catch {
+    return failed("invalid-evidence", "AUTHOR_DID_INVALID", `${did} is not a did:btco`);
+  }
+  const sat = evidence.bitcoin;
+  if (!sat) return failed("incomplete-evidence", "AUTHOR_BITCOIN_EVIDENCE_MISSING", `no Bitcoin read of ${did}'s sat`);
+  if (sat.sat !== alias.did) return failed("invalid-evidence", "AUTHOR_LOG_MISMATCH", `the sat read is ${sat.sat}, not ${did}`);
+  const versions: AuthorVersion[] = [];
+  const max = options.maxVersions ?? ORIGINALS_LIMITS.authorVersions;
+  for (const i of [...sat.inscriptions].sort(chainOrder)) {
+    if (i.confirmations < 1 || !i.metadata) continue;
+    let doc;
+    try {
+      doc = decodeCbor(i.metadata);
+    } catch (error) {
+      if (error instanceof OriginalsError) continue;
+      throw error;
+    }
+    if (!isJsonObject(doc) || doc.id !== did) continue;
+    const position = { height: i.height, transactionIndex: i.transactionIndex, inscriptionIndex: i.inscriptionIndex };
+    const deactivated = doc.deactivated === true;
+    const previous = versions[versions.length - 1];
+    if (deactivated && !previous) continue;
+    versions.push({
+      versionId: i.id,
+      versionNumber: versions.length + 1,
+      time: i.inscriptionTime,
+      document: deactivated ? previous.document : doc,
+      updateKeys: [],
+      deactivated,
+      position,
+    });
+    if (deactivated) break;
+    if (versions.length > max) return failed("invalid-evidence", "AUTHOR_HISTORY_TOO_LONG", `${did} has more than ${max} versions`);
+  }
+  if (versions.length === 0) return failed("incomplete-evidence", "AUTHOR_DID_NOT_FOUND", `no DID document is inscribed on ${did}'s sat`);
+  return { did, method: "did:btco", versions };
 }
 
 function webvhScid(did: string): string | undefined {

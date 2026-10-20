@@ -838,9 +838,9 @@ export class OriginalsSDK {
   /** Alias logs this store keeps for the aliases a log lists (stored with the DID evidence). */
   private async aliasEvidence(log: string, supplied: AliasEvidence[] = []): Promise<AliasEvidence[]> {
     const out: AliasEvidence[] = [];
-    for (const did of aliasesOf(log)) {
+    for (const did of aliasesOf(log).filter((a) => a.startsWith("did:webvh:"))) {
       const found = supplied.find((a) => a.did === did) ?? (await this.store.getAuthorEvidence(did));
-      if (found) out.push(found);
+      if (found?.log !== undefined) out.push({ did: found.did, log: found.log, ...(found.witness !== undefined ? { witness: found.witness } : {}) });
     }
     return out;
   }
@@ -1258,7 +1258,10 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
+    // A did:btco signer's history is read from Bitcoin, not packaged; it is listed as missing (P5.13).
+    const authors = (await this.packagedIdentities(prefix, view.report))
+      .filter((a) => a.log !== undefined)
+      .map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
     const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
     for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });

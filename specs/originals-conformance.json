@@ -775,8 +775,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-59",
@@ -786,8 +788,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-60",
@@ -797,8 +801,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-61",
@@ -808,8 +814,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-62",
