@@ -556,6 +556,7 @@
       ],
       "status": "partial",
       "coveredBy": [
+        "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
       "note": "Unanchored case: a deactivated author DID makes the Original non-current. The anchored case arrives in PR 9."

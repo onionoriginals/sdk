@@ -174,6 +174,54 @@ describe("signing (P5.11): the signer is shown who signs", () => {
   });
 });
 
+describe("signing (P5.11): keySigner shows what the entry itself says (editors PR review A3)", () => {
+  const proofFor = (verificationMethod: string) => ({ type: "DataIntegrityProof" as const, cryptosuite: "eddsa-jcs-2022" as const, verificationMethod, proofPurpose: "assertionMethod" });
+
+  test("a summary that hides a grant change, a rename or a metadata change is refused", async () => {
+    const { sdk, did, v1, asAlice, store } = await harbor();
+    const parent = { entry: JSON.parse((await store.get(did))!.log.trimEnd().split("\n")[0]) as never };
+    const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
+    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, name: "Harbor (fixed typo)", metadata: { note: "x" }, editors: [grant(mallory.did, { name: true, metadata: true, resources: ["photo"] })] });
+    let shown = "";
+    const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
+    for (const lie of [{ editorsChanged: false }, { nameChanged: false, name: "Harbor at dawn" }, { metadataChanged: false }]) {
+      const lying = { ...draft.summary, ...lie };
+      await rejects(signer.sign({ entry: draft.entry, proofOptions: proofFor(asAlice.author.verificationMethod), summary: lying, display: describeEntry(lying), parent }), "invalid-evidence", "SIGNER_REFUSED");
+    }
+    expect(shown).toBe("");
+    // The true summary with the same parent signs.
+    await signer.sign({ entry: draft.entry, proofOptions: proofFor(asAlice.author.verificationMethod), summary: draft.summary, display: draft.display, parent });
+    expect(shown).toContain("Editor grants: changed");
+  });
+
+  test("the text shown is derived from the entry and its parent, with each grant's DID and rights", async () => {
+    const { sdk, did, v1, asAlice } = await harbor();
+    const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
+    let shown = "";
+    const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
+    await sdk.edit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { name: true, metadata: true, resources: ["photo"] })], signer });
+    expect(shown).toContain("Editor grants: changed");
+    expect(shown).toContain(`${mallory.did}: name yes, metadata yes, resources photo`);
+    expect(shown).not.toContain("Name: changed");
+  });
+
+  test("a parent that does not chain to the entry is refused; without one, every change is shown", async () => {
+    const { sdk, did, v1, asAlice, store } = await harbor();
+    const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
+    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { resources: ["photo"] })] });
+    const genesis = JSON.parse((await store.get(did))!.log.trimEnd().split("\n")[0]) as Record<string, any>;
+    const forgedParent = { ...genesis, state: { ...genesis.state, asset: { ...genesis.state.asset, editors: [grant(mallory.did, { resources: ["photo"] })] } } };
+    let shown = "";
+    const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
+    const request = { entry: draft.entry, proofOptions: proofFor(asAlice.author.verificationMethod), summary: { ...draft.summary, editorsChanged: false }, display: "" };
+    await rejects(signer.sign({ ...request, parent: { entry: forgedParent as never } }), "invalid-evidence", "SIGNER_REFUSED");
+    // With no parent the signer cannot tell what changed, so it shows the name, metadata and every grant.
+    await signer.sign({ ...request, summary: draft.summary });
+    expect(shown).toContain("Editor grants:");
+    expect(shown).toContain(`${mallory.did}: name no, metadata no, resources photo`);
+  });
+});
+
 describe("C12-118: an editor entry and a revoking author entry on the same parent", () => {
   test("are a fork, reported with both branches and never current (P5.17, P6.6)", async () => {
     const { alice, bob, carol, sdk, did, v1, asBob, asAlice } = await harbor();

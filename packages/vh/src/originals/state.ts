@@ -177,6 +177,20 @@ function scidOfWebvh(did: string): string | undefined {
   }
 }
 
+const DID_VH = /^did:vh:[1-9A-HJ-NP-Za-km-z]{46}$/;
+// did:btco[:sig|:test|:reg]:<sat>, a canonical decimal sat number within the supply (did:btco v0.2.0).
+const DID_BTCO = /^did:btco:(?:(?:sig|test|reg):)?(0|[1-9]\d{0,15})$/;
+const MAX_SAT = 2_099_999_997_689_999n;
+
+/** True when `did` is a well-formed DID of a listed method, with no path, query or fragment (P5.15). */
+function wellFormedSigner(did: string): boolean {
+  if (/[?#/]/.test(did)) return false;
+  if (did.startsWith("did:vh:")) return DID_VH.test(did);
+  if (did.startsWith("did:webvh:")) return scidOfWebvh(did) !== undefined;
+  const sat = DID_BTCO.exec(did)?.[1];
+  return sat !== undefined && BigInt(sat) <= MAX_SAT;
+}
+
 /**
  * P5.15: the editor grants. Each editor DID is unique, uses a listed method,
  * and is neither the author DID nor a DID of the author's identity: for a
@@ -202,11 +216,15 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
     }
     if (typeof g.did !== "string" || !/^did:[a-z0-9]+:\S+$/.test(g.did)) bad(`state.asset.editors[${i}].did is not a DID`);
     const did = g.did;
+    // The author's DID with a path, query or fragment still names the author's identity.
+    const bare = did.replace(/[?#/].*$/, "");
+    if (bare === authorDid || (authorScid !== undefined && scidOfWebvh(bare) === authorScid)) bad("an editor cannot be the author DID or a DID of the author's identity (P5.14, P5.15)");
     if (!LISTED_METHODS.some((m) => did.startsWith(m))) bad(`editor DID ${did} uses a method the profile does not list (P5.8)`);
-    if (did.startsWith("did:webvh:") && scidOfWebvh(did) === undefined) bad(`editor DID ${did} is not a valid did:webvh`);
-    if (did === authorDid || (authorScid !== undefined && scidOfWebvh(did) === authorScid)) bad("an editor cannot be the author DID or a DID of the author's identity (P5.14, P5.15)");
-    if (seen.has(did)) bad(`editor DID ${did} is granted twice`);
-    seen.add(did);
+    if (!wellFormedSigner(did)) bad(`editor DID ${did} is not a well-formed DID of its method, with no path, query or fragment`);
+    // One identity, one grant: a did:webvh at two locations is one identity (P5.14).
+    const identity = did.startsWith("did:webvh:") ? `did:webvh:${scidOfWebvh(did)}` : did;
+    if (seen.has(identity)) bad(`editor DID ${did} is granted twice (one grant per identity, P5.14)`);
+    seen.add(identity);
     if (typeof g.name !== "boolean" || typeof g.metadata !== "boolean") bad(`state.asset.editors[${i}].name and .metadata are booleans`);
     if (!Array.isArray(g.resources) || !g.resources.every((r) => typeof r === "string")) bad(`state.asset.editors[${i}].resources is a list of resourceIDs`);
     const granted = g.resources;

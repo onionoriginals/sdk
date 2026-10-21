@@ -7,12 +7,19 @@
  * its own key; `keySigner` does, checks that the summary states the entry
  * truly, and recomputes the signed bytes itself rather than trusting the
  * caller's.
+ *
+ * What a change changes depends on the parent's state. A request carries the
+ * parent entry, which `keySigner` checks chains to the entry (VH-Log
+ * versionIds), so a caller cannot misstate it. `keySigner` derives the text it
+ * shows from the entry and that parent, never from the caller's summary, and
+ * refuses a summary that differs (editors PR review A3). Without a parent it
+ * cannot tell what changed, so it shows the name, metadata and every grant.
  */
 import { OriginalsError } from "@originals/vh";
 import { localSigner, proofHashData, type CryptosuiteName, type DataIntegrityProof, type KeyType } from "@originals/vh/crypto";
-import { canonicalize, type JsonObject, type JsonValue } from "@originals/vh/json";
-import type { UnsignedEntry } from "@originals/vh/log";
-import { ORIGINALS_METHOD, type AuthorRef, type EntryState, type Operation, type Transition } from "@originals/vh/originals";
+import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "@originals/vh/json";
+import { vhHash, type UnsignedEntry } from "@originals/vh/log";
+import { ORIGINALS_METHOD, type AuthorRef, type EditorGrant, type EntryState, type Operation, type Transition } from "@originals/vh/originals";
 
 /** Who signs an entry: the author, or a granted editor (P5.16). */
 export interface SignerIdentity extends AuthorRef {
@@ -33,6 +40,8 @@ export interface EntrySummary {
   metadataChanged: boolean;
   /** The editor grants change (author entries only, P5.16). */
   editorsChanged: boolean;
+  /** The editor grants after this entry: each editor DID and what it may change (P5.15). */
+  editors: EditorGrant[];
   versionTime: string;
 }
 
@@ -44,6 +53,12 @@ export interface SigningRequest {
   summary: EntrySummary;
   /** `describeEntry(summary)`: what to show the person whose key signs (P5.11). */
   display: string;
+  /**
+   * The parent entry, for an entry after genesis, so a signer can tell what
+   * the entry changes; `predecessor` is the parent's own parent versionId
+   * (absent when the parent is the genesis entry). The SDK supplies it.
+   */
+  parent?: { entry: UnsignedEntry; predecessor?: string };
 }
 
 export interface OriginalsSigner {
@@ -69,6 +84,7 @@ export function summarize(entry: UnsignedEntry, previous?: EntryState): EntrySum
     nameChanged: previous ? previous.asset.name !== state.asset.name : true,
     metadataChanged: previous ? !same(previous.asset.metadata, state.asset.metadata) : state.asset.metadata !== undefined,
     editorsChanged: previous ? !same(previous.asset.editors, state.asset.editors) : state.asset.editors !== undefined,
+    editors: state.asset.editors ?? [],
     versionTime: entry.versionTime,
   };
 }
@@ -88,9 +104,13 @@ export function describeEntry(summary: EntrySummary): string {
   ];
   if (summary.changes.length === 0) lines.push("Resources: no change");
   for (const c of summary.changes) lines.push(`Resource ${c.resource}: ${c.from ?? "(new)"} -> ${c.to}`);
-  if (summary.nameChanged) lines.push("Name: changed");
+  if (summary.nameChanged) lines.push(`Name: changed to ${JSON.stringify(summary.name)}`);
   if (summary.metadataChanged) lines.push("Metadata: changed");
-  if (summary.editorsChanged) lines.push("Editor grants: changed");
+  if (summary.editorsChanged) {
+    const grants = summary.editors ?? [];
+    lines.push(`Editor grants: changed${grants.length === 0 ? " (none remain)" : ""}`);
+    for (const g of grants) lines.push(`  ${g.did}: name ${g.name ? "yes" : "no"}, metadata ${g.metadata ? "yes" : "no"}, resources ${g.resources.length > 0 ? g.resources.join(", ") : "none"}`);
+  }
   return lines.join("\n");
 }
 
@@ -98,11 +118,42 @@ function refuse(message: string): never {
   throw new OriginalsError("invalid-evidence", "SIGNER_REFUSED", message);
 }
 
+const VERSION_ID = /^(\d+)-(.+)$/;
+
+/** True when `entry`'s versionId is its hash over `predecessor`, as VH-Log chains entries. */
+function chainsTo(entry: UnsignedEntry, predecessor: unknown): boolean {
+  const id = VERSION_ID.exec(String(entry?.versionId));
+  if (!id || typeof predecessor !== "string") return false;
+  const { proof: _proof, ...unsigned } = entry as UnsignedEntry & { proof?: unknown };
+  try {
+    return vhHash({ ...(unsigned as unknown as JsonObject), versionId: predecessor }) === id[2];
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The parent's state when the request's parent is bound to the entry by its
+ * versionId chain (refused otherwise), or "unknown" when there is none.
+ */
+function parentState(request: SigningRequest, number: number): EntryState | undefined | "unknown" {
+  if (number === 1) return undefined;
+  const parent = request.parent;
+  if (!parent) return "unknown";
+  const p = parent.entry;
+  const pid = VERSION_ID.exec(String(p?.versionId));
+  if (!pid || Number(pid[1]) !== number - 1 || !chainsTo(request.entry, p.versionId)) refuse("the parent does not chain to this entry");
+  const predecessor = Number(pid[1]) === 1 ? (isJsonObject(p.parameters) ? p.parameters.scid : undefined) : parent.predecessor;
+  if (!chainsTo(p, predecessor)) refuse("the parent is not the entry its versionId names");
+  return p.state as unknown as EntryState;
+}
+
 /**
  * Refuse input that is not a well-formed Originals entry for `verificationMethod`,
- * or whose summary does not state the entry truly (P5.11).
+ * or whose summary does not state the entry truly (P5.11). Returns the
+ * summary derived from the entry and its parent, which is what is shown.
  */
-function checkRequest(request: SigningRequest, verificationMethod: string, cryptosuite: CryptosuiteName): void {
+function checkRequest(request: SigningRequest, verificationMethod: string, cryptosuite: CryptosuiteName): EntrySummary {
   const { entry, proofOptions } = request;
   if (proofOptions.verificationMethod !== verificationMethod || proofOptions.cryptosuite !== cryptosuite || proofOptions.proofPurpose !== "assertionMethod") {
     refuse("the proof options are not this key's");
@@ -131,6 +182,15 @@ function checkRequest(request: SigningRequest, verificationMethod: string, crypt
   ) {
     refuse("the summary does not state this entry: who signs, the Original, the operation or the resource changes");
   }
+  // Everything else is derived from the entry and its bound parent, and the summary must agree.
+  const parent = parentState(request, number);
+  const derived = summarize(entry, parent === "unknown" ? undefined : parent);
+  const checked: Array<keyof EntrySummary> = ["name", "editors", "versionTime", ...(parent === "unknown" ? [] : (["nameChanged", "metadataChanged", "editorsChanged"] as const))];
+  for (const field of checked) {
+    if (!same(summary[field], derived[field])) refuse(`the summary does not state this entry: ${field}`);
+  }
+  // With no parent, what changed is unknown: show it all.
+  return parent === "unknown" ? { ...derived, nameChanged: true, metadataChanged: true, editorsChanged: true } : derived;
 }
 
 export interface KeySignerOptions {
@@ -157,8 +217,8 @@ export function keySigner(options: KeySignerOptions): OriginalsSigner {
     verificationMethod: options.verificationMethod,
     cryptosuite,
     sign: async (request) => {
-      checkRequest(request, options.verificationMethod, cryptosuite);
-      if (options.confirm && !(await options.confirm(describeEntry(request.summary), request.summary))) refuse("the signer declined");
+      const derived = checkRequest(request, options.verificationMethod, cryptosuite);
+      if (options.confirm && !(await options.confirm(describeEntry(derived), derived))) refuse("the signer declined");
       return key.sign(proofHashData(request.entry, request.proofOptions));
     },
   };

@@ -423,6 +423,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       if (typeof key !== "string" || !stillAuthorized(signerLatest, ref, key)) {
         reasons.push(role === "author" ? "head-key-not-in-latest-author-document" : "head-key-not-in-latest-signer-document");
       }
+      // P5.18, P6.5, P7.9: an editor whose DID is deactivated authorizes nothing further, so its
+      // entry at the head is not current, even if the deactivated document still lists the key.
+      if (role === "editor" && signerLatest.deactivated) reasons.push("editor-did-deactivated");
     }
   }
   report.current = reasons.length === 0;

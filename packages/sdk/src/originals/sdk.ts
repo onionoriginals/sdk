@@ -829,7 +829,14 @@ export class OriginalsSDK {
     if (head !== draft.parent) throw staleHead(draft.original, draft.parent, head);
 
     const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
-    const signature = await signer.sign({ entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary) });
+    // The parent entry, so the signer can tell what this entry changes (P5.11).
+    const storedLines = lines(stored);
+    const parentEntry = storedLines.length > 0 ? (parseJson(storedLines[storedLines.length - 1]) as unknown as UnsignedEntry) : undefined;
+    const predecessor = storedLines.length > 1 ? (parseJson(storedLines[storedLines.length - 2]) as { versionId: string }).versionId : undefined;
+    const signature = await signer.sign({
+      entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary),
+      ...(parentEntry ? { parent: { entry: parentEntry, ...(predecessor ? { predecessor } : {}) } } : {}),
+    });
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
 

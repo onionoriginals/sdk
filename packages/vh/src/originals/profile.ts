@@ -13,6 +13,7 @@ import { fail } from "../errors.js";
 import type { JsonObject } from "../json/index.js";
 import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../log/index.js";
 import type { DidVhExtension } from "../didvh/index.js";
+import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
 import { ORIGINALS_METHOD, checkAuthorRef, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
 
@@ -29,6 +30,22 @@ function histories(list: Iterable<AuthorHistory>): Map<string, AuthorHistory> {
 }
 
 /**
+ * The key one signer identity is known by for P5.8's per-identity order: a
+ * did:webvh's SCID, which every location it moves to keeps (P5.14); any other
+ * DID itself.
+ */
+export function identityKey(did: string): string {
+  if (did.startsWith("did:webvh:")) {
+    try {
+      return `did:webvh:${parseDidWebvh(did).scid}`;
+    } catch {
+      return did;
+    }
+  }
+  return did;
+}
+
+/**
  * The versionId each signer identity named in its most recent entry, through
  * an entry, for P5.8's per-identity order (P5.18). Kept per verified entry
  * object, so copies verified with the same rules never share it.
@@ -41,8 +58,8 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
   if (known) return known;
   // A predecessor verified elsewhere: its own signer and author references are what it names.
   const state = previous.entry.state as unknown as EntryState;
-  const out = new Map([[state.author.did, state.author.versionId]]);
-  if (state.editor) out.set(state.editor.did, state.editor.versionId);
+  const out = new Map([[identityKey(state.author.did), state.author.versionId]]);
+  if (state.editor) out.set(identityKey(state.editor.did), state.editor.versionId);
   return out;
 }
 
@@ -77,7 +94,16 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         }
         authorMethod(ref.did);
         const signer: AuthorRef = editor ?? ref;
-        if (editor) authorMethod(editor.did);
+        if (editor) {
+          authorMethod(editor.did);
+          // P5.16, P5.17: the grant in the parent's state decides before any editor evidence is looked up,
+          // so an editor with no grant is rejected, never reported as missing evidence (C12-05).
+          const parent = previous?.entry.state as unknown as EntryState | undefined;
+          if (!parent) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the genesis entry; only an author entry may (P5.16)");
+          if (!(parent.asset?.editors ?? []).some((g) => g.did === editor.did)) {
+            fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor.did} has no grant in the parent's state (P5.16, P5.17)`);
+          }
+        }
         if (proof.verificationMethod !== signer.verificationMethod) {
           fail("author-binding", editor ? "SIGNER_VM_MISMATCH" : "AUTHOR_VM_MISMATCH", `the proof's verificationMethod must be the ${editor ? "editor" : "author"} verification method the entry names (P5.2)`);
         }
@@ -87,13 +113,20 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
           fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`, { did: ref.did, role: "author" });
         }
         // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier entry named.
+        // Keyed by identity, so a did:webvh named at another location is the same signer (P5.14).
         const through = namedThrough(named, previous);
-        const before = through.get(signer.did);
+        const identity = identityKey(signer.did);
+        const before = through.get(identity);
         if (before !== undefined && versionNumberOf(signer.versionId) < versionNumberOf(before)) {
           fail("invalid-evidence", editor ? "SIGNER_VERSION_REGRESSED" : "AUTHOR_VERSION_REGRESSED", `an entry may not name an older ${editor ? "editor" : "author"} DID version than the signer's previous entry (P5.8)`);
         }
-        const key = authorKey(namedVersion(history, signer), signer);
-        named.set(entry, new Map([...through, [signer.did, signer.versionId]]));
+        const version = namedVersion(history, signer);
+        // P6.5, P5.3: a deactivated DID version authorizes nothing, whoever signs (P5.18 for editors).
+        if (version.deactivated) {
+          fail("deactivated", "SIGNER_VERSION_DEACTIVATED", `${signer.did} is deactivated at version ${signer.versionId}; an entry cannot name it (P6.5, P5.18)`, { did: signer.did, role: editor ? "editor" : "author" });
+        }
+        const key = authorKey(version, signer);
+        named.set(entry, new Map([...through, [identity, signer.versionId]]));
         return Promise.resolve(key);
       },
     },
