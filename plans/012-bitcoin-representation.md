@@ -27,7 +27,10 @@ v0.2.0 (`decentralized-identity/labs-ordinals-plus` `cff856ac`).
 - **Author checks at inscription time (P9.15, P5.13).** Each anchored entry is
   checked against the author DID's state at its inscription time: the greatest
   block timestamp among its block and that block's ancestors. For a did:btco
-  author DID, versions are ordered by chain order instead.
+  author DID, versions are ordered by chain order instead: the named version
+  must precede the inscription (for an entry before the anchor, the anchoring
+  inscription), and the state is the latest version before it, with no
+  later-named-version exception (P5.13; issue #972).
 - **The anchor (P9.16).** The first valid anchoring entry in chain order on the
   sat it names. Others are conflicting anchors, never current, conferring no
   ownership. Uniqueness is never established; ownership is provisional.
@@ -238,6 +241,18 @@ this from PR 9b. The SDK's legacy resolver still reads the document from
 inscription content and a 🔥 marker; moving it and its writer to the method's
 metadata is PR 9c (decision C). An anchoring entry naming the author DID's own
 sat is rejected (P5.13).
+
+An author DID inscription counts as a version only when the index reports it
+on the DID's sat number on its network; where two indexes disagree, the
+history stops before it and reports missing evidence (P5.13, P9.10). For an
+anchored Original, the version an entry names must precede in chain order the
+inscription that carries it, or, for an entry before the anchor, the anchoring
+inscription, including against a version later in the same block: a version's
+id can be known before it is mined (P5.13; C12-92, C12-93, C12-95; issue #972). The
+state at the inscription is the latest version before it, not the later of
+that and the named version, and the key must hold at both (C12-96). did:vh
+and did:webvh keep P9.15's versionTime rule, whose named later version may
+list a removed key again (C12-98, C12-44).
 
 ### 3.9 Ownership report (P9.11)
 

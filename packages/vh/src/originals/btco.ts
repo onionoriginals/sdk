@@ -4,7 +4,7 @@
  * are this profile's, as the SDK uses them (P9.10, P14.12; owner decision, D6;
  * spec PR #50 (open)).
  */
-import { fail } from "../errors.js";
+import { OriginalsError, fail } from "../errors.js";
 
 export type BitcoinNetwork = "mainnet" | "signet" | "testnet" | "regtest";
 
@@ -107,4 +107,84 @@ export interface ChainPosition {
 
 export function chainOrder(a: ChainPosition, b: ChainPosition): number {
   return a.height - b.height || a.transactionIndex - b.transactionIndex || a.inscriptionIndex - b.inscriptionIndex;
+}
+
+/** Why an inscription did not count for the sat it was read under. */
+export type PlacementReason = "not-on-sat" | "other-network" | "placement-disputed" | "after-disputed-placement";
+
+/** The inscriptions every index used places on one sat, merged (P9.10, P9.11). */
+export interface SatRead {
+  alias: BtcoAlias;
+  /** The indexes whose reads were compared, in the order first supplied. */
+  indexes: string[];
+  /** The lowest tip among the reads. */
+  tip: { height: number; hash: string };
+  /**
+   * Inscriptions every index places on the sat, in chain order, before the
+   * first disputed one. Confirmations are the lowest any index reports.
+   */
+  inscriptions: SatInscription[];
+  /** Inscriptions supplied under this alias that do not count for it. */
+  excluded: Array<{ inscription: string; reason: PlacementReason }>;
+  /** Inscriptions whose placement the indexes disagree on: missing evidence until they agree. */
+  disputed: string[];
+  /** The sat's holder when every index agrees on it; null when none was observed or they disagree. */
+  owner: SatEvidence["owner"];
+  ownerDisputed: boolean;
+}
+
+const sameBytes = (a: Uint8Array | null | undefined, b: Uint8Array | null | undefined) =>
+  (a ?? null) === null ? (b ?? null) === null : !!b && a!.length === b.length && a!.every((x, k) => x === b[k]);
+
+function sameReport(a: SatInscription, b: SatInscription): boolean {
+  return a.height === b.height && a.transactionIndex === b.transactionIndex && a.inscriptionIndex === b.inscriptionIndex &&
+    a.inscriptionTime === b.inscriptionTime && a.mediaType === b.mediaType && sameBytes(a.content, b.content) && sameBytes(a.metadata, b.metadata) &&
+    (a.unsupported ?? null) === (b.unsupported ?? null) && (a.contentLength ?? null) === (b.contentLength ?? null) &&
+    (a.metadataPresent ?? false) === (b.metadataPresent ?? false);
+}
+
+/**
+ * Merge the reads of one sat by the indexes the verifier uses (P9.10). An
+ * inscription counts only when every read reports it on the alias's sat
+ * number and network, consistently; when they disagree, it and everything
+ * after it in chain order on this sat are undecided. Unconfirmed
+ * inscriptions are never disputed: they are only observed (P9.5).
+ */
+export function readSat(alias: string, reads: SatEvidence[]): SatRead {
+  const parsed = parseBtcoAlias(alias);
+  if (reads.length === 0) throw new OriginalsError("incomplete-evidence", "SAT_READ_MISSING", `no read of ${alias}`);
+  const on = (i: SatInscription) => i.sat === parsed.sat && i.network === parsed.network;
+  const ids = new Map<string, SatInscription[]>();
+  for (const r of reads) for (const i of r.inscriptions) ids.set(i.id, [...(ids.get(i.id) ?? []), i]);
+
+  const placed: SatInscription[] = [];
+  const excluded: SatRead["excluded"] = [];
+  const disputes: SatInscription[] = [];
+  for (const [id, reports] of ids) {
+    const placing = reports.filter(on);
+    const everyIndex = placing.length === reads.length && reads.every((r) => r.inscriptions.some((i) => i.id === id && on(i)));
+    if (everyIndex && placing.every((p) => sameReport(p, placing[0]))) {
+      placed.push({ ...placing[0], confirmations: Math.min(...placing.map((p) => p.confirmations)) });
+    } else if (placing.length === 0) {
+      excluded.push({ inscription: id, reason: reports.some((i) => i.network !== parsed.network) ? "other-network" : "not-on-sat" });
+    } else if (placing.every((p) => p.confirmations < 1)) {
+      placed.push({ ...placing[0], confirmations: 0 }); // observed only
+    } else {
+      disputes.push(placing[0]);
+    }
+  }
+  placed.sort(chainOrder);
+  disputes.sort(chainOrder);
+  const cut = disputes[0];
+  const inscriptions = cut ? placed.filter((i) => chainOrder(i, cut) < 0) : placed;
+  if (cut) {
+    for (const d of disputes) excluded.push({ inscription: d.id, reason: "placement-disputed" });
+    for (const i of placed) if (chainOrder(i, cut) >= 0) excluded.push({ inscription: i.id, reason: "after-disputed-placement" });
+  }
+
+  const owners = reads.map((r) => r.owner);
+  const ownerDisputed = owners.some((o) => (o?.output ?? null) !== (owners[0]?.output ?? null) || (o?.address ?? null) !== (owners[0]?.address ?? null));
+  const owner = !ownerDisputed && owners[0] ? { ...owners[0], confirmations: Math.min(...owners.map((o) => o!.confirmations)) } : null;
+  const tip = reads.map((r) => r.tip).reduce((low, t) => (t.height < low.height ? t : low));
+  return { alias: parsed, indexes: [...new Set(reads.map((r) => r.index))], tip, inscriptions, excluded, disputed: disputes.map((d) => d.id), owner, ownerDisputed };
 }

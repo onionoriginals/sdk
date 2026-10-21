@@ -720,12 +720,24 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 - Ownership is the anchoring sat's holder, always provisional, never authority
   (P9.11, P9.12).
 - **did:btco author DIDs** (P5.13; method v0.2.0): supply
-  `{ did, bitcoin: await satEvidence(snapshotOfTheDidSat, …) }` as the author
-  evidence. A version is a confirmed inscription on the DID's sat whose CBOR
-  metadata is the DID document (strictly decoded), in chain order; an entry
-  names its version by inscription id (PROVISIONAL); `deactivated: true` is
-  terminal. Anchored entries are checked against the versions before them in
-  chain order, so a version later in the same block is not in effect. An
+  `{ did, bitcoin: [await satEvidence(snapshotOfTheDidSat, { index, … })] }`
+  as the author evidence, one read per Bitcoin index; their placement is
+  compared as for the anchoring sat (P9.10). A version is a confirmed
+  inscription that every index reports on the sat number the DID names, on its
+  network, whose CBOR metadata is the DID document (strictly decoded), in
+  chain order; an inscription the index places on another sat is not a version
+  (C12-105), and one the indexes disagree on stops the history there with
+  `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). An entry names its version
+  by inscription id (PROVISIONAL); `deactivated: true` is terminal. For an
+  anchored Original, the version an entry names must precede, in chain order,
+  the inscription that carries it, or the anchoring inscription for an entry
+  before the anchor: one mined later, even later in the same block, is
+  rejected as `author-version-not-yet-in-effect` (C12-92, C12-93, C12-95), because
+  its id can be known before it is mined. The author DID's state at the
+  inscription is the latest version before it, and the key must hold there
+  too (C12-96); there is no later-named-version exception for did:btco, unlike
+  did:vh and did:webvh (C12-98). A state the author read cannot establish,
+  past its tip or a disputed placement, is `author-version-unavailable`. An
   Original is never anchored to its author DID's own sat. A did:btco author's
   history is read from Bitcoin, not packaged: packages list it as missing
   identity evidence. Spending requires the

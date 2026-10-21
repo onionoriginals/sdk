@@ -574,7 +574,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/btco-author.test.ts"
       ]
     },
     {
@@ -1256,7 +1257,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-93",
@@ -1266,7 +1270,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-94",
@@ -1276,7 +1283,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-95",
@@ -1286,7 +1296,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-96",
@@ -1296,7 +1309,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-97",
@@ -1319,7 +1335,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-99",
@@ -1405,7 +1424,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-106",
