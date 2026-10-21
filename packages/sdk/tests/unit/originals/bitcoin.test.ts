@@ -321,7 +321,7 @@ describe("sat snapshots as evidence", () => {
     await expect(satEvidence(snapshot([]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "" })).rejects.toMatchObject({ code: "SAT_INDEX_REQUIRED" });
   });
 
-  test("row 95: an inscription the reader could not read fails the whole read (P9.17; VH-Log PR 2)", async () => {
+  test("C12-89: an inscription the reader could not read fails the whole read (P9.17; VH-Log PR 2)", async () => {
     const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "", complete: false }]);
     await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
     await expect(satEvidence({ ...snapshot([]), enumerationComplete: false }, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toBeInstanceOf(OriginalsError);
@@ -352,7 +352,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(view.report.ownership).toMatchObject({ status: "provisional", output: `${"cc".repeat(32)}:0`, confirmations: 3, indexes: ["ord-a"] });
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
 
-    // Row 105 (P9.16): the store keeps the anchor reported, so learning of an earlier anchoring
+    // C12-99 (P9.16): the store keeps the anchor reported, so learning of an earlier anchoring
     // inscription is reported as a change of anchor, once, never silently.
     const earlier = await satEvidence(snapshot([
       { id: `${"d".repeat(64)}i0`, height: 3, content: log },
@@ -369,7 +369,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(settled.current, JSON.stringify(settled.report.reasons)).toBe(true);
   });
 
-  test("row 93: an anchored Original loads from Bitcoin alone, whatever copy the package holds", async () => {
+  test("C12-87: an anchored Original loads from Bitcoin alone, whatever copy the package holds", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
