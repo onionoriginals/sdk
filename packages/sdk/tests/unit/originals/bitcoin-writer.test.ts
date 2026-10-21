@@ -11,13 +11,13 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { parseWitness } from "micro-ordinals";
-import { ORIGINALS_INSCRIPTION_TYPE } from "@originals/vh/originals";
+import { ORIGINALS_INSCRIPTION_MAX_BYTES, ORIGINALS_INSCRIPTION_TYPE, resourceDigest, type EditorGrant } from "@originals/vh/originals";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore, PreparedInscriptionOnSat } from "../../../src/bitcoin/inscription-recovery.js";
 import type { OrdinalsProvider } from "../../../src/adapters/types.js";
 import type { BitcoinNetwork, SatSnapshot } from "../../../src/bitcoin/sat-snapshot-types.js";
 import type { BitcoinSigner } from "../../../src/types/common.js";
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip } from "../../../src/originals/index.js";
-import { catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeInscriptionOnSat } from "../../../src/originals/bitcoin-writer.js";
+import { catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeInscriptionOnSat, transferHandoff, verifyHandoff } from "../../../src/originals/bitcoin-writer.js";
 import { fileRecoveryStore } from "../../../src/originals/fs-store.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -26,6 +26,7 @@ const SAT = "5000000000";
 const T = Date.parse("2026-10-18T12:00:00Z") / 1000;
 const utxo = { txid: "ab".repeat(32), vout: 0, value: 100_000, scriptPubKey: "0014" + "11".repeat(20) };
 const satSigner: BitcoinSigner = { signAndFinalizeCommitPsbt: () => Promise.reject(new Error("not reached")) };
+const INDEX = "ord-a";
 const hashAt = (h: number) => h.toString(16).padStart(64, "0");
 const blocks = () => new InscriptionClock(async (h) => ({ time: T + h * 600, hash: hashAt(h) }));
 
@@ -66,7 +67,7 @@ async function original(anchorTo?: string, edits = 0) {
 }
 
 const prepare = (sdk: OriginalsSDK, did: string, network: "regtest" | "mainnet", p: OrdinalsProvider, versionId?: string) =>
-  prepareEntryInscription({ sdk, did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network, provider: p, clock: blocks(), ...(versionId ? { versionId } : {}) });
+  prepareEntryInscription({ sdk, did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network, provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}) });
 
 describe("inscribing an Original's head entry (P9.10, P9.12)", () => {
   test("an Original that is not anchored has nothing to inscribe yet", async () => {
@@ -86,6 +87,8 @@ describe("inscribing an Original's head entry (P9.10, P9.12)", () => {
 });
 
 const idOf = (line: string) => (JSON.parse(line) as { versionId: string }).versionId;
+/** The anchoring inscription's body lines: the stored log from genesis through the anchoring entry (P9.17). */
+const anchorBody = (all: string[], anchor = 1) => all.slice(0, anchor + 1).join("\n");
 
 describe("an explicitly requested entry must be the next one Bitcoin can accept (P9.13)", () => {
   test("before the anchor is on Bitcoin, only the anchoring entry can be inscribed", async () => {
@@ -97,14 +100,14 @@ describe("an explicitly requested entry must be the next one Bitcoin can accept 
   test("an entry Bitcoin already shows is not inscribed again", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT));
     const all = await lines();
-    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([all[1]])), idOf(all[1]))).rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
-    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([all[1]])))).rejects.toMatchObject({ code: "NOTHING_TO_INSCRIBE" });
+    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([anchorBody(all)])), idOf(all[1]))).rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
+    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([anchorBody(all)])))).rejects.toMatchObject({ code: "NOTHING_TO_INSCRIBE" });
   });
 
   test("an entry that skips one Bitcoin does not show is refused", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
     const all = await lines();
-    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([all[1]])), idOf(all[3]))).rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
+    await expect(prepare(sdk, did, "regtest", provider(SAT, snapshot([anchorBody(all)])), idOf(all[3]))).rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
   });
 
   test("an entry the store does not hold is refused", async () => {
@@ -117,7 +120,7 @@ describe("an explicitly requested entry must be the next one Bitcoin can accept 
     await expect(prepare(anchoring.sdk, anchoring.did, "regtest", provider(SAT))).rejects.toThrow("not reached");
     const next = await original(btcoAlias("regtest", SAT), 1);
     const all = await next.lines();
-    await expect(prepare(next.sdk, next.did, "regtest", provider(SAT, snapshot([all[1]])))).rejects.toThrow("not reached");
+    await expect(prepare(next.sdk, next.did, "regtest", provider(SAT, snapshot([anchorBody(all)])))).rejects.toThrow("not reached");
   });
 });
 
@@ -125,8 +128,8 @@ describe("reading an anchored Original back", () => {
   test("a read of another network than the anchoring sat's is refused", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT));
     const all = await lines();
-    await expect(readAnchored(sdk, did, { provider: provider(SAT, snapshot([all[1]], "mainnet")), clock: blocks() })).rejects.toMatchObject({ code: "NETWORK_MISMATCH" });
-    const view = await readAnchored(sdk, did, { provider: provider(SAT, snapshot([all[1]])), clock: blocks() });
+    await expect(readAnchored(sdk, did, { provider: provider(SAT, snapshot([anchorBody(all)], "mainnet")), clock: blocks(), index: INDEX })).rejects.toMatchObject({ code: "NETWORK_MISMATCH" });
+    const view = await readAnchored(sdk, did, { provider: provider(SAT, snapshot([anchorBody(all)])), clock: blocks(), index: INDEX });
     expect(view.report.anchoring?.status).toBe("anchored");
   });
 });
@@ -173,25 +176,26 @@ function recovery() {
 }
 
 const pairFor = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, versionId?: string) =>
-  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), ...(versionId ? { versionId } : {}) });
+  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}) });
 
 const step = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, r: ReturnType<typeof recovery>) =>
-  catchUp({ sdk, did, provider: p, clock: blocks(), recoveryStore: r.store, recoveryIds: r.ids() });
+  catchUp({ sdk, did, provider: p, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
 
 describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", () => {
-  test("edits committed before the anchor is published: the anchoring entry goes first, its exact signed bytes", async () => {
+  test("C12-28: edits committed before the anchor is published: the log through the anchoring entry goes first, then one entry per inscription", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
     const all = await lines();
-    const before = await nextPendingEntry(sdk, did, { provider: provider(SAT), clock: blocks() });
+    const before = await nextPendingEntry(sdk, did, { provider: provider(SAT), clock: blocks(), index: INDEX });
     expect(before).toMatchObject({ committed: idOf(all[3]), accepted: null, next: idOf(all[1]), queue: all.slice(1).map(idOf), remaining: 3 });
     const anchorPair = await pairFor(sdk, did, node(snapshot([])).provider);
     expect(anchorPair.versionId).toBe(idOf(all[1]));
-    expect(inscribed(anchorPair.prepared)).toBe(`${all[1]}\n`);
+    // The anchoring inscription is the whole stored log through the anchoring entry, exact lines, in order (P9.17).
+    expect(inscribed(anchorPair.prepared)).toBe(`${all[0]}\n${all[1]}\n`);
     expect(anchorPair.remaining).toBe(2);
     // Once Bitcoin shows the anchor, the first edit is next.
-    const after = await nextPendingEntry(sdk, did, { provider: provider(SAT, snapshot([all[1]])), clock: blocks() });
+    const after = await nextPendingEntry(sdk, did, { provider: provider(SAT, snapshot([anchorBody(all)])), clock: blocks(), index: INDEX });
     expect(after).toMatchObject({ committed: idOf(all[3]), accepted: idOf(all[1]), acceptedHeight: 10, next: idOf(all[2]), remaining: 2 });
-    expect(inscribed((await pairFor(sdk, did, node(snapshot([all[1]])).provider)).prepared)).toBe(`${all[2]}\n`);
+    expect(inscribed((await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider)).prepared)).toBe(`${all[2]}\n`);
     expect(await lines()).toEqual(all); // nothing re-signed or rebased
   });
 
@@ -200,15 +204,15 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     const all = await lines();
     const r = recovery();
     for (let k = 1; k <= 3; k++) {
-      const read = snapshot(all.slice(1, k + 1));
-      const pending = await nextPendingEntry(sdk, did, { provider: provider(SAT, read), clock: blocks() });
+      const read = snapshot([anchorBody(all), ...all.slice(2, k + 1)]);
+      const pending = await nextPendingEntry(sdk, did, { provider: provider(SAT, read), clock: blocks(), index: INDEX });
       expect(pending).toMatchObject({ accepted: idOf(all[k]), acceptedHeight: 9 + k, next: idOf(all[k + 1]), remaining: 4 - k });
       expect(pending.view.current).toBe(true);
       const plan = await step(sdk, did, node(read).provider, r);
       expect(plan).toMatchObject({ action: "prepare", versionId: idOf(all[k + 1]) });
       expect(inscribed((await pairFor(sdk, did, node(read).provider)).prepared)).toBe(`${all[k + 1]}\n`);
     }
-    const caughtUp = snapshot(all.slice(1));
+    const caughtUp = snapshot([anchorBody(all), ...all.slice(2)]);
     expect(await step(sdk, did, node(caughtUp).provider, r)).toMatchObject({ action: "done", pending: { next: null, remaining: 0, accepted: idOf(all[4]) } });
     await expect(pairFor(sdk, did, node(caughtUp).provider)).rejects.toMatchObject({ code: "NOTHING_TO_INSCRIBE" });
     expect(await lines()).toEqual(all);
@@ -217,7 +221,7 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
   test("a reveal already broadcast is waited on, never prepared again (C12-40)", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
     const all = await lines();
-    const read = snapshot([all[1]]);
+    const read = snapshot([anchorBody(all)]);
     const r = recovery();
     expect(await step(sdk, did, node(read).provider, r)).toMatchObject({ action: "prepare", versionId: idOf(all[2]) });
     const pair = await pairFor(sdk, did, node(read).provider);
@@ -229,7 +233,7 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
   test("an interrupted pair is resumed as the same pair, then the queue moves on without re-inscribing it (C12-40)", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
     const all = await lines();
-    const read = snapshot([all[1]]);
+    const read = snapshot([anchorBody(all)]);
     const r = recovery();
     const pair = await pairFor(sdk, did, node(read).provider);
     r.put(pair.prepared, "commit_broadcast_unknown"); // the process died between the two broadcasts
@@ -243,7 +247,7 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     // Broadcast, not yet mined: wait, do not prepare a duplicate.
     expect(await step(sdk, did, chain.provider, r)).toMatchObject({ action: "wait-for-confirmation", recoveryId: pair.prepared.commitTxId });
     // Mined and accepted: the record is for an entry Bitcoin accepted, so the next entry is prepared, nothing resumed.
-    const mined = node(snapshot([all[1], { line: all[2], id: pair.prepared.inscriptionId }]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
+    const mined = node(snapshot([anchorBody(all), { line: all[2], id: pair.prepared.inscriptionId }]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
     expect(await step(sdk, did, mined.provider, r)).toMatchObject({ action: "prepare", versionId: idOf(all[3]), replaces: [] });
     expect(mined.sent).toEqual([]);
   });
@@ -251,7 +255,7 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
   test("after a restart, catchUp lists a file recovery store itself and resumes the same pair (#975, C12-40)", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
     const all = await lines();
-    const read = snapshot([all[1]]);
+    const read = snapshot([anchorBody(all)]);
     const dir = mkdtempSync(join(tmpdir(), "originals-recovery-"));
     try {
       const pair = await pairFor(sdk, did, node(read).provider);
@@ -260,11 +264,11 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
       // A fresh store over the same directory: no recovery ids passed.
       const reopened = fileRecoveryStore(dir);
       const chain = node(read);
-      const plan = await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), recoveryStore: reopened });
+      const plan = await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: reopened });
       expect(plan).toMatchObject({ action: "resume", versionId: idOf(all[2]), recoveryId: pair.prepared.commitTxId });
       const resumed = await resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider: chain.provider, recoveryStore: reopened });
       expect([resumed.commitTxId, resumed.revealTxId, resumed.inscriptionId]).toEqual([pair.prepared.commitTxId, pair.prepared.revealTxId, pair.prepared.inscriptionId]);
-      expect(await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), recoveryStore: fileRecoveryStore(dir) }))
+      expect(await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: fileRecoveryStore(dir) }))
         .toMatchObject({ action: "wait-for-confirmation", recoveryId: pair.prepared.commitTxId });
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -274,20 +278,20 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
   test("a store that cannot list needs the recovery ids passed", async () => {
     const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
     const r = recovery();
-    await expect(catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), recoveryStore: r.store }))
+    await expect(catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, recoveryStore: r.store }))
       .rejects.toMatchObject({ code: "RECOVERY_IDS_REQUIRED" });
     // A listing store is used when no ids are given; passed ids still take precedence.
     const listing = { ...r.store, list: () => Promise.resolve(r.ids()) };
-    expect(await catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), recoveryStore: listing })).toMatchObject({ action: "prepare" });
+    expect(await catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, recoveryStore: listing })).toMatchObject({ action: "prepare" });
   });
 
   test("a pair whose input has moved on is not resumed", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
     const all = await lines();
     const r = recovery();
-    const pair = await pairFor(sdk, did, node(snapshot([all[1]])).provider);
+    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider);
     r.put(pair.prepared, "prepared");
-    const moved = snapshot([all[1]]);
+    const moved = snapshot([anchorBody(all)]);
     moved.ownership = { owner: "bcrt1qholder", satpoint: `${"ff".repeat(32)}:0:0` };
     expect(await step(sdk, did, node(moved).provider, r)).toMatchObject({ action: "prepare", versionId: idOf(all[2]) });
   });
@@ -296,18 +300,18 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 3);
     const all = await lines();
     const r = recovery();
-    const second = await pairFor(sdk, did, node(snapshot([all[1], all[2]])).provider);
+    const second = await pairFor(sdk, did, node(snapshot([anchorBody(all), all[2]])).provider);
     expect(second.versionId).toBe(idOf(all[3]));
     r.put(second.prepared, "reveal_broadcast");
-    const shown = snapshot([all[1], all[2], { line: all[3], id: second.prepared.inscriptionId }]);
-    expect(await nextPendingEntry(sdk, did, { provider: node(shown, [second.prepared.revealTxId]).provider, clock: blocks() })).toMatchObject({ next: idOf(all[4]), remaining: 1 });
+    const shown = snapshot([anchorBody(all), all[2], { line: all[3], id: second.prepared.inscriptionId }]);
+    expect(await nextPendingEntry(sdk, did, { provider: node(shown, [second.prepared.revealTxId]).provider, clock: blocks(), index: INDEX })).toMatchObject({ next: idOf(all[4]), remaining: 1 });
     // The block holding the second edit is replaced: its reveal is back in the mempool.
-    const reorged = snapshot([all[1], all[2]]);
-    const pending = await nextPendingEntry(sdk, did, { provider: node(reorged).provider, clock: blocks() });
+    const reorged = snapshot([anchorBody(all), all[2]]);
+    const pending = await nextPendingEntry(sdk, did, { provider: node(reorged).provider, clock: blocks(), index: INDEX });
     expect(pending).toMatchObject({ accepted: idOf(all[2]), next: idOf(all[3]), queue: [idOf(all[3]), idOf(all[4])], remaining: 2 });
     expect(await step(sdk, did, node(reorged).provider, r)).toMatchObject({ action: "wait-for-confirmation", reason: "unconfirmed", recoveryId: second.prepared.commitTxId });
     // The new chain mines it in the same block as its parent: Bitcoin ignores it (P9.13), so a replacement is prepared.
-    const sameBlock = snapshot([all[1], { line: all[2], height: 11 }, { line: all[3], id: second.prepared.inscriptionId, height: 11, tx: 2 }]);
+    const sameBlock = snapshot([anchorBody(all), { line: all[2], height: 11 }, { line: all[3], id: second.prepared.inscriptionId, height: 11, tx: 2 }]);
     const plan = await step(sdk, did, node(sameBlock, [second.prepared.commitTxId, second.prepared.revealTxId]).provider, r);
     expect(plan).toMatchObject({ action: "prepare", versionId: idOf(all[3]), replaces: [second.prepared.inscriptionId] });
   });
@@ -316,7 +320,7 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
     const all = await lines();
     const r = recovery();
-    const read = snapshot([all[1]]);
+    const read = snapshot([anchorBody(all)]);
     const pair = await pairFor(sdk, did, node(read).provider);
     r.put(pair.prepared, "reveal_broadcast");
     expect(await step(sdk, did, node(read, [pair.prepared.commitTxId, pair.prepared.revealTxId]).provider, r))
@@ -328,7 +332,178 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     const ahead = await original(btcoAlias("regtest", SAT), 1);
     const all = await ahead.lines();
     expect((await behind.lines())[1]).toBe(all[1]);
-    await expect(nextPendingEntry(behind.sdk, behind.did, { provider: provider(SAT, snapshot([all[1], all[2]])), clock: blocks() }))
+    await expect(nextPendingEntry(behind.sdk, behind.did, { provider: provider(SAT, snapshot([anchorBody(all), all[2]])), clock: blocks(), index: INDEX }))
       .rejects.toMatchObject({ code: "BITCOIN_HEAD_NOT_STORED" });
+  });
+});
+
+/** Alice grants Bob the photo; Bob replaces it before the anchor (an editor entry), then Alice anchors. */
+async function edited() {
+  const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+  const bob = await Author.create([{ fragment: "edit", secret: seed(31) }]);
+  const known = new Map([[alice.did, alice], [bob.did, bob]]);
+  const store = new MemoryStore();
+  const sdk = OriginalsSDK.create({ store, authors: async (d) => known.get(d)?.evidence(), freshness: "asserted", clock: clock() });
+  const asAlice = { author: alice.ref("orig"), signer: alice.signer("orig", KEY) };
+  const asBob = { editor: bob.ref("edit"), signer: bob.signer("edit", seed(31)) };
+  const grant: EditorGrant = { did: bob.did, name: false, metadata: false, resources: ["photo"] };
+  const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], editors: [grant], ...asAlice });
+  if (c.kind !== "original") throw new Error("expected an Original");
+  const did = c.original.did;
+  const byBob = await sdk.edit(did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: bytes("two") }], ...asBob });
+  const anchored = await sdk.anchor(did, { parent: byBob.original.checkpoint, sat: btcoAlias("regtest", SAT), ...asAlice });
+  const lines = async () => new TextDecoder().decode(readZip((await sdk.package(did)).bytes).get("asset/did.jsonl")!).trimEnd().split("\n");
+  return { alice, bob, known, store, sdk, did, asAlice, asBob, anchored: anchored.original.checkpoint, lines };
+}
+
+describe("C12-112: the anchoring inscription is the log through the anchoring entry, at most 350,000 bytes (P9.17)", () => {
+  test("the SDK refuses to anchor an Original whose log through the anchoring entry would be over the limit", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const store = new MemoryStore();
+    const sdk = OriginalsSDK.create({ store, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const big = { note: "x".repeat(60_000) };
+    const c = await sdk.create({ name: "Large", metadata: big, resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    let parent = c.original.checkpoint;
+    for (let k = 0; k < 4; k++) parent = (await sdk.edit(c.original.did, { parent, name: `Large ${k}`, author: alice.ref("orig"), signer })).original.checkpoint;
+    const before = (await store.get(c.original.did))!.log;
+    expect(new TextEncoder().encode(before).length).toBeLessThan(ORIGINALS_INSCRIPTION_MAX_BYTES);
+    await expect(sdk.anchor(c.original.did, { parent, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) }))
+      .rejects.toMatchObject({ category: "limit-exceeded", code: "ANCHORING_LOG_TOO_LARGE" });
+    expect((await store.get(c.original.did))!.log).toBe(before); // nothing committed: the Original is not anchored
+  });
+
+  test("the writer refuses an anchoring inscription over the limit, before reading Bitcoin or signing", async () => {
+    const pad = (n: number) => "y".repeat(n);
+    const genesis = JSON.stringify({ versionId: "1-a", state: { asset: { aliases: [] } }, pad: pad(200_000) });
+    const anchoring = JSON.stringify({ versionId: "2-b", state: { asset: { aliases: [btcoAlias("regtest", SAT)] } }, pad: pad(150_000) });
+    const log = `${genesis}\n${anchoring}\n`;
+    expect(new TextEncoder().encode(log).length).toBeGreaterThan(ORIGINALS_INSCRIPTION_MAX_BYTES);
+    const sdk = { committedLog: () => Promise.resolve(log) } as unknown as OriginalsSDK;
+    await expect(prepare(sdk, "did:vh:x", "regtest", provider(SAT))).rejects.toMatchObject({ category: "limit-exceeded", code: "ANCHORING_LOG_TOO_LARGE" });
+  });
+
+  test("an explicitly requested entry before the anchoring entry is not inscribed on its own", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT));
+    await expect(prepare(sdk, did, "regtest", provider(SAT), idOf((await lines())[0]))).rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
+  });
+
+  test("an Originals inscription carries no metadata", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT));
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const [inscription] = parseWitness(parse(pair.prepared.revealTxHex).getInput(0).finalScriptWitness!)!;
+    expect(inscription.tags.contentType).toBe(ORIGINALS_INSCRIPTION_TYPE);
+    expect(inscription.tags.metadata).toBeUndefined();
+  });
+});
+
+describe("C12-100: before inscribing the anchoring entry the SDK verifies it; then it is pending Bitcoin acceptance (P9.18)", () => {
+  test("a stored log that does not verify through the signed anchoring entry is not inscribed", async () => {
+    const store = new MemoryStore();
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    // The stored anchoring entry's proof is damaged after it was committed.
+    const [genesis, anchoring] = (await store.get(c.original.did))!.log.trimEnd().split("\n");
+    const entry = JSON.parse(anchoring) as { proof: Array<{ proofValue: string }> };
+    entry.proof[0].proofValue = `z${"1".repeat(entry.proof[0].proofValue.length - 1)}`;
+    await store.commit(c.original.did, { expectedHead: anchored.original.checkpoint, log: `${genesis}\n${JSON.stringify(entry)}\n` });
+    await expect(pairFor(sdk, c.original.did, node(snapshot([])).provider)).rejects.toMatchObject({ code: "ANCHORING_NOT_VERIFIED" });
+  });
+
+  test("an editor whose DID history is missing signed before the anchor: refused as incomplete identity evidence", async () => {
+    const { bob, known, sdk, did } = await edited();
+    known.delete(bob.did);
+    await expect(pairFor(sdk, did, node(snapshot([])).provider)).rejects.toMatchObject({ category: "incomplete-evidence", code: "ANCHORING_NOT_VERIFIED" });
+  });
+
+  test("an author key removed from the author DID before inscribing: refused, Bitcoin would not accept it (P9.15)", async () => {
+    const { alice, sdk, did } = await edited();
+    await alice.rotate([{ fragment: "other", secret: seed(77) }]);
+    await expect(pairFor(sdk, did, node(snapshot([])).provider)).rejects.toMatchObject({ code: "ANCHORING_NOT_VERIFIED" });
+  });
+
+  test("a verified anchoring entry is prepared, with what Bitcoin will not hold: resource bytes and did:vh signer histories", async () => {
+    const { alice, bob, sdk, did, anchored, lines } = await edited();
+    const all = await lines();
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    expect(pair.versionId).toBe(anchored);
+    expect(inscribed(pair.prepared)).toBe(`${all.join("\n")}\n`);
+    expect(pair.offChain.replication).toBe("not-guaranteed");
+    expect(pair.offChain.identities).toEqual([{ did: alice.did, role: "author", held: true }, { did: bob.did, role: "editor", held: true }]);
+    expect(pair.offChain.resources.map((r) => [r.resource, r.version, r.digest, r.held])).toEqual([
+      ["photo", 1, resourceDigest(bytes("one")), true], ["photo", 2, resourceDigest(bytes("two")), true],
+    ]);
+  });
+
+  test("broadcast, the anchor is labelled pending Bitcoin acceptance until it is confirmed; then it is anchored", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const unread = { recoveryStore: r.store, recoveryIds: r.ids() };
+    expect((await readAnchored(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...unread })).publication).toBe("not-anchored");
+    r.put(pair.prepared, "reveal_broadcast");
+    const recorded = { recoveryStore: r.store, recoveryIds: r.ids() };
+    const pending = await readAnchored(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...recorded });
+    expect(pending.publication).toBe("pending-bitcoin-acceptance");
+    expect(pending.current).toBe(false);
+    expect((await nextPendingEntry(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...recorded })).publication).toBe("pending-bitcoin-acceptance");
+    const waiting = await step(sdk, did, node(snapshot([])).provider, r);
+    expect(waiting).toMatchObject({ action: "wait-for-confirmation", versionId: idOf(all[1]), pending: { publication: "pending-bitcoin-acceptance" } });
+    // Mined but not yet indexed: still pending.
+    const mined = node(snapshot([]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
+    expect((await readAnchored(sdk, did, { provider: mined.provider, clock: blocks(), index: INDEX, ...recorded })).publication).toBe("pending-bitcoin-acceptance");
+    const shown = node(snapshot([{ line: anchorBody(all), id: pair.prepared.inscriptionId }]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
+    const view = await readAnchored(sdk, did, { provider: shown.provider, clock: blocks(), index: INDEX, ...recorded });
+    expect(view.publication).toBe("anchored");
+    expect(view.report.anchoring?.anchor?.inscription).toBe(pair.prepared.inscriptionId);
+    expect(view.current).toBe(true);
+    expect(await step(sdk, did, shown.provider, r)).toMatchObject({ action: "prepare", versionId: idOf(all[2]), pending: { publication: "anchored" } });
+  });
+});
+
+describe("C12-123: an editor entry is inscribed by the sat's holder like an author entry (P9.12, P5.16)", () => {
+  test("after the anchor, the holder inscribes Bob's entry; Bitcoin accepts it and it is current", async () => {
+    const { bob, sdk, did, asBob, anchored, lines } = await edited();
+    const after = await sdk.edit(did, { parent: anchored, resources: [{ id: "photo", bytes: bytes("three") }], ...asBob });
+    const all = await lines();
+    expect(all).toHaveLength(4);
+    const read = snapshot([anchorBody(all, 2)]);
+    const r = recovery();
+    expect(await step(sdk, did, node(read).provider, r)).toMatchObject({ action: "prepare", versionId: after.original.checkpoint });
+    const pair = await pairFor(sdk, did, node(read).provider);
+    expect(inscribed(pair.prepared)).toBe(`${all[3]}\n`);
+    expect(pair.offChain.identities.map((i) => i.did)).toContain(bob.did);
+    const shown = snapshot([anchorBody(all, 2), { line: all[3], id: pair.prepared.inscriptionId }]);
+    const done = await step(sdk, did, node(shown, [pair.prepared.commitTxId, pair.prepared.revealTxId]).provider, r);
+    expect(done).toMatchObject({ action: "done", pending: { accepted: after.original.checkpoint, publication: "anchored" } });
+    if (done.action !== "done") throw new Error("unreachable");
+    expect(done.pending.view.current).toBe(true);
+    expect(done.pending.view.report.identityEvidence.editors.map((e) => [e.did, e.status])).toEqual([[bob.did, "complete"]]);
+    expect(done.pending.view.resources.at(-1)?.digest).toBe(resourceDigest(bytes("three")));
+  });
+});
+
+describe("transfer handoff: what the sender holds that Bitcoin does not (P9.18)", () => {
+  test("the recipient gets the resource bytes and did:vh signer histories, and verifies them against the sat", async () => {
+    const { alice, bob, sdk, did, lines } = await edited();
+    const all = await lines();
+    const handoff = await transferHandoff(sdk, did);
+    expect(handoff.offChain.identities.map((i) => i.did)).toEqual([alice.did, bob.did]);
+    const contents = readZip(handoff.package.bytes);
+    expect([...contents.keys()].filter((k) => k.startsWith("resources/"))).toHaveLength(2);
+    // A recipient with an empty store and no author list.
+    const recipient = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock() });
+    const read = await verifyHandoff(recipient, handoff.package.bytes, { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX });
+    expect(read.report.anchoring?.status).toBe("anchored");
+    expect(read.report.history.status).toBe("valid");
+    expect(read.report.authorBinding.status).toBe("valid");
+    expect(read.report.identityEvidence.status).toBe("complete");
+    expect(read.report.resources.status).toBe("available");
   });
 });

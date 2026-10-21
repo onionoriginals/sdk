@@ -30,10 +30,13 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/RegtestProvider';
 import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
-import { parseBtcoAlias } from '@originals/vh/originals';
+import { parseBtcoAlias, verifyOriginal } from '@originals/vh/originals';
 import { InscriptionClock, OriginalsSDK, readEvidence, satEvidence } from '../../packages/sdk/src/originals/index';
 import { FileStore, fileRecoveryStore } from '../../packages/sdk/src/originals/fs-store';
 import { catchUp, prepareEntryInscription, resumeInscriptionOnSat, submitPreparedInscriptionOnSat, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
+
+/** The one index every read uses, reported as used (P9.11). */
+export const ORD_INDEX = 'ord-0.29.0-regtest';
 
 export interface ChildEndpoints { rpcUrl: string; ordUrl: string; rpcAuth: string }
 
@@ -77,7 +80,7 @@ const summary = (step: CatchUpStep) => ({
   ...('recoveryId' in step ? { recoveryId: step.recoveryId } : {}),
   ...('broadcast' in step ? { broadcast: step.broadcast } : {}),
   ...('reason' in step ? { reason: step.reason } : {}),
-  committed: step.pending.committed, accepted: step.pending.accepted, acceptedHeight: step.pending.acceptedHeight,
+  committed: step.pending.committed, accepted: step.pending.accepted, acceptedHeight: step.pending.acceptedHeight, publication: step.pending.publication,
   queue: step.pending.queue, current: step.pending.view.current,
 });
 
@@ -101,20 +104,28 @@ async function main(mode: string): Promise<Record<string, unknown>> {
     const snapshot = await provider.getSatSnapshot!(sat.sat);
     const satpoint = snapshot.ownership.satpoint;
     const ownerConfirmations = satpoint ? (await provider.getTransactionStatus(satpoint.split(':')[0])).confirmations ?? 0 : 0;
-    const evidence = await satEvidence(snapshot, { clock, ownerConfirmations });
+    const evidence = await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD_INDEX });
     const loaded = await sdk.load(zip, { bitcoin: [evidence] });
     const contents = readEvidence(zip);
     const r = loaded.report;
     const ids = contents.log.trimEnd().split('\n').map((l) => (JSON.parse(l) as { versionId: string }).versionId);
+    // The same sat with no copy of the log: Bitcoin carries it whole (P9.17); only the off-chain
+    // signer DID histories and the bytes come from the package (P9.18).
+    const alone = await verifyOriginal({ bitcoin: [evidence], authors: contents.authors.map(({ retrievedFrom: _, ...a }) => a), now: Date.now() });
     return {
       mode, pid: process.pid, store: need('ORIGINALS_CHILD_READER_STORE'),
       provider: { kind: 'RegtestProvider', ord: endpoints.ordUrl, core: endpoints.rpcUrl, indexesConsulted: 1 },
       snapshot: { network: snapshot.network, sat: snapshot.sat, tip: snapshot.tipAfter, indexHealthy: snapshot.indexHealthy, enumerationComplete: snapshot.enumerationComplete, satpoint },
-      evidenceIndexes: evidence.indexes,
+      evidenceIndex: evidence.index,
       manifest: loaded.manifest, packageVersionIds: ids,
       history: r.history, authorBinding: r.authorBinding, identityEvidence: { status: r.identityEvidence.status, author: r.identityEvidence.author, latestVersionId: r.identityEvidence.latestVersionId },
       ordering: r.ordering, head: r.head, checkpoint: r.checkpoint, current: r.current, reasons: loaded.reasons,
       anchoring: r.anchoring, ownership: r.ownership, state: { name: r.state?.name },
+      fromBitcoinAlone: {
+        copy: alone.anchoring?.copy, anchoring: alone.anchoring?.status, head: alone.head, entries: alone.history.entries, history: alone.history.status,
+        authorBinding: alone.authorBinding.status, identity: alone.identityEvidence.status, resources: alone.resources.status,
+        anchor: alone.anchoring?.anchor?.inscription, accepted: alone.anchoring?.accepted.map((a) => a.inscription),
+      },
       resources: {
         status: r.resources.status, missing: r.resources.missing.length, failures: r.resources.failures.length,
         versions: r.resources.versions.map((v) => {
@@ -134,14 +145,14 @@ async function main(mode: string): Promise<Record<string, unknown>> {
   const base = { mode, pid: process.pid, store: storeRoot, recovery: recoveryDir, recordedBefore: await recoveryStore.list() };
 
   if (mode === 'step') {
-    return { ...base, step: summary(await catchUp({ sdk, did, provider, clock, recoveryStore })) };
+    return { ...base, step: summary(await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore })) };
   }
 
   if (mode === 'resume') {
-    const plan = await catchUp({ sdk, did, provider, clock, recoveryStore });
+    const plan = await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore });
     if (plan.action !== 'resume') throw new Error(`expected catchUp to resume a recorded pair, got ${JSON.stringify(summary(plan))}`);
     const resumed = await resumeInscriptionOnSat({ recoveryId: plan.recoveryId, provider, recoveryStore });
-    const after = await catchUp({ sdk, did, provider, clock, recoveryStore });
+    const after = await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore });
     return {
       ...base, plan: summary(plan),
       resumed: { recoveryId: resumed.recoveryId, commitTxId: resumed.commitTxId, revealTxId: resumed.revealTxId, inscriptionId: resumed.inscriptionId, broadcast: resumed.broadcast, error: resumed.error ?? null },
@@ -151,14 +162,14 @@ async function main(mode: string): Promise<Record<string, unknown>> {
 
   if (mode === 'submit') {
     const { address, satSigner } = localWallet(need('ORIGINALS_CHILD_WALLET_KEY'));
-    const plan = await catchUp({ sdk, did, provider, clock, recoveryStore });
+    const plan = await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore });
     if (plan.action !== 'prepare') throw new Error(`expected catchUp to prepare, got ${JSON.stringify(summary(plan))}`);
     const [txid, vout] = plan.pending.view.report.ownership!.output.split(':');
     const tx = await rpc<{ vout: Array<{ n: number; value: number; scriptPubKey: { hex: string } }> }>('getrawtransaction', [txid, true]);
     const out = tx.vout[Number(vout)];
     const holding: Utxo = { txid, vout: out.n, value: Math.round(out.value * 100_000_000), scriptPubKey: out.scriptPubKey.hex };
     const fee = JSON.parse(need('ORIGINALS_CHILD_FEE_UTXO')) as Utxo;
-    const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock });
+    const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX });
     // The kill point: the state machine asks to broadcast the reveal only after the
     // commit is out and `reveal_broadcast_unknown` is durably saved. Here the process
     // reports that, from a fresh read of the record file, and never sends the reveal.
