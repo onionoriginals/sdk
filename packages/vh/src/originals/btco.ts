@@ -143,14 +143,27 @@ function sameReport(a: SatInscription, b: SatInscription): boolean {
     (a.metadataPresent ?? false) === (b.metadataPresent ?? false);
 }
 
+export interface ReadSatOptions {
+  /**
+   * Whether a disputed inscription, as each index reports it, could count for
+   * the reader. One that could leaves everything after it on the sat
+   * undecided (P9.10); one that could not (for an Original, an inscription no
+   * index reports as an Originals inscription) is excluded as
+   * `placement-disputed` without holding back later ones, and is not listed
+   * in `disputed`. Default: every disputed inscription could count.
+   */
+  couldCount?: (reports: SatInscription[]) => boolean;
+}
+
 /**
  * Merge the reads of one sat by the indexes the verifier uses (P9.10). An
  * inscription counts only when every read reports it on the alias's sat
- * number and network, consistently; when they disagree, it and everything
- * after it in chain order on this sat are undecided. Unconfirmed
- * inscriptions are never disputed: they are only observed (P9.5).
+ * number and network, consistently; when they disagree, it and, if it could
+ * count (`couldCount`), everything after it in chain order on this sat are
+ * undecided. Unconfirmed inscriptions are never disputed: they are only
+ * observed (P9.5).
  */
-export function readSat(alias: string, reads: SatEvidence[]): SatRead {
+export function readSat(alias: string, reads: SatEvidence[], options: ReadSatOptions = {}): SatRead {
   const parsed = parseBtcoAlias(alias);
   if (reads.length === 0) throw new OriginalsError("incomplete-evidence", "SAT_READ_MISSING", `no read of ${alias}`);
   const on = (i: SatInscription) => i.sat === parsed.sat && i.network === parsed.network;
@@ -169,8 +182,10 @@ export function readSat(alias: string, reads: SatEvidence[]): SatRead {
       excluded.push({ inscription: id, reason: reports.some((i) => i.network !== parsed.network) ? "other-network" : "not-on-sat" });
     } else if (placing.every((p) => p.confirmations < 1)) {
       placed.push({ ...placing[0], confirmations: 0 }); // observed only
-    } else {
+    } else if (!options.couldCount || options.couldCount(reports)) {
       disputes.push(placing[0]);
+    } else {
+      excluded.push({ inscription: id, reason: "placement-disputed" });
     }
   }
   placed.sort(chainOrder);

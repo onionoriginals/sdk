@@ -19,7 +19,7 @@ import { parseLog, verifyLog, type LogFailure } from "../log/index.js";
 import { didVh } from "../didvh/index.js";
 import { didWebvh, parseDidWebvh } from "../webvh/index.js";
 import { ORIGINALS_LIMITS, type AuthorRef } from "./state.js";
-import { chainOrder, parseBtcoAlias, readSat, type ChainPosition, type SatEvidence } from "./btco.js";
+import { chainOrder, parseBtcoAlias, readSat, type ChainPosition, type SatEvidence, type SatInscription } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
 
 /** The author DID methods the baseline profile lists (P5.8). did:btco arrives with Bitcoin (plan 011, PR 9). */
@@ -168,8 +168,16 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
   const read = readSat(alias.did, reads);
   const versions: AuthorVersion[] = [];
   const max = options.maxVersions ?? ORIGINALS_LIMITS.authorVersions;
+  let unread: SatInscription | undefined;
   for (const i of read.inscriptions) {
-    if (i.confirmations < 1 || !i.metadata) continue;
+    if (i.confirmations < 1) continue;
+    // Metadata not read could hold a version: the history stops before it (M1). A delegated or
+    // encoded inscription is not a version (P5.13, PROVISIONAL).
+    if (i.unsupported === "not-read") {
+      unread = i;
+      break;
+    }
+    if (i.unsupported || !i.metadata) continue;
     let doc;
     try {
       doc = decodeCbor(i.metadata);
@@ -198,7 +206,11 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
   const disputed = new Set(read.disputed);
   const firstDisputed = reads.flatMap((r) => r.inscriptions).filter((i) => disputed.has(i.id)).sort(chainOrder)[0];
   const afterTip: ChainPosition = { height: read.tip.height + 1, transactionIndex: 0, inscriptionIndex: 0 };
-  const establishedBefore = firstDisputed && chainOrder(firstDisputed, afterTip) < 0 ? positionOf(firstDisputed) : afterTip;
+  const establishedBefore = unread ? positionOf(unread) : firstDisputed && chainOrder(firstDisputed, afterTip) < 0 ? positionOf(firstDisputed) : afterTip;
+  if (unread) {
+    const error = new OriginalsError("incomplete-evidence", "AUTHOR_SAT_READ_INCOMPLETE", `inscription ${unread.id} on ${did}'s sat was not read in full: it could be a version (P5.13)`);
+    return { did, method: "did:btco", versions, establishedBefore, failure: { index: versions.length, error } };
+  }
   if (firstDisputed) {
     const error = new OriginalsError("incomplete-evidence", "AUTHOR_PLACEMENT_DISPUTED", `the indexes used disagree on whether inscription ${firstDisputed.id} is on ${did}'s sat (P9.10)`);
     return { did, method: "did:btco", versions, establishedBefore, failure: { index: versions.length, error } };

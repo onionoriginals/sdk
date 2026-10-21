@@ -607,8 +607,15 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 - Placement rests on the index (P9.10): an inscription counts for a sat only
   when every index read supplied reports it on that sat number on that
   network. Indexes that disagree leave it `disputed`
-  (`bitcoin-placement-disputed`), and disagreement on the holder gives no
-  owner (`ownership-indexes-disagree`).
+  (`bitcoin-placement-disputed`), and with it everything after it on the
+  sat, and disagreement on the holder gives no owner
+  (`ownership-indexes-disagree`). A disputed inscription that no index
+  reports as an Originals inscription (by media type) cannot be an entry: it
+  is ignored as `placement-disputed` and holds back nothing after it. On a
+  did:btco DID's sat every disputed inscription holds back what follows.
+  Without an anchor the report's head is the copy's last entry before its
+  anchoring entry, as for `not-anchored`; with no Bitcoin evidence at all it
+  is the local committed head, not current (`bitcoin-evidence-missing`).
 - Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
   from 1 confirmation on every network, mainnet included (P9.5; depth
   reported) when it extends the head at a strictly

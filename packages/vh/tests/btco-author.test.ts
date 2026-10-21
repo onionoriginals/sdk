@@ -363,6 +363,23 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(agreed.current, JSON.stringify(agreed.reasons)).toBe(true);
   });
 
+  test("M1, P5.13: a delegated or encoded inscription is not a version; an unread one leaves the history incomplete from there", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const delegated = at(20, { content: new Uint8Array(), unsupported: "delegated" });
+    const later = version(22, both());
+    const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, delegated, later]) });
+    expect(h.versions.map((v) => v.versionId)).toEqual([v1.id, later.id]);
+    expect(h.failure).toBeUndefined();
+    // An inscription whose metadata was not read could be a version: the history stops before it.
+    const unread = at(20, { content: new Uint8Array(), unsupported: "not-read" });
+    const cut = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, unread, later]) });
+    expect(cut.versions.map((v) => v.versionId)).toEqual([v1.id]);
+    expect(cut.failure?.error).toMatchObject({ category: "incomplete-evidence", code: "AUTHOR_SAT_READ_INCOMPLETE" });
+    const r = await fromBitcoin([sat(AUTHOR, [v1, unread])], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-unavailable");
+    expect(r.current).toBe(false);
+  });
+
   test("P9.15: an author read whose tip is below the inscription cannot establish the state there", async () => {
     const { v1, genesis, anchor } = await byA();
     const short = { ...sat(AUTHOR, [v1]), tip: { height: 20, hash: "cc".repeat(32) } };
