@@ -20,21 +20,26 @@
  *    entry that chains to any other entry, to none, or that was changed after
  *    signing, does not extend the head and is a stale-parent conflict naming
  *    the head.
- * 3. Identity evidence for each signer is the DID log the host would use:
- *    the verified prefix of the one it holds, or a submitted log that
+ * 3. Cheap checks come first, before any signer DID log is verified (C7,
+ *    r4 #4): the entry carries one proof, by the signer it names, who is the
+ *    author or holds a grant in the head's state (422 signer_not_authorized);
+ *    the stored or submitted signer DID log, read without verifying it, shows
+ *    the named version and key (422 identity_missing or
+ *    signer_version_unavailable otherwise, r2 #8); and the proof verifies
+ *    with that key (422 proof_invalid).
+ *    Identity evidence for each signer is then the DID log the host would
+ *    use: the verified prefix of the one it holds, or a submitted log that
  *    verifies, every line, as that DID's own log and extends that verified
  *    prefix (it also replaces a stored log that does not verify, the repair
  *    path). A submitted log that does not verify is refused (422
  *    identity_log_invalid), one that diverges too (422
  *    identity_evidence_conflict). A submitted witness file is used, and
  *    stored with the log, only when the log does not verify with the stored
- *    file and verifies completely with the submitted one (r4 #3); it counts
- *    in the identity byte cap (08d review r2 #6, #7).
- *    Cheap checks then come first (C7): the entry carries one proof, by the
- *    signer it names, who is the author or holds a grant in the head's
- *    state; the signer DID log the host would use shows the named version
- *    and key (422 identity_missing or signer_version_unavailable otherwise,
- *    r2 #8); and the proof verifies with that key (422 proof_invalid). Then
+ *    file and verifies completely with the submitted one, so a did:webvh 1.0
+ *    file pruned to the latest proof per witness is accepted; a file that
+ *    would not be written is not judged. It counts in the identity byte cap
+ *    (08d review r2 #6, #7, r4 #3). The verified log must again show the
+ *    named version and key, with the proof verifying. Then
  *    the head log plus the entry must verify under the profile
  *    (`verifyOriginal`: VH history, author binding and, through it, any
  *    editor rule the profile has; complete identity evidence), and every
@@ -333,6 +338,27 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     // 2. Only an entry whose parent is the head; never rebased (P6.7).
     if (!extendsHead(s.parsed, head)) return refuse(409, 'stale_parent', { status: 'stale-parent', head });
 
+    // 3a. Cheap checks before any signer DID log is verified (C7; #08d review r4 #4): the signer is the
+    // author or granted in the head's state, and its key at the named version, in the stored or the
+    // submitted signer log read without verifying it, verifies the one proof. Full verification would
+    // refuse an entry failing either, so nobody can make the host verify a log for one.
+    const headState = lineState(lines[lines.length - 1]) as { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } } | undefined;
+    const state = lineState(s.entry) as { author?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown }; editor?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown } } | undefined;
+    const signer = state?.editor ?? state?.author;
+    if (!signer || typeof signer.did !== 'string' || typeof signer.verificationMethod !== 'string' || typeof signer.versionId !== 'string') return refuse(422, 'entry_invalid');
+    const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
+    if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
+    {
+      const storedSigner = store.readHosted(`${siteKey}/originals/${authorPath(signer.did)}/did.jsonl`);
+      const unverified = [s.identities.find((i) => i.did === signer.did)?.log, storedSigner ? text(storedSigner) : null].filter((l): l is string => typeof l === 'string');
+      if (unverified.length === 0) return refuse(422, 'identity_missing', { did: signer.did });
+      const checked = unverified.map((log) => proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod as string, versionId: signer.versionId as string }, log));
+      if (!checked.includes(true)) {
+        if (checked.every((c) => c === undefined)) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
+        return refuse(422, 'proof_invalid');
+      }
+    }
+
     // 3. Verify under the profile against the head.
     const candidate = [...lines, s.entry];
     const identities: AuthorDidEvidence[] = [];
@@ -377,16 +403,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       }
       if (heldEvidence) identities.push(heldEvidence);
     }
-    // 3a. Cheap checks before full verification (C7): the signer is the author or granted in the
-    // head's state, and its key at the named version verifies the one proof.
-    const headState = lineState(lines[lines.length - 1]) as { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } } | undefined;
-    const state = lineState(s.entry) as { author?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown }; editor?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown } } | undefined;
-    const signer = state?.editor ?? state?.author;
-    if (!signer || typeof signer.did !== 'string' || typeof signer.verificationMethod !== 'string' || typeof signer.versionId !== 'string') return refuse(422, 'entry_invalid');
-    const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
-    if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
-    // The signer DID log the host would use must show the named version and key (#08d review r2 #8):
-    // full verification would refuse an entry without them, so it is refused before it.
+    // 3b. The signer DID log verification uses must show the named version and key (#08d review r2 #8).
     const signerLog = identities.find((i) => i.did === signer.did)?.log;
     if (typeof signerLog !== 'string') return refuse(422, 'identity_missing', { did: signer.did });
     const verifies = proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog);

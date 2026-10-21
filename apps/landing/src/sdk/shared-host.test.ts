@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { localSigner, multibaseEncode, proofHashData } from '@originals/vh/crypto';
 import { parseJson } from '@originals/vh/json';
-import { appendEntry, createLog, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
+import { appendEntry, createLog, createWitnessProof, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
 import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type AuthorRef } from '@originals/vh/originals';
 import { MemoryStore, OriginalsSDK, keySigner, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
@@ -29,13 +29,17 @@ const MINE = enc('<svg xmlns="http://www.w3.org/2000/svg"><rect width="6"/></svg
 const NOON = enc('<svg xmlns="http://www.w3.org/2000/svg"><rect width="9"/></svg>');
 
 /** An author DID with two assertionMethod keys, so one branch can carry more signing keys than another. */
-async function twoKeyAuthor(now: Date) {
+async function twoKeyAuthor(now: Date, opts: { witnessed?: boolean } = {}) {
   const update = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const witnessKey = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const witnessParam = opts.witnessed ? { witness: { threshold: 1, witnesses: [{ id: `did:key:${witnessKey.publicKeyMultibase}` }] } } : {};
+  /** A did:webvh 1.0 witness file pruned to the latest proof per witness. */
+  const prunedWitness = async (entry: LogEntry) => (opts.witnessed ? { witness: [{ versionId: entry.versionId, proof: [await createWitnessProof(witnessKey, entry.versionId)] }] } : {});
   const secrets = [crypto.getRandomValues(new Uint8Array(32)), crypto.getRandomValues(new Uint8Array(32))];
   const did = 'did:vh:{SCID}';
   const genesis = await createLog({
     versionTime: new Date(Math.floor(now.getTime() / 1000) * 1000 - 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase] },
+    parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase], ...witnessParam },
     state: {
       '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
       id: did,
@@ -49,7 +53,7 @@ async function twoKeyAuthor(now: Date) {
     ref: { did: authorDid, verificationMethod: `${authorDid}#author-${i}`, versionId: genesis.versionId },
     signer: keySigner({ keyType: 'Ed25519', secretKey: secrets[i], verificationMethod: `${authorDid}#author-${i}` }),
   });
-  const evidence: AuthorDidEvidence = { did: authorDid, log: serializeLog([genesis]) };
+  const evidence: AuthorDidEvidence = { did: authorDid, log: serializeLog([genesis]), ...(await prunedWitness(genesis)) };
   /** v2 of the author DID: key 0 removed, or the DID deactivated. */
   async function rotate(at: Date, opts: { deactivate?: boolean } = {}): Promise<AuthorDidEvidence> {
     const v2 = await appendEntry(genesis, {
@@ -63,15 +67,15 @@ async function twoKeyAuthor(now: Date) {
       },
       sign: signWith(update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${update.publicKeyMultibase}#${update.publicKeyMultibase}` }),
     });
-    return { did: authorDid, log: serializeLog([genesis, v2]) };
+    return { did: authorDid, log: serializeLog([genesis, v2]), ...(await prunedWitness(v2)) };
   }
   return { evidence, rotate, ...key(0), second: key(1) };
 }
 
 /** A published Original, a second device that has it, and a host client for each. */
-async function shared() {
+async function shared(opts: { witnessed?: boolean } = {}) {
   const h = host();
-  const author = await twoKeyAuthor(new Date(START));
+  const author = await twoKeyAuthor(new Date(START), opts);
   let ta = START + 1000;
   let tb = START + 1100;
   const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], freshness: 'asserted', clock });
@@ -379,8 +383,8 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
   const { authorPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
 
   /** A third device whose author DID is at v2 (key 0 removed, or deactivated). */
-  async function rotated(deactivate: boolean) {
-    const env = await shared();
+  async function rotated(deactivate: boolean, opts: { witnessed?: boolean } = {}) {
+    const env = await shared(opts);
     const v2 = await env.author.rotate(new Date(START + 2000), { deactivate });
     let tc = START + 5000;
     const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], freshness: 'asserted', clock: () => (tc += 250) });
@@ -458,6 +462,31 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const res = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] }, 'random-stranger');
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: 'proof_invalid' });
+  });
+
+  test('08d review r4 #4: the cheap checks run before any signer DID log is verified', async () => {
+    const env = await shared();
+    const junkLog = `${env.author.evidence.log as string}${'{"junk":1}\n'.repeat(1000)}`;
+    // A proof that does not verify with the named key, submitted with a signer log that would fail verification:
+    // refused by the proof check, before the log is verified.
+    const cand = parseJson((await env.edit(env.a, THEIRS)).line) as { proof: Array<{ proofValue: string }> };
+    cand.proof[0].proofValue = `z${'2'.repeat(86)}`;
+    const bad = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.author.evidence.did, log: junkLog }] }, 'random-stranger');
+    expect(bad.status).toBe(422);
+    expect(await bad.json()).toMatchObject({ error: 'proof_invalid' });
+    // A signer that is neither the author nor granted is refused before its log is looked at.
+    const stranger = await twoKeyAuthor(new Date(START));
+    const e = parseJson((await env.edit(env.a, THEIRS)).line) as Record<string, any>;
+    const { vhHash } = await import('@originals/vh/log');
+    const lines = env.hostedLines();
+    const head = (JSON.parse(lines[lines.length - 1]) as { versionId: string }).versionId;
+    const { proof, versionId: _v, ...rest } = e;
+    const forged: Record<string, any> = { ...rest, state: { ...rest.state, author: { ...stranger.ref } } };
+    forged.versionId = `${Number(head.split('-')[0]) + 1}-${vhHash({ ...forged, versionId: head })}`;
+    const other = { versionId: forged.versionId, versionTime: forged.versionTime, parameters: forged.parameters, state: forged.state, proof };
+    const unauthorized = await env.post({ original: env.did, entry: JSON.stringify(other), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: stranger.ref.did, log: `${stranger.evidence.log as string}{"junk":1}\n` }] }, 'random-stranger');
+    expect(unauthorized.status).toBe(422);
+    expect(await unauthorized.json()).toMatchObject({ error: 'signer_not_authorized' });
   });
 
   test('a submission is bounded: identity count and size, resources, and the body counted in bytes as it arrives (C7, R4)', async () => {
@@ -576,6 +605,28 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     expect(readFileSync(witnessPath, 'utf8')).toBe(kept);
     rmSync(witnessPath);
     expect((await env.h.read(`https://${env.didPath.replace(/did\.jsonl$/, 'did-witness.json')}`).then(() => 'served', () => 'absent'))).toBe('absent');
+  });
+
+  test('08d review r4 #3: a witnessed signer DID log is accepted with its did:webvh 1.0 pruned witness file, which never weakens the stored log', async () => {
+    const env = await rotated(false, { witnessed: true });
+    const witnessPath = join(env.h.dataDir, 'hosted', env.didPath.replace(/did\.jsonl$/, 'did-witness.json'));
+    const cand = await env.edit(env.c, THEIRS, env.author.second);
+    const body = (witness: unknown) => ({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ ...env.v2, witness } as AuthorDidEvidence] });
+    // The stored v1 file holds v1's proof; v2's pruned file holds only v2's. A file the submitted log does
+    // not verify with is refused with the log, and nothing is written.
+    const before = readFileSync(witnessPath, 'utf8');
+    const wrong = await env.post(body(env.author.evidence.witness), SUB2);
+    expect(wrong.status).toBe(422);
+    expect(await wrong.json()).toMatchObject({ error: 'identity_log_invalid' });
+    expect(readFileSync(witnessPath, 'utf8')).toBe(before);
+    // Proofs reordered member by member are the same proofs: accepted, and stored with the log it verifies.
+    const reordered = (env.v2.witness as Array<{ versionId: string; proof: Record<string, unknown>[] }>).map((e) => ({ proof: e.proof.map((p) => Object.fromEntries(Object.entries(p).reverse())), versionId: e.versionId }));
+    const res = await env.post(body(reordered), SUB2);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(readFileSync(join(env.h.dataDir, 'hosted', env.didPath), 'utf8')).toBe(env.v2.log as string);
+    expect(JSON.parse(readFileSync(witnessPath, 'utf8'))).toEqual(reordered);
+    const reader = await env.stranger().loadPublished(env.aliasDid, env.h.read);
+    expect(reader.verified, JSON.stringify(reader.reasons)).toBe(true);
   });
 
   test('08d review r2 #8: an entry naming a signer version absent from the host\'s DID log is refused before full verification', async () => {
