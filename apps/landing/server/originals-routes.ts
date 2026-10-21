@@ -14,7 +14,8 @@ import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import type { OriginalsStore, OriginalInscription } from './originals-store';
-import { bytesMatchDigest, classifyHostedKey, hostedContentType, signedMediaType } from './hosted-layout';
+import { bytesMatchDigest, classifyHostedKey, extendsSignerLog, extendsSignerWitness, hostedContentType, signedMediaType } from './hosted-layout';
+import { readBodyCapped } from './body';
 
 const HOST_PREFIX = '/api/originals/host/';
 
@@ -101,14 +102,10 @@ export function createOriginalsRoutes(deps: {
     // no write can shadow the app's static assets or another author's files.
     const hosted = classifyHostedKey(key, userSlug(sub));
     if (!hosted) return json({ error: 'forbidden_path' }, 403);
-    // Cap the upload before buffering the whole body into memory (the rate
+    // Cap the upload in bytes while reading it, declared or chunked (the rate
     // limiter bounds request COUNT, not per-request size).
-    const declared = Number(req.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
-      return json({ error: 'payload_too_large' }, 413);
-    }
-    const bytes = new Uint8Array(await req.arrayBuffer());
-    if (bytes.byteLength > MAX_UPLOAD_BYTES) return json({ error: 'payload_too_large' }, 413);
+    const bytes = await readBodyCapped(req, MAX_UPLOAD_BYTES);
+    if (!bytes) return json({ error: 'payload_too_large' }, 413);
     // The server labels every file itself. A resource takes the media type of
     // its descriptor in the Original's asset log, uploaded first, and
     // must be the bytes its digest names (P9.7).
@@ -121,6 +118,14 @@ export function createOriginalsRoutes(deps: {
       contentType = mediaType;
     } else {
       contentType = hostedContentType(hosted);
+    }
+    // A signer's DID log and witness only grow, so an upload can never roll
+    // back a newer one, and the revocation in it (P7.8; #965 review C2).
+    // The check and the write below run in one synchronous step, so no other upload interleaves.
+    if (hosted.kind === 'evidence' && hosted.signer) {
+      const stored = store.readHosted(key);
+      const extend = hosted.signer === 'log' ? extendsSignerLog : extendsSignerWitness;
+      if (stored && !extend(stored, bytes)) return json({ error: hosted.signer === 'log' ? 'identity_log_not_extending' : 'identity_witness_not_extending' }, 409);
     }
     try {
       store.saveBytes(sub, key, bytes, contentType);

@@ -417,3 +417,31 @@ describe("bytes read from a refused response count against the budget (#962 revi
     expect(error.details).toMatchObject({ limit: "bytes" });
   });
 });
+
+describe("hosted files carry the newest verified author evidence (#965 review C2, P7.8)", () => {
+  test("a configured author DID log that a stored one extends is not republished over it", async () => {
+    const K2 = seed(22);
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const v1 = alice.evidence();
+    // The publisher was configured with v1 of the author DID.
+    const at = clock();
+    const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [v1], freshness: "asserted", clock: at });
+    const signer = alice.signer("orig", KEY);
+    const c = await a.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const did = c.original.did;
+    // The author rotates to v2 elsewhere and edits there; the publisher imports that package.
+    await alice.rotate([{ fragment: "orig", secret: KEY }, { fragment: "next", secret: K2 }]);
+    const v2 = alice.evidence();
+    const b = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], freshness: "asserted", clock: at });
+    await b.import((await a.package(did)).bytes);
+    const e = await b.edit(did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: alice.ref("next"), signer: alice.signer("next", K2) });
+    expect((await a.import((await b.package(did)).bytes)).status).toBe("imported");
+    const alias = await aliasFor(did);
+    const p = await a.publish(did, { parent: e.original.checkpoint, author: alice.ref("next"), signer: alice.signer("next", K2), alias });
+    const files = await hostedFiles(a, did, alias);
+    const authorLog = [...files].find(([path]) => /^originals\/authors\/[0-9a-f]{64}\/did\.jsonl$/.test(path));
+    expect(decoder.decode(authorLog![1])).toBe(v2.log as string);
+    expect(p.original.checkpoint).toBeDefined();
+  });
+});

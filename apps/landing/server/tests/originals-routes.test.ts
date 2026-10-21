@@ -334,3 +334,79 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
     expect((await fetchFn(new Request(`http://${base}/originals-evidence.json`))).headers.get('content-type')).toBe('application/json');
   });
 });
+
+describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
+  const NAME = 'o-9xKpQ2mN4vR7tW1z';
+  const base = `demo.example.com/user-sub-1/${NAME}/originals`;
+  const authorDir = `${base}/authors/${'a'.repeat(64)}`;
+
+  function setup() {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (key: string, body: BodyInit) =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
+    const get = async (key: string) => (await fetchFn(new Request(`http://${key}`)))?.text();
+    return { originals, put, get };
+  }
+
+  test('a chunked body with no Content-Length is refused once it passes the cap, without reading it all', async () => {
+    const { originals } = setup();
+    const chunk = new Uint8Array(1024 * 1024).fill(0x61);
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (pulled++ < 60) c.enqueue(chunk);
+        else c.close();
+      },
+    });
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/did.jsonl')}`);
+    const req = new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body, duplex: 'half' } as RequestInit);
+    expect(req.headers.get('content-length')).toBeNull();
+    const res = await originals.hostPut(req, url, '1.1.1.1');
+    expect(res.status).toBe(413);
+    expect(pulled).toBeLessThan(20);
+  });
+
+  test('the cap counts bytes, not characters', async () => {
+    const { originals } = setup();
+    // 3 million three-byte characters: 9 MB, past the 8 MiB cap, though under it in string length.
+    const text = '€'.repeat(3_000_000);
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(text));
+        c.close();
+      },
+    });
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/did.jsonl')}`);
+    const res = await originals.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body, duplex: 'half' } as RequestInit), url, '1.1.1.1');
+    expect(res.status).toBe(413);
+  });
+
+  test('a signer DID log only grows: a PUT that does not extend the stored log is a 409 (P7.8)', async () => {
+    const { put, get } = setup();
+    const v1 = '{"versionId":"1-a"}\n';
+    const v2 = `${v1}{"versionId":"2-b"}\n`;
+    expect((await put(`${authorDir}/did.jsonl`, v1)).status).toBe(200);
+    expect((await put(`${authorDir}/did.jsonl`, v2)).status).toBe(200);
+    expect((await put(`${authorDir}/did.jsonl`, v2)).status).toBe(200); // a retry of the same log
+    const rollBack = await put(`${authorDir}/did.jsonl`, v1);
+    expect(rollBack.status).toBe(409);
+    expect(await rollBack.json()).toMatchObject({ error: 'identity_log_not_extending' });
+    expect((await put(`${authorDir}/did.jsonl`, '{"versionId":"1-other"}\n')).status).toBe(409);
+    expect(await get(`${authorDir}/did.jsonl`)).toBe(v2);
+  });
+
+  test('a signer DID witness file only gains proofs: a PUT that drops one is a 409', async () => {
+    const { put, get } = setup();
+    const p1 = { versionId: '1-a', proof: [{ proofValue: 'z1' }] };
+    const w1 = JSON.stringify([p1]);
+    const w2 = JSON.stringify([{ ...p1, proof: [...p1.proof, { proofValue: 'z2' }] }, { versionId: '2-b', proof: [{ proofValue: 'z3' }] }]);
+    expect((await put(`${authorDir}/did-witness.json`, w1)).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, w2)).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, w1)).status).toBe(409);
+    expect((await put(`${authorDir}/did-witness.json`, '[]')).status).toBe(409);
+    expect((await put(`${authorDir}/did-witness.json`, 'not json')).status).toBe(409);
+    expect(await get(`${authorDir}/did-witness.json`)).toBe(w2);
+  });
+});

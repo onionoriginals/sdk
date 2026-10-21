@@ -18,6 +18,11 @@
  * type itself: a resource is served with the media type its descriptor
  * declares in the uploaded asset log, never a header the uploader chose
  * (P9.7). The host does not verify that log; readers do.
+ *
+ * A signer's DID log and witness file (authors/<64 hex>/...) only grow: a
+ * replacement must extend what is stored (`extendsSignerLog`,
+ * `extendsSignerWitness`), so no upload can roll back a newer DID log, and
+ * with it a key removal or deactivation, that a save stored (P7.8).
  */
 import { resourceDigest } from '@originals/vh/originals';
 
@@ -32,7 +37,7 @@ const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]
 export type HostedKey =
   | { kind: 'identity-log' }
   | { kind: 'alias-log' | 'alias-witness' }
-  | { kind: 'evidence'; contentType: string }
+  | { kind: 'evidence'; contentType: string; signer?: 'log' | 'witness' }
   | { kind: 'resource'; digest: string; assetLogKey: string };
 
 /** Classify `key` for the author whose namespace is `slug`, or null when it is not a hosted file of theirs. */
@@ -52,8 +57,8 @@ export function classifyHostedKey(key: string, slug: string): HostedKey | null {
   if (p.length === 1 && p[0] === 'originals-evidence.json') return json;
   if (p.length === 2 && p[0] === 'asset' && p[1] === 'did.jsonl') return jsonl;
   if (p.length === 2 && p[0] === 'asset' && p[1] === 'did-witness.json') return json;
-  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return jsonl;
-  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did-witness.json') return json;
+  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return { ...jsonl, signer: 'log' };
+  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did-witness.json') return { ...json, signer: 'witness' };
   if (p.length === 2 && p[0] === 'resources' && DIGEST.test(p[1])) {
     return { kind: 'resource', digest: p[1], assetLogKey: [host, ns, name, 'originals', 'asset', 'did.jsonl'].join('/') };
   }
@@ -91,4 +96,45 @@ export function signedMediaType(assetLog: string, digest: string): string | null
 /** True when `bytes` are the bytes `digest` names. */
 export function bytesMatchDigest(bytes: Uint8Array, digest: string): boolean {
   return resourceDigest(bytes) === digest;
+}
+
+/**
+ * True when `next` may replace the stored signer DID log `stored`: the same
+ * lines, then possibly more (P7.8). An identical log is a retry.
+ */
+export function extendsSignerLog(stored: Uint8Array, next: Uint8Array): boolean {
+  if (next.length < stored.length) return false;
+  for (let i = 0; i < stored.length; i++) if (stored[i] !== next[i]) return false;
+  return stored.length === 0 || next.length === stored.length || stored[stored.length - 1] === 0x0a;
+}
+
+type WitnessEntry = { versionId: string; proof: unknown[] };
+
+function witnessEntries(bytes: Uint8Array): WitnessEntry[] | null {
+  try {
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    if (!Array.isArray(value)) return null;
+    const ok = value.every((e) => typeof e === 'object' && e !== null && typeof (e as WitnessEntry).versionId === 'string' && Array.isArray((e as WitnessEntry).proof));
+    return ok ? (value as WitnessEntry[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `next` may replace the stored signer witness file `stored`:
+ * every stored proof is still there, under the same versionId. A stored file
+ * that is not a witness file can be replaced by one that is.
+ */
+export function extendsSignerWitness(stored: Uint8Array, next: Uint8Array): boolean {
+  const old = witnessEntries(stored);
+  const proposed = witnessEntries(next);
+  if (!proposed) return false;
+  if (!old) return true;
+  return old.every((o) => {
+    const match = proposed.find((p) => p.versionId === o.versionId);
+    if (!match) return false;
+    const have = new Set(match.proof.map((x) => JSON.stringify(x)));
+    return o.proof.every((x) => have.has(JSON.stringify(x)));
+  });
 }

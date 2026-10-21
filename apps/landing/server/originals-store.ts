@@ -77,6 +77,8 @@ export interface OriginalsStore {
   serve(url: URL): Response | null;
   /** Auth-scoped read by object key (adapter.get) — only keys this user wrote. */
   read(subOrgId: string, key: string): Response;
+  /** The bytes of a hosted key, whoever wrote it, or null. For the server's own checks. */
+  readHosted(key: string): Uint8Array | null;
 }
 
 const CTYPE_SUFFIX = '.ctype';
@@ -397,5 +399,15 @@ export function createOriginalsStore(opts: {
     }
   }
 
-  return { saveBytes, recordOriginal, list, serve, read };
+  function readHosted(key: string): Uint8Array | null {
+    try {
+      const path = keyToPath(hostedDir, key);
+      if (!statSync(path).isFile()) return null;
+      return new Uint8Array(readFileSync(path));
+    } catch {
+      return null;
+    }
+  }
+
+  return { saveBytes, recordOriginal, list, serve, read, readHosted };
 }
