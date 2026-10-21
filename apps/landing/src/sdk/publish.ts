@@ -51,7 +51,11 @@ export async function buildOriginalAlias(signer: WebVHSigner, opts: { domain: st
   return { did: result.did, log: entries.map((e) => `${JSON.stringify(e)}\n`).join("") };
 }
 
-/** Upload order: the alias log, then the asset log, then everything else. */
+/**
+ * Upload order: the alias log, then the asset log, then everything else.
+ * Within a rank paths sort, so a signer's did-witness.json goes before its
+ * did.jsonl, which the host verifies with it (server/hosted-layout.ts).
+ */
 function uploadOrder(path: string): number {
   if (!path.startsWith("originals/")) return 0;
   if (path === "originals/asset/did.jsonl") return 1;

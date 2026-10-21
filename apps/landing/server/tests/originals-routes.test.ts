@@ -8,6 +8,29 @@ import { createOriginalsStore } from '../originals-store';
 import { createOriginalsRoutes } from '../originals-routes';
 import { buildFetch } from '../app';
 import { resourceDigest } from '@originals/vh/originals';
+import { createHash } from 'node:crypto';
+import { localSigner } from '@originals/vh/crypto';
+import { appendEntry, createLog, serializeLog, signWith } from '@originals/vh/log';
+
+/** A real did:vh signer DID log of `versions` entries, and the directory hex it lives under. */
+async function signerLog(versions = 2) {
+  const update = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const author = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const sign = signWith(update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${update.publicKeyMultibase}#${update.publicKeyMultibase}` });
+  const doc = (id: string) => ({
+    '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+    id,
+    verificationMethod: [{ id: `${id}#k`, type: 'Multikey', controller: id, publicKeyMultibase: author.publicKeyMultibase }],
+    assertionMethod: [`${id}#k`],
+  });
+  const t = Date.now() - 60_000;
+  const iso = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const entries = [await createLog({ versionTime: iso(t), parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase] }, state: doc('did:vh:{SCID}'), sign })];
+  const did = entries[0].state.id as string;
+  for (let i = 1; i < versions; i++) entries.push(await appendEntry(entries[i - 1], { versionTime: iso(t + i * 1000), parameters: {}, state: { ...doc(did), alsoKnownAs: [`urn:v${i}`] }, sign }));
+  const logs = entries.map((_, i) => serializeLog(entries.slice(0, i + 1)));
+  return { did, hex: createHash('sha256').update(did).digest('hex'), logs };
+}
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -347,7 +370,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     const put = (key: string, body: BodyInit) =>
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
     const get = async (key: string) => (await fetchFn(new Request(`http://${key}`)))?.text();
-    return { originals, put, get };
+    return { originals, store, put, get };
   }
 
   test('a chunked body with no Content-Length is refused once it passes the cap, without reading it all', async () => {
@@ -385,16 +408,41 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
 
   test('a signer DID log only grows: a PUT that does not extend the stored log is a 409 (P7.8)', async () => {
     const { put, get } = setup();
-    const v1 = '{"versionId":"1-a"}\n';
-    const v2 = `${v1}{"versionId":"2-b"}\n`;
-    expect((await put(`${authorDir}/did.jsonl`, v1)).status).toBe(200);
-    expect((await put(`${authorDir}/did.jsonl`, v2)).status).toBe(200);
-    expect((await put(`${authorDir}/did.jsonl`, v2)).status).toBe(200); // a retry of the same log
-    const rollBack = await put(`${authorDir}/did.jsonl`, v1);
+    const { hex, logs } = await signerLog(2);
+    const [v1, v2] = logs;
+    const dir = `${base}/authors/${hex}`;
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200); // a retry of the same log
+    const rollBack = await put(`${dir}/did.jsonl`, v1);
     expect(rollBack.status).toBe(409);
     expect(await rollBack.json()).toMatchObject({ error: 'identity_log_not_extending' });
-    expect((await put(`${authorDir}/did.jsonl`, '{"versionId":"1-other"}\n')).status).toBe(409);
-    expect(await get(`${authorDir}/did.jsonl`)).toBe(v2);
+    const other = await signerLog(1);
+    expect((await put(`${dir}/did.jsonl`, other.logs[0])).status).toBe(422); // another DID's log, in this DID's directory
+    expect(await get(`${dir}/did.jsonl`)).toBe(v2);
+  });
+
+  test('#965 review r2 #6: a signer DID log must verify; junk appended is refused, and a stored log that does not verify is repaired by a verified one', async () => {
+    const { store, put, get } = setup();
+    const { hex, logs } = await signerLog(3);
+    const [v1, v2, v3] = logs;
+    const dir = `${base}/authors/${hex}`;
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+    // Bytes that extend the stored log but do not verify are refused, so they cannot block a later save.
+    const junk = await put(`${dir}/did.jsonl`, `${v1}{"junk":1}\n`);
+    expect(junk.status).toBe(422);
+    expect(await junk.json()).toMatchObject({ error: 'identity_log_invalid' });
+    expect((await put(`${dir}/did.jsonl`, 'not a log')).status).toBe(422);
+    expect(await get(`${dir}/did.jsonl`)).toBe(v1);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200);
+    // A stored log poisoned before this rule (junk after its verified prefix) is replaced by a verified extension.
+    store.saveBytes('sub-1', `${dir}/did.jsonl`, new TextEncoder().encode(`${v2}{"junk":1}\n`), 'application/jsonl');
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(409); // still never a rollback of what verifies
+    expect((await put(`${dir}/did.jsonl`, v3)).status).toBe(200);
+    expect(await get(`${dir}/did.jsonl`)).toBe(v3);
+    // A stored log that does not verify at all can be replaced by any verified log of the DID.
+    store.saveBytes('sub-1', `${dir}/did.jsonl`, new TextEncoder().encode('{"junk":1}\n'), 'application/jsonl');
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
   });
 
   test('a signer DID witness file only gains proofs: a PUT that drops one is a 409', async () => {

@@ -14,7 +14,7 @@ import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import type { OriginalsStore, OriginalInscription } from './originals-store';
-import { bytesMatchDigest, classifyHostedKey, extendsSignerLog, extendsSignerWitness, hostedContentType, signedMediaType } from './hosted-layout';
+import { bytesMatchDigest, classifyHostedKey, extendsSignerWitness, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict } from './hosted-layout';
 import { readBodyCapped } from './body';
 
 const HOST_PREFIX = '/api/originals/host/';
@@ -26,6 +26,11 @@ const HOST_PREFIX = '/api/originals/host/';
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
+function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
 function userSlug(sub: string): string {
   return `user-${sub.slice(0, 16)}`;
 }
@@ -120,12 +125,23 @@ export function createOriginalsRoutes(deps: {
       contentType = hostedContentType(hosted);
     }
     // A signer's DID log and witness only grow, so an upload can never roll
-    // back a newer one, and the revocation in it (P7.8; #965 review C2).
-    // The check and the write below run in one synchronous step, so no other upload interleaves.
-    if (hosted.kind === 'evidence' && hosted.signer) {
+    // back a newer one, and the revocation in it (P7.8; #965 review C2). A log
+    // is judged by verification against the stored log's verified prefix
+    // (#965 review r2 #6). The verdict is reached asynchronously; the stored
+    // bytes are then re-read, and the write happens in the same synchronous
+    // step only if they are what was judged, so no other upload interleaves.
+    if (hosted.kind === 'evidence' && hosted.signer === 'log') {
+      for (let attempt = 0; ; attempt++) {
+        const stored = store.readHosted(key);
+        const witness = parseWitnessFile(store.readHosted(key.replace(/did\.jsonl$/, 'did-witness.json')));
+        const verdict = await signerLogVerdict(stored, bytes, hosted.signerHex!, witness);
+        if (verdict) return json({ error: verdict }, verdict === 'identity_log_invalid' ? 422 : 409);
+        if (sameBytes(store.readHosted(key), stored)) break;
+        if (attempt >= 2) return json({ error: 'identity_log_contended' }, 409);
+      }
+    } else if (hosted.kind === 'evidence' && hosted.signer === 'witness') {
       const stored = store.readHosted(key);
-      const extend = hosted.signer === 'log' ? extendsSignerLog : extendsSignerWitness;
-      if (stored && !extend(stored, bytes)) return json({ error: hosted.signer === 'log' ? 'identity_log_not_extending' : 'identity_witness_not_extending' }, 409);
+      if (stored && !extendsSignerWitness(stored, bytes)) return json({ error: 'identity_witness_not_extending' }, 409);
     }
     try {
       store.saveBytes(sub, key, bytes, contentType);
