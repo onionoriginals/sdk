@@ -93,6 +93,19 @@ const idOf = (line: string) => (JSON.parse(line) as { versionId: string }).versi
 /** The anchoring inscription's body lines: the stored log from genesis through the anchoring entry (P9.17). */
 const anchorBody = (all: string[], anchor = 1) => all.slice(0, anchor + 1).join("\n");
 
+describe("the writer's sat reads are asset reads (P9.12; r4 finding 6)", () => {
+  test("they fetch only Originals bodies, so the sat's holder's other inscriptions cost no body reads", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT));
+    const asked: unknown[] = [];
+    const p = { ...provider(SAT), getSatSnapshot: (_sat: string, options?: unknown) => (asked.push(options), Promise.resolve(snapshot([]))) } as unknown as OrdinalsProvider;
+    // The test signer stops at signing, after the sat was read.
+    await expect(prepare(sdk, did, "regtest", p)).rejects.toThrow("not reached");
+    expect(asked.length).toBeGreaterThan(0);
+    for (const options of asked) expect(options).toEqual({ bodies: "originals" });
+    expect((await lines()).length).toBe(2);
+  });
+});
+
 describe("an explicitly requested entry must be the next one Bitcoin can accept (P9.13)", () => {
   test("before the anchor is on Bitcoin, only the anchoring entry can be inscribed", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);

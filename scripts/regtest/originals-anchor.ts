@@ -138,7 +138,7 @@ try {
   const storedLines = async (of: string) => (await sdk.committedLog(of)).trimEnd().split('\n');
   /** What ord shows on a sat, as evidence (one index, reported). */
   const readSat = async (satAlias: string) => {
-    const snapshot = await provider.getSatSnapshot!(satAlias.split(':').at(-1)!);
+    const snapshot = await provider.getSatSnapshot!(satAlias.split(':').at(-1)!, { bodies: 'originals' });
     const satpoint = snapshot.ownership.satpoint;
     const ownerConfirmations = satpoint ? (await provider.getTransactionStatus(satpoint.split(':')[0])).confirmations ?? 0 : 0;
     return { snapshot, evidence: await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD }) };

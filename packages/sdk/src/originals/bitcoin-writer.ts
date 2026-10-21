@@ -879,7 +879,8 @@ async function readSatHeld(sat: StoredLog["sat"], options: SatReadOptions): Prom
   const holdings = new Set<string | undefined>();
   for (const { provider, index } of reads) {
     if (!provider.getSatSnapshot) refuse("incomplete-evidence", "SAT_SNAPSHOT_UNSUPPORTED", `the provider for ${index} cannot read a complete sat`);
-    const snapshot = await provider.getSatSnapshot(sat.sat);
+    // An asset read: only Originals bodies are fetched, so the holder's other inscriptions cost none (P9.12).
+    const snapshot = await provider.getSatSnapshot(sat.sat, { bodies: "originals" });
     if (snapshot.network !== NETWORK[sat.network] || snapshot.sat !== sat.sat) {
       refuse("invalid-evidence", "NETWORK_MISMATCH", `${index} read sat ${snapshot.sat} on ${snapshot.network}, not ${sat.did}`);
     }

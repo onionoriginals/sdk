@@ -821,7 +821,8 @@ received.report.ownership?.output;                           // compare with the
   read, pass `getSatSnapshot(sat, { bodies: 'originals' })`: only
   `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
   their metadata are fetched, and every other inscription is reported
-  `not-requested`, so the holder's other inscriptions cost no body reads. The
+  `not-requested`, so the holder's other inscriptions cost no body reads (the
+  Bitcoin writer's sat reads do this). The
   default, `bodies: 'all'`, reads every body and its metadata, as a did:btco
   read needs (P5.13). The reader's budget (`snapshotBudget` on
   `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5
