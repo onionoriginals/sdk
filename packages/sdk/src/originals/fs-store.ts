@@ -575,24 +575,24 @@ export class FileStore implements OriginalsStore {
   async putRefused(did: string, refused: StoredRefused): Promise<void> {
     const dir = join(this.dirOf(did), "refused");
     // Under the Original's lock: a concurrent label update cannot be lost between the read and the write.
-    return this.serialized(did, async () => {
+    return this.track(() => this.serialized(did, async () => {
       await fs.mkdir(dir, { recursive: true });
       const name = this.didFile(refusedVersionId(refused));
       const existing = await this.readText(join(dir, name));
       if (existing === undefined || (JSON.parse(existing) as StoredRefused).entry === refused.entry) await this.writeAtomically(dir, name, JSON.stringify(refused));
-    });
+    }));
   }
 
   async putPending(did: string, pending: StoredPending | null): Promise<void> {
     const dir = this.dirOf(did);
-    return this.serialized(did, async () => {
+    return this.track(() => this.serialized(did, async () => {
       await fs.mkdir(dir, { recursive: true });
       if (pending) await this.writeAtomically(dir, "pending.json", JSON.stringify(pending));
       else {
         await fs.rm(join(dir, "pending.json"), { force: true });
         await fsyncDir(dir).catch(() => undefined);
       }
-    });
+    }));
   }
 
   async getPending(did: string): Promise<StoredPending | undefined> {
@@ -613,8 +613,10 @@ export class FileStore implements OriginalsStore {
 
   async dropRefused(did: string, versionId: string): Promise<void> {
     const dir = join(this.dirOf(did), "refused");
-    await fs.rm(join(dir, this.didFile(versionId)), { force: true });
-    await fsyncDir(dir).catch(() => undefined);
+    return this.track(async () => {
+      await fs.rm(join(dir, this.didFile(versionId)), { force: true });
+      await fsyncDir(dir).catch(() => undefined);
+    });
   }
 
   async list(): Promise<string[]> {

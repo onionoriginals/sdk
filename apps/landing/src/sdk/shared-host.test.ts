@@ -6,7 +6,7 @@
  * authorizes the change.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { localSigner, multibaseEncode, proofHashData } from '@originals/vh/crypto';
@@ -348,12 +348,28 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect([manifest.checkpoint, manifest.head]).toEqual([one.versionId, one.versionId]);
   });
 
-  test('re-uploading an older asset log cannot roll back the accepted head', async () => {
+  test('re-uploading an older asset log cannot roll back the accepted head: a retried first publication is already published (08d review r2 #9)', async () => {
     const env = await shared();
     const old = readFileSync(env.logPath);
+    const manifestKey = `${env.siteKey}/originals/originals-evidence.json`;
+    const oldManifest = readFileSync(join(env.h.dataDir, 'hosted', manifestKey));
     expect((await env.a.submit(await env.edit(env.a, THEIRS), env.hostA)).status).toBe('accepted');
-    await expect(env.h.upload.put(`${env.siteKey}/originals/asset/did.jsonl`, old)).rejects.toThrow(/409/);
+    const after = readFileSync(env.logPath, 'utf8');
+    const newManifest = readFileSync(join(env.h.dataDir, 'hosted', manifestKey), 'utf8');
+    // The publisher retries its first publication: the log it sent then, and its manifest.
+    const put = (key: string, body: Uint8Array) => env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', body }));
+    const retried = await put(`${env.siteKey}/originals/asset/did.jsonl`, old);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ alreadyPublished: true });
+    expect((await put(manifestKey, oldManifest)).status).toBe(200);
+    // Nothing was written: no rollback of the save.
+    expect(readFileSync(env.logPath, 'utf8')).toBe(after);
+    expect(readFileSync(join(env.h.dataDir, 'hosted', manifestKey), 'utf8')).toBe(newManifest);
     expect(env.hostedLines().length).toBe(3);
+    // A log that is not a prefix of whole lines is still refused.
+    expect((await put(`${env.siteKey}/originals/asset/did.jsonl`, old.subarray(0, old.length - 1))).status).toBe(409);
+    const reader = await env.stranger().loadPublished(env.aliasDid, env.h.read);
+    expect(reader.verified, JSON.stringify(reader.reasons)).toBe(true);
   });
 });
 
@@ -519,5 +535,61 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const served = await env.h.serve(new Request(resourceUrl));
     expect(served.status).toBe(200);
     expect(served.headers.get('content-type')).toBe('image/svg+xml');
+  });
+
+  test('#965 / 08d review r2 #6: junk appended to the signer DID log cannot poison the Original; a verified log repairs it', async () => {
+    const env = await rotated(false);
+    const junk = `${env.author.evidence.log as string}{"junk":1}\n`;
+    const putDid = (body: string) => env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(env.didPath)}`, { method: 'PUT', body }));
+    // PUT: bytes that extend the stored log but do not verify are refused.
+    const put = await putDid(junk);
+    expect(put.status).toBe(422);
+    // Submit: a junk-extended signer log is refused, and nothing is written.
+    const before = env.hostedLines();
+    const cand = await env.edit(env.c, THEIRS, env.author.second);
+    const viaSubmit = await env.post({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.v2.did, log: `${env.v2.log as string}{"junk":1}\n` }] }, SUB2);
+    expect(viaSubmit.status).toBe(422);
+    expect(await viaSubmit.json()).toMatchObject({ error: 'identity_log_invalid' });
+    expect(env.hostedLines()).toEqual(before);
+    // A stored log poisoned before this rule: the legitimate rotated save still lands and repairs it.
+    writeFileSync(join(env.h.dataDir, 'hosted', env.didPath), junk);
+    expect((await env.c.submit(cand, env.hostC)).status).toBe('accepted');
+    expect(readFileSync(join(env.h.dataDir, 'hosted', env.didPath), 'utf8')).toBe(env.v2.log as string);
+    const reader = await env.stranger().loadPublished(env.aliasDid, env.h.read);
+    expect(reader.verified, JSON.stringify(reader.reasons)).toBe(true);
+  });
+
+  test('08d review r2 #7, r4 #3: a submitted witness file is bounded and stored only when the submitted log needs it and verifies with it', async () => {
+    const env = await rotated(false);
+    const witnessPath = join(env.h.dataDir, 'hosted', env.didPath.replace(/did\.jsonl$/, 'did-witness.json'));
+    const cand = await env.edit(env.c, THEIRS, env.author.second);
+    const body = (witness: unknown) => ({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ ...env.v2, witness } as AuthorDidEvidence] });
+    // Counted in the identity byte cap.
+    const big = await env.post(body([{ versionId: '1-x', proof: [{ v: 'x'.repeat(2 * 1024 * 1024) }] }]), SUB2);
+    expect(big.status).toBe(413);
+    // A file that would not be written is not judged: this DID log is not witnessed, so the stored file stays.
+    const v2Id = (JSON.parse((env.v2.log as string).trimEnd().split('\n')[1]) as { versionId: string }).versionId;
+    const kept = JSON.stringify([{ versionId: v2Id, proof: [{ proofValue: 'z1' }] }]);
+    writeFileSync(witnessPath, kept);
+    const ignored = await env.post(body({ injected: '<script>alert(1)</script>'.repeat(1000) }), SUB2);
+    expect(ignored.status).toBe(200);
+    expect(readFileSync(witnessPath, 'utf8')).toBe(kept);
+    rmSync(witnessPath);
+    expect((await env.h.read(`https://${env.didPath.replace(/did\.jsonl$/, 'did-witness.json')}`).then(() => 'served', () => 'absent'))).toBe('absent');
+  });
+
+  test('08d review r2 #8: an entry naming a signer version absent from the host\'s DID log is refused before full verification', async () => {
+    const env = await shared();
+    const e = parseJson((await env.edit(env.a, THEIRS)).line) as Record<string, any>;
+    const { vhHash } = await import('@originals/vh/log');
+    const lines = env.hostedLines();
+    const head = (JSON.parse(lines[lines.length - 1]) as { versionId: string }).versionId;
+    const { proof, versionId: _v, ...rest } = e;
+    const forged: Record<string, any> = { ...rest, state: { ...rest.state, author: { ...rest.state.author, versionId: '7-QmFake' } } };
+    forged.versionId = `${Number(head.split('-')[0]) + 1}-${vhHash({ ...forged, versionId: head })}`;
+    const ordered = { versionId: forged.versionId, versionTime: forged.versionTime, parameters: forged.parameters, state: forged.state, proof: [{ ...proof[0], proofValue: `z${'2'.repeat(86)}` }] };
+    const res = await env.post({ original: env.did, entry: JSON.stringify(ordered), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] }, 'random-stranger');
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'signer_version_unavailable', versionId: '7-QmFake' });
   });
 });

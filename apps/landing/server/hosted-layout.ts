@@ -121,7 +121,7 @@ function signerDidOf(text: string, hex: string): string | null {
 }
 
 /** The versionIds of `log` that verify as `did`'s own log from its genesis, and whether all of it does. */
-async function verifiedSignerLog(did: string, log: string, witness: unknown, now: number): Promise<{ ids: string[]; complete: boolean }> {
+export async function verifiedSignerLog(did: string, log: string, witness: unknown, now: number): Promise<{ ids: string[]; complete: boolean }> {
   try {
     const h = await verifyAuthorHistory({ did, log, ...(witness !== undefined ? { witness } : {}) }, { now });
     return { ids: h.versions.map((v) => v.versionId), complete: !h.failure && h.versions.length > 0 };
@@ -147,6 +147,12 @@ function decodeText(bytes: Uint8Array): string | null {
  * verify. A stored log that does not verify at all can be replaced (repair);
  * an identical log is a retry. Never a rollback (P7.8).
  */
+/** The first `count` lines of a JSONL log, newline-terminated: a log's verified prefix. */
+export function logPrefix(log: string, count: number): string {
+  const lines = log.split('\n').filter((l) => l.trim() !== '');
+  return count === 0 ? '' : `${lines.slice(0, count).join('\n')}\n`;
+}
+
 export async function signerLogVerdict(
   stored: Uint8Array | null,
   next: Uint8Array,

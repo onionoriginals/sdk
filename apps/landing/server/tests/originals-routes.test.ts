@@ -534,7 +534,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
 
 describe('a hosted asset log changes only through the verifying submit route (P6.7)', () => {
   const base = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals';
-  test('an upload creates the asset log or repeats it; one that rolls it back or extends it is refused', async () => {
+  test('an upload creates the asset log or repeats it; a prefix of it is already published (08d review r2 #9); one that changes or extends it is refused', async () => {
     const store = tmpStore();
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
@@ -542,9 +542,14 @@ describe('a hosted asset log changes only through the verifying submit route (P6
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(`${base}/asset/did.jsonl`)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
     expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
     expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
-    const rollback = await put('{"versionId":"1-a"}\n');
-    expect(rollback.status).toBe(409);
-    expect(await rollback.json()).toEqual({ error: 'asset_log_changes_through_submit' });
+    // A retried first publication after a save landed: nothing is written, never a rollback.
+    const retried = await put('{"versionId":"1-a"}\n');
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual({ ok: true, alreadyPublished: true });
+    expect(await (await fetchFn(new Request(`http://${base}/asset/did.jsonl`))).text()).toBe('{"versionId":"1-a"}\n{"versionId":"2-b"}\n');
+    const changed = await put('{"versionId":"1-a"}\n{"versionId":"2-x"}\n');
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toEqual({ error: 'asset_log_changes_through_submit' });
     // Extending it is a save, which goes through the submit route (shared-host PR review C4).
     expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n{"versionId":"3-c"}\n')).status).toBe(409);
   });

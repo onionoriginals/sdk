@@ -418,6 +418,16 @@ await sdk.reconcile(did, {
   request summarizes the change from the new head (P5.11), and the SDK never
   signs on anyone's behalf. Once the reconciled candidate is accepted, the
   refused one it names is dropped.
+- **What a host judges with (P7.8, PROVISIONAL).** A host verifies each
+  submission with the signer DID logs it holds, or a submitted one that
+  verifies and extends what it holds. A host never sent a newer DID log,
+  for example one deactivating the author DID or removing a key, accepts an
+  entry that log would refuse: the host judges with the identity evidence
+  it holds, and its acceptance does not establish freshness (P7.8). Readers
+  judge for themselves with the newest evidence they can get, and an entry
+  that newer evidence refuses is not current for them (P6.5, P7.9). Sending
+  the newer log to the host (with a save, or by the owner) makes it refuse
+  such entries from then on.
 - **Forks.** A refused candidate published elsewhere is a fork, unresolved
   until anchoring; branch length, number of entries and which keys signed
   decide nothing. An entry that brings content from another branch is an

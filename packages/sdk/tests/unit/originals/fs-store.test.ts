@@ -401,4 +401,25 @@ describe("refused candidates (P6.8)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("08b review r2 #2: a closed handle refuses refused-candidate and pending writes too, and close() waits for them", async () => {
+    const dir = tempDir();
+    try {
+      const store = await FileStore.open(dir);
+      const writes = [store.putRefused(DID, record(1)), store.putPending(DID, { parent: "1-a", entry: record(1).entry })];
+      await store.close();
+      expect(existsSync(join(dir, ".lock"))).toBe(false);
+      await Promise.all(writes);
+      const reopened = await FileStore.open(dir);
+      expect((await reopened.getRefused(DID)).map((r) => r.entry)).toEqual([record(1).entry]);
+      expect((await reopened.getPending(DID))?.entry).toBe(record(1).entry);
+      await reopened.close();
+      const code = async (p: Promise<unknown>) => (await p.then(() => undefined, (e: unknown) => e as OriginalsError))?.code;
+      expect(await code(store.putRefused(DID, record(2)))).toBe("STORE_CLOSED");
+      expect(await code(store.putPending(DID, null))).toBe("STORE_CLOSED");
+      expect(await code(store.dropRefused(DID, "2-1"))).toBe("STORE_CLOSED");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

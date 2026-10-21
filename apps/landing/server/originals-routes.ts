@@ -17,9 +17,11 @@
  * Once an Original's asset log is hosted, it changes only through the
  * verifying submit route: a PUT of the asset log is taken only when there is
  * none yet (the first publication) or it repeats the stored log byte for byte
- * (a retried publication, P9.2). Anything else is refused (409), so an upload
- * can neither roll back nor advance, unverified, a head the host accepted
- * (shared-host PR review C4).
+ * (a retried publication, P9.2). A PUT of whole lines the stored log starts
+ * with is a first publication retried after a save landed: answered as
+ * already published, with nothing written (r2 #9). Anything else is refused
+ * (409), so an upload can neither roll back nor advance, unverified, a head
+ * the host accepted (shared-host PR review C4).
  */
 import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router';
@@ -45,6 +47,25 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (a === null || b === null) return a === b;
   return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/** True when `prefix` is a shorter run of whole lines at the start of `log`. */
+function isLinePrefix(prefix: Uint8Array, log: Uint8Array): boolean {
+  if (prefix.length === 0 || prefix.length >= log.length || prefix[prefix.length - 1] !== 0x0a) return false;
+  for (let i = 0; i < prefix.length; i++) if (prefix[i] !== log[i]) return false;
+  return true;
+}
+
+/** True when `manifest` names a head that the hosted asset log `log` lists before its last entry. */
+function supersededManifest(manifest: Uint8Array, log: Uint8Array | null): boolean {
+  if (!log) return false;
+  try {
+    const head = (JSON.parse(new TextDecoder().decode(manifest)) as { head?: unknown }).head;
+    const ids = new TextDecoder().decode(log).trimEnd().split('\n').map((l) => (JSON.parse(l) as { versionId?: unknown }).versionId);
+    return typeof head === 'string' && ids.includes(head) && ids[ids.length - 1] !== head;
+  } catch {
+    return false;
+  }
 }
 
 function userSlug(sub: string): string {
@@ -156,7 +177,7 @@ export function createOriginalsRoutes(deps: {
       for (let attempt = 0; ; attempt++) {
         const stored = store.readHosted(key);
         const witnessBytes = store.readHosted(witnessKey);
-        const verdict = await signerLogVerdict(stored, bytes, hosted.signerHex!, parseWitnessFile(witnessBytes));
+        const verdict = await signerLogVerdict(stored, bytes, hosted.signerHex!, parseWitnessFile(witnessBytes), now());
         if (verdict) return json({ error: verdict }, verdict === 'identity_log_invalid' ? 422 : 409);
         if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(witnessKey), witnessBytes)) break;
         if (attempt >= 2) return json({ error: 'identity_log_contended' }, 409);
@@ -168,7 +189,7 @@ export function createOriginalsRoutes(deps: {
       for (let attempt = 0; ; attempt++) {
         const stored = store.readHosted(key);
         const log = store.readHosted(logKey);
-        const verdict = await signerWitnessVerdict(stored, bytes, log, hosted.signerHex!, { maxBytes: MAX_UPLOAD_BYTES });
+        const verdict = await signerWitnessVerdict(stored, bytes, log, hosted.signerHex!, { maxBytes: MAX_UPLOAD_BYTES, now: now() });
         if ('error' in verdict) return json({ error: verdict.error }, verdict.error === 'identity_witness_too_large' ? 413 : verdict.error === 'identity_witness_invalid' ? 422 : 409);
         write = verdict.write;
         if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(logKey), log)) break;
@@ -176,12 +197,20 @@ export function createOriginalsRoutes(deps: {
       }
     }
     // A hosted asset log changes only through the verifying submit route (C4): a PUT may create it
-    // or repeat it, never change it.
+    // or repeat it, never change it. A PUT of a line prefix of the stored log is a first publication
+    // retried after a shared save landed: already published, so nothing is written and the save is
+    // never rolled back (08d review r2 #9).
     if (hosted.kind === 'evidence' && key.endsWith('/originals/asset/did.jsonl')) {
       const stored = store.readHosted(key);
-      if (stored && !(stored.length === bytes.length && stored.every((b, i) => b === bytes[i]))) {
+      if (stored && !sameBytes(stored, bytes)) {
+        if (isLinePrefix(bytes, stored)) return json({ ok: true, alreadyPublished: true }, 200);
         return json({ error: 'asset_log_changes_through_submit' }, 409);
       }
+    }
+    // Likewise a retried publication's manifest naming an entry the hosted log has moved past is
+    // not written over the manifest of the current head.
+    if (hosted.kind === 'evidence' && key.endsWith('/originals/originals-evidence.json') && supersededManifest(bytes, store.readHosted(key.replace(/originals-evidence\.json$/, 'asset/did.jsonl')))) {
+      return json({ ok: true, alreadyPublished: true }, 200);
     }
     try {
       store.saveBytes(sub, key, write, contentType);

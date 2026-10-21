@@ -20,17 +20,26 @@
  *    entry that chains to any other entry, to none, or that was changed after
  *    signing, does not extend the head and is a stale-parent conflict naming
  *    the head.
- * 3. Cheap checks first (C7): the entry carries one proof, by the signer it
- *    names, who is the author or holds a grant in the head's state, and the
- *    proof verifies with that signer's key at the named version in the DID
- *    log the host would use (422 proof_invalid otherwise). Then the head log
- *    plus the entry must verify under the profile (`verifyOriginal`: VH
- *    history, author binding and, through it, any editor rule the profile
- *    has; complete identity evidence), and every resource the entry
- *    introduces must arrive with bytes matching its digest. Identity evidence
- *    is the submitted DID log of each signer where it extends the one the
- *    host holds (else the host's); a submitted log that diverges from the
- *    stored one is refused.
+ * 3. Identity evidence for each signer is the DID log the host would use:
+ *    the verified prefix of the one it holds, or a submitted log that
+ *    verifies, every line, as that DID's own log and extends that verified
+ *    prefix (it also replaces a stored log that does not verify, the repair
+ *    path). A submitted log that does not verify is refused (422
+ *    identity_log_invalid), one that diverges too (422
+ *    identity_evidence_conflict). A submitted witness file is used, and
+ *    stored with the log, only when the log does not verify with the stored
+ *    file and verifies completely with the submitted one (r4 #3); it counts
+ *    in the identity byte cap (08d review r2 #6, #7).
+ *    Cheap checks then come first (C7): the entry carries one proof, by the
+ *    signer it names, who is the author or holds a grant in the head's
+ *    state; the signer DID log the host would use shows the named version
+ *    and key (422 identity_missing or signer_version_unavailable otherwise,
+ *    r2 #8); and the proof verifies with that key (422 proof_invalid). Then
+ *    the head log plus the entry must verify under the profile
+ *    (`verifyOriginal`: VH history, author binding and, through it, any
+ *    editor rule the profile has; complete identity evidence), and every
+ *    resource the entry introduces must arrive with bytes matching its
+ *    digest.
  * 4. The candidate head must be current apart from freshness: an entry by a
  *    key the signer's latest DID state no longer lists (P7.9), by a
  *    deactivated DID (P6.5, P5.18), or that leaves the Original otherwise not
@@ -76,7 +85,7 @@ import { vhHash } from '@originals/vh/log';
 import { ORIGINALS_LIMITS, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { authorPath } from '@originals/sdk/originals';
 import { json } from './router';
-import { signedMediaType } from './hosted-layout';
+import { logPrefix, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
 import type { OriginalsStore } from './originals-store';
 
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
@@ -149,7 +158,9 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
   if (ids.length > SUBMISSION_LIMITS.identities) return refuse(400, 'too_many_identities');
   for (const i of ids as Array<Record<string, unknown>>) {
     if (typeof i !== 'object' || i === null || typeof i.did !== 'string' || typeof i.log !== 'string') return refuse(400, 'bad_request');
-    if (encoder.encode(i.log).length > SUBMISSION_LIMITS.identityBytes) return refuse(413, 'identity_too_large', { did: i.did });
+    // The log and its witness file count together (#08d review r2 #7).
+    const witnessBytes = i.witness === undefined ? 0 : encoder.encode(JSON.stringify(i.witness)).length;
+    if (encoder.encode(i.log).length + witnessBytes > SUBMISSION_LIMITS.identityBytes) return refuse(413, 'identity_too_large', { did: i.did });
     identities.push({ did: i.did, log: i.log, ...(i.witness !== undefined ? { witness: i.witness } : {}) });
   }
   return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities };
@@ -325,9 +336,11 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     // 3. Verify under the profile against the head.
     const candidate = [...lines, s.entry];
     const identities: AuthorDidEvidence[] = [];
-    const keepIdentities: AuthorDidEvidence[] = [];
+    /** Submitted signer DID logs verification used, to store; a witness file only where verification needed it. */
+    const keepIdentities: Array<{ did: string; log: string; witness?: unknown }> = [];
     // What verification used, to compare again in the append step (P1).
     const usedFiles = new Map<string, Uint8Array | null>();
+    const now = deps.now();
     for (const did of signerDids(candidate)) {
       const base = `${siteKey}/originals/${authorPath(did)}`;
       const storedBytes = store.readHosted(`${base}/did.jsonl`);
@@ -335,21 +348,34 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       const witnessBytes = store.readHosted(`${base}/did-witness.json`);
       usedFiles.set(`${base}/did.jsonl`, storedBytes);
       usedFiles.set(`${base}/did-witness.json`, witnessBytes);
+      const storedWitness = parseWitnessFile(witnessBytes);
+      // Only what of the stored log verifies counts (#965/#08d review r2 #6): junk after it is not evidence.
+      const held = stored === null ? { ids: [] as string[], complete: false } : await verifiedSignerLog(did, stored, storedWitness, now);
+      const heldEvidence: AuthorDidEvidence | undefined =
+        stored !== null && held.ids.length > 0 ? { did, log: logPrefix(stored, held.ids.length), ...(storedWitness !== undefined ? { witness: storedWitness } : {}) } : undefined;
       const submitted = s.identities.find((i) => i.did === did) as (AuthorDidEvidence & { log: string }) | undefined;
-      if (submitted && (stored === null || (submitted.log.startsWith(stored) && submitted.log !== stored))) {
-        identities.push(submitted);
-        keepIdentities.push(submitted);
-      } else if (stored !== null && (!submitted || stored.startsWith(submitted.log))) {
-        let witness: unknown;
-        try {
-          witness = witnessBytes ? JSON.parse(text(witnessBytes) ?? '') : undefined;
-        } catch {
-          witness = undefined;
+      if (submitted) {
+        // The submitted log is judged with the stored witness file first; the submitted file is used,
+        // and stored, only when the log needs it and verifies with it completely (r2 #7, r4 #3). So a
+        // did:webvh 1.0 file pruned to the latest proof per witness is accepted, proofs are judged by
+        // verification rather than their bytes, and a file that would not be written is not judged.
+        // The stored log is replaced by the submitted one with it, which extends what of the stored
+        // log verified, so the stored file's proofs are never needed again.
+        const withStored = await verifiedSignerLog(did, submitted.log, storedWitness, now);
+        const needsWitness = !withStored.complete && submitted.witness !== undefined;
+        const proposed = needsWitness ? await verifiedSignerLog(did, submitted.log, submitted.witness, now) : withStored;
+        if (!proposed.complete) return refuse(422, 'identity_log_invalid', { did });
+        const witness = needsWitness ? submitted.witness : storedWitness;
+        const extendsHeld = held.ids.every((id, i) => proposed.ids[i] === id);
+        if (!extendsHeld && !proposed.ids.every((id, i) => held.ids[i] === id)) return refuse(422, 'identity_evidence_conflict', { did });
+        if (extendsHeld && (proposed.ids.length > held.ids.length || !held.complete)) {
+          identities.push({ did, log: submitted.log, ...(witness !== undefined ? { witness } : {}) });
+          keepIdentities.push({ did, log: submitted.log, ...(needsWitness ? { witness: submitted.witness } : {}) });
+          continue;
         }
-        identities.push({ did, log: stored, ...(witness !== undefined ? { witness } : {}) });
-      } else if (submitted) {
-        return refuse(422, 'identity_evidence_conflict', { did });
+        // The submitted log is what the host holds, or a prefix of it: the host's is used.
       }
+      if (heldEvidence) identities.push(heldEvidence);
     }
     // 3a. Cheap checks before full verification (C7): the signer is the author or granted in the
     // head's state, and its key at the named version verifies the one proof.
@@ -359,8 +385,12 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     if (!signer || typeof signer.did !== 'string' || typeof signer.verificationMethod !== 'string' || typeof signer.versionId !== 'string') return refuse(422, 'entry_invalid');
     const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
     if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
+    // The signer DID log the host would use must show the named version and key (#08d review r2 #8):
+    // full verification would refuse an entry without them, so it is refused before it.
     const signerLog = identities.find((i) => i.did === signer.did)?.log;
-    const verifies = typeof signerLog === 'string' ? proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog) : undefined;
+    if (typeof signerLog !== 'string') return refuse(422, 'identity_missing', { did: signer.did });
+    const verifies = proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog);
+    if (verifies === undefined) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
     if (verifies === false) return refuse(422, 'proof_invalid');
 
     const entryState = lineState(s.entry) as { transitions?: Array<{ to?: unknown }> } | undefined;
@@ -404,7 +434,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
     for (const identity of keepIdentities) {
       const base = `${siteKey}/originals/${authorPath(identity.did)}`;
-      store.saveBytes(owner, `${base}/did.jsonl`, encoder.encode(identity.log as string), 'application/jsonl');
+      store.saveBytes(owner, `${base}/did.jsonl`, encoder.encode(identity.log), 'application/jsonl');
       if (identity.witness !== undefined) store.saveBytes(owner, `${base}/did-witness.json`, encoder.encode(JSON.stringify(identity.witness)), 'application/json');
     }
     store.saveBytes(owner, assetKey, encoder.encode(`${candidate.join('\n')}\n`), 'application/jsonl');
