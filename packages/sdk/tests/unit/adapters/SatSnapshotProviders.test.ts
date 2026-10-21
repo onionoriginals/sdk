@@ -4,6 +4,7 @@ import { RegtestProvider } from '../../../src/adapters/providers/RegtestProvider
 import { readSatSnapshot, type SatSnapshotReader } from '../../../src/adapters/providers/sat-snapshot';
 import { OriginalsError } from '@originals/vh';
 import { ResponseTooLargeError } from '../../../src/adapters/response-body-limit';
+import { satEvidence } from '../../../src/originals/bitcoin';
 
 const nativeFetch = globalThis.fetch;
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -310,12 +311,54 @@ describe('sat snapshot budgets (M1)', () => {
     expect(refused).toBeInstanceOf(OriginalsError);
     expect(refused).toMatchObject({ category: 'incomplete-evidence', code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
   });
-  test('a sat listing more inscriptions than maxInscriptions is refused with a category, before reading them', async () => {
+  test('a sat listing more inscriptions than maxListedInscriptions is refused with a category, before reading them', async () => {
     const { reader, calls } = memoryReader(30);
-    const refused = await readSatSnapshot(reader, '123', 'regtest', { maxInscriptions: 20 }).catch((e: unknown) => e);
+    const refused = await readSatSnapshot(reader, '123', 'regtest', { maxListedInscriptions: 20 }).catch((e: unknown) => e);
     expect(refused).toMatchObject({ category: 'incomplete-evidence', code: 'SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS' });
     expect(calls.includes('inscription')).toBe(false);
   });
+  test('#966 r5 finding 1: past maxInscriptions bodies the sat is still listed in full; later inscriptions are observed unread, not a refusal (P9.12)', async () => {
+    const { reader, calls } = memoryReader(30);
+    const snapshot = await readSatSnapshot(reader, '123', 'regtest', { maxInscriptions: 20 });
+    expect(snapshot.publications).toHaveLength(30);
+    expect(snapshot.publications.slice(0, 20).every((p) => p.body.status === 'complete')).toBe(true);
+    expect(snapshot.publications.slice(20).map((p) => p.body)).toEqual(Array(10).fill({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 1 }));
+    expect(calls.filter((c) => c === 'inscription')).toHaveLength(30);
+    expect(calls.filter((c) => c === 'content')).toHaveLength(20);
+    expect(calls.filter((c) => c === 'metadata')).toHaveLength(20);
+  });
+  test("#966 r5 finding 1: in an Originals read only Originals bodies count against maxInscriptions; an unread Originals one fails satEvidence closed, others do not", async () => {
+    const T = 'application/vnd.originals.vh+jsonl';
+    const clock = { at: async () => 1_700_000_000 };
+    // 30 non-Originals inscriptions: none is read, so the cap is never reached and the read is evidence.
+    const plain = memoryReader(30);
+    const ok = await readSatSnapshot(plain.reader, '123', 'regtest', { maxInscriptions: 20 }, { bodies: 'originals' });
+    expect(ok.publications.every((p) => p.body.status === 'unavailable' && 'reason' in p.body && p.body.reason === 'not-requested')).toBe(true);
+    await expect(satEvidence(ok, { clock, ownerConfirmations: 1, index: 'ord' })).resolves.toBeDefined();
+    // Originals-typed bodies past the cap are observed unread, and could be the anchor or an entry: incomplete evidence.
+    const flood = memoryReader(30, () => ({ content_type: T }));
+    const capped = await readSatSnapshot(flood.reader, '123', 'regtest', { maxInscriptions: 20 }, { bodies: 'originals' });
+    expect(flood.calls.filter((c) => c === 'content')).toHaveLength(20);
+    expect(capped.publications[20].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: T, contentLength: 1 });
+    await expect(satEvidence(capped, { clock, ownerConfirmations: 1, index: 'ord' })).rejects.toMatchObject({ code: 'SAT_READ_INCOMPLETE' });
+  });
+  test('#966 r5 finding 1: at the default budget a sat listing 10,001 non-Originals inscriptions reads as evidence (P9.12)', async () => {
+    // One batch reveal reinscribing the sat 10,001 times: cheap for its holder (#966 r5 reproduction).
+    const ids = Array.from({ length: 10_001 }, (_, k) => `${txid}i${k}`);
+    const { reader } = memoryReader(1);
+    const batch: SatSnapshotReader = {
+      ...reader,
+      rpc: async (method, params) => method === 'getblockchaininfo' ? { chain: 'regtest', blocks: 20_000, bestblockhash: hash }
+        : method === 'getblockhash' ? 'c'.repeat(64) : { hash: params[0], height: 10, confirmations: 5, tx: [txid], time: 1_700_000_000 },
+      sat: async () => ({ number: 123, inscriptions: ids, address: 'holder', satpoint: txid + ':0:0' }),
+      inscription: async (i) => ({ id: i, sat: 123, height: 10, content_type: 'text/plain', content_length: 0 }),
+      content: async () => new Uint8Array(0),
+    };
+    const snapshot = await readSatSnapshot(batch, '123', 'regtest', {}, { bodies: 'originals' });
+    expect(snapshot.publications).toHaveLength(10_001);
+    const all = await readSatSnapshot(batch, '123', 'regtest');
+    expect(all.publications[10_000].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 0 });
+  }, 60_000);
   test('a body past the content-byte budget is observed unread; later bodies that fit are still read', async () => {
     const sizes = [600, 700, 100];
     let k = 0;

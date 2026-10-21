@@ -34,13 +34,31 @@ export interface SatSnapshotBudget {
    * Total upstream requests for one observation. By default the budget
    * scales with the inscriptions the index lists: 7 + 5 per inscription
    * (`/inscription`, at most two Core block reads, body and metadata), so a
-   * sat with many entries is read in full; `maxInscriptions` bounds it. An
-   * explicit value is kept as given (at most 1,000,000). No partial result is
-   * returned.
+   * sat with many entries is read in full; `maxListedInscriptions` bounds it.
+   * An explicit value is kept as given (at most 1,000,000). No partial result
+   * is returned.
    */
   maxRequests?: number;
-  /** Inscriptions a sat may list before the read is refused (default 10,000, at most 100,000). */
+  /**
+   * Inscriptions whose body and metadata one observation reads (default
+   * 10,000, at most 100,000), in listing order; with `bodies: 'originals'`
+   * only the Originals inscriptions it would read count. Past it the sat is
+   * still enumerated and each inscription's index record read, but its body
+   * and metadata are not: it is reported observed but unread (`{ status:
+   * 'unavailable', reason: 'over-budget' }`), so the holder of a sat, who has
+   * no authority over it (P9.12), cannot make every read of it fail by
+   * reinscribing it. Whether an unread one matters is the consumer's call:
+   * `satEvidence` fails closed on an unread Originals inscription (P9.17).
+   * PROVISIONAL.
+   */
   maxInscriptions?: number;
+  /**
+   * Inscriptions a sat may list before the read is refused
+   * (`SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`; default 100,000, at most
+   * 1,000,000). Each listed one costs an index record and, at most, two block
+   * reads, within `maxRequests` and `timeoutMs`. PROVISIONAL.
+   */
+  maxListedInscriptions?: number;
   /**
    * Body and metadata bytes read in one observation (default 32 MiB, at most
    * 512 MiB), for every inscription except Originals inscriptions within
@@ -56,6 +74,15 @@ export interface SatSnapshotBudget {
    * (default 64 MiB, at most 1 GiB). Kept apart from `maxContentBytes`, so
    * other bodies on the sat cannot spend what an Originals entry is read
    * from. PROVISIONAL.
+   *
+   * PROVISIONAL bound (#966 r5, finding 2): Originals-typed inscriptions
+   * the holder adds are read from this pool too, because an unread one could
+   * be an entry (P9.17), so `satEvidence` fails closed on them. About 192
+   * Originals-typed inscriptions of 350,000 bytes (some 67 MB of witness
+   * data) exhaust the default, and more than `maxInscriptions` (10,000)
+   * Originals-typed inscriptions of any size exhaust that; either makes a
+   * default read an explicit incomplete result (`SAT_READ_INCOMPLETE`), never a
+   * wrong one. A reader raises them (up to 1 GiB and 100,000) to read on.
    */
   maxOriginalsBytes?: number;
 }
@@ -143,10 +170,11 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
   const concurrency = within(budget.concurrency, 8, 64);
   const explicitRequests = within(budget.maxRequests, 0, 1_000_000);
   const maxInscriptions = within(budget.maxInscriptions, 10_000, 100_000, true);
+  const maxListedInscriptions = within(budget.maxListedInscriptions, 100_000, 1_000_000, true);
   const maxContentBytes = within(budget.maxContentBytes, 32 * 1024 * 1024, 512 * 1024 * 1024, true);
   const maxOriginalsBytes = within(budget.maxOriginalsBytes, 64 * 1024 * 1024, 1024 * 1024 * 1024, true);
   const bodies = options.bodies ?? 'all';
-  if ([explicitTimeout, maxTimeoutMs, requestTimeoutMs, concurrency, explicitRequests, maxInscriptions, maxContentBytes, maxOriginalsBytes].some(Number.isNaN) ||
+  if ([explicitTimeout, maxTimeoutMs, requestTimeoutMs, concurrency, explicitRequests, maxInscriptions, maxListedInscriptions, maxContentBytes, maxOriginalsBytes].some(Number.isNaN) ||
       (bodies !== 'all' && bodies !== 'originals')) {
     throw invalid('SAT_SNAPSHOT_BUDGET_INVALID', 'Invalid sat snapshot budget');
   }
@@ -189,6 +217,7 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
       metadata: id => call(signal => reader.metadata(id, signal)),
     }, satoshi, expectedNetwork, {
       maxInscriptions,
+      maxListedInscriptions,
       maxContentBytes,
       maxOriginalsBytes,
       concurrency,
@@ -208,6 +237,7 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
 
 interface Limits {
   maxInscriptions: number;
+  maxListedInscriptions: number;
   maxContentBytes: number;
   maxOriginalsBytes: number;
   concurrency: number;
@@ -251,9 +281,10 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   if (!integer(sat.number) || String(sat.number) !== satoshi || !Array.isArray(sat.inscriptions) ||
       !(sat.address === null || typeof sat.address === 'string') || !(sat.satpoint === null || typeof sat.satpoint === 'string'))
     throw incomplete('SAT_SNAPSHOT_ENUMERATION_UNAVAILABLE', 'Complete sat enumeration and ownership required');
-  if (sat.inscriptions.length > limits.maxInscriptions) {
-    throw incomplete('SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS', `The sat lists ${sat.inscriptions.length} inscriptions, more than maxInscriptions ${limits.maxInscriptions}`,
-      { inscriptions: sat.inscriptions.length, maxInscriptions: limits.maxInscriptions });
+  // Only the enumeration is refused outright; past maxInscriptions bodies are left unread (#966 r5, finding 1).
+  if (sat.inscriptions.length > limits.maxListedInscriptions) {
+    throw incomplete('SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS', `The sat lists ${sat.inscriptions.length} inscriptions, more than maxListedInscriptions ${limits.maxListedInscriptions}`,
+      { inscriptions: sat.inscriptions.length, maxListedInscriptions: limits.maxListedInscriptions });
   }
   limits.listed(sat.inscriptions.length);
   const ids: Array<{ id: string; txid: string; index: number }> = [];
@@ -303,6 +334,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   // 2. Which bodies to read, decided in listing order before any is read.
   type Publication = SatSnapshot['publications'][number];
   const used = { originals: 0, other: 0 };
+  let reads = 0;
   const cap = { originals: limits.maxOriginalsBytes, other: limits.maxContentBytes };
   const plan = listed.map(({ observation, info, mediaType, length }) => {
     const unread = (body: Publication['body']): { publication: Publication } => ({ publication: { ...observation, body } });
@@ -318,7 +350,10 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
         : { status: 'unavailable', reason: 'not-requested', mediaType, contentLength: length });
     }
     const pool = originals ? 'originals' as const : 'other' as const;
-    if (used[pool] + length > cap[pool]) return unread({ status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length });
+    // Past maxInscriptions reads, or the byte budget: observed but unread (P9.12). The consumer decides
+    // whether it could matter: satEvidence fails closed on an unread Originals inscription (P9.17).
+    if (reads >= limits.maxInscriptions || used[pool] + length > cap[pool]) return unread({ status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length });
+    reads++;
     used[pool] += length;
     return { read: { observation, info, mediaType, length, pool } };
   });
