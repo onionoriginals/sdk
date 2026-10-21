@@ -26,6 +26,8 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
   names. That key must not also be an update key of the author DID's own log.
   Asset logs do not use witnesses (owner decision Q14). Accepted
   cryptosuites are `eddsa-jcs-2022` and `bip340-jcs-2025`.
+- The author can grant editors (P5.15–P5.18): each editor signs its own
+  entries with its own DID, only for the content its grant allows.
 - Keys rotate in the author DID only. The asset log has no update keys.
 - A did:webvh author can move to another host under did:webvh portability
   and stays the same identity: the DID at genesis, which every entry keeps
@@ -82,10 +84,14 @@ The `originals` command verifies a package offline:
   preparation step.
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version.
-- **Signing (P5.11).** The signer receives the unsigned entry, the proof options
-  and a summary of the Original, the operation and the resource changes.
-  `keySigner` refuses anything that is not an Originals entry for its own key,
-  and it computes the signed bytes itself rather than taking the caller's.
+- **Signing (P5.11).** The signer receives the unsigned entry, the proof options,
+  a summary of the Original, the operation and the resource changes, with
+  `summary.signer` naming whose key signs (the author, or the editor of an
+  editor entry), and `display`, the text `describeEntry(summary)` renders for
+  that person (PROVISIONAL wording). `keySigner` refuses anything that is not
+  an Originals entry for its own key or whose summary misstates it, passes the
+  text to its optional `confirm` callback (returning false refuses), and
+  computes the signed bytes itself rather than taking the caller's.
 
 ## Verification report — phase 1, extended in later phases
 
@@ -95,7 +101,7 @@ The `originals` command verifies a package offline:
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8) |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
 | `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
@@ -107,18 +113,21 @@ The `originals` command verifies a package offline:
 
 Errors are `OriginalsError` (a `StructuredError`) in one of these categories:
 `invalid-evidence`, `incomplete-evidence`, `unsupported-profile`,
-`unauthorized-key`, `author-binding`, `stale-parent`, `fork`, `deactivated`,
-`unavailable-bytes` or `limit-exceeded`.
+`unauthorized-key`, `author-binding`, `outside-grant` (a change outside an
+editor's grant, or one only the author may make), `stale-parent`, `fork`,
+`deactivated`, `unavailable-bytes` or `limit-exceeded`.
 
 ## Evidence package — phase 1, implemented (PROVISIONAL format, D4)
 
 The package is an uncompressed ZIP containing `originals-evidence.json` (the
 manifest), `asset/did.jsonl` through the checkpoint, `asset/did-witness.json`,
-the author DID histories under `authors/<sha256(did)>/`, and the resource bytes
+the DID histories of every signer (the author and each editor that signed an
+entry, P7.1) under `authors/<sha256(did)>/`, and the resource bytes
 under `resources/<digest>`. The manifest records the packager's head, so a
 package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
-declares the package complete or partial, listing any missing items.
+declares the package complete or partial, listing any missing items (a
+missing DID history is `{ kind: "identity", did, role: "author" | "editor" }`).
 
 Import bounds sizes and counts before extracting anything. It rejects absolute
 paths, `..` segments, symbolic links and duplicate entries. It never replaces a
@@ -155,6 +164,53 @@ replaces stored author DID evidence with an older or diverging history.
 Stores implement `getRetained`/`putRetained` and `putBranch`/`getBranches` in
 addition to the phase 1 methods; `MemoryStore` and `FileStore` do.
 
+## Editors (P5.15–P5.18, implemented)
+
+The author grants editors in the asset state; an editor signs its own entries
+with its own DID through the normal edit API, and the author does not
+countersign them:
+
+```ts
+// PROVISIONAL member names (D4). Absent means no editors.
+const editors = [
+  { did: bobDid, name: false, metadata: false, resources: ["photo"] },
+  { did: carolDid, name: false, metadata: true, resources: [] },
+];
+await sdk.create({ name, resources, author, signer, editors });
+await sdk.edit(did, { parent, editors: [...], author, signer });   // the author grants, narrows or revokes
+await sdk.edit(did, { parent, editors: null, author, signer });    // removes every grant
+await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRef, signer: bobSigner });
+```
+
+- A grant names one editor DID, unique in the list, using a method P5.8
+  lists (did:vh, did:webvh, did:btco), never the author DID or a DID of the
+  author's identity (for a did:webvh author, any did:webvh with its SCID).
+  `resources` are resourceIDs of the Original's resource set. At most
+  `ORIGINALS_LIMITS.editors` (32, PROVISIONAL) grants (P7.7). An empty list is
+  not used: no editors means no `editors` member (PROVISIONAL).
+- An editor entry carries `editor: { did, verificationMethod, versionId }` in
+  its signed state. It is checked against the grant in its parent's state, so
+  a grant, a change to it and a revocation take effect from the next entry
+  (P5.17). Its author reference is its parent's, its operation is update, its
+  parameters are empty, and only the name, metadata and resources the grant
+  allows change. Only author entries change grants, aliases, lifecycle or
+  parameters, start an Original, anchor it or deactivate it. A change outside
+  the grant is refused before anything is signed (`outside-grant`); an editor
+  with no grant is `unauthorized-key` (`EDITOR_NOT_GRANTED`).
+- Editor keys follow the author key rules against the editor DID (P5.3,
+  P5.10–P5.14, P7.8, P7.9): a key the latest editor DID no longer lists makes
+  the head not current; versionIds never go backwards per signer identity
+  (P5.8). Once the author DID is deactivated no entry, editor's included, is
+  current. Editors rotate, remove keys or move only in their own DIDs.
+- An editor entry and a revoking author entry with the same parent are a fork,
+  unresolved until anchoring (P6.6). Branch length and the number of signers
+  decide nothing; an entry bringing content from another branch is an ordinary
+  single-parent entry and the fork remains.
+- PROVISIONAL: editor authority is an Originals profile rule. No VH-Log hook
+  carries it yet (VH-Log PR 11 and plan 011 PR 6 pending). Anchored editor
+  entries (P9.15 at inscription time, P9.12 inscription by the owner) arrive
+  with Bitcoin anchoring. No signer is required to use did:btco.
+
 ## Moved author DIDs — identity continuity (P5.14, implemented)
 
 A did:webvh author DID can move to another host or path under the did:webvh
@@ -187,7 +243,10 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
   retrieval from that location is how this SDK establishes a moved
   identity's freshness). Otherwise the identity's freshness is not
-  established and the Original is not reported as current.
+  established and the Original is not reported as current. Editor entries
+  carry their parent's author reference, so they never reveal where a moved
+  author now is: the author's location comes from the latest author entry.
+  The same applies to each editor DID.
 
 ```ts
 const reader = OriginalsSDK.create({ store, authors: [], identityFetch: async (url, o) => (await safeFetch(url, o)).bytes });

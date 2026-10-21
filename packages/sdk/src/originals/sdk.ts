@@ -41,6 +41,8 @@ import {
   type AssetState,
   type AuthorDidEvidence,
   type AuthorRef,
+  type EditorGrant,
+  type EditorRef,
   type EntryState,
   type OriginalsReport,
   type ResourceDescriptor,
@@ -53,7 +55,7 @@ import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/w
 import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
-import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
+import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import { MemoryStore, headOf, staleHead, type OriginalsStore } from "./store.js";
 import type { ZipLimits } from "./zip.js";
 
@@ -110,6 +112,8 @@ export interface CreateInput {
   metadata?: JsonObject;
   resources: ResourceInput[];
   author: AuthorRef;
+  /** Editor grants (P5.15; PROVISIONAL member names, D4). */
+  editors?: EditorGrant[];
 }
 
 export interface EditInput {
@@ -118,7 +122,16 @@ export interface EditInput {
   name?: string;
   metadata?: JsonObject | null;
   resources?: ResourceChange[];
-  author: AuthorRef;
+  /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
+  author?: AuthorRef;
+  /**
+   * Edit as a granted editor (P5.16): the editor DID, its verification method
+   * and exact versionId. The signer is the editor's key. The grant in the
+   * parent's state must cover every change, or nothing is signed.
+   */
+  editor?: EditorRef;
+  /** Replace the editor grants; null removes them all (P5.15, P5.17). Author only. */
+  editors?: EditorGrant[] | null;
 }
 
 export interface Draft {
@@ -131,6 +144,8 @@ export interface Draft {
   /** The unsigned entry; preparing again makes a new candidate (P4.5). */
   readonly entry: UnsignedEntry;
   readonly summary: EntrySummary;
+  /** What the signer is shown (P5.11): `describeEntry(summary)`. */
+  readonly display: string;
   /** New resource bytes by digest. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
 }
@@ -198,12 +213,14 @@ function versionIds(log: string): string[] {
   return lines(log).map((line) => (parseJson(line) as { versionId: string }).versionId);
 }
 
-function authorDidsOf(log: string): string[] {
+/** The signer identity DIDs a log names: its author and each editor of an editor entry (P7.1), before verification. */
+function signerDidsOf(log: string): string[] {
   const dids = new Set<string>();
   for (const line of lines(log)) {
     try {
-      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } } };
+      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown }; editor?: { did?: unknown } } };
       if (typeof entry.state?.author?.did === "string") dids.add(entry.state.author.did);
+      if (typeof entry.state?.editor?.did === "string") dids.add(entry.state.editor.did);
     } catch {
       // Verification reports the malformed line.
     }
@@ -211,13 +228,20 @@ function authorDidsOf(log: string): string[] {
   return [...dids];
 }
 
-/** The DID in the verification method id of the latest entry `did` signed (P5.14), before verification. */
+/**
+ * The DID in the verification method id of the latest entry `did` signed
+ * (P5.14), before verification. An editor entry is signed by its editor; the
+ * author reference it carries is its parent's and says nothing of where the
+ * author is now.
+ */
 function latestLocation(log: string, did: string): string | undefined {
+  type Ref = { did?: unknown; verificationMethod?: unknown };
   const all = lines(log);
   for (let i = all.length - 1; i >= 0; i--) {
     try {
-      const author = (JSON.parse(all[i]) as { state?: { author?: { did?: unknown; verificationMethod?: unknown } } }).state?.author;
-      if (author?.did === did && typeof author.verificationMethod === "string") return signerLocation(author as AuthorRef);
+      const state = (JSON.parse(all[i]) as { state?: { author?: Ref; editor?: Ref } }).state;
+      const signer = state?.editor ?? state?.author;
+      if (signer?.did === did && typeof signer.verificationMethod === "string") return signerLocation(signer as AuthorRef);
     } catch {
       // Verification reports the malformed line.
     }
@@ -283,13 +307,15 @@ export class OriginalsSDK {
    * `identityFetch`, the log at the identity's current location, if it
    * extends that.
    */
-  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = []): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = []): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
-    for (const did of authorDidsOf(log)) {
+    // Other branches compared with this log are verified too, and their editors may differ (P6.6).
+    const dids = [...new Set([log, ...others].flatMap(signerDidsOf))];
+    for (const did of dids) {
       const own = supplied.find((a) => a.did === did);
       const source = this.options.authors;
       const found = own ?? (Array.isArray(source) ? source.find((a) => a.did === did) : await source(did)) ?? (await this.store.getAuthorEvidence(did));
-      const retrieved = await this.retrieveIdentity(did, log, found);
+      const retrieved = await this.retrieveIdentity(did, signerDidsOf(log).includes(did) ? log : others.find((o) => signerDidsOf(o).includes(did)) ?? log, found);
       if (retrieved ?? found) out.push((retrieved ?? found)!);
     }
     return out;
@@ -371,7 +397,7 @@ export class OriginalsSDK {
     const retained: RetainedVersions = { authors: {} };
     const original = did ? await quietly(() => this.store.getRetained(did), undefined) : undefined;
     if (original) retained.original = original;
-    for (const author of authorDidsOf(log)) {
+    for (const author of signerDidsOf(log)) {
       const version = await quietly(() => this.store.getRetained(author), undefined);
       if (version) retained.authors![author] = version;
     }
@@ -401,13 +427,14 @@ export class OriginalsSDK {
   }
 
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<OriginalsReport> {
+    const comparisons = await this.comparisons(log);
     return verifyOriginal({
       log,
       aliases: await this.aliasEvidence(log),
-      authors: await this.authorEvidence(log),
+      authors: await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : []))),
       bytes: await this.storedBytes(log, extra),
       now: this.clock(),
-      ...(await this.comparisons(log)),
+      ...comparisons,
       ...(checkpoint ? { checkpoint } : {}),
       ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
     });
@@ -446,7 +473,7 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resources", "author", "signer"], "create input");
+    exactKeys(input, ["name", "metadata", "resources", "author", "signer", "editors"], "create input");
     const bytes = new Map<string, Uint8Array>();
     const resources: ResourceDescriptor[] = input.resources.map((r, i) => {
       exactKeys(r, ["id", "mediaType", "bytes"], `resources[${i}]`);
@@ -457,8 +484,10 @@ export class OriginalsSDK {
     });
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resources, author: input.author,
+      ...(input.editors !== undefined ? { editors: input.editors } : {}),
     });
-    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary: summarize(entry), bytes });
+    const summary = summarize(entry);
+    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes });
   }
 
   /** Create an Original, or return an unsigned draft when no signer is given. */
@@ -481,7 +510,7 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "editor", "editors", "signer"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
@@ -503,20 +532,26 @@ export class OriginalsSDK {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       resources,
-      author: input.author,
+      ...(input.author !== undefined ? { author: input.author } : {}),
+      ...(input.editor !== undefined ? { editor: input.editor } : {}),
+      ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
     });
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes };
+    const summary = summarize(entry, head.state as unknown as EntryState);
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
   }
 
   async edit(did: string, input: EditInput & { signer: OriginalsSigner }): Promise<CommitResult> {
     return this.commit(await this.prepareEdit(did, input), input.signer);
   }
 
+  /** Only the author deactivates (P5.16, P6.5). */
   async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef }): Promise<Draft> {
+    exactKeys(input, ["parent", "author", "signer"], "deactivate input");
     const { head } = await this.parentOf(did, input.parent);
     const entry = prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author });
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes: new Map() };
+    const summary = summarize(entry, head.state as unknown as EntryState);
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes: new Map() };
   }
 
   async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner }): Promise<CommitResult> {
@@ -545,7 +580,7 @@ export class OriginalsSDK {
   async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
     // Holding evidence is not authority (P8.4): with no usable signer there is nothing to sign with.
     if (typeof signer !== "object" || signer === null || typeof signer.sign !== "function") {
-      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author key`);
+      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author or editor key`);
     }
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
@@ -555,7 +590,7 @@ export class OriginalsSDK {
     if (head !== draft.parent) throw staleHead(draft.original, draft.parent, head);
 
     const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
-    const signature = await signer.sign({ entry: draft.entry, proofOptions, summary: draft.summary });
+    const signature = await signer.sign({ entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary) });
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
 
@@ -584,7 +619,8 @@ export class OriginalsSDK {
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
     const authors = (await this.authorEvidence(prefix)).map(({ retrievedFrom: _, ...evidence }) => evidence);
     const missing: MissingItem[] = [];
-    for (const did of authorDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did });
+    const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
+    for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
     const bytes: Record<string, Uint8Array> = {};
     for (const v of view.report.resources.versions) {
       const data = await this.store.getResource(v.digest);
@@ -609,15 +645,16 @@ export class OriginalsSDK {
   }
 
   private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = []): Promise<LoadedEvidence> {
+    const comparisons = await this.comparisons(contents.log);
     const report = await verifyOriginal({
       aliases: await this.aliasEvidence(contents.log, aliases),
       log: contents.log,
-      authors: await this.authorEvidence(contents.log, contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence)),
+      authors: await this.authorEvidence(contents.log, contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence), (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : []))),
       bytes: contents.bytes,
       witnessFile: contents.witness,
       checkpoint: contents.manifest.checkpoint,
       now: this.clock(),
-      ...(await this.comparisons(contents.log)),
+      ...comparisons,
       ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
     });
     const reasons = [...report.reasons];
