@@ -22,6 +22,15 @@
  *   From then on the Original reports the fork, with every branch, and is not
  *   current; edits continue on the local branch. Only anchoring settles a
  *   fork (P6.6, P9.16; owner decision Q5).
+ * - Shared-host saves (P6.7, P6.8; ./shared.ts): `sign` makes a verified
+ *   candidate against the exact local parent without committing it;
+ *   `submit` sends it to the host and commits it locally only once the host
+ *   accepts it. A stale-parent refusal keeps the draft and the signed
+ *   candidate, labelled `refused`, beside the log and never in it, and the
+ *   SDK never commits, packages, publishes or submits it again. `reconcile`
+ *   fetches and verifies the host's new head and has the caller's signer sign
+ *   the caller's reconciled change against it; the SDK never merges or signs
+ *   on its own.
  */
 import { OriginalsError } from "@originals/vh";
 import { multibaseEncode } from "@originals/vh/crypto";
@@ -55,7 +64,8 @@ import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, wr
 import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
-import { MemoryStore, headOf, staleHead, type OriginalsStore } from "./store.js";
+import type { HostAnswer, SharedHost } from "./shared.js";
+import { MemoryStore, headOf, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
@@ -156,6 +166,70 @@ export interface Draft {
   readonly display: string;
   /** New resource bytes by digest. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
+}
+
+/** A signed entry verified against its exact parent, not yet history (P6.1). */
+export interface SignedCandidate {
+  readonly kind: "candidate";
+  readonly original: string;
+  /** The checkpoint it extends; null for a genesis entry. */
+  readonly parent: string | null;
+  readonly versionId: string;
+  readonly entry: LogEntry;
+  /** The entry as one JSON line, no newline: the exact bytes a host stores and compares (P6.7). */
+  readonly line: string;
+  readonly summary: EntrySummary;
+  /** New resource bytes by digest. */
+  readonly bytes: ReadonlyMap<string, Uint8Array>;
+}
+
+/**
+ * A candidate a shared host refused with a stale-parent conflict (P6.8). It is
+ * a valid entry with the same parent as an accepted one, so it is kept for the
+ * signer's intended change and is never history: the SDK never commits,
+ * packages, publishes, submits or inscribes it.
+ */
+export interface RefusedCandidate {
+  readonly label: "refused";
+  readonly original: string;
+  readonly parent: string;
+  readonly versionId: string;
+  /** The refused signed entry, exactly as submitted. */
+  readonly entry: LogEntry;
+  /** The draft it was signed from: the same entry without its proof, with its new bytes. */
+  readonly draft: Draft;
+  /** The host's head when it refused. */
+  readonly hostHead: string;
+}
+
+export type SubmitResult =
+  | {
+      status: "accepted" | "already-accepted";
+      /** The candidate's checkpoint, now committed locally. */
+      checkpoint: string;
+      /** The host's current head. */
+      hostHead: string;
+      /** True when the host's head is past this checkpoint; `sync` fetches it. */
+      behind: boolean;
+      original: OriginalView;
+    }
+  | { status: "stale-parent"; hostHead: string; refused: RefusedCandidate };
+
+/** The content a reconciled candidate changes; its parent is always the host's new head. */
+export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources">;
+
+export interface ReconcileInput {
+  host: SharedHost;
+  /** The refused candidate this reconciles, if any; it is forgotten once the reconciled one is accepted. */
+  refused?: string;
+  author: AuthorRef;
+  /** An authorized signer: the SDK never signs on anyone's behalf (P6.8). */
+  signer: OriginalsSigner;
+  /**
+   * The reconciled change, or a function that returns it from the new head
+   * and the refused candidate. Required: the SDK never merges (P6.8).
+   */
+  change: ReconciledChange | ((context: { head: OriginalView; refused?: RefusedCandidate }) => ReconciledChange | Promise<ReconciledChange>);
 }
 
 export interface OriginalView {
@@ -378,6 +452,29 @@ function aliasesOf(log: string): string[] {
     }
   }
   return [...out];
+}
+
+/** The DIDs that sign a log's entries: the author, and an editor where an entry names one (P5.16). */
+function signerDidsOf(log: string): string[] {
+  const dids = new Set(authorDidsOf(log));
+  for (const line of lines(log)) {
+    try {
+      const entry = JSON.parse(line) as { state?: { editor?: { did?: unknown } } };
+      if (typeof entry.state?.editor?.did === "string") dids.add(entry.state.editor.did);
+    } catch {
+      // Verification reports the malformed line.
+    }
+  }
+  return [...dids];
+}
+
+function checkAnswer(answer: unknown, did: string): HostAnswer {
+  const a = answer as Partial<Record<"status" | "checkpoint" | "head", unknown>> | null;
+  const ok =
+    typeof a === "object" && a !== null && typeof a.head === "string" &&
+    (a.status === "stale-parent" || ((a.status === "accepted" || a.status === "already-accepted") && typeof a.checkpoint === "string"));
+  if (!ok) sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host's answer for ${did} is not accepted, already-accepted or stale-parent`);
+  return a as HostAnswer;
 }
 
 function digestsOf(log: string): string[] {
@@ -815,16 +912,31 @@ export class OriginalsSDK {
 
   // ---------------------------------------------------------------- committing
 
-  /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
-  async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
+  private readonly signedReports = new WeakMap<SignedCandidate, { log: string; report: OriginalsReport }>();
+
+  private requireSigner(signer: OriginalsSigner, original: string): void {
     // Holding evidence is not authority (P8.4): with no usable signer there is nothing to sign with.
     if (typeof signer !== "object" || signer === null || typeof signer.sign !== "function") {
-      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author or editor key`);
+      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${original} needs a signer for an author or editor key`);
     }
+  }
+
+  /** A refused candidate is never signed, committed or submitted again (P6.8). */
+  private async notRefused(did: string, versionId: string): Promise<void> {
+    if ((await this.store.getRefused(did)).some((r) => refusedVersionId(r) === versionId)) {
+      sdkError("stale-parent", "CANDIDATE_REFUSED", `${versionId} was refused by a shared host; reconcile it into a new candidate against the new head (P6.8)`);
+    }
+  }
+
+  /**
+   * Sign a draft and verify the whole resulting history against its exact
+   * parent, without committing anything (P6.1, P6.4). The result is a
+   * candidate for `submit` to a shared host, or for `commit` locally.
+   */
+  async sign(draft: Draft, signer: OriginalsSigner): Promise<SignedCandidate> {
+    this.requireSigner(signer, draft.original);
+    await this.notRefused(draft.original, draft.entry.versionId);
     const stored = (await this.store.get(draft.original))?.log ?? "";
-    if (versionIds(stored).includes(draft.entry.versionId)) {
-      return { status: "duplicate", original: await this.get(draft.original) };
-    }
     const head = headOf(stored);
     if (head !== draft.parent) throw staleHead(draft.original, draft.parent, head);
 
@@ -849,10 +961,127 @@ export class OriginalsSDK {
     ) {
       sdkError("invalid-evidence", "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
     }
-    for (const [digest, bytes] of draft.bytes) await this.store.putResource(digest, bytes);
-    await this.store.commit(draft.original, { expectedHead: head, log: candidate });
+    const signed: SignedCandidate = {
+      kind: "candidate", original: draft.original, parent: draft.parent, versionId: entry.versionId, entry, line: JSON.stringify(entry), summary: draft.summary, bytes: draft.bytes,
+    };
+    this.signedReports.set(signed, { log: candidate, report });
+    return signed;
+  }
+
+  /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
+  async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
+    this.requireSigner(signer, draft.original);
+    const stored = (await this.store.get(draft.original))?.log ?? "";
+    if (versionIds(stored).includes(draft.entry.versionId)) {
+      return { status: "duplicate", original: await this.get(draft.original) };
+    }
+    return this.commitCandidate(await this.sign(draft, signer));
+  }
+
+  /** Store a verified candidate's new bytes, then replace the log atomically (P6.2). */
+  private async commitCandidate(candidate: SignedCandidate): Promise<CommitResult> {
+    const stored = (await this.store.get(candidate.original))?.log ?? "";
+    const log = stored + serializeLog([candidate.entry]);
+    for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
+    await this.store.commit(candidate.original, { expectedHead: candidate.parent, log });
+    const signed = this.signedReports.get(candidate);
+    const report = signed?.log === log ? signed.report : await this.verify(log);
     await this.retain(report);
-    return { status: "committed", original: this.view(draft.original, report) };
+    return { status: "committed", original: this.view(candidate.original, report) };
+  }
+
+  // ---------------------------------------------------------------- shared hosts
+
+  /**
+   * Save a signed candidate through a shared host (P6.7, P6.8). Accepted or
+   * already accepted: the candidate is committed locally and returned with
+   * the host's head. Stale parent: the draft and the signed candidate are
+   * kept, labelled `refused`, local history does not move, and the result
+   * names the host's head. A refused candidate is never submitted again.
+   */
+  async submit(candidate: SignedCandidate, host: SharedHost): Promise<SubmitResult> {
+    if (candidate?.kind !== "candidate" || typeof candidate.line !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "submit takes a candidate from sign()");
+    const did = candidate.original;
+    await this.notRefused(did, candidate.versionId);
+    const stored = await this.stored(did);
+    const committed = lines(stored).includes(candidate.line);
+    if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
+    const answer = checkAnswer(
+      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries(candidate.bytes), identities: await this.authorEvidence(signerDidsOf(candidate.line)) }),
+      did,
+    );
+    if (answer.status === "stale-parent") {
+      if (answer.head === candidate.parent) sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host refused ${candidate.versionId} as stale while naming its parent as the head`);
+      // Staged bytes are content addressed and are never a version on their own (P6.1).
+      for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
+      const record: StoredRefused = { label: "refused", parent: candidate.parent!, entry: candidate.line, hostHead: answer.head };
+      await this.store.putRefused(did, record);
+      return { status: "stale-parent", hostHead: answer.head, refused: await this.hydrateRefused(did, record) };
+    }
+    if (answer.checkpoint !== candidate.versionId) {
+      sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host answered for ${answer.checkpoint}, not ${candidate.versionId}`);
+    }
+    const original = committed ? await this.get(did) : (await this.commitCandidate(candidate)).original;
+    return { status: answer.status, checkpoint: candidate.versionId, hostHead: answer.head, behind: answer.head !== candidate.versionId, original };
+  }
+
+  /** The candidates shared hosts refused for `did`, each with its draft (P6.8). */
+  async refused(did: string): Promise<RefusedCandidate[]> {
+    const out: RefusedCandidate[] = [];
+    for (const record of await this.store.getRefused(did)) out.push(await this.hydrateRefused(did, record));
+    return out;
+  }
+
+  private async hydrateRefused(did: string, record: StoredRefused): Promise<RefusedCandidate> {
+    const entry = parseJson(record.entry) as unknown as LogEntry;
+    const { proof: _proof, ...unsigned } = entry;
+    const parentLine = lines((await this.store.get(did))?.log ?? "").find((line) => (JSON.parse(line) as { versionId?: unknown }).versionId === record.parent);
+    const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
+    const bytes = new Map<string, Uint8Array>();
+    for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      const data = await this.store.getResource(t.to);
+      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+    }
+    const draft: Draft = { kind: "draft", signed: false, original: did, parent: record.parent, entry: unsigned, summary: summarize(unsigned, previous), bytes };
+    return { label: "refused", original: did, parent: record.parent, versionId: entry.versionId, entry, draft, hostHead: record.hostHead };
+  }
+
+  /**
+   * Fetch a shared host's accepted log and verify it (P6.8). A log that
+   * extends local history is committed; one that diverges is kept as a
+   * branch and reported as a fork (P6.6), exactly as `import` does.
+   */
+  async sync(did: string, host: SharedHost): Promise<ImportResult> {
+    return this.importContents(await host.accepted(did), did);
+  }
+
+  /**
+   * Reconcile after a stale-parent conflict (P6.8): fetch and verify the
+   * host's new head, prepare a candidate with the caller's reconciled change
+   * against it, show the signer the change from the new head (P5.11) and
+   * submit what the signer signs. The SDK never merges and never signs on its
+   * own; a host that diverges from local history is a fork, not a parent.
+   */
+  async reconcile(did: string, input: ReconcileInput): Promise<SubmitResult> {
+    exactKeys(input, ["host", "refused", "author", "signer", "change"], "reconcile input");
+    if (input.change === undefined || input.change === null) {
+      sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
+    }
+    this.requireSigner(input.signer, did);
+    const kept = input.refused === undefined ? undefined : (await this.refused(did)).find((r) => r.versionId === input.refused);
+    if (input.refused !== undefined && !kept) sdkError("invalid-evidence", "REFUSED_NOT_FOUND", `${input.refused} is not a refused candidate of ${did}`);
+    const synced = await this.sync(did, input.host);
+    if (synced.status === "conflict") {
+      sdkError("fork", "HOST_DIVERGES", `the host's history of ${did} diverges from local history; it is kept as a branch (P6.6)`, { report: synced.original.report });
+    }
+    const head = synced.original;
+    const change = typeof input.change === "function" ? await input.change({ head, ...(kept ? { refused: kept } : {}) }) : input.change;
+    if (typeof change !== "object" || change === null) sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
+    exactKeys(change, ["name", "metadata", "resources"], "reconciled change");
+    const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
+    const result = await this.submit(await this.sign(draft, input.signer), input.host);
+    if (result.status !== "stale-parent" && kept) await this.store.dropRefused(did, kept.versionId);
+    return result;
   }
 
   // ---------------------------------------------------------------- evidence
@@ -1008,11 +1237,17 @@ export class OriginalsSDK {
    * new as what this store has verified (P7.8).
    */
   async import(zip: Uint8Array): Promise<ImportResult> {
-    const contents = readEvidence(zip, this.options.archiveLimits);
-    const loaded = await this.load(zip);
+    return this.importContents(readEvidence(zip, this.options.archiveLimits));
+  }
+
+  private async importContents(contents: EvidenceContents, expected?: string): Promise<ImportResult> {
+    const loaded = await this.loadContents(contents);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });
+    }
+    if (expected !== undefined && r.original !== expected) {
+      sdkError("invalid-evidence", "IMPORT_REJECTED", `the evidence is for ${r.original}, not ${expected}`, { report: r });
     }
     // The verified head must be the package's own last entry: nothing else may be stored (P7.5).
     const own = versionIds(contents.log);
@@ -1039,7 +1274,7 @@ export class OriginalsSDK {
     return result("imported");
   }
 
-  private async keepEvidence(contents: ReturnType<typeof readEvidence>, report: OriginalsReport): Promise<void> {
+  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }

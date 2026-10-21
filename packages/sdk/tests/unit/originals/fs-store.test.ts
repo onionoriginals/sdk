@@ -374,3 +374,31 @@ describe("FileStore: one writer per root (08b review C5)", () => {
     }
   });
 });
+
+describe("refused candidates (P6.8)", () => {
+  const DID = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
+  const record = (n: number) => ({ label: "refused" as const, parent: "1-a", entry: `{"versionId":"2-${n}"}`, hostHead: "2-host" });
+
+  test("row 131: FileStore keeps refused candidates beside, never in, the committed log, across reopening", async () => {
+    const dir = tempDir();
+    try {
+      const store = await FileStore.open(dir);
+      await store.commit(DID, { expectedHead: null, log: '{"versionId":"1-a"}\n' });
+      await store.putRefused(DID, record(1));
+      await store.putRefused(DID, record(1)); // idempotent
+      await store.putRefused(DID, record(2));
+      const scidDir = join(dir, "originals", DID.slice("did:vh:".length));
+      writeFileSync(join(scidDir, "refused", "x.json.abc.tmp"), "partial");
+      const reopened = await FileStore.open(dir);
+      expect(readdirSync(join(scidDir, "refused")).some((f) => f.endsWith(".tmp"))).toBe(false);
+      expect((await reopened.getRefused(DID)).map((r) => r.entry).sort()).toEqual([record(1).entry, record(2).entry]);
+      expect((await reopened.get(DID))?.log).toBe('{"versionId":"1-a"}\n');
+      await reopened.dropRefused(DID, "2-1");
+      await reopened.dropRefused(DID, "2-404");
+      expect((await reopened.getRefused(DID)).map((r) => r.entry)).toEqual([record(2).entry]);
+      expect(await reopened.list()).toEqual([DID]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

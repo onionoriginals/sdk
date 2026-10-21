@@ -9,3 +9,4 @@ export * from "./store.js";
 export * from "./evidence.js";
 export { readZip, writeZip, crc32, checkArchivePath, ZIP_LIMITS, type ZipLimits } from "./zip.js";
 export * from "./hosting.js";
+export * from "./shared.js";
