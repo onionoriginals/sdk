@@ -17,7 +17,9 @@
  * because the store decodes it once more. The server assigns every content
  * type itself: a resource is served with the media type its descriptor
  * declares in the uploaded asset log, never a header the uploader chose
- * (P9.7). The host does not verify that log; readers do.
+ * (P9.7). The host does not verify a log uploaded here; readers do. An
+ * uploaded asset log may only extend the stored one, and saves from several
+ * signers go through the verifying submit route instead (shared-saves.ts).
  *
  * A signer's DID log and witness file (authors/<64 hex>/...) only grow: a
  * replacement must extend what is stored (`signerLogVerdict`,

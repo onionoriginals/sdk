@@ -113,6 +113,25 @@ describe('DemoEngine on the Originals Protocol', () => {
     expect((await stranger.loadPublished(published.webvhDid!, read)).verified).toBe(true);
   });
 
+  test('once published, a revision is saved through the host: the hosted snapshot moves to it (P6.7)', async () => {
+    const { upload, read } = host();
+    const secret = ed.utils.randomSecretKey();
+    const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
+    const engine = new DemoEngine({
+      features: { hostedPublication: true },
+      publishTarget: { upload, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+    });
+    await engine.create('Harbor at dawn', 'Orbits', generateArtwork('Harbor at dawn', 'Orbits', 7).svg);
+    const published = await engine.publish();
+    const revised = await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg);
+    expect(revised.history.length).toBe(published.history.length + 1);
+    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
+    const r = await stranger.loadPublished(published.webvhDid!, read);
+    expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.report.head).toBe(revised.history.at(-1)!.versionId);
+    expect(r.report.state?.name).toBe('Harbor at dusk');
+  });
+
   test('a new Original does not inherit the previous Original\'s alias', async () => {
     const { upload } = host();
     const secret = ed.utils.randomSecretKey();

@@ -12,7 +12,7 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, type OriginalView, type OriginalsSigner } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner } from "@originals/sdk/originals";
 import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
@@ -21,6 +21,7 @@ import { ensureAuthorshipAccount, ensureIdentityAccount, type TurnkeyBitcoinClie
 import { DEFAULT_WEBVH_DOMAIN, TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
 import { FEATURES, type Feature } from "./features";
 import { publishOriginal, type HostedUpload } from "./publish";
+import { landingSharedHost, type SubmitTransport } from "./shared-host";
 import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
 import { short } from "./format";
 import { createLocalAuthor } from "./local-author";
@@ -94,6 +95,18 @@ export interface AssetSource {
   filename: string;
 }
 
+/**
+ * A shared-host save refused with a stale-parent conflict (P6.7): someone
+ * saved first. The change is kept, signed and labelled refused, and is never
+ * published; it needs reconciling against the new head (P6.8).
+ */
+export class StaleSaveError extends Error {
+  constructor(public readonly refused: string, public readonly hostHead: string) {
+    super("Someone saved this Original first. Your change is kept as a refused candidate and was not published; reconcile it with the new version.");
+    this.name = "StaleSaveError";
+  }
+}
+
 /** A refusal for a feature that waits on a later phase. */
 export class FeatureUnavailableError extends Error {
   constructor(public readonly feature: "hostedPublication" | "bitcoinAnchoring", message: string) {
@@ -115,9 +128,14 @@ interface LogLine {
   };
 }
 
-/** Where an Original is published, and the key that controls its alias (P3.7). */
+/**
+ * Where an Original is published, and the key that controls its alias (P3.7).
+ * An upload that can also `submit` takes shared-host saves of the published
+ * Original (P6.7); `read` fetches its public files (defaults to `fetch`).
+ */
 export interface PublishTarget {
-  upload: HostedUpload;
+  upload: HostedUpload & Partial<SubmitTransport>;
+  read?: HostedFetch;
   domain: string;
   slug: string;
   aliasSigner: () => Promise<WebVHSigner>;
@@ -266,7 +284,7 @@ export class DemoEngine {
     ) {
       return current;
     }
-    const result = await this.sdk!.edit(this.did, {
+    const input: EditInput = {
       parent: this.view.checkpoint,
       name: title,
       resources: [
@@ -274,12 +292,39 @@ export class DemoEngine {
         ...(metadata && current.metadata ? [{ id: current.metadata.id, bytes: new TextEncoder().encode(metadata) }] : []),
       ],
       author: ref,
-      signer,
-    });
-    this.view = result.original;
+    };
+    this.view = this.published() ? await this.saveThroughHost(input, signer) : (await this.sdk!.edit(this.did, { ...input, signer })).original;
     await this.refresh();
     this.emit("asset:updated", `Revised ${short(this.did)} at ${short(this.view.checkpoint)}`, { checkpoint: this.view.checkpoint });
     return this.snapshot();
+  }
+
+  /** Published from this engine, with hosted publication on: saves go through the host. */
+  private published(): boolean {
+    return this.features.hostedPublication && !!this.alias && !!this.view?.state.aliases.includes(this.alias.did);
+  }
+
+  /**
+   * A shared-host save (P6.7, P6.8): sign a candidate against the exact
+   * parent, submit it, and commit it locally only once the host accepts it.
+   * A stale parent keeps the refused candidate and throws StaleSaveError.
+   */
+  private async saveThroughHost(input: EditInput, signer: OriginalsSigner): Promise<OriginalView> {
+    const target = this.target ?? this.accountTarget();
+    const transport = target.upload;
+    if (typeof transport.submit !== "function") throw new Error("This host does not take saves for published Originals.");
+    const host = landingSharedHost({
+      sdk: this.sdk!,
+      aliasDid: this.alias!.did,
+      transport: { submit: (key, body) => transport.submit!(key, body) },
+      read: target.read ?? publicRead,
+    });
+    const result = await this.sdk!.submit(await this.sdk!.sign(await this.sdk!.prepareEdit(this.did!, input), signer), host);
+    if (result.status === "stale-parent") {
+      this.emit("asset:refused", `The host refused ${short(result.refused.versionId)}: ${short(result.hostHead)} was saved first`, { refused: result.refused.versionId, hostHead: result.hostHead });
+      throw new StaleSaveError(result.refused.versionId, result.hostHead);
+    }
+    return result.original;
   }
 
   /**
@@ -395,6 +440,13 @@ export class DemoEngine {
     }
   }
 }
+
+/** A public read of a hosted file, as any reader makes it. */
+const publicRead: HostedFetch = async (url, options) => {
+  const res = await fetch(url, { signal: options.signal, credentials: "omit", redirect: "error" });
+  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+};
 
 function asSource(source: string | AssetSource): AssetSource {
   return typeof source === "string" ? { content: source, contentType: "image/svg+xml", filename: "artwork.svg" } : source;

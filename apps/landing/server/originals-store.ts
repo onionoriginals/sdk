@@ -77,8 +77,10 @@ export interface OriginalsStore {
   serve(url: URL): Response | null;
   /** Auth-scoped read by object key (adapter.get) — only keys this user wrote. */
   read(subOrgId: string, key: string): Response;
-  /** The bytes of a hosted key, whoever wrote it, or null. For the server's own checks. */
+  /** The bytes of a hosted key, whoever wrote it, or null. For the server's own checks (shared-host saves). */
   readHosted(key: string): Uint8Array | null;
+  /** The sub that owns a hosted key (first writer), or null when unclaimed. */
+  ownerOf(key: string): string | null;
 }
 
 const CTYPE_SUFFIX = '.ctype';
@@ -409,5 +411,13 @@ export function createOriginalsStore(opts: {
     }
   }
 
-  return { saveBytes, recordOriginal, list, serve, read, readHosted };
+  function ownerOf(key: string): string | null {
+    try {
+      return readFileSync(keyToPath(hostedDir, key) + OWNER_SUFFIX, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  return { saveBytes, recordOriginal, list, serve, read, readHosted, ownerOf };
 }
