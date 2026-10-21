@@ -4,6 +4,8 @@
  *   <root>/originals/<scid>/did.jsonl   the committed log
  *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl
  *                                       valid branches that diverge from it
+ *   <root>/originals/<scid>/refused/<sha256(versionId)>.json
+ *                                       refused candidates, never history (P6.8)
  *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
@@ -21,7 +23,7 @@ import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 import { hex } from "@scure/base";
-import { headOf, higherVersion, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal } from "./store.js";
+import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredRefused } from "./store.js";
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
@@ -73,9 +75,11 @@ export class FileStore implements OriginalsStore {
       for (const name of await readdir(join(root, "originals", scid))) {
         if (name.endsWith(".tmp")) await rm(join(root, "originals", scid, name), { force: true });
       }
-      const branches = join(root, "originals", scid, "branches");
-      for (const name of await readdir(branches).catch(() => [] as string[])) {
-        if (name.endsWith(".tmp")) await rm(join(branches, name), { force: true });
+      for (const sub of ["branches", "refused"]) {
+        const dir = join(root, "originals", scid, sub);
+        for (const name of await readdir(dir).catch(() => [] as string[])) {
+          if (name.endsWith(".tmp")) await rm(join(dir, name), { force: true });
+        }
       }
     }
     for (const dir of ["resources", "authors", "retained"]) {
@@ -205,6 +209,30 @@ export class FileStore implements OriginalsStore {
       if (log !== undefined) out.push(log);
     }
     return out;
+  }
+
+  async putRefused(did: string, refused: StoredRefused): Promise<void> {
+    const dir = join(this.dirOf(did), "refused");
+    await fs.mkdir(dir, { recursive: true });
+    const name = this.didFile(refusedVersionId(refused));
+    if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, JSON.stringify(refused));
+  }
+
+  async getRefused(did: string): Promise<StoredRefused[]> {
+    const dir = join(this.dirOf(did), "refused");
+    const names = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".json")).sort();
+    const out: StoredRefused[] = [];
+    for (const name of names) {
+      const text = await this.readText(join(dir, name));
+      if (text !== undefined) out.push(JSON.parse(text) as StoredRefused);
+    }
+    return out;
+  }
+
+  async dropRefused(did: string, versionId: string): Promise<void> {
+    const dir = join(this.dirOf(did), "refused");
+    await fs.rm(join(dir, this.didFile(versionId)), { force: true });
+    await fsyncDir(dir).catch(() => undefined);
   }
 
   async list(): Promise<string[]> {
