@@ -272,19 +272,25 @@ function retrievableIdentities(chained: ChainedEntry[]): string[] {
 }
 
 /**
- * Where to retrieve `did`'s log (P5.14): the DID in the verification method
- * id of the latest entry `did` signed among the first `verified` chained
- * entries, those whose proofs and author binding verified with the identity
- * evidence already held (08b review r2 #5). A hash-chained line anyone can
- * append, whose proof does not verify, chooses nothing.
+ * Where to retrieve `did`'s log (P5.14), in the order to try: the DID in the
+ * verification method id of the latest entry `did` signed among the first
+ * `verified` chained entries, those whose proofs and author binding verified
+ * with the identity evidence already held (08b review r2 #5). A hash-chained
+ * line anyone can append, whose proof does not verify, chooses nothing.
  *
- * PROVISIONAL: when the evidence held verifies no entry `did` signed (a
- * reader with no evidence for it), no proof can be checked before the log is
- * retrieved, so P5.14's latest chained entry is used; the verifier checks
- * afterwards that the log came from the latest verified entry's location, so
- * such a line can choose the request but never the result.
+ * PROVISIONAL (P5.14; 08b review r4 #5): when the evidence held verifies no
+ * entry `did` signed (a reader with no evidence for it), no proof can be
+ * checked before the log is retrieved. The location named by the earliest
+ * chained entry `did` signed (the genesis entry for the author), which is
+ * bound to the Original's SCID and so cannot be steered by a line appended
+ * to someone else's Original, is tried first; P5.14's latest chained entry
+ * only when that location gives no usable log. A log retrieved from the
+ * earlier location verifies the entries, and the latest verified entry then
+ * names the location retrieved next (`withIdentities`). The verifier checks
+ * that a retrieved log came from the latest verified entry's location, so an
+ * unverified line can choose a request but never the result.
  */
-function latestLocation(chained: ChainedEntry[], did: string, verified: number): string | undefined {
+function identityLocations(chained: ChainedEntry[], did: string, verified: number): string[] {
   const signedBy = (i: number) => {
     const state = chained[i].state;
     const author = isJsonObject(state) ? state.author : undefined;
@@ -292,14 +298,35 @@ function latestLocation(chained: ChainedEntry[], did: string, verified: number):
   };
   for (let i = Math.min(verified, chained.length) - 1; i >= 0; i--) {
     const location = signedBy(i);
-    if (location) return location;
+    if (location) return [location];
   }
-  if (verified > 0) return undefined; // the held evidence verified entries, none by `did`: nothing vouches for a location
+  if (verified > 0) return []; // the held evidence verified entries, none by `did`: nothing vouches for a location
+  const out: string[] = [];
+  for (let i = 0; i < chained.length; i++) {
+    const location = signedBy(i);
+    if (location) {
+      out.push(location);
+      break;
+    }
+  }
   for (let i = chained.length - 1; i >= 0; i--) {
     const location = signedBy(i);
-    if (location) return location;
+    if (location) {
+      if (!out.includes(location)) out.push(location);
+      break;
+    }
   }
-  return undefined;
+  return out;
+}
+
+/** The did:webvh log URL of `location`, or undefined when it is not a did:webvh. */
+function logUrlOf(location: string): string | undefined {
+  try {
+    return didWebvhLogUrl(location);
+  } catch (error) {
+    if (error instanceof OriginalsError) return undefined;
+    throw error;
+  }
 }
 
 /** The did:vh a log's genesis names, before verification; only used to look up what to compare with. */
@@ -402,8 +429,13 @@ export class OriginalsSDK {
     retrieval?: Retrieval,
   ): Promise<{ report: OriginalsReport; authors: AuthorDidEvidence[] }> {
     const report = await run(base);
-    const authors = await this.identityRound(log, base, report.history.entries, retrieval);
-    return authors === base ? { report, authors } : { report: await run(authors), authors };
+    const first = await this.identityRound(log, base, report.history.entries, retrieval);
+    if (first === base) return { report, authors: base };
+    // A log first retrieved where an unverified entry said (`identityLocations`) verifies the
+    // entries, and the latest verified entry may name another location: one more round from there.
+    const again = await run(first);
+    const second = await this.identityRound(log, first, again.history.entries, retrieval);
+    return second === first ? { report: again, authors: first } : { report: await run(second), authors: second };
   }
 
   /** One bounded round of identity retrieval; `base` itself when nothing new was retrieved. */
@@ -417,11 +449,16 @@ export class OriginalsSDK {
     const budget = retrieval ?? new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
     let out = base;
     try {
-      // Up to two requests per identity, its log and its witness file, planned before any is made.
-      budget.plan(2 * identities.length, 0);
-      for (const did of identities) {
+      // Up to two requests per location tried, its log and its witness file, planned before any is made.
+      const locations = identities.map((did) => {
         const known = out.find((a) => a.did === did);
-        const retrieved = await this.retrieveIdentity(did, chained, verified, known, budget, fetch);
+        // A location this evidence was just retrieved from is not asked again.
+        return identityLocations(chained, did, verified).filter((l) => !known?.retrievedFrom || logUrlOf(l) !== known.retrievedFrom);
+      });
+      budget.plan(2 * locations.reduce((n, l) => n + l.length, 0), 0);
+      for (const [i, did] of identities.entries()) {
+        const known = out.find((a) => a.did === did);
+        const retrieved = await this.retrieveIdentity(did, locations[i], known, budget, fetch);
         if (retrieved) out = known ? out.map((a) => (a.did === did ? retrieved : a)) : [...out, retrieved];
       }
     } catch (error) {
@@ -444,15 +481,23 @@ export class OriginalsSDK {
    * P5.14: retrieve a did:webvh identity's log from the location of the DID in
    * the verification method id of the latest entry it signed, with no
    * redirects (P8.5). Used only when it verifies from the identity DID's
-   * genesis and extends `known`. The location comes from the entries that
-   * verified with the evidence held (`latestLocation`); it only chooses the
-   * URL, and the verifier checks that the URL is that location.
+   * genesis and extends `known`. The locations come from `identityLocations`;
+   * they only choose the URL, and the verifier checks that the URL is the
+   * latest verified entry's location.
    */
-  private async retrieveIdentity(did: string, chained: ChainedEntry[], verified: number, known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
-    const location = latestLocation(chained, did, verified);
+  private async retrieveIdentity(did: string, locations: string[], known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
+    for (const location of locations) {
+      const found = await this.retrieveIdentityAt(did, location, known, retrieval, fetch);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** `did`'s log retrieved from `location` (with its witness file), when it verifies from genesis and extends `known`. */
+  private async retrieveIdentityAt(did: string, location: string, known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
     let url: string;
     try {
-      if (!location || parseDidWebvh(location).scid !== parseDidWebvh(did).scid) return undefined;
+      if (parseDidWebvh(location).scid !== parseDidWebvh(did).scid) return undefined;
       url = didWebvhLogUrl(location);
     } catch (error) {
       if (error instanceof OriginalsError) return undefined;
@@ -842,8 +887,9 @@ export class OriginalsSDK {
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
     const planned = 1 + 2 * plan.authors.length + plan.digests.length;
-    // With identityFetch, up to two more requests per did:webvh signer (P5.14), in the same budget.
-    const identities = this.options.identityFetch ? 2 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
+    // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
+    // a log and witness file from up to two locations, then from the latest verified location.
+    const identities = this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
     retrieval.plan(planned + identities, files.size + planned);
     await put("asset/did-witness.json", false);
     for (const did of plan.authors) {

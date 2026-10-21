@@ -147,19 +147,36 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(loaded.report.reasons).not.toContain("author-freshness-not-established");
   });
 
-  test("a log kept only at the old location is not found there: freshness is not established", async () => {
-    const { alice, zip } = await movedAndRotated();
+  test("a log kept only at the old location verifies the history but establishes no freshness (PROVISIONAL, 08b review r4 #5)", async () => {
+    const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const reader = OriginalsSDK.create({
       store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
       identityFetch: host({ [didWebvhLogUrl(alice.did)]: alice.evidence().log as string }, seen),
     });
     const r = (await reader.load(zip)).report;
-    expect(seen[0]).toBe(didWebvhLogUrl(alice.location));
-    expect(seen).not.toContain(didWebvhLogUrl(alice.did));
-    expect(r.identityEvidence.status).toBe("incomplete");
+    // The genesis entry's location first; the log found there verifies the entries, whose latest
+    // names the new location, which is asked next and serves nothing.
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
+    expect(seen).toContain(didWebvhLogUrl(alice.location));
+    expect(r.checkpoint).toBe(head);
     expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.reasons).toContain("author-freshness-not-established");
     expect(r.current).toBe(false);
+  });
+
+  test("found at both locations, the log from the latest verified entry's location is used and its freshness is retrieved", async () => {
+    const { alice, zip, head } = await movedAndRotated();
+    const seen: string[] = [];
+    const log = alice.evidence().log as string;
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(alice.did)]: log, [didWebvhLogUrl(alice.location)]: log }, seen),
+    });
+    const r = (await reader.load(zip)).report;
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
+    expect(r.checkpoint).toBe(head);
+    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
   });
 
   test("a retrieved log with another SCID, or one that diverges from the package's, is not used", async () => {
@@ -237,8 +254,10 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
       identityFetch: host({ [didWebvhLogUrl(alice.location)]: alice.evidence().log as string }, seen),
     });
     await reader.load(withLines(withoutIdentity((await sdk.package(did)).bytes, alice.did), junk));
-    expect(seen.length).toBeLessThanOrEqual(2);
-    for (const url of seen) expect(url.startsWith("https://new.example.org/.well-known/")).toBe(true);
+    // The genesis entry's location, then the latest chained entry's (08b review r4 #5): log and witness file.
+    expect(seen.length).toBeLessThanOrEqual(3);
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
+    for (const url of seen.slice(1)) expect(url.startsWith("https://new.example.org/.well-known/")).toBe(true);
   });
 
   test("load with identityFetch has its own deadline: an identity host that never answers leaves freshness not established", async () => {
@@ -355,5 +374,34 @@ describe("C12-134: a forged hash-chained line chooses no identity location (P5.1
     expect(r.history.status).toBe("invalid");
     expect(seen.some((url) => url.includes("attacker"))).toBe(false);
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
+  });
+
+  test("08b review r4 #5 (PROVISIONAL): a reader with no identity evidence asks the genesis entry's location before a forged line's", async () => {
+    const { alice, sdk, did } = await journey();
+    const files = new Map(readZip((await sdk.package(did)).bytes));
+    const log = new TextDecoder().decode(files.get("asset/did.jsonl"));
+    const last = JSON.parse(log.trimEnd().split("\n").pop()!) as Record<string, any>;
+    const tracker = `did:webvh:${alice.did.split(":")[2]}:tracker.attacker.example`;
+    const { proof, ...rest } = last;
+    const forged: Record<string, any> = { ...rest, versionTime: "2026-10-18T12:59:00Z", state: { ...last.state, transitions: [], author: { ...last.state.author, verificationMethod: `${tracker}#orig-1` } } };
+    forged.versionId = `${Number(String(last.versionId).split("-")[0]) + 1}-${vhHash({ ...forged, versionId: last.versionId })}`;
+    files.set("asset/did.jsonl", new TextEncoder().encode(`${log}${JSON.stringify({ ...forged, proof })}\n`));
+    for (const path of [...files.keys()]) if (path.startsWith("authors/")) files.delete(path);
+    const forgedZip = writeZip(files);
+    // The author's own host serves the log: the forged line's location is never requested.
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), identityFetch: host({ [didWebvhLogUrl(alice.did)]: alice.evidence().log as string }, seen) });
+    const r = (await reader.load(forgedZip)).report;
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
+    expect(seen.some((url) => url.includes("attacker"))).toBe(false);
+    expect(r.history.status).toBe("invalid");
+    // Only when the genesis location gives nothing is P5.14's latest chained entry tried; it can choose a
+    // request but never the result.
+    const offline: string[] = [];
+    const fallback = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), identityFetch: host({}, offline) });
+    const f = (await fallback.load(forgedZip)).report;
+    expect(offline[0]).toBe(didWebvhLogUrl(alice.did));
+    expect(f.identityEvidence.freshness).toBe("not-established");
+    expect(f.current).toBe(false);
   });
 });

@@ -202,9 +202,14 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   (`safeFetch` refuses them). That entry is the latest one that verified
   with the evidence the reader holds, so an appended line whose proof does
   not verify cannot choose the request. A reader holding no evidence that
-  verifies any entry of that identity can check no proof before retrieving,
-  so it uses the latest chained entry (PROVISIONAL); such a line can then
-  choose the request, never the result. A log retrieved there that verifies and extends
+  verifies any entry of that identity can check no proof before retrieving
+  (PROVISIONAL): it first asks the location named by the earliest chained
+  entry the identity signed (for the author, the genesis entry, which is
+  bound to the Original's SCID), and the latest chained entry's location
+  only when that gives no usable log. A log found first verifies the
+  entries, and the latest verified entry's location is then asked. An
+  unverified line can choose a request, never the result. A log retrieved
+  from the latest verified entry's location that verifies and extends
   the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
   retrieval from that location is how this SDK establishes a moved
   identity's freshness). Otherwise the identity's freshness is not
