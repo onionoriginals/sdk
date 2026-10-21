@@ -571,20 +571,33 @@ await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }
 const clock = new InscriptionClock(async (height) => ({ time, hash }));   // running max of header times (P9.15), reorg-aware
 // A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).
 const served = new InscriptionClock(header, { network: "mainnet", headers, store: fileClockStore(path), maxRequests: 1000 });
-const evidence = await satEvidence(snapshot, { clock, ownerConfirmations });  // from the SDK's sat reader
+// One read per index used; the verifier compares their placement (P9.10, P9.11).
+const evidence = await satEvidence(snapshot, { clock, ownerConfirmations, index: "ord@node-a" });
 const view = await sdk.get(did, { bitcoin: [evidence] });                     // also load(zip, { bitcoin })
-view.report.anchoring; // anchor, conflicting and unresolved anchors, accepted and ignored inscriptions (with reasons), tip
-view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes }
+view.report.anchoring; // anchor, conflicting anchors, accepted, ignored and disputed inscriptions, indexes, copy, change, tip
+view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes: ["ord@node-a"] }
+// Without any copy of the log: verifyOriginal({ bitcoin: [evidence], authors }) (P9.17, P9.18).
 ```
 
 - The anchoring entry is an ordinary update that adds the sat's did:btco alias
   (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere,
-  PROVISIONAL). From then on the alias never changes, and an Original anchored
-  without a did:webvh alias never gains one.
-- Every inscription carries one complete entry as
-  `application/vnd.originals.vh+jsonl` (PROVISIONAL), with no did:btco
-  metadata. The history before the anchor comes from the supplied copy and
-  must chain to the anchoring entry.
+  PROVISIONAL; strict grammar: no sign, no leading zeros, below the total
+  supply). From then on the alias never changes, and no did:webvh alias may be
+  added, replaced or re-added; the one listed at anchoring may stay or go
+  (P9.10, D7).
+- The anchoring inscription carries the whole log, genesis through the
+  anchoring entry; every later inscription exactly one entry, as
+  `application/vnd.originals.vh+jsonl` (PROVISIONAL), with no metadata and at
+  most 350,000 bytes (P9.17, D6 provisional). So the sat alone verifies the
+  log: a stored or packaged copy is only compared (`anchoring.copy`), and one
+  that differs is ignored. Entries before the anchoring entry are checked
+  against the versions they name, with claimed ordering (P9.15). The writer
+  (PR 10) must inscribe the full log when anchoring.
+- Placement rests on the index (P9.10): an inscription counts for a sat only
+  when every index read supplied reports it on that sat number on that
+  network. Indexes that disagree leave it `disputed`
+  (`bitcoin-placement-disputed`), and disagreement on the holder gives no
+  owner (`ownership-indexes-disagree`).
 - Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
   from 1 confirmation (depth reported) when it extends the head at a strictly
   greater height and passes the author checks at its inscription time
@@ -592,9 +605,13 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   nor make stale an anchored log. Only the anchor and accepted inscriptions
   have `anchored` ordering. The anchor is the first valid anchoring entry in
   chain order across the sats supplied; others, on the same sat or another,
-  are conflicting anchors, never current (P9.16). An earlier anchoring entry
-  the copy cannot check (too little or a different history) is listed as
-  `unresolved`, and the result is not current (`earlier-anchor-unresolved`).
+  are conflicting anchors, never current (P9.16). Each anchoring inscription
+  checks itself. The store keeps the anchor it reported (`getRetainedAnchor`,
+  optional), so an earlier one learned later is reported in
+  `anchoring.change` with the owner change (`anchor-changed`), once.
+- Resource bytes are not on Bitcoin and not needed for the log: an anchored
+  Original without them is reported `resources.status: "partial"` and stays
+  current (P7.3, P7.4, P9.18); supplied bytes are still checked.
 - The clock checks each inscription's block hash: it rewinds past a
   reorganisation and refuses a block no longer on the chain
   (`BLOCK_NOT_ON_CHAIN`). Before reading past the blocks it holds, it checks
