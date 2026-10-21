@@ -568,3 +568,15 @@ describe('a hosted asset log changes only through the verifying submit route (P6
     expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'))).status).toBe(400);
   });
 });
+
+describe('#965 r5 finding 3: a submitted witness file is depth-bounded', () => {
+  test('a witness nested beyond the JSON depth limit is a structured 400, never a thrown RangeError', async () => {
+    const { parseSubmission } = await import('../shared-saves');
+    for (const n of [65, 50_000]) {
+      const text = `{"original":"did:vh:x","entry":"{\\"versionId\\":\\"2-Qa\\"}","identities":[{"did":"did:vh:a","log":"","witness":${JSON.stringify([{ versionId: '1-Qa', proof: [] }]).slice(0, -1)},${'['.repeat(n)}${']'.repeat(n)}]}]}`;
+      const out = parseSubmission(text) as { http?: number; body?: { error?: string } };
+      expect(out.http).toBe(400);
+      expect(out.body?.error).toBe('identity_witness_invalid');
+    }
+  });
+});

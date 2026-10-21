@@ -90,7 +90,7 @@ import { vhHash } from '@originals/vh/log';
 import { ORIGINALS_LIMITS, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { authorPath } from '@originals/sdk/originals';
 import { json } from './router';
-import { logPrefix, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
+import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
 import type { OriginalsStore } from './originals-store';
 
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
@@ -163,6 +163,8 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
   if (ids.length > SUBMISSION_LIMITS.identities) return refuse(400, 'too_many_identities');
   for (const i of ids as Array<Record<string, unknown>>) {
     if (typeof i !== 'object' || i === null || typeof i.did !== 'string' || typeof i.log !== 'string') return refuse(400, 'bad_request');
+    // A witness file nests no deeper than a hosted one may (#965 r5, finding 3), so measuring it never throws.
+    if (i.witness !== undefined && deeperThan(i.witness, MAX_WITNESS_DEPTH)) return refuse(400, 'identity_witness_invalid', { did: i.did });
     // The log and its witness file count together (#08d review r2 #7).
     const witnessBytes = i.witness === undefined ? 0 : encoder.encode(JSON.stringify(i.witness)).length;
     if (encoder.encode(i.log).length + witnessBytes > SUBMISSION_LIMITS.identityBytes) return refuse(413, 'identity_too_large', { did: i.did });

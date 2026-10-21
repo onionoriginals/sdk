@@ -194,7 +194,7 @@ type WitnessEntry = { versionId: string; proof: unknown[] };
 export const MAX_WITNESS_DEPTH = 64;
 
 /** True when `value` nests arrays and objects more than `max` levels deep (iterative, so it never overflows). */
-function deeperThan(value: unknown, max: number): boolean {
+export function deeperThan(value: unknown, max: number): boolean {
   const stack: Array<[unknown, number]> = [[value, 0]];
   while (stack.length > 0) {
     const [v, d] = stack.pop()!;
