@@ -14,7 +14,8 @@ The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
-| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/b8e8323560b8c313bed96dd8074daf2b1cf374e0/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@b8e8323560b8c313bed96dd8074daf2b1cf374e0`, Editor's Draft 0.1 | Asset state, author binding, operations, evidence packages, hosting, witnesses, anchoring and ownership. Rules are cited by ID (for example P5.3). |
+| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/a432aa67529cd86b4ab38d97cc91963be82acbc3/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@a432aa67529cd86b4ab38d97cc91963be82acbc3` (branch `q15-bitcoin-representation`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). |
+| Originals Protocol pull requests in the pinned stack | [#34](https://github.com/aviarytech/originals-spec/pull/34) `7072e1f8` only Bitcoin settles a fork (Q5) · [#35](https://github.com/aviarytech/originals-spec/pull/35) `4b945a4e` author keys are ordinary assertionMethod keys (Q6) · [#36](https://github.com/aviarytech/originals-spec/pull/36) `a432aa67` anchoring and the Bitcoin representation (Q15) · [#42](https://github.com/aviarytech/originals-spec/pull/42) did:btco version order and anchoring claims (merged into #36) · [#43](https://github.com/aviarytech/originals-spec/pull/43) scoped editors, shared-host saves and signer identity continuity (merged into #36 through #42) | #34–#36 are stacked and still open against `master`; #42 and #43 are merged into that stack, and `a432aa6` is #36's head with both. The pin moves to `master` only when #34–#36 merge. |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
 | VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `7bae699a` keys from a controller | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
@@ -41,24 +42,30 @@ ambiguous or conflict (S1–S8). Where a finding blocks implementation, work on
 that rule stops until the spec is corrected. Code never silently diverges from
 the pinned text.
 
-These owner decisions (plan section 6) depart from the pinned text until the
-spec is edited:
-- Only Bitcoin settles a fork; P6.6's abandonment declarations are dropped (S1).
-- Author keys are ordinary `assertionMethod` keys (S8).
+The owner decisions that departed from the earlier pin are now in the pinned
+stack, so none is a departure any more:
+- Only Bitcoin settles a fork (S1, Q5): originals-spec PR #34, P6.6 and P9.16.
+- Author keys are ordinary `assertionMethod` keys (S8, Q6): PR #35, P5.3 and
+  P5.11.
+- Asset logs use no witnesses (S9, Q14): PR #33, P9.8 and P9.9.
 
-Owner decision Q14 (S9: asset logs use no witnesses) is now in the pinned
-spec (originals-spec PR #33, P9.8 and P9.9), so it is no longer a departure.
-
-Rows these decisions make moot are `not-applicable` in the conformance matrix.
-
-Each departure is cited in code where it applies.
+Code that cites one of these decisions cites the spec rule as well.
 
 ## Conformance evidence
 
 [`originals-conformance.json`](originals-conformance.json) registers every row
-of the Originals spec's section 12 matrix under a stable ID (`C12-01` to
-`C12-84`), together with the delivery phase that covers it. A row counts as
-covered only when a test cites its ID. Until then it stays `todo`.
+of the Originals spec's section 12 matrix under a stable ID, together with its
+position in the pinned table and the delivery phase that covers it. A row
+counts as covered only when a test cites its ID. Until then it stays `todo`.
+
+IDs are kept across re-pins, so they need not equal table positions. At
+`a432aa6` the table has 139 rows:
+- Rows 1–91 keep their earlier IDs (row 41 is C12-44, row 57 is C12-59). PRs
+  #34–#36 removed the three abandonment-declaration rows that were
+  `not-applicable` (C12-24, C12-25, C12-37) and added ten rows; those take the
+  freed IDs in table order: row 50 is C12-24, row 83 is C12-25, row 84 is
+  C12-37, and rows 85–91 are C12-85 to C12-91.
+- Rows 92–112 (PR #42) and 113–139 (PR #43) are C12-92 to C12-139.
 
 Positive checkpoints come with positive and negative fixtures, pinned
 decisions and a dependency inventory. Fixtures, dry runs and disposable regtest

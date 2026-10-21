@@ -6,7 +6,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@b8e8323560b8c313bed96dd8074daf2b1cf374e0` | Editor's Draft 0.1; re-pinned from `d64fdbe` after PR #33 (Q14), which renumbered §12 rows from C12-34 on |
+| Originals Protocol | `aviarytech/originals-spec@a432aa67529cd86b4ab38d97cc91963be82acbc3` | Editor's Draft 0.1, the head of the open #34–#36 stack (Q5, Q6, Q15) with #42 and #43 merged into it; re-pinned from `b8e8323` (PR #33, Q14). §12 grows to 139 rows; IDs are kept and the mapping is in `specs/README.md` |
 | VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `7bae699a` | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |

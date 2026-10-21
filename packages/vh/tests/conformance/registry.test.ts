@@ -8,7 +8,7 @@ import { join } from "node:path";
  * A row an owner decision makes moot is not-applicable, names the decision in
  * its note, and is cited by no test.
  */
-interface Row { id: string; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string }
+interface Row { id: string; position: number; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string }
 const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as { rows: Row[] };
 
 function testFiles(dir: string): string[] {
@@ -26,7 +26,7 @@ const cited = new Map<string, Set<string>>();
 for (const root of roots) {
   for (const file of testFiles(join(repo, root))) {
     if (file.endsWith("registry.test.ts")) continue;
-    for (const [id] of readFileSync(file, "utf8").matchAll(/C12-\d{2}/g)) {
+    for (const [id] of readFileSync(file, "utf8").matchAll(/\bC12-\d{2,3}\b/g)) {
       const files = cited.get(id) ?? new Set<string>();
       files.add(file.slice(repo.length));
       cited.set(id, files);
@@ -35,9 +35,13 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  test("registers all 84 rows with unique ids", () => {
-    expect(registry.rows.length).toBe(84);
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(84);
+  // The pinned table (originals-spec a432aa6) has 139 rows. Ids are stable across re-pins, so
+  // they differ from table positions; each row records its position in the pinned table.
+  test("registers all 139 rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(139);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(139);
+    expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
+    for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 
   test("every cited row exists and is marked partial or covered, with the citing files", () => {

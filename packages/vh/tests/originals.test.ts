@@ -326,7 +326,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     failedWith(await report([genesis], [alice]), 0, "AUTHOR_VM_TYPE", "author-binding");
   });
 
-  test("P5.11: an update key of the author DID's own log cannot sign Originals", async () => {
+  test("C12-24: an update key of the author DID's own log cannot sign Originals (P5.3, P5.11)", async () => {
     const alice = await VhAuthor.create([]);
     await alice.rotate([{ fragment: "update", signer: alice.update }]);
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("update"), sign: alice.signer(alice.update, "update") });
