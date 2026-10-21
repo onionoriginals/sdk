@@ -119,21 +119,34 @@ export class RegtestProvider implements OrdinalsProvider {
 
   async estimateFee(): Promise<number> { await this.assertNetwork(); return this.feeRate; }
 
-  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; confirmations: number; blockHeight?: number; blockHash?: string }> {
+  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; confirmations: number; blockHeight?: number; blockHash?: string; inMempool?: boolean }> {
     if (!TXID.test(txid)) throw new Error('Invalid transaction id');
     await this.assertNetwork();
+    // Unconfirmed: ask the mempool itself, since -txindex still finds a
+    // transaction whose block was reorganised out.
+    const unconfirmed = async () => ({ confirmed: false, confirmations: 0, inMempool: await this.inMempool(txid) });
     try {
       const tx = await this.rpc<{ confirmations?: number; blockhash?: string }>('getrawtransaction', [txid, true]);
       const confirmations = Math.max(0, tx.confirmations ?? 0);
-      if (!confirmations || !tx.blockhash) return { confirmed: false, confirmations: 0 };
+      if (!confirmations || !tx.blockhash) return await unconfirmed();
       const header = await this.rpc<{ height: number; confirmations: number }>('getblockheader', [tx.blockhash]);
-      if (header.confirmations < 1) return { confirmed: false, confirmations: 0 };
+      if (header.confirmations < 1) return await unconfirmed();
       // blockhash is the real block IDENTITY — kept alongside height so a
       // caller can detect an ordinary reorg that replaces the block at a
       // given height with a different one (#567).
       return { confirmed: true, confirmations, blockHeight: header.height, blockHash: tx.blockhash };
     } catch (error) {
-      if ((error as { code?: number }).code === -5) return { confirmed: false, confirmations: 0 };
+      if ((error as { code?: number }).code === -5) return { confirmed: false, confirmations: 0, inMempool: false };
+      throw error;
+    }
+  }
+
+  private async inMempool(txid: string): Promise<boolean> {
+    try {
+      await this.rpc('getmempoolentry', [txid]);
+      return true;
+    } catch (error) {
+      if ((error as { code?: number }).code === -5) return false;
       throw error;
     }
   }

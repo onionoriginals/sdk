@@ -4,7 +4,7 @@
  * and ord 0.29.0.
  */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as btc from "@scure/btc-signer";
@@ -17,7 +17,10 @@ import type { OrdinalsProvider } from "../../../src/adapters/types.js";
 import type { BitcoinNetwork, SatSnapshot } from "../../../src/bitcoin/sat-snapshot-types.js";
 import type { BitcoinSigner } from "../../../src/types/common.js";
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip } from "../../../src/originals/index.js";
-import { catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeInscriptionOnSat, transferHandoff, verifyHandoff } from "../../../src/originals/bitcoin-writer.js";
+import {
+  catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeEntryInscription, resumeInscriptionOnSat, submitPreparedInscriptionOnSat, transferHandoff, verifyHandoff,
+  type EntryInscriptionParams,
+} from "../../../src/originals/bitcoin-writer.js";
 import { fileRecoveryStore } from "../../../src/originals/fs-store.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -151,18 +154,25 @@ const fee = { txid: "dd".repeat(32), vout: 1, value: 100_000, scriptPubKey: hex.
 const parse = (raw: string) => btc.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true, allowUnknownOutputs: true });
 const inscribed = (p: PreparedInscriptionOnSat) => new TextDecoder().decode(parseWitness(parse(p.revealTxHex).getInput(0).finalScriptWitness!)![0].body);
 
-/** A node: reads SAT as `read`, confirms the holder and the txids in `confirmed`, records broadcasts. */
-function node(read: SatSnapshot, confirmed: string[] = []) {
+/**
+ * A node: reads SAT as `read`, confirms the holder and the txids in `confirmed`, records broadcasts.
+ * With `seesMempool` it reports `inMempool` for unconfirmed txids: true for `mempool` and anything it
+ * was sent, false otherwise; without it, it cannot tell.
+ */
+function node(read: SatSnapshot, confirmed: string[] = [], { mempool = [], seesMempool = false }: { mempool?: string[]; seesMempool?: boolean } = {}) {
   const sent: string[] = [];
   const known = new Set([holder.txid, ...confirmed]);
+  const pool = new Set(mempool);
   const p = {
     getFirstSatOfOutput: () => Promise.resolve(SAT),
     getSatSnapshot: () => Promise.resolve(read),
-    getTransactionStatus: (txid: string) => Promise.resolve(known.has(txid) ? { confirmed: true, confirmations: 3 } : { confirmed: false }),
-    broadcastTransaction: (raw: string) => (sent.push(raw), Promise.resolve(parse(raw).id)),
+    getTransactionStatus: (txid: string) => Promise.resolve(known.has(txid) ? { confirmed: true, confirmations: 3 } : seesMempool ? { confirmed: false, inMempool: pool.has(txid) } : { confirmed: false }),
+    broadcastTransaction: (raw: string) => (sent.push(raw), pool.add(parse(raw).id), Promise.resolve(parse(raw).id)),
   } as unknown as OrdinalsProvider;
   return { provider: p, sent };
 }
+/** A node that can see its mempool (`inMempool`), holding `mempool`. */
+const seeing = (read: SatSnapshot, confirmed: string[] = [], mempool: string[] = []) => node(read, confirmed, { mempool, seesMempool: true });
 
 function recovery() {
   const records = new Map<string, InscriptionRecoveryRecord>();
@@ -175,8 +185,8 @@ function recovery() {
   return { records, store, put, ids: () => [...records.keys()] };
 }
 
-const pairFor = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, versionId?: string) =>
-  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}) });
+const pairFor = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, versionId?: string, extra: Partial<EntryInscriptionParams> = {}) =>
+  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}), ...extra });
 
 const step = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, r: ReturnType<typeof recovery>) =>
   catchUp({ sdk, did, provider: p, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
@@ -449,11 +459,13 @@ describe("C12-100: before inscribing the anchoring entry the SDK verifies it; th
     expect((await readAnchored(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...unread })).publication).toBe("not-anchored");
     r.put(pair.prepared, "reveal_broadcast");
     const recorded = { recoveryStore: r.store, recoveryIds: r.ids() };
-    const pending = await readAnchored(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...recorded });
+    // Pending only while the node shows the pair (here, in its mempool).
+    const out = () => seeing(snapshot([]), [], [pair.prepared.commitTxId, pair.prepared.revealTxId]).provider;
+    const pending = await readAnchored(sdk, did, { provider: out(), clock: blocks(), index: INDEX, ...recorded });
     expect(pending.publication).toBe("pending-bitcoin-acceptance");
     expect(pending.current).toBe(false);
-    expect((await nextPendingEntry(sdk, did, { provider: node(snapshot([])).provider, clock: blocks(), index: INDEX, ...recorded })).publication).toBe("pending-bitcoin-acceptance");
-    const waiting = await step(sdk, did, node(snapshot([])).provider, r);
+    expect((await nextPendingEntry(sdk, did, { provider: out(), clock: blocks(), index: INDEX, ...recorded })).publication).toBe("pending-bitcoin-acceptance");
+    const waiting = await step(sdk, did, out(), r);
     expect(waiting).toMatchObject({ action: "wait-for-confirmation", versionId: idOf(all[1]), pending: { publication: "pending-bitcoin-acceptance" } });
     // Mined but not yet indexed: still pending.
     const mined = node(snapshot([]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
@@ -505,5 +517,180 @@ describe("transfer handoff: what the sender holds that Bitcoin does not (P9.18)"
     expect(read.report.authorBinding.status).toBe("valid");
     expect(read.report.identityEvidence.status).toBe("complete");
     expect(read.report.resources.status).toBe("available");
+  });
+});
+
+describe("recovery review of the writer: retries, liveness and damaged records (P9.4, P9.6, P9.18)", () => {
+  test("C12-100: a recorded anchoring pair is verified again before it is resumed; once the author key is removed it is refused and nothing is sent (P9.18)", async () => {
+    const { alice, sdk, did } = await edited();
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    r.put(pair.prepared, "commit_broadcast_unknown"); // persisted, then the process died before the commit went out
+    await alice.rotate([{ fragment: "other", secret: seed(77) }]);
+    const chain = seeing(snapshot([]));
+    const plan = await step(sdk, did, chain.provider, r);
+    expect(plan).toMatchObject({ action: "refused", versionId: pair.versionId, recoveryId: pair.prepared.commitTxId, commit: "not-observed", ifRevealed: "ignored-by-bitcoin", error: { code: "ANCHORING_NOT_VERIFIED" } });
+    const resume = () => resumeEntryInscription({ sdk, did, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids(), recoveryId: pair.prepared.commitTxId });
+    await expect(resume()).rejects.toMatchObject({ code: "NOT_RESUMABLE", details: { step: "refused", cause: "ANCHORING_NOT_VERIFIED", commit: "not-observed" } });
+    expect(chain.sent).toEqual([]);
+    // The commit is already mined: the sat waits in its output, and the reveal would be ignored by Bitcoin. Said so; still nothing sent.
+    const mined = seeing(snapshot([]), [pair.prepared.commitTxId]);
+    expect(await step(sdk, did, mined.provider, r)).toMatchObject({ action: "refused", commit: "confirmed", ifRevealed: "ignored-by-bitcoin" });
+    expect(mined.sent).toEqual([]);
+  });
+
+  test("before the anchor is accepted, a pair whose sat has moved on is neither waited on, resumed, nor labelled pending", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const moved = snapshot([]);
+    moved.ownership = { owner: "bcrt1qsomeoneelse", satpoint: `${"ff".repeat(32)}:0:0` };
+    for (const state of ["reveal_broadcast", "commit_broadcast_unknown", "prepared"] as const) {
+      const r = recovery();
+      r.put(pair.prepared, state);
+      expect(await step(sdk, did, node(moved).provider, r)).toMatchObject({ action: "prepare", versionId: pair.versionId, pending: { publication: "not-anchored" } });
+    }
+  });
+
+  test("among several live pairs for one entry the choice is deterministic: furthest along on the network, then lowest recovery id", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const pairs = [await pairFor(sdk, did, node(snapshot([])).provider), await pairFor(sdk, did, node(snapshot([])).provider)];
+    const [low, high] = pairs.sort((a, b) => (a.prepared.commitTxId < b.prepared.commitTxId ? -1 : 1));
+    const r = recovery();
+    r.put(high.prepared, "prepared");
+    r.put(low.prepared, "prepared");
+    const plan = (p: OrdinalsProvider, ids: string[]) => catchUp({ sdk, did, provider: p, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: ids });
+    for (const ids of [r.ids(), [...r.ids()].reverse()]) {
+      expect(await plan(seeing(snapshot([])).provider, ids)).toMatchObject({ action: "resume", recoveryId: low.prepared.commitTxId });
+      // The pair whose commit the node holds wins over a lower id.
+      expect(await plan(seeing(snapshot([]), [], [high.prepared.commitTxId]).provider, ids))
+        .toMatchObject({ action: "resume", recoveryId: high.prepared.commitTxId, pending: { publication: "pending-bitcoin-acceptance" } });
+    }
+  });
+
+  test("C12-100: a pair whose commit was rejected is submitted-unobserved, not pending Bitcoin acceptance; one never sent is not anchored (P9.4, P9.18)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const r = recovery();
+    const rejecting = { ...seeing(snapshot([])).provider, broadcastTransaction: () => Promise.reject(new Error("min relay fee not met")) } as unknown as OrdinalsProvider;
+    expect((await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider: rejecting, recoveryStore: r.store })).broadcast).toBe("commit_broadcast_unknown");
+    const read = async (p: OrdinalsProvider, rec = r) => (await readAnchored(sdk, did, { provider: p, clock: blocks(), index: INDEX, recoveryStore: rec.store, recoveryIds: rec.ids() })).publication;
+    expect(await read(seeing(snapshot([])).provider)).toBe("submitted-unobserved");
+    expect(await read(node(snapshot([])).provider)).toBe("submitted-unobserved"); // a node that cannot see its mempool shows nothing either
+    expect(await read(seeing(snapshot([]), [], [pair.prepared.commitTxId]).provider)).toBe("pending-bitcoin-acceptance");
+    expect(await read(seeing(snapshot([]), [pair.prepared.commitTxId]).provider)).toBe("pending-bitcoin-acceptance");
+    expect(await step(sdk, did, seeing(snapshot([])).provider, r)).toMatchObject({ action: "resume", recoveryId: pair.prepared.commitTxId, pending: { publication: "submitted-unobserved" } });
+    const never = recovery();
+    never.put(pair.prepared, "prepared");
+    expect(await read(seeing(snapshot([])).provider, never)).toBe("not-anchored");
+  });
+
+  test("malformed records, and records whose declared txids do not match their bytes, are skipped and reported, never a TypeError", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const read = snapshot([anchorBody(all)]);
+    const pair = await pairFor(sdk, did, node(read).provider);
+    const r = recovery();
+    const bare = "aa".repeat(32);
+    r.records.set(bare, { recoveryId: bare } as unknown as InscriptionRecoveryRecord);
+    // Declares a confirmed, unrelated txid as its reveal: it would otherwise be waited on forever.
+    r.put({ ...pair.prepared, revealTxId: holder.txid, inscriptionId: `${holder.txid}i0` }, "reveal_broadcast");
+    const plan = await step(sdk, did, node(read, [holder.txid]).provider, r);
+    expect(plan).toMatchObject({ action: "prepare", versionId: idOf(all[2]) });
+    expect([...plan.pending.recoveryIssues].sort((a, b) => (a.recoveryId < b.recoveryId ? -1 : 1))).toEqual(
+      [bare, pair.prepared.commitTxId].sort().map((recoveryId) => ({ recoveryId, code: "INVALID_INSCRIPTION_RECOVERY", message: expect.any(String) })),
+    );
+  });
+
+  test("one damaged record in a shared recovery directory is reported per record and blocks no Original", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const read = snapshot([anchorBody(all)]);
+    const dir = mkdtempSync(join(tmpdir(), "originals-recovery-"));
+    try {
+      writeFileSync(join(dir, `${"bb".repeat(32)}.json`), "{garbage");
+      const pair = await pairFor(sdk, did, node(read).provider);
+      await fileRecoveryStore(dir).save({ recoveryId: pair.prepared.commitTxId, prepared: pair.prepared, broadcast: "commit_broadcast_unknown" });
+      const plan = await catchUp({ sdk, did, provider: seeing(read).provider, clock: blocks(), index: INDEX, recoveryStore: fileRecoveryStore(dir) });
+      expect(plan).toMatchObject({ action: "resume", recoveryId: pair.prepared.commitTxId });
+      const damaged = [{ recoveryId: "bb".repeat(32), code: "RECOVERY_RECORD_DAMAGED", message: expect.any(String) }];
+      expect(plan.pending.recoveryIssues).toEqual(damaged);
+      const view = await readAnchored(sdk, did, { provider: seeing(read).provider, clock: blocks(), index: INDEX, recoveryStore: fileRecoveryStore(dir) });
+      expect(view.recoveryIssues).toEqual(damaged);
+      expect(view.publication).toBe("anchored");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a second pair for an entry whose pair can still land is refused unless it names the pair it replaces (P9.6)", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const read = snapshot([anchorBody(all)]);
+    const r = recovery();
+    const first = await pairFor(sdk, did, node(read).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    r.put(first.prepared, "reveal_broadcast");
+    await expect(pairFor(sdk, did, node(read).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ category: "stale-parent", code: "PAIR_IN_FLIGHT", details: { recoveryIds: [first.prepared.commitTxId] } });
+    const replacement = await pairFor(sdk, did, node(read).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids(), replaces: [first.prepared.commitTxId] });
+    expect(replacement.versionId).toBe(first.versionId);
+    expect(replacement.prepared.commitTxId).not.toBe(first.prepared.commitTxId);
+    // Once the sat has moved on, the first pair cannot land and no longer blocks.
+    const moved = snapshot([anchorBody(all)]);
+    moved.ownership = { owner: "bcrt1qholder", satpoint: `${"ff".repeat(32)}:0:0` };
+    expect((await pairFor(sdk, did, node(moved).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() })).versionId).toBe(first.versionId);
+  });
+
+  test("C12-40: an inscription the read shows unconfirmed is waited on, never listed as replaced (P9.13)", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider);
+    r.put(pair.prepared, "reveal_broadcast");
+    const read = snapshot([anchorBody(all), { line: all[2], id: pair.prepared.inscriptionId, height: 20 }]);
+    (read.publications[1] as { confirmed: boolean }).confirmed = false; // the index has not caught up with the node
+    const plan = await step(sdk, did, node(read, [pair.prepared.commitTxId, pair.prepared.revealTxId]).provider, r);
+    expect(plan.pending.view.report.anchoring?.ignored.map((i) => i.reason)).toEqual(["unconfirmed"]);
+    expect(plan).toMatchObject({ action: "wait-for-confirmation", reason: "not-indexed", recoveryId: pair.prepared.commitTxId });
+  });
+
+  test("C12-40: a broadcast pair the node no longer holds is resumed as the same pair; without a mempool view it is waited on (P9.6)", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const read = snapshot([anchorBody(all)]);
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(read).provider);
+    r.put(pair.prepared, "reveal_broadcast");
+    expect(await step(sdk, did, node(read).provider, r)).toMatchObject({ action: "wait-for-confirmation", reason: "unconfirmed" });
+    expect(await step(sdk, did, seeing(read, [], [pair.prepared.commitTxId, pair.prepared.revealTxId]).provider, r)).toMatchObject({ action: "wait-for-confirmation", reason: "unconfirmed" });
+    // Evicted: neither transaction in the mempool or the chain. Rebroadcast the same bytes.
+    const evicted = seeing(read);
+    expect(await step(sdk, did, evicted.provider, r)).toMatchObject({ action: "resume", recoveryId: pair.prepared.commitTxId, broadcast: "reveal_broadcast" });
+    const resumed = await resumeEntryInscription({ sdk, did, provider: evicted.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids(), recoveryId: pair.prepared.commitTxId });
+    expect(resumed.inscriptionId).toBe(pair.prepared.inscriptionId);
+    expect(evicted.sent).toEqual([pair.prepared.signedCommitHex, pair.prepared.revealTxHex]);
+    expect(await step(sdk, did, evicted.provider, r)).toMatchObject({ action: "wait-for-confirmation", reason: "unconfirmed" });
+    // The reveal evicted after its commit was mined: the reveal alone goes again.
+    const half = seeing(read, [pair.prepared.commitTxId]);
+    expect(await step(sdk, did, half.provider, r)).toMatchObject({ action: "resume", recoveryId: pair.prepared.commitTxId });
+  });
+
+  test("indexes that disagree on the sat never lead to a second anchor being prepared (P9.10)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const disputed = [`${"d1".repeat(32)}i0`];
+    // Two indexes' reads merged: placement of an inscription is disputed, so anchoring is unverified.
+    const merged = new Proxy(sdk, {
+      get(target, key) {
+        if (key === "get") {
+          return async (...args: Parameters<OriginalsSDK["get"]>) => {
+            const view = await target.get(...args);
+            return { ...view, report: { ...view.report, anchoring: { ...view.report.anchoring!, status: "unverified", disputed } } };
+          };
+        }
+        const value = Reflect.get(target, key, target) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    expect(await step(merged, did, node(snapshot([])).provider, recovery()))
+      .toMatchObject({ action: "wait-for-bitcoin", reason: "indexes-disagree", disputed, pending: { publication: "unverified" } });
   });
 });

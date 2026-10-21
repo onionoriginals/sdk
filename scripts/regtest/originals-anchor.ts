@@ -32,6 +32,10 @@
  *     anchoring entry (Bob's entry inside it, his identity evidence verified
  *     first), then Alice's edit, then Bob's editor entry, one per later block;
  *     the holder inscribes Bob's entry and Bitcoin accepts it (P5.16, P9.12).
+ *     A reorganisation then replaces the block holding Alice's edit: catchUp
+ *     re-reads the accepted head (back to the anchor), re-derives the queue
+ *     and waits on the recorded pair back in the mempool, preparing nothing;
+ *     the next block includes it again.
  *  9. Fresh readers: each Original verifies from its sat alone, with no copy
  *     of the log, plus the off-chain signer DID histories (P9.17, P9.18); and
  *     a recipient of the sat verifies the sender's handoff (resource bytes and
@@ -379,7 +383,27 @@ try {
   const early2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [await holdingOf(second2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD });
   assert.deepEqual(early2Pair.carries, [early.original.checkpoint]);
   assert.equal((await submitPreparedInscriptionOnSat({ prepared: early2Pair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
-  await env.mine();
+  const early2Block = (await env.mine())[0];
+  assert.equal((await expectStep(did2, 'prepare', bobAfter.original.checkpoint)).pending.accepted, early.original.checkpoint);
+  // A reorganisation during catch-up: the block holding Alice's edit is replaced by empty ones, so its
+  // commit and reveal fall back to the mempool. catchUp re-derives the queue from the head Bitcoin
+  // shows now and waits on the recorded pair: nothing prepared, the next entry not skipped (P9.4, P9.13).
+  const tip2 = (await env.rpc<{ blocks: number }>('getblockchaininfo')).blocks;
+  await env.rpc('invalidateblock', [early2Block]);
+  while ((await env.rpc<{ blocks: number }>('getblockchaininfo')).blocks <= tip2) await env.rpc('generateblock', [wallet.address!, []]);
+  await env.sync();
+  const reorged2 = await expectStep(did2, 'wait-for-confirmation', early.original.checkpoint);
+  assert.equal(reorged2.reason, 'unconfirmed');
+  assert.equal(reorged2.recoveryId, early2Pair.prepared.commitTxId, 'the recorded pair is waited on, not prepared again');
+  assert.equal(reorged2.pending.accepted, anchored2.original.checkpoint, 'the accepted head is re-read: back to the anchor');
+  assert.deepEqual(reorged2.pending.queue, [early.original.checkpoint, bobAfter.original.checkpoint]);
+  assert.equal(reorged2.pending.publication, 'anchored');
+  assert.ok((await provider.getTransactionStatus(early2Pair.prepared.revealTxId)).inMempool, 'the reveal is back in the mempool');
+  const early2Again = (await env.mine())[0];
+  evidence.reorgDuringCatchUp = {
+    invalidated: early2Block, reincludedIn: early2Again, waitedOn: reorged2.recoveryId,
+    acceptedAfterReorg: reorged2.pending.accepted, queueAfterReorg: reorged2.pending.queue,
+  };
   // The holder inscribes Bob's editor entry like any other (P9.12, P5.16).
   const third2 = await expectStep(did2, 'prepare', bobAfter.original.checkpoint);
   assert.equal(third2.pending.accepted, early.original.checkpoint);

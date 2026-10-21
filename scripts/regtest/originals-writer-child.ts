@@ -9,7 +9,8 @@
  *           reveal is sent; prints {"event":"halted-before-reveal",...} and
  *           waits to be killed (SIGKILL by the parent)
  *   step    one `catchUp` step, read only (no broadcast)
- *   resume  `catchUp`, which must say resume, then `resumeInscriptionOnSat`
+ *   resume  `catchUp`, which must say resume, then `resumeEntryInscription`
+ *           (which re-verifies the log through the entry first, P9.18)
  *   read    a fresh reader: a new empty store, no author list, only the
  *           author's evidence package and the sat read from ord and Core
  *
@@ -33,7 +34,7 @@ import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { parseBtcoAlias, verifyOriginal } from '@originals/vh/originals';
 import { InscriptionClock, OriginalsSDK, readEvidence, satEvidence } from '../../packages/sdk/src/originals/index';
 import { FileStore, fileRecoveryStore } from '../../packages/sdk/src/originals/fs-store';
-import { catchUp, prepareEntryInscription, resumeInscriptionOnSat, submitPreparedInscriptionOnSat, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
+import { catchUp, prepareEntryInscription, resumeEntryInscription, submitPreparedInscriptionOnSat, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
 
 /** The one index every read uses, reported as used (P9.11). */
 export const ORD_INDEX = 'ord-0.29.0-regtest';
@@ -80,8 +81,9 @@ const summary = (step: CatchUpStep) => ({
   ...('recoveryId' in step ? { recoveryId: step.recoveryId } : {}),
   ...('broadcast' in step ? { broadcast: step.broadcast } : {}),
   ...('reason' in step ? { reason: step.reason } : {}),
+  ...(step.action === 'refused' ? { commit: step.commit, ifRevealed: step.ifRevealed, error: step.error.code } : {}),
   committed: step.pending.committed, accepted: step.pending.accepted, acceptedHeight: step.pending.acceptedHeight, publication: step.pending.publication,
-  queue: step.pending.queue, current: step.pending.view.current,
+  queue: step.pending.queue, current: step.pending.view.current, recoveryIssues: step.pending.recoveryIssues,
 });
 
 function need(name: string): string {
@@ -151,7 +153,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
   if (mode === 'resume') {
     const plan = await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore });
     if (plan.action !== 'resume') throw new Error(`expected catchUp to resume a recorded pair, got ${JSON.stringify(summary(plan))}`);
-    const resumed = await resumeInscriptionOnSat({ recoveryId: plan.recoveryId, provider, recoveryStore });
+    const resumed = await resumeEntryInscription({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore, recoveryId: plan.recoveryId });
     const after = await catchUp({ sdk, did, provider, clock, index: ORD_INDEX, recoveryStore });
     return {
       ...base, plan: summary(plan),

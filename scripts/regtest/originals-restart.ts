@@ -24,6 +24,12 @@
  *     resource bytes, the network, the confirmation depth and the trust
  *     boundary (one ord index, reported; ownership provisional). Freshness is
  *     reported as not established (section 7), so it does not claim current.
+ *  6. A second kill, resumed before any block: the author edits again, a
+ *     writer child is killed after the commit broadcast, and with the commit
+ *     still unconfirmed in the mempool a fresh child's `catchUp` says resume
+ *     (the anchor accepted, the pair live in the mempool) and a restarted
+ *     writer resumes it through `resumeEntryInscription`: the same pair. One
+ *     block then confirms commit and reveal together and the head advances.
  *
  * The signer is a disposable local key, not Turnkey: live client-authorized
  * signing is not established here.
@@ -168,27 +174,32 @@ try {
   receipt.anchor = { versionId: anchorId, carries: anchorPair.carries, bodyBytes: anchorBody === null ? null : new TextEncoder().encode(anchorBody).length, publication: [unmined.publication, v1.publication], offChain: anchorPair.offChain, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscriptionId: anchorPair.prepared.inscriptionId, height: v1.report.anchoring?.anchor?.height };
 
   step('2: writer child submits the edit and is killed after the commit, before the reveal');
-  const fee = await fundUtxo();
-  const writer = Bun.spawn([process.execPath, CHILD, 'submit'], {
-    cwd: root, env: childEnv({ ORIGINALS_CHILD_DID: did, ORIGINALS_CHILD_WALLET_KEY: walletKey, ORIGINALS_CHILD_FEE_UTXO: JSON.stringify(fee) }),
-    stdout: 'pipe', stderr: 'inherit',
-  });
-  const halted = await (async () => {
-    const reader = writer.stdout.getReader();
-    const decoder = new TextDecoder();
-    let buffered = '';
-    const deadline = Date.now() + 120_000;
-    while (Date.now() < deadline) {
-      const chunk = await Promise.race([reader.read(), writer.exited.then(() => ({ done: true, value: undefined }))]);
-      if (chunk.value) buffered += decoder.decode(chunk.value, { stream: true });
-      for (const line of buffered.split('\n').slice(0, -1)) {
-        const event = JSON.parse(line) as Record<string, any>;
-        if (event.event === 'halted-before-reveal') { reader.releaseLock(); return event; }
+  /** Start a writer child that submits the next entry and halts after the commit, before the reveal. */
+  const haltingWriter = async () => {
+    const fee = await fundUtxo();
+    const writer = Bun.spawn([process.execPath, CHILD, 'submit'], {
+      cwd: root, env: childEnv({ ORIGINALS_CHILD_DID: did, ORIGINALS_CHILD_WALLET_KEY: walletKey, ORIGINALS_CHILD_FEE_UTXO: JSON.stringify(fee) }),
+      stdout: 'pipe', stderr: 'inherit',
+    });
+    const halted = await (async () => {
+      const reader = writer.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), writer.exited.then(() => ({ done: true, value: undefined }))]);
+        if (chunk.value) buffered += decoder.decode(chunk.value, { stream: true });
+        for (const line of buffered.split('\n').slice(0, -1)) {
+          const event = JSON.parse(line) as Record<string, any>;
+          if (event.event === 'halted-before-reveal') { reader.releaseLock(); return event; }
+        }
+        if (chunk.done) break;
       }
-      if (chunk.done) break;
-    }
-    throw new Error(`the writer child (pid ${writer.pid}) did not halt before the reveal`);
-  })();
+      throw new Error(`the writer child (pid ${writer.pid}) did not halt before the reveal`);
+    })();
+    return { writer, halted };
+  };
+  const { writer, halted } = await haltingWriter();
   check('R04', 'the writer child reports the record persisted before the reveal, with the commit in the mempool',
     halted.pid === writer.pid && halted.versionId === editId && halted.persisted === 'reveal_broadcast_unknown' && halted.commitInMempool === true,
     { persisted: halted.persisted, commitInMempool: halted.commitInMempool });
@@ -285,6 +296,38 @@ try {
     tip: read.snapshot.tip, anchor: a?.anchor, accepted: a?.accepted, ownership: read.ownership,
     resources: versions, fromBitcoinAlone: alone,
   };
+
+  step('6: a second writer is killed after the commit; resumed before any block confirms it');
+  const lastEdit = await sdk.edit(did, { parent: editId, name: 'Harbor after restart, edited again', author, signer });
+  const lastId = lastEdit.original.checkpoint;
+  const second = await haltingWriter();
+  check('R32', 'the second writer child halts with the record persisted and the commit in the mempool',
+    second.halted.versionId === lastId && second.halted.persisted === 'reveal_broadcast_unknown' && second.halted.commitInMempool === true,
+    { persisted: second.halted.persisted, commitInMempool: second.halted.commitInMempool });
+  second.writer.kill('SIGKILL');
+  await second.writer.exited;
+  processes.push({ role: 'second writer (killed)', mode: 'submit', pid: second.writer.pid, exitCode: second.writer.exitCode, signal: second.writer.signalCode ?? null });
+  const killed2 = { commitTxId: second.halted.commitTxId as string, revealTxId: second.halted.revealTxId as string, inscriptionId: second.halted.inscriptionId as string };
+  check('R33', 'killed by SIGKILL; the commit is unconfirmed in the mempool and the reveal never reached the node',
+    second.writer.signalCode === 'SIGKILL' && (await inMempool(killed2.commitTxId)) && !(await confirmed(killed2.commitTxId)) && !(await inMempool(killed2.revealTxId)),
+    { signal: second.writer.signalCode });
+  const unmined2 = await runChild('fresh reader of the writer stores', 'step', { ORIGINALS_CHILD_DID: did });
+  check('R34', 'with the commit unconfirmed, a fresh catchUp resumes the recorded pair (P9.6), the head still the first edit (P9.4)',
+    unmined2.step.action === 'resume' && unmined2.step.recoveryId === killed2.commitTxId && unmined2.step.versionId === lastId && unmined2.step.accepted === editId && unmined2.step.publication === 'anchored',
+    unmined2.step);
+  const resumed2 = await runChild('restarted writer', 'resume', { ORIGINALS_CHILD_DID: did });
+  check('R35', 'the restarted writer resumes the identical pair through resumeEntryInscription (re-verified, P9.18)',
+    resumed2.resumed.commitTxId === killed2.commitTxId && resumed2.resumed.revealTxId === killed2.revealTxId && resumed2.resumed.inscriptionId === killed2.inscriptionId &&
+    resumed2.resumed.broadcast === 'reveal_broadcast' && resumed2.resumed.error === null && resumed2.pid !== second.writer.pid, resumed2.resumed);
+  check('R36', 'commit and reveal both wait in the mempool; catchUp waits rather than preparing again',
+    (await inMempool(killed2.commitTxId)) && (await inMempool(killed2.revealTxId)) && resumed2.after.action === 'wait-for-confirmation' && resumed2.after.reason === 'unconfirmed' && resumed2.after.recoveryId === killed2.commitTxId,
+    resumed2.after);
+  const [bothBlock] = await env.mine();
+  const done2 = await runChild('fresh reader of the writer stores', 'step', { ORIGINALS_CHILD_DID: did });
+  check('R37', 'one block confirms commit and reveal; the accepted head is the second edit, through the resumed pair',
+    (await confirmed(killed2.commitTxId)) && (await confirmed(killed2.revealTxId)) && done2.step.action === 'done' && done2.step.accepted === lastId && done2.step.recoveryIssues.length === 0,
+    done2.step);
+  receipt.unconfirmedResume = { killedPid: second.writer.pid, resumePid: resumed2.pid, ...killed2, beforeResume: unmined2.step, after: resumed2.after, block: bothBlock, head: done2.step.accepted };
   receipt.result = 'passed';
 } catch (error) {
   failure = error;

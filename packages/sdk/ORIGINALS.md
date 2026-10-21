@@ -587,16 +587,22 @@ const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, f
 pair.carries;   // the versionIds in the body: genesis..anchoring entry, or the one entry
 pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
 await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore }); // persists before each broadcast
-// after a crash: resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider, recoveryStore }) sends the same pair
+// after a crash: resumeEntryInscription({ sdk, did, ...read, recoveryStore, recoveryId }) sends the same pair once catchUp
+// says to (re-verified, P9.18); resumeInscriptionOnSat({ recoveryId, provider, recoveryStore }) is the unchecked rebroadcast.
+// Pass recoveryStore to prepareEntryInscription too: a pair for the same entry that can still land refuses a second
+// one (PAIR_IN_FLIGHT) unless `replaces: [recoveryId]` says it is a deliberate replacement (P9.6).
 const published = await readAnchored(sdk, did, { ...read, recoveryStore });  // what Bitcoin shows: the durable boundary (P9.4)
-published.publication; // "pending-bitcoin-acceptance" while the anchor is out but not shown; then "anchored" (P9.18)
+published.publication; // "pending-bitcoin-acceptance" while the anchor is observed but not shown; then "anchored" (P9.18)
+published.recoveryIssues; // damaged or inconsistent recovery records, skipped: [{ recoveryId, code, message }]
 const pending = await nextPendingEntry(sdk, did, read); // { committed, accepted, acceptedHeight, next, queue, remaining, publication }
 // Catching up, one step at a time, from a fresh read and the recorded pairs. A store with `list()`
 // (Node: fileRecoveryStore(dir) from `@originals/sdk/originals/fs`) finds them itself after a restart;
 // otherwise pass `recoveryIds` (their commit txids):
 const plan = await catchUp({ sdk, did, ...read, recoveryStore });
-// plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeInscriptionOnSat(plan.recoveryId))
+// plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeEntryInscription(plan.recoveryId))
 //            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
+//            | "wait-for-bitcoin" (indexes disagree: nothing is prepared) | "refused" (the recorded pair no longer
+//              verifies, P9.18: nothing is sent; plan.commit and plan.ifRevealed say what broadcasting it would do)
 // Or by hand: pass what an adapter read from the sat:
 // Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
 const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
@@ -624,7 +630,23 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   recorded pair for the next entry rather than preparing another, waits while
   its reveal is unconfirmed or not yet indexed, skips records for entries
   Bitcoin already accepted, and prepares a replacement only when Bitcoin
-  confirmed and ignored the earlier inscription (`replaces`). So each accepted
+  confirmed and ignored the earlier inscription for good (`replaces`; one the
+  read shows unconfirmed or disputed is waited on). A pair can still land
+  only while the sat read shows the sat in its funding input or its own
+  outputs, before the anchor is accepted as after; among several the one
+  furthest along on the network wins, then the lowest recovery id. A
+  broadcast pair the provider reports in neither its mempool nor the chain
+  (`inMempool: false`, evicted or rejected) is resumed as the same pair on
+  that read: resubmitting identical bytes is idempotent and spends nothing
+  new. Before a resume the log is verified through the entry again (P9.18);
+  a pair that no longer verifies is `refused`, never broadcast, with
+  `commit: "not-observed" | "mempool" | "confirmed"` (a confirmed commit
+  holds the sat until its reveal spends it, and that reveal would be
+  `ifRevealed: "ignored-by-bitcoin"`, or `"unverified"` when only evidence is
+  missing). While the indexes disagree on the sat (`unverified`), nothing is
+  prepared (`wait-for-bitcoin`). Each recovery record is validated (its
+  declared txids must be its bytes'); a damaged one is skipped and listed in
+  `recoveryIssues`, so one bad file in a shared directory blocks nothing. So each accepted
   inscription lands in a later block than the one before (P9.13), and a
   reorganisation re-derives the queue from the head Bitcoin shows. A head
   Bitcoin shows that the store does not hold is refused
@@ -662,11 +684,16 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   anchor's checks depend on its position (P5.13, P9.15, P9.16), so the result
   is labelled `publication: "pending-bitcoin-acceptance"` on `readAnchored`,
   `nextPendingEntry` and every `catchUp` step, as long as the recovery store
-  holds a broadcast pair of the anchoring body that can still land (unmined,
-  or mined but not yet indexed). Once Bitcoin shows it the label is
-  `anchored` and the Original verifies as anchored. Without a recovery store
-  the label cannot see the pair and reads `not-anchored`; `unverified` means
-  Bitcoin evidence is missing or disputed.
+  holds a pair of the anchoring body that can still land and that the node
+  shows: its commit or reveal confirmed (a confirmed reveal not yet indexed
+  included), or in its mempool where the provider reports `inMempool`
+  (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
+  pair submitted but not observed (rejected, evicted, or a provider without a
+  mempool view) is `submitted-unobserved`, never pending acceptance. Once
+  Bitcoin shows it the label is `anchored` and the Original verifies as
+  anchored. Without a recovery store the label cannot see the pair and reads
+  `not-anchored`; `unverified` means Bitcoin evidence is missing or
+  disputed.
 - **What Bitcoin will not hold (P9.18).** `pair.offChain` lists every resource
   version the log through the entry commits to (inscriptions carry only their
   descriptors) and every did:vh or did:webvh signer DID, author and editors,

@@ -26,6 +26,10 @@ export interface PreparedInscriptionOnSat {
 export type InscriptionBroadcastState = 'commit_broadcast' | 'reveal_broadcast' |
   'commit_broadcast_unknown' | 'reveal_broadcast_unknown';
 
+/** Every state a persisted record may be in. */
+export const INSCRIPTION_RECORD_STATES: ReadonlyArray<InscriptionRecoveryRecord['broadcast']> =
+  ['prepared', 'commit_broadcast', 'reveal_broadcast', 'commit_broadcast_unknown', 'reveal_broadcast_unknown'];
+
 export interface InscriptionRecoveryRecord {
   /** The locally computed commit txid. */
   recoveryId: string;
@@ -83,8 +87,12 @@ export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.T
   if (!schnorr.verify(signature, message, publicKey)) invalid('Recovery reveal signature is invalid.');
 }
 
-/** Check persisted identities and funding order before using stored spending bytes. */
-function validate(prepared: PreparedInscriptionOnSat): void {
+/**
+ * Check persisted identities and funding order before using stored spending
+ * bytes: the declared txids and inscription id must be the ones the stored hex
+ * computes to. Throws `INVALID_INSCRIPTION_RECOVERY` (a StructuredError).
+ */
+export function validatePreparedInscriptionOnSat(prepared: PreparedInscriptionOnSat): void {
   if (!prepared || prepared.version !== 1 || !['mainnet', 'testnet', 'regtest', 'signet'].includes(prepared.network) ||
       !validateSatoshiNumber(prepared.satoshi).valid || !Array.isArray(prepared.fundingUtxos) || !prepared.fundingUtxos.length) {
     invalid('Invalid prepared inscription schema.');
@@ -228,18 +236,18 @@ export async function submitPreparedInscriptionOnSat(params: {
 }): Promise<InscribeOnSatResult> {
   const { provider, recoveryStore } = params;
   const prepared = structuredClone(params.prepared);
-  validate(prepared);
+  validatePreparedInscriptionOnSat(prepared);
   if (!recoveryStore && typeof provider.submitInscription !== 'function') {
     throw new StructuredError('INSCRIPTION_RECOVERY_REQUIRED', 'Direct inscription broadcasting requires a durable recoveryStore.');
   }
   let record: InscriptionRecoveryRecord = { recoveryId: prepared.commitTxId, prepared, broadcast: 'prepared' };
   const saved = await recoveryStore?.load(record.recoveryId);
   if (saved) {
-    validate(saved.prepared);
+    validatePreparedInscriptionOnSat(saved.prepared);
     if (saved.recoveryId !== record.recoveryId || !samePrepared(saved.prepared, prepared)) {
       invalid('A different signed pair or identity is already stored under this recovery id.');
     }
-    if (!['prepared', 'commit_broadcast', 'reveal_broadcast', 'commit_broadcast_unknown', 'reveal_broadcast_unknown'].includes(saved.broadcast)) {
+    if (!INSCRIPTION_RECORD_STATES.includes(saved.broadcast)) {
       invalid('Invalid persisted broadcast state.');
     }
     record = structuredClone(saved);
