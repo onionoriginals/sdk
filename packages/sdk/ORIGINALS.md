@@ -639,7 +639,14 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   read needs (P5.13). The reader's budget (`snapshotBudget` on
   `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5
   per inscription the index lists, so a sat with many entries reads in full;
-  `maxInscriptions` (default 10,000) bounds it. `timeoutMs` defaults to
+  `maxListedInscriptions` (default 100,000; more is refused,
+  `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`) bounds it. At most `maxInscriptions`
+  (default 10,000) inscriptions have their body and metadata read, in listing
+  order, counting only the ones the read would fetch (with `bodies:
+  'originals'`, only Originals inscriptions); every later one is still listed
+  and placed, but reported observed but unread (`over-budget`), so
+  reinscribing the sat many times does not fail a read (PROVISIONAL).
+  `timeoutMs` defaults to
   30 seconds plus 250 ms per listed inscription, at most `maxTimeoutMs`
   (default 10 minutes); an explicit `timeoutMs` is kept as given. Each
   request has its own `requestTimeoutMs` (default 15 seconds,
@@ -652,6 +659,14 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   (`SAT_SNAPSHOT_BUDGET_EXCEEDED`, `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`). A
   holder who floods the sat past these bounds still costs an explicit
   incomplete result, never a wrong one; raise the budget to read it.
+  PROVISIONAL bound: an unread Originals inscription could be an entry, so
+  Originals-typed junk the holder adds is read from the Originals budgets and
+  fails the read closed once it exhausts them. About 192 Originals-typed
+  inscriptions of 350,000 bytes (some 67 MB of witness data) exhaust the
+  default `maxOriginalsBytes`, and more than 10,000 Originals-typed
+  inscriptions of any size exhaust `maxInscriptions`. A reader raises them
+  through `snapshotBudget` (`maxOriginalsBytes` up to 1 GiB,
+  `maxInscriptions` up to 100,000) to read such a sat.
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).
