@@ -812,6 +812,8 @@ export class OriginalsSDK {
     const retained: RetainedVersions = { authors: {} };
     const original = did ? await quietly(() => this.store.getRetained(did), undefined) : undefined;
     if (original) retained.original = original;
+    const anchor = did && this.store.getRetainedAnchor ? await quietly(() => this.store.getRetainedAnchor!(did), undefined) : undefined;
+    if (anchor) retained.anchor = anchor;
     for (const author of signerDidsOf(log)) {
       const version = await quietly(() => this.store.getRetained(author), undefined);
       if (version) retained.authors![author] = version;
@@ -829,6 +831,7 @@ export class OriginalsSDK {
   private async retain(report: OriginalsReport): Promise<void> {
     if (report.original && report.retain.original) await this.store.putRetained(report.original, report.retain.original);
     for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
+    if (report.original && report.retain.anchor && this.store.putRetainedAnchor) await this.store.putRetainedAnchor(report.original, report.retain.anchor);
   }
 
   /** Alias logs this store keeps for the aliases a log lists (stored with the DID evidence). */

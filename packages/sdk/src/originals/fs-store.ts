@@ -63,7 +63,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
-import type { AuthorDidEvidence } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { ClockStore } from "./bitcoin.js";
 import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
@@ -376,6 +376,7 @@ export class FileStore implements OriginalsStore {
     await mkdir(join(root, "resources"), { recursive: true });
     await mkdir(join(root, "authors"), { recursive: true });
     await mkdir(join(root, "retained"), { recursive: true });
+    await mkdir(join(root, "anchors"), { recursive: true });
     const key = await realpath(root);
     const shared = await FileStore.attach(root, key);
     const { writing } = shared;
@@ -393,7 +394,7 @@ export class FileStore implements OriginalsStore {
         await sweep(dir, await readdir(dir).catch(() => [] as string[]));
       }
     }
-    for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
+    for (const dir of ["resources", "authors", "retained", "anchors"]) await sweep(join(root, dir), await readdir(join(root, dir)));
     // Lock candidates a crashed opener left behind.
     for (const name of await readdir(root)) {
       const pid = Number(/^\.lock\.(?:break\.[0-9a-f]+\.)?(\d+)\.[0-9a-f]+\.new$/.exec(name)?.[1]);
@@ -589,6 +590,20 @@ export class FileStore implements OriginalsStore {
     });
     this.locks.set(key, run.catch(() => undefined));
     return run;
+  }
+
+  async getRetainedAnchor(did: string): Promise<RetainedAnchor | undefined> {
+    const text = await this.readText(join(this.root, "anchors", this.didFile(did)));
+    if (text === undefined) return undefined;
+    const record = JSON.parse(text) as { did?: unknown; anchor?: Partial<RetainedAnchor> };
+    const a = record.anchor;
+    return record.did === did && a && typeof a.inscription === "string" && typeof a.sat === "string" && (a.owner === null || typeof a.owner === "string")
+      ? { inscription: a.inscription, sat: a.sat, owner: a.owner }
+      : undefined;
+  }
+
+  async putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
+    return this.track(() => this.writeAtomically(join(this.root, "anchors"), this.didFile(did), JSON.stringify({ did, anchor })));
   }
 
   async putBranch(did: string, log: string): Promise<void> {
