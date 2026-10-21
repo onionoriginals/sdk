@@ -215,7 +215,8 @@ export class FileStore implements OriginalsStore {
     const dir = join(this.dirOf(did), "refused");
     await fs.mkdir(dir, { recursive: true });
     const name = this.didFile(refusedVersionId(refused));
-    if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, JSON.stringify(refused));
+    const existing = await this.readText(join(dir, name));
+    if (existing === undefined || (JSON.parse(existing) as StoredRefused).entry === refused.entry) await this.writeAtomically(dir, name, JSON.stringify(refused));
   }
 
   async getRefused(did: string): Promise<StoredRefused[]> {

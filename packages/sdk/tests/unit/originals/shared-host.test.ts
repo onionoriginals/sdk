@@ -110,7 +110,7 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     expect(sent.identities.map((i) => i.did)).toEqual([author.did]);
   });
 
-  test("row 131: a stale-parent answer keeps the draft and the refused candidate, labelled refused; local history does not advance (P6.8)", async () => {
+  test("C12-125: a stale-parent answer keeps the draft and the refused candidate, labelled refused; local history does not advance (P6.8)", async () => {
     const { b, did, parent, mine, refused } = await refusedOnB();
     expect(refused.status).toBe("stale-parent");
     if (refused.status !== "stale-parent") return;
@@ -131,7 +131,7 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     expect([...readZip(pkg.bytes).keys()]).not.toContain(`resources/${resourceDigest(MINE)}`);
   });
 
-  test("row 131: the refused candidate is never submitted again, committed or re-signed as history (P6.8)", async () => {
+  test("C12-125: the refused candidate is never submitted again, committed or re-signed as history (P6.8)", async () => {
     const { b, did, mine, signer, host, refused } = await refusedOnB();
     if (refused.status !== "stale-parent") throw new Error("expected a refusal");
     const before = host.submissions.length;
@@ -142,7 +142,7 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     expect((await b.refused(did)).length).toBe(1);
   });
 
-  test("row 132: reconcile fetches the new head, shows the signer the change from it, and the reconciled candidate is accepted (P6.8, P5.11)", async () => {
+  test("C12-126: reconcile fetches the new head, shows the signer the change from it, and the reconciled candidate is accepted (P6.8, P5.11)", async () => {
     const { b, did, author, signer, host, refused, theirs } = await refusedOnB();
     if (refused.status !== "stale-parent" || theirs.status !== "accepted") throw new Error("expected one acceptance and one refusal");
     const requests: SigningRequest[] = [];
@@ -164,10 +164,13 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     expect(requests[0].summary.changes).toEqual([{ resource: "photo", from: resourceDigest(THEIRS), to: resourceDigest(MINE) }]);
     expect(result.original.checkpoint).toBe(host.lines.length === 3 ? (parseJson(host.lines[2]) as { versionId: string }).versionId : "");
     expect(result.original.report.history.entries).toBe(3);
-    expect(await b.refused(did)).toEqual([]);
+    // The refused candidate is kept, labelled with the entry that carried its change; it is still never history (P6.8).
+    const kept = await b.refused(did);
+    expect(kept.map((r) => [r.label, r.reconciledAs])).toEqual([["refused", result.original.checkpoint]]);
+    await rejects(b.sign(kept[0].draft, signer), "stale-parent", "CANDIDATE_REFUSED");
   });
 
-  test("row 132: reconcile never merges or signs on its own (P6.8)", async () => {
+  test("C12-126: reconcile never merges or signs on its own (P6.8)", async () => {
     const { b, did, author, signer, host, refused } = await refusedOnB();
     if (refused.status !== "stale-parent") throw new Error("expected a refusal");
     await rejects(b.reconcile(did, { host, author, signer, change: undefined as never }), "invalid-evidence", "RECONCILE_CHANGE_REQUIRED");
@@ -186,7 +189,7 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     await rejects(b.reconcile(did, { host, refused: "9-unknown", author, signer, change: { name: "x" } }), "invalid-evidence", "REFUSED_NOT_FOUND");
   });
 
-  test("row 134: a retry after a lost acknowledgement returns the existing checkpoint and the current head; no second append (P6.4, P6.7)", async () => {
+  test("C12-128: a retry after a lost acknowledgement returns the existing checkpoint and the current head; no second append (P6.4, P6.7)", async () => {
     const { a, b, did, parent, author, signer, host } = await twoDevices();
     const candidate = await b.sign(await b.prepareEdit(did, { parent, resources: [{ id: "photo", bytes: MINE }], author }), signer);
     // The host accepts, but the answer never reaches device B.
