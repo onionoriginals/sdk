@@ -590,8 +590,9 @@ const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other
 const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read, recoveryStore });
 pair.carries;   // the versionIds in the body: genesis..anchoring entry, or the one entry
 pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
-// Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, P9.18),
-// then persists before each broadcast.
+// Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, the indexes
+// agree, the sat still in the pair's funding input; P9.6, P9.10, P9.18), then persists before each broadcast.
+// A replacement keeps the `replaces` it was prepared with (pair.replaces).
 await submitEntryInscription({ sdk, did, pair, ...read, provider, recoveryStore });
 // after a crash: resumeEntryInscription({ sdk, did, ...read, recoveryStore, recoveryId }) sends the same pair once catchUp
 // says to (re-verified, P9.18). submitPreparedInscriptionOnSat and resumeInscriptionOnSat, also exported, are the
@@ -606,7 +607,8 @@ const pending = await nextPendingEntry(sdk, did, read); // { committed, accepted
 const plan = await catchUp({ sdk, did, ...read, recoveryStore });
 // plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeEntryInscription(plan.recoveryId))
 //            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
-//            | "wait-for-bitcoin" (indexes disagree: nothing is prepared) | "refused" (the recorded pair no longer
+//            | "wait-for-bitcoin" (indexes disagree on the sat or its holder: nothing is prepared, sent or resumed;
+//              prepare and submit refuse INDEXES_DISAGREE) | "refused" (the recorded pair no longer
 //              verifies, P9.18: nothing is sent; plan.commit and plan.ifRevealed say what broadcasting it would do)
 // Or by hand: pass what an adapter read from the sat:
 // Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
@@ -651,7 +653,12 @@ received.report.ownership?.output;                           // compare with the
   holds the sat until its reveal spends it, and that reveal would be
   `ifRevealed: "ignored-by-bitcoin"`, or `"unverified"` when only evidence is
   missing). Reads compare every index given (`indexes`); while they
-  disagree on the sat (`unverified`), nothing is prepared (`wait-for-bitcoin`). Each recovery record is validated (its
+  disagree on the sat (`unverified` or `disputed` inscriptions) or on the
+  output holding it (`holders`), nothing is prepared, submitted or resumed:
+  `catchUp` says `wait-for-bitcoin` before looking at any recorded pair (so a
+  pair the sat may have left is never labelled `resume`), and
+  `prepareEntryInscription` and `submitEntryInscription` refuse with
+  `INDEXES_DISAGREE` (`incomplete-evidence`). Each recovery record is validated (its
   declared txids must be its bytes'); a damaged one is skipped and listed in
   `recoveryIssues`, so one bad file in a shared directory blocks nothing. So each accepted
   inscription lands in a later block than the one before (P9.13), and a
@@ -689,8 +696,13 @@ received.report.ownership?.output;                           // compare with the
   either; it stays a reported policy. Time passes before the pair is sent, so
   `submitEntryInscription` checks again before the first broadcast: the entry
   is still the next one Bitcoin can accept (`HEAD_NOT_NEXT`), no other pair
-  for it can still land (`PAIR_IN_FLIGHT`), the pair inscribes the stored
-  bytes (`PAIR_BODY_MISMATCH`) and the log still verifies through it.
+  for it can still land (`PAIR_IN_FLIGHT`; the `replaces` the pair was
+  prepared with still apply), the indexes agree (`INDEXES_DISAGREE`), the sat
+  read still shows the sat in the pair's funding input (`SAT_MOVED`, or
+  `SAT_HOLDER_UNKNOWN` when neither the read nor the funding output shows it;
+  ord names no holder for a sat without an inscription, so the funding output
+  is asked for its first sat), the pair inscribes the
+  stored bytes (`PAIR_BODY_MISMATCH`) and the log still verifies through it.
   `submitPreparedInscriptionOnSat` and `resumeInscriptionOnSat` skip all of
   that: send a pair promptly through them only right after preparing it, or
   to force a rebroadcast deliberately.
@@ -733,7 +745,8 @@ received.report.ownership?.output;                           // compare with the
   recipient's Original (P9.12). `{ through: "committed" }` includes them, for
   a recipient who will inscribe them; `{ checkpoint }` names an exact entry.
   Before the anchor is on Bitcoin there is no accepted head
-  (`NOT_ANCHORED_ON_BITCOIN`). The recipient's SDK should verify it rather
+  (`NOT_ANCHORED_ON_BITCOIN`). Called without options it refuses
+  (`SAT_READ_REQUIRED`) rather than guess which head to hand over. The recipient's SDK should verify it rather
   than trust it: `verifyHandoff(sdk, zip, { ...read, expectedSat })` reads
   the sat the recipient received and refuses a package anchored to any other
   (`HANDOFF_SAT_MISMATCH`), then verifies the package against it, reporting

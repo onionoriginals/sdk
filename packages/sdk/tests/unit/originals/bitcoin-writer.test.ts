@@ -778,3 +778,107 @@ describe("second review of the writer (P9.6, P9.10, P9.18)", () => {
     expect(unguarded.inFlightGuard).toBe("skipped");
   });
 });
+
+describe("one disagreement guard for every step that can broadcast (P9.6, P9.10)", () => {
+  const lagging = async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    // ord-a shows the anchor; ord-b lags and shows nothing yet.
+    return { sdk, did, a: node(snapshot([anchorBody(all)])), b: node(snapshot([])), r: recovery() };
+  };
+
+  test("C12-109: one index shows the anchor, another does not: preparing is refused (INDEXES_DISAGREE)", async () => {
+    const { sdk, did, a, b, r } = await lagging();
+    const indexes = [{ provider: b.provider, index: "ord-b" }];
+    expect(await catchUp({ sdk, did, provider: a.provider, clock: blocks(), index: "ord-a", indexes, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .toMatchObject({ action: "wait-for-bitcoin", reason: "indexes-disagree" });
+    for (const recoveryStore of [r.store, null]) {
+      await expect(pairFor(sdk, did, a.provider, undefined, { index: "ord-a", indexes, recoveryStore, recoveryIds: r.ids() }))
+        .rejects.toMatchObject({ category: "incomplete-evidence", code: "INDEXES_DISAGREE" });
+    }
+  });
+
+  test("C12-109: a pair prepared before the indexes diverged is not sent while they disagree", async () => {
+    const { sdk, did, a, b, r } = await lagging();
+    const early = await pairFor(sdk, did, b.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    await expect(submitEntryInscription({ sdk, did, pair: early, provider: a.provider, clock: blocks(), index: "ord-a", indexes: [{ provider: b.provider, index: "ord-b" }], recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ category: "incomplete-evidence", code: "INDEXES_DISAGREE" });
+    expect(a.sent).toEqual([]);
+    expect(await r.store.load(early.prepared.commitTxId)).toBeUndefined();
+  });
+
+  test("C12-109: indexes that disagree on the sat's holder wait; a pair the sat has left is never resumed (C12-40)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const r = recovery();
+    const s = snapshot([]);
+    const pair = await pairFor(sdk, did, node(s).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    r.put(pair.prepared, "reveal_broadcast");
+    const moved = { ...s, ownership: { owner: "bcrt1qother", satpoint: `${"99".repeat(32)}:0:0` } };
+    // One index: the sat left the pair's funding input, so the pair is dead and a new one is prepared.
+    expect(await catchUp({ sdk, did, provider: seeing(moved).provider, clock: blocks(), index: "ord-a", recoveryStore: r.store, recoveryIds: r.ids() }))
+      .toMatchObject({ action: "prepare" });
+    // Two indexes that disagree on the holder: neither resume nor prepare.
+    const two = await catchUp({ sdk, did, provider: seeing(moved).provider, clock: blocks(), index: "ord-a", indexes: [{ provider: seeing(s).provider, index: "ord-b" }], recoveryStore: r.store, recoveryIds: r.ids() });
+    expect(two).toMatchObject({ action: "wait-for-bitcoin", reason: "indexes-disagree", holders: [`${"99".repeat(32)}:0`, `${"cc".repeat(32)}:0`] });
+    await expect(resumeEntryInscription({ sdk, did, provider: seeing(moved).provider, clock: blocks(), index: "ord-a", indexes: [{ provider: seeing(s).provider, index: "ord-b" }], recoveryStore: r.store, recoveryIds: r.ids(), recoveryId: pair.prepared.commitTxId }))
+      .rejects.toMatchObject({ code: "NOT_RESUMABLE" });
+  });
+});
+
+describe("submitting a prepared pair checks it can still land (P9.6)", () => {
+  test("the sat has left the pair's funding input: nothing is sent (SAT_MOVED)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const r = recovery();
+    const s = snapshot([]);
+    const pair = await pairFor(sdk, did, node(s).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    const moved = node({ ...s, ownership: { owner: "bcrt1qother", satpoint: `${"99".repeat(32)}:0:0` } });
+    await expect(submitEntryInscription({ sdk, did, pair, provider: moved.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ category: "stale-parent", code: "SAT_MOVED" });
+    expect(moved.sent).toEqual([]);
+  });
+
+  test("a read that names no holder (ord, before the sat carries an inscription): the funding output is asked", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const r = recovery();
+    const s = { ...snapshot([]), ownership: { owner: null, satpoint: null } };
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    const asking = (first: () => Promise<string>) => {
+      const n = node(s);
+      (n.provider as { getFirstSatOfOutput: unknown }).getFirstSatOfOutput = first;
+      return n;
+    };
+    const spent = asking(() => Promise.reject(new Error("Unspent output sat ranges unavailable")));
+    await expect(submitEntryInscription({ sdk, did, pair, provider: spent.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ category: "incomplete-evidence", code: "SAT_HOLDER_UNKNOWN" });
+    const other = asking(() => Promise.resolve("6000000000"));
+    await expect(submitEntryInscription({ sdk, did, pair, provider: other.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ category: "stale-parent", code: "SAT_MOVED" });
+    expect([...spent.sent, ...other.sent]).toEqual([]);
+    const holds = asking(() => Promise.resolve(SAT));
+    expect((await submitEntryInscription({ sdk, did, pair, provider: holds.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() })).broadcast).toBe("reveal_broadcast");
+  });
+
+  test("a replacement named at prepare carries `replaces` to submit (C12-40)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const r = recovery();
+    const s = snapshot([]);
+    const first = await pairFor(sdk, did, node(s).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    r.put(first.prepared, "commit_broadcast");
+    const second = await pairFor(sdk, did, node(s).provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids(), replaces: [first.prepared.commitTxId], fundingUtxos: [holder, { ...fee, vout: 2 }] });
+    expect(second.replaces).toEqual([first.prepared.commitTxId]);
+    const chain = node(s);
+    const sent = await submitEntryInscription({ sdk, did, pair: second, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
+    expect(sent.broadcast).toBe("reveal_broadcast");
+    expect(chain.sent).toEqual([second.prepared.signedCommitHex, second.prepared.revealTxHex]);
+  });
+});
+
+describe("transferHandoff options", () => {
+  test("called without options from JavaScript: a structured refusal, not a TypeError", async () => {
+    const { sdk, did } = await edited();
+    for (const options of [undefined, null]) {
+      await expect(transferHandoff(sdk, did, options as never)).rejects.toMatchObject({ category: "incomplete-evidence", code: "SAT_READ_REQUIRED" });
+    }
+    await expect(transferHandoff(sdk, did)).rejects.toMatchObject({ code: "SAT_READ_REQUIRED" });
+  });
+});

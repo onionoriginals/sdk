@@ -56,7 +56,7 @@ import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { verifyOriginal, type AuthorDidEvidence } from '@originals/vh/originals';
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, keySigner, satEvidence } from '../../packages/sdk/src/originals/index';
-import { catchUp, prepareEntryInscription, readAnchored, resumeEntryInscription, submitEntryInscription, submitPreparedInscriptionOnSat, transferHandoff, verifyHandoff, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
+import { catchUp, prepareEntryInscription, readAnchored, resumeEntryInscription, submitEntryInscription, transferHandoff, verifyHandoff, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
 import type { OriginalView } from '../../packages/sdk/src/originals/index';
 import { startRegtest } from './environment';
 
@@ -200,7 +200,7 @@ try {
   const holding = await outputOf(anchorPair.prepared.revealTxId, 0);
   const editPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(editPair.carries, [edit.original.checkpoint], 'after the anchor, one entry per inscription (P9.17)');
-  assert.equal((await submitPreparedInscriptionOnSat({ prepared: editPair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+  assert.equal((await submitEntryInscription({ sdk, did, pair: editPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const editBlock = (await env.mine())[0];
   const v2 = await readAnchored(sdk, did, { provider, clock, index: ORD });
   assert.equal(v2.head, edit.original.checkpoint);
@@ -246,7 +246,9 @@ try {
   const thirdPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   const crashing = Object.create(provider) as RegtestProvider;
   crashing.broadcastTransaction = (raw: unknown) => (raw === thirdPair.prepared.revealTxHex ? Promise.reject(new Error('process died before the reveal')) : provider.broadcastTransaction(raw));
-  const crashed = await submitPreparedInscriptionOnSat({ prepared: thirdPair.prepared, provider: crashing, recoveryStore }).catch((error: unknown) => ({ error }));
+  // The checked send, through a node that dies before the reveal: the record is saved before each broadcast,
+  // so the kill leaves it mid-way for the recovery state machine below (#975).
+  const crashed = await submitEntryInscription({ sdk, did, pair: thirdPair, provider: crashing, clock, index: ORD, recoveryStore }).catch((error: unknown) => ({ error }));
   const stored = records.get(thirdPair.prepared.commitTxId);
   assert.ok(stored && stored.broadcast !== 'reveal_broadcast', `the record shows the reveal unsent: ${stored?.broadcast}`);
   await assert.rejects(env.rpc('getmempoolentry', [thirdPair.prepared.revealTxId]), 'the reveal never reached the node');
@@ -305,7 +307,8 @@ try {
   // The process dies after the commit broadcast, before the reveal.
   const crashing1 = Object.create(provider) as RegtestProvider;
   crashing1.broadcastTransaction = (raw: unknown) => (raw === catch1.prepared.revealTxHex ? Promise.reject(new Error('process died before the reveal')) : provider.broadcastTransaction(raw));
-  await submitPreparedInscriptionOnSat({ prepared: catch1.prepared, provider: crashing1, recoveryStore }).catch(() => undefined);
+  // Checked send; the node dies before the reveal, leaving the record mid-way for catch-up to resume.
+  await submitEntryInscription({ sdk, did, pair: catch1, provider: crashing1, clock, index: ORD, recoveryStore }).catch(() => undefined);
   const resume1 = await expectStep(did, 'resume', local.original.checkpoint);
   assert.equal(resume1.recoveryId, catch1.prepared.commitTxId, 'the recorded pair is resumed, not a new one prepared (P9.6)');
   const resumedCatch = await resumeEntryInscription({ sdk, did, provider, clock, index: ORD, recoveryStore, recoveryId: resume1.recoveryId });
@@ -318,7 +321,7 @@ try {
   assert.deepEqual(after1.replaces, []);
   const catch2 = await prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(after1.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal(catch2.versionId, skips.original.checkpoint);
-  assert.equal((await submitPreparedInscriptionOnSat({ prepared: catch2.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+  assert.equal((await submitEntryInscription({ sdk, did, pair: catch2, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const waiting2 = await expectStep(did, 'wait-for-confirmation', skips.original.checkpoint);
   assert.equal(waiting2.recoveryId, catch2.prepared.commitTxId);
   const catchBlock2 = (await env.mine())[0];
@@ -375,7 +378,7 @@ try {
   assert.equal(anchor2Pair.versionId, anchored2.original.checkpoint);
   assert.deepEqual(anchor2Pair.carries, [lighthouse.original.checkpoint, bobBefore.original.checkpoint, anchored2.original.checkpoint]);
   assert.deepEqual(anchor2Pair.offChain.identities, [{ did: authorDid, role: 'author', held: true }, { did: bob.did, role: 'editor', held: true }]);
-  assert.equal((await submitPreparedInscriptionOnSat({ prepared: anchor2Pair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+  assert.equal((await submitEntryInscription({ sdk, did: did2, pair: anchor2Pair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const waiting2a = await expectStep(did2, 'wait-for-confirmation', anchored2.original.checkpoint);
   assert.equal(waiting2a.pending.publication, 'pending-bitcoin-acceptance');
   await env.mine();
@@ -387,7 +390,7 @@ try {
   assert.equal(second2.pending.publication, 'anchored');
   const early2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [await holdingOf(second2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(early2Pair.carries, [early.original.checkpoint]);
-  assert.equal((await submitPreparedInscriptionOnSat({ prepared: early2Pair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+  assert.equal((await submitEntryInscription({ sdk, did: did2, pair: early2Pair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const early2Block = (await env.mine())[0];
   assert.equal((await expectStep(did2, 'prepare', bobAfter.original.checkpoint)).pending.accepted, early.original.checkpoint);
   // A reorganisation during catch-up: the block holding Alice's edit is replaced by empty ones, so its
@@ -414,7 +417,7 @@ try {
   assert.equal(third2.pending.accepted, early.original.checkpoint);
   const bob2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [await holdingOf(third2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(bob2Pair.carries, [bobAfter.original.checkpoint]);
-  assert.equal((await submitPreparedInscriptionOnSat({ prepared: bob2Pair.prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+  assert.equal((await submitEntryInscription({ sdk, did: did2, pair: bob2Pair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   await env.mine();
   const done2 = await expectStep(did2, 'done');
   const v6 = done2.pending.view;

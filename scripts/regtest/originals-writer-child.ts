@@ -34,7 +34,7 @@ import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { parseBtcoAlias, verifyOriginal } from '@originals/vh/originals';
 import { InscriptionClock, OriginalsSDK, readEvidence, satEvidence } from '../../packages/sdk/src/originals/index';
 import { FileStore, fileRecoveryStore } from '../../packages/sdk/src/originals/fs-store';
-import { catchUp, prepareEntryInscription, resumeEntryInscription, submitPreparedInscriptionOnSat, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
+import { catchUp, prepareEntryInscription, resumeEntryInscription, submitEntryInscription, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
 
 /** The one index every read uses, reported as used (P9.11). */
 export const ORD_INDEX = 'ord-0.29.0-regtest';
@@ -190,7 +190,8 @@ async function main(mode: string): Promise<Record<string, unknown>> {
       setInterval(() => undefined, 1 << 30); // keep the process alive until it is killed
       return new Promise<string>(() => { /* never: the parent kills this process */ });
     };
-    await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider: halting, recoveryStore });
+    // The checked send, through the halting node: every Originals check runs before the commit is broadcast.
+    await submitEntryInscription({ sdk, did, pair, provider: halting, clock, index: ORD_INDEX, recoveryStore });
     throw new Error('submit returned: the halt before the reveal was not reached');
   }
   throw new Error(`unknown mode ${mode}`);
