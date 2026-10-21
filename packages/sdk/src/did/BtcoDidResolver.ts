@@ -10,6 +10,9 @@
  * Core) and applies the same version rules as the Originals verifier
  * (`@originals/vh`), so the two never disagree about a did:btco. An
  * inscription it cannot read fails resolution: it could be a newer version.
+ * A delegated or encoded inscription, which the sat's holder can add, is
+ * observed and is not a version (P5.13, PROVISIONAL); one whose body was past
+ * the reader's byte budget was not read, so resolution is `unresolvable`.
  *
  * This replaces the earlier content-based convention (the document as
  * inscription content, a 🔥 marker for deactivation), which the method does
@@ -118,9 +121,10 @@ export class BtcoDidResolver {
       return failed('invalidDidDocument', error.message, { satNumber, network });
     }
     if (history.failure) {
-      // A placement the index reports inconsistently stops the history there: a later version may
-      // exist, so the latest one read is never reported as current (P9.10, P5.13).
-      const code = { AUTHOR_DID_NOT_FOUND: 'notFound', AUTHOR_PLACEMENT_DISPUTED: 'unresolvable' }[history.failure.error.code] ?? 'invalidDidDocument';
+      // A placement the index reports inconsistently, or an inscription the reader did not read,
+      // stops the history there: a later version may exist, so the latest one read is never
+      // reported as current (P9.10, P5.13).
+      const code = { AUTHOR_DID_NOT_FOUND: 'notFound', AUTHOR_PLACEMENT_DISPUTED: 'unresolvable', AUTHOR_SAT_READ_INCOMPLETE: 'unresolvable' }[history.failure.error.code] ?? 'invalidDidDocument';
       return failed(code, history.failure.error.message, { satNumber, network });
     }
     const first = history.versions[0];
