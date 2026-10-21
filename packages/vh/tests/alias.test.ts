@@ -123,6 +123,32 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
     expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
   });
 
+  test("C12-139: the alias moving to another host is an alias change by an author entry; author binding is unaffected (P3.6, P9.3)", async () => {
+    const { alice, at, sign, ref, publish, alias, log, genesis } = await published();
+    // The alias log moves under did:webvh portability: same SCID, new host, prior DID in alsoKnownAs.
+    const k = ALIAS_KEY.publicKeyMultibase;
+    const movedDid = alias.did.replace(":example.com", ":moved.example");
+    const move = await appendEntry(alias.entries[0], {
+      versionTime: "2026-10-18T10:00:01Z", parameters: {},
+      state: { id: movedDid, alsoKnownAs: [genesis.state.id as string, alias.did] },
+      sign: signWith(ALIAS_KEY, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${k}#${k}` }),
+    });
+    const movedLog = serializeLog([...alias.entries, move]);
+    // Before the author lists it, the listed alias has moved; the Original itself is unaffected.
+    const before = await verify(log, alice, { aliases: [{ did: alias.did, log: movedLog }] });
+    expect(before.aliases).toEqual([{ did: alias.did, status: "not-confirmed", reason: "alias-moved" }]);
+    expect(before.authorBinding.status).toBe("valid");
+    expect(before.current).toBe(true);
+    // An author entry lists the moved alias; the author reference is the same as before.
+    const relisted = await updateOriginal(publish, { versionTime: at(), aliases: [movedDid], author: ref, sign });
+    const after = await verify([...log, relisted], alice, { aliases: [{ did: movedDid, log: movedLog }] });
+    expect(after.aliases).toEqual([{ did: movedDid, status: "confirmed" }]);
+    expect(after.authorBinding.status).toBe("valid");
+    expect(after.identityEvidence.author).toBe(alice.did);
+    expect((relisted.state as JsonObject).author).toEqual(ref);
+    expect(after.current, JSON.stringify(after.reasons)).toBe(true);
+  });
+
   test("aliases other than one did:webvh are refused; did:btco arrives with anchoring", async () => {
     const { alice, at, sign, ref, publish, alias, log } = await published();
     for (const aliases of [[alias.did, alias.did], ["did:web:example.com"], [alias.did, "did:btco:1234"]]) {

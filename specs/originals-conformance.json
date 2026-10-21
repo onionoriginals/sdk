@@ -1532,7 +1532,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts",
+        "packages/vh/tests/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-133",
@@ -1542,7 +1546,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-134",
@@ -1552,7 +1559,12 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts",
+        "packages/vh/tests/continuity.test.ts"
+      ],
+      "note": "Author entries covered: the moved log is found at the location of the DID in the latest author entry's verification method (freshness retrieved, PROVISIONAL) or freshness is not established. The case where the latest entry is an editor entry arrives with editors."
     },
     {
       "id": "C12-135",
@@ -1562,7 +1574,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts",
+        "packages/vh/tests/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-136",
@@ -1572,7 +1588,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-137",
@@ -1582,7 +1601,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-138",
@@ -1592,7 +1614,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/continuity.test.ts"
+      ]
     },
     {
       "id": "C12-139",
@@ -1603,7 +1628,11 @@
         3,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/alias.test.ts"
+      ],
+      "note": "Unanchored part covered: the alias moves within its SCID by an author entry and author binding is unaffected. The anchored part (a new did:webvh alias is rejected, P9.10) belongs to the Bitcoin branch."
     }
   ]
 }

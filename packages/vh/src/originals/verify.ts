@@ -2,8 +2,9 @@
  * Fresh verification of an Original (spec section 7). The report keeps history
  * validity, author binding, identity evidence, resource availability,
  * freshness and ordering separate; `current` is true only when every part
- * passes under the selected freshness policy. No private key or network is
- * involved (P7.3).
+ * passes under the selected freshness policy, except content availability:
+ * missing resource bytes are reported as unavailable content and never fail
+ * the log (P7.3, P7.4, P9.18). No private key or network is involved (P7.3).
  *
  * Freshness (P7.6, P7.8): a caller may supply other copies of the asset log
  * and the highest versionIds it has verified before, for the Original and for
@@ -26,7 +27,8 @@ import {
   type VerifiedEntry,
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
-import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory } from "./author.js";
+import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory } from "./author.js";
+import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, type AssetState, type EntryState } from "./state.js";
 
@@ -62,7 +64,14 @@ export interface RetainedVersions {
   authors?: Record<string, string>;
 }
 
-export type Freshness = "asserted" | "not-established" | "stale";
+/**
+ * asserted: the caller vouches for the evidence. retrieved (PROVISIONAL,
+ * P5.14): an identity's log was retrieved, without redirects, from where the
+ * latest entry it signed says the DID is. not-established: neither. stale:
+ * shorter than a retained versionId. Only `asserted` and `retrieved` are
+ * established freshness (P7.8).
+ */
+export type Freshness = "asserted" | "retrieved" | "not-established" | "stale";
 
 /** Divergent valid histories of one Original. No branch is current (Q5). */
 export interface OriginalsFork {
@@ -112,6 +121,10 @@ export interface OriginalsReport {
     deactivated: boolean;
     failure?: { code: string; message: string };
   };
+  /**
+   * Content availability, reported separately (P7.4): `partial` lists the missing resource
+   * versions and is not a verification failure (P7.3, P9.18); `digest-failure` is.
+   */
   resources: { status: "available" | "partial" | "digest-failure"; versions: ResourceVersion[]; missing: ResourceVersion[]; failures: ResourceVersion[] };
   /** Whether the asset log is the latest, under the freshness policy and the retained versionId (P7.6). */
   assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
@@ -146,6 +159,28 @@ function historyStatus(failure?: ReportFailure): OriginalsReport["history"]["sta
   if (failure.category === "limit-exceeded") return "limit-exceeded";
   if (failure.category === "incomplete-evidence") return "incomplete";
   return "invalid";
+}
+
+/**
+ * P5.14: whether the identity's log was retrieved from the location of the DID
+ * in the verification method id of the latest verified entry that identity
+ * signed. A log found anywhere else (an old location, a redirect target, a
+ * host's claim) establishes nothing.
+ */
+function retrievedAtLocation(did: string, authors: AuthorDidEvidence[], entries: VerifiedEntry[]): boolean {
+  const evidence = authors.find((a) => a.did === did);
+  if (!evidence?.retrievedFrom) return false;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const ref = (entries[i].entry.state as unknown as EntryState).author;
+    if (ref.did !== did) continue;
+    try {
+      return didWebvhLogUrl(signerLocation(ref)) === evidence.retrievedFrom;
+    } catch (error) {
+      if (error instanceof OriginalsError) return false; // not a did:webvh: it has no location to retrieve from
+      throw error;
+    }
+  }
+  return false;
 }
 
 function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Array | undefined {
@@ -239,6 +274,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
+  const authorFreshness = (did: string | null): Freshness => {
+    if (did && staleAuthors.has(did)) return "stale";
+    if (options.freshness === "asserted") return "asserted";
+    return did && retrievedAtLocation(did, options.authors, log.entries) ? "retrieved" : "not-established";
+  };
 
   let selected: VerifiedEntry | undefined = head;
   if (options.checkpoint !== undefined) {
@@ -265,7 +305,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       status: identityIncomplete ? "incomplete" : "complete",
       author: authorDid ?? history?.did ?? null,
       latestVersionId: latest?.versionId ?? null,
-      freshness: authorDid && staleAuthors.has(authorDid) ? "stale" : options.freshness === "asserted" ? "asserted" : "not-established",
+      freshness: authorFreshness(authorDid),
       retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
       deactivated: latest?.deactivated ?? false,
       ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
@@ -304,7 +344,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (report.identityEvidence.freshness === "stale") reasons.push("author-history-older-than-retained");
   if (report.identityEvidence.freshness === "not-established") reasons.push("author-freshness-not-established");
   if (report.identityEvidence.deactivated) reasons.push("author-did-deactivated");
-  if (report.resources.status !== "available") reasons.push(`resources-${report.resources.status}`);
+  // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
+  // `resources` as unavailable content, never as a failure, and do not affect `current`
+  // (section 7: the default acceptance check excludes content availability). Bytes that are
+  // supplied are still checked, and a mismatch fails.
+  if (report.resources.status === "digest-failure") reasons.push("resources-digest-failure");
   if (!head) reasons.push("no-verified-entry");
   // P7.9: an unwitnessed head signed by a key the latest author DID no longer lists is never current.
   if (head && latest) {
