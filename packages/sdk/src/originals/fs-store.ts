@@ -10,9 +10,18 @@
  *
  * Every write goes to a temporary file that is fsynced and then renamed over
  * its target, and the directory is fsynced after the rename, so a commit is
- * either fully visible or not at all (P6.2). Temporary files left by a crash
- * are removed when the store is opened. One process may write a store at a
- * time; commits within that process are serialized per Original.
+ * either fully visible or not at all (P6.2).
+ *
+ * One process writes a root at a time: opening it takes `<root>/.lock`
+ * (holding the process id), and opening a root that a live process holds is
+ * refused (STORE_LOCKED); a lock left by a process that no longer runs is
+ * taken over. Every handle on one root in a process shares one set of locks,
+ * so commits are serialized per Original across handles, and opening a root
+ * removes only temporary files that no handle in the process is writing:
+ * those left by a crash (08b review C5).
+ *
+ * The lock file is PROVISIONAL and advisory: it guards against two SDK
+ * processes, not against other programs writing the directory.
  *
  * Node modules are loaded lazily, so importing this entry is safe anywhere;
  * opening a store needs Node.
@@ -25,7 +34,46 @@ import { headOf, higherVersion, staleHead, type CommitUpdate, type OriginalsStor
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
-  beforeRename?: () => void;
+  beforeRename?: () => void | Promise<void>;
+}
+
+/** What every handle on one root in this process shares. */
+interface RootState {
+  locks: Map<string, Promise<void>>;
+  /** Temporary files being written now. */
+  writing: Set<string>;
+}
+
+const roots = new Map<string, RootState>();
+
+function alive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Take `<root>/.lock` for this process, or refuse when a live process holds it. */
+async function takeLock(root: string): Promise<void> {
+  const path = join(root, ".lock");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await fs.writeFile(path, String(process.pid), { flag: "wx" });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const holder = Number((await fs.readFile(path, "utf8").catch(() => "")).trim());
+    if (holder === process.pid) return;
+    if (alive(holder)) {
+      throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is in use by process ${holder}; one process writes a store at a time`, { root, pid: holder });
+    }
+    await fs.rm(path, { force: true }); // stale: its process no longer runs
+  }
+  throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is being opened by another process`, { root });
 }
 
 const DID_VH = /^did:vh:([1-9A-HJ-NP-Za-km-z]{46})$/;
@@ -55,35 +103,47 @@ async function fsyncDir(dir: string): Promise<void> {
 }
 
 export class FileStore implements OriginalsStore {
-  private readonly locks = new Map<string, Promise<void>>();
+  private readonly locks: Map<string, Promise<void>>;
+  private readonly writing: Set<string>;
 
   private constructor(
     private readonly root: string,
+    shared: RootState,
     private readonly faults: FileStoreFaults = {},
-  ) {}
+  ) {
+    this.locks = shared.locks;
+    this.writing = shared.writing;
+  }
 
   static async open(root: string, faults?: FileStoreFaults): Promise<FileStore> {
     await loadNode();
-    const { mkdir, readdir, rm } = fs;
+    const { mkdir, readdir, realpath, rm } = fs;
     await mkdir(join(root, "originals"), { recursive: true });
     await mkdir(join(root, "resources"), { recursive: true });
     await mkdir(join(root, "authors"), { recursive: true });
     await mkdir(join(root, "retained"), { recursive: true });
+    const key = await realpath(root);
+    let shared = roots.get(key);
+    if (!shared) {
+      await takeLock(root);
+      shared = roots.get(key) ?? { locks: new Map(), writing: new Set() };
+      roots.set(key, shared);
+    }
+    const { writing } = shared;
+    // Only a crash's leftovers: a temporary file a handle in this process is writing stays.
+    const sweep = async (dir: string, names: string[]) => {
+      for (const name of names) {
+        const path = join(dir, name);
+        if (name.endsWith(".tmp") && !writing.has(path)) await rm(path, { force: true });
+      }
+    };
     for (const scid of await readdir(join(root, "originals"))) {
-      for (const name of await readdir(join(root, "originals", scid))) {
-        if (name.endsWith(".tmp")) await rm(join(root, "originals", scid, name), { force: true });
-      }
+      await sweep(join(root, "originals", scid), await readdir(join(root, "originals", scid)));
       const branches = join(root, "originals", scid, "branches");
-      for (const name of await readdir(branches).catch(() => [] as string[])) {
-        if (name.endsWith(".tmp")) await rm(join(branches, name), { force: true });
-      }
+      await sweep(branches, await readdir(branches).catch(() => [] as string[]));
     }
-    for (const dir of ["resources", "authors", "retained"]) {
-      for (const name of await readdir(join(root, dir))) {
-        if (name.endsWith(".tmp")) await rm(join(root, dir, name), { force: true });
-      }
-    }
-    return new FileStore(root, faults);
+    for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
+    return new FileStore(root, shared, faults);
   }
 
   private dirOf(did: string): string {
@@ -94,15 +154,20 @@ export class FileStore implements OriginalsStore {
 
   private async writeAtomically(dir: string, name: string, data: Uint8Array | string): Promise<void> {
     const tmp = join(dir, `${name}.${randomHex(6)}.tmp`);
-    const handle = await fs.open(tmp, "wx");
+    this.writing.add(tmp);
     try {
-      await handle.writeFile(data);
-      await handle.sync();
+      const handle = await fs.open(tmp, "wx");
+      try {
+        await handle.writeFile(data);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      if (name === "did.jsonl") await this.faults.beforeRename?.();
+      await fs.rename(tmp, join(dir, name));
     } finally {
-      await handle.close();
+      this.writing.delete(tmp);
     }
-    if (name === "did.jsonl") this.faults.beforeRename?.();
-    await fs.rename(tmp, join(dir, name));
     await fsyncDir(dir);
   }
 

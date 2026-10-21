@@ -453,3 +453,29 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     expect(p.original.checkpoint).toBeDefined();
   });
 });
+
+describe("identity retrieval in loadPublished stays inside its budget (08b review R1)", () => {
+  test("forged lines naming many did:webvh signers are planned against the request budget, and none is requested", async () => {
+    const { alias, files } = await published();
+    const scid = alias.did.split(":")[2];
+    const forged = forgeLog(files, (t) => Array.from({ length: 90 }, (_, i) => {
+      const did = `did:webvh:${scid}:evil${i}.example`;
+      return { ...t, state: { ...t.state, author: { did, verificationMethod: `${did}#k`, versionId: "1-x" } } };
+    }));
+    const host = instrumented(forged, didWebvhFilesUrl(alias.did));
+    const identity: string[] = [];
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      retrievalLimits: { maxRequests: 200, maxTotalBytes: 1_000_000, timeoutMs: 5_000 },
+      identityFetch: async (url) => {
+        identity.push(url);
+        return new Uint8Array(900_000).fill(0x7b);
+      },
+    });
+    const error = await rejection(reader.loadPublished(alias.did, host.fetch));
+    expect(error.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+    expect(error.details).toMatchObject({ limit: "requests" });
+    expect(identity).toEqual([]);
+    expect(host.calls.length + identity.length).toBeLessThanOrEqual(200);
+  });
+});

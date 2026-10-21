@@ -101,3 +101,63 @@ describe("FileStore: durable local commit (P6.2)", () => {
     }
   });
 });
+
+describe("FileStore: one writer per root (08b review C5)", () => {
+  test("C12-14: two handles on one root in one process serialize commits: the second on the same parent is stale, none is lost", async () => {
+    const dir = tempDir();
+    try {
+      const { sdk, signer, author, alice } = await withOriginal(dir);
+      const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const other = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:05:00Z")) });
+      const parent = c.original.checkpoint;
+      const d1 = await sdk.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("mine") }], author });
+      const d2 = await other.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("theirs") }], author });
+      const results = await Promise.allSettled([sdk.commit(d1, signer), other.commit(d2, signer)]);
+      const committed = results.filter((r) => r.status === "fulfilled" && r.value.status === "committed");
+      expect(committed).toHaveLength(1);
+      const winner = (committed[0] as PromiseFulfilledResult<{ original: { checkpoint: string } }>).value.original.checkpoint;
+      const reader = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:10:00Z")) });
+      expect((await reader.get(c.original.did)).checkpoint).toBe(winner);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("opening a root does not delete a temporary file another handle is writing", async () => {
+    const dir = tempDir();
+    try {
+      const did = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
+      const scidDir = join(dir, "originals", did.slice("did:vh:".length));
+      let during: string[] = [];
+      const faulty = await FileStore.open(dir, {
+        beforeRename: async () => {
+          // Another handle opens the root while this write's temporary file is in place.
+          await FileStore.open(dir);
+          during = readdirSync(scidDir).filter((f) => f.endsWith(".tmp"));
+        },
+      });
+      await faulty.commit(did, { expectedHead: null, log: '{"versionId":"1-a"}\n' });
+      expect(during).toHaveLength(1);
+      expect((await faulty.get(did))?.log).toBe('{"versionId":"1-a"}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a root held by another live process is refused clearly; a stale lock is taken over", async () => {
+    const dir = tempDir();
+    try {
+      writeFileSync(join(dir, ".lock"), String(process.ppid));
+      const refused = await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError);
+      expect(refused).toBeInstanceOf(OriginalsError);
+      expect(refused!.code).toBe("STORE_LOCKED");
+      // A lock left by a process that no longer runs is stale.
+      const dead = Bun.spawnSync(["true"]).pid;
+      writeFileSync(join(dir, ".lock"), String(dead));
+      expect(await FileStore.open(dir)).toBeInstanceOf(FileStore);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

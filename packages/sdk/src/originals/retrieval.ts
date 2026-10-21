@@ -13,6 +13,11 @@
  * - The request plan derived from an unverified asset log is checked for
  *   shape (section 4 state rules) and size before any of it is requested.
  *
+ * A budget can also bound another operation's requests: the signer identity
+ * logs `identityFetch` retrieves (P5.14) count in the same budget as the
+ * snapshot in `loadPublished`, and other operations that retrieve them get
+ * a budget of their own.
+ *
  * An exhausted budget is a `limit-exceeded` OriginalsError (section 6),
  * RETRIEVAL_BUDGET_EXCEEDED; a caller's abort is RETRIEVAL_ABORTED. Neither is
  * ever a result.
@@ -73,7 +78,14 @@ export class Retrieval {
   private readonly caller?: AbortSignal;
   private readonly onCallerAbort = () => this.controller.abort();
 
-  constructor(private readonly fetch: HostedFetch, limits: RetrievalLimits = {}, archive: ZipLimits = {}, signal?: AbortSignal) {
+  constructor(
+    private readonly fetch: HostedFetch,
+    limits: RetrievalLimits = {},
+    archive: ZipLimits = {},
+    signal?: AbortSignal,
+    /** Names the operation in errors. */
+    private readonly operation = "loadPublished",
+  ) {
     this.archive = { maxEntries: archive.maxEntries ?? ZIP_LIMITS.maxEntries, maxTotalBytes: archive.maxTotalBytes ?? ZIP_LIMITS.maxTotalBytes };
     this.limits = {
       maxRequests: limits.maxRequests ?? RETRIEVAL_LIMITS.maxRequests,
@@ -100,7 +112,7 @@ export class Retrieval {
 
   private exceeded(limit: Limit, message: string): never {
     const { maxRequests, maxTotalBytes, timeoutMs } = this.limits;
-    throw new OriginalsError("limit-exceeded", "RETRIEVAL_BUDGET_EXCEEDED", `loadPublished stopped: ${message}`, {
+    throw new OriginalsError("limit-exceeded", "RETRIEVAL_BUDGET_EXCEEDED", `${this.operation} stopped: ${message}`, {
       limit, requests: this.requests, bytes: this.bytes, maxRequests, maxTotalBytes, timeoutMs,
       archiveBytes: this.archiveBytes, maxArchiveBytes: this.archive.maxTotalBytes, maxArchiveEntries: this.archive.maxEntries,
     });
@@ -109,7 +121,7 @@ export class Retrieval {
   /** Throw if the caller aborted or the deadline passed. The caller's abort wins. */
   private checkRunning(): void {
     if (this.caller?.aborted) {
-      throw new OriginalsError("incomplete-evidence", "RETRIEVAL_ABORTED", "loadPublished stopped: the caller aborted", { requests: this.requests, bytes: this.bytes });
+      throw new OriginalsError("incomplete-evidence", "RETRIEVAL_ABORTED", `${this.operation} stopped: the caller aborted`, { requests: this.requests, bytes: this.bytes });
     }
     if (this.timedOut || Date.now() >= this.deadline) this.exceeded("time", `the ${this.limits.timeoutMs} ms deadline passed`);
   }
@@ -126,7 +138,7 @@ export class Retrieval {
    * Make one request. An optional file that is unavailable gives undefined;
    * any other failure throws. `archive` files are part of the snapshot.
    */
-  async get(url: string, { required, archive }: { required: boolean; archive: boolean }): Promise<Uint8Array | undefined> {
+  async get(url: string, { required, archive, fetch = this.fetch }: { required: boolean; archive: boolean; fetch?: HostedFetch }): Promise<Uint8Array | undefined> {
     this.checkRunning();
     if (this.requests >= this.limits.maxRequests) this.exceeded("requests", `at most ${this.limits.maxRequests} requests`);
     this.requests++;
@@ -156,7 +168,7 @@ export class Retrieval {
     stopped.catch(() => undefined);
     let data: Uint8Array;
     try {
-      const pending = Promise.resolve(this.fetch(url, { maxBytes, timeoutMs, signal: request.signal }));
+      const pending = Promise.resolve(fetch(url, { maxBytes, timeoutMs, signal: request.signal }));
       // Once abandoned, a late failure is not an unhandled rejection.
       pending.catch(() => undefined);
       data = await Promise.race([pending, stopped]);

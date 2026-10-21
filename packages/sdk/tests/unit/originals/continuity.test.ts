@@ -8,9 +8,11 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { safeFetch, type FetchTransport } from "@originals/vh/fetch";
-import { resourceDigest } from "@originals/vh/originals";
-import { didWebvhLogUrl } from "@originals/vh/webvh";
-import { MemoryStore, OriginalsSDK, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
+import { localSigner } from "@originals/vh/crypto";
+import { createLog, serializeLog, signWith } from "@originals/vh/log";
+import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
+import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
+import { MemoryStore, OriginalsSDK, hostedFiles, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
 import { WebvhIdentity, bytes, clock, seed } from "./helpers.js";
 
 const B1 = bytes("harbor at dawn, first crop");
@@ -201,5 +203,136 @@ describe("C12-137: the old author DID location redirecting to a new host", () =>
     // With the package's (pre-move) log the history verifies, but the redirect still establishes nothing.
     const withPackage = (await reader.load((await sdk.package(did)).bytes)).report;
     expect(withPackage.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established" });
+  });
+});
+
+describe("C12-134: identity retrieval is bounded and follows only the identity's own chained entries (P5.14; 08b review R1, R2, A4)", () => {
+  async function movedAndRotated() {
+    const env = await journey();
+    await env.alice.move("new.example.org");
+    await env.alice.rotate([{ fragment: "orig-2", secret: K2 }]);
+    const after = env.alice.ref("orig-2");
+    const appended = await env.sdk.edit(env.did, { parent: env.v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: env.alice.signer(after, K2) });
+    return { ...env, after, head: appended.original.checkpoint };
+  }
+
+  /** The package with `extra` lines appended to its asset log. Unchained lines need only parse. */
+  function withLines(zip: Uint8Array, extra: string[]): Uint8Array {
+    const files = new Map(readZip(zip));
+    const log = new TextDecoder().decode(files.get("asset/did.jsonl"));
+    files.set("asset/did.jsonl", new TextEncoder().encode(log + extra.map((l) => `${l}\n`).join("")));
+    return writeZip(files);
+  }
+
+  test("lines that do not chain, naming other DIDs, request nothing: only the author's own location is fetched", async () => {
+    const { alice, sdk, did } = await movedAndRotated();
+    const scid = alice.did.split(":")[2];
+    const junk = Array.from({ length: 200 }, (_, i) => {
+      const victim = `did:webvh:${scid}:victim${i}.example`;
+      return JSON.stringify({ versionId: `${i + 4}-x`, versionTime: "2026-10-18T12:59:00Z", parameters: {}, state: { author: { did: i % 2 ? victim : alice.did, verificationMethod: `${victim}#k`, versionId: "1-x" } }, proof: [] });
+    });
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(alice.location)]: alice.evidence().log as string }, seen),
+    });
+    await reader.load(withLines(withoutIdentity((await sdk.package(did)).bytes, alice.did), junk));
+    expect(seen.length).toBeLessThanOrEqual(2);
+    for (const url of seen) expect(url.startsWith("https://new.example.org/.well-known/")).toBe(true);
+  });
+
+  test("load with identityFetch has its own deadline: an identity host that never answers leaves freshness not established", async () => {
+    const { alice, sdk, did } = await movedAndRotated();
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      retrievalLimits: { timeoutMs: 200 },
+      identityFetch: () => new Promise<Uint8Array>(() => undefined),
+    });
+    const started = Date.now();
+    const r = (await reader.load(withoutIdentity((await sdk.package(did)).bytes, alice.did))).report;
+    expect(Date.now() - started).toBeLessThan(1_500);
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.current).toBe(false);
+  });
+
+  test("load without identityFetch makes no request at all (P7.3)", async () => {
+    const { sdk, did } = await movedAndRotated();
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const r = (await reader.load((await sdk.package(did)).bytes)).report;
+    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established" });
+  });
+
+  async function publishedMoved() {
+    const env = await movedAndRotated();
+    const key = localSigner("Ed25519", seed(61));
+    const k = key.publicKeyMultibase;
+    const g = await createLog({
+      versionTime: "2026-10-18T10:00:00Z",
+      parameters: { method: "did:webvh:1.0", scid: "{SCID}", updateKeys: [k], portable: true },
+      state: { id: "did:webvh:{SCID}:example.com:photos", alsoKnownAs: [env.did] },
+      sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${k}#${k}` }),
+    });
+    const alias: AliasEvidence = { did: g.state.id as string, log: serializeLog([g]) };
+    const p = await env.sdk.publish(env.did, { parent: env.head, author: env.after, signer: env.alice.signer(env.after, K2), alias });
+    expect(p.status).toBe("committed");
+    const files = await hostedFiles(env.sdk, env.did, alias);
+    // A reader of a host that serves no author DID log: the identity must come from its location.
+    for (const path of [...files.keys()]) if (path.startsWith("originals/authors/")) files.delete(path);
+    const base = didWebvhFilesUrl(alias.did);
+    const hosted: HostedFetch = (url) => {
+      const data = url.startsWith(base) ? files.get(url.slice(base.length)) : undefined;
+      return data ? Promise.resolve(data.slice()) : Promise.reject(new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered 404`));
+    };
+    return { ...env, alias, files, hosted };
+  }
+
+  test("loadPublished's deadline and the caller's signal bound identity requests", async () => {
+    const { alias, hosted } = await publishedMoved();
+    const hanging = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      retrievalLimits: { timeoutMs: 300 }, identityFetch: () => new Promise<Uint8Array>(() => undefined),
+    });
+    const started = Date.now();
+    const timedOut = await hanging.loadPublished(alias.did, hosted).then(() => undefined, (e: unknown) => e as OriginalsError);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    expect(timedOut).toBeInstanceOf(OriginalsError);
+    expect(timedOut!.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+    expect(timedOut!.details).toMatchObject({ limit: "time" });
+
+    const patient = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: () => new Promise<Uint8Array>(() => undefined),
+    });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const aborted = await patient.loadPublished(alias.did, hosted, { signal: controller.signal }).then(() => undefined, (e: unknown) => e as OriginalsError);
+    expect(aborted!.code).toBe("RETRIEVAL_ABORTED");
+  });
+
+  test("identity requests are planned and counted in loadPublished's request and byte budget", async () => {
+    const { alice, alias, hosted } = await publishedMoved();
+    const seen: string[] = [];
+    const identity = host({ [didWebvhLogUrl(alice.location)]: alice.evidence().log as string }, seen);
+    const reader = (retrievalLimits: Record<string, number>) =>
+      OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits, identityFetch: identity });
+    const r = await reader({}).loadPublished(alias.did, hosted);
+    expect(seen).toContain(didWebvhLogUrl(alice.location));
+    expect(r.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved" });
+    // Without room for the author's two identity requests in the plan, nothing past the asset log is requested.
+    const hostCalls: string[] = [];
+    const counted: HostedFetch = (url, options) => {
+      hostCalls.push(url);
+      return hosted(url, options);
+    };
+    seen.length = 0;
+    const planOnly = 4 + 1 + 2 + 3; // alias witness, alias log, manifest, asset log; asset witness; author log and witness; resources
+    const error = await reader({ maxRequests: planOnly }).loadPublished(alias.did, counted).then(() => undefined, (e: unknown) => e as OriginalsError);
+    expect(error!.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+    expect(error!.details).toMatchObject({ limit: "requests" });
+    expect(seen).toEqual([]);
+    // Identity bytes count: a byte budget too small for the identity log stops the call.
+    const size = [...(await publishedMoved()).files.values()].reduce((n, d) => n + d.length, 0);
+    const tight = await reader({ maxTotalBytes: size + 2_000 }).loadPublished(alias.did, hosted).then(() => undefined, (e: unknown) => e as OriginalsError);
+    expect(tight?.details).toMatchObject({ limit: "bytes" });
   });
 });
