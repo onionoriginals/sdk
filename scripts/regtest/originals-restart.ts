@@ -164,7 +164,7 @@ try {
   const satDid = btcoAlias('regtest', await provider.getFirstSatOfOutput!(satUtxo));
   const anchored = await sdk.anchor(did, { parent: genesisId, author, signer, sat: satDid });
   const anchorId = anchored.original.checkpoint;
-  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX });
+  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX, recoveryStore });
   const anchorSent = await submitPreparedInscriptionOnSat({ prepared: anchorPair.prepared, provider, recoveryStore });
   check('R01', 'the anchoring entry pair is broadcast through the file recovery store', anchorSent.broadcast === 'reveal_broadcast' && anchorPair.versionId === anchorId, anchorSent.broadcast);
   const unmined = await readAnchored(sdk, did, { provider, clock, index: ORD_INDEX, recoveryStore });

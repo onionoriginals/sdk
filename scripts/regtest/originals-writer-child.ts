@@ -71,7 +71,9 @@ export function rpcClient({ rpcUrl, rpcAuth }: ChildEndpoints) {
 export function headerClock(rpc: ReturnType<typeof rpcClient>): InscriptionClock {
   return new InscriptionClock(async (height) => {
     const hash = await rpc<string>('getblockhash', [height]);
-    return { time: (await rpc<{ time: number }>('getblockheader', [hash])).time, hash };
+    // prev (Core's previousblockhash) lets the clock check each block extends the one before it.
+    const header = await rpc<{ time: number; previousblockhash?: string }>('getblockheader', [hash]);
+    return { time: header.time, hash, ...(header.previousblockhash ? { prev: header.previousblockhash } : {}) };
   });
 }
 
@@ -171,7 +173,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
     const out = tx.vout[Number(vout)];
     const holding: Utxo = { txid, vout: out.n, value: Math.round(out.value * 100_000_000), scriptPubKey: out.scriptPubKey.hex };
     const fee = JSON.parse(need('ORIGINALS_CHILD_FEE_UTXO')) as Utxo;
-    const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX });
+    const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX, recoveryStore });
     // The kill point: the state machine asks to broadcast the reveal only after the
     // commit is out and `reveal_broadcast_unknown` is durably saved. Here the process
     // reports that, from a fresh read of the record file, and never sends the reveal.
