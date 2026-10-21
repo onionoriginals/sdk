@@ -1,0 +1,205 @@
+/**
+ * Signer identity continuity through the SDK (P5.14): a did:webvh author moved
+ * by didwebvh-ts under did:webvh portability keeps its genesis DID as its
+ * identity. Each identity's moved log is found in an evidence package or at
+ * the location of the DID in the verification method id of the latest entry
+ * that identity signed, never through a redirect (P8.5).
+ */
+import { describe, expect, test } from "bun:test";
+import { OriginalsError } from "@originals/vh";
+import { safeFetch, type FetchTransport } from "@originals/vh/fetch";
+import { resourceDigest } from "@originals/vh/originals";
+import { didWebvhLogUrl } from "@originals/vh/webvh";
+import { MemoryStore, OriginalsSDK, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
+import { WebvhIdentity, bytes, clock, seed } from "./helpers.js";
+
+const B1 = bytes("harbor at dawn, first crop");
+const B2 = bytes("harbor at dawn, tighter crop");
+const B3 = bytes("harbor at dawn, after the move");
+const B4 = bytes("harbor at dawn, edited by a fresh reader");
+const K1 = seed(21);
+const K2 = seed(22);
+
+/** Alice creates and edits on old.example.com, then moves to new.example.org and rotates to orig-2. */
+async function journey() {
+  const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
+  const store = new MemoryStore();
+  const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), freshness: "asserted", clock: clock() });
+  const before = alice.ref("orig-1");
+  const created = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: before, signer: alice.signer(before, K1) });
+  if (created.kind !== "original") throw new Error("expected an Original");
+  const did = created.original.did;
+  const cropped = await sdk.edit(did, { parent: created.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: before, signer: alice.signer(before, K1) });
+  return { alice, store, sdk, did, before, v1: created.original.checkpoint, v2: cropped.original.checkpoint };
+}
+
+/** The same package without the author DID logs, declared partial, as a reader with no identity evidence gets it. */
+function withoutIdentity(zip: Uint8Array, author: string): Uint8Array {
+  const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("authors/")));
+  const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
+  files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author }] })));
+  return writeZip(files);
+}
+
+/** A host serving exactly these files; anything else is unavailable. */
+function host(files: Record<string, string>, seen: string[] = []): HostedFetch {
+  return (url) => {
+    seen.push(url);
+    const body = files[url];
+    if (body === undefined) return Promise.reject(new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered 404`));
+    return Promise.resolve(new TextEncoder().encode(body));
+  };
+}
+
+describe("C12-132, C12-133: create, move the author, rotate, append, package, import into a fresh SDK, verify, continue editing", () => {
+  test("the end-to-end case of originals-spec #39 with a didwebvh-ts portable move", async () => {
+    const { alice, sdk, did, v1, v2 } = await journey();
+    await alice.move("new.example.org");
+    expect(alice.location).not.toBe(alice.did);
+    expect(alice.location.split(":")[2]).toBe(alice.did.split(":")[2]);
+
+    // C12-135: didwebvh-ts keeps orig-1's controller as the old DID across the move, so at the
+    // move's version orig-1 does not meet P5.3; the commit is refused and nothing changes.
+    const moved = alice.ref("orig-1");
+    expect(moved.verificationMethod.startsWith(`${alice.location}#`)).toBe(true);
+    const refused = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: moved, signer: alice.signer(moved, K1) }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(OriginalsError);
+    expect((refused as OriginalsError).code).toBe("COMMIT_VERIFICATION_FAILED");
+    const report = (refused as OriginalsError).details?.report as { history: { failure?: { code: string; category: string } } };
+    expect(report.history.failure).toMatchObject({ code: "AUTHOR_VM_CONTROLLER", category: "author-binding" });
+    expect((await sdk.get(did)).checkpoint).toBe(v2);
+
+    // Rotation in the author DID: orig-2 under the new id. The new key signs with no asset log entry for it.
+    await alice.rotate([{ fragment: "orig-2", secret: K2 }]);
+    const after = alice.ref("orig-2");
+    expect(after.did).toBe(alice.did);
+    const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: alice.signer(after, K2) });
+    expect(appended.status).toBe("committed");
+    expect(appended.original.current, JSON.stringify(appended.original.report.reasons)).toBe(true);
+    expect(appended.original.report.identityEvidence).toMatchObject({ author: alice.did, latestVersionId: alice.versionId });
+    // Entries before the move still verify against the versions before it.
+    for (const checkpoint of [v1, v2]) {
+      const earlier = await sdk.get(did, { checkpoint });
+      expect(earlier.report.history.status).toBe("valid");
+      expect(earlier.report.authorBinding.status).toBe("valid");
+    }
+
+    // Package, import into a fresh SDK with an empty store and no author source.
+    const pkg = await sdk.package(did);
+    expect(pkg.manifest.completeness).toBe("complete");
+    const fresh = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const loaded = await fresh.load(pkg.bytes);
+    expect(loaded.report.checkpoint).toBe(appended.original.checkpoint);
+    expect(loaded.report.authorBinding.status).toBe("valid");
+    expect(loaded.report.identityEvidence.status).toBe("complete");
+    const imported = await fresh.import(pkg.bytes);
+    expect(imported.status).toBe("imported");
+    expect(imported.original.checkpoint).toBe(appended.original.checkpoint);
+    expect(imported.original.state).toEqual(appended.original.state);
+    expect(imported.original.resources.map((r) => [r.version, r.digest, r.bytes])).toEqual(appended.original.resources.map((r) => [r.version, r.digest, r.bytes]));
+
+    // The fresh SDK continues editing with the new key: authority comes from the key, not the import.
+    const continued = await fresh.edit(did, { parent: imported.original.checkpoint, resources: [{ id: "photo", bytes: B4 }], author: after, signer: alice.signer(after, K2) });
+    expect(continued.status).toBe("committed");
+    expect(continued.original.report.authorBinding.status).toBe("valid");
+    expect(continued.original.resources.map((r) => r.digest)).toEqual([B1, B2, B3, B4].map(resourceDigest));
+    // The old key, at the version that still lists it, cannot continue: it is no longer the author's (P7.9).
+    const old = alice.ref("orig-1", alice.log[0].versionId as string);
+    const stale = await fresh.edit(did, { parent: continued.original.checkpoint, name: "renamed", author: old, signer: alice.signer(old, K1) }).catch((e: unknown) => e);
+    expect(stale).toBeInstanceOf(OriginalsError);
+  });
+});
+
+describe("C12-134: a fresh reader with no package of the moved author's log", () => {
+  async function movedAndRotated() {
+    const env = await journey();
+    await env.alice.move("new.example.org");
+    await env.alice.rotate([{ fragment: "orig-2", secret: K2 }]);
+    const after = env.alice.ref("orig-2");
+    const appended = await env.sdk.edit(env.did, { parent: env.v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: env.alice.signer(after, K2) });
+    return { ...env, zip: withoutIdentity((await env.sdk.package(env.did)).bytes, env.alice.did), head: appended.original.checkpoint };
+  }
+
+  test("without the log the author's identity evidence is incomplete and nothing is current", async () => {
+    const { zip } = await movedAndRotated();
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const r = (await reader.load(zip)).report;
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.current).toBe(false);
+  });
+
+  test("found at the location of the DID in the latest entry's verification method, the log is used and its freshness is retrieved", async () => {
+    const { alice, zip, head } = await movedAndRotated();
+    const seen: string[] = [];
+    const log = alice.evidence().log as string;
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(alice.location)]: log }, seen),
+    });
+    const loaded = await reader.load(zip);
+    expect(seen).toContain("https://new.example.org/.well-known/did.jsonl");
+    expect(loaded.report.checkpoint).toBe(head);
+    expect(loaded.report.authorBinding.status).toBe("valid");
+    expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
+    expect(loaded.report.reasons).not.toContain("author-freshness-not-established");
+  });
+
+  test("a log kept only at the old location is not found there: freshness is not established", async () => {
+    const { alice, zip } = await movedAndRotated();
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(alice.did)]: alice.evidence().log as string }, seen),
+    });
+    const r = (await reader.load(zip)).report;
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.location));
+    expect(seen).not.toContain(didWebvhLogUrl(alice.did));
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.current).toBe(false);
+  });
+
+  test("a retrieved log with another SCID, or one that diverges from the package's, is not used", async () => {
+    const { alice, sdk, did } = await movedAndRotated();
+    const mallory = await WebvhIdentity.create("new.example.org", [{ fragment: "orig-2", secret: K2 }]);
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(alice.location)]: mallory.evidence().log as string }),
+    });
+    const r = (await reader.load((await sdk.package(did)).bytes)).report;
+    // The package's own log is used; the impostor's is ignored and establishes nothing.
+    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established" });
+    expect(r.authorBinding.status).toBe("valid");
+  });
+});
+
+describe("C12-137: the old author DID location redirecting to a new host", () => {
+  test("the redirect is not followed and establishes no continuity (P5.14, P8.5)", async () => {
+    const { alice, sdk, did } = await journey();
+    // Alice moves after her latest entry, which names the old location; the old host now redirects.
+    await alice.move("new.example.org");
+    const oldUrl = didWebvhLogUrl(alice.did);
+    const newUrl = didWebvhLogUrl(alice.location);
+    const requested: string[] = [];
+    const transport: FetchTransport = ({ url }) => {
+      requested.push(url.href);
+      const body = url.href === newUrl ? (alice.evidence().log as string) : "";
+      const status = url.href === oldUrl ? 301 : url.href === newUrl ? 200 : 404;
+      return Promise.resolve({ status, headers: status === 301 ? { location: newUrl } : {}, body: (async function* () { yield new TextEncoder().encode(body); })() });
+    };
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: async (url, options) => (await safeFetch(url, { ...options, resolve: () => Promise.resolve(["93.184.215.14"]), transport })).bytes,
+    });
+    const r = (await reader.load(withoutIdentity((await sdk.package(did)).bytes, alice.did))).report;
+    expect(requested[0]).toBe(oldUrl);
+    expect(requested).not.toContain(newUrl);
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.current).toBe(false);
+    // With the package's (pre-move) log the history verifies, but the redirect still establishes nothing.
+    const withPackage = (await reader.load((await sdk.package(did)).bytes)).report;
+    expect(withPackage.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established" });
+  });
+});

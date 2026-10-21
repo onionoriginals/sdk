@@ -120,13 +120,21 @@ describe("the public reader verifies one exact snapshot (P9.1)", () => {
     await expect(stranger().loadPublished(claim.did, host(files, didWebvhFilesUrl(claim.did)))).rejects.toMatchObject({ code: "ALIAS_NOT_CONFIRMED" });
   });
 
-  test("missing bytes leave an explicitly partial, unverified result (P7.4)", async () => {
+  test("missing bytes leave the snapshot verified, with the content reported unavailable (P7.3, P7.4, P9.18)", async () => {
     const { alias, files } = await published();
     const partial = new Map(files);
     partial.delete(`originals/resources/${resourceDigest(B1)}`);
     const r = await stranger().loadPublished(alias.did, host(partial, didWebvhFilesUrl(alias.did)));
-    expect(r.verified).toBe(false);
+    expect(r.verified).toBe(true);
     expect(r.report.resources.status).toBe("partial");
+    expect(r.report.resources.missing.map((v) => v.digest)).toEqual([resourceDigest(B1)]);
+    expect(r.reasons).not.toContain("resources-partial");
+    // Bytes that are served but wrong still fail.
+    const wrong = new Map(files);
+    wrong.set(`originals/resources/${resourceDigest(B1)}`, bytes("not the first crop"));
+    const bad = await stranger().loadPublished(alias.did, host(wrong, didWebvhFilesUrl(alias.did)));
+    expect(bad.verified).toBe(false);
+    expect(bad.report.resources.status).toBe("digest-failure");
   });
 
   test("the hosted files are the same for a retried publication of the same checkpoint (P9.2)", async () => {
