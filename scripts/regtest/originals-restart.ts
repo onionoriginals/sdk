@@ -109,11 +109,17 @@ try {
     ORIGINALS_CHILD_RPC_URL: env.rpcUrl, ORIGINALS_CHILD_ORD_URL: env.ordUrl, ORIGINALS_CHILD_RPC_AUTH: env.rpcAuth,
     ORIGINALS_CHILD_STORE: stores.store, ORIGINALS_CHILD_RECOVERY: stores.recovery, ...extra,
   });
+  // One process writes a store at a time (FileStore's root lock): the journey hands the
+  // author's store to each child process and takes it back once the child has exited.
+  let handBack: (() => Promise<void>) | null = null;
+  let handOver: (() => Promise<void>) | null = null;
   const runChild = async (role: string, mode: string, extra: Record<string, string> = {}) => {
+    await handOver?.();
     const child = Bun.spawn([process.execPath, CHILD, mode], { cwd: root, env: childEnv(extra), stdout: 'pipe', stderr: 'inherit' });
     const text = await new Response(child.stdout).text();
     const code = await child.exited;
     processes.push({ role, mode, pid: child.pid, exitCode: code, signal: child.signalCode ?? null });
+    await handBack?.();
     if (code !== 0) throw new Error(`${role} (${mode}, pid ${child.pid}) exited ${code}`);
     return JSON.parse(text.trim().split('\n').at(-1)!) as Record<string, any>;
   };
@@ -138,11 +144,16 @@ try {
   const signer = keySigner({ keyType: 'Ed25519', secretKey: originalsKey, verificationMethod: author.verificationMethod });
 
   step('1: create, anchor and inscribe the anchoring entry; edit (durable stores)');
-  const store = await FileStore.open(stores.store);
+  let store = await FileStore.open(stores.store);
   // The author's DID evidence lives in the durable store, so a restarted writer needs no author list.
   await store.putAuthorEvidence({ did: authorDid, log: serializeLog([authorGenesis]) });
   const recoveryStore = fileRecoveryStore(stores.recovery);
-  const sdk = OriginalsSDK.create({ store, authors: [], freshness: 'asserted' });
+  let sdk = OriginalsSDK.create({ store, authors: [], freshness: 'asserted' });
+  handOver = () => store.close();
+  handBack = async () => {
+    store = await FileStore.open(stores.store);
+    sdk = OriginalsSDK.create({ store, authors: [], freshness: 'asserted' });
+  };
   const bytesA = new TextEncoder().encode('regtest restart photo, version 1');
   const bytesB = new TextEncoder().encode('regtest restart photo, version 2 (the edit)');
   const created = await sdk.create({ name: 'Harbor after restart', resources: [{ id: 'photo', mediaType: 'image/jpeg', bytes: bytesA }], author, signer });
@@ -177,6 +188,7 @@ try {
   /** Start a writer child that submits the next entry and halts after the commit, before the reveal. */
   const haltingWriter = async () => {
     const fee = await fundUtxo();
+    await handOver?.();
     const writer = Bun.spawn([process.execPath, CHILD, 'submit'], {
       cwd: root, env: childEnv({ ORIGINALS_CHILD_DID: did, ORIGINALS_CHILD_WALLET_KEY: walletKey, ORIGINALS_CHILD_FEE_UTXO: JSON.stringify(fee) }),
       stdout: 'pipe', stderr: 'inherit',
@@ -206,6 +218,7 @@ try {
   check('R05', 'the reveal has not reached the node when the writer is killed', !(await inMempool(halted.revealTxId)));
   writer.kill('SIGKILL');
   await writer.exited;
+  await handBack?.(); // the killed child's lock is stale and is taken over
   processes.push({ role: 'writer (killed)', mode: 'submit', pid: writer.pid, exitCode: writer.exitCode, signal: writer.signalCode ?? null });
   check('R06', 'the writer process was terminated by SIGKILL, not by an exception', writer.signalCode === 'SIGKILL' && writer.exitCode !== 0, { signal: writer.signalCode, exitCode: writer.exitCode });
   const killed = { commitTxId: halted.commitTxId as string, revealTxId: halted.revealTxId as string, inscriptionId: halted.inscriptionId as string };
@@ -245,14 +258,14 @@ try {
   const [revealBlock] = await env.mine();
   const done = await runChild('fresh reader of the writer stores', 'step', { ORIGINALS_CHILD_DID: did });
   check('R17', 'only the confirmed reveal advances the accepted head, to the edit', done.step.action === 'done' && done.step.accepted === editId && done.step.current === true, done.step);
-  const v2 = await readAnchored(OriginalsSDK.create({ store: await FileStore.open(stores.store), authors: [], freshness: 'asserted' }), did, { provider, clock, index: ORD_INDEX });
+  const v2 = await readAnchored(sdk, did, { provider, clock, index: ORD_INDEX });
   const accepted = v2.report.anchoring?.accepted.at(-1);
   check('R18', 'the inscription Bitcoin accepts is the resumed pair', accepted?.inscription === killed.inscriptionId && accepted?.versionId === editId, accepted);
   receipt.resume = { midwayPid: midway.pid, resumePid: resumed.pid, ...resumed.resumed, revealBlock, acceptedHeight: accepted?.height, recordAfter: resumed.record };
 
   step('5: a fresh reader verifies from the did:btco sat and the author\'s evidence package');
   if (DEPTH > 1) await env.mine(DEPTH - 1);
-  const exported = await OriginalsSDK.create({ store: await FileStore.open(stores.store), authors: [], freshness: 'asserted' }).package(did);
+  const exported = await sdk.package(did);
   await writeFile(stores.package, exported.bytes);
   check('R19', 'the author exports a complete evidence package at the edit', exported.manifest.completeness === 'complete' && exported.manifest.checkpoint === editId, exported.manifest);
   await mkdir(stores.reader, { recursive: true });
@@ -306,6 +319,7 @@ try {
     { persisted: second.halted.persisted, commitInMempool: second.halted.commitInMempool });
   second.writer.kill('SIGKILL');
   await second.writer.exited;
+  await handBack?.();
   processes.push({ role: 'second writer (killed)', mode: 'submit', pid: second.writer.pid, exitCode: second.writer.exitCode, signal: second.writer.signalCode ?? null });
   const killed2 = { commitTxId: second.halted.commitTxId as string, revealTxId: second.halted.revealTxId as string, inscriptionId: second.halted.inscriptionId as string };
   check('R33', 'killed by SIGKILL; the commit is unconfirmed in the mempool and the reveal never reached the node',
