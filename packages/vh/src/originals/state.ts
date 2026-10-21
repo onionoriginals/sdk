@@ -410,16 +410,18 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   const satOf = (aliases: string[]) => aliases.find((x) => x.startsWith("did:btco:"));
   const before = ctx.previous ? webOf(ctx.previous.asset.aliases) : undefined;
   const now = webOf(asset.aliases);
-  if (before !== undefined) {
-    if (now === undefined) invalid("STATE_ALIASES", "a published Original keeps its did:webvh alias");
-    if (parseDidWebvh(now).scid !== parseDidWebvh(before).scid) invalid("STATE_ALIASES", "a did:webvh alias moves only within its own SCID (P9.3)");
-  }
-  // Anchoring is terminal (P9.10): once the did:btco alias is listed it never changes or goes,
-  // and an Original anchored without a did:webvh alias never gains one.
   const anchoredTo = ctx.previous ? satOf(ctx.previous.asset.aliases) : undefined;
   if (anchoredTo !== undefined) {
+    // Anchoring is terminal (P9.10): once the did:btco alias is listed it never changes or goes.
     if (satOf(asset.aliases) !== anchoredTo) invalid("STATE_ANCHOR", "an anchored Original names its sat for good (P9.10)");
-    if (before === undefined && now !== undefined) invalid("STATE_ANCHOR", "an Original anchored without a web alias never gains one (P9.10)");
+    // After anchoring no entry adds or replaces a did:webvh alias, even within its SCID (P9.10, D7).
+    // The one the anchoring state lists may stay or go; with at most one listed and none added
+    // since, an alias absent from the previous state was never listed or has been removed, and
+    // either way may not come (back). This keeps C12-35's case: anchored without one, never one.
+    if (now !== undefined && now !== before) invalid("STATE_ANCHOR", "after anchoring, no did:webvh alias may be added, replaced or added again (P9.10)");
+  } else if (before !== undefined) {
+    if (now === undefined) invalid("STATE_ALIASES", "a published Original keeps its did:webvh alias");
+    if (parseDidWebvh(now).scid !== parseDidWebvh(before).scid) invalid("STATE_ALIASES", "a did:webvh alias moves only within its own SCID (P9.3)");
   }
 
   // Deactivation agrees in both directions (P6.5).
