@@ -4,7 +4,10 @@
  *
  * - Every request counts, failed and optional ones included.
  * - Bytes count as responses arrive. Each request is told what it may still
- *   take, and a response larger than that is never kept.
+ *   take, and a response larger than that is never kept. The body bytes a
+ *   refused response had already delivered (an error page, a body cut off at
+ *   its cap) count too, when the fetcher reports them as `details.bytesRead`
+ *   as `safeFetch` does: the budget is spent on bytes read, not bytes kept.
  * - The whole call has a deadline and honours the caller's signal, so many
  *   slow optional files cannot multiply the per-request timeout.
  * - The request plan derived from an unverified asset log is checked for
@@ -159,6 +162,12 @@ export class Retrieval {
       data = await Promise.race([pending, stopped]);
     } catch (error) {
       this.checkRunning();
+      // Bytes a refused response delivered were read, so they are spent (#962 review R5).
+      const read = error instanceof OriginalsError ? error.details?.bytesRead : undefined;
+      if (typeof read === "number" && Number.isFinite(read) && read > 0) {
+        this.bytes += read;
+        if (this.bytes > this.limits.maxTotalBytes) this.exceeded("bytes", `${url} was refused after ${read} bytes, past the budget of ${this.limits.maxTotalBytes}`);
+      }
       if (error instanceof OriginalsError && error.code === "FETCH_TOO_LARGE" && room < this.limits.maxFileBytes) overBudget();
       if (error instanceof OriginalsError && error.category === "unavailable-bytes") return unavailable(error);
       throw error;

@@ -562,11 +562,19 @@ export class OriginalsSDK {
   }
 
   private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
-    const text = (data: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(data);
+    // A hosted file that is not UTF-8 is invalid evidence, as in a package (EVIDENCE_ENCODING).
+    const text = (data: Uint8Array, name: string) => {
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(data);
+      } catch {
+        return sdkError("invalid-evidence", "EVIDENCE_ENCODING", `${name} is not UTF-8`);
+      }
+    };
     const logUrl = didWebvhLogUrl(aliasDid);
-    const aliasWitness = await retrieval.get(logUrl.replace(/did\.jsonl$/, "did-witness.json"), { required: false, archive: false });
+    const witnessUrl = logUrl.replace(/did\.jsonl$/, "did-witness.json");
+    const aliasWitness = await retrieval.get(witnessUrl, { required: false, archive: false });
     const aliasLog = (await retrieval.get(logUrl, { required: true, archive: false }))!;
-    const alias: AliasEvidence = { did: aliasDid, log: text(aliasLog), ...(aliasWitness ? { witness: parseJson(text(aliasWitness)) } : {}) };
+    const alias: AliasEvidence = { did: aliasDid, log: text(aliasLog, logUrl), ...(aliasWitness ? { witness: parseJson(text(aliasWitness, witnessUrl)) } : {}) };
 
     const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
     const files = new Map<string, Uint8Array>();
@@ -576,7 +584,7 @@ export class OriginalsSDK {
       return data;
     };
     readManifest((await put(MANIFEST, true))!);
-    const log = text((await put("asset/did.jsonl", true))!);
+    const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
     const planned = 1 + 2 * plan.authors.length + plan.digests.length;

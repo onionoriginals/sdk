@@ -383,3 +383,37 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     }
   });
 });
+
+describe("hosted files that are not UTF-8 are invalid evidence (#962 review R3)", () => {
+  test("a non-UTF-8 alias log, alias witness or asset log is EVIDENCE_ENCODING, never a raw TypeError", async () => {
+    const { alias, files } = await published();
+    const base = didWebvhFilesUrl(alias.did);
+    const notUtf8 = new Uint8Array([0xff, 0xfe, 0x7b]);
+    for (const target of ["did.jsonl", "did-witness.json", "originals/asset/did.jsonl"]) {
+      const served = new Map(files);
+      served.set(target, notUtf8);
+      const error = await rejection(stranger().loadPublished(alias.did, host(served, base)));
+      expect(error.category, target).toBe("invalid-evidence");
+      expect(error.code, target).toBe("EVIDENCE_ENCODING");
+    }
+  });
+});
+
+describe("bytes read from a refused response count against the budget (#962 review R5)", () => {
+  test("a host whose refusals report bytes read exhausts the byte budget", async () => {
+    const { alias, files } = await published();
+    const base = didWebvhFilesUrl(alias.did);
+    const total = [...files.values()].reduce((n, d) => n + d.length, 0);
+    const limits = { maxTotalBytes: total + 1_000 };
+    // A 404 that sent 600 bytes of error page before it was refused, as safeFetch reports it.
+    const chatty: HostedFetch = (url, options) =>
+      files.has(url.slice(base.length))
+        ? host(files, base)(url, options)
+        : Promise.reject(new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered 404`, { bytesRead: 600 }));
+    const quiet = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: limits });
+    expect((await quiet.loadPublished(alias.did, host(files, base))).verified).toBe(true);
+    const error = await rejection(quiet.loadPublished(alias.did, chatty));
+    expect(error.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+    expect(error.details).toMatchObject({ limit: "bytes" });
+  });
+});

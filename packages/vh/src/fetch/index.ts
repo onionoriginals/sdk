@@ -12,7 +12,12 @@
  *   whole-operation deadline) can end it sooner.
  *
  * Every refusal is an `unavailable-bytes` error: the caller reports the item
- * as unavailable, never as verified. The default transport and resolver use
+ * as unavailable, never as verified. A refused response is closed at once
+ * (its request is aborted, so the socket is released), and a refusal after
+ * the response arrived carries `details.bytesRead`: the body bytes actually
+ * read before it was refused (0 for a redirect, a non-2xx status or an
+ * oversized declared length, which are refused unread). A whole-operation
+ * budget can count them. The default transport and resolver use
  * Node's `https` and `dns`, loaded lazily, so importing this entry is safe in
  * a browser; fetching with the defaults needs Node.
  */
@@ -49,8 +54,8 @@ export interface FetchedFile {
   mediaType?: string;
 }
 
-function refuse(code: string, message: string): never {
-  throw new OriginalsError("unavailable-bytes", code, message);
+function refuse(code: string, message: string, details?: Record<string, unknown>): never {
+  throw new OriginalsError("unavailable-bytes", code, message, details);
 }
 
 // ---------------------------------------------------------------------------
@@ -189,8 +194,8 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", onCallerAbort);
   };
-  const stopped = (what: string): never =>
-    callerAborted ? refuse("FETCH_ABORTED", `${what}: the caller aborted`) : refuse("FETCH_TIMEOUT", `${what} within ${timeoutMs} ms`);
+  const stopped = (what: string, details?: Record<string, unknown>): never =>
+    callerAborted ? refuse("FETCH_ABORTED", `${what}: the caller aborted`, details) : refuse("FETCH_TIMEOUT", `${what} within ${timeoutMs} ms`, details);
   const aborted = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout"))));
   aborted.catch(() => undefined);
   const host = url.hostname;
@@ -216,20 +221,20 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
     refuse("FETCH_PRIVATE_ADDRESS", `${host} resolves to ${blocked}, which is not a public address`);
   }
 
+  let size = 0;
+  let succeeded = false;
+  // A refusal of an arrived response reports the body bytes read so far.
+  const refuseRead = (code: string, message: string): never => refuse(code, message, { bytesRead: size });
   try {
     const response = await (options.transport ?? nodeTransport)({ url, address: addresses[0], signal: controller.signal });
-    if (response.status >= 300 && response.status < 400) refuse("FETCH_REDIRECT", `${url.href} redirects; redirects are not followed`);
-    if (response.status < 200 || response.status >= 300) refuse("FETCH_STATUS", `${url.href} answered ${response.status}`);
+    if (response.status >= 300 && response.status < 400) refuseRead("FETCH_REDIRECT", `${url.href} redirects; redirects are not followed`);
+    if (response.status < 200 || response.status >= 300) refuseRead("FETCH_STATUS", `${url.href} answered ${response.status}`);
     const declared = Number(response.headers["content-length"]);
-    if (Number.isFinite(declared) && declared > maxBytes) refuse("FETCH_TOO_LARGE", `${url.href} is ${declared} bytes; the cap is ${maxBytes}`);
+    if (Number.isFinite(declared) && declared > maxBytes) refuseRead("FETCH_TOO_LARGE", `${url.href} is ${declared} bytes; the cap is ${maxBytes}`);
     const chunks: Uint8Array[] = [];
-    let size = 0;
     for await (const chunk of response.body) {
       size += chunk.length;
-      if (size > maxBytes) {
-        controller.abort();
-        refuse("FETCH_TOO_LARGE", `${url.href} exceeds the ${maxBytes}-byte cap`);
-      }
+      if (size > maxBytes) refuseRead("FETCH_TOO_LARGE", `${url.href} exceeds the ${maxBytes}-byte cap`);
       chunks.push(chunk);
     }
     const bytes = new Uint8Array(size);
@@ -239,12 +244,15 @@ export async function safeFetch(locator: string, options: SafeFetchOptions = {})
       offset += c.length;
     }
     const mediaType = response.headers["content-type"];
+    succeeded = true;
     return { url: url.href, bytes, ...(mediaType ? { mediaType } : {}) };
   } catch (error) {
     if (error instanceof OriginalsError) throw error;
-    if (controller.signal.aborted) stopped(`${url.href} did not answer`);
-    refuse("FETCH_FAILED", `${url.href} could not be retrieved`);
+    if (controller.signal.aborted) stopped(`${url.href} did not answer`, { bytesRead: size });
+    return refuse("FETCH_FAILED", `${url.href} could not be retrieved`, { bytesRead: size });
   } finally {
     done();
+    // Any refusal closes the response: aborting the request destroys its socket (#962 review R5).
+    if (!succeeded) controller.abort();
   }
 }

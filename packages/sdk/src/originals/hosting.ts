@@ -39,6 +39,9 @@ export interface HostedFetchOptions {
 
 /**
  * Retrieve one hosted file, or throw an `unavailable-bytes` OriginalsError.
+ * A refusal may report the body bytes it had already read as
+ * `details.bytesRead` (`safeFetch` does); they count against
+ * `RetrievalLimits.maxTotalBytes`.
  * `@originals/vh/fetch`'s `safeFetch` fits:
  * `async (url, options) => (await safeFetch(url, options)).bytes`.
  */

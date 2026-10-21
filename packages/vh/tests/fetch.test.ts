@@ -116,3 +116,55 @@ describe("other refusals", () => {
     await refused(safeFetch("https://example.invalid/x", { resolve: () => Promise.resolve([]), transport: transport({}) }), "FETCH_DNS");
   });
 });
+
+describe("a refused response is closed, and its bytes are reported (#962 review R5)", () => {
+  /** A transport that records its signal and whether the body was read. */
+  function recording(response: { status?: number; headers?: Record<string, string>; chunks?: string[] }) {
+    const seen: { signal?: AbortSignal; read: number } = { read: 0 };
+    const t: FetchTransport = ({ signal }) => {
+      seen.signal = signal;
+      const chunks = response.chunks ?? ["ok"];
+      return Promise.resolve({
+        status: response.status ?? 200,
+        headers: response.headers ?? {},
+        body: (async function* () {
+          for (const c of chunks) {
+            seen.read += c.length;
+            yield new TextEncoder().encode(c);
+          }
+        })(),
+      });
+    };
+    return { t, seen };
+  }
+
+  test("C12-81: a redirect, a non-2xx status and an oversized declared length abort the request without reading it", async () => {
+    for (const [response, code] of [
+      [{ status: 302, headers: { location: "https://127.0.0.1/" }, chunks: ["moved"] }, "FETCH_REDIRECT"],
+      [{ status: 500, chunks: ["error page"] }, "FETCH_STATUS"],
+      [{ headers: { "content-length": "11" }, chunks: ["12345678901"] }, "FETCH_TOO_LARGE"],
+    ] as const) {
+      const { t, seen } = recording(response);
+      const error = await safeFetch("https://example.com/did.jsonl", { resolve: publicDns, maxBytes: 10, transport: t }).then(() => undefined, (e: unknown) => e);
+      expect((error as OriginalsError).code).toBe(code);
+      // The socket is released: the transport's signal is aborted.
+      expect(seen.signal?.aborted, code).toBe(true);
+      expect(seen.read, code).toBe(0);
+      expect((error as OriginalsError).details).toMatchObject({ bytesRead: 0 });
+    }
+  });
+
+  test("C12-78: a body that outgrows the cap is aborted, and the bytes read are reported", async () => {
+    const { t, seen } = recording({ chunks: ["123456", "7890", "1"] });
+    const error = (await safeFetch("https://example.com/did.jsonl", { resolve: publicDns, maxBytes: 10, transport: t }).then(() => undefined, (e: unknown) => e)) as OriginalsError;
+    expect(error.code).toBe("FETCH_TOO_LARGE");
+    expect(seen.signal?.aborted).toBe(true);
+    expect(error.details).toMatchObject({ bytesRead: 11 });
+  });
+
+  test("a successful response does not abort its request", async () => {
+    const { t, seen } = recording({ chunks: ["ok"] });
+    await safeFetch("https://example.com/did.jsonl", { resolve: publicDns, transport: t });
+    expect(seen.signal?.aborted).toBe(false);
+  });
+});

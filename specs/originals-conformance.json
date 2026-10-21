@@ -282,8 +282,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ]
     },
     {
@@ -295,8 +295,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ],
       "note": "Owner decision Q5: every branch is reported and none is current until anchoring settles it (P9.16)."
     },
@@ -719,8 +719,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ]
     },
     {
@@ -744,8 +744,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/alias.test.ts",
-        "packages/sdk/tests/unit/originals/hosting.test.ts"
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/vh/tests/alias.test.ts"
       ]
     },
     {
@@ -886,8 +886,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/fetch.test.ts",
-        "packages/sdk/tests/unit/originals/hosting.test.ts"
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/vh/tests/fetch.test.ts"
       ]
     },
     {
