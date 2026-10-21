@@ -127,13 +127,29 @@ describe('resolution (did:btco method v0.2.0)', () => {
     expect((await failing.resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
   });
 
-  test('M1: a delegated or encoded inscription the sat holder adds is observed, not a version, and does not fail resolution (P5.13)', async () => {
+  test('M1: a delegated or encoded inscription the sat holder adds without metadata is observed, not a version, and does not fail resolution (P5.13)', async () => {
     const v1 = version(10, doc('one'));
-    const delegated = { ...publication(11, {}), body: { status: 'unsupported' as const, reason: 'delegated' as const, mediaType: null } };
-    const encoded = { ...publication(12, {}), body: { status: 'unsupported' as const, reason: 'content-encoding' as const, mediaType: 'text/plain' } };
+    const delegated = { ...publication(11, {}), body: { status: 'unsupported' as const, reason: 'delegated' as const, mediaType: null, metadata: null } };
+    const encoded = { ...publication(12, {}), body: { status: 'unsupported' as const, reason: 'content-encoding' as const, mediaType: 'text/plain', metadata: null } };
     const r = await resolver(snapshot([v1, delegated, encoded])).resolve(DID);
     expect(r.resolutionMetadata.error).toBeUndefined();
     expect(r.resolutionMetadata.versions).toEqual([v1.id]);
+  });
+
+  test('finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; metadata not read is unresolvable, never skipped', async () => {
+    for (const reason of ['delegated', 'content-encoding'] as const) {
+      const v1 = version(10, doc('one'));
+      const v2 = { ...publication(11, {}), body: { status: 'unsupported' as const, reason, mediaType: null, metadata: btcoDidInscription(doc('two')).metadata } };
+      const r = await resolver(snapshot([v1, v2])).resolve(DID);
+      expect(r.resolutionMetadata.error).toBeUndefined();
+      expect(r.resolutionMetadata.versions).toEqual([v1.id, v2.id]);
+      expect(r.didDocument?.alsoKnownAs).toEqual(['two']);
+      // Its metadata was not read: it could be a newer version.
+      const unread = { ...publication(11, {}), body: { status: 'unsupported' as const, reason, mediaType: null } };
+      const cut = await resolver(snapshot([v1, unread])).resolve(DID);
+      expect(cut.didDocument).toBeNull();
+      expect(cut.resolutionMetadata.error).toBe('unresolvable');
+    }
   });
 
   test('M1: an inscription past the reader\'s byte budget could be a version: unresolvable, never the latest version read', async () => {
