@@ -581,16 +581,21 @@ await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }
 // of the browser-first entry). The first funding UTXO must hold the sat at offset 0. Until Bitcoin shows
 // the anchor, the inscription is the whole stored log from genesis through the anchoring entry; then one
 // entry, the one after Bitcoin's head. `versionId` names it explicitly; it is refused unless it is next
-// (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11):
-const read = { provider, clock, index: "ord@node-a" };
-const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read });
+// (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
+// ones, whose reads are compared (P9.10 SHOULD: an index you run, or two independent ones):
+const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other, index: "ord@node-b" }] };
+// recoveryStore is required: a pair for the same entry that can still land refuses a second one
+// (PAIR_IN_FLIGHT) unless `replaces: [recoveryId]` says it is a deliberate replacement (P9.6).
+// `recoveryStore: null` skips that check deliberately (pair.inFlightGuard: "skipped").
+const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read, recoveryStore });
 pair.carries;   // the versionIds in the body: genesis..anchoring entry, or the one entry
 pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
-await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore }); // persists before each broadcast
+// Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, P9.18),
+// then persists before each broadcast.
+await submitEntryInscription({ sdk, did, pair, ...read, provider, recoveryStore });
 // after a crash: resumeEntryInscription({ sdk, did, ...read, recoveryStore, recoveryId }) sends the same pair once catchUp
-// says to (re-verified, P9.18); resumeInscriptionOnSat({ recoveryId, provider, recoveryStore }) is the unchecked rebroadcast.
-// Pass recoveryStore to prepareEntryInscription too: a pair for the same entry that can still land refuses a second
-// one (PAIR_IN_FLIGHT) unless `replaces: [recoveryId]` says it is a deliberate replacement (P9.6).
+// says to (re-verified, P9.18). submitPreparedInscriptionOnSat and resumeInscriptionOnSat, also exported, are the
+// unchecked low-level calls: they broadcast stored bytes without any Originals check.
 const published = await readAnchored(sdk, did, { ...read, recoveryStore });  // what Bitcoin shows: the durable boundary (P9.4)
 published.publication; // "pending-bitcoin-acceptance" while the anchor is observed but not shown; then "anchored" (P9.18)
 published.recoveryIssues; // damaged or inconsistent recovery records, skipped: [{ recoveryId, code, message }]
@@ -614,9 +619,11 @@ const view = await sdk.get(did, { bitcoin: [evidence] });                     //
 view.report.anchoring; // anchor, conflicting anchors, accepted, ignored and disputed inscriptions, indexes, copy, change, tip
 view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes: ["ord@node-a"] }
 // Without any copy of the log: verifyOriginal({ bitcoin: [evidence], authors }) (P9.17, P9.18).
-// Transferring the sat: hand the recipient what Bitcoin does not hold; the recipient checks it against the sat.
-const handoff = await transferHandoff(sdk, did);             // { package (evidence package), offChain }
-const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read); // LoadedEvidence; stores nothing
+// Transferring the sat: hand the recipient what Bitcoin does not hold, through the head Bitcoin accepts
+// ({ through: "committed" } for the committed head); the recipient checks it against the sat it received.
+const handoff = await transferHandoff(sdk, did, read);       // { package (evidence package), offChain }
+const received = await verifyHandoff(recipientSdk, handoff.package.bytes, { ...read, expectedSat: "did:btco:reg:5000000000" });
+received.report.ownership?.output;                           // compare with the output the sat was received in
 ```
 
 - Three heads are kept apart. The committed head is the stored log's last
@@ -643,8 +650,8 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   `commit: "not-observed" | "mempool" | "confirmed"` (a confirmed commit
   holds the sat until its reveal spends it, and that reveal would be
   `ifRevealed: "ignored-by-bitcoin"`, or `"unverified"` when only evidence is
-  missing). While the indexes disagree on the sat (`unverified`), nothing is
-  prepared (`wait-for-bitcoin`). Each recovery record is validated (its
+  missing). Reads compare every index given (`indexes`); while they
+  disagree on the sat (`unverified`), nothing is prepared (`wait-for-bitcoin`). Each recovery record is validated (its
   declared txids must be its bytes'); a damaged one is skipped and listed in
   `recoveryIssues`, so one bad file in a shared directory blocks nothing. So each accepted
   inscription lands in a later block than the one before (P9.13), and a
@@ -679,7 +686,14 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   `details.problems` and the report; missing identity evidence is
   `incomplete-evidence`. Resource availability does not gate it: missing
   bytes are listed, never a reason to refuse (P7.4). Freshness is not gated
-  either; it stays a reported policy.
+  either; it stays a reported policy. Time passes before the pair is sent, so
+  `submitEntryInscription` checks again before the first broadcast: the entry
+  is still the next one Bitcoin can accept (`HEAD_NOT_NEXT`), no other pair
+  for it can still land (`PAIR_IN_FLIGHT`), the pair inscribes the stored
+  bytes (`PAIR_BODY_MISMATCH`) and the log still verifies through it.
+  `submitPreparedInscriptionOnSat` and `resumeInscriptionOnSat` skip all of
+  that: send a pair promptly through them only right after preparing it, or
+  to force a rebroadcast deliberately.
 - **Pending Bitcoin acceptance (P9.18).** Between broadcast and acceptance the
   anchor's checks depend on its position (P5.13, P9.15, P9.16), so the result
   is labelled `publication: "pending-bitcoin-acceptance"` on `readAnchored`,
@@ -689,7 +703,13 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   included), or in its mempool where the provider reports `inMempool`
   (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
   pair submitted but not observed (rejected, evicted, or a provider without a
-  mempool view) is `submitted-unobserved`, never pending acceptance. Once
+  mempool view) is `submitted-unobserved`, never pending acceptance.
+  PROVISIONAL, and a spec question: P9.18 names a single label, "pending
+  Bitcoin acceptance", from inscribing until confirmation. The SDK is
+  stricter and splits off `submitted-unobserved` for a pair nothing shows the
+  network holding, so a rejected or evicted anchor is not reported as on its
+  way. Proposed fix: P9.18 to allow (or require) distinguishing a submitted
+  inscription that is not observed on the network from one that is. Once
   Bitcoin shows it the label is `anchored` and the Original verifies as
   anchored. Without a recovery store the label cannot see the pair and reads
   `not-anchored`; `unverified` means Bitcoin evidence is missing or
@@ -704,15 +724,23 @@ const received = await verifyHandoff(recipientSdk, handoff.package.bytes, read);
   Bitcoin to be all a reader needs uses a did:btco author DID and grants only
   did:btco editors (P5.15).
 - **Transfer handoff (P9.18).** Selling or giving the Original is moving the
-  sat; it needs nothing from the author. `transferHandoff(sdk, did)` returns
-  an evidence package (the log, the off-chain signer DID histories and the
-  resource bytes this SDK holds; did:btco histories are listed as missing,
+  sat; it needs nothing from the author. `transferHandoff(sdk, did, read)`
+  returns an evidence package (the log, the off-chain signer DID histories and
+  the resource bytes this SDK holds; did:btco histories are listed as missing,
   being on Bitcoin) with its `offChain` notice, for the sender to give the
-  recipient. The recipient's SDK should verify it rather than trust it:
-  `verifyHandoff(sdk, zip, read)` reads the sat the package names and verifies
-  the package against it, reporting history, binding, identity evidence and
-  resource availability separately, and stores nothing. Nothing guarantees
-  the recipient ever gets them.
+  recipient. By default it runs through the head Bitcoin accepts, read from
+  the sat: entries committed locally but not inscribed are not the
+  recipient's Original (P9.12). `{ through: "committed" }` includes them, for
+  a recipient who will inscribe them; `{ checkpoint }` names an exact entry.
+  Before the anchor is on Bitcoin there is no accepted head
+  (`NOT_ANCHORED_ON_BITCOIN`). The recipient's SDK should verify it rather
+  than trust it: `verifyHandoff(sdk, zip, { ...read, expectedSat })` reads
+  the sat the recipient received and refuses a package anchored to any other
+  (`HANDOFF_SAT_MISMATCH`), then verifies the package against it, reporting
+  history, binding, identity evidence and resource availability separately,
+  and stores nothing. Ownership is the sat's holder, reported separately:
+  compare `report.ownership.output` with the output the sat was received in.
+  Nothing guarantees the recipient ever gets the evidence.
 - **Editor entries** are published like author entries: the sat's holder
   inscribes them, and the pre-inscription check covers the editor's identity
   evidence (P5.16, P9.12).
