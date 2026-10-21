@@ -1507,7 +1507,11 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/fs-store.test.ts",
+        "packages/sdk/tests/unit/originals/shared-host.test.ts"
+      ]
     },
     {
       "id": "C12-126",
@@ -1517,7 +1521,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/shared-host.test.ts"
+      ]
     },
     {
       "id": "C12-127",
@@ -1537,7 +1544,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/shared-host.test.ts"
+      ]
     },
     {
       "id": "C12-129",

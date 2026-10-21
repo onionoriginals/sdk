@@ -200,6 +200,8 @@ export interface RefusedCandidate {
   readonly draft: Draft;
   /** The host's head when it refused. */
   readonly hostHead: string;
+  /** The accepted candidate that carried its change, once reconciled. */
+  readonly reconciledAs?: string;
 }
 
 export type SubmitResult =
@@ -452,20 +454,6 @@ function aliasesOf(log: string): string[] {
     }
   }
   return [...out];
-}
-
-/** The DIDs that sign a log's entries: the author, and an editor where an entry names one (P5.16). */
-function signerDidsOf(log: string): string[] {
-  const dids = new Set(authorDidsOf(log));
-  for (const line of lines(log)) {
-    try {
-      const entry = JSON.parse(line) as { state?: { editor?: { did?: unknown } } };
-      if (typeof entry.state?.editor?.did === "string") dids.add(entry.state.editor.did);
-    } catch {
-      // Verification reports the malformed line.
-    }
-  }
-  return [...dids];
 }
 
 function checkAnswer(answer: unknown, did: string): HostAnswer {
@@ -1007,7 +995,7 @@ export class OriginalsSDK {
     const committed = lines(stored).includes(candidate.line);
     if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
     const answer = checkAnswer(
-      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries(candidate.bytes), identities: await this.authorEvidence(signerDidsOf(candidate.line)) }),
+      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries(candidate.bytes), identities: await this.authorEvidence(stored ? `${stored.trimEnd()}\n${candidate.line}` : candidate.line) }),
       did,
     );
     if (answer.status === "stale-parent") {
@@ -1042,8 +1030,9 @@ export class OriginalsSDK {
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
-    const draft: Draft = { kind: "draft", signed: false, original: did, parent: record.parent, entry: unsigned, summary: summarize(unsigned, previous), bytes };
-    return { label: "refused", original: did, parent: record.parent, versionId: entry.versionId, entry, draft, hostHead: record.hostHead };
+    const summary = summarize(unsigned, previous);
+    const draft: Draft = { kind: "draft", signed: false, original: did, parent: record.parent, entry: unsigned, summary, display: describeEntry(summary), bytes };
+    return { label: "refused", original: did, parent: record.parent, versionId: entry.versionId, entry, draft, hostHead: record.hostHead, ...(record.reconciledAs ? { reconciledAs: record.reconciledAs } : {}) };
   }
 
   /**
@@ -1080,7 +1069,11 @@ export class OriginalsSDK {
     exactKeys(change, ["name", "metadata", "resources"], "reconciled change");
     const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
     const result = await this.submit(await this.sign(draft, input.signer), input.host);
-    if (result.status !== "stale-parent" && kept) await this.store.dropRefused(did, kept.versionId);
+    // The refused candidate stays, labelled with what carried its change (P6.8).
+    if (result.status !== "stale-parent" && kept) {
+      const record = (await this.store.getRefused(did)).find((r) => refusedVersionId(r) === kept.versionId);
+      if (record) await this.store.putRefused(did, { ...record, reconciledAs: draft.entry.versionId });
+    }
     return result;
   }
 

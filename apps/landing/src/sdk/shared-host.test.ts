@@ -89,7 +89,7 @@ async function shared() {
   return { h, author, a, b, did, parent, aliasDid, siteKey, hostA, hostB, logPath, hostedLines, post, stranger, edit };
 }
 
-/** Device A saves first; device B's save from the same parent is refused (row 131). */
+/** Device A saves first; device B's save from the same parent is refused (C12-125). */
 async function refusedOnB() {
   const env = await shared();
   const theirs = await env.a.submit(await env.edit(env.a, THEIRS), env.hostA);
@@ -99,7 +99,7 @@ async function refusedOnB() {
   return { ...env, theirs, mine, refused };
 }
 
-/** A package of the refused candidate's branch, as someone publishing it elsewhere would make (row 135). */
+/** A package of the refused candidate's branch, as someone publishing it elsewhere would make (C12-129). */
 function elsewhere(env: Awaited<ReturnType<typeof refusedOnB>>): Uint8Array {
   const hosted = env.hostedLines();
   const through = hosted.slice(0, hosted.findIndex((l) => (parseJson(l) as { versionId: string }).versionId === env.parent) + 1);
@@ -109,7 +109,7 @@ function elsewhere(env: Awaited<ReturnType<typeof refusedOnB>>): Uint8Array {
 }
 
 describe('shared-host saves on the landing (P6.7, P6.8)', () => {
-  test('row 131: two submissions with the same parent: one accepted, the other refused with the new head; the refused candidate is kept, not published', async () => {
+  test('C12-125: two submissions with the same parent: one accepted, the other refused with the new head; the refused candidate is kept, not published', async () => {
     const env = await refusedOnB();
     const { b, did, parent, mine, refused, theirs } = env;
     expect(refused.hostHead).toBe(theirs.checkpoint);
@@ -131,7 +131,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     await expect(b.submit(mine, env.hostB)).rejects.toMatchObject({ code: 'CANDIDATE_REFUSED' });
   });
 
-  test('row 132: a reconciled candidate signed by an authorized signer against the new head is accepted', async () => {
+  test('C12-126: a reconciled candidate signed by an authorized signer against the new head is accepted', async () => {
     const env = await refusedOnB();
     const { b, did, author, theirs, refused } = env;
     const result = await b.reconcile(did, {
@@ -148,14 +148,17 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     if (result.status === 'stale-parent') return;
     expect(result.hostHead).toBe(result.checkpoint);
     expect(env.hostedLines().length).toBe(4);
-    expect(await b.refused(did)).toEqual([]);
+    // The refused candidate is kept, labelled with what carried its change, and never published (P6.8).
+    const kept = await b.refused(did);
+    expect(kept.map((r) => r.reconciledAs)).toEqual([result.checkpoint]);
+    expect(env.hostedLines().some((l) => l.includes(kept[0].versionId))).toBe(false);
     const r = await env.stranger().loadPublished(env.aliasDid, env.h.read);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.head).toBe(result.checkpoint);
     expect(r.report.state?.resources[0].digest).toBe(resourceDigest(MINE));
   });
 
-  test('row 133: the host stores the submission unchanged; a changed or re-signed entry fails verification or is not by an authorized signer', async () => {
+  test('C12-127: the host stores the submission unchanged; a changed or re-signed entry fails verification or is not by an authorized signer', async () => {
     const env = await shared();
     const candidate = await env.edit(env.a, THEIRS);
     expect((await env.a.submit(candidate, env.hostA)).status).toBe('accepted');
@@ -185,7 +188,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     }
   });
 
-  test('row 133: the host refuses, and never publishes, a changed or re-signed submission', async () => {
+  test('C12-127: the host refuses, and never publishes, a changed or re-signed submission', async () => {
     const env = await shared();
     const candidate = await env.edit(env.a, THEIRS);
     const entry = parseJson(candidate.line) as unknown as LogEntry;
@@ -204,7 +207,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect(existsSync(join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'resources', resourceDigest(THEIRS)))).toBe(false);
   });
 
-  test('row 134: a submission retried after a lost acknowledgement, including after the head moved on, returns its checkpoint and the current head; no second append', async () => {
+  test('C12-128: a submission retried after a lost acknowledgement, including after the head moved on, returns its checkpoint and the current head; no second append', async () => {
     const env = await shared();
     const { a, b, did } = env;
     const candidate = await env.edit(b, MINE);
@@ -229,7 +232,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect(await b.refused(did)).toEqual([]);
   });
 
-  test('row 135: a refused candidate published elsewhere makes a fork that stays unresolved; the SDK never packages it', async () => {
+  test('C12-129: a refused candidate published elsewhere makes a fork that stays unresolved; the SDK never packages it', async () => {
     const env = await refusedOnB();
     const pkgB = await env.b.package(env.did);
     expect(new TextDecoder().decode(pkgB.bytes)).not.toContain(env.mine.versionId);
@@ -241,7 +244,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect(view.report.fork?.branches.map((br) => br.versionId).sort()).toEqual([env.theirs.checkpoint, env.mine.versionId].sort());
   });
 
-  test('row 136: neither the longer branch nor the branch with more signing keys wins; the fork stays unresolved', async () => {
+  test('C12-130: neither the longer branch nor the branch with more signing keys wins; the fork stays unresolved', async () => {
     const env = await refusedOnB();
     // Someone extends the refused branch elsewhere: two more entries, signed with both author keys.
     let tc = START + 30_000;
@@ -260,7 +263,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     }
   });
 
-  test('row 137: an entry bringing in content from another branch is accepted on its branch as a single-parent entry; the fork remains', async () => {
+  test('C12-131: an entry bringing in content from another branch is accepted on its branch as a single-parent entry; the fork remains', async () => {
     const env = await refusedOnB();
     const reader = env.stranger();
     await reader.import((await env.a.package(env.did)).bytes);

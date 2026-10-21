@@ -379,7 +379,7 @@ describe("refused candidates (P6.8)", () => {
   const DID = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
   const record = (n: number) => ({ label: "refused" as const, parent: "1-a", entry: `{"versionId":"2-${n}"}`, hostHead: "2-host" });
 
-  test("row 131: FileStore keeps refused candidates beside, never in, the committed log, across reopening", async () => {
+  test("C12-125: FileStore keeps refused candidates beside, never in, the committed log, across reopening", async () => {
     const dir = tempDir();
     try {
       const store = await FileStore.open(dir);

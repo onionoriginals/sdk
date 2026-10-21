@@ -47,6 +47,8 @@ export interface StoredRefused {
   entry: string;
   /** The host's head when it refused. */
   hostHead: string;
+  /** The accepted candidate that carried its change, once reconciled (P6.8). The refused entry is kept either way. */
+  reconciledAs?: string;
 }
 
 export interface OriginalsStore {
@@ -65,9 +67,10 @@ export interface OriginalsStore {
   putBranch(did: string, log: string): Promise<void>;
   getBranches(did: string): Promise<string[]>;
   /** Keep a refused candidate (P6.8). Idempotent by its versionId. */
+  /** Keep a refused candidate. Storing it again with the same entry updates its label; the entry itself never changes. */
   putRefused(did: string, refused: StoredRefused): Promise<void>;
   getRefused(did: string): Promise<StoredRefused[]>;
-  /** Forget a refused candidate, once its change is reconciled or abandoned. */
+  /** Forget a refused candidate, when its signer abandons it. Reconciling never drops it (P6.8). */
   dropRefused(did: string, versionId: string): Promise<void>;
   list(): Promise<string[]>;
 }
@@ -161,7 +164,9 @@ export class MemoryStore implements OriginalsStore {
   putRefused(did: string, refused: StoredRefused): Promise<void> {
     const known = this.refused.get(did) ?? [];
     const id = refusedVersionId(refused);
-    if (!known.some((r) => refusedVersionId(r) === id)) this.refused.set(did, [...known, { ...refused }]);
+    const at = known.findIndex((r) => refusedVersionId(r) === id);
+    if (at < 0) this.refused.set(did, [...known, { ...refused }]);
+    else if (known[at].entry === refused.entry) this.refused.set(did, known.map((r, k) => (k === at ? { ...refused } : r)));
     return Promise.resolve();
   }
 
