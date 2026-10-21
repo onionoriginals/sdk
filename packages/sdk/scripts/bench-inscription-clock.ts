@@ -175,7 +175,7 @@ export async function runBenchmark(options: BenchOptions): Promise<{ rows: Bench
     stateBytes = shared.bytes?.length ?? 0;
   }, options.store ? "file store" : "memory store");
 
-  // 2. Warm reads: known blocks cost nothing; a new block costs a boundary check and one batch.
+  // 2. Warm reads: a known block costs one probe that it is still on the chain; a new block costs a boundary check and one batch.
   const sample = Array.from({ length: 10_000 }, (_, i) => Math.floor((i * 2654435761) % chain.length));
   await measure("warm read x10,000, known blocks", async () => {
     for (const h of sample) await clock.at(h, chain.hash(h));

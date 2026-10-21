@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { QuickNodeProvider } from '../../../src/adapters/providers/QuickNodeProvider';
 import { RegtestProvider } from '../../../src/adapters/providers/RegtestProvider';
+import { readSatSnapshot, type SatSnapshotReader } from '../../../src/adapters/providers/sat-snapshot';
+import { OriginalsError } from '@originals/vh';
 
 const nativeFetch = globalThis.fetch;
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -118,9 +120,16 @@ for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snap
     const { provider } = fixture(kind, { content: new Uint8Array([0, 255]) });
     await expect(provider.getSatSnapshot('123')).rejects.toThrow(/content|body/i);
   });
-  test('rejects delegated content', async () => {
-    const { provider } = fixture(kind, { info: { delegate: 'd'.repeat(64) + 'i0' } });
-    await expect(provider.getSatSnapshot('123')).rejects.toThrow(/delegat/i);
+  test('reports delegated content as observed but unsupported, without reading it (M1; P9.12)', async () => {
+    const { provider, calls } = fixture(kind, { info: { delegate: 'd'.repeat(64) + 'i0' } });
+    const result = await provider.getSatSnapshot('123');
+    expect(result.publications[0].body).toEqual({ status: 'unsupported', reason: 'delegated', mediaType: 'image/png' });
+    expect(result.publications[0].creation).toEqual({ height: 100, blockHash: hash, transactionIndex: 1, inscriptionIndex: 0 });
+    expect(calls.some(call => /content|metadata/i.test(call.method))).toBe(false);
+  });
+  test('reports an encoded body as observed but unsupported (M1; P9.14)', async () => {
+    const { provider } = fixture(kind, { info: { content_encoding: 'br' } });
+    expect((await provider.getSatSnapshot('123')).publications[0].body).toEqual({ status: 'unsupported', reason: 'content-encoding', mediaType: 'image/png' });
   });
   test('rejects missing content type rather than hiding a continuation', async () => {
     const { provider } = fixture(kind, { info: { content_type: undefined } });
@@ -242,4 +251,66 @@ test('QuickNode raw metadata remains inside the total snapshot deadline', async 
 test('QuickNode raw metadata enforces its configured response size cap', async () => {
   const { provider } = fixture('quicknode', { rawContent: true, maxJsonBytes: 1024, metadata: 'ab'.repeat(1024) });
   await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'QUICKNODE_RESPONSE_TOO_LARGE' });
+});
+
+/** An in-memory ord + Core holding `n` inscriptions on sat 123, one block each from height 10. */
+function memoryReader(n: number, extra: (k: number) => Record<string, unknown> = () => ({}), length = () => 1) {
+  const ids = Array.from({ length: n }, (_, k) => `${(k + 1).toString(16).padStart(64, 'e')}i0`);
+  const calls: string[] = [];
+  const reader: SatSnapshotReader = {
+    rpc: async (method, params) => {
+      calls.push(method);
+      if (method === 'getblockchaininfo') return { chain: 'regtest', blocks: 20_000, bestblockhash: hash };
+      if (method === 'getblockhash') return (params[0] as number).toString(16).padStart(64, '0');
+      const height = parseInt(params[0] as string, 16);
+      return { hash: params[0], height, confirmations: 1, tx: [ids[height - 10].slice(0, 64)], time: 1_700_000_000 };
+    },
+    status: async () => (calls.push('status'), { chain: 'regtest', height: 20_000, sat_index: true, inscription_index: true, unrecoverably_reorged: false }),
+    indexHash: async () => (calls.push('indexHash'), hash),
+    sat: async () => (calls.push('sat'), { number: 123, inscriptions: ids, address: 'holder', satpoint: txid + ':0:0' }),
+    inscription: async (i) => {
+      calls.push('inscription');
+      const k = ids.indexOf(i);
+      return { id: i, sat: 123, height: 10 + k, content_type: 'text/plain', content_length: length(), ...extra(k) };
+    },
+    content: async () => (calls.push('content'), new Uint8Array(length())),
+    metadata: async () => (calls.push('metadata'), null),
+  };
+  return { reader, calls, ids };
+}
+
+describe('sat snapshot budgets (M1)', () => {
+  test('the default request budget scales with the inscriptions the index lists', async () => {
+    const { reader, calls } = memoryReader(150);
+    const snapshot = await readSatSnapshot(reader, '123', 'regtest');
+    expect(snapshot.publications).toHaveLength(150);
+    expect(calls.length).toBeGreaterThan(512);
+  });
+  test('an explicit request budget is kept, and running out is incomplete evidence with a category', async () => {
+    const { reader } = memoryReader(150);
+    const refused = await readSatSnapshot(reader, '123', 'regtest', { maxRequests: 512 }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(OriginalsError);
+    expect(refused).toMatchObject({ category: 'incomplete-evidence', code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
+  });
+  test('a sat listing more inscriptions than maxInscriptions is refused with a category, before reading them', async () => {
+    const { reader, calls } = memoryReader(30);
+    const refused = await readSatSnapshot(reader, '123', 'regtest', { maxInscriptions: 20 }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ category: 'incomplete-evidence', code: 'SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS' });
+    expect(calls.includes('inscription')).toBe(false);
+  });
+  test('a body past the content-byte budget is observed unread; later bodies that fit are still read', async () => {
+    const sizes = [600, 700, 100];
+    let k = 0;
+    const { reader, calls, ids } = memoryReader(3, () => ({}), () => sizes[k++]);
+    const content = async (id: string) => (calls.push('content'), new Uint8Array(sizes[ids.indexOf(id)]));
+    const snapshot = await readSatSnapshot({ ...reader, content }, '123', 'regtest', { maxContentBytes: 1000 });
+    expect(snapshot.publications.map((p) => p.body.status)).toEqual(['complete', 'unavailable', 'complete']);
+    expect(snapshot.publications[1].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 700 });
+    expect(calls.filter((c) => c === 'content')).toHaveLength(2);
+  });
+  test('errors at the seam carry a category', async () => {
+    const { reader } = memoryReader(1);
+    await expect(readSatSnapshot(reader, '123', 'mainnet')).rejects.toMatchObject({ category: 'invalid-evidence', code: 'SAT_SNAPSHOT_NETWORK_MISMATCH' });
+    await expect(readSatSnapshot(reader, '123', 'regtest', { maxRequests: 0 })).rejects.toMatchObject({ category: 'invalid-evidence', code: 'SAT_SNAPSHOT_BUDGET_INVALID' });
+  });
 });

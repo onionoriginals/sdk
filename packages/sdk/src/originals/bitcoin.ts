@@ -9,12 +9,16 @@
  * genesis again (#973). `satEvidence` turns a sat
  * snapshot from the SDK's sat reader into the evidence `verifyOriginal`
  * takes: one index's read, with the sat number and network that index
- * reports for each inscription (P9.10). A publication whose body the reader
- * could not establish fails the whole read: the anchoring sat carries the
- * Original's whole log, and a copy is no substitute (P9.17; VH-Log PR 2).
+ * reports for each inscription (P9.10). A delegated or encoded inscription,
+ * or one past the reader's byte budget, is passed on flagged `unsupported`
+ * and the verifier ignores it with a reason (P9.12, P9.14). An Originals
+ * inscription the reader did not read, or any publication whose body it
+ * could not establish otherwise, fails the whole read: the anchoring sat
+ * carries the Original's whole log, and a copy is no substitute (P9.17;
+ * VH-Log PR 2).
  */
 import { OriginalsError } from "@originals/vh";
-import type { SatEvidence, SatInscription } from "@originals/vh/originals";
+import { ORIGINALS_INSCRIPTION_TYPE, type SatEvidence, type SatInscription } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { BitcoinNetwork, SatSnapshot } from "../bitcoin/sat-snapshot-types.js";
 import { crc32 } from "./zip.js";
@@ -24,9 +28,13 @@ export interface BlockInfo {
   time: number;
   hash: string;
   /**
-   * The parent block's hash (Core's `previousblockhash`). When given, the
-   * clock checks that each block it appends extends the one before it, so a
-   * reorganisation during a read cannot splice two chains together.
+   * The parent block's hash (Core's `previousblockhash`). The clock checks
+   * that each block it appends extends the one before it, so a
+   * reorganisation during a read cannot splice two chains together. A
+   * batched `headers` source must give it for every block but genesis
+   * (`BLOCK_PARENT_REQUIRED`). Without it, a single-header source costs a
+   * second request per new block: the clock re-reads the parent to check the
+   * chain did not move. Give it.
    */
   prev?: string;
 }
@@ -107,10 +115,13 @@ interface Budget {
  * Running maximum of block timestamps from genesis (P9.15). Every value is
  * derived from headers of the active chain; there are no built-in checkpoints.
  *
- * - A read of a block whose hash the clock already holds costs no request:
- *   the hash fixes the block's ancestry, so its maximum cannot have changed.
- * - Any other read first checks the highest held block it relies on against
- *   the active chain and rewinds to the common ancestor if it moved (#971).
+ * - Every read first checks the highest held block it relies on against the
+ *   active chain and rewinds to the common ancestor if it moved (#971). A
+ *   read of a block the clock holds therefore costs one request, and a block
+ *   the chain has since orphaned is refused by hash (`BLOCK_NOT_ON_CHAIN`)
+ *   as a fresh clock refuses it.
+ * - Each appended block must extend the one before it: by its `prev`, or,
+ *   from a single-header source without `prev`, by re-reading the parent.
  * - New blocks are appended `batch` at a time when a `headers` source is
  *   given; a warm read or a restart costs requests in proportion to new or
  *   reorganised blocks, not to the chain's height.
@@ -190,7 +201,8 @@ export class InscriptionClock {
   }
 
   private async derive(height: number, hash: string | undefined, budget: Budget): Promise<number> {
-    if (hash !== undefined && height < this.count && this.hashAt(height) === hash) return this.maxima[height] * 1000;
+    // No shortcut for a held hash: the hash fixes the block's maximum, not
+    // whether the active chain still has it, so it is probed like any read.
     for (;;) {
       if (this.count > 0) await this.reconcile(Math.min(height, this.count - 1), budget);
       if (await this.extend(height, budget)) break;
@@ -234,9 +246,20 @@ export class InscriptionClock {
   private async extend(height: number, budget: Budget): Promise<boolean> {
     while (this.count <= height) {
       const want = Math.min(this.options.batch!, height - this.count + 1);
-      const blocks = this.options.headers && want > 1 ? await this.fetchBatch(this.count, want, budget) : [await this.fetch(this.count, budget)];
+      const batched = !!this.options.headers && want > 1;
+      const blocks = batched ? await this.fetchBatch(this.count, want, budget) : [await this.fetch(this.count, budget)];
       for (const block of blocks) {
-        if (this.count > 0 && block.prev !== undefined && block.prev.toLowerCase() !== this.hashAt(this.count - 1)) return false;
+        if (this.count > 0) {
+          if (block.prev !== undefined) {
+            if (block.prev.toLowerCase() !== this.hashAt(this.count - 1)) return false;
+          } else if (batched) {
+            // Blocks in one batch could come from two chains; only their parent links show it.
+            throw new OriginalsError("invalid-evidence", "BLOCK_PARENT_REQUIRED", `the batched header source gave block ${this.count} without its parent's hash (prev)`);
+          } else if ((await this.fetch(this.count - 1, budget)).hash.toLowerCase() !== this.hashAt(this.count - 1)) {
+            // Its parent link was not given: the parent must still be the one held.
+            return false;
+          }
+        }
         this.append(block);
       }
     }
@@ -420,10 +443,24 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
   const tip = snapshot.tipAfter;
   const inscriptions: SatInscription[] = [];
   for (const p of snapshot.publications) {
-    if (p.body.status !== "complete" || !p.creation) {
+    const body = p.body;
+    // Observed but not read: a delegated or encoded body, or one past the read's byte budget (M1).
+    // An unread Originals inscription is missing evidence (P9.17); anything else is flagged and
+    // the verifier ignores it with a reason, so the sat's holder cannot fail every read (P9.12).
+    const observed = "reason" in body && body.reason !== undefined && !(body.reason === "over-budget" && body.mediaType === ORIGINALS_INSCRIPTION_TYPE);
+    if ((body.status !== "complete" && !observed) || !p.creation) {
       throw new OriginalsError("unavailable-bytes", "SAT_READ_INCOMPLETE", `inscription ${p.id} on sat ${snapshot.sat} could not be read`);
     }
     const confirmations = p.confirmed ? tip.height - p.creation.height + 1 : 0;
+    const content =
+      body.status === "complete"
+        ? { mediaType: body.mediaType, content: body.bytes, metadata: body.metadata }
+        : {
+            mediaType: ("mediaType" in body ? body.mediaType : null) ?? "application/octet-stream",
+            content: new Uint8Array(),
+            metadata: null,
+            unsupported: "reason" in body && body.reason !== "over-budget" ? body.reason : ("not-read" as const),
+          };
     inscriptions.push({
       id: p.id,
       // Where the index places it, not the sat the read was asked about (P9.10).
@@ -434,9 +471,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
       inscriptionIndex: p.creation.inscriptionIndex,
       confirmations,
       inscriptionTime: await options.clock.at(p.creation.height, p.creation.blockHash, { signal: options.signal }),
-      mediaType: p.body.mediaType,
-      content: p.body.bytes,
-      metadata: p.body.metadata,
+      ...content,
     });
   }
   const satpoint = snapshot.ownership.satpoint;

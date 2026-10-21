@@ -983,6 +983,7 @@
       "status": "covered",
       "note": "Baseline profile: a compact delta is rejected, because no compact encoding is defined (P9.17). No profile defines one yet (P9.14 MAY), so decoding to the full entry has nothing to test.",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },

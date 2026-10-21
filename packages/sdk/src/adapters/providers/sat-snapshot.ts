@@ -1,6 +1,6 @@
 import type { BitcoinNetwork, SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
 import { MAX_SATOSHI_SUPPLY } from '../../utils/satoshi-validation.js';
-import { StructuredError } from '../../utils/telemetry.js';
+import { OriginalsError } from '@originals/vh';
 import { hexToBytes } from '../../utils/encoding.js';
 
 /** Transport seam for ord's complete /sat, /inscription and raw /r/metadata views. */
@@ -15,10 +15,25 @@ export interface SatSnapshotReader {
 }
 
 export interface SatSnapshotBudget {
-  /** Total time for one complete observation, including stalled reads (default 30 seconds). */
+  /** Total time for one complete observation, including stalled reads (default 30 seconds, at most 120). */
   timeoutMs?: number;
-  /** Total upstream requests for one observation (default 512). No partial result is returned. */
+  /**
+   * Total upstream requests for one observation. By default the budget
+   * scales with the inscriptions the index lists: 7 + 5 per inscription
+   * (`/inscription`, at most two Core block reads, body and metadata), so a
+   * sat with many entries is read in full; `maxInscriptions` bounds it. An
+   * explicit value is kept as given (at most 1,000,000). No partial result is
+   * returned.
+   */
   maxRequests?: number;
+  /** Inscriptions a sat may list before the read is refused (default 10,000, at most 100,000). */
+  maxInscriptions?: number;
+  /**
+   * Body and metadata bytes read in one observation (default 32 MiB, at most
+   * 512 MiB). A body that would pass it is reported observed but unread
+   * (`{ status: 'unavailable', reason: 'over-budget' }`) and the read goes on.
+   */
+  maxContentBytes?: number;
 }
 
 const object = (value: unknown): Record<string, unknown> =>
@@ -27,20 +42,39 @@ const integer = (value: unknown): value is number => typeof value === 'number' &
 const hash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const chains: Record<string, BitcoinNetwork> = { main: 'mainnet', mainnet: 'mainnet', test: 'testnet', testnet: 'testnet', testnet3: 'testnet', testnet4: 'testnet', signet: 'signet', regtest: 'regtest' };
 const networkOf = (value: unknown): BitcoinNetwork | undefined => typeof value === 'string' && Object.prototype.hasOwnProperty.call(chains, value) ? chains[value] : undefined;
+/** Malformed or inconsistent upstream answers (section 6). */
+const invalid = (code: string, message: string) => new OriginalsError('invalid-evidence', code, message);
+/** Answers that are missing or not yet stable: an explicit incomplete result (section 6). */
+const incomplete = (code: string, message: string, details?: Record<string, unknown>) => new OriginalsError('incomplete-evidence', code, message, details);
+const within = (value: number | undefined, fallback: number, max: number, allowZero = false) =>
+  value === undefined ? fallback : Number.isSafeInteger(value) && (allowZero ? value >= 0 : value > 0) && value <= max ? value : NaN;
+/** Requests besides the per-inscription reads: two Core tips, two index statuses and hashes, and /sat. */
+const FIXED_REQUESTS = 7;
+const PER_INSCRIPTION = 5;
 
-/** One complete, stable sat observation: no decoded metadata, delegated bytes, incomplete bodies or moving index. */
+/**
+ * One complete, stable sat observation: no decoded metadata, no delegated or
+ * encoded bytes taken as a body, no moving index. Delegated and encoded
+ * inscriptions, and bodies past the byte budget, are reported observed but
+ * unread instead of failing the read, so the holder of a sat cannot make
+ * every read of it fail (P9.12). Every failure is an `OriginalsError` with a
+ * section 6 category.
+ */
 export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork, budget: SatSnapshotBudget = {}): Promise<SatSnapshot> {
-  const timeoutMs = budget.timeoutMs ?? 30_000;
-  const maxRequests = budget.maxRequests ?? 512;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000 ||
-      !Number.isSafeInteger(maxRequests) || maxRequests <= 0 || maxRequests > 50_000) {
-    throw new Error('Invalid sat snapshot budget');
+  const timeoutMs = within(budget.timeoutMs, 30_000, 120_000);
+  const explicitRequests = within(budget.maxRequests, 0, 1_000_000);
+  const maxInscriptions = within(budget.maxInscriptions, 10_000, 100_000, true);
+  const maxContentBytes = within(budget.maxContentBytes, 32 * 1024 * 1024, 512 * 1024 * 1024, true);
+  if ([timeoutMs, explicitRequests, maxInscriptions, maxContentBytes].some(Number.isNaN)) {
+    throw invalid('SAT_SNAPSHOT_BUDGET_INVALID', 'Invalid sat snapshot budget');
   }
-  const exhausted = () => new StructuredError('SAT_SNAPSHOT_BUDGET_EXCEEDED', 'Complete sat observation exceeded its total request or time budget');
+  const exhausted = () => incomplete('SAT_SNAPSHOT_BUDGET_EXCEEDED', 'Complete sat observation exceeded its total request or time budget', { maxRequests, timeoutMs });
   const controller = new AbortController();
   const deadline = performance.now() + timeoutMs;
   const timer = setTimeout(() => controller.abort(exhausted()), timeoutMs);
   let requests = 0;
+  // Until the index lists the sat's inscriptions, only the fixed reads are allowed.
+  let maxRequests = budget.maxRequests !== undefined ? explicitRequests : FIXED_REQUESTS;
   const call = async <T>(read: () => Promise<T>): Promise<T> => {
     if (requests >= maxRequests || performance.now() >= deadline) controller.abort(exhausted());
     controller.signal.throwIfAborted();
@@ -65,20 +99,31 @@ export async function readSatSnapshot(reader: SatSnapshotReader, satoshi: string
       inscription: id => call(() => reader.inscription(id, signal)),
       content: id => call(() => reader.content(id, signal)),
       metadata: id => call(() => reader.metadata(id, signal)),
-    }, satoshi, expectedNetwork);
+    }, satoshi, expectedNetwork, {
+      maxInscriptions,
+      maxContentBytes,
+      listed: count => { if (budget.maxRequests === undefined) maxRequests = FIXED_REQUESTS + PER_INSCRIPTION * count; },
+    });
   } finally { clearTimeout(timer); }
 }
 
-async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork?: BitcoinNetwork): Promise<SatSnapshot> {
+interface Limits {
+  maxInscriptions: number;
+  maxContentBytes: number;
+  /** Called once the index has listed the sat's inscriptions. */
+  listed(count: number): void;
+}
+
+async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, expectedNetwork: BitcoinNetwork | undefined, limits: Limits): Promise<SatSnapshot> {
   // Canonical decimal sat number within supply: no leading zeros, sign or whitespace.
   if (!/^(0|[1-9]\d{0,15})$/.test(satoshi) || BigInt(satoshi) > BigInt(MAX_SATOSHI_SUPPLY)) {
-    throw new StructuredError('INVALID_SATOSHI', 'Invalid canonical sat number');
+    throw invalid('INVALID_SATOSHI', 'Invalid canonical sat number');
   }
   const readTip = async () => {
     const info = object(await reader.rpc('getblockchaininfo', []));
     const network = networkOf(info.chain);
-    if (!network || (expectedNetwork && network !== expectedNetwork)) throw new Error('Snapshot Bitcoin network mismatch');
-    if (!integer(info.blocks) || !hash(info.bestblockhash)) throw new Error('Core chain tip unavailable');
+    if (!network || (expectedNetwork && network !== expectedNetwork)) throw invalid('SAT_SNAPSHOT_NETWORK_MISMATCH', 'Snapshot Bitcoin network mismatch');
+    if (!integer(info.blocks) || !hash(info.bestblockhash)) throw incomplete('SAT_SNAPSHOT_TIP_UNAVAILABLE', 'Core chain tip unavailable');
     return { network, height: info.blocks, hash: info.bestblockhash };
   };
   const before = await readTip();
@@ -88,63 +133,82 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     // needed for the inverse address-to-outputs lookup, which this scan never uses.
     if (networkOf(status.chain) !== before.network || !integer(status.height) || status.sat_index !== true ||
         status.inscription_index !== true || status.unrecoverably_reorged !== false)
-      throw new Error('Healthy ord sat and inscription indexes required');
+      throw incomplete('SAT_SNAPSHOT_INDEX_UNHEALTHY', 'Healthy ord sat and inscription indexes required');
     const indexedHash = await reader.indexHash(status.height);
-    if (!hash(indexedHash)) throw new Error('ord index hash unavailable');
-    if (status.height !== before.height || indexedHash !== before.hash) throw new StructuredError('SAT_SNAPSHOT_CHAIN_CHANGED', 'ord index is not at the stable Core tip');
+    if (!hash(indexedHash)) throw incomplete('SAT_SNAPSHOT_INDEX_UNHEALTHY', 'ord index hash unavailable');
+    if (status.height !== before.height || indexedHash !== before.hash) throw incomplete('SAT_SNAPSHOT_CHAIN_CHANGED', 'ord index is not at the stable Core tip');
     return { height: status.height, hash: indexedHash };
   };
   const indexTip = await readIndex();
   const sat = object(await reader.sat(satoshi));
-  if (!integer(sat.number) || String(sat.number) !== satoshi || !Array.isArray(sat.inscriptions) || sat.inscriptions.length > 10000 ||
+  if (!integer(sat.number) || String(sat.number) !== satoshi || !Array.isArray(sat.inscriptions) ||
       !(sat.address === null || typeof sat.address === 'string') || !(sat.satpoint === null || typeof sat.satpoint === 'string'))
-    throw new Error('Complete sat enumeration and ownership required');
+    throw incomplete('SAT_SNAPSHOT_ENUMERATION_UNAVAILABLE', 'Complete sat enumeration and ownership required');
+  if (sat.inscriptions.length > limits.maxInscriptions) {
+    throw incomplete('SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS', `The sat lists ${sat.inscriptions.length} inscriptions, more than maxInscriptions ${limits.maxInscriptions}`,
+      { inscriptions: sat.inscriptions.length, maxInscriptions: limits.maxInscriptions });
+  }
+  limits.listed(sat.inscriptions.length);
   const blocks = new Map<number, SatSnapshot['blocks'][number]>();
   const publications: SatSnapshot['publications'] = [];
   const seen = new Set<string>();
   let contentBytes = 0;
   for (const id of sat.inscriptions) {
-    if (typeof id !== 'string' || !/^([0-9a-f]{64})i(0|[1-9]\d*)$/.test(id) || seen.has(id)) throw new Error('Invalid or duplicate inscription id');
+    if (typeof id !== 'string' || !/^([0-9a-f]{64})i(0|[1-9]\d*)$/.test(id) || seen.has(id)) throw invalid('SAT_SNAPSHOT_INSCRIPTION_ID', 'Invalid or duplicate inscription id');
     seen.add(id);
     const [txid, index] = id.split('i');
-    if (!integer(Number(index))) throw new Error('Invalid inscription index');
+    if (!integer(Number(index))) throw invalid('SAT_SNAPSHOT_INSCRIPTION_ID', 'Invalid inscription index');
     const info = object(await reader.inscription(id));
     if (info.id !== id || !integer(info.sat) || String(info.sat) !== satoshi || !integer(info.height) || info.height > before.height)
-      throw new Error('Listed inscription observation unavailable');
+      throw incomplete('SAT_SNAPSHOT_INSCRIPTION_UNAVAILABLE', 'Listed inscription observation unavailable');
     if (!(info.content_type === null || typeof info.content_type === 'string') || !(info.content_length === null || integer(info.content_length)))
-      throw new Error('Explicit inscription content type and length required');
-    if (info.delegate != null || info.content_encoding != null) throw new Error('Delegated or encoded inscription body is unsupported');
+      throw incomplete('SAT_SNAPSHOT_INSCRIPTION_UNAVAILABLE', 'Explicit inscription content type and length required');
+    const mediaType = info.content_type;
     let block = blocks.get(info.height);
     if (!block) {
       const blockHash = await reader.rpc('getblockhash', [info.height]);
-      if (!hash(blockHash)) throw new Error('Active block hash unavailable');
+      if (!hash(blockHash)) throw incomplete('SAT_SNAPSHOT_BLOCK_UNAVAILABLE', 'Active block hash unavailable');
       const observed = object(await reader.rpc('getblock', [blockHash, 1]));
       if (observed.hash !== blockHash || observed.height !== info.height || !integer(observed.confirmations) || observed.confirmations < 1 ||
           !Array.isArray(observed.tx) || !observed.tx.length || !observed.tx.every(hash) || new Set(observed.tx).size !== observed.tx.length)
-        throw new Error('Active block observation unavailable');
-      if (!integer(observed.time)) throw new Error('Active block timestamp unavailable');
+        throw incomplete('SAT_SNAPSHOT_BLOCK_UNAVAILABLE', 'Active block observation unavailable');
+      if (!integer(observed.time)) throw incomplete('SAT_SNAPSHOT_BLOCK_UNAVAILABLE', 'Active block timestamp unavailable');
       block = { height: info.height, hash: blockHash, txids: observed.tx, time: observed.time };
       blocks.set(info.height, block);
     }
     const transactionIndex = block.txids.indexOf(txid);
-    if (transactionIndex < 0) throw new Error('Listed reveal is absent from its active block');
+    if (transactionIndex < 0) throw invalid('SAT_SNAPSHOT_REVEAL_NOT_IN_BLOCK', 'Listed reveal is absent from its active block');
+    const observation = { id, revealTxid: txid, network: before.network, sat: satoshi, confirmed: true,
+      creation: { height: info.height, blockHash: block.hash, transactionIndex, inscriptionIndex: Number(index) } };
+    // Observed, never taken as its own body: ord would serve another inscription's bytes, or encoded ones (P9.14).
+    if (info.delegate != null || info.content_encoding != null) {
+      publications.push({ ...observation, body: { status: 'unsupported', reason: info.delegate != null ? 'delegated' : 'content-encoding', mediaType } });
+      continue;
+    }
+    const length = info.content_length ?? 0;
+    if (contentBytes + length > limits.maxContentBytes) {
+      publications.push({ ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length } });
+      continue;
+    }
     const content = await reader.content(id);
     // Null explicitly reports a bodyless inscription. Never accept delegated/effective bytes as its own body.
-    if ((content === null && info.content_length !== null) || (content?.length ?? 0) !== (info.content_length ?? 0))
-      throw new Error('Listed inscription content is unavailable or has a different byte length');
+    if ((content === null && info.content_length !== null) || (content?.length ?? 0) !== length)
+      throw incomplete('SAT_SNAPSHOT_CONTENT_UNAVAILABLE', 'Listed inscription content is unavailable or has a different byte length');
     const metadataHex = await reader.metadata(id);
     if (metadataHex !== null && (typeof metadataHex !== 'string' || !/^(?:[0-9a-fA-F]{2})*$/.test(metadataHex)))
-      throw new Error('Raw metadata bytes unavailable');
+      throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
     const metadata = metadataHex === null ? null : hexToBytes(metadataHex);
-    contentBytes += (content?.length ?? 0) + (metadata?.length ?? 0);
-    if (contentBytes > 32 * 1024 * 1024) throw new Error('Sat observation exceeds 32 MiB');
-    publications.push({ id, revealTxid: txid, network: before.network, sat: satoshi, confirmed: true,
-      creation: { height: info.height, blockHash: block.hash, transactionIndex, inscriptionIndex: Number(index) },
-      body: { status: 'complete', mediaType: info.content_type ?? 'application/octet-stream', bytes: content ?? new Uint8Array(), metadata } });
+    if (contentBytes + length + (metadata?.length ?? 0) > limits.maxContentBytes) {
+      // The metadata, whose length the index does not report beforehand, passed the budget.
+      publications.push({ ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length } });
+      continue;
+    }
+    contentBytes += length + (metadata?.length ?? 0);
+    publications.push({ ...observation, body: { status: 'complete', mediaType: mediaType ?? 'application/octet-stream', bytes: content ?? new Uint8Array(), metadata } });
   }
   await readIndex();
   const after = await readTip();
-  if (after.network !== before.network || after.height !== before.height || after.hash !== before.hash) throw new StructuredError('SAT_SNAPSHOT_CHAIN_CHANGED', 'Core chain changed during sat observation');
+  if (after.network !== before.network || after.height !== before.height || after.hash !== before.hash) throw incomplete('SAT_SNAPSHOT_CHAIN_CHANGED', 'Core chain changed during sat observation');
   return { network: before.network, sat: satoshi, tipBefore: { height: before.height, hash: before.hash },
     tipAfter: { height: after.height, hash: after.hash }, indexTip, indexHealthy: true, enumerationComplete: true,
     blocks: [...blocks.values()], publications, ownership: { owner: sat.address, satpoint: sat.satpoint } };
