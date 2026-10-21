@@ -15,11 +15,12 @@ describe("InscriptionClock cost (#973, P9.15)", () => {
     expect(cost).toEqual({
       "cold start, batched": { requests: 40, headers: 20_000 },
       "save state": { requests: 0, headers: 0 },
-      "warm read x10,000, known blocks": { requests: 0, headers: 0 },
+      // L1: each read probes the block it asks for, so an orphaned one is refused (BLOCK_NOT_ON_CHAIN).
+      "warm read x10,000, known blocks": { requests: 10_000, headers: 10_000 },
       // The boundary check (#971) and one batch.
       "warm read, 1 new block": { requests: 2, headers: 2 },
-      // The genesis check against the saved network.
-      "restart, read a known block": { requests: 1, headers: 1 },
+      // The genesis check against the saved network, and the probe of the block read.
+      "restart, read a known block": { requests: 2, headers: 2 },
       "restart, then 6 new blocks": { requests: 2, headers: 7 },
       // Genesis, the boundary, three gallop probes, two bisection probes, one batch of the 9 new blocks.
       "restart across a 6-block reorg (+3)": { requests: 8, headers: 16 },

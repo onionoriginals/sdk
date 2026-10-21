@@ -14,15 +14,13 @@ export interface BitcoinCoreChainValidatorOptions {
   /** Whole validation deadline, including streamed response bodies. Default 15 seconds. */
   timeoutMs?: number;
   /**
-   * Maximum total RPC calls per validation. Default 512, matching the
-   * primary snapshot reader's own default request budget
-   * (`SatSnapshotBudget.maxRequests` in `adapters/providers/sat-snapshot.ts`).
-   * Validation costs exactly `2 * snapshot.blocks.length + 2` requests (one
-   * tip check before and after, plus `getblockhash` + `getblock` per distinct
-   * active block) — a legitimate snapshot with more distinct blocks than
-   * `(maxRequests - 2) / 2` fails closed with `SAT_SNAPSHOT_BUDGET_EXCEEDED`
-   * even with no disagreement, so raise this alongside a larger configured
-   * `SatSnapshotBudget` rather than assuming the default covers it.
+   * Maximum total RPC calls per validation. By default it is exactly what the
+   * snapshot needs, `2 * snapshot.blocks.length + 2` requests (one tip check
+   * before and after, plus `getblockhash` + `getblock` per distinct active
+   * block), so a snapshot of a sat with many entries validates in full, as
+   * the snapshot reader's own budget scales (`SatSnapshotBudget.maxRequests`).
+   * An explicit value is kept as given and fails closed with
+   * `SAT_SNAPSHOT_BUDGET_EXCEEDED` when a snapshot needs more.
    */
   maxRequests?: number;
   /** Streaming limit for each RPC response. Default 8 MiB. */
@@ -58,13 +56,13 @@ export function createBitcoinCoreChainValidator(options: BitcoinCoreChainValidat
     new TextEncoder().encode(`${options.rpcAuth.username}:${options.rpcAuth.password}`)));
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = positive(options.timeoutMs, 15_000);
-  const maxRequests = positive(options.maxRequests, 512);
   const maxBytes = positive(options.maxResponseBytes, 8 * 1024 * 1024);
   const unavailable = () => new StructuredError('SAT_SNAPSHOT_CHAIN_UNAVAILABLE', 'Independent Bitcoin Core validation is unavailable');
   const disagreement = () => new StructuredError('SAT_SNAPSHOT_CHAIN_DISAGREEMENT', 'Independent Bitcoin Core disagrees with the snapshot chain evidence');
   return async snapshot => {
     const controller = new AbortController();
     const budgetExceeded = () => new StructuredError('SAT_SNAPSHOT_BUDGET_EXCEEDED', 'Independent chain validation budget exceeded');
+    const maxRequests = positive(options.maxRequests, 2 * (Array.isArray(snapshot?.blocks) ? snapshot.blocks.length : 0) + 2);
     let requests = 0;
     let rejectDeadline!: (error: Error) => void;
     const deadline = new Promise<never>((_, reject) => { rejectDeadline = reject; });

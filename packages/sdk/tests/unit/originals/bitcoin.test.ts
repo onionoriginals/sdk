@@ -27,7 +27,7 @@ const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63
 const clockOver = (times: number[]) =>
   new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
-function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array }>, tip = 10): SatSnapshot {
+function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array; body?: SatSnapshot["publications"][number]["body"] }>, tip = 10): SatSnapshot {
   return {
     network: "regtest",
     sat: SAT,
@@ -44,7 +44,7 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
       sat: SAT,
       confirmed: true,
       creation: { height: p.height, blockHash: p.blockHash ?? hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
-      body: p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: p.metadata ?? null },
+      body: p.body ?? (p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: p.metadata ?? null }),
     })),
     ownership: { owner: "bcrt1qowner", satpoint: `${"cc".repeat(32)}:0:0` },
   };
@@ -151,6 +151,55 @@ describe("inscription time (P9.15)", () => {
   });
 });
 
+describe("inscription time across reorganisations during and between reads (P9.15)", () => {
+  test("L1: a block the clock holds but the chain has since orphaned is refused by hash, as a fresh clock refuses it (C12-45)", async () => {
+    let chain = [{ time: 10, hash: "1".repeat(64) }, { time: 20, hash: "2".repeat(64) }, { time: 100, hash: "3".repeat(64) }];
+    const cached = new InscriptionClock(async (h) => chain[h]);
+    expect(await cached.at(2, "3".repeat(64))).toBe(100_000);
+    chain = [chain[0], chain[1], { time: 30, hash: "4".repeat(64) }];
+    await expect(new InscriptionClock(async (h) => chain[h]).at(2, "3".repeat(64))).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+    await expect(cached.at(2, "3".repeat(64))).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+    expect(await cached.at(2, "4".repeat(64))).toBe(30_000);
+  });
+
+  test("L1: a clock restored from its store refuses an orphaned block by hash (C12-45)", async () => {
+    const chain = new SyntheticChain(500, 3);
+    const store = memoryClockStore();
+    const first = new InscriptionClock(chain.header, { network: "mainnet", headers: chain.headers, batch: 100, store });
+    await first.at(499);
+    await first.flush();
+    const orphan = chain.hash(495);
+    chain.reorg(10, 2);
+    const restored = new InscriptionClock(chain.header, { network: "mainnet", headers: chain.headers, batch: 100, store });
+    await expect(restored.at(495, orphan)).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+    expect(await restored.at(495, chain.hash(495))).toBe(chain.expected(495));
+  });
+
+  test("M2: a single-header source without parent hashes cannot splice two chains during a walk (C12-45)", async () => {
+    const old = Array.from({ length: 10 }, (_, h) => ({ time: 1000 + h * 10 + (h === 5 ? 5000 : 0), hash: h.toString(16).padStart(64, "a") }));
+    const neu = old.map((b, h) => (h >= 4 ? { time: 1000 + h * 10, hash: h.toString(16).padStart(64, "b") } : b));
+    let reorged = false;
+    const cached = new InscriptionClock(async (h) => {
+      const b = (reorged ? neu : old)[h];
+      if (h === 6) reorged = true; // the chain moves after old block 6 is served
+      return b;
+    });
+    await cached.at(9);
+    const fresh = new InscriptionClock(async (h) => neu[h]);
+    for (const h of [9, 8, 6, 5, 4]) expect(await cached.at(h, neu[h].hash)).toBe(await fresh.at(h, neu[h].hash));
+    expect(await cached.at(9)).toBe(await fresh.at(9));
+  });
+
+  test("M2: a batched source must give each block's parent hash, or the batch could splice two chains", async () => {
+    const chain = new SyntheticChain(400, 3);
+    const clock = new InscriptionClock(chain.header, {
+      batch: 100,
+      headers: async (from, count) => (await chain.headers(from, count)).map(({ time, hash }) => ({ time, hash })),
+    });
+    await expect(clock.at(150)).rejects.toMatchObject({ category: "invalid-evidence", code: "BLOCK_PARENT_REQUIRED" });
+  });
+});
+
 describe("inscription time at scale (#973, P9.15)", () => {
   const sourceOf = (chain: SyntheticChain, extra: Partial<ConstructorParameters<typeof InscriptionClock>[1]> = {}) =>
     new InscriptionClock(chain.header, { network: "mainnet", headers: chain.headers, batch: 100, ...extra });
@@ -165,7 +214,7 @@ describe("inscription time at scale (#973, P9.15)", () => {
     expect(chain.decreasing()).toBeGreaterThan(50);
   });
 
-  test("a restart reuses the saved state: a known block costs only the genesis check", async () => {
+  test("a restart reuses the saved state: a known block costs the genesis check and its own probe", async () => {
     const chain = new SyntheticChain(1000, 3);
     const store = memoryClockStore();
     const first = sourceOf(chain, { store });
@@ -177,7 +226,7 @@ describe("inscription time at scale (#973, P9.15)", () => {
     await second.flush(); // not opened: the saved state is left alone
     expect(store.bytes).not.toBeNull();
     expect(await second.at(500, chain.hash(500))).toBe(chain.expected(500));
-    expect(second.stats).toMatchObject({ requests: 1, restored: 1000 });
+    expect(second.stats).toMatchObject({ requests: 2, restored: 1000 });
   });
 
   test("a saved state for another network is refused; one from another chain's genesis is refused", async () => {
@@ -277,7 +326,7 @@ describe("inscription time at scale (#973, P9.15)", () => {
     const heights = [1999, 3, 1500, 700, 1999, 0, 1234];
     const times = await Promise.all(heights.map((h) => clock.at(h, chain.hash(h))));
     expect(times).toEqual(heights.map((h) => chain.expected(h)));
-    expect(clock.stats.requests).toBe(20); // one cold walk in batches; reads of held blocks by hash are free
+    expect(clock.stats.requests).toBe(26); // one cold walk in batches, then one probe per read of a held block (L1)
   });
 
   test("the file store (@originals/sdk/originals/fs) survives a restart and rebuilds a damaged file", async () => {
@@ -291,7 +340,7 @@ describe("inscription time at scale (#973, P9.15)", () => {
       await first.flush();
       const second = sourceOf(chain, { store: fileClockStore(path) });
       expect(await second.at(299, chain.hash(299))).toBe(chain.expected(299));
-      expect(second.stats).toMatchObject({ requests: 1, restored: 300 });
+      expect(second.stats).toMatchObject({ requests: 2, restored: 300 });
       writeFileSync(path, "garbage");
       const third = sourceOf(chain, { store: fileClockStore(path) });
       expect(await third.at(299, chain.hash(299))).toBe(chain.expected(299));
@@ -325,6 +374,47 @@ describe("sat snapshots as evidence", () => {
     const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "", complete: false }]);
     await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
     await expect(satEvidence({ ...snapshot([]), enumerationComplete: false }, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toBeInstanceOf(OriginalsError);
+  });
+});
+
+describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
+  const id = (c: string) => `${c.repeat(64)}i0`;
+  test("a delegated or encoded inscription is evidence flagged unsupported, not a failed read", async () => {
+    const e = await satEvidence(snapshot([
+      { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null } },
+      { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: ORIGINALS_INSCRIPTION_TYPE } },
+      { id: id("c"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/png", contentLength: 9 } },
+    ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    expect(e.inscriptions.map((i) => [i.mediaType, i.unsupported, i.content.length, i.metadata])).toEqual([
+      ["application/octet-stream", "delegated", 0, null],
+      [ORIGINALS_INSCRIPTION_TYPE, "content-encoding", 0, null],
+      ["image/png", "not-read", 0, null],
+    ]);
+  });
+
+  test("C12-89: an Originals inscription past the read's byte budget is missing evidence: the read fails", async () => {
+    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9 } }]);
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ category: "unavailable-bytes", code: "SAT_READ_INCOMPLETE" });
+  });
+
+  test("C12-74: the holder's delegated and encoded inscriptions around the anchor do not stop an anchored Original verifying", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
+    const evidence = await satEvidence(snapshot([
+      { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null } },
+      { id: id("e"), height: 4, content: log },
+      { id: id("b"), height: 5, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: ORIGINALS_INSCRIPTION_TYPE } },
+    ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
+    expect(view.report.anchoring?.status).toBe("anchored");
+    expect(view.report.anchoring?.ignored.map((i) => [i.inscription, i.reason])).toEqual([[id("a"), "not-an-originals-inscription"], [id("b"), "unsupported-encoding"]]);
+    expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
   });
 });
 

@@ -443,6 +443,27 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription", "invalid-entry"]);
   });
 
+  test("C12-74: an inscription whose own body the reader did not establish is ignored with a reason, never a failed read (M1; P9.12, P9.14)", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Encoded", author: ref, sign });
+    const r = await verify(undefined, alice, [sat([
+      inscribe(next, 5, { mediaType: "image/png", content: new Uint8Array(), unsupported: "delegated" }),
+      anchoring(10),
+      inscribe(next, 20, { content: new Uint8Array(), unsupported: "content-encoding" }),
+      inscribe(next, 21, { mediaType: "text/plain", content: new Uint8Array(), unsupported: "not-read" }),
+    ])]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription", "unsupported-encoding", "not-an-originals-inscription"]);
+  });
+
+  test("C12-89: an Originals inscription the reader did not read is missing evidence, not an ignored one (M1; P9.17)", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Unread", author: ref, sign });
+    await expect(verify(undefined, alice, [sat([anchoring(10), inscribe(next, 20, { content: new Uint8Array(), unsupported: "not-read" })])]))
+      .rejects.toMatchObject({ category: "incomplete-evidence", code: "SAT_READ_INCOMPLETE" });
+  });
+
   test("C12-90: an unconfirmed anchoring inscription is observed, not an anchor", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10, { confirmations: 0 })])]);

@@ -29,6 +29,21 @@ export interface PublicationObservation {
   creation?: CreationPosition;
   body:
     | { status: 'unavailable' | 'unsupported' }
+    /**
+     * Observed, but its own body is not established, and the read goes on
+     * (the holder of a sat, who has no authority over it, must not be able
+     * to make every read of it fail; P9.12). `delegated`: ord serves another
+     * inscription's bytes for it. `content-encoding`: its body is encoded
+     * (P9.14 defines no encoding). Neither body nor metadata is read.
+     * PROVISIONAL.
+     */
+    | { status: 'unsupported'; reason: 'delegated' | 'content-encoding'; mediaType: string | null }
+    /**
+     * Observed, but its body and metadata were not read because they would
+     * pass the read's content-byte budget (`SatSnapshotBudget.maxContentBytes`).
+     * The read goes on with later, smaller bodies. PROVISIONAL.
+     */
+    | { status: 'unavailable'; reason: 'over-budget'; mediaType: string | null; contentLength: number }
     | {
         status: 'complete';
         mediaType: string;

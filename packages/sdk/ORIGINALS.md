@@ -568,7 +568,8 @@ layer, once, terminally, to one sat (P9.10):
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
 // The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
-const clock = new InscriptionClock(async (height) => ({ time, hash }));   // running max of header times (P9.15), reorg-aware
+// Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
+const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
 // A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).
 const served = new InscriptionClock(header, { network: "mainnet", headers, store: fileClockStore(path), maxRequests: 1000 });
 // One read per index used; the verifier compares their placement (P9.10, P9.11).
@@ -614,9 +615,29 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   current (P7.3, P7.4, P9.18); supplied bytes are still checked.
 - The clock checks each inscription's block hash: it rewinds past a
   reorganisation and refuses a block no longer on the chain
-  (`BLOCK_NOT_ON_CHAIN`). Before reading past the blocks it holds, it checks
-  the highest one against the active chain, so an orphaned block's maximum
-  never carries into the new chain (#971).
+  (`BLOCK_NOT_ON_CHAIN`), even one it read before the reorganisation. Before
+  reading past the blocks it holds, it checks the highest one against the
+  active chain, so an orphaned block's maximum never carries into the new
+  chain (#971).
+- The holder of the anchoring sat can inscribe anything on it, but cannot
+  make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
+  delegated or encoded inscription as observed but unsupported, and a body
+  past its byte budget as observed but unread, and reads on; `satEvidence`
+  passes them on flagged `unsupported` (PROVISIONAL). The verifier ignores a
+  non-Originals one (`not-an-originals-inscription`) and rejects a delegated
+  or encoded Originals one (`unsupported-encoding`; P9.14, P9.17). An
+  Originals inscription the reader did not read fails the read
+  (`SAT_READ_INCOMPLETE`, missing evidence, P9.17). The reader's budget
+  (`snapshotBudget` on `RegtestProvider` and `QuickNodeProvider`):
+  `maxRequests` defaults to 7 + 5 per inscription the index lists, so a sat
+  with many entries reads in full; `maxInscriptions` (default 10,000) bounds
+  it, `maxContentBytes` (default 32 MiB) bounds the bytes read and
+  `timeoutMs` (default 30 seconds) the time. Every reader failure is an
+  `OriginalsError` with a section 6 category; running out of budget is
+  `incomplete-evidence` (`SAT_SNAPSHOT_BUDGET_EXCEEDED`,
+  `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`). A holder who floods the sat past
+  these bounds still costs an explicit incomplete result, never a wrong one;
+  raise the budget to read it.
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).
@@ -639,9 +660,10 @@ single-header source:
 
 - `headers(from, count, signal)`: a batched source, one request per `batch`
   (default 2000) headers, for example a JSON-RPC batch of `getblockhash` and
-  `getblockheader`. Returning `prev` (Core's `previousblockhash`) lets the
-  clock check that each block extends the one before it, so a reorganisation
-  during a read cannot splice two chains together.
+  `getblockheader`. Each block but genesis must carry `prev` (Core's
+  `previousblockhash`), so the clock checks that each block extends the one
+  before it and a reorganisation during a read cannot splice two chains
+  together; a block without it is refused (`BLOCK_PARENT_REQUIRED`).
 - `store`: a `ClockStore` (`load`/`save` of opaque bytes) with the `network`
   it follows. `fileClockStore(path)` from `@originals/sdk/originals/fs`
   writes one file atomically (Node only); a server can keep the same bytes in
@@ -661,9 +683,14 @@ single-header source:
   `incomplete-evidence` (`BLOCK_TIME_BUDGET_EXCEEDED`, `BLOCK_TIME_ABORTED`),
   never a guessed time. What was derived is kept, so a retry continues.
 
-A read of a block the clock holds, by hash, costs no request: the hash fixes
-the block's ancestry. Any other read costs one boundary check plus the new
-or reorganised blocks. `bun run --cwd packages/sdk bench:clock` runs a
+A read of a block the clock holds costs one request, a probe that the active
+chain still has it, so a block orphaned since it was read is refused by hash
+(`BLOCK_NOT_ON_CHAIN`) as a fresh clock refuses it. Any other read costs one
+boundary check plus the new or reorganised blocks. Each appended block must
+extend the one before it: a batched `headers` source must give every block's
+`prev` (Core's `previousblockhash`; `BLOCK_PARENT_REQUIRED` otherwise), and a
+single-header source without `prev` costs a second request per new block,
+re-reading the parent, so give `prev` there too. `bun run --cwd packages/sdk bench:clock` runs a
 deterministic 900,000-header synthetic chain (204,786 blocks with a timestamp
 earlier than their parent's) through a cold start, warm reads and restarts
 with a file store, and checks every sampled time against an independently
@@ -674,9 +701,9 @@ adds a delay per request):
 | --- | ---: | ---: | ---: | ---: |
 | Cold start, batch 2000 | 450 | 900,000 | 422 ms | 959 ms |
 | Save state (32.4 MB file) | 0 | 0 | 114 ms | 106 ms |
-| Warm reads of known blocks, x10,000 | 0 | 0 | 13 ms | 21 ms |
+| Warm reads of known blocks, x10,000 (one probe each) | 10,000 | 10,000 | 25 ms | 12.7 s |
 | Warm read, 1 new block | 2 | 2 | 0.3 ms | 3.6 ms |
-| Restart, read a known block (load and check) | 1 | 1 | 74 ms | 84 ms |
+| Restart, read a known block (load, check and probe) | 2 | 2 | 82 ms | 75 ms |
 | Restart, then 6 new blocks | 2 | 7 | 0.1 ms | 3.6 ms |
 | Restart across a 6-block reorganisation (+3) | 8 | 16 | 74 ms | 88 ms |
 | Cold start, one request per header | 900,010 | 900,010 | 602 ms | about 15 min (projected, not run) |
