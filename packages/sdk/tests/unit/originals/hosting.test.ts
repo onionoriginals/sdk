@@ -137,6 +137,23 @@ describe("the public reader verifies one exact snapshot (P9.1)", () => {
     expect(bad.report.resources.status).toBe("digest-failure");
   });
 
+  test("retrieveHosted reads the snapshot's contents unverified, within the same bounds, for a shared host's accepted log (P6.8)", async () => {
+    const { did, alias, files, head } = await published();
+    const contents = await stranger().retrieveHosted(alias.did, host(files, didWebvhFilesUrl(alias.did)));
+    expect(contents.manifest.checkpoint).toBe(head);
+    expect(contents.log.trimEnd().split("\n")).toHaveLength(3);
+    expect(Object.keys(contents.bytes).sort()).toEqual([resourceDigest(B1), resourceDigest(B2)].sort());
+    expect(contents.authors.map((a) => a.did)).toHaveLength(1);
+    // A reader that syncs from it verifies it before storing anything.
+    const reader = stranger();
+    const synced = await reader.sync(did, { submit: () => Promise.reject(new Error("unused")), accepted: () => Promise.resolve(contents) });
+    expect(synced.status).toBe("imported");
+    await expect(reader.sync("did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ", { submit: () => Promise.reject(new Error("unused")), accepted: () => Promise.resolve(contents) })).rejects.toMatchObject({ code: "IMPORT_REJECTED" });
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(stranger().retrieveHosted(alias.did, host(files, didWebvhFilesUrl(alias.did)), { signal: aborted.signal })).rejects.toBeInstanceOf(OriginalsError);
+  });
+
   test("the hosted files are the same for a retried publication of the same checkpoint (P9.2)", async () => {
     const { sdk, did, alias, files } = await published();
     const again = await hostedFiles(sdk, did, alias);

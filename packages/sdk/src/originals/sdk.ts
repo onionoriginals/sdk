@@ -921,7 +921,22 @@ export class OriginalsSDK {
     }
   }
 
-  private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
+  /**
+   * Retrieve the snapshot hosted under a did:webvh alias, unverified, within
+   * the same bounds as `loadPublished`. A shared host's `accepted` can use it
+   * to give `sync` and `reconcile` the host's accepted log, which they verify
+   * before using any of it (P6.8).
+   */
+  async retrieveHosted(aliasDid: string, fetch: HostedFetch, options: { signal?: AbortSignal } = {}): Promise<EvidenceContents> {
+    const retrieval = new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, options.signal);
+    try {
+      return readEvidenceFiles((await this.retrieveSnapshot(aliasDid, retrieval)).files);
+    } finally {
+      retrieval.close();
+    }
+  }
+
+  private async retrieveSnapshot(aliasDid: string, retrieval: Retrieval): Promise<{ alias: AliasEvidence; files: Map<string, Uint8Array> }> {
     const text = (data: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(data);
     const logUrl = didWebvhLogUrl(aliasDid);
     const aliasWitness = await retrieval.get(logUrl.replace(/did\.jsonl$/, "did-witness.json"), { required: false, archive: false });
@@ -946,7 +961,11 @@ export class OriginalsSDK {
       if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
     }
     for (const digest of plan.digests) await put(`resources/${digest}`, false);
+    return { alias, files };
+  }
 
+  private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
+    const { alias, files } = await this.retrieveSnapshot(aliasDid, retrieval);
     // Every file is already within the budget and the archive limits; no archive is assembled.
     const loaded = await this.loadContents(readEvidenceFiles(files), [alias]);
     const r = loaded.report;
