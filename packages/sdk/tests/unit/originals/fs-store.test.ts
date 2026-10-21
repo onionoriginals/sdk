@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OriginalsError } from "@originals/vh";
@@ -178,6 +179,126 @@ describe("FileStore: one writer per root (08b review C5)", () => {
       const dead = Bun.spawnSync(["true"]).pid;
       writeFileSync(join(dir, ".lock"), String(dead));
       expect(await FileStore.open(dir)).toBeInstanceOf(FileStore);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const FS_STORE = new URL("../../../src/originals/fs-store.ts", import.meta.url).pathname;
+
+  /** Start `count` processes that each open `dir` at the same instant, hold it briefly, and report. */
+  async function race(dir: string, count: number): Promise<string[]> {
+    const script = join(dir, "..", `race-${process.pid}-${Date.now()}.ts`);
+    writeFileSync(
+      script,
+      `import { FileStore } from ${JSON.stringify(FS_STORE)};\nconst at = Number(process.argv[3]);\nwhile (Date.now() < at) {}\ntry { await FileStore.open(process.argv[2]); console.log("opened " + process.pid); await new Promise((r) => setTimeout(r, 400)); } catch (e) { console.log((e as { code?: string }).code); }\n`,
+    );
+    try {
+      const at = Date.now() + 600;
+      const children = Array.from({ length: count }, () => Bun.spawn([process.execPath, script, dir, String(at)], { stdout: "pipe" }));
+      return await Promise.all(children.map(async (child) => (await new Response(child.stdout).text()).trim()));
+    } finally {
+      rmSync(script, { force: true });
+    }
+  }
+
+  test("08b review r2 #1: processes racing to take over one stale lock leave exactly one holder", async () => {
+    for (let trial = 0; trial < 4; trial++) {
+      const dir = tempDir();
+      try {
+        writeFileSync(join(dir, ".lock"), String(Bun.spawnSync(["true"]).pid)); // stale: that process has exited
+        const results = await race(dir, 6);
+        const opened = results.filter((r) => r.startsWith("opened "));
+        expect(opened).toHaveLength(1);
+        expect(results.filter((r) => r === "STORE_LOCKED")).toHaveLength(5);
+        // The winner's record is the lock; no takeover leftovers remain.
+        expect(JSON.parse(readFileSync(join(dir, ".lock"), "utf8")).pid).toBe(Number(opened[0]!.slice("opened ".length)));
+        expect(readdirSync(dir).filter((f) => f.startsWith(".lock."))).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }, 30_000);
+
+  test("08b review r2 #1: processes racing to open a free root leave exactly one holder", async () => {
+    const dir = tempDir();
+    try {
+      const results = await race(dir, 6);
+      expect(results.filter((r) => r.startsWith("opened "))).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("08b review r2 #2: close() waits for every write in flight, not only commits; a closed handle refuses every write", async () => {
+    const dir = tempDir();
+    try {
+      const a = await FileStore.open(dir);
+      const digest = "zQmbyV4BASLJCFiCfKz37eNwFX8y6hefQ7LGpzvEwJQzNft";
+      let written = false;
+      const write = a.putResource(digest, new Uint8Array(32 * 1024 * 1024).fill(1)).then(() => {
+        written = true;
+      });
+      const evidence = a.putAuthorEvidence({ did: "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ", log: "{}\n" });
+      await a.close();
+      // The lock is released only after the writes landed, so a new process cannot sweep or race them.
+      expect(written).toBe(true);
+      expect(existsSync(join(dir, ".lock"))).toBe(false);
+      await write;
+      await evidence;
+      expect(readdirSync(join(dir, "resources"))).toEqual([digest]);
+      const did = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
+      const refused = async (p: Promise<unknown>) => (await p.then(() => undefined, (e: unknown) => e as OriginalsError))?.code;
+      expect(await refused(a.putResource("zQmOther1", bytes("x")))).toBe("STORE_CLOSED");
+      expect(await refused(a.putBranch(did, '{"versionId":"1-a"}\n'))).toBe("STORE_CLOSED");
+      expect(await refused(a.putAuthorEvidence({ did, log: "{}\n" }))).toBe("STORE_CLOSED");
+      expect(await refused(a.putRetained(did, "1-a"))).toBe("STORE_CLOSED");
+      expect(await refused(a.commit(did, { expectedHead: null, log: '{"versionId":"1-a"}\n' }))).toBe("STORE_CLOSED");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("08b review r2 #3: an open() racing the last close() in one process ends holding the lock", async () => {
+    for (let i = 0; i < 20; i++) {
+      const dir = tempDir();
+      try {
+        const a = await FileStore.open(dir);
+        const closing = a.close();
+        await new Promise((r) => setImmediate(r));
+        const b = await FileStore.open(dir);
+        await closing;
+        expect(existsSync(join(dir, ".lock"))).toBe(true);
+        expect(JSON.parse(readFileSync(join(dir, ".lock"), "utf8")).pid).toBe(process.pid);
+        await b.close();
+        expect(existsSync(join(dir, ".lock"))).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("08b review r2 #4: a lock is a record with a token; a reused pid is recognised where it can be, and an unconfirmable holder is refused", async () => {
+    const dir = tempDir();
+    try {
+      // This process's pid under a token it never issued: an earlier process that had the pid.
+      writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: process.pid, host: hostname(), token: "f00d" }));
+      const a = await FileStore.open(dir);
+      const record = JSON.parse(readFileSync(join(dir, ".lock"), "utf8"));
+      expect(record).toMatchObject({ pid: process.pid, host: hostname() });
+      expect(record.token).toMatch(/^[0-9a-f]{32}$/);
+      await a.close();
+      // Another host's holder cannot be checked: refused, never taken over.
+      writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: 1, host: `not-${hostname()}`, token: "f00d" }));
+      expect((await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError))?.code).toBe("STORE_LOCKED");
+      // An unreadable record is refused too.
+      writeFileSync(join(dir, ".lock"), "");
+      expect((await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError))?.code).toBe("STORE_LOCKED");
+      // A live pid whose recorded start time is not that process's: a reused pid, stale where /proc tells (Linux).
+      writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: process.ppid, host: hostname(), token: "f00d", start: "1" }));
+      const reused = await FileStore.open(dir).then((s) => s, (e: unknown) => e as OriginalsError);
+      if (process.platform === "linux") expect(reused).toBeInstanceOf(FileStore);
+      else expect((reused as OriginalsError).code).toBe("STORE_LOCKED");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

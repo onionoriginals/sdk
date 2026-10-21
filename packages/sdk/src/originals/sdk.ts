@@ -272,15 +272,32 @@ function retrievableIdentities(chained: ChainedEntry[]): string[] {
 }
 
 /**
- * The DID in the verification method id of the latest chained entry `did`
- * signed (P5.14). The entry's proof cannot be checked before the identity's
- * moved log is retrieved; the verifier checks afterwards that the log used
- * came from this location.
+ * Where to retrieve `did`'s log (P5.14): the DID in the verification method
+ * id of the latest entry `did` signed among the first `verified` chained
+ * entries, those whose proofs and author binding verified with the identity
+ * evidence already held (08b review r2 #5). A hash-chained line anyone can
+ * append, whose proof does not verify, chooses nothing.
+ *
+ * PROVISIONAL: when the evidence held verifies no entry `did` signed (a
+ * reader with no evidence for it), no proof can be checked before the log is
+ * retrieved, so P5.14's latest chained entry is used; the verifier checks
+ * afterwards that the log came from the latest verified entry's location, so
+ * such a line can choose the request but never the result.
  */
-function latestLocation(chained: ChainedEntry[], did: string): string | undefined {
+function latestLocation(chained: ChainedEntry[], did: string, verified: number): string | undefined {
+  const signedBy = (i: number) => {
+    const state = chained[i].state;
+    const author = isJsonObject(state) ? state.author : undefined;
+    return isJsonObject(author) && author.did === did && typeof author.verificationMethod === "string" ? signerLocation(author as unknown as AuthorRef) : undefined;
+  };
+  for (let i = Math.min(verified, chained.length) - 1; i >= 0; i--) {
+    const location = signedBy(i);
+    if (location) return location;
+  }
+  if (verified > 0) return undefined; // the held evidence verified entries, none by `did`: nothing vouches for a location
   for (let i = chained.length - 1; i >= 0; i--) {
-    const author = isJsonObject(chained[i].state) ? (chained[i].state as JsonObject).author : undefined;
-    if (isJsonObject(author) && author.did === did && typeof author.verificationMethod === "string") return signerLocation(author as unknown as AuthorRef);
+    const location = signedBy(i);
+    if (location) return location;
   }
   return undefined;
 }
@@ -385,12 +402,13 @@ export class OriginalsSDK {
     retrieval?: Retrieval,
   ): Promise<{ report: OriginalsReport; authors: AuthorDidEvidence[] }> {
     const report = await run(base);
-    const authors = await this.identityRound(log, base, retrieval);
+    const authors = await this.identityRound(log, base, report.history.entries, retrieval);
     return authors === base ? { report, authors } : { report: await run(authors), authors };
   }
 
   /** One bounded round of identity retrieval; `base` itself when nothing new was retrieved. */
-  private async identityRound(log: string, base: AuthorDidEvidence[], retrieval?: Retrieval): Promise<AuthorDidEvidence[]> {
+  /** `verified`: how many of `log`'s entries verified with `base` (P5.14 locations come only from them). */
+  private async identityRound(log: string, base: AuthorDidEvidence[], verified: number, retrieval?: Retrieval): Promise<AuthorDidEvidence[]> {
     const fetch = this.identityFetcher();
     if (!fetch) return base;
     const chained = chainedEntries(log);
@@ -403,7 +421,7 @@ export class OriginalsSDK {
       budget.plan(2 * identities.length, 0);
       for (const did of identities) {
         const known = out.find((a) => a.did === did);
-        const retrieved = await this.retrieveIdentity(did, chained, known, budget, fetch);
+        const retrieved = await this.retrieveIdentity(did, chained, verified, known, budget, fetch);
         if (retrieved) out = known ? out.map((a) => (a.did === did ? retrieved : a)) : [...out, retrieved];
       }
     } catch (error) {
@@ -426,12 +444,12 @@ export class OriginalsSDK {
    * P5.14: retrieve a did:webvh identity's log from the location of the DID in
    * the verification method id of the latest entry it signed, with no
    * redirects (P8.5). Used only when it verifies from the identity DID's
-   * genesis and extends `known`. The location comes from the log's chained
-   * entries, unverified until the retrieved log lets them be; it only chooses
-   * the URL, and the verifier checks that the URL is that location.
+   * genesis and extends `known`. The location comes from the entries that
+   * verified with the evidence held (`latestLocation`); it only chooses the
+   * URL, and the verifier checks that the URL is that location.
    */
-  private async retrieveIdentity(did: string, chained: ChainedEntry[], known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
-    const location = latestLocation(chained, did);
+  private async retrieveIdentity(did: string, chained: ChainedEntry[], verified: number, known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
+    const location = latestLocation(chained, did, verified);
     let url: string;
     try {
       if (!location || parseDidWebvh(location).scid !== parseDidWebvh(did).scid) return undefined;
@@ -715,7 +733,7 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = (await this.identityRound(prefix, await this.authorEvidence(prefix))).map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const authors = (await this.identityRound(prefix, await this.authorEvidence(prefix), view.report.history.entries)).map(({ retrievedFrom: _, ...evidence }) => evidence);
     const missing: MissingItem[] = [];
     for (const did of authorDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did });
     const bytes: Record<string, Uint8Array> = {};

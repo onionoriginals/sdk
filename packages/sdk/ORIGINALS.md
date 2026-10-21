@@ -77,11 +77,17 @@ The `originals` command verifies a package offline:
   interrupted commit recovers to either the prior checkpoint or the fully
   committed one. A signer rejection or an invalid proof leaves the prior
   checkpoint unchanged (P6.1).
-- **One writing process per store.** `FileStore.open` takes `<root>/.lock`;
-  another live process opening the root gets `STORE_LOCKED`, and a lock left
-  by a dead process is taken over. Handles in one process share the root.
-  `close()` releases the lock once the last handle closes, so a store can be
-  handed to another process; a closed handle refuses writes (`STORE_CLOSED`).
+- **One writing process per store.** `FileStore.open` takes `<root>/.lock`
+  atomically (a `link` of a per-process record), so exactly one process holds
+  a root; another opening it gets `STORE_LOCKED`. A lock is taken over only
+  when its holder is confirmed gone: same host, and its pid no longer runs or
+  now belongs to a different process. A lock from another host, or one whose
+  holder cannot be confirmed gone, stays refused; remove `<root>/.lock` (and
+  any `<root>/.lock.break.*`) by hand once no process uses the store
+  (PROVISIONAL). Handles in one process share the root. `close()` on the last
+  handle waits for every write in flight, then releases the lock, so a store
+  can be handed to another process; a closed handle refuses writes
+  (`STORE_CLOSED`).
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
@@ -188,7 +194,12 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
 - A reader finds a moved log in the evidence package, or, with the SDK's
   `identityFetch` option, at the location of the DID in the verification
   method id of the latest entry the identity signed, without redirects
-  (`safeFetch` refuses them). A log retrieved there that verifies and extends
+  (`safeFetch` refuses them). That entry is the latest one that verified
+  with the evidence the reader holds, so an appended line whose proof does
+  not verify cannot choose the request. A reader holding no evidence that
+  verifies any entry of that identity can check no proof before retrieving,
+  so it uses the latest chained entry (PROVISIONAL); such a line can then
+  choose the request, never the result. A log retrieved there that verifies and extends
   the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
   retrieval from that location is how this SDK establishes a moved
   identity's freshness). Otherwise the identity's freshness is not

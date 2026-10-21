@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { safeFetch, type FetchTransport } from "@originals/vh/fetch";
 import { localSigner } from "@originals/vh/crypto";
-import { createLog, serializeLog, signWith } from "@originals/vh/log";
+import { createLog, serializeLog, signWith, vhHash } from "@originals/vh/log";
 import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
 import { MemoryStore, OriginalsSDK, hostedFiles, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
@@ -334,5 +334,26 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     const size = [...(await publishedMoved()).files.values()].reduce((n, d) => n + d.length, 0);
     const tight = await reader({ maxTotalBytes: size + 2_000 }).loadPublished(alias.did, hosted).then(() => undefined, (e: unknown) => e as OriginalsError);
     expect(tight?.details).toMatchObject({ limit: "bytes" });
+  });
+});
+
+describe("C12-134: a forged hash-chained line chooses no identity location (P5.14; 08b review r2 #5)", () => {
+  test("the location comes from the last entry that verified, not from an appended line whose proof does not", async () => {
+    const { alice, sdk, did } = await journey();
+    const files = new Map(readZip((await sdk.package(did)).bytes));
+    const log = new TextDecoder().decode(files.get("asset/did.jsonl"));
+    const last = JSON.parse(log.trimEnd().split("\n").pop()!) as Record<string, any>;
+    // Anyone can chain a line: same SCID, an attacker's host, the previous proof reused.
+    const tracker = `did:webvh:${alice.did.split(":")[2]}:tracker.attacker.example`;
+    const { proof, ...rest } = last;
+    const forged: Record<string, any> = { ...rest, versionTime: "2026-10-18T12:59:00Z", state: { ...last.state, transitions: [], author: { ...last.state.author, verificationMethod: `${tracker}#orig-1` } } };
+    forged.versionId = `${Number(String(last.versionId).split("-")[0]) + 1}-${vhHash({ ...forged, versionId: last.versionId })}`;
+    files.set("asset/did.jsonl", new TextEncoder().encode(`${log}${JSON.stringify({ ...forged, proof })}\n`));
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), identityFetch: host({}, seen) });
+    const r = (await reader.load(writeZip(files))).report;
+    expect(r.history.status).toBe("invalid");
+    expect(seen.some((url) => url.includes("attacker"))).toBe(false);
+    expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
   });
 });

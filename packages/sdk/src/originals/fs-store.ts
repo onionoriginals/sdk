@@ -12,16 +12,38 @@
  * its target, and the directory is fsynced after the rename, so a commit is
  * either fully visible or not at all (P6.2).
  *
- * One process writes a root at a time: opening it takes `<root>/.lock`
- * (holding the process id), and opening a root that a live process holds is
- * refused (STORE_LOCKED); a lock left by a process that no longer runs is
- * taken over. Every handle on one root in a process shares one set of locks,
- * so commits are serialized per Original across handles, and opening a root
- * removes only temporary files that no handle in the process is writing:
- * those left by a crash (08b review C5).
+ * One process writes a root at a time: opening it takes `<root>/.lock`, and
+ * opening a root that another live process holds is refused (STORE_LOCKED).
+ * Every handle on one root in a process shares one set of locks, so commits
+ * are serialized per Original across handles, and opening a root removes only
+ * temporary files that no handle in the process is writing: those left by a
+ * crash (08b review C5). `close()` on the last handle waits for every write in
+ * flight on the root, then releases the lock; an `open()` that arrives while
+ * the root is closing waits for the release and takes the lock afresh.
  *
- * The lock file is PROVISIONAL and advisory: it guards against two SDK
- * processes, not against other programs writing the directory.
+ * The lock (PROVISIONAL, advisory: it guards against two SDK processes, not
+ * against other programs writing the directory) holds a JSON record
+ * `{pid, host, token, start}`; `token` is random per acquisition. It is never
+ * absent while held, and never replaced while its holder may still run:
+ *
+ * - Taking a free root: write the record to `.lock.<pid>.<token>.new`, then
+ *   `link()` it to `.lock`. `link` fails if `.lock` exists, so exactly one
+ *   process wins.
+ * - Taking over a stale lock: the record is stale only when its holder is on
+ *   this host and is confirmed not to run (no such pid; or the pid is this
+ *   process but the token is not one this process holds, so the pid was
+ *   reused; or, on Linux, the pid's start time differs from the record's).
+ *   The taker claims the break with an exclusive `.lock.break.<hash(record)>`,
+ *   re-reads `.lock`, and only if it still holds that same record renames its
+ *   own record over `.lock` in one step. Only one process can claim a given
+ *   stale record, and `.lock` exists throughout, so a fresh `link` cannot
+ *   slip in and two takers cannot both succeed.
+ * - A record from another host, an unreadable record, or a live pid is held:
+ *   STORE_LOCKED. If such a lock is left by a process known to be gone (a
+ *   crash on another host, or a reused pid that `kill -0` still sees), remove
+ *   `<root>/.lock` and any `<root>/.lock.break.*` by hand once no process uses
+ *   the root. Refusing is the safe default: a wrong takeover would let two
+ *   writers share a root.
  *
  * Node modules are loaded lazily, so importing this entry is safe anywhere;
  * opening a store needs Node.
@@ -39,14 +61,35 @@ export interface FileStoreFaults {
 
 /** What every handle on one root in this process shares. */
 interface RootState {
+  /** The token of this process's record in `.lock`. */
+  token: string;
+  /** Settles once `.lock` is taken (or refused); handles attach after it. */
+  ready: Promise<void>;
+  /** Set once the last handle closed; `open()` waits for it, then takes the lock afresh. */
+  closing?: Promise<void>;
   locks: Map<string, Promise<void>>;
   /** Temporary files being written now. */
   writing: Set<string>;
+  /** Every mutating operation in flight, from any handle; the last `close()` waits for them all. */
+  inflight: Set<Promise<unknown>>;
   /** Open handles; the root's `.lock` is released when the last one closes. */
   handles: number;
 }
 
-const roots = new Map<string, RootState>();
+/**
+ * Per process, not per module instance: two copies of this module loaded in
+ * one process (a bundle and the package, say) must share roots and tokens, or
+ * one would read the other's lock as a reused pid.
+ */
+const roots: Map<string, RootState> = ((globalThis as Record<symbol, unknown>)[Symbol.for("@originals/sdk/fs-store/roots")] ??= new Map()) as Map<string, RootState>;
+
+interface LockRecord {
+  pid: number;
+  host?: string;
+  token?: string;
+  /** The holder's start time where the platform exposes it (Linux /proc), else absent. */
+  start?: string;
+}
 
 function alive(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -58,24 +101,103 @@ function alive(pid: number): boolean {
   }
 }
 
-/** Take `<root>/.lock` for this process, or refuse when a live process holds it. */
-async function takeLock(root: string): Promise<void> {
-  const path = join(root, ".lock");
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await fs.writeFile(path, String(process.pid), { flag: "wx" });
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-    const holder = Number((await fs.readFile(path, "utf8").catch(() => "")).trim());
-    if (holder === process.pid) return;
-    if (alive(holder)) {
-      throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is in use by process ${holder}; one process writes a store at a time`, { root, pid: holder });
-    }
-    await fs.rm(path, { force: true }); // stale: its process no longer runs
+/** A process's start time in clock ticks since boot (Linux), or undefined where it cannot be read. */
+async function startOf(pid: number): Promise<string | undefined> {
+  const stat = await fs.readFile(`/proc/${pid}/stat`, "utf8").catch(() => undefined);
+  if (stat === undefined) return undefined;
+  // Field 22; the command name (field 2) is parenthesised and may hold spaces.
+  return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+}
+
+function parseRecord(text: string): LockRecord | undefined {
+  const trimmed = text.trim();
+  if (/^[1-9][0-9]*$/.test(trimmed)) return { pid: Number(trimmed) }; // a bare pid, as earlier builds wrote
+  try {
+    const record = JSON.parse(trimmed) as Partial<LockRecord>;
+    if (typeof record.pid !== "number" || typeof record.host !== "string" || typeof record.token !== "string") return undefined;
+    return { pid: record.pid, host: record.host, token: record.token, start: typeof record.start === "string" ? record.start : undefined };
+  } catch {
+    return undefined;
   }
-  throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is being opened by another process`, { root });
+}
+
+/** True only when the holder is confirmed gone; anything uncertain counts as held. */
+async function stale(record: LockRecord): Promise<boolean> {
+  if (record.host !== undefined && record.host !== hostname()) return false; // another host's pid cannot be checked
+  if (record.pid === process.pid) {
+    // This process holds it only under a token it knows; otherwise the pid was reused.
+    return ![...roots.values()].some((state) => state.token === record.token);
+  }
+  if (!alive(record.pid)) return true;
+  if (record.start === undefined) return false;
+  const start = await startOf(record.pid);
+  return start !== undefined && start !== record.start; // a different process now has the pid
+}
+
+const lockedError = (root: string, record: LockRecord | undefined, detail = "") =>
+  new OriginalsError(
+    "unavailable-bytes",
+    "STORE_LOCKED",
+    record
+      ? `${root} is in use by process ${record.pid}${record.host ? ` on ${record.host}` : ""}; one process writes a store at a time${detail}`
+      : `${root}/.lock cannot be read as a lock record; if no process uses the store, remove it by hand${detail}`,
+    { root, pid: record?.pid, host: record?.host },
+  );
+
+/**
+ * Take `<root>/.lock` for this process under `token`, or refuse when another
+ * process may hold it. See the module comment for the protocol.
+ */
+async function takeLock(root: string, token: string): Promise<void> {
+  const path = join(root, ".lock");
+  const mine: LockRecord = { pid: process.pid, host: hostname(), token, start: await startOf(process.pid) };
+  const candidate = join(root, `.lock.${process.pid}.${token}.new`);
+  await fs.writeFile(candidate, JSON.stringify(mine), { flag: "wx" });
+  try {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        await fs.link(candidate, path);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      const text = await fs.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (text === undefined) continue; // released meanwhile: link again
+      const record = parseRecord(text);
+      if (!record || !(await stale(record))) throw lockedError(root, record);
+      // Claim the break of exactly this record; one process can.
+      const claim = join(root, `.lock.break.${hashHex(text).slice(0, 32)}`);
+      try {
+        await fs.writeFile(claim, JSON.stringify(mine), { flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if ((await fs.readFile(path, "utf8").catch(() => undefined)) !== text) continue; // another taker finished
+        throw lockedError(root, record, `; another process is taking over its stale lock (if none is, remove ${claim} by hand)`);
+      }
+      try {
+        // Nobody else can replace this record now, and its holder is gone: replace it in one step.
+        if ((await fs.readFile(path, "utf8").catch(() => undefined)) !== text) continue;
+        await fs.rename(candidate, path);
+        return;
+      } finally {
+        await fs.rm(claim, { force: true });
+      }
+    }
+    throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is being opened by other processes`, { root });
+  } finally {
+    await fs.rm(candidate, { force: true });
+  }
+}
+
+/** Remove `.lock` if this process holds it under `token`. */
+async function releaseLock(root: string, token: string): Promise<void> {
+  const path = join(root, ".lock");
+  const record = parseRecord(await fs.readFile(path, "utf8").catch(() => ""));
+  // Nobody replaces a live holder's record (see `stale`), so the check and the removal cannot interleave with a takeover.
+  if (record?.pid === process.pid && record.token === token) await fs.rm(path, { force: true });
 }
 
 const DID_VH = /^did:vh:([1-9A-HJ-NP-Za-km-z]{46})$/;
@@ -84,6 +206,7 @@ const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{1,120}$/;
 type Fs = typeof import("node:fs/promises");
 let fs: Fs;
 let randomHex: (bytes: number) => string;
+let hostname: () => string;
 const join = (...parts: string[]) => parts.join("/");
 const hashHex = (text: string) => hex.encode(sha256(new TextEncoder().encode(text)));
 
@@ -93,6 +216,7 @@ async function loadNode(): Promise<void> {
     const { randomBytes } = await import("node:crypto");
     randomHex = (n) => randomBytes(n).toString("hex");
   }
+  if (!hostname) hostname = (await import("node:os")).hostname;
 }
 
 async function fsyncDir(dir: string): Promise<void> {
@@ -128,13 +252,7 @@ export class FileStore implements OriginalsStore {
     await mkdir(join(root, "authors"), { recursive: true });
     await mkdir(join(root, "retained"), { recursive: true });
     const key = await realpath(root);
-    let shared = roots.get(key);
-    if (!shared) {
-      await takeLock(root);
-      shared = roots.get(key) ?? { locks: new Map(), writing: new Set(), handles: 0 };
-      roots.set(key, shared);
-    }
-    shared.handles++;
+    const shared = await FileStore.attach(root, key);
     const { writing } = shared;
     // Only a crash's leftovers: a temporary file a handle in this process is writing stays.
     const sweep = async (dir: string, names: string[]) => {
@@ -149,6 +267,11 @@ export class FileStore implements OriginalsStore {
       await sweep(branches, await readdir(branches).catch(() => [] as string[]));
     }
     for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
+    // Lock candidates a crashed opener left behind.
+    for (const name of await readdir(root)) {
+      const pid = Number(/^\.lock\.(\d+)\.[0-9a-f]+\.new$/.exec(name)?.[1]);
+      if (pid && pid !== process.pid && !alive(pid)) await rm(join(root, name), { force: true });
+    }
     return new FileStore(root, key, shared, faults);
   }
 
@@ -161,15 +284,61 @@ export class FileStore implements OriginalsStore {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    const shared = roots.get(this.key);
-    if (!shared || shared !== this.shared) return;
+    const shared = this.shared;
     shared.handles--;
     if (shared.handles > 0) return;
-    await Promise.all([...shared.locks.values()]);
-    if (shared.handles > 0) return; // reopened while the writes finished
-    roots.delete(this.key);
-    const lock = join(this.root, ".lock");
-    if (Number((await fs.readFile(lock, "utf8").catch(() => "")).trim()) === process.pid) await fs.rm(lock, { force: true });
+    // Closing: `open()` waits for this before deciding whether it holds the lock (08b review r2 #3).
+    shared.closing = (async () => {
+      try {
+        // Every write in flight from any handle, including ones chained behind a per-Original lock (r2 #2).
+        while (shared.inflight.size > 0) await Promise.allSettled([...shared.inflight]);
+        await releaseLock(this.root, shared.token);
+      } finally {
+        if (roots.get(this.key) === shared) roots.delete(this.key);
+      }
+    })();
+    await shared.closing;
+  }
+
+  /** The root's shared state with this handle counted, taking `.lock` when this process does not hold it. */
+  private static async attach(root: string, key: string): Promise<RootState> {
+    for (;;) {
+      const existing = roots.get(key);
+      if (existing?.closing) {
+        await existing.closing.catch(() => undefined);
+        continue;
+      }
+      if (existing) {
+        await existing.ready;
+        if (roots.get(key) !== existing || existing.closing) continue;
+        existing.handles++;
+        return existing;
+      }
+      // Registered before the first await, so a concurrent open in this process waits for this one.
+      const token = randomHex(16);
+      const state: RootState = { token, ready: Promise.resolve(), locks: new Map(), writing: new Set(), inflight: new Set(), handles: 0 };
+      state.ready = takeLock(root, token).catch((error: unknown) => {
+        if (roots.get(key) === state) roots.delete(key);
+        throw error;
+      });
+      roots.set(key, state);
+      await state.ready;
+      state.handles++;
+      return state;
+    }
+  }
+
+  /** Run a mutating operation: refused on a closed handle, and awaited by the root's last `close()`. */
+  private async track<T>(fn: () => Promise<T>): Promise<T> {
+    this.open();
+    const run = fn();
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.shared.inflight.add(settled);
+    void settled.then(() => this.shared.inflight.delete(settled));
+    return await run;
   }
 
   private open(): void {
@@ -182,8 +351,8 @@ export class FileStore implements OriginalsStore {
     return join(this.root, "originals", match[1]);
   }
 
+  /** Called only under `track`, which refused it on a closed handle. */
   private async writeAtomically(dir: string, name: string, data: Uint8Array | string): Promise<void> {
-    this.open();
     const tmp = join(dir, `${name}.${randomHex(6)}.tmp`);
     this.writing.add(tmp);
     try {
@@ -212,7 +381,10 @@ export class FileStore implements OriginalsStore {
   }
 
   async commit(did: string, update: CommitUpdate): Promise<void> {
-    this.open();
+    return this.track(() => this.commitNow(did, update));
+  }
+
+  private commitNow(did: string, update: CommitUpdate): Promise<void> {
     const previous = this.locks.get(did) ?? Promise.resolve();
     const run = previous.then(async () => {
       const dir = this.dirOf(did);
@@ -226,9 +398,11 @@ export class FileStore implements OriginalsStore {
   }
 
   async putResource(digest: string, bytes: Uint8Array): Promise<void> {
-    if (!DIGEST.test(digest)) throw new OriginalsError("invalid-evidence", "STORE_DIGEST_INVALID", `${digest} is not a digest`);
-    if ((await this.getResource(digest)) !== undefined) return;
-    await this.writeAtomically(join(this.root, "resources"), digest, bytes);
+    return this.track(async () => {
+      if (!DIGEST.test(digest)) throw new OriginalsError("invalid-evidence", "STORE_DIGEST_INVALID", `${digest} is not a digest`);
+      if ((await this.getResource(digest)) !== undefined) return;
+      await this.writeAtomically(join(this.root, "resources"), digest, bytes);
+    });
   }
 
   async getResource(digest: string): Promise<Uint8Array | undefined> {
@@ -255,7 +429,7 @@ export class FileStore implements OriginalsStore {
   }
 
   async putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void> {
-    await this.writeAtomically(join(this.root, "authors"), this.didFile(evidence.did), JSON.stringify(evidence));
+    return this.track(() => this.writeAtomically(join(this.root, "authors"), this.didFile(evidence.did), JSON.stringify(evidence)));
   }
 
   async getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined> {
@@ -276,6 +450,10 @@ export class FileStore implements OriginalsStore {
   }
 
   async putRetained(did: string, versionId: string): Promise<void> {
+    return this.track(() => this.putRetainedNow(did, versionId));
+  }
+
+  private putRetainedNow(did: string, versionId: string): Promise<void> {
     // Serialized per DID and never lowered, so a concurrent read cannot undo a newer retain (P7.8).
     const key = `retained:${did}`;
     const run = (this.locks.get(key) ?? Promise.resolve()).then(async () => {
@@ -287,10 +465,12 @@ export class FileStore implements OriginalsStore {
   }
 
   async putBranch(did: string, log: string): Promise<void> {
-    const dir = join(this.dirOf(did), "branches");
-    await fs.mkdir(dir, { recursive: true });
-    const name = `${hashHex(log)}.jsonl`;
-    if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, log);
+    return this.track(async () => {
+      const dir = join(this.dirOf(did), "branches");
+      await fs.mkdir(dir, { recursive: true });
+      const name = `${hashHex(log)}.jsonl`;
+      if ((await this.readText(join(dir, name))) === undefined) await this.writeAtomically(dir, name, log);
+    });
   }
 
   async getBranches(did: string): Promise<string[]> {
