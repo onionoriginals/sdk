@@ -3,8 +3,8 @@
  * sat, as an adapter reports them, decide the log (P9.10, P9.12-P9.17): the
  * anchoring inscription carries the whole log from genesis through the
  * anchoring entry, each later inscription one entry, and each is checked
- * against the author DID at its inscription time (P9.15). Rows of the a432
- * section 12 matrix not yet in the registry are cited as "row NN".
+ * against the author DID at its inscription time (P9.15). Tests cite their
+ * section 12 rows by registry id (specs/originals-conformance.json).
  */
 import { describe, expect, test } from "bun:test";
 import { serializeLog, type LogEntry } from "../src/log/index.js";
@@ -99,7 +99,7 @@ describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
     await expect(updateOriginal(anchor, { versionTime: time(11), aliases: [web, SAT], author: ref, sign })).rejects.toMatchObject({ code: "STATE_ANCHOR" });
   });
 
-  test("row 95: an anchored log with no Bitcoin evidence is unverified: missing evidence, not current", async () => {
+  test("C12-89: an anchored log with no Bitcoin evidence is unverified: missing evidence, not current", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice);
     expect(r.anchoring?.status).toBe("unverified");
@@ -107,7 +107,7 @@ describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
     expect(r.reasons).toContain("bitcoin-evidence-missing");
   });
 
-  test("C12-38 and C12-33: an anchoring entry inscribed on a sat other than the one it names is not an anchor, and confers nothing", async () => {
+  test("C12-38, C12-25 and C12-33: an anchoring entry inscribed on a sat other than the one it names is not an anchor, is reported, and confers nothing", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10)], OTHER_SAT)]);
     expect(r.anchoring?.status).toBe("not-anchored");
@@ -163,7 +163,7 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
     expect(r.anchoring?.ignored[0]?.reason).toBe("not-above-previous-height");
   });
 
-  test("row 96: unconfirmed and foreign inscriptions are observed but never accepted", async () => {
+  test("C12-90: unconfirmed and foreign inscriptions are observed but never accepted", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Pending", author: ref, sign });
     const r = await verify(copy, alice, [sat([anchoring(10), inscribe(next, 20, { confirmations: 0 }), inscribe(next, 21, { mediaType: "image/png" })])]);
@@ -171,7 +171,7 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unconfirmed", "not-an-originals-inscription"]);
   });
 
-  test("C12-75 and row 92: an inscription that does not strictly parse is rejected; after the anchor, so is one carrying more than one entry", async () => {
+  test("C12-75 and C12-86: an inscription that does not strictly parse is rejected; after the anchor, so is one carrying more than one entry", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Next", author: ref, sign });
     const line = serializeLog([next]);
@@ -197,7 +197,7 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
     }
   });
 
-  test("C12-40 and row 97: when a reorganisation removes an accepted inscription, the change is reported, never applied silently", async () => {
+  test("C12-40 and C12-91: when a reorganisation removes an accepted inscription, the change is reported, never applied silently", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Reorged away", author: ref, sign });
     const r = await verify([...copy, next], alice, [sat([anchoring(10)])], { retained: { original: next.versionId } });
@@ -241,7 +241,7 @@ describe("review fixes (PR 9a)", () => {
     expect(inscribed.retain.original).toBe(anchor.versionId);
   });
 
-  test("every anchoring inscription checks itself: an earlier one with another history is the anchor, whatever the copy holds (P9.16, P9.17; row 94)", async () => {
+  test("every anchoring inscription checks itself: an earlier one with another history is the anchor, whatever the copy holds (P9.16, P9.17; C12-88)", async () => {
     const { alice, copy, genesis, ref, sign, anchoring } = await anchored();
     const branch = await updateOriginal(genesis, { versionTime: time(3), name: "Another history", author: ref, sign });
     const earlier = await updateOriginal(branch, { versionTime: time(9), aliases: [SAT], author: ref, sign });
@@ -273,7 +273,7 @@ describe("review fixes (PR 9a)", () => {
     expect(r.anchoring?.ignored).toEqual([]);
   });
 
-  test("a copy that does not parse is ignored: the sat carries the log (P9.17; row 94)", async () => {
+  test("a copy that does not parse is ignored: the sat carries the log (P9.17; C12-88)", async () => {
     const { alice, anchor, anchoring } = await anchored();
     const r = await verifyOriginal({ log: "not a log\n", authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted", bitcoin: [sat([anchoring(10)])] });
     expect(r.head).toBe(anchor.versionId);
@@ -314,7 +314,7 @@ describe("author checks at inscription time (P9.15)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("C12-44 and row 104: an anchored entry naming an author DID version newer than its inscription time is checked against the named version", async () => {
+  test("C12-44: an anchored entry naming an author DID version newer than its inscription time is checked against the named version", async () => {
     const { alice, copy, anchor, sign, anchoring } = await anchored();
     alice.timeOverride = new Date(T0 + 35 * 600_000).toISOString();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
@@ -366,7 +366,7 @@ describe("the deactivation of an anchored Original (P9.12)", () => {
 });
 
 describe("the anchoring inscription carries the whole log (P9.17)", () => {
-  test("row 93: an anchored Original verifies from Bitcoin alone, with no copy of the log", async () => {
+  test("C12-87: an anchored Original verifies from Bitcoin alone, with no copy of the log", async () => {
     const { alice, anchor, ref, sign, anchoring, genesis } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, from the sat", author: ref, sign });
     const r = await verify(undefined, alice, [sat([anchoring(10), inscribe(next, 20)])]);
@@ -378,7 +378,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("row 94: a copy whose history differs from the sat's is ignored; the sat's entries are the log", async () => {
+  test("C12-88: a copy whose history differs from the sat's is ignored; the sat's entries are the log", async () => {
     const { alice, genesis, anchor, ref, sign, anchoring } = await anchored();
     const other = await updateOriginal(genesis, { versionTime: time(2), name: "A rewritten history", author: ref, sign });
     const r = await verify([genesis, other], alice, [sat([anchoring(10)])]);
@@ -388,7 +388,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("row 107: an anchoring inscription that does not start at genesis, or whose entries are not one log, is not an anchor", async () => {
+  test("C12-101: an anchoring inscription that does not start at genesis, or whose entries are not one log, is not an anchor", async () => {
     const { alice, genesis, renamed, anchor, copy, ref, sign } = await anchored();
     const sideways = await updateOriginal(genesis, { versionTime: time(3), name: "Sideways", author: ref, sign });
     const cases = [inscribe(anchor, 10), inscribe([renamed, anchor], 11), inscribe([genesis, sideways, anchor], 12)];
@@ -398,7 +398,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("row 108: an anchoring inscription whose last entry is not an anchoring entry naming that sat is not an anchor", async () => {
+  test("C12-102: an anchoring inscription whose last entry is not an anchoring entry naming that sat is not an anchor", async () => {
     const { alice, genesis, renamed, anchor, copy, ref, sign } = await anchored();
     const after = await updateOriginal(anchor, { versionTime: time(11), name: "After the anchor", author: ref, sign });
     const r = await verify(copy, alice, [sat([inscribe([genesis, renamed], 10), inscribe([...copy, after], 11)])]);
@@ -408,7 +408,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(elsewhere.anchoring?.ignored.map((i) => i.reason)).toEqual(["names-another-sat"]);
   });
 
-  test("row 92: after the anchor, an inscription carrying more than one entry is rejected, even if each would extend the head", async () => {
+  test("C12-86: after the anchor, an inscription carrying more than one entry is rejected, even if each would extend the head", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
     const one = await updateOriginal(anchor, { versionTime: time(20), name: "One", author: ref, sign });
     const two = await updateOriginal(one, { versionTime: time(21), name: "Two", author: ref, sign });
@@ -417,7 +417,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "more-than-one-entry" })]);
   });
 
-  test("an inscription of the Originals media type carrying metadata is rejected, anchoring or later (P9.17)", async () => {
+  test("C12-37: an inscription of the Originals media type carrying metadata is rejected, anchoring or later (P9.17)", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "With metadata", author: ref, sign });
     const cbor = new Uint8Array([0xa1, 0x62, 0x69, 0x64, 0x61, 0x78]);
@@ -429,7 +429,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(later.anchoring?.ignored.map((i) => i.reason)).toEqual(["carries-metadata"]);
   });
 
-  test("row 72: an inscription carrying a compact delta is rejected in the baseline, which defines no compact encoding (P9.14, P9.17)", async () => {
+  test("C12-74: an inscription carrying a compact delta is rejected in the baseline, which defines no compact encoding (P9.14, P9.17)", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Delta", author: ref, sign });
     const delta = bytes(`${JSON.stringify({ versionId: next.versionId, patch: [{ op: "replace", path: "/state/asset/name", value: "Delta" }] })}\n`);
@@ -443,7 +443,7 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription", "invalid-entry"]);
   });
 
-  test("row 96: an unconfirmed anchoring inscription is observed, not an anchor", async () => {
+  test("C12-90: an unconfirmed anchoring inscription is observed, not an anchor", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10, { confirmations: 0 })])]);
     expect(r.anchoring?.status).toBe("not-anchored");
@@ -482,7 +482,7 @@ async function paddedTo(target: number) {
 }
 
 describe("the inscription body limit (P9.17, D6 provisional)", () => {
-  test("row 117: an anchoring inscription of exactly 350,000 bytes is accepted", async () => {
+  test("C12-111: an anchoring inscription of exactly 350,000 bytes is accepted", async () => {
     expect(ORIGINALS_INSCRIPTION_MAX_BYTES).toBe(350_000);
     const { alice, entries } = await paddedTo(350_000);
     const r = await verify(undefined, alice, [sat([inscribe(entries, 10)])]);
@@ -491,7 +491,7 @@ describe("the inscription body limit (P9.17, D6 provisional)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("row 118 (verifier): a larger inscription is rejected", async () => {
+  test("C12-112 (verifier): a larger inscription is rejected", async () => {
     const { alice, entries } = await paddedTo(350_001);
     const r = await verify(undefined, alice, [sat([inscribe(entries, 10)])]);
     expect(r.anchoring?.status).toBe("not-anchored");
@@ -500,7 +500,7 @@ describe("the inscription body limit (P9.17, D6 provisional)", () => {
 });
 
 describe("placement rests on the index (P9.10, P9.11)", () => {
-  test("row 109: an inscription the index reports on another sat is not on the anchoring sat, whatever the read is labelled", async () => {
+  test("C12-103: an inscription the index reports on another sat is not on the anchoring sat, whatever the read is labelled", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10, { sat: "7000000000" })])]);
     expect(r.anchoring?.status).toBe("not-anchored");
@@ -508,14 +508,14 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(r.ownership).toBeNull();
   });
 
-  test("row 110: inscriptions read from another network are not on the anchoring sat", async () => {
+  test("C12-104: inscriptions read from another network are not on the anchoring sat", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10, { network: "testnet" })])]);
     expect(r.anchoring?.status).toBe("not-anchored");
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["other-network"]);
   });
 
-  test("row 115: two indexes that disagree on placement are not accepted; missing evidence is reported until they agree", async () => {
+  test("C12-109: two indexes that disagree on placement are not accepted; missing evidence is reported until they agree", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Disputed", author: ref, sign });
     const a = anchoring(10);
@@ -550,7 +550,7 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(r.reasons).toContain("ownership-indexes-disagree");
   });
 
-  test("row 114: did:btco aliases follow the strict grammar", () => {
+  test("C12-108: did:btco aliases follow the strict grammar", () => {
     for (const ok of ["did:btco:0", "did:btco:1", "did:btco:sig:1", "did:btco:test:1", "did:btco:reg:5000000000", "did:btco:2099999997689999"]) {
       expect(parseBtcoAlias(ok).did).toBe(ok);
     }
@@ -568,7 +568,7 @@ describe("aliases after anchoring (P9.10, D7)", () => {
   const MOVED = WEB.replace(":example.com", ":moved.example");
   const OTHER_WEB = "did:webvh:QmZbbDDaBzk5mdtDNAJnxAZ1BhGBbu3ZYkZmF4BkbbMiTT:example.org";
 
-  test("row 112: an entry after anchoring may not add or replace a did:webvh alias, even within its SCID", async () => {
+  test("C12-106 and C12-139 (anchored): an entry after anchoring may not add or replace a did:webvh alias, even within its SCID", async () => {
     const { ref, sign, anchor } = await anchored({ aliases: [WEB] });
     for (const aliases of [[OTHER_WEB, SAT], [MOVED, SAT]]) {
       await expect(updateOriginal(anchor, { versionTime: time(11), aliases, author: ref, sign })).rejects.toMatchObject({ code: "STATE_ANCHOR" });
@@ -577,7 +577,7 @@ describe("aliases after anchoring (P9.10, D7)", () => {
     expect(kept.state.asset).toMatchObject({ aliases: [WEB, SAT] });
   });
 
-  test("row 116: a did:webvh alias the anchoring state lists may be removed, but never added again", async () => {
+  test("C12-110: a did:webvh alias the anchoring state lists may be removed, but never added again", async () => {
     const { alice, ref, sign, anchor, anchoring } = await anchored({ aliases: [WEB] });
     const removed = await updateOriginal(anchor, { versionTime: time(20), aliases: [SAT], author: ref, sign });
     await expect(updateOriginal(removed, { versionTime: time(21), aliases: [WEB, SAT], author: ref, sign })).rejects.toMatchObject({ code: "STATE_ANCHOR" });
@@ -593,7 +593,7 @@ describe("aliases after anchoring (P9.10, D7)", () => {
 });
 
 describe("entries before the anchor (P9.15)", () => {
-  test("row 113: an entry before the anchoring entry, signed by a key removed before the inscription, is accepted against the version it names, with claimed ordering", async () => {
+  test("C12-107: an entry before the anchoring entry, signed by a key removed before the inscription, is accepted against the version it names, with claimed ordering", async () => {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const old = alice.signer(KEY, "orig");
     const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: alice.ref("orig"), sign: old });
@@ -616,7 +616,7 @@ describe("entries before the anchor (P9.15)", () => {
 });
 
 describe("a change of anchor is reported (P9.16)", () => {
-  test("row 105: learning of an earlier anchoring entry reports it as the anchor, the previous one as conflicting, and the owner change", async () => {
+  test("C12-99: learning of an earlier anchoring entry reports it as the anchor, the previous one as conflicting, and the owner change", async () => {
     const { alice, genesis, renamed, ref, sign, anchoring, anchor } = await anchored();
     const other = await updateOriginal(renamed, { versionTime: time(10), aliases: [OTHER_SAT], author: ref, sign });
     const mine = sat([anchoring(12)]);
@@ -643,7 +643,7 @@ describe("a change of anchor is reported (P9.16)", () => {
 });
 
 describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18)", () => {
-  test("row 103: an anchored Original without its resource bytes, current or historical, verifies with content reported unavailable", async () => {
+  test("C12-97: an anchored Original without its resource bytes, current or historical, verifies with content reported unavailable", async () => {
     const { alice, anchor, anchoring } = await anchored();
     const r = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: {} });
     expect(r.history.status).toBe("valid");
