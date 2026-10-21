@@ -10,9 +10,12 @@
  * Core) and applies the same version rules as the Originals verifier
  * (`@originals/vh`), so the two never disagree about a did:btco. An
  * inscription it cannot read fails resolution: it could be a newer version.
- * A delegated or encoded inscription, which the sat's holder can add, is
- * observed and is not a version (P5.13, PROVISIONAL); one whose body was past
- * the reader's byte budget was not read, so resolution is `unresolvable`.
+ * A delegated or encoded inscription, which the sat's holder can add, keeps
+ * its own metadata (delegation and body encoding do not affect it): the
+ * reader reads it and it is a version candidate like any other (P5.13; whether
+ * such an inscription counts as a version is open, PROVISIONAL). One whose
+ * metadata or body was past the reader's byte budget was not read, so
+ * resolution is `unresolvable`: it is never skipped.
  *
  * This replaces the earlier content-based convention (the document as
  * inscription content, a 🔥 marker for deactivation), which the method does
