@@ -318,8 +318,9 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
   });
 
   test('a declared media type that is not a bare type/subtype is not served', async () => {
-    const { put } = setup();
     for (const mediaType of ['text/html\r\nx-evil: 1', 'image/svg+xml; charset=utf-8', 'svg', '']) {
+      // A fresh host each time: an asset log can only be extended, never replaced.
+      const { put } = setup();
       const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'a', mediaType, size: bytes.length, digest }] } } })}\n`;
       expect((await put(`${base}/asset/did.jsonl`, bad)).status).toBe(200);
       expect((await put(`${base}/resources/${digest}`, bytes)).status, JSON.stringify(mediaType)).toBe(409);
@@ -332,5 +333,37 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
     await put(`${base}/originals-evidence.json`, '{}');
     expect((await fetchFn(new Request(`http://${base}/asset/did.jsonl`))).headers.get('content-type')).toBe('application/jsonl');
     expect((await fetchFn(new Request(`http://${base}/originals-evidence.json`))).headers.get('content-type')).toBe('application/json');
+  });
+});
+
+describe('the hosted asset log only grows (P6.7)', () => {
+  const base = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals';
+  test('an upload that does not extend the stored asset log is refused; one that extends it or repeats it is stored', async () => {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (body: string) =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(`${base}/asset/did.jsonl`)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
+    expect((await put('{"versionId":"1-a"}\n')).status).toBe(200);
+    expect((await put('{"versionId":"1-a"}\n')).status).toBe(200);
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
+    const rollback = await put('{"versionId":"1-a"}\n');
+    expect(rollback.status).toBe(409);
+    expect(await rollback.json()).toEqual({ error: 'stale_asset_log' });
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-c"}\n')).status).toBe(409);
+  });
+
+  test('a submission needs a signed-in caller and a well-formed site key', async () => {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const post = (key: string, cookie?: string, method = 'POST') =>
+      fetchFn(new Request(`http://demo.local/api/originals/submit/${encodeURIComponent(key)}`, { method, headers: cookie ? { cookie } : {}, body: method === 'POST' ? '{}' : undefined }));
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z')).status).toBe(401);
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'), 'PUT')).status).toBe(405);
+    for (const key of ['demo.example.com/user-sub-1', 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/extra', '../x/o-9xKpQ2mN4vR7tW1z', 'demo.example.com/user-sub-1/not-a-name']) {
+      expect((await post(key, cookieFor('sub-1'))).status, key).toBe(400);
+    }
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'))).status).toBe(400);
   });
 });

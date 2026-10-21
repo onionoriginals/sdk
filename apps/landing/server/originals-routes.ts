@@ -2,12 +2,21 @@
  * Auth-gated routes for durable per-user Originals.
  *
  *   PUT /api/originals/host/<encoded key>   store a hosted file (hosted-layout.ts)
+ *   POST /api/originals/submit/<site key>   a shared-host save of one entry (shared-saves.ts, P6.7)
  *   POST /api/originals                     record an Original summary
  *   GET  /api/originals                     list the user's Originals
  *   serve(url)                              durable read at the resolver URL
  *
  * Every route requires a valid JWT (cookie or Bearer); the store is namespaced
  * by the JWT `sub`, so a user only ever writes/reads under their own account.
+ * The one exception is a shared-host save: any signed-in caller may submit a
+ * signed entry for an Original hosted in someone's namespace, because the
+ * entry's validity under the profile, not the account, authorizes the change
+ * (P5.4, P6.7). Accepted files stay the namespace owner's.
+ *
+ * An Original's hosted asset log only ever grows: an upload that does not
+ * extend the stored log is refused (409), so neither a stale re-publish nor
+ * anything else rolls back a head the host has accepted.
  */
 import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router';
@@ -15,8 +24,12 @@ import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import type { OriginalsStore, OriginalInscription } from './originals-store';
 import { bytesMatchDigest, classifyHostedKey, hostedContentType, signedMediaType } from './hosted-layout';
+import { createSharedSaves, parseSubmission } from './shared-saves';
 
 const HOST_PREFIX = '/api/originals/host/';
+const SUBMIT_PREFIX = '/api/originals/submit/';
+// A submission carries one entry, the bytes it introduces (base64) and its signer's DID logs.
+const MAX_SUBMIT_BYTES = 12 * 1024 * 1024;
 
 // Reject a declared body larger than this before buffering it — the store's
 // per-user 25 MiB quota is the real ceiling; no single did:webvh artifact
@@ -35,9 +48,9 @@ function userSlug(sub: string): string {
  * decodeURIComponent would throw URIError → an uncaught 500; callers turn null
  * into a clean 400.
  */
-function decodeKey(url: URL): string | null {
+function decodeKey(url: URL, prefix = HOST_PREFIX): string | null {
   try {
-    return decodeURIComponent(url.pathname.slice(HOST_PREFIX.length));
+    return decodeURIComponent(url.pathname.slice(prefix.length));
   } catch {
     return null;
   }
@@ -46,6 +59,7 @@ function decodeKey(url: URL): string | null {
 export interface OriginalsRoutes {
   hostPut(req: Request, url: URL, clientIp: string): Promise<Response>;
   hostGet(req: Request, url: URL): Promise<Response>;
+  submit(req: Request, url: URL, clientIp: string): Promise<Response>;
   record: Handler;
   list: Handler;
   serve(url: URL): Response | null;
@@ -63,6 +77,9 @@ export function createOriginalsRoutes(deps: {
   // publishes/min for one signed-in creator; the auth gate and the per-user
   // namespace are the real bounds.
   const putLimiter = createRateLimiter({ limit: 120, windowMs: 60_000 });
+  // Each save is one signed entry, so 60/min per client is far above any editor's pace.
+  const submitLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
+  const sharedSaves = createSharedSaves({ store, now });
 
   /** Authenticated subOrgId, or null (→ 401). */
   function authSub(req: Request): string | null {
@@ -122,12 +139,40 @@ export function createOriginalsRoutes(deps: {
     } else {
       contentType = hostedContentType(hosted);
     }
+    // The accepted head never moves back: an asset log may only be replaced by one that extends it.
+    if (hosted.kind === 'evidence' && key.endsWith('/originals/asset/did.jsonl')) {
+      const stored = store.readHosted(key);
+      const prefix = stored ? new TextDecoder().decode(stored) : '';
+      if (!new TextDecoder().decode(bytes).startsWith(prefix)) return json({ error: 'stale_asset_log' }, 409);
+    }
     try {
       store.saveBytes(sub, key, bytes, contentType);
     } catch (e) {
       return storeError(e);
     }
     return json({ ok: true }, 200);
+  }
+
+  async function submit(req: Request, url: URL, clientIp: string): Promise<Response> {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+    const rl = submitLimiter.check(clientIp);
+    if (!rl.allowed) {
+      return json({ error: 'rate_limited' }, 429, { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) });
+    }
+    const siteKey = decodeKey(url, SUBMIT_PREFIX);
+    const [, ns, , ...rest] = (siteKey ?? '').split('/');
+    if (siteKey === null || rest.length > 0 || !ns || !classifyHostedKey(`${siteKey}/originals/asset/did.jsonl`, ns)) {
+      return json({ error: 'bad_key' }, 400);
+    }
+    const declared = Number(req.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_SUBMIT_BYTES) return json({ error: 'payload_too_large' }, 413);
+    const body = await req.text();
+    if (body.length > MAX_SUBMIT_BYTES) return json({ error: 'payload_too_large' }, 413);
+    const parsed = parseSubmission(body);
+    if ('http' in parsed) return json(parsed.body, parsed.http);
+    return sharedSaves.submit(siteKey, parsed);
   }
 
   // adapter.get: read back an object under this user's account (auth-scoped in
@@ -198,5 +243,5 @@ export function createOriginalsRoutes(deps: {
     return json({ originals: store.list(sub) });
   };
 
-  return { hostPut, hostGet, record, list, serve: (url) => store.serve(url) };
+  return { hostPut, hostGet, submit, record, list, serve: (url) => store.serve(url) };
 }
