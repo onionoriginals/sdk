@@ -5,8 +5,10 @@
  * - the committed head: the last entry of the stored log, signed locally;
  * - a prepared or pending publication: a pair in the recovery store, built or
  *   broadcast but not accepted, which never advances anything (P9.4). While
- *   the anchoring inscription is out but Bitcoin does not show it, reads are
- *   labelled `pending-bitcoin-acceptance` (P9.18);
+ *   the anchoring pair is observed on the network (confirmed, or in the
+ *   node's mempool) but Bitcoin does not show it, reads are labelled
+ *   `pending-bitcoin-acceptance` (P9.18); submitted but not observed, they
+ *   are `submitted-unobserved`;
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *
@@ -35,15 +37,25 @@
  *   later entry, which is how only the sat's holder can extend an anchored
  *   Original while only the author or an editor can sign it (P9.12). Nothing
  *   is re-signed or rebased: the bytes are the ones already committed (P9.6).
+ *   Given the recovery store, a pair for the same entry that can still land
+ *   refuses a new one (PAIR_IN_FLIGHT) unless `replaces` names it (P9.6).
  * - Submitting and retrying are the sat builder's durable state machine:
  *   `submitPreparedInscriptionOnSat` persists before every broadcast, and
- *   `resumeInscriptionOnSat` rebroadcasts the same pair. A replacement is a
- *   new `prepareEntryInscription`, never a silent re-sign (P9.6).
+ *   `resumeInscriptionOnSat` rebroadcasts the same pair, unchecked;
+ *   `resumeEntryInscription` does so only when `catchUp` says to resume that
+ *   pair. A replacement is a new `prepareEntryInscription`, never a silent
+ *   re-sign (P9.6).
  * - `catchUp` is one step of publishing the queue: it re-reads Bitcoin, finds
  *   any recorded pair for the next inscription, and says whether to resume
- *   it, wait for it, prepare the next one, or stop. One inscription is in
- *   flight at a time, so each accepted publication lands at a strictly
- *   greater height (P9.13). Editor entries are published like author entries.
+ *   it, wait for it, prepare the next one, or stop. A pair can still land
+ *   only while the sat read shows the sat in its funding input or its own
+ *   outputs; among several, the one furthest along on the network is chosen,
+ *   then the lowest recovery id. Before resuming, the log is verified through
+ *   the entry again (P9.18), and a pair that no longer verifies is `refused`.
+ *   Damaged records are skipped and reported (`recoveryIssues`). One
+ *   inscription is in flight at a time, so each accepted publication lands at
+ *   a strictly greater height (P9.13). Editor entries are published like
+ *   author entries.
  * - `readAnchored` reads the sat back; a broadcast or pending transaction never
  *   advances the published boundary (P9.4).
  * - `transferHandoff` and `verifyHandoff`: when the anchoring sat is
@@ -65,7 +77,14 @@ import {
 } from "@originals/vh/originals";
 import type { OrdinalsProvider } from "../adapters/types.js";
 import { prepareInscriptionOnSat, type InscribeOnSatParams, type PreparedInscriptionOnSat } from "../bitcoin/inscribe-on-sat.js";
-import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
+import {
+  INSCRIPTION_RECORD_STATES,
+  resumeInscriptionOnSat,
+  validatePreparedInscriptionOnSat,
+  type InscriptionRecoveryRecord,
+  type InscriptionRecoveryStore,
+} from "../bitcoin/inscription-recovery.js";
+import type { InscribeOnSatResult } from "../bitcoin/inscribe-on-sat.js";
 import { readEvidence } from "./evidence.js";
 import { InscriptionClock, satEvidence } from "./bitcoin.js";
 import type { EvidencePackage, LoadedEvidence, OriginalView, OriginalsSDK } from "./sdk.js";
@@ -133,12 +152,20 @@ export type Publication =
   /** Bitcoin shows the anchor under the confirmation policy: the Original verifies as anchored. */
   | "anchored"
   /**
-   * The anchoring inscription is broadcast (a recorded pair, not only
-   * prepared) and Bitcoin does not show it yet, including while it is
-   * confirmed but not yet indexed. Its acceptance depends on its position
-   * (P5.13, P9.15, P9.16), so it is not anchored yet.
+   * A recorded anchoring pair is observed on the network and Bitcoin does not
+   * show it as the anchor yet: its commit or reveal is confirmed (including a
+   * confirmed reveal not yet indexed) or, where the provider reports it
+   * (`inMempool`), in the node's mempool. Its acceptance depends on its
+   * position (P5.13, P9.15, P9.16), so it is not anchored yet.
    */
   | "pending-bitcoin-acceptance"
+  /**
+   * A recorded anchoring pair was submitted, but neither its commit nor its
+   * reveal is observed: the node rejected or evicted it, or the provider
+   * cannot see its mempool. Not pending acceptance: nothing shows Bitcoin has
+   * it. `catchUp` says whether to resume the same pair (P9.6).
+   */
+  | "submitted-unobserved"
   /** No anchor on Bitcoin and none known in flight. */
   | "not-anchored"
   /** Bitcoin evidence is missing or its indexes disagree (P9.10). */
@@ -166,11 +193,25 @@ export interface PendingEntries {
    * `not-anchored`.
    */
   publication: Publication;
+  /**
+   * Recovery records that could not be used: unreadable, damaged, or whose
+   * declared identities do not match their bytes. Each is skipped and
+   * reported here; one never blocks another Original's catch-up.
+   */
+  recoveryIssues: RecoveryIssue[];
   /** The read the comparison came from. */
   view: OriginalView;
 }
 
-function pendingFrom(did: string, log: StoredLog, view: OriginalView, publication: Publication): PendingEntries {
+/** A recovery record skipped because it could not be used. */
+export interface RecoveryIssue {
+  recoveryId: string;
+  /** The store's or validator's code, e.g. RECOVERY_RECORD_DAMAGED, INVALID_INSCRIPTION_RECOVERY. */
+  code: string;
+  message: string;
+}
+
+function pendingFrom(did: string, log: StoredLog, view: OriginalView, publication: Publication): Omit<PendingEntries, "recoveryIssues"> {
   const anchoring = view.report.anchoring;
   let start = log.anchor;
   let accepted: string | null = null;
@@ -285,6 +326,20 @@ export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | 
    * Named, it must be that entry (HEAD_NOT_NEXT).
    */
   versionId?: string;
+  /**
+   * The writer's recovery store (and, if it cannot list, `recoveryIds`).
+   * Given, a pair for the same entry that can still land refuses the new one
+   * (PAIR_IN_FLIGHT): retrying it is `resumeInscriptionOnSat`, not a second
+   * pair (P9.6). Nothing is saved here; submitting saves.
+   */
+  recoveryStore?: InscriptionRecoveryStore;
+  recoveryIds?: Iterable<string>;
+  /**
+   * The recovery ids (or inscription ids) of in-flight pairs this one
+   * deliberately replaces (P9.6). Their inputs are the same sat-holding
+   * output, so at most one of them lands.
+   */
+  replaces?: string[];
 };
 
 export interface PreparedEntryInscription {
@@ -303,14 +358,14 @@ export interface PreparedEntryInscription {
 
 /** Build (not broadcast) the pair that publishes the next committed entry on the anchoring sat. */
 export async function prepareEntryInscription(params: EntryInscriptionParams): Promise<PreparedEntryInscription> {
-  const { sdk, did, clock, index: satIndex, versionId, ...rest } = params;
+  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], ...rest } = params;
   const log = await storedLog(sdk, did);
   if (NETWORK[log.sat.network] !== params.network) {
     refuse("invalid-evidence", "NETWORK_MISMATCH", `${log.sat.did} is a ${log.sat.network} sat; the writer is on ${params.network}`);
   }
   // A log over the limit through the anchoring entry can never be anchored (P9.17).
   checkSize(log, log.anchor, bodyFor(log, log.anchor));
-  const { pending } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex });
+  const { pending, found } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
   const target = versionId ?? pending.next;
   if (target === null) refuse("invalid-evidence", "NOTHING_TO_INSCRIBE", `Bitcoin already shows the committed head ${pending.committed}`);
   const index = log.ids.indexOf(target);
@@ -319,6 +374,12 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     if (pending.accepted === null) refuse("invalid-evidence", "HEAD_NOT_NEXT", `Bitcoin does not show the anchor yet: inscribe the log through the anchoring entry ${pending.next} before ${target}`);
     if (!pending.queue.includes(target)) refuse("invalid-evidence", "HEAD_NOT_NEXT", `${target} is already inscribed on the anchoring sat`);
     refuse("invalid-evidence", "HEAD_NOT_NEXT", `${target} does not follow ${pending.accepted}, the head Bitcoin shows; inscribe ${pending.next} first`);
+  }
+  // P9.6: a pair for this entry that can still land is retried, not replaced, unless the caller says so.
+  const inFlight = (found?.inFlight ?? []).filter((c) => !replaces.includes(c.record.recoveryId) && !replaces.includes(c.record.prepared.inscriptionId));
+  if (inFlight.length > 0) {
+    const ids = inFlight.map((c) => c.record.recoveryId);
+    refuse("stale-parent", "PAIR_IN_FLIGHT", `a recorded pair for ${target} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` to prepare a replacement (P9.6)`, { recoveryIds: ids });
   }
   // The stored lines, verbatim: the signed bytes Bitcoin will carry (P9.6, P9.17).
   const content = bodyFor(log, index);
@@ -344,24 +405,54 @@ export interface CatchUpParams extends ReadAnchoredOptions {
   recoveryStore: InscriptionRecoveryStore;
 }
 
+/** How far a recorded pair's commit got, as the provider sees it now. */
+export type CommitSeen = "confirmed" | "mempool" | "not-observed";
+
 /** One step of publishing the committed entries Bitcoin does not show yet. */
 export type CatchUpStep =
   /** Bitcoin shows the committed head. */
   | { action: "done"; pending: PendingEntries }
   /**
    * Prepare `versionId` (`prepareEntryInscription`) and submit it. `replaces`
-   * lists confirmed inscriptions of the same body Bitcoin ignored (P9.13):
-   * this pair is a replacement, not a retry of them.
+   * lists confirmed inscriptions of the same body Bitcoin ignored for good
+   * (P9.13): this pair is a replacement, not a retry of them. An inscription
+   * the read shows unconfirmed or whose placement is disputed is not listed:
+   * it is waited on.
    */
   | { action: "prepare"; versionId: string; replaces: string[]; pending: PendingEntries }
-  /** Resume the recorded pair for `versionId` (`resumeInscriptionOnSat`): the same bytes, no new fee (P9.6). */
+  /**
+   * Resume the recorded pair for `versionId` (`resumeEntryInscription`, or
+   * `resumeInscriptionOnSat`): the same bytes, no new fee (P9.6). The stored
+   * log was verified through `versionId` again first (P9.18). Also returned
+   * for a broadcast pair the provider reports in neither its mempool nor the
+   * chain (evicted or rejected): the policy is to rebroadcast the same pair
+   * on the first read that shows it absent, since resubmitting identical
+   * bytes is idempotent and spends nothing new.
+   */
   | { action: "resume"; versionId: string; recoveryId: string; broadcast: InscriptionRecoveryRecord["broadcast"]; pending: PendingEntries }
   /**
    * The pair for `versionId` is out: wait for a block (`unconfirmed`), or for
    * the sat reader to index a confirmed reveal (`not-indexed`). Resuming the
    * same pair is always safe if it stalls; preparing another is not.
    */
-  | { action: "wait-for-confirmation"; versionId: string; recoveryId: string; inscriptionId: string; reason: "unconfirmed" | "not-indexed"; pending: PendingEntries };
+  | { action: "wait-for-confirmation"; versionId: string; recoveryId: string; inscriptionId: string; reason: "unconfirmed" | "not-indexed"; pending: PendingEntries }
+  /**
+   * The indexes disagree on what the sat holds (anchoring `unverified`,
+   * P9.10): nothing is prepared until they agree, so a second anchor is never
+   * built on missing evidence.
+   */
+  | { action: "wait-for-bitcoin"; versionId: string; reason: "indexes-disagree"; disputed: string[]; pending: PendingEntries }
+  /**
+   * A recorded pair for `versionId` can still land, but the stored log no
+   * longer verifies through it (P9.18): nothing is broadcast. `commit` says
+   * how far the pair got. With `not-observed` the record can be discarded.
+   * With `mempool` or `confirmed` the sat is, or will be, in the commit's
+   * output, which only this pair's reveal spends: broadcasting it would move
+   * the sat but inscribe an entry that `ifRevealed` says Bitcoin ignores
+   * (P9.15) or that cannot be verified with the evidence held. Only an
+   * explicit `resumeInscriptionOnSat` broadcasts it.
+   */
+  | { action: "refused"; versionId: string; recoveryId: string; commit: CommitSeen; ifRevealed: "ignored-by-bitcoin" | "unverified"; error: OriginalsError; pending: PendingEntries };
 
 /** The bytes a prepared reveal inscribes, if it inscribes one Originals inscription without metadata. */
 function inscribedBytes(prepared: PreparedInscriptionOnSat): Uint8Array | undefined {
@@ -378,61 +469,120 @@ function inscribedBytes(prepared: PreparedInscriptionOnSat): Uint8Array | undefi
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-async function isConfirmed(provider: ReadAnchoredOptions["provider"], txid: string): Promise<boolean> {
+/** Where the provider sees a transaction: `unknown` when it cannot say (no mempool view, or an error). */
+type Seen = "confirmed" | "mempool" | "absent" | "unknown";
+
+async function seen(provider: ReadAnchoredOptions["provider"], txid: string): Promise<Seen> {
   try {
-    return (await provider.getTransactionStatus(txid)).confirmed === true;
+    const status = await provider.getTransactionStatus(txid);
+    if (status.confirmed === true) return "confirmed";
+    return status.inMempool === true ? "mempool" : status.inMempool === false ? "absent" : "unknown";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
-/** What the recovery store holds for the next inscription. */
-type Recorded =
-  | { kind: "wait"; record: InscriptionRecoveryRecord; reason: "unconfirmed" | "not-indexed" }
-  | { kind: "pairs"; resumable: InscriptionRecoveryRecord[]; replaces: string[] };
-
-async function recoveryIdsOf(store: InscriptionRecoveryStore, given?: Iterable<string>): Promise<Iterable<string>> {
-  const ids = given ?? (await store.list?.());
-  if (!ids) refuse("incomplete-evidence", "RECOVERY_IDS_REQUIRED", "the recovery store cannot list its records; pass recoveryIds");
-  return ids;
+interface Candidate {
+  record: InscriptionRecoveryRecord;
+  commit: Seen;
+  reveal: Seen;
 }
 
-/** The recorded pairs that inscribe exactly `content` on the anchoring sat, and which of them can still land. */
-async function recorded(log: StoredLog, view: OriginalView, content: Uint8Array, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: Iterable<string>): Promise<Recorded> {
-  const ignored = new Set((view.report.anchoring?.ignored ?? []).map((i) => i.inscription));
-  const holding = view.report.ownership?.output;
-  const replaces: string[] = [];
-  const resumable: InscriptionRecoveryRecord[] = [];
+/** What the recovery store holds for the next inscription. */
+interface Recorded {
+  /** Pairs whose reveal is confirmed but which the read does not show placed yet: wait for the index. */
+  indexed: Candidate[];
+  /** Pairs that can still land (the sat sits in their funding input or their own outputs), best first. */
+  live: Candidate[];
+  /** `indexed` and `live`: every pair for this entry that can still land. */
+  inFlight: Candidate[];
+  /** Confirmed inscriptions of this body that Bitcoin ignored for good. */
+  replaces: string[];
+  issues: RecoveryIssue[];
+}
+
+async function recoveryIdsOf(store: InscriptionRecoveryStore, given?: Iterable<string>): Promise<string[]> {
+  const ids = given ?? (await store.list?.());
+  if (!ids) refuse("incomplete-evidence", "RECOVERY_IDS_REQUIRED", "the recovery store cannot list its records; pass recoveryIds");
+  return [...new Set(ids)].sort();
+}
+
+/** Ignored reasons that are not final: the inscription may still be accepted once confirmed or agreed on. */
+const NOT_SETTLED = new Set(["unconfirmed", "placement-disputed", "after-disputed-placement"]);
+
+/** Ordering of live pairs: the one furthest along on the network first, then by recovery id. */
+const PROGRESS: Record<InscriptionRecoveryRecord["broadcast"], number> = {
+  reveal_broadcast: 0, reveal_broadcast_unknown: 1, commit_broadcast: 2, commit_broadcast_unknown: 3, prepared: 4,
+};
+const rank = (c: Candidate) => (c.reveal === "mempool" ? 0 : c.commit === "confirmed" ? 1 : c.commit === "mempool" ? 2 : 3 + PROGRESS[c.record.broadcast]);
+
+/** Load one record, or report why it cannot be used (never a bare TypeError). */
+async function loadRecord(store: InscriptionRecoveryStore, id: string): Promise<InscriptionRecoveryRecord | RecoveryIssue | undefined> {
+  const issue = (code: string, message: string): RecoveryIssue => ({ recoveryId: id, code, message });
+  let record: InscriptionRecoveryRecord | undefined;
+  try {
+    record = await store.load(id);
+  } catch (error) {
+    return issue((error as { code?: string }).code ?? "RECOVERY_RECORD_UNREADABLE", error instanceof Error ? error.message : String(error));
+  }
+  if (record === undefined || record === null) return undefined;
+  if (typeof record !== "object" || record.recoveryId !== id) return issue("RECOVERY_RECORD_MISMATCH", `the record stored under ${id} names another recovery id`);
+  try {
+    validatePreparedInscriptionOnSat(record.prepared);
+  } catch (error) {
+    return issue((error as { code?: string }).code ?? "INVALID_INSCRIPTION_RECOVERY", error instanceof Error ? error.message : String(error));
+  }
+  if (record.prepared.commitTxId !== id) return issue("RECOVERY_RECORD_MISMATCH", `the record stored under ${id} holds the pair committed by ${record.prepared.commitTxId}`);
+  if (!INSCRIPTION_RECORD_STATES.includes(record.broadcast)) return issue("INVALID_INSCRIPTION_RECOVERY", `the record ${id} is in an unknown state`);
+  return record;
+}
+
+/**
+ * The recorded pairs that inscribe exactly `content` on the anchoring sat, and
+ * which of them can still land. `holding` is the outpoint holding the sat now,
+ * from the sat read itself (not from verified ownership, which is null before
+ * the anchor is accepted).
+ */
+async function recorded(log: StoredLog, view: OriginalView, holding: string | undefined, content: Uint8Array, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: string[]): Promise<Recorded> {
+  const ignored = new Set((view.report.anchoring?.ignored ?? []).filter((i) => !NOT_SETTLED.has(i.reason)).map((i) => i.inscription));
+  const found: Recorded = { indexed: [], live: [], inFlight: [], replaces: [], issues: [] };
   for (const id of ids) {
-    const record = await store.load(id);
-    if (!record || record.recoveryId !== id) continue;
+    const loaded = await loadRecord(store, id);
+    if (!loaded) continue;
+    if (!("prepared" in loaded)) {
+      found.issues.push(loaded);
+      continue;
+    }
+    const record = loaded;
     const { prepared } = record;
     if (prepared.satoshi !== log.sat.sat || prepared.network !== NETWORK[log.sat.network]) continue;
     const body = inscribedBytes(prepared);
     if (!body || !sameBytes(body, content)) continue;
-    if (await isConfirmed(provider, prepared.revealTxId)) {
-      // Confirmed: Bitcoin either ignored it (a replacement is needed) or has not indexed it yet.
-      if (ignored.has(prepared.inscriptionId)) {
-        replaces.push(prepared.inscriptionId);
-        continue;
-      }
-      return { kind: "wait", record, reason: "not-indexed" };
+    const reveal = await seen(provider, prepared.revealTxId);
+    if (reveal === "confirmed") {
+      // Confirmed: Bitcoin either ignored it for good (a replacement is needed) or has not placed it yet.
+      if (ignored.has(prepared.inscriptionId)) found.replaces.push(prepared.inscriptionId);
+      else found.indexed.push({ record, commit: "confirmed", reveal });
+      continue;
     }
-    // A pair can still land only while the sat sits in its funding input or its own commit.
+    // A pair can still land only while the sat sits in its funding input or its own outputs.
     const first = prepared.fundingUtxos[0];
-    const live = !holding || [`${first.txid}:${first.vout}`, `${prepared.commitTxId}:0`, `${prepared.revealTxId}:0`].includes(holding);
-    if (!live) continue;
-    if (record.broadcast === "reveal_broadcast") return { kind: "wait", record, reason: "unconfirmed" };
-    resumable.push(record);
+    const outputs = [`${first.txid.toLowerCase()}:${first.vout}`, `${prepared.commitTxId}:0`, `${prepared.revealTxId}:0`];
+    if (holding !== undefined && !outputs.includes(holding)) continue;
+    found.live.push({ record, commit: await seen(provider, prepared.commitTxId), reveal });
   }
-  return { kind: "pairs", resumable, replaces };
+  found.live.sort((a, b) => rank(a) - rank(b) || (a.record.recoveryId < b.record.recoveryId ? -1 : 1));
+  found.inFlight = [...found.indexed, ...found.live];
+  return found;
 }
+
+const observed = (c: Candidate) => c.commit === "confirmed" || c.commit === "mempool" || c.reveal === "mempool";
 
 function publicationOf(view: OriginalView, found: Recorded | undefined): Publication {
   const status = view.report.anchoring?.status;
   if (status === "anchored") return "anchored";
-  const inFlight = found?.kind === "wait" || (found?.kind === "pairs" && found.resumable.some((r) => r.broadcast !== "prepared"));
-  if (inFlight) return "pending-bitcoin-acceptance";
+  if (found && (found.indexed.length > 0 || found.live.some(observed))) return "pending-bitcoin-acceptance";
+  if (found?.live.some((c) => c.record.broadcast !== "prepared")) return "submitted-unobserved";
   return status === "unverified" ? "unverified" : "not-anchored";
 }
 
@@ -440,36 +590,77 @@ function publicationOf(view: OriginalView, found: Recorded | undefined): Publica
 async function observe(sdk: OriginalsSDK, did: string, log: StoredLog, options: ReadAnchoredOptions): Promise<{ view: OriginalView; pending: PendingEntries; found?: Recorded }> {
   const { recoveryStore, recoveryIds, ...read } = options;
   const ids = recoveryStore ? await recoveryIdsOf(recoveryStore, recoveryIds) : undefined;
-  const view = await sdk.get(did, { bitcoin: [await readSat(log.sat, read)] });
+  const { evidence, holding } = await readSatHeld(log.sat, read);
+  const view = await sdk.get(did, { bitcoin: [evidence] });
   const base = pendingFrom(did, log, view, "not-anchored");
   const found = base.next !== null && recoveryStore && ids
-    ? await recorded(log, view, bodyFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
+    ? await recorded(log, view, holding, bodyFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
     : undefined;
-  return { view, pending: { ...base, publication: publicationOf(view, found) }, ...(found ? { found } : {}) };
+  return { view, pending: { ...base, publication: publicationOf(view, found), recoveryIssues: found?.issues ?? [] }, ...(found ? { found } : {}) };
 }
 
 /**
  * Decide the next step of catching up, from a fresh read of the sat and the
  * recorded pairs. Call it again after each step: it re-reads the accepted head
  * every time, so a reorganisation re-derives the queue, and it never prepares
- * an entry while a pair for it is pending, nor one Bitcoin already accepts.
- * Before the anchor is accepted the next inscription is the log through the
- * anchoring entry; then each step is one entry, author's or editor's alike.
+ * an entry while a pair for it can still land, nor one Bitcoin already
+ * accepts. Before the anchor is accepted the next inscription is the log
+ * through the anchoring entry; then each step is one entry, author's or
+ * editor's alike. Damaged recovery records are skipped and listed in
+ * `pending.recoveryIssues`.
  */
 export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
   const { sdk, did, recoveryStore, recoveryIds, ...read } = params;
   const ids = await recoveryIdsOf(recoveryStore, recoveryIds);
   const log = await storedLog(sdk, did);
-  const { pending, found } = await observe(sdk, did, log, { ...read, recoveryStore, recoveryIds: ids });
+  const { view, pending, found } = await observe(sdk, did, log, { ...read, recoveryStore, recoveryIds: ids });
   if (pending.next === null || !found) return { action: "done", pending };
   const versionId = pending.next;
-  if (found.kind === "wait") {
-    const { record, reason } = found;
-    return { action: "wait-for-confirmation", versionId, recoveryId: record.recoveryId, inscriptionId: record.prepared.inscriptionId, reason, pending };
+  const [indexed] = found.indexed;
+  if (indexed) {
+    return { action: "wait-for-confirmation", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, reason: "not-indexed", pending };
   }
-  const [resume] = found.resumable;
-  if (resume) return { action: "resume", versionId, recoveryId: resume.recoveryId, broadcast: resume.broadcast, pending };
+  const [best] = found.live;
+  if (best) {
+    const { record } = best;
+    // In the mempool, or reported broadcast by a provider that cannot see its mempool: wait.
+    if (best.reveal === "mempool" || (record.broadcast === "reveal_broadcast" && best.reveal === "unknown")) {
+      return { action: "wait-for-confirmation", versionId, recoveryId: record.recoveryId, inscriptionId: record.prepared.inscriptionId, reason: "unconfirmed", pending };
+    }
+    // P9.18: the log is verified through the entry again before its pair is broadcast, as when it was prepared.
+    try {
+      await verifyThrough(sdk, did, log, log.ids.indexOf(versionId));
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+      const commit: CommitSeen = best.commit === "confirmed" || best.commit === "mempool" ? best.commit : "not-observed";
+      const ifRevealed = error.category === "incomplete-evidence" ? "unverified" : "ignored-by-bitcoin";
+      return { action: "refused", versionId, recoveryId: record.recoveryId, commit, ifRevealed, error, pending };
+    }
+    return { action: "resume", versionId, recoveryId: record.recoveryId, broadcast: record.broadcast, pending };
+  }
+  const disputed = view.report.anchoring?.disputed ?? [];
+  if (disputed.length > 0 || view.report.anchoring?.status === "unverified") {
+    return { action: "wait-for-bitcoin", versionId, reason: "indexes-disagree", disputed, pending };
+  }
   return { action: "prepare", versionId, replaces: found.replaces, pending };
+}
+
+/**
+ * Resume a recorded pair only when `catchUp` says to resume exactly it: the
+ * log is verified through its entry again (P9.18), the pair can still land,
+ * and it is the one chosen among the recorded pairs. Otherwise refused with
+ * NOT_RESUMABLE (details carry the step). `resumeInscriptionOnSat` remains
+ * the unchecked rebroadcast of stored bytes.
+ */
+export async function resumeEntryInscription(params: CatchUpParams & { recoveryId: string; provider: OrdinalsProvider }): Promise<InscribeOnSatResult> {
+  const step = await catchUp(params);
+  if (step.action !== "resume" || step.recoveryId !== params.recoveryId) {
+    const details = step.action === "refused"
+      ? { step: step.action, cause: step.error.code, commit: step.commit, ifRevealed: step.ifRevealed }
+      : { step: step.action, ...("recoveryId" in step ? { chosen: step.recoveryId } : {}) };
+    refuse(step.action === "refused" ? step.error.category : "stale-parent", "NOT_RESUMABLE", `catch-up does not resume ${params.recoveryId} (${step.action}${step.action === "refused" ? `: ${step.error.code}` : ""})`, details);
+  }
+  return resumeInscriptionOnSat({ recoveryId: params.recoveryId, provider: params.provider, recoveryStore: params.recoveryStore });
 }
 
 export interface ReadAnchoredOptions {
@@ -479,8 +670,8 @@ export interface ReadAnchoredOptions {
   index: string;
   /**
    * The writer's recovery store, to label a broadcast anchor
-   * `pending-bitcoin-acceptance` (P9.18). Omitted, a broadcast anchor Bitcoin
-   * does not show yet reads as `not-anchored`.
+   * `pending-bitcoin-acceptance` or `submitted-unobserved` (P9.18). Omitted,
+   * a broadcast anchor Bitcoin does not show yet reads as `not-anchored`.
    */
   recoveryStore?: InscriptionRecoveryStore;
   /**
@@ -493,16 +684,21 @@ export interface ReadAnchoredOptions {
 }
 
 /** A read of an anchored Original from its sat, labelled with the anchor's state on Bitcoin (P9.18). */
-export type AnchoredView = OriginalView & { publication: Publication };
+export type AnchoredView = OriginalView & { publication: Publication; recoveryIssues: RecoveryIssue[] };
 
 /** Read the anchoring sat and verify the Original against it (P9.12, P9.13, P9.18). */
 export async function readAnchored(sdk: OriginalsSDK, did: string, options: ReadAnchoredOptions): Promise<AnchoredView> {
   const { view, pending } = await observe(sdk, did, await storedLog(sdk, did), options);
-  return { ...view, publication: pending.publication };
+  return { ...view, publication: pending.publication, recoveryIssues: pending.recoveryIssues };
 }
 
 /** One index's complete read of a sat, as verifier evidence. */
 async function readSat(sat: StoredLog["sat"], options: Pick<ReadAnchoredOptions, "provider" | "clock" | "index">): Promise<SatEvidence> {
+  return (await readSatHeld(sat, options)).evidence;
+}
+
+/** The read as evidence, and the outpoint the read says holds the sat now (whether or not an anchor is accepted). */
+async function readSatHeld(sat: StoredLog["sat"], options: Pick<ReadAnchoredOptions, "provider" | "clock" | "index">): Promise<{ evidence: SatEvidence; holding?: string }> {
   if (!options.provider.getSatSnapshot) refuse("incomplete-evidence", "SAT_SNAPSHOT_UNSUPPORTED", "the provider cannot read a complete sat");
   const snapshot = await options.provider.getSatSnapshot(sat.sat);
   if (snapshot.network !== NETWORK[sat.network] || snapshot.sat !== sat.sat) {
@@ -510,7 +706,8 @@ async function readSat(sat: StoredLog["sat"], options: Pick<ReadAnchoredOptions,
   }
   const satpoint = snapshot.ownership.satpoint;
   const ownerConfirmations = satpoint ? (await options.provider.getTransactionStatus(satpoint.split(":")[0])).confirmations ?? 0 : 0;
-  return satEvidence(snapshot, { clock: options.clock, ownerConfirmations, index: options.index });
+  const evidence = await satEvidence(snapshot, { clock: options.clock, ownerConfirmations, index: options.index });
+  return { evidence, ...(satpoint ? { holding: satpoint.split(":").slice(0, 2).join(":").toLowerCase() } : {}) };
 }
 
 /** What the sender of an anchoring sat gives its recipient (P9.18). */

@@ -99,8 +99,14 @@ export interface OrdinalsProvider {
    * cannot supply it (no block-hash source, or a not-yet-updated
    * implementation) omit it; a consumer should treat that as "identity
    * unknown", not "unchanged".
+   *
+   * `inMempool`, for an unconfirmed transaction: true when the node holds it
+   * in its mempool, false when the node knows it is in neither its mempool
+   * nor its active chain (rejected, evicted, never sent, or reorganised out
+   * and not readmitted). Omitted when the provider cannot tell; a consumer
+   * must then not infer either.
    */
-  getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }>;
+  getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number; inMempool?: boolean }>;
   estimateFee(blocks?: number): Promise<number>;
   createInscription(params: {
     /** Static content. Provide exactly one of data / buildContent. */

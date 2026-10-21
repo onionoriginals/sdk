@@ -363,10 +363,10 @@ describe('getTransactionStatus', () => {
     expect(status.blockHash).toBe(BLOCKHASH);
   });
 
-  test('reports a mempool transaction as unconfirmed', async () => {
+  test('reports a mempool transaction as unconfirmed and in the mempool', async () => {
     mockRpc('getrawtransaction', { txid: TXID, confirmations: 0 });
     const status = await provider().getTransactionStatus(TXID);
-    expect(status).toEqual({ confirmed: false, confirmations: 0 });
+    expect(status).toEqual({ confirmed: false, confirmations: 0, inMempool: true });
   });
 
   test('treats RPC -5 (unknown tx) as unconfirmed rather than an error', async () => {
