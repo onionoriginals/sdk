@@ -1,7 +1,9 @@
 # 012 — Bitcoin representation of an Original (proposal for plan 011, PRs 9–10)
 
 Status: **accepted by the owner on 2026-10-20 (decisions A–D in section 5,
-owner decision Q15).** Nothing here is implemented yet. It fills
+owner decision Q15); decision A replaced the same day by full-log anchoring
+(P9.17, spec `a432aa67`).** The verifier follows spec `a432aa67`; the writer
+is plan 011 PR 10. It fills
 what the pinned spec leaves open for the Bitcoin layer (D6, D7) and states the
 choices this SDK would make, each marked PROVISIONAL where the spec is silent.
 Pins: originals-spec `b8e8323`, VH-Log PRs 2 (`0d5eb134`), 9 (`5552a668`) and
@@ -62,7 +64,9 @@ v0.2.0 (`decentralized-identity/labs-ordinals-plus` `cff856ac`).
 An ordinary `update` entry whose asset state adds `did:btco:<sat>` (with the
 network prefix, §3.5) to `aliases`. The reserved `migrate` operation is
 dropped. From then on every entry must keep that alias, and none may add a
-did:webvh alias the anchoring entry did not list (P9.10). The verifier
+did:webvh alias the anchoring entry did not list, replace one (even within its
+SCID), or add one again after removing it; the one the anchoring state lists
+may stay or go (P9.10, D7). The verifier
 recognises an entry as anchoring when it first lists a did:btco alias.
 
 ### 3.2 What an inscription carries
@@ -72,19 +76,25 @@ recognises an entry as anchoring when it first lists a did:btco alias.
 - **Content:** UTF-8 JSON Lines of complete log entries, exactly as in
   `did.jsonl`. No ord metadata, no did:btco metadata (S11), no delegation, no
   compression (`content-encoding` refused, as the sat reader already does).
-- **Every inscription carries exactly one entry** (decision A): the anchoring
-  inscription carries the anchoring entry, and each later inscription one new
-  entry that extends the head (P9.13). The history before the anchor comes
-  from a copy of the log (an evidence package or the web host) and must chain
-  to the anchoring entry by versionId; the anchoring block shows it existed no
-  later than that block (P9.16) but Bitcoin does not carry it. Batching several
-  entries in one inscription is not allowed: P9.13's height rule already
-  forces one accepted publication per block.
+- **The anchoring inscription carries the whole log** (P9.17, replacing
+  decision A): genesis through the anchoring entry, which is its last entry.
+  Every later inscription carries exactly one new entry that extends the head
+  (P9.13). The anchoring sat therefore carries the Original's complete log:
+  no copy is needed, and a copy that differs from the sat's entries is
+  ignored. An anchoring inscription that does not start at genesis, does not
+  verify as one log, or whose last entry is not an anchoring entry naming
+  that sat is not an anchor. Any other inscription with more than one entry
+  is rejected. The anchoring block shows the earlier entries existed no later
+  than that block (P9.16); their ordering stays claimed.
 - **Resources** are not inscribed. Each entry commits to its resources by
   digest (P9.4's content commitment is the entry's state); the bytes stay in
   evidence packages and on the web host.
-- **Size:** one entry, so the profile's entry limit (64 KiB, P7.7) bounds every
-  inscription, well below the standard transaction weight limit.
+- **Size:** a body is at most 350,000 bytes (P9.17, D6 provisional), which keeps
+  a full anchoring inscription within Bitcoin's standard transaction size. The
+  SDK refuses to anchor a log through the anchoring entry over it (writer, PR
+  10); a verifier rejects a larger inscription.
+- **Metadata:** an inscription of this media type carrying any metadata is
+  rejected (P9.17).
 
 ### 3.3 Compact encoding (P9.14, VH-Log PR 10)
 
@@ -102,24 +112,29 @@ counts (10,000), bytes (32 MiB) and time, and checks ord against Bitcoin Core.
 
 Assembly:
 
-1. Order the sat's inscriptions by chain order (height, transaction index,
+1. Merge the reads of each sat, one per index used (P9.10, P9.11). An
+   inscription is on a did:btco alias's sat only when every index reports it
+   on that sat number on that network; the label a read was supplied under
+   does not count. Where indexes disagree, that inscription and everything
+   after it on the sat are undecided: missing evidence until they agree.
+2. Order the sat's inscriptions by chain order (height, transaction index,
    inscription index) and drop those below the confirmation depth (§3.6).
-2. The prefix before the anchor comes from a copy of the log. The first
-   inscription of our media type that decodes to a valid anchoring entry naming
-   this sat and extending that prefix is the anchor (P9.16). Earlier or
-   malformed inscriptions are reported, not used. Without a prefix that the
-   anchoring entry extends, the result is incomplete evidence, not success.
-3. Each later inscription of our media type is accepted when it decodes to one
-   entry that extends the head, sits at a strictly greater height than the last
-   accepted one, passes the profile, and passes P9.15 at its inscription time.
-   Everything else is ignored and reported (P9.13).
-4. A copy's entries after the anchor are compared against the assembled log:
-   entries Bitcoin includes win, and a copy that diverges after the anchor is
-   superseded (VH-Log PR 2). Entries before the anchor are governed by Bitcoin
-   through the anchoring entry's hash chain: a prefix the anchoring entry does
-   not extend is not this Original's history.
-5. If the sat cannot be read in full, resolution fails (VH-Log PR 2: a copy is
+3. The first inscription of our media type, with no metadata and within the
+   size limit, that decodes to a log verifying from genesis whose last entry
+   is the first anchoring entry, naming this sat and passing P9.15 at its
+   inscription time, is the anchor (P9.16, P9.17). Entries before the
+   anchoring entry are checked against the versions they name, with claimed
+   ordering (P9.15). Every anchoring inscription checks itself, so there is no
+   unresolved earlier anchor.
+4. Each later inscription of our media type is accepted when it decodes to
+   exactly one entry that extends the head, sits at a strictly greater height
+   than the last accepted one, passes the profile, and passes P9.15 at its
+   inscription time. Everything else is ignored and reported (P9.13).
+5. A supplied copy is compared and otherwise ignored (P9.17).
+6. If the sat cannot be read in full, resolution fails (VH-Log PR 2: a copy is
    no substitute).
+7. A verifier that retained the anchor it reported and now finds an earlier
+   valid one reports the change of anchor and owner, never silently (P9.16).
 
 Bitcoin never decides between branches before the anchor except through the
 anchor itself, which settles a fork (owner decision Q5).
@@ -129,7 +144,10 @@ anchor itself, which settles a fork (owner decision Q5).
 `did:btco:<sat>` on mainnet; `did:btco:sig:`, `did:btco:test:` and
 `did:btco:reg:` elsewhere, as the SDK already does. The did:btco method spec
 names no network prefixes, so this stays PROVISIONAL and is reported upstream.
-A verifier refuses an alias whose network differs from its adapter's.
+The grammar is strict (P9.10): an optional prefix, then the sat number in
+decimal with no sign and no leading zeros, below the total supply
+(2,099,999,997,690,000). An inscription read from another network, or placed
+by the index on another sat number, is not on the alias's sat.
 
 ### 3.6 Confirmation policy and reorganisations (P9.5, P9.11)
 
@@ -138,8 +156,9 @@ A verifier refuses an alias whose network differs from its adapter's.
   Every accepted inscription is reported with its confirmation depth, so the
   reader judges the risk.
 - Every report states the tip height and hash it relied on, the confirmation
-  depth of the head and of the sat's current output, and how many independent
-  indexes agreed (1 in this version: ord checked against Bitcoin Core).
+  depth of the head and of the sat's current output, and which indexes it
+  used (P9.11); indexes that disagree on placement or on the holder give no
+  accepted placement or owner.
 - A reorganisation that removes an accepted inscription is reported as
   `authoritative-source-changed` (VH-Log PR 2), never silently.
 
@@ -164,7 +183,7 @@ naming the author DID's own sat is rejected (P5.13).
 ### 3.9 Ownership report (P9.11)
 
 The owner is the holder of the anchoring sat at the reported tip:
-`{ status: "provisional", output, address?, confirmations, indexes: 1 }`.
+`{ status: "provisional", output, address?, confirmations, indexes: [ids] }`.
 Ownership is never authority (P9.12). An Original that is not anchored has no
 owner. A copy of the same evidence on another sat confers none (C12-33).
 
@@ -185,9 +204,11 @@ owner. A copy of the same evidence on another sat confers none (C12-33).
 
 ## 5. Owner decisions (2026-10-20, Q15)
 
-- **A. Anchoring inscription content: the anchoring entry only.** Earlier
-  history comes from evidence packages or the web host and must chain to it.
-  (The alternative, the whole log in the anchoring inscription, was declined.)
+- **A. Anchoring inscription content: the anchoring entry only.**
+  *Replaced on 2026-10-20 by owner decision (spec `a432aa67`, P9.17):* the
+  anchoring inscription carries the whole log from genesis through the
+  anchoring entry, and each later inscription one entry. Copies of the log
+  are not needed; one that differs from the sat's entries is ignored.
 - **B. Compact deltas: not now.** Full entries only; the P9.14 hook stays open.
 - **C. did:btco author DID documents: the method spec v0.2.0.** CBOR
   DID-document metadata on the inscription. The SDK's content-based resolver
