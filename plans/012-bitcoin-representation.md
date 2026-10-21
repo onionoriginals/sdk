@@ -275,7 +275,13 @@ owner. A copy of the same evidence on another sat confers none (C12-33).
 - **PR 10 — writer.** Anchor and reinscribe through the existing sat
   inscription builder and recovery store; the landing server's refusal of
   inscribed inputs becomes reinscription of the Original's own sat; durable
-  boundary and retries (P9.4–P9.6). **Real Bitcoin Core 31.1 / ord 0.29.0
+  boundary and retries (P9.4–P9.6). The anchoring inscription is the whole
+  stored log through the anchoring entry, then one entry per inscription
+  (P9.17), with the size refusal; the log and every signer's identity
+  evidence are verified before inscribing, the anchor is labelled pending
+  Bitcoin acceptance until confirmed, and the author is told what Bitcoin
+  will not hold; a transfer handoff exports it for the sat's recipient
+  (P9.18). **Real Bitcoin Core 31.1 / ord 0.29.0
   regtest** journey including reorg and retry faults. No mainnet or testnet
   spending.
 

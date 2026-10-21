@@ -45,7 +45,7 @@ import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { OriginalsSDK, btcoAlias, keySigner } from '../../packages/sdk/src/originals/index';
 import { FileStore, fileRecoveryStore } from '../../packages/sdk/src/originals/fs-store';
 import { prepareEntryInscription, readAnchored, submitPreparedInscriptionOnSat } from '../../packages/sdk/src/originals/bitcoin-writer';
-import { headerClock, localWallet, rpcClient } from './originals-writer-child';
+import { ORD_INDEX, headerClock, localWallet, rpcClient } from './originals-writer-child';
 import { startRegtest } from './environment';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -147,18 +147,25 @@ try {
   const satDid = btcoAlias('regtest', await provider.getFirstSatOfOutput!(satUtxo));
   const anchored = await sdk.anchor(did, { parent: genesisId, author, signer, sat: satDid });
   const anchorId = anchored.original.checkpoint;
-  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock });
+  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX });
   const anchorSent = await submitPreparedInscriptionOnSat({ prepared: anchorPair.prepared, provider, recoveryStore });
   check('R01', 'the anchoring entry pair is broadcast through the file recovery store', anchorSent.broadcast === 'reveal_broadcast' && anchorPair.versionId === anchorId, anchorSent.broadcast);
-  const unmined = await readAnchored(sdk, did, { provider, clock });
-  check('R02', 'a broadcast, unmined anchor does not count (P9.4)', unmined.report.anchoring?.status !== 'anchored' && unmined.current === false, unmined.report.anchoring?.status);
+  const unmined = await readAnchored(sdk, did, { provider, clock, index: ORD_INDEX, recoveryStore });
+  check('R02', 'a broadcast, unmined anchor does not count (P9.4) and is labelled pending Bitcoin acceptance (P9.18)',
+    unmined.report.anchoring?.status !== 'anchored' && unmined.current === false && unmined.publication === 'pending-bitcoin-acceptance', { status: unmined.report.anchoring?.status, publication: unmined.publication });
   await env.mine();
-  const v1 = await readAnchored(sdk, did, { provider, clock });
-  check('R03', 'mined, the Original is anchored with the anchoring entry as head', v1.report.anchoring?.status === 'anchored' && v1.head === anchorId && v1.current, { head: v1.head, reasons: v1.report.reasons });
+  const v1 = await readAnchored(sdk, did, { provider, clock, index: ORD_INDEX, recoveryStore });
+  check('R03', 'mined, the Original is anchored with the anchoring entry as head', v1.report.anchoring?.status === 'anchored' && v1.publication === 'anchored' && v1.head === anchorId && v1.current, { head: v1.head, publication: v1.publication, reasons: v1.report.reasons });
+  const storedLines = (await sdk.committedLog(did)).trimEnd().split('\n');
+  const onOrd = (await provider.getSatSnapshot!(satDid.split(':').at(-1)!)).publications.find((p) => p.id === anchorPair.prepared.inscriptionId);
+  const anchorBody = onOrd?.body.status === 'complete' ? new TextDecoder().decode(onOrd.body.bytes) : null;
+  check('R30', 'the anchoring inscription ord returns is the exact stored log, genesis through the anchoring entry (P9.17)',
+    anchorBody === `${storedLines.slice(0, 2).join('\n')}\n` && JSON.stringify(anchorPair.carries) === JSON.stringify([genesisId, anchorId]) && (onOrd?.body.status === 'complete' ? onOrd.body.metadata : 'unread') === null,
+    { carries: anchorPair.carries, bodyBytes: onOrd?.body.status === 'complete' ? onOrd.body.bytes.length : null });
   const edit = await sdk.edit(did, { parent: v1.checkpoint, name: 'Harbor after restart, edited', resources: [{ id: 'photo', bytes: bytesB }], author, signer });
   const editId = edit.original.checkpoint;
   receipt.original = { did, sat: satDid, author: authorDid, genesis: genesisId, anchoringEntry: anchorId, edit: editId };
-  receipt.anchor = { versionId: anchorId, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscriptionId: anchorPair.prepared.inscriptionId, height: v1.report.anchoring?.anchor?.height };
+  receipt.anchor = { versionId: anchorId, carries: anchorPair.carries, bodyBytes: anchorBody === null ? null : new TextEncoder().encode(anchorBody).length, publication: [unmined.publication, v1.publication], offChain: anchorPair.offChain, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscriptionId: anchorPair.prepared.inscriptionId, height: v1.report.anchoring?.anchor?.height };
 
   step('2: writer child submits the edit and is killed after the commit, before the reveal');
   const fee = await fundUtxo();
@@ -227,7 +234,7 @@ try {
   const [revealBlock] = await env.mine();
   const done = await runChild('fresh reader of the writer stores', 'step', { ORIGINALS_CHILD_DID: did });
   check('R17', 'only the confirmed reveal advances the accepted head, to the edit', done.step.action === 'done' && done.step.accepted === editId && done.step.current === true, done.step);
-  const v2 = await readAnchored(OriginalsSDK.create({ store: await FileStore.open(stores.store), authors: [], freshness: 'asserted' }), did, { provider, clock });
+  const v2 = await readAnchored(OriginalsSDK.create({ store: await FileStore.open(stores.store), authors: [], freshness: 'asserted' }), did, { provider, clock, index: ORD_INDEX });
   const accepted = v2.report.anchoring?.accepted.at(-1);
   check('R18', 'the inscription Bitcoin accepts is the resumed pair', accepted?.inscription === killed.inscriptionId && accepted?.versionId === editId, accepted);
   receipt.resume = { midwayPid: midway.pid, resumePid: resumed.pid, ...resumed.resumed, revealBlock, acceptedHeight: accepted?.height, recordAfter: resumed.record };
@@ -260,18 +267,23 @@ try {
     a?.accepted.at(-1)?.confirmations === DEPTH && tipHeight - (a?.accepted.at(-1)?.height ?? 0) + 1 === DEPTH && read.ownership?.confirmations >= DEPTH,
     { tip: read.snapshot.tip, accepted: a?.accepted.at(-1), anchorConfirmations: a?.anchor?.confirmations, ownerConfirmations: read.ownership?.confirmations });
   check('R27', 'trust boundary: one ord index consulted and reported; ownership provisional; uniqueness not established',
-    read.evidenceIndexes === 1 && read.ownership?.indexes === 1 && read.ownership?.status === 'provisional' && a?.uniqueness === 'not-established' && read.snapshot.indexHealthy && read.snapshot.enumerationComplete,
-    { provider: read.provider, indexes: read.evidenceIndexes, ownership: read.ownership, uniqueness: a?.uniqueness });
+    read.evidenceIndex === ORD_INDEX && JSON.stringify(read.ownership?.indexes) === JSON.stringify([ORD_INDEX]) && read.ownership?.status === 'provisional' && a?.uniqueness === 'not-established' && read.snapshot.indexHealthy && read.snapshot.enumerationComplete,
+    { provider: read.provider, index: read.evidenceIndex, ownership: read.ownership, uniqueness: a?.uniqueness });
   check('R28', 'the reader stored nothing (load verifies without storing)', (await readdir(join(stores.reader, 'originals'))).length === 0);
   // Section 7: a reader with only public inputs cannot vouch that the author DID or
   // asset log it holds is the latest. That is reported, never passed.
   check('R29', 'freshness is reported separately as not established, so the fresh reader does not claim current',
     read.current === false && read.reasons.includes('author-freshness-not-established'), { current: read.current, reasons: read.reasons });
+  const alone = read.fromBitcoinAlone;
+  check('R31', 'with no copy of the log, the sat alone plus the package\'s author DID history verifies the Original to the edit (P9.17, P9.18)',
+    alone.copy === 'absent' && alone.anchoring === 'anchored' && alone.head === editId && alone.entries === 3 && alone.history === 'valid' && alone.authorBinding === 'valid' && alone.identity === 'complete' &&
+    alone.anchor === anchorPair.prepared.inscriptionId && JSON.stringify(alone.accepted) === JSON.stringify([killed.inscriptionId]) && alone.resources === 'partial',
+    alone);
   receipt.reader = {
     pid: read.pid, store: read.store, inputs: { sat: satDid, package: stores.package, packageSha256: digest(exported.bytes) },
     provider: read.provider, head: read.head, ordering: read.ordering, current: read.current, reasons: read.reasons,
     tip: read.snapshot.tip, anchor: a?.anchor, accepted: a?.accepted, ownership: read.ownership,
-    resources: versions,
+    resources: versions, fromBitcoinAlone: alone,
   };
   receipt.result = 'passed';
 } catch (error) {
