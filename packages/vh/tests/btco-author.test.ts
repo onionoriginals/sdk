@@ -10,6 +10,7 @@ import type { JsonObject } from "../src/json/index.js";
 import { serializeLog, signWith, type LogEntry } from "../src/log/index.js";
 import {
   ORIGINALS_INSCRIPTION_TYPE,
+  checkBeforeAnchor,
   createOriginal,
   decodeCbor,
   encodeCbor,
@@ -23,7 +24,7 @@ import {
   type SatInscription,
 } from "../src/originals/index.js";
 import { OriginalsError } from "../src/errors.js";
-import { bytes, photo, seeded } from "./helpers/originals.js";
+import { VhAuthor, bytes, photo, seeded } from "./helpers/originals.js";
 
 const B1 = "harbor at dawn";
 const allBytes = { [resourceDigest(bytes(B1))]: bytes(B1) };
@@ -192,5 +193,200 @@ describe("Originals by a did:btco author", () => {
     const back = await updateOriginal(next, { versionTime: time(42), name: "Older version", author: ref(v1.id), sign });
     const regressed = await verifyOriginal({ log: [genesis, next, back], authors, now: NOW, bytes: allBytes, freshness: "asserted" });
     expect(regressed.history.failure?.code).toBe("AUTHOR_VERSION_REGRESSED");
+  });
+});
+
+/**
+ * P5.13 (spec a432; issue #972): for an anchored Original, the did:btco version
+ * an entry names must precede, in chain order, the inscription that carries the
+ * entry (or, before the anchor, the anchoring inscription). The author DID's
+ * state at an inscription is the latest version preceding it, and the key must
+ * hold at both. A version's id can be known before it is mined, so naming one
+ * proves nothing about when it took effect.
+ */
+describe("did:btco author versions in chain order (P5.13; #972)", () => {
+  const KEY_B = seeded(23);
+  const signB = signWith(KEY_B, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `${AUTHOR}#b` });
+  const refB = (versionId: string): AuthorRef => ({ did: AUTHOR, verificationMethod: `${AUTHOR}#b`, versionId });
+  const onlyA = () => document([{ fragment: "orig", signer: KEY }]);
+  const both = () => document([{ fragment: "orig", signer: KEY }, { fragment: "b", signer: KEY_B }]);
+  const onlyB = () => document([{ fragment: "b", signer: KEY_B }]);
+  const off = () => ({ "@context": ["https://www.w3.org/ns/did/v1"], id: AUTHOR, deactivated: true });
+  const inscribed = (entries: LogEntry[], height: number, extra: Partial<SatInscription> = {}) =>
+    at(height, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(entries)), ...extra });
+  /** Verify from Bitcoin alone: the author's sat and the anchoring sat, no copy of the log (P9.18). */
+  const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[]) =>
+    verifyOriginal({
+      now: NOW, bytes: allBytes, freshness: "asserted",
+      authors: [{ did: AUTHOR, bitcoin: "index" in (author[0] ?? {}) ? (author as SatEvidence[]) : sat(AUTHOR, author as Inscribed[]) }],
+      bitcoin: [sat(SAT, anchoring)],
+    });
+
+  /** The issue's repro: V1 lists key A; the anchoring entry is signed with B and names V2, the grant of B. */
+  async function grant(v2: Inscribed) {
+    const v1 = version(10, onlyA());
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
+    return { v1, v2, genesis, anchor };
+  }
+  /** Genesis and anchoring entry by V1 and key A. */
+  async function byA() {
+    const v1 = version(10, onlyA());
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
+    return { v1, genesis, anchor };
+  }
+
+  test("a grant inscribed before the anchoring inscription authorizes it", async () => {
+    const { v1, v2, genesis, anchor } = await grant(version(25, both()));
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-92: an inscribed entry naming a did:btco author version inscribed in a later block is rejected", async () => {
+    const { v1, v2, genesis, anchor } = await grant(version(32, both()));
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored).toMatchObject([{ sat: SAT, versionId: anchor.versionId, reason: "author-version-not-yet-in-effect" }]);
+    expect(r.current).toBe(false);
+  });
+
+  test("C12-92, after the anchor: a later inscribed entry naming a version mined after it is rejected; the head stays", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const v2 = version(41, both());
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Signed with B", author: refB(v2.id), sign: signB });
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31), inscribed([next], 40)]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toMatchObject([{ versionId: next.versionId, reason: "author-version-not-yet-in-effect" }]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-93: an inscribed entry naming a did:btco author version inscribed later in the same block is rejected", async () => {
+    const { v1, v2, genesis, anchor } = await grant(version(31, both(), { transactionIndex: 9 }));
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31, { transactionIndex: 5 })]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-not-yet-in-effect");
+  });
+
+  test("C12-94: an inscribed entry naming a did:btco author version inscribed earlier in the same block, whose key it holds, is accepted", async () => {
+    const { v1, v2, genesis, anchor } = await grant(version(31, both(), { transactionIndex: 2 }));
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31, { transactionIndex: 5 })]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-95: an entry before the anchor naming a did:btco author version inscribed after the anchoring inscription is rejected", async () => {
+    const v1 = version(10, onlyA());
+    const v2 = version(35, both());
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const renamed = await updateOriginal(genesis, { versionTime: time(21), name: "Signed with B", author: refB(v2.id), sign: signB });
+    const anchor = await updateOriginal(renamed, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
+    const anchoring = inscribed([genesis, renamed, anchor], 31);
+    const r = await fromBitcoin([v1, v2], [anchoring]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-not-yet-in-effect");
+    // The pre-anchor check on its own: claimed ordering, but never a version mined after the anchoring inscription.
+    const history = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, v2]) });
+    const placed = { ...anchoring, sat: "5000000000", network: "regtest" as const };
+    expect(checkBeforeAnchor(renamed, placed, [history])).toBe("author-version-not-yet-in-effect");
+    expect(checkBeforeAnchor(genesis, placed, [history])).toBeNull();
+  });
+
+  test("C12-95's complement: an entry before the anchor is checked against the version it names, with claimed ordering (P9.15)", async () => {
+    // V2 removes key A before the anchoring inscription; genesis, signed with A under V1, still stands.
+    const v1 = version(10, onlyA());
+    const v2 = version(25, onlyB());
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-96: an inscribed entry naming a preceding did:btco version whose key a later preceding version removed is rejected", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const v2 = version(20, onlyB());
+    const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-key-not-valid-at-inscription-time");
+  });
+
+  test("C12-59 still: a removal inscribed after the anchoring inscription does not affect it", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const r = await fromBitcoin([v1, version(32, onlyB())], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-61 and P5.13: a deactivation before an inscription rejects it; one after leaves the accepted state current", async () => {
+    const before = await byA();
+    const early = await fromBitcoin([before.v1, version(25, off())], [inscribed([before.genesis, before.anchor], 31)]);
+    expect(early.anchoring?.ignored[0]?.reason).toBe("author-deactivated-at-inscription-time");
+    const { v1, genesis, anchor } = await byA();
+    const late = await updateOriginal(anchor, { versionTime: time(50), name: "After deactivation", author: ref(v1.id), sign });
+    // Versions after the deactivation are not versions (C12-61), so a re-grant cannot revive the key.
+    const r = await fromBitcoin([v1, version(45, off()), version(46, onlyA())], [inscribed([genesis, anchor], 31), inscribed([late], 50)]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toMatchObject([{ versionId: late.versionId, reason: "author-deactivated-at-inscription-time" }]);
+    expect(r.identityEvidence.deactivated).toBe(true);
+  });
+
+  test("C12-105: a did:btco author inscription the index reports on another sat, or another network, is not a version", async () => {
+    const v1 = version(10, onlyA());
+    const elsewhere = version(25, both(), { sat: "1234" });
+    const otherNetwork = version(26, both(), { network: "testnet" });
+    const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, elsewhere, otherNetwork]) });
+    expect(h.versions.map((v) => v.versionId)).toEqual([v1.id]);
+    const { genesis, anchor } = await grant(elsewhere);
+    const r = await fromBitcoin([v1, elsewhere], [inscribed([genesis, anchor], 31)]);
+    // The anchoring entry names a version the history does not hold, so the log does not verify.
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored[0]).toMatchObject({ reason: "invalid-entry", code: "AUTHOR_VERSION_UNAVAILABLE" });
+  });
+
+  test("P9.10: a did:btco version whose placement two indexes disagree on is not accepted; missing evidence is reported", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const v2 = version(25, both());
+    const reads = [sat(AUTHOR, [v1, v2], "ord-a"), sat(AUTHOR, [v1, { ...v2, sat: "1234" }], "ord-b")];
+    const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: reads });
+    expect(h.versions.map((v) => v.versionId)).toEqual([v1.id]);
+    expect(h.failure?.error).toMatchObject({ category: "incomplete-evidence", code: "AUTHOR_PLACEMENT_DISPUTED" });
+    // V2 is undecided, and so is everything after it: the anchor naming V1 cannot be checked at its inscription either.
+    const r = await fromBitcoin(reads, [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-unavailable");
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.current).toBe(false);
+    // Two indexes that agree are accepted.
+    const agreed = await fromBitcoin([sat(AUTHOR, [v1, v2], "ord-a"), sat(AUTHOR, [v1, v2], "ord-b")], [inscribed([genesis, anchor], 31)]);
+    expect(agreed.anchoring?.status).toBe("anchored");
+    expect(agreed.current, JSON.stringify(agreed.reasons)).toBe(true);
+  });
+
+  test("P9.15: an author read whose tip is below the inscription cannot establish the state there", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const short = { ...sat(AUTHOR, [v1]), tip: { height: 20, hash: "cc".repeat(32) } };
+    const r = await fromBitcoin([short], [inscribed([genesis, anchor], 31)]);
+    expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-unavailable");
+    expect(r.current).toBe(false);
+  });
+
+  test("C12-98 and C12-44 unchanged: a did:vh author's named later version that lists a removed key again is accepted", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const vhSign = alice.signer(KEY, "orig");
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: alice.ref("orig"), sign: vhSign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(10), aliases: [SAT], author: alice.ref("orig"), sign: vhSign });
+    // Removed at versionTime 20, listed again at versionTime 35; the entry is inscribed at 30 and names the later version.
+    alice.timeOverride = new Date(T0 + 20 * 600_000).toISOString();
+    await alice.rotate([{ fragment: "orig2", signer: seeded(25) }]);
+    alice.timeOverride = new Date(T0 + 35 * 600_000).toISOString();
+    await alice.rotate([{ fragment: "orig", signer: KEY }]);
+    const next = await updateOriginal(anchor, { versionTime: time(30), name: "Names the re-grant", author: alice.ref("orig"), sign: vhSign });
+    const r = await verifyOriginal({
+      now: NOW, bytes: allBytes, freshness: "asserted", authors: [alice.evidence()],
+      bitcoin: [sat(SAT, [inscribed([genesis, anchor], 11), inscribed([next], 30)])],
+    });
+    expect(r.head).toBe(next.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 });
