@@ -2,12 +2,13 @@
   "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "b8e8323560b8c313bed96dd8074daf2b1cf374e0",
+    "commit": "a432aa67529cd86b4ab38d97cc91963be82acbc3",
     "section": "12"
   },
   "rows": [
     {
       "id": "C12-01",
+      "position": 1,
       "test": "Fresh create, edit, package and verify",
       "requiredResult": "Same asset checkpoint and resource versions; no private key in reader",
       "phases": [
@@ -22,6 +23,7 @@
     },
     {
       "id": "C12-02",
+      "position": 2,
       "test": "Byte changed at same URL",
       "requiredResult": "Digest failure; no verified resource result",
       "phases": [
@@ -34,6 +36,7 @@
     },
     {
       "id": "C12-03",
+      "position": 3,
       "test": "Wrong genesis or Original ID",
       "requiredResult": "Identifier binding failure",
       "phases": [
@@ -48,6 +51,7 @@
     },
     {
       "id": "C12-04",
+      "position": 4,
       "test": "Broken chain or reordered entry",
       "requiredResult": "History invalid; no derived accepted state beyond failure",
       "phases": [
@@ -61,30 +65,35 @@
     },
     {
       "id": "C12-05",
-      "test": "Valid key of an identity other than the Original’s author DID",
+      "position": 5,
+      "test": "Valid key of an identity other than the Original’s author DID, with no grant in the parent’s state covering the change",
       "requiredResult": "Rejected; identity alone grants no edit right",
       "phases": [
         1
       ],
-      "status": "covered",
+      "status": "partial",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
-      ]
+      ],
+      "note": "Author part covered; the editor part (no grant in the parent's state covering the change, P5.16) arrives with editors."
     },
     {
       "id": "C12-06",
-      "test": "Valid VH entry, key not a method of the named author DID",
-      "requiredResult": "Author binding failure; VH validity cannot rescue it",
+      "position": 6,
+      "test": "Valid VH entry, key not a method of the named signer DID (the author DID, or the editor DID for an editor entry)",
+      "requiredResult": "Signer binding failure; VH validity cannot rescue it",
       "phases": [
         1
       ],
-      "status": "covered",
+      "status": "partial",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
-      ]
+      ],
+      "note": "Author part covered; the editor part (a key not a method of the editor DID, P5.16) arrives with editors."
     },
     {
       "id": "C12-07",
+      "position": 7,
       "test": "Wrong DID method binding or relationship",
       "requiredResult": "Identity authorization failure",
       "phases": [
@@ -97,6 +106,7 @@
     },
     {
       "id": "C12-08",
+      "position": 8,
       "test": "Old identity version with claimed old time",
       "requiredResult": "Unanchored: ordering unproven; no timestamp-only acceptance. Anchored: checked against the author DID state at the inscription time (P9.15)",
       "phases": [
@@ -112,6 +122,7 @@
     },
     {
       "id": "C12-09",
+      "position": 9,
       "test": "Missing identity history",
       "requiredResult": "Incomplete identity evidence; no blanket verified result",
       "phases": [
@@ -124,6 +135,7 @@
     },
     {
       "id": "C12-10",
+      "position": 10,
       "test": "Missing historical resource bytes",
       "requiredResult": "Explicit partial availability; supplied bytes still checked",
       "phases": [
@@ -137,6 +149,7 @@
     },
     {
       "id": "C12-11",
+      "position": 11,
       "test": "Caller changes version counter",
       "requiredResult": "Counter ignored or rejected; history-derived version retained",
       "phases": [
@@ -150,6 +163,7 @@
     },
     {
       "id": "C12-12",
+      "position": 12,
       "test": "Stale parent or prior digest",
       "requiredResult": "Conflict; no silent rebase or commit",
       "phases": [
@@ -162,6 +176,7 @@
     },
     {
       "id": "C12-13",
+      "position": 13,
       "test": "Signer rejects or returns invalid proof",
       "requiredResult": "No partial state commit",
       "phases": [
@@ -174,6 +189,7 @@
     },
     {
       "id": "C12-14",
+      "position": 14,
       "test": "Interrupted local commit",
       "requiredResult": "Recover prior or fully committed checkpoint; no false success",
       "phases": [
@@ -186,6 +202,7 @@
     },
     {
       "id": "C12-15",
+      "position": 15,
       "test": "Identical accepted retry",
       "requiredResult": "Existing result or explicit duplicate; no unintended extra version",
       "phases": [
@@ -198,6 +215,7 @@
     },
     {
       "id": "C12-16",
+      "position": 16,
       "test": "Resource added, removed or renamed",
       "requiredResult": "Rejected in baseline fixed-resource profile",
       "phases": [
@@ -211,6 +229,7 @@
     },
     {
       "id": "C12-17",
+      "position": 17,
       "test": "Metadata supplied, omitted or null",
       "requiredResult": "Replacement, unchanged or removed, respectively",
       "phases": [
@@ -224,6 +243,7 @@
     },
     {
       "id": "C12-18",
+      "position": 18,
       "test": "Name set to null",
       "requiredResult": "Rejected",
       "phases": [
@@ -237,6 +257,7 @@
     },
     {
       "id": "C12-19",
+      "position": 19,
       "test": "Update that leaves a resource’s digest unchanged",
       "requiredResult": "That resource’s version does not advance",
       "phases": [
@@ -250,6 +271,7 @@
     },
     {
       "id": "C12-20",
+      "position": 20,
       "test": "Import then edit without authority",
       "requiredResult": "Read succeeds where evidence valid; edit authorization fails",
       "phases": [
@@ -262,6 +284,7 @@
     },
     {
       "id": "C12-21",
+      "position": 21,
       "test": "Update after deactivation",
       "requiredResult": "Rejected; historical evidence retained",
       "phases": [
@@ -275,6 +298,7 @@
     },
     {
       "id": "C12-22",
+      "position": 22,
       "test": "Old valid prefix served as current",
       "requiredResult": "Freshness unresolved or failed under policy, never assumed",
       "phases": [
@@ -288,8 +312,9 @@
     },
     {
       "id": "C12-23",
-      "test": "Divergent valid branches",
-      "requiredResult": "Explicit fork/conflict, no timestamp winner",
+      "position": 23,
+      "test": "Divergent valid branches not settled on Bitcoin",
+      "requiredResult": "Unresolved conflict; every branch reported; none current; no timestamp winner",
       "phases": [
         2
       ],
@@ -301,27 +326,8 @@
       "note": "Owner decision Q5: every branch is reported and none is current until anchoring settles it (P9.16)."
     },
     {
-      "id": "C12-24",
-      "test": "Author entry on one branch declares the other abandoned",
-      "requiredResult": "Declared branch and its descendants reported as abandoned, never current",
-      "phases": [
-        2
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q5 (plan S1): fork declarations are dropped; C12-23 covers the replacement: a fork not on Bitcoin is an unresolved conflict with no current branch. Pending a spec edit."
-    },
-    {
-      "id": "C12-25",
-      "test": "Each branch declares the other abandoned",
-      "requiredResult": "Unresolved conflict",
-      "phases": [
-        2
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q5 (plan S1): fork declarations are dropped; C12-23 covers the replacement: a fork not on Bitcoin is an unresolved conflict with no current branch. Pending a spec edit."
-    },
-    {
       "id": "C12-26",
+      "position": 24,
       "test": "Hosted mixed snapshot",
       "requiredResult": "Rejected before public result is marked verified",
       "phases": [
@@ -334,6 +340,7 @@
     },
     {
       "id": "C12-27",
+      "position": 25,
       "test": "Anchoring sat moved to a new holder",
       "requiredResult": "Owner reported as the new holder; author unchanged",
       "phases": [
@@ -343,6 +350,7 @@
     },
     {
       "id": "C12-28",
+      "position": 26,
       "test": "After anchoring, author-signed entry not inscribed on the sat",
       "requiredResult": "Not current",
       "phases": [
@@ -352,7 +360,8 @@
     },
     {
       "id": "C12-29",
-      "test": "Inscription on the anchoring sat not signed by the author, including by the owner",
+      "position": 27,
+      "test": "Inscription on the anchoring sat signed by neither the author nor an editor whose grant covers the change, including one by the owner",
       "requiredResult": "Rejected; state unchanged",
       "phases": [
         4
@@ -361,6 +370,7 @@
     },
     {
       "id": "C12-30",
+      "position": 28,
       "test": "Author-signed entry inscribed by the owner",
       "requiredResult": "Accepted",
       "phases": [
@@ -370,7 +380,8 @@
     },
     {
       "id": "C12-31",
-      "test": "Entry that names a different sat or migrates after anchoring",
+      "position": 29,
+      "test": "Entry after anchoring that removes or changes the did:btco alias, or adds another",
       "requiredResult": "Rejected",
       "phases": [
         4
@@ -379,6 +390,7 @@
     },
     {
       "id": "C12-32",
+      "position": 30,
       "test": "Newer inscription on the sat that does not extend the head",
       "requiredResult": "Ignored; state follows the authenticated chain",
       "phases": [
@@ -388,6 +400,7 @@
     },
     {
       "id": "C12-33",
+      "position": 31,
       "test": "Same evidence inscribed on a different sat",
       "requiredResult": "No ownership conferred",
       "phases": [
@@ -397,6 +410,7 @@
     },
     {
       "id": "C12-34",
+      "position": 32,
       "test": "Anchoring an Original from the local or web layer",
       "requiredResult": "Accepted; ordering before the anchor claimed only; uniqueness not established; ownership provisional",
       "phases": [
@@ -406,6 +420,7 @@
     },
     {
       "id": "C12-35",
+      "position": 33,
       "test": "Entry after anchoring that adds a did:webvh alias when the anchoring entry’s state listed none",
       "requiredResult": "Rejected",
       "phases": [
@@ -415,6 +430,7 @@
     },
     {
       "id": "C12-36",
+      "position": 34,
       "test": "Two valid anchoring entries for one Original on different sats",
       "requiredResult": "The first in chain order is the anchor; the other and its descendants are a conflicting anchor, not current, conferring no ownership",
       "phases": [
@@ -423,17 +439,8 @@
       "status": "todo"
     },
     {
-      "id": "C12-37",
-      "test": "Later anchoring entry that declares an earlier anchored branch abandoned",
-      "requiredResult": "Declaration ignored; the first anchor stands",
-      "phases": [
-        4
-      ],
-      "status": "not-applicable",
-      "note": "Owner decision Q5 (plan S1): fork declarations are dropped, so this row is moot. Pending a spec edit."
-    },
-    {
       "id": "C12-38",
+      "position": 35,
       "test": "Anchoring entry inscribed on a sat other than the one it names",
       "requiredResult": "Not an anchor",
       "phases": [
@@ -443,6 +450,7 @@
     },
     {
       "id": "C12-39",
+      "position": 36,
       "test": "Publication at the same or a lower block height than the previous accepted one",
       "requiredResult": "Not accepted",
       "phases": [
@@ -452,6 +460,7 @@
     },
     {
       "id": "C12-40",
+      "position": 37,
       "test": "Bitcoin failure, retry or reorganization",
       "requiredResult": "Durable boundary follows adapter policy, not pending intent",
       "phases": [
@@ -461,8 +470,9 @@
     },
     {
       "id": "C12-41",
+      "position": 38,
       "test": "Entry signed by a key removed from the author DID",
-      "requiredResult": "Unanchored: historically authorized, ordering unproven, never current. Anchored: rejected if its inscription time is at or after the removal’s versionTime",
+      "requiredResult": "Unanchored: historically authorized, ordering unproven, not current while the latest verified author DID state does not list the key (P7.9). Anchored: an anchoring entry or later inscribed entry is rejected if its inscription time is at or after the removal’s versionTime, unless it names a later did:vh or did:webvh version that lists the key again (P9.15); for did:btco, rejected unless the latest version preceding the inscription lists the key (P5.13)",
       "phases": [
         2,
         4
@@ -476,6 +486,7 @@
     },
     {
       "id": "C12-42",
+      "position": 39,
       "test": "Accepted anchored entry whose key the author DID later removes",
       "requiredResult": "Remains current",
       "phases": [
@@ -485,6 +496,7 @@
     },
     {
       "id": "C12-43",
+      "position": 40,
       "test": "Author DID deactivated after an Original is anchored",
       "requiredResult": "Accepted state remains current; entries inscribed later rejected",
       "phases": [
@@ -494,8 +506,9 @@
     },
     {
       "id": "C12-44",
-      "test": "Anchored entry naming an author DID version newer than its inscription time",
-      "requiredResult": "Checked against the named version",
+      "position": 41,
+      "test": "Anchored entry naming a did:vh or did:webvh author DID version whose versionTime is later than its inscription time",
+      "requiredResult": "Checked against the named version (P9.15)",
       "phases": [
         4
       ],
@@ -503,6 +516,7 @@
     },
     {
       "id": "C12-45",
+      "position": 42,
       "test": "Block whose timestamp is earlier than an ancestor’s",
       "requiredResult": "Inscription time is the greatest ancestor timestamp",
       "phases": [
@@ -512,6 +526,7 @@
     },
     {
       "id": "C12-46",
+      "position": 43,
       "test": "Author DID history missing through an inscription time",
       "requiredResult": "Incomplete identity evidence; not reported as current",
       "phases": [
@@ -521,6 +536,7 @@
     },
     {
       "id": "C12-47",
+      "position": 44,
       "test": "Author DID version published with a versionTime before an already accepted inscription it would reject",
       "requiredResult": "Retroactive revocation conflict reported; result not silently changed",
       "phases": [
@@ -530,6 +546,7 @@
     },
     {
       "id": "C12-48",
+      "position": 45,
       "test": "Any entry after the author DID is deactivated",
       "requiredResult": "Not anchored: Original reported as non-current. Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
       "phases": [
@@ -545,6 +562,7 @@
     },
     {
       "id": "C12-49",
+      "position": 46,
       "test": "Entry that sets updateKeys or nextKeyHashes",
       "requiredResult": "Rejected",
       "phases": [
@@ -557,6 +575,7 @@
     },
     {
       "id": "C12-50",
+      "position": 47,
       "test": "Asset log entry that sets the witness parameter to anything other than an empty object",
       "requiredResult": "Rejected",
       "phases": [
@@ -569,6 +588,7 @@
     },
     {
       "id": "C12-51",
+      "position": 48,
       "test": "Entry signed by a key the author DID added, with no asset log entry for the change",
       "requiredResult": "Accepted",
       "phases": [
@@ -581,7 +601,8 @@
     },
     {
       "id": "C12-52",
-      "test": "Author key not in the author DID’s Originals declaration",
+      "position": 49,
+      "test": "Author key not under assertionMethod in the author DID",
       "requiredResult": "Author binding failure",
       "phases": [
         1
@@ -593,7 +614,21 @@
       "note": "Tested as 'author key not under assertionMethod' (owner decision Q6, plan S8); pending the spec edit."
     },
     {
+      "id": "C12-24",
+      "position": 50,
+      "test": "Author key that is also an updateKey of the author DID’s own log",
+      "requiredResult": "Author binding failure",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
+    },
+    {
       "id": "C12-53",
+      "position": 51,
       "test": "Author DID versionId absent from signed state",
       "requiredResult": "Rejected",
       "phases": [
@@ -606,6 +641,7 @@
     },
     {
       "id": "C12-54",
+      "position": 52,
       "test": "Verification method from another DID, with a different controller, or under authentication only",
       "requiredResult": "Author binding failure",
       "phases": [
@@ -618,6 +654,7 @@
     },
     {
       "id": "C12-55",
+      "position": 53,
       "test": "Key expressed as JWK or a different multikey encoding",
       "requiredResult": "Author binding failure",
       "phases": [
@@ -631,6 +668,7 @@
     },
     {
       "id": "C12-56",
+      "position": 54,
       "test": "Later entry names a different author DID, or an older author DID version than its predecessor",
       "requiredResult": "Rejected",
       "phases": [
@@ -643,6 +681,7 @@
     },
     {
       "id": "C12-57",
+      "position": 55,
       "test": "Author DID using a method the profile does not list",
       "requiredResult": "Rejected",
       "phases": [
@@ -655,7 +694,8 @@
     },
     {
       "id": "C12-58",
-      "test": "Anchored Original with a did:btco author DID, verified from Bitcoin alone",
+      "position": 56,
+      "test": "Anchored Original with a did:btco author DID, verified with no author DID host",
       "requiredResult": "Author binding checked against inscribed DID versions in chain order",
       "phases": [
         4
@@ -664,6 +704,7 @@
     },
     {
       "id": "C12-59",
+      "position": 57,
       "test": "did:btco author DID version inscribed after an Originals inscription in the same block",
       "requiredResult": "Not in effect for that inscription",
       "phases": [
@@ -673,6 +714,7 @@
     },
     {
       "id": "C12-60",
+      "position": 58,
       "test": "Anchoring entry naming the author DID’s own did:btco sat",
       "requiredResult": "Rejected",
       "phases": [
@@ -682,6 +724,7 @@
     },
     {
       "id": "C12-61",
+      "position": 59,
       "test": "Inscription on a did:btco author DID’s sat after its deactivation",
       "requiredResult": "Not a version; author DID remains deactivated",
       "phases": [
@@ -691,6 +734,7 @@
     },
     {
       "id": "C12-62",
+      "position": 60,
       "test": "Anchored Original whose did:vh or did:webvh author DID log is unavailable",
       "requiredResult": "Incomplete identity evidence; not reported as current",
       "phases": [
@@ -700,6 +744,7 @@
     },
     {
       "id": "C12-63",
+      "position": 61,
       "test": "Two proofs in the proof array",
       "requiredResult": "Rejected",
       "phases": [
@@ -712,6 +757,7 @@
     },
     {
       "id": "C12-64",
+      "position": 62,
       "test": "Stale author DID history served with a current asset log",
       "requiredResult": "Identity freshness not established; not reported as currently authorized",
       "phases": [
@@ -725,6 +771,7 @@
     },
     {
       "id": "C12-65",
+      "position": 63,
       "test": "VH-valid log that fails Originals rules, read through a generic resolver",
       "requiredResult": "Not reported as Originals-verified",
       "phases": [
@@ -737,6 +784,7 @@
     },
     {
       "id": "C12-66",
+      "position": 64,
       "test": "did:webvh whose document points to a did:vh that does not list it",
       "requiredResult": "Not an alias; no Originals result through that did:webvh",
       "phases": [
@@ -750,6 +798,7 @@
     },
     {
       "id": "C12-67",
+      "position": 65,
       "test": "Asset state lists a did:webvh whose document points elsewhere",
       "requiredResult": "Alias not confirmed; the did:vh still verifiable directly",
       "phases": [
@@ -762,6 +811,7 @@
     },
     {
       "id": "C12-68",
+      "position": 66,
       "test": "Served DID document for the did:vh that differs from the one derived from the log",
       "requiredResult": "Ignored; the derived document is used",
       "phases": [
@@ -774,6 +824,7 @@
     },
     {
       "id": "C12-69",
+      "position": 67,
       "test": "Derived DID document",
       "requiredResult": "Same for every resolver; `controller`, `alsoKnownAs` and `#files` match the author DID and asset state",
       "phases": [
@@ -786,6 +837,7 @@
     },
     {
       "id": "C12-70",
+      "position": 68,
       "test": "Plain did:vh resolver given an Originals log",
       "requiredResult": "Rejected by its unrecognised `method` value",
       "phases": [
@@ -799,6 +851,7 @@
     },
     {
       "id": "C12-71",
+      "position": 69,
       "test": "Later entry that moves the log between plain did:vh and the Originals extension",
       "requiredResult": "Rejected",
       "phases": [
@@ -812,6 +865,7 @@
     },
     {
       "id": "C12-72",
+      "position": 70,
       "test": "Proof using a cryptosuite other than `eddsa-jcs-2022` or `bip340-jcs-2025`",
       "requiredResult": "Rejected",
       "phases": [
@@ -825,6 +879,7 @@
     },
     {
       "id": "C12-73",
+      "position": 71,
       "test": "Entry whose state is a delta rather than the full asset state",
       "requiredResult": "Rejected",
       "phases": [
@@ -837,8 +892,9 @@
     },
     {
       "id": "C12-74",
+      "position": 72,
       "test": "Inscription carrying a compact delta",
-      "requiredResult": "Decoded to the full entry; hashes and proofs checked over the decoded entry",
+      "requiredResult": "Rejected in the baseline profile, which defines no compact encoding (P9.17); under a profile that defines one, decoded to the full entry and checked over it (P9.14)",
       "phases": [
         4
       ],
@@ -846,6 +902,7 @@
     },
     {
       "id": "C12-75",
+      "position": 73,
       "test": "Inscription that does not decode deterministically",
       "requiredResult": "Rejected",
       "phases": [
@@ -855,6 +912,7 @@
     },
     {
       "id": "C12-76",
+      "position": 74,
       "test": "Lifecycle status deactivated without VH deactivated: true, or the reverse",
       "requiredResult": "Rejected",
       "phases": [
@@ -867,6 +925,7 @@
     },
     {
       "id": "C12-77",
+      "position": 75,
       "test": "Older prefix imported over a newer local history",
       "requiredResult": "Local current state not rolled back",
       "phases": [
@@ -879,6 +938,7 @@
     },
     {
       "id": "C12-78",
+      "position": 76,
       "test": "Log file larger than the profile cap",
       "requiredResult": "Fetch refused; reported as unavailable",
       "phases": [
@@ -892,6 +952,7 @@
     },
     {
       "id": "C12-79",
+      "position": 77,
       "test": "Entry with duplicate JSON keys or an unsigned state field",
       "requiredResult": "Parse failure; no verified state",
       "phases": [
@@ -905,6 +966,7 @@
     },
     {
       "id": "C12-80",
+      "position": 78,
       "test": "Resource digest with an unlisted algorithm",
       "requiredResult": "Unsupported-profile failure",
       "phases": [
@@ -917,6 +979,7 @@
     },
     {
       "id": "C12-81",
+      "position": 79,
       "test": "Locator resolving or redirecting to a private address",
       "requiredResult": "Fetch refused; reported as unavailable",
       "phases": [
@@ -929,6 +992,7 @@
     },
     {
       "id": "C12-82",
+      "position": 80,
       "test": "History or identity history beyond profile limits",
       "requiredResult": "Last valid prefix reported, labelled limit-exceeded; never complete or current",
       "phases": [
@@ -942,6 +1006,7 @@
     },
     {
       "id": "C12-83",
+      "position": 81,
       "test": "Archive with a symbolic link, `..` path or duplicate entry",
       "requiredResult": "Rejected before extraction",
       "phases": [
@@ -954,6 +1019,7 @@
     },
     {
       "id": "C12-84",
+      "position": 82,
       "test": "SVG resource containing script, or a name containing markup",
       "requiredResult": "Not executed on the platform origin or in a client",
       "phases": [
@@ -964,6 +1030,580 @@
         "packages/sdk/tests/unit/originals/hosting.test.ts"
       ],
       "note": "Serving headers: servingHeaders in the SDK, and the landing host labels each resource with the media type its uploaded asset log declares and serves it nosniff, sandboxed and as an attachment (apps/landing/server/tests/originals-routes.test.ts). Escaping names and metadata in every client remains."
+    },
+    {
+      "id": "C12-25",
+      "position": 83,
+      "test": "Entry inscribed on a sat whose did:btco alias its asset state does not list",
+      "requiredResult": "Not an anchoring entry; ignored and reported",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-37",
+      "position": 84,
+      "test": "Inscription of the Originals media type on the anchoring sat carrying did:btco DID-document metadata",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-85",
+      "position": 85,
+      "test": "did:btco DID document inscribed on the anchoring sat by its holder",
+      "requiredResult": "Ignored for the Original; a generic did:btco result is not reported as Originals verification",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-86",
+      "position": 86,
+      "test": "Inscription other than the anchoring inscription carrying more than one entry",
+      "requiredResult": "Rejected",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-87",
+      "position": 87,
+      "test": "Anchored Original verified from Bitcoin alone, with no copy of the log",
+      "requiredResult": "Complete log verified from the anchoring sat (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-88",
+      "position": 88,
+      "test": "Copy of the log that differs from the entries inscribed on the anchoring sat",
+      "requiredResult": "Ignored; the sat’s entries are the log (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-89",
+      "position": 89,
+      "test": "Anchoring sat whose inscriptions cannot be read in full",
+      "requiredResult": "Resolution fails",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-90",
+      "position": 90,
+      "test": "Inscription with no confirmations",
+      "requiredResult": "Reported as observed; not in the accepted log",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-91",
+      "position": 91,
+      "test": "Reorganization that removes an accepted inscription",
+      "requiredResult": "Reported with `authoritative-source-changed`; not silent",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-92",
+      "position": 92,
+      "test": "Inscribed entry naming a did:btco author DID version inscribed in a later block",
+      "requiredResult": "Rejected; the version was not in effect (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-93",
+      "position": 93,
+      "test": "Inscribed entry naming a did:btco author DID version inscribed later in the same block",
+      "requiredResult": "Rejected (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-94",
+      "position": 94,
+      "test": "Inscribed entry naming a did:btco author DID version inscribed earlier in the same block, whose key it holds",
+      "requiredResult": "Accepted (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-95",
+      "position": 95,
+      "test": "Entry before the anchor naming a did:btco author DID version inscribed after the anchoring inscription",
+      "requiredResult": "Rejected (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-96",
+      "position": 96,
+      "test": "Inscribed entry naming a preceding did:btco version whose key a later preceding version removed",
+      "requiredResult": "Rejected; the key must hold in the latest preceding version (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-97",
+      "position": 97,
+      "test": "Anchored Original whose resource bytes, current or historical, are unavailable",
+      "requiredResult": "Log verified; content reported unavailable for the affected resources; not a verification failure (P7.4, P9.18)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-98",
+      "position": 98,
+      "test": "Anchored entry naming a did:vh or did:webvh author DID version, later than its inscription time, that lists again a key removed before that time",
+      "requiredResult": "Accepted against the named version (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-99",
+      "position": 99,
+      "test": "Verifier learns of a valid anchoring entry earlier in chain order than the one it reported",
+      "requiredResult": "Earlier one reported as the anchor, previous one as conflicting, owner change reported; not silent (P9.16)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-100",
+      "position": 100,
+      "test": "Anchoring when the log or signer identity evidence through the signed anchoring entry does not verify",
+      "requiredResult": "SDK refuses to inscribe; one that verifies is labelled pending Bitcoin acceptance until confirmed (P9.18)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-101",
+      "position": 101,
+      "test": "Anchoring inscription that does not start at the genesis entry, or whose entries do not verify as one log",
+      "requiredResult": "Not an anchor (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-102",
+      "position": 102,
+      "test": "Anchoring inscription whose last entry is not an anchoring entry naming that sat",
+      "requiredResult": "Not an anchor (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-103",
+      "position": 103,
+      "test": "Inscription the Bitcoin index reports on a sat whose number differs from the did:btco alias’s sat number",
+      "requiredResult": "Not on the anchoring sat; ignored and reported (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-104",
+      "position": 104,
+      "test": "Inscriptions read from a network other than the one the did:btco alias names",
+      "requiredResult": "Not on the anchoring sat (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-105",
+      "position": 105,
+      "test": "did:btco author DID inscription the index reports on a sat other than the one the DID names",
+      "requiredResult": "Not a version of that DID (P5.13)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-106",
+      "position": 106,
+      "test": "Entry after anchoring that replaces the did:webvh alias with a different one",
+      "requiredResult": "Rejected (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-107",
+      "position": 107,
+      "test": "Entry before the anchoring entry, in the anchoring inscription, signed by a key removed from its signer’s DID before the inscription",
+      "requiredResult": "Accepted against the version it names; ordering claimed (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-108",
+      "position": 108,
+      "test": "did:btco alias with an unknown network prefix, a sign, leading zeros or a number beyond the supply of sats",
+      "requiredResult": "Rejected (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-109",
+      "position": 109,
+      "test": "Two indexes the verifier uses disagree on which sat an inscription is on",
+      "requiredResult": "Not accepted; missing evidence reported until they agree (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-110",
+      "position": 110,
+      "test": "Anchored Original whose did:webvh alias is removed, then added again",
+      "requiredResult": "Re-adding rejected (P9.10)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-111",
+      "position": 111,
+      "test": "Inscription body of exactly 350,000 bytes",
+      "requiredResult": "Accepted, if otherwise valid (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-112",
+      "position": 112,
+      "test": "Inscription body over 350,000 bytes, or an Original whose log through the anchoring entry is over it",
+      "requiredResult": "Rejected; the SDK refuses to anchor (P9.17)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-113",
+      "position": 113,
+      "test": "Two editors with grants each sign an entry within their grant, on successive heads, with no author signature",
+      "requiredResult": "Both accepted; author unchanged; each entry identifies its editor (P5.16)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-114",
+      "position": 114,
+      "test": "Editor entry changing content outside its grant: the name, the metadata or a resource it is not granted",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-115",
+      "position": 115,
+      "test": "Editor entry that changes grants, aliases, lifecycle or parameters, anchors, or deactivates",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-116",
+      "position": 116,
+      "test": "Editor entry whose author reference differs from its parent’s",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-117",
+      "position": 117,
+      "test": "Editor entry whose parent’s state has no grant for that editor, including after revocation",
+      "requiredResult": "Rejected (P5.17)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-118",
+      "position": 118,
+      "test": "Editor entry signed before its revocation, on the revocation’s parent",
+      "requiredResult": "Fork with the revocation; unresolved until anchoring, then decided by chain order (P5.17)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-119",
+      "position": 119,
+      "test": "Editor’s earlier entries after its grant is revoked",
+      "requiredResult": "Remain valid",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-120",
+      "position": 120,
+      "test": "Grant naming the author DID, a DID of the author’s identity, a duplicate editor or an unlisted DID method",
+      "requiredResult": "Rejected (P5.15)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-121",
+      "position": 121,
+      "test": "Editor entry signed with a key removed from the editor DID",
+      "requiredResult": "Unanchored: not current while the latest verified editor DID state does not list the key. Anchored: rejected if inscribed at or after the removal, unless it names a later did:vh or did:webvh editor DID version that lists the key again (P9.15), or, for a did:btco editor DID, the latest version preceding the inscription lists it (P5.13); see P5.18",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-122",
+      "position": 122,
+      "test": "Editor entry after the author DID is deactivated",
+      "requiredResult": "Unanchored: not current. Anchored: rejected if inscribed after the deactivation (P5.18)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-123",
+      "position": 123,
+      "test": "Editor entry inscribed on the anchoring sat by the owner",
+      "requiredResult": "Accepted (P9.12)",
+      "phases": [
+        4
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-124",
+      "position": 124,
+      "test": "Editor DID history missing for an editor entry",
+      "requiredResult": "Incomplete identity evidence; not reported as current (P7.1, P5.6)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-125",
+      "position": 125,
+      "test": "Two submissions with the same parent at a shared host",
+      "requiredResult": "One accepted; the other refused with a stale-parent conflict returning the new head; refused candidate kept by the SDK, not published (P6.7, P6.8)",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-126",
+      "position": 126,
+      "test": "Reconciled candidate signed by an authorized signer against the new head",
+      "requiredResult": "Accepted (P6.8)",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-127",
+      "position": 127,
+      "test": "Host changes or re-signs a submitted entry",
+      "requiredResult": "Fails verification, or is not by an authorized signer (P6.7)",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-128",
+      "position": 128,
+      "test": "Submission retried after a lost acknowledgement, including after the head has moved on",
+      "requiredResult": "Existing checkpoint and current head returned; no second append and no conflict (P6.7)",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-129",
+      "position": 129,
+      "test": "Refused candidate published elsewhere",
+      "requiredResult": "Fork; unresolved until anchoring (P6.6, P6.8)",
+      "phases": [
+        3
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-130",
+      "position": 130,
+      "test": "Longer branch of a fork, or the branch with more signers",
+      "requiredResult": "No winner; unresolved conflict (P6.6)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-131",
+      "position": 131,
+      "test": "Entry on one branch bringing in content from another",
+      "requiredResult": "Accepted on its branch as a single-parent entry; fork remains (P6.6)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-132",
+      "position": 132,
+      "test": "did:webvh author moved under DID portability, then rotated; new entry signed with the new key naming a version after the move",
+      "requiredResult": "Accepted; entries before the move still verify against versions before it (P5.14)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-133",
+      "position": 133,
+      "test": "Moved author: package, import into a fresh reader, verify, then continue editing with the new key",
+      "requiredResult": "Same result in the fresh reader; editing continues with authority (P5.14)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-134",
+      "position": 134,
+      "test": "Moved author whose latest asset entry is an editor entry, read by a fresh reader with no package",
+      "requiredResult": "Author freshness not established unless the moved author log is found; not reported as currently authorized (P5.14, P7.8)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-135",
+      "position": 135,
+      "test": "Verification method at a version after a move whose controller is the old DID",
+      "requiredResult": "Author binding failure (P5.3, P5.14)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-136",
+      "position": 136,
+      "test": "Log with a different SCID whose `alsoKnownAs` lists the author DID",
+      "requiredResult": "Not the author’s identity; entries signed with its keys rejected (P5.14)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-137",
+      "position": 137,
+      "test": "Old author DID location redirecting to a new host",
+      "requiredResult": "Redirect not followed; no continuity established (P5.14, P8.5)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-138",
+      "position": 138,
+      "test": "Author DID that changes DID method",
+      "requiredResult": "Not continuity; entries naming the new DID’s keys rejected (P5.14)",
+      "phases": [
+        2
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-139",
+      "position": 139,
+      "test": "The Original’s did:webvh alias moves to another host",
+      "requiredResult": "Unanchored: handled as an alias change by an author entry (P3.6, P9.3). Anchored: a new did:webvh alias is rejected (P9.10). Author binding unaffected either way",
+      "phases": [
+        3,
+        4
+      ],
+      "status": "todo"
     }
   ]
 }
