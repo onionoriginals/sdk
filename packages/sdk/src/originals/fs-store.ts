@@ -42,6 +42,8 @@ interface RootState {
   locks: Map<string, Promise<void>>;
   /** Temporary files being written now. */
   writing: Set<string>;
+  /** Open handles; the root's `.lock` is released when the last one closes. */
+  handles: number;
 }
 
 const roots = new Map<string, RootState>();
@@ -106,9 +108,12 @@ export class FileStore implements OriginalsStore {
   private readonly locks: Map<string, Promise<void>>;
   private readonly writing: Set<string>;
 
+  private closed = false;
+
   private constructor(
     private readonly root: string,
-    shared: RootState,
+    private readonly key: string,
+    private readonly shared: RootState,
     private readonly faults: FileStoreFaults = {},
   ) {
     this.locks = shared.locks;
@@ -126,9 +131,10 @@ export class FileStore implements OriginalsStore {
     let shared = roots.get(key);
     if (!shared) {
       await takeLock(root);
-      shared = roots.get(key) ?? { locks: new Map(), writing: new Set() };
+      shared = roots.get(key) ?? { locks: new Map(), writing: new Set(), handles: 0 };
       roots.set(key, shared);
     }
+    shared.handles++;
     const { writing } = shared;
     // Only a crash's leftovers: a temporary file a handle in this process is writing stays.
     const sweep = async (dir: string, names: string[]) => {
@@ -143,7 +149,31 @@ export class FileStore implements OriginalsStore {
       await sweep(branches, await readdir(branches).catch(() => [] as string[]));
     }
     for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
-    return new FileStore(root, shared, faults);
+    return new FileStore(root, key, shared, faults);
+  }
+
+  /**
+   * Close this handle. When the last handle on the root in this process
+   * closes, its pending writes finish and the root's `.lock` is released, so
+   * another process can open it, for example a writer restarted in a new
+   * process. A closed handle refuses writes (STORE_CLOSED). Idempotent.
+   */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    const shared = roots.get(this.key);
+    if (!shared || shared !== this.shared) return;
+    shared.handles--;
+    if (shared.handles > 0) return;
+    await Promise.all([...shared.locks.values()]);
+    if (shared.handles > 0) return; // reopened while the writes finished
+    roots.delete(this.key);
+    const lock = join(this.root, ".lock");
+    if (Number((await fs.readFile(lock, "utf8").catch(() => "")).trim()) === process.pid) await fs.rm(lock, { force: true });
+  }
+
+  private open(): void {
+    if (this.closed) throw new OriginalsError("unavailable-bytes", "STORE_CLOSED", `this handle on ${this.root} is closed`, { root: this.root });
   }
 
   private dirOf(did: string): string {
@@ -153,6 +183,7 @@ export class FileStore implements OriginalsStore {
   }
 
   private async writeAtomically(dir: string, name: string, data: Uint8Array | string): Promise<void> {
+    this.open();
     const tmp = join(dir, `${name}.${randomHex(6)}.tmp`);
     this.writing.add(tmp);
     try {
@@ -181,6 +212,7 @@ export class FileStore implements OriginalsStore {
   }
 
   async commit(did: string, update: CommitUpdate): Promise<void> {
+    this.open();
     const previous = this.locks.get(did) ?? Promise.resolve();
     const run = previous.then(async () => {
       const dir = this.dirOf(did);

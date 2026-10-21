@@ -77,6 +77,11 @@ The `originals` command verifies a package offline:
   interrupted commit recovers to either the prior checkpoint or the fully
   committed one. A signer rejection or an invalid proof leaves the prior
   checkpoint unchanged (P6.1).
+- **One writing process per store.** `FileStore.open` takes `<root>/.lock`;
+  another live process opening the root gets `STORE_LOCKED`, and a lock left
+  by a dead process is taken over. Handles in one process share the root.
+  `close()` releases the lock once the last handle closes, so a store can be
+  handed to another process; a closed handle refuses writes (`STORE_CLOSED`).
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.

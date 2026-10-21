@@ -145,6 +145,28 @@ describe("FileStore: one writer per root (08b review C5)", () => {
     }
   });
 
+  test("close() hands the root to another process; until then that process is refused, and a closed handle refuses writes", async () => {
+    const dir = tempDir();
+    const script = join(dir, "..", `open-${process.pid}-${Date.now()}.ts`);
+    try {
+      writeFileSync(script, `import { FileStore } from ${JSON.stringify(new URL("../../../src/originals/fs-store.ts", import.meta.url).pathname)};\ntry { await FileStore.open(process.argv[2]); console.log("opened"); } catch (e) { console.log((e as { code?: string }).code); }\n`);
+      const child = () => new TextDecoder().decode(Bun.spawnSync([process.execPath, script, dir]).stdout).trim();
+      const a = await FileStore.open(dir);
+      const b = await FileStore.open(dir);
+      expect(child()).toBe("STORE_LOCKED");
+      await a.close();
+      expect(child()).toBe("STORE_LOCKED"); // b still holds the root
+      await b.close();
+      await b.close(); // idempotent
+      expect(child()).toBe("opened");
+      const refused = await a.commit("did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ", { expectedHead: null, log: '{"versionId":"1-a"}\n' }).then(() => undefined, (e: unknown) => e as OriginalsError);
+      expect(refused?.code).toBe("STORE_CLOSED");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(script, { force: true });
+    }
+  });
+
   test("a root held by another live process is refused clearly; a stale lock is taken over", async () => {
     const dir = tempDir();
     try {
