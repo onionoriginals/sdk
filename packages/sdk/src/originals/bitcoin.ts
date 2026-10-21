@@ -10,15 +10,17 @@
  * snapshot from the SDK's sat reader into the evidence `verifyOriginal`
  * takes: one index's read, with the sat number and network that index
  * reports for each inscription (P9.10). A delegated or encoded inscription,
- * or one past the reader's byte budget, is passed on flagged `unsupported`
- * and the verifier ignores it with a reason (P9.12, P9.14). An Originals
- * inscription the reader did not read, or any publication whose body it
- * could not establish otherwise, fails the whole read: the anchoring sat
+ * one the read did not ask for (`bodies: 'originals'`), or one past the
+ * reader's byte budget, is passed on flagged `unsupported` and the verifier
+ * ignores it with a reason (P9.12, P9.14). An Originals inscription the
+ * reader did not read, unless the length or metadata the index reports
+ * already rejects it (P9.17), or any publication whose body it could not
+ * establish otherwise, fails the whole read: the anchoring sat
  * carries the Original's whole log, and a copy is no substitute (P9.17;
  * VH-Log PR 2).
  */
 import { OriginalsError } from "@originals/vh";
-import { ORIGINALS_INSCRIPTION_TYPE, type SatEvidence, type SatInscription } from "@originals/vh/originals";
+import { ORIGINALS_INSCRIPTION_MAX_BYTES, ORIGINALS_INSCRIPTION_TYPE, type SatEvidence, type SatInscription } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { BitcoinNetwork, SatSnapshot } from "../bitcoin/sat-snapshot-types.js";
 import { crc32 } from "./zip.js";
@@ -442,12 +444,23 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
   }
   const tip = snapshot.tipAfter;
   const inscriptions: SatInscription[] = [];
+  // One clock read per block, however many inscriptions it holds.
+  const times = new Map<string, Promise<number>>();
+  const timeAt = (height: number, blockHash: string) => {
+    const key = `${height}:${blockHash}`;
+    let time = times.get(key);
+    if (!time) times.set(key, (time = options.clock.at(height, blockHash, { signal: options.signal })));
+    return time;
+  };
   for (const p of snapshot.publications) {
     const body = p.body;
-    // Observed but not read: a delegated or encoded body, or one past the read's byte budget (M1).
-    // An unread Originals inscription is missing evidence (P9.17); anything else is flagged and
-    // the verifier ignores it with a reason, so the sat's holder cannot fail every read (P9.12).
-    const observed = "reason" in body && body.reason !== undefined && !(body.reason === "over-budget" && body.mediaType === ORIGINALS_INSCRIPTION_TYPE);
+    // Observed but not read: a delegated or encoded body, one the read did not ask for, or one past the
+    // read's byte budget (M1). An unread Originals inscription is missing evidence (P9.17), unless what
+    // the index reports already rejects it: a body over 350,000 bytes, or metadata. Anything else is
+    // flagged and the verifier ignores it with a reason, so the sat's holder cannot fail every read (P9.12).
+    const unread = body.status === "unavailable" && "reason" in body;
+    const rejectedUnread = unread && (body.contentLength > ORIGINALS_INSCRIPTION_MAX_BYTES || (body.reason === "over-budget" && body.metadataPresent === true));
+    const observed = "reason" in body && body.reason !== undefined && !(unread && body.mediaType === ORIGINALS_INSCRIPTION_TYPE && !rejectedUnread);
     if ((body.status !== "complete" && !observed) || !p.creation) {
       throw new OriginalsError("unavailable-bytes", "SAT_READ_INCOMPLETE", `inscription ${p.id} on sat ${snapshot.sat} could not be read`);
     }
@@ -459,7 +472,9 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
             mediaType: ("mediaType" in body ? body.mediaType : null) ?? "application/octet-stream",
             content: new Uint8Array(),
             metadata: null,
-            unsupported: "reason" in body && body.reason !== "over-budget" ? body.reason : ("not-read" as const),
+            unsupported: unread ? ("not-read" as const) : (body as { reason: "delegated" | "content-encoding" }).reason,
+            ...(unread ? { contentLength: body.contentLength } : {}),
+            ...(unread && body.reason === "over-budget" && body.metadataPresent ? { metadataPresent: true } : {}),
           };
     inscriptions.push({
       id: p.id,
@@ -470,7 +485,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
       transactionIndex: p.creation.transactionIndex,
       inscriptionIndex: p.creation.inscriptionIndex,
       confirmations,
-      inscriptionTime: await options.clock.at(p.creation.height, p.creation.blockHash, { signal: options.signal }),
+      inscriptionTime: await timeAt(p.creation.height, p.creation.blockHash),
       ...content,
     });
   }

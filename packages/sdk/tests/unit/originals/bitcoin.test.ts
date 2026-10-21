@@ -416,6 +416,51 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     expect(view.report.anchoring?.ignored.map((i) => [i.inscription, i.reason])).toEqual([[id("a"), "not-an-originals-inscription"], [id("b"), "unsupported-encoding"]]);
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
   });
+
+  test("C12-112, C12-87: the holder's unread oversized Originals-typed body, Originals-typed metadata and skipped bodies hold nothing back", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
+    const evidence = await satEvidence(snapshot([
+      // Too large for an Originals inscription (P9.17), so not read: rejected by its reported length.
+      { id: id("a"), height: 2, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 400_000 } },
+      { id: id("e"), height: 4, content: log },
+      // Metadata past the read's budget: an Originals inscription carries none (P9.17).
+      { id: id("b"), height: 5, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9, metadataPresent: true } },
+      // An Originals asset read does not fetch other media types' bodies.
+      { id: id("c"), height: 6, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: "image/png", contentLength: 3_900_000 } },
+    ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    expect(evidence.inscriptions.map((i) => [i.unsupported, i.contentLength, i.metadataPresent])).toEqual([
+      ["not-read", 400_000, undefined], [undefined, undefined, undefined], ["not-read", 9, true], ["not-read", 3_900_000, undefined],
+    ]);
+    const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
+    expect(view.report.anchoring?.status).toBe("anchored");
+    expect(view.report.anchoring?.ignored.map((i) => [i.inscription, i.reason])).toEqual([
+      [id("a"), "too-large"], [id("b"), "carries-metadata"], [id("c"), "not-an-originals-inscription"],
+    ]);
+    expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
+  });
+
+  test("C12-89: an Originals-typed body a reader skipped is missing evidence", async () => {
+    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9 } }]);
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
+  });
+
+  test("one evidence read probes the clock once per block, however many inscriptions it holds", async () => {
+    let reads = 0;
+    const clock = new InscriptionClock(async (h) => (reads++, { time: T + h * 600, hash: hashAt(h) }));
+    await clock.at(4);
+    reads = 0;
+    const many = Array.from({ length: 50 }, (_, k) => ({ id: `${(k + 1).toString(16).padStart(64, "f")}i0`, height: 4, content: "", body: { status: "unavailable" as const, reason: "not-requested" as const, mediaType: "text/plain", contentLength: 1 } }));
+    const e = await satEvidence(snapshot(many), { clock, ownerConfirmations: 1, index: "ord-a" });
+    expect(e.inscriptions).toHaveLength(50);
+    expect(reads).toBe(1);
+  });
 });
 
 describe("an anchored Original through the SDK (P9.10, P9.12)", () => {

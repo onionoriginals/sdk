@@ -622,22 +622,36 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 - The holder of the anchoring sat can inscribe anything on it, but cannot
   make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
   delegated or encoded inscription as observed but unsupported, and a body
-  past its byte budget as observed but unread, and reads on; `satEvidence`
-  passes them on flagged `unsupported` (PROVISIONAL). The verifier ignores a
-  non-Originals one (`not-an-originals-inscription`) and rejects a delegated
-  or encoded Originals one (`unsupported-encoding`; P9.14, P9.17). An
-  Originals inscription the reader did not read fails the read
-  (`SAT_READ_INCOMPLETE`, missing evidence, P9.17). The reader's budget
-  (`snapshotBudget` on `RegtestProvider` and `QuickNodeProvider`):
-  `maxRequests` defaults to 7 + 5 per inscription the index lists, so a sat
-  with many entries reads in full; `maxInscriptions` (default 10,000) bounds
-  it, `maxContentBytes` (default 32 MiB) bounds the bytes read and
-  `timeoutMs` (default 30 seconds) the time. Every reader failure is an
-  `OriginalsError` with a section 6 category; running out of budget is
-  `incomplete-evidence` (`SAT_SNAPSHOT_BUDGET_EXCEEDED`,
-  `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`). A holder who floods the sat past
-  these bounds still costs an explicit incomplete result, never a wrong one;
-  raise the budget to read it.
+  or metadata past its byte budget or the transport's response cap (for
+  example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
+  `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
+  verifier ignores a non-Originals one (`not-an-originals-inscription`) and
+  rejects a delegated or encoded Originals one (`unsupported-encoding`;
+  P9.14, P9.17). An Originals inscription the reader did not read fails the
+  read (`SAT_READ_INCOMPLETE`, missing evidence, P9.17), unless what the
+  index reports already rejects it: a length over 350,000 bytes
+  (`too-large`) or metadata (`carries-metadata`). For an Original's asset
+  read, pass `getSatSnapshot(sat, { bodies: 'originals' })`: only
+  `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
+  their metadata are fetched, and every other inscription is reported
+  `not-requested`, so the holder's other inscriptions cost no body reads. The
+  default, `bodies: 'all'`, reads every body and its metadata, as a did:btco
+  read needs (P5.13). The reader's budget (`snapshotBudget` on
+  `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5
+  per inscription the index lists, so a sat with many entries reads in full;
+  `maxInscriptions` (default 10,000) bounds it. `timeoutMs` defaults to
+  30 seconds plus 250 ms per listed inscription, at most `maxTimeoutMs`
+  (default 10 minutes); an explicit `timeoutMs` is kept as given. Each
+  request has its own `requestTimeoutMs` (default 15 seconds,
+  `SAT_SNAPSHOT_REQUEST_TIMEOUT`), and at most `concurrency` (default 8)
+  reads are in flight. Originals bodies within their size limit are read
+  from their own `maxOriginalsBytes` (default 64 MiB), so other bodies,
+  bounded by `maxContentBytes` (default 32 MiB), cannot spend it
+  (PROVISIONAL). Every reader failure is an `OriginalsError` with a section 6
+  category; running out of budget is `incomplete-evidence`
+  (`SAT_SNAPSHOT_BUDGET_EXCEEDED`, `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`). A
+  holder who floods the sat past these bounds still costs an explicit
+  incomplete result, never a wrong one; raise the budget to read it.
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).

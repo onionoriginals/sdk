@@ -27,7 +27,7 @@ export interface FeeOracleAdapter {
 
 export interface OrdinalsProvider {
   /** Complete, stable observation of one sat; omission means the provider cannot supply one. */
-  getSatSnapshot?(satoshi: string): Promise<import('../bitcoin/sat-snapshot-types.js').SatSnapshot>;
+  getSatSnapshot?(satoshi: string, options?: import('./providers/sat-snapshot.js').SatSnapshotOptions): Promise<import('../bitcoin/sat-snapshot-types.js').SatSnapshot>;
   getInscriptionById(id: string): Promise<{
     inscriptionId: string;
     // Optional: deferred-content providers may not echo built content back.

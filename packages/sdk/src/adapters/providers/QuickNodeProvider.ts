@@ -1,5 +1,5 @@
 import type { SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
-import { readSatSnapshot, type SatSnapshotBudget } from './sat-snapshot.js';
+import { readSatSnapshot, type SatSnapshotBudget, type SatSnapshotOptions } from './sat-snapshot.js';
 import type { OrdinalsProvider, InscriptionParts } from '../types.js';
 import { StructuredError } from '../../utils/telemetry.js';
 import { validateSatoshiNumber } from '../../utils/satoshi-validation.js';
@@ -554,7 +554,17 @@ export class QuickNodeProvider implements OrdinalsProvider {
    * https://www.quicknode.com/docs/bitcoin/ord_getMetadata
    * https://www.quicknode.com/docs/bitcoin/ord_getContent
    */
-  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+  /** A JSON-RPC response past its cap, as the snapshot reader's ResponseTooLargeError. */
+  private static async capped<T>(cap: number, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (err) {
+      if (err instanceof StructuredError && err.code === 'QUICKNODE_RESPONSE_TOO_LARGE') throw new ResponseTooLargeError(cap);
+      throw err;
+    }
+  }
+
+  async getSatSnapshot(satoshi: string, options?: SatSnapshotOptions): Promise<SatSnapshot> {
     if (!this.contentBaseUrl && this.contentEncoding === 'auto') throw new StructuredError(
       'QUICKNODE_SNAPSHOT_ENCODING_REQUIRED', 'Sat snapshots require an explicit contentEncoding wire contract',
     );
@@ -571,16 +581,11 @@ export class QuickNodeProvider implements OrdinalsProvider {
           });
           if (response.status === 404) return null;
           if (!response.ok) throw new StructuredError('QUICKNODE_CONTENT_UNAVAILABLE', 'Raw inscription content request failed');
-          try {
-            return await readResponseBodyCapped(response, this.maxContentBytes);
-          } catch (err) {
-            if (err instanceof ResponseTooLargeError) {
-              throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw inscription content exceeds configured limit');
-            }
-            throw err;
-          }
+          // Past the cap, ResponseTooLargeError: the snapshot reports the body observed but unread (P9.12).
+          return await readResponseBodyCapped(response, this.maxContentBytes);
         }
-        let result = await this.rpcCall<unknown>('ord_getContent', [id], Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024, signal);
+        const contentCap = Math.ceil(this.maxContentBytes * 4 / 3) + 64 * 1024;
+        let result = await QuickNodeProvider.capped(contentCap, () => this.rpcCall<unknown>('ord_getContent', [id], contentCap, signal));
         // The documented wrapper carries literal content; never re-serialize
         // decoded objects or guess whether an alphanumeric string is base64.
         if (result === null) return null;
@@ -589,19 +594,12 @@ export class QuickNodeProvider implements OrdinalsProvider {
         return this.decodeContent(result);
       },
       metadata: async (id, signal) => {
-        if (!this.contentBaseUrl) return this.rpcCall('ord_getMetadata', [id], undefined, signal);
+        if (!this.contentBaseUrl) return QuickNodeProvider.capped(this.maxJsonBytes, () => this.rpcCall('ord_getMetadata', [id], undefined, signal));
         const response = await fetch(this.contentBaseUrl + '/r/metadata/' + id, {
           headers: { Accept: 'application/json' }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)]) : AbortSignal.timeout(this.timeout),
         });
-        let bytes: Uint8Array;
-        try {
-          bytes = await readResponseBodyCapped(response, this.maxJsonBytes);
-        } catch (err) {
-          if (err instanceof ResponseTooLargeError) {
-            throw new StructuredError('QUICKNODE_RESPONSE_TOO_LARGE', 'Raw metadata exceeds configured limit');
-          }
-          throw err;
-        }
+        // Past the cap (1 MiB by default), ResponseTooLargeError: the snapshot reports the metadata observed but unread (P9.12).
+        const bytes = await readResponseBodyCapped(response, this.maxJsonBytes);
         const text = new TextDecoder().decode(bytes);
         // A generic gateway 404 can mean the route is unavailable. Only ord's
         // matching inscription-specific marker attests absent metadata.
@@ -611,7 +609,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
         if (typeof metadata !== 'string') throw new StructuredError('QUICKNODE_METADATA_UNAVAILABLE', 'Raw inscription metadata must be a hex string');
         return metadata;
       },
-    }, satoshi, this.expectedNetwork, this.snapshotBudget);
+    }, satoshi, this.expectedNetwork, this.snapshotBudget, options);
   }
 
   async getInscriptionsBySatoshi(satoshi: string) {

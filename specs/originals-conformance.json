@@ -1484,6 +1484,7 @@
       ],
       "status": "partial",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ],
       "note": "Verifier part covered: a larger inscription is rejected. The SDK's refusal to anchor a log over the limit belongs to the Bitcoin writer (plan 011 PR 10)."

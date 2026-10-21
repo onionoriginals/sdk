@@ -220,5 +220,5 @@ export type { QuickNodeProviderOptions } from './adapters/providers/QuickNodePro
 export { RegtestProvider } from './adapters/providers/RegtestProvider.js';
 export type { RegtestProviderOptions, RegtestOutput } from './adapters/providers/RegtestProvider.js';
 export { OrdHttpProvider } from './adapters/providers/OrdHttpProvider.js';
-export type { SatSnapshotReader, SatSnapshotBudget } from './adapters/providers/sat-snapshot.js';
+export type { SatSnapshotReader, SatSnapshotBudget, SatSnapshotOptions } from './adapters/providers/sat-snapshot.js';
 export type { OrdinalsProvider, FeeOracleAdapter, StorageAdapter } from './adapters/types.js';
