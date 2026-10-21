@@ -12,7 +12,9 @@
  *   alias's sat only when every index read for that alias reports it on that
  *   sat number on that network. The label a read is supplied under does not
  *   count. Indexes that disagree leave the inscription, and everything after
- *   it on that sat, undecided: missing evidence until they agree.
+ *   it on that sat, undecided: missing evidence until they agree. A disputed
+ *   inscription that no index reports as an Originals inscription cannot be
+ *   an entry: it is ignored and holds back nothing after it (`couldCount`).
  * - Inscriptions carry complete entries as JSON Lines of
  *   `application/vnd.originals.vh+jsonl`, with no metadata, at most 350,000
  *   bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). The anchoring inscription carries the whole
