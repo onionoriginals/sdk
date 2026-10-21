@@ -71,11 +71,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Author part covered; the editor part (no grant in the parent's state covering the change, P5.16) arrives with editors."
+      ]
     },
     {
       "id": "C12-06",
@@ -85,11 +85,11 @@
       "phases": [
         1
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "Author part covered; the editor part (a key not a method of the editor DID, P5.16) arrives with editors."
+      ]
     },
     {
       "id": "C12-07",
@@ -1339,7 +1339,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-114",
@@ -1349,7 +1353,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-115",
@@ -1359,7 +1367,12 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ],
+      "note": "Grants, aliases, lifecycle, parameters and deactivation are covered as author-only (P5.16). An editor entry adding a did:btco alias is rejected today only because did:btco aliases are not yet accepted; the Bitcoin branch adds anchoring as an author-only change."
     },
     {
       "id": "C12-116",
@@ -1369,7 +1382,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-117",
@@ -1379,7 +1395,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-118",
@@ -1390,7 +1410,12 @@
         2,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ],
+      "note": "Unanchored part covered: an editor entry and a revoking author entry with the same parent are an unresolved fork (verifier and SDK import). Decided by chain order after anchoring: the Bitcoin branch."
     },
     {
       "id": "C12-119",
@@ -1400,7 +1425,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-120",
@@ -1410,7 +1439,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-121",
@@ -1421,7 +1453,11 @@
         2,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ],
+      "note": "Unanchored part covered (not current while the latest editor DID state does not list the key, P7.9). The anchored part (P9.15, P5.13 for did:btco editors) belongs to the Bitcoin branch; profile.ts marks the hook."
     },
     {
       "id": "C12-122",
@@ -1432,7 +1468,11 @@
         2,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ],
+      "note": "Unanchored part covered (not current once the author DID is deactivated, P5.18). The anchored part belongs to the Bitcoin branch."
     },
     {
       "id": "C12-123",
@@ -1452,7 +1492,11 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-125",
@@ -1512,7 +1556,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-131",
@@ -1522,7 +1569,10 @@
       "phases": [
         2
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-132",
@@ -1559,12 +1609,13 @@
       "phases": [
         2
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/continuity.test.ts",
-        "packages/vh/tests/continuity.test.ts"
-      ],
-      "note": "Author entries covered: the moved log is found at the location of the DID in the latest author entry's verification method (freshness retrieved, PROVISIONAL) or freshness is not established. The case where the latest entry is an editor entry arrives with editors."
+        "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/continuity.test.ts",
+        "packages/vh/tests/editors.test.ts"
+      ]
     },
     {
       "id": "C12-135",

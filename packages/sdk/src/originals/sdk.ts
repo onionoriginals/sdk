@@ -41,6 +41,8 @@ import {
   type AssetState,
   type AuthorDidEvidence,
   type AuthorRef,
+  type EditorGrant,
+  type EditorRef,
   type EntryState,
   type OriginalsReport,
   type ResourceDescriptor,
@@ -52,7 +54,7 @@ import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/w
 import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
-import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
+import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import { MemoryStore, headOf, staleHead, type OriginalsStore } from "./store.js";
 import type { ZipLimits } from "./zip.js";
 
@@ -118,6 +120,8 @@ export interface CreateInput {
   metadata?: JsonObject;
   resources: ResourceInput[];
   author: AuthorRef;
+  /** Editor grants (P5.15; PROVISIONAL member names, D4). */
+  editors?: EditorGrant[];
 }
 
 export interface EditInput {
@@ -126,7 +130,16 @@ export interface EditInput {
   name?: string;
   metadata?: JsonObject | null;
   resources?: ResourceChange[];
-  author: AuthorRef;
+  /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
+  author?: AuthorRef;
+  /**
+   * Edit as a granted editor (P5.16): the editor DID, its verification method
+   * and exact versionId. The signer is the editor's key. The grant in the
+   * parent's state must cover every change, or nothing is signed.
+   */
+  editor?: EditorRef;
+  /** Replace the editor grants; null removes them all (P5.15, P5.17). Author only. */
+  editors?: EditorGrant[] | null;
 }
 
 export interface Draft {
@@ -139,6 +152,8 @@ export interface Draft {
   /** The unsigned entry; preparing again makes a new candidate (P4.5). */
   readonly entry: UnsignedEntry;
   readonly summary: EntrySummary;
+  /** What the signer is shown (P5.11): `describeEntry(summary)`. */
+  readonly display: string;
   /** New resource bytes by digest. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
 }
@@ -217,12 +232,14 @@ function versionIds(log: string): string[] {
   return lines(log).map((line) => (parseJson(line) as { versionId: string }).versionId);
 }
 
-function authorDidsOf(log: string): string[] {
+/** The signer identity DIDs a log names: its author and each editor of an editor entry (P7.1), before verification. */
+function signerDidsOf(log: string): string[] {
   const dids = new Set<string>();
   for (const line of lines(log)) {
     try {
-      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } } };
+      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown }; editor?: { did?: unknown } } };
       if (typeof entry.state?.author?.did === "string") dids.add(entry.state.author.did);
+      if (typeof entry.state?.editor?.did === "string") dids.add(entry.state.editor.did);
     } catch {
       // Verification reports the malformed line.
     }
@@ -263,20 +280,31 @@ function chainedEntries(log: string): ChainedEntry[] {
 
 /**
  * The signer identities whose logs `identityFetch` may retrieve (P5.14): the
- * author DID fixed at genesis (P5.8). No other DID a line names is an
- * identity of the Original, so none is requested.
+ * author DID fixed at genesis (P5.8), and each editor DID a grant names in
+ * the state of one of the first `verified` entries (P5.15), which the
+ * verifier has checked. No other DID a line names is an identity of the
+ * Original, so none is requested.
  */
-function retrievableIdentities(chained: ChainedEntry[]): string[] {
+function retrievableIdentities(chained: ChainedEntry[], verified: number): string[] {
+  const out = new Set<string>();
   const author = isJsonObject(chained[0]?.state) && isJsonObject(chained[0].state.author) ? chained[0].state.author.did : undefined;
-  return typeof author === "string" ? [author] : [];
+  if (typeof author === "string") out.add(author);
+  for (const entry of chained.slice(0, verified)) {
+    const asset = isJsonObject(entry.state) ? entry.state.asset : undefined;
+    const editors = isJsonObject(asset) && Array.isArray(asset.editors) ? asset.editors : [];
+    for (const grant of editors) if (isJsonObject(grant) && typeof grant.did === "string") out.add(grant.did);
+  }
+  return [...out];
 }
 
 /**
  * Where to retrieve `did`'s log (P5.14), in the order to try: the DID in the
  * verification method id of the latest entry `did` signed among the first
- * `verified` chained entries, those whose proofs and author binding verified
- * with the identity evidence already held (08b review r2 #5). A hash-chained
- * line anyone can append, whose proof does not verify, chooses nothing.
+ * `verified` chained entries, those that verified with the identity evidence
+ * already held (08b review r2 #5). A hash-chained line anyone can append,
+ * whose proof does not verify, chooses nothing once an entry by `did` has
+ * verified. An editor entry is signed by its editor; the author reference it
+ * carries is its parent's and says nothing of where the author is now.
  *
  * PROVISIONAL (P5.14; 08b review r4 #5): when the evidence held verifies no
  * entry `did` signed (a reader with no evidence for it), no proof can be
@@ -293,23 +321,22 @@ function retrievableIdentities(chained: ChainedEntry[]): string[] {
 function identityLocations(chained: ChainedEntry[], did: string, verified: number): string[] {
   const signedBy = (i: number) => {
     const state = chained[i].state;
-    const author = isJsonObject(state) ? state.author : undefined;
-    return isJsonObject(author) && author.did === did && typeof author.verificationMethod === "string" ? signerLocation(author as unknown as AuthorRef) : undefined;
+    const signer = isJsonObject(state) ? (isJsonObject(state.editor) ? state.editor : state.author) : undefined;
+    return isJsonObject(signer) && signer.did === did && typeof signer.verificationMethod === "string" ? signerLocation(signer as unknown as AuthorRef) : undefined;
   };
   for (let i = Math.min(verified, chained.length) - 1; i >= 0; i--) {
     const location = signedBy(i);
     if (location) return [location];
   }
-  if (verified > 0) return []; // the held evidence verified entries, none by `did`: nothing vouches for a location
   const out: string[] = [];
-  for (let i = 0; i < chained.length; i++) {
+  for (let i = Math.min(verified, chained.length); i < chained.length; i++) {
     const location = signedBy(i);
     if (location) {
       out.push(location);
       break;
     }
   }
-  for (let i = chained.length - 1; i >= 0; i--) {
+  for (let i = chained.length - 1; i >= Math.min(verified, chained.length); i--) {
     const location = signedBy(i);
     if (location) {
       if (!out.includes(location)) out.push(location);
@@ -390,13 +417,22 @@ export class OriginalsSDK {
    * `authors` list never rolls a newer DID log back, in verification or in
    * what is published (#965 review C2).
    */
-  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = []): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = []): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
-    for (const did of authorDidsOf(log)) {
+    // Other branches compared with this log are verified too, and their editors may differ (P6.6).
+    const dids = [...new Set([log, ...others].flatMap(signerDidsOf))];
+    for (const did of dids) {
       const found = supplied.find((a) => a.did === did) ?? (await this.configuredOrStored(did));
       if (found) out.push(found);
     }
     return out;
+  }
+
+  private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
+    const source = this.options.authors;
+    const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+    const stored = await this.store.getAuthorEvidence(did);
+    return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
   }
 
   /** `identityFetch`, with a fetcher's TypeError (offline, DNS) treated as unavailable. */
@@ -428,53 +464,78 @@ export class OriginalsSDK {
     run: (authors: AuthorDidEvidence[]) => Promise<OriginalsReport>,
     retrieval?: Retrieval,
   ): Promise<{ report: OriginalsReport; authors: AuthorDidEvidence[] }> {
-    const report = await run(base);
-    const first = await this.identityRound(log, base, report.history.entries, retrieval);
-    if (first === base) return { report, authors: base };
-    // A log first retrieved where an unverified entry said (`identityLocations`) verifies the
-    // entries, and the latest verified entry may name another location: one more round from there.
-    const again = await run(first);
-    const second = await this.identityRound(log, first, again.history.entries, retrieval);
-    return second === first ? { report: again, authors: first } : { report: await run(second), authors: second };
-  }
-
-  /** One bounded round of identity retrieval; `base` itself when nothing new was retrieved. */
-  /** `verified`: how many of `log`'s entries verified with `base` (P5.14 locations come only from them). */
-  private async identityRound(log: string, base: AuthorDidEvidence[], verified: number, retrieval?: Retrieval): Promise<AuthorDidEvidence[]> {
+    let report = await run(base);
+    let authors = base;
     const fetch = this.identityFetcher();
-    if (!fetch) return base;
-    const chained = chainedEntries(log);
-    const identities = retrievableIdentities(chained).filter((did) => did.startsWith("did:webvh:"));
-    if (identities.length === 0) return base;
+    if (!fetch) return { report, authors };
     const budget = retrieval ?? new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
-    let out = base;
+    const tried = new Set<string>();
     try {
-      // Up to two requests per location tried, its log and its witness file, planned before any is made.
-      const locations = identities.map((did) => {
-        const known = out.find((a) => a.did === did);
-        // A location this evidence was just retrieved from is not asked again.
-        return identityLocations(chained, did, verified).filter((l) => !known?.retrievedFrom || logUrlOf(l) !== known.retrievedFrom);
-      });
-      budget.plan(2 * locations.reduce((n, l) => n + l.length, 0), 0);
-      for (const [i, did] of identities.entries()) {
-        const known = out.find((a) => a.did === did);
-        const retrieved = await this.retrieveIdentity(did, locations[i], known, budget, fetch);
-        if (retrieved) out = known ? out.map((a) => (a.did === did ? retrieved : a)) : [...out, retrieved];
+      // A retrieved author log can verify entries whose states grant editors, and a log first retrieved
+      // where an unverified entry said (`identityLocations`) verifies entries whose latest may name
+      // another location: further rounds retrieve from those.
+      for (let round = 0; round < 3; round++) {
+        const next = await this.identityRound(log, authors, report.history.entries, budget, fetch, tried);
+        if (next === authors) break;
+        authors = next;
+        report = await run(authors);
       }
     } catch (error) {
-      if (!retrieval && error instanceof OriginalsError && (error.code === "RETRIEVAL_BUDGET_EXCEEDED" || error.code === "RETRIEVAL_ABORTED")) return out;
-      throw error;
+      if (retrieval || !(error instanceof OriginalsError) || (error.code !== "RETRIEVAL_BUDGET_EXCEEDED" && error.code !== "RETRIEVAL_ABORTED")) throw error;
+      // This operation's own budget ran out: what was retrieved is used, the rest is not established.
+      if (authors !== base) report = await run(authors);
     } finally {
       if (!retrieval) budget.close();
+    }
+    return { report, authors };
+  }
+
+  /**
+   * One round of identity retrieval: each retrievable did:webvh identity, at
+   * each of its locations (`identityLocations`) not yet tried, up to two
+   * requests each (its log and witness file), planned before any is made.
+   * Returns `base` itself when nothing new was retrieved.
+   */
+  private async identityRound(
+    log: string,
+    base: AuthorDidEvidence[],
+    verified: number,
+    budget: Retrieval,
+    fetch: HostedFetch,
+    tried = new Set<string>(),
+  ): Promise<AuthorDidEvidence[]> {
+    const chained = chainedEntries(log);
+    // Only an identity that signed a chained entry has a location to retrieve from; none is asked twice.
+    const plan = retrievableIdentities(chained, verified)
+      .filter((did) => did.startsWith("did:webvh:"))
+      .map((did) => ({ did, locations: identityLocations(chained, did, verified).filter((l) => !tried.has(`${did} ${logUrlOf(l)}`)) }))
+      .filter((p) => p.locations.length > 0);
+    if (plan.length === 0) return base;
+    budget.plan(2 * plan.reduce((n, p) => n + p.locations.length, 0), 0);
+    let out = base;
+    for (const { did, locations } of plan) {
+      const known = out.find((a) => a.did === did);
+      const retrieved = await this.retrieveIdentity(did, locations, known, budget, fetch, (l) => tried.add(`${did} ${logUrlOf(l)}`));
+      if (retrieved) out = known ? out.map((a) => (a.did === did ? retrieved : a)) : [...out, retrieved];
     }
     return out;
   }
 
-  private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
-    const source = this.options.authors;
-    const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
-    const stored = await this.store.getAuthorEvidence(did);
-    return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+  /** The evidence a package carries for `log`: as `verify` used it, identity retrieval included. */
+  private async packagedIdentities(log: string, report: OriginalsReport): Promise<AuthorDidEvidence[]> {
+    const base = await this.authorEvidence(log);
+    const fetch = this.identityFetcher();
+    if (!fetch) return base;
+    const budget = new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
+    let out = base;
+    try {
+      out = await this.identityRound(log, base, Math.min(report.history.entries, lines(log).length), budget, fetch);
+    } catch (error) {
+      if (!(error instanceof OriginalsError) || (error.code !== "RETRIEVAL_BUDGET_EXCEEDED" && error.code !== "RETRIEVAL_ABORTED")) throw error;
+    } finally {
+      budget.close();
+    }
+    return out;
   }
 
   /**
@@ -485,8 +546,16 @@ export class OriginalsSDK {
    * they only choose the URL, and the verifier checks that the URL is the
    * latest verified entry's location.
    */
-  private async retrieveIdentity(did: string, locations: string[], known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
+  private async retrieveIdentity(
+    did: string,
+    locations: string[],
+    known: AuthorDidEvidence | undefined,
+    retrieval: Retrieval,
+    fetch: HostedFetch,
+    asked: (location: string) => void = () => undefined,
+  ): Promise<AuthorDidEvidence | undefined> {
     for (const location of locations) {
+      asked(location);
       const found = await this.retrieveIdentityAt(did, location, known, retrieval, fetch);
       if (found) return found;
     }
@@ -562,7 +631,7 @@ export class OriginalsSDK {
     const retained: RetainedVersions = { authors: {} };
     const original = did ? await quietly(() => this.store.getRetained(did), undefined) : undefined;
     if (original) retained.original = original;
-    for (const author of authorDidsOf(log)) {
+    for (const author of signerDidsOf(log)) {
       const version = await quietly(() => this.store.getRetained(author), undefined);
       if (version) retained.authors![author] = version;
     }
@@ -606,7 +675,8 @@ export class OriginalsSDK {
         ...(checkpoint ? { checkpoint } : {}),
         ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
-    return (await this.withIdentities(log, await this.authorEvidence(log), run)).report;
+    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
+    return (await this.withIdentities(log, base, run)).report;
   }
 
   private view(did: string, report: OriginalsReport): OriginalView {
@@ -642,7 +712,7 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resources", "author", "signer"], "create input");
+    exactKeys(input, ["name", "metadata", "resources", "author", "signer", "editors"], "create input");
     const bytes = new Map<string, Uint8Array>();
     const resources: ResourceDescriptor[] = input.resources.map((r, i) => {
       exactKeys(r, ["id", "mediaType", "bytes"], `resources[${i}]`);
@@ -653,8 +723,10 @@ export class OriginalsSDK {
     });
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resources, author: input.author,
+      ...(input.editors !== undefined ? { editors: input.editors } : {}),
     });
-    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary: summarize(entry), bytes });
+    const summary = summarize(entry);
+    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes });
   }
 
   /** Create an Original, or return an unsigned draft when no signer is given. */
@@ -677,7 +749,7 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "editor", "editors", "signer"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
@@ -699,20 +771,26 @@ export class OriginalsSDK {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       resources,
-      author: input.author,
+      ...(input.author !== undefined ? { author: input.author } : {}),
+      ...(input.editor !== undefined ? { editor: input.editor } : {}),
+      ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
     });
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes };
+    const summary = summarize(entry, head.state as unknown as EntryState);
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
   }
 
   async edit(did: string, input: EditInput & { signer: OriginalsSigner }): Promise<CommitResult> {
     return this.commit(await this.prepareEdit(did, input), input.signer);
   }
 
+  /** Only the author deactivates (P5.16, P6.5). */
   async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef }): Promise<Draft> {
+    exactKeys(input, ["parent", "author", "signer"], "deactivate input");
     const { head } = await this.parentOf(did, input.parent);
     const entry = prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author });
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary: summarize(entry, head.state as unknown as EntryState), bytes: new Map() };
+    const summary = summarize(entry, head.state as unknown as EntryState);
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes: new Map() };
   }
 
   async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner }): Promise<CommitResult> {
@@ -741,7 +819,7 @@ export class OriginalsSDK {
   async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
     // Holding evidence is not authority (P8.4): with no usable signer there is nothing to sign with.
     if (typeof signer !== "object" || signer === null || typeof signer.sign !== "function") {
-      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author key`);
+      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author or editor key`);
     }
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
@@ -751,7 +829,7 @@ export class OriginalsSDK {
     if (head !== draft.parent) throw staleHead(draft.original, draft.parent, head);
 
     const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
-    const signature = await signer.sign({ entry: draft.entry, proofOptions, summary: draft.summary });
+    const signature = await signer.sign({ entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary) });
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
 
@@ -778,9 +856,10 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = (await this.identityRound(prefix, await this.authorEvidence(prefix), view.report.history.entries)).map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ retrievedFrom: _, ...evidence }) => evidence);
     const missing: MissingItem[] = [];
-    for (const did of authorDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did });
+    const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
+    for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
     const bytes: Record<string, Uint8Array> = {};
     for (const v of view.report.resources.versions) {
       const data = await this.store.getResource(v.digest);
@@ -823,7 +902,8 @@ export class OriginalsSDK {
         ...comparisons,
         ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
-    const base = await this.authorEvidence(contents.log, contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence));
+    const supplied = contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
     const m = contents.manifest;

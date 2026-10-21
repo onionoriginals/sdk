@@ -5,7 +5,8 @@
  *   originals-evidence.json               the manifest
  *   asset/did.jsonl                       the asset log, through the checkpoint
  *   asset/did-witness.json                witness proofs, when there are any
- *   authors/<sha256(did) hex>/did.jsonl   each author DID's log
+ *   authors/<sha256(did) hex>/did.jsonl   each signer DID's log: the author's and
+ *                                         each editor's that signed an entry (P7.1)
  *   authors/<sha256(did) hex>/did-witness.json
  *   resources/<digest>                    resource bytes, named by digest
  *
@@ -23,7 +24,8 @@ export const MANIFEST = "originals-evidence.json";
 
 export type MissingItem =
   | { kind: "resource"; resource: string; version: number; digest: string; versionId: string }
-  | { kind: "identity"; did: string };
+  /** A signer DID history the package lacks (P7.1, P7.4): the author's, or an editor's. */
+  | { kind: "identity"; did: string; role?: "author" | "editor" };
 
 export interface EvidenceManifest {
   format: typeof EVIDENCE_FORMAT;
@@ -115,11 +117,13 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
   const manifest = readManifest(manifestBytes);
 
   const authors = new Map<string, AuthorDidEvidence>();
+  // Every signer identity the log names: the author and each editor of an editor entry (P7.1).
   const authorDids = new Set<string>();
   for (const line of text(logBytes, "asset/did.jsonl").trimEnd().split("\n")) {
     try {
-      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } } };
+      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown }; editor?: { did?: unknown } } };
       if (typeof entry.state?.author?.did === "string") authorDids.add(entry.state.author.did);
+      if (typeof entry.state?.editor?.did === "string") authorDids.add(entry.state.editor.did);
     } catch {
       // A malformed line fails verification later.
     }
@@ -133,7 +137,7 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
   }
   for (const name of files.keys()) {
     if (name.startsWith("authors/") && ![...authorDids].some((did) => name.startsWith(`${authorPath(did)}/`))) {
-      evidenceError("EVIDENCE_LAYOUT", `${name} belongs to no author the log names`);
+      evidenceError("EVIDENCE_LAYOUT", `${name} belongs to no signer the log names`);
     }
   }
   const bytes: Record<string, Uint8Array> = {};
