@@ -10,10 +10,11 @@ import { buildFetch } from '../app';
 import { resourceDigest } from '@originals/vh/originals';
 import { createHash } from 'node:crypto';
 import { localSigner } from '@originals/vh/crypto';
-import { appendEntry, createLog, serializeLog, signWith } from '@originals/vh/log';
+import { appendEntry, createLog, createWitnessProof, serializeLog, signWith } from '@originals/vh/log';
 
 /** A real did:vh signer DID log of `versions` entries, and the directory hex it lives under. */
-async function signerLog(versions = 2) {
+async function signerLog(versions = 2, opts: { witnessed?: boolean } = {}) {
+  const witness = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
   const update = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
   const author = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
   const sign = signWith(update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${update.publicKeyMultibase}#${update.publicKeyMultibase}` });
@@ -25,11 +26,15 @@ async function signerLog(versions = 2) {
   });
   const t = Date.now() - 60_000;
   const iso = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const entries = [await createLog({ versionTime: iso(t), parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase] }, state: doc('did:vh:{SCID}'), sign })];
+  const entries = [await createLog({ versionTime: iso(t), parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase], ...(opts.witnessed ? { witness: { threshold: 1, witnesses: [{ id: `did:key:${witness.publicKeyMultibase}` }] } } : {}) }, state: doc('did:vh:{SCID}'), sign })];
   const did = entries[0].state.id as string;
   for (let i = 1; i < versions; i++) entries.push(await appendEntry(entries[i - 1], { versionTime: iso(t + i * 1000), parameters: {}, state: { ...doc(did), alsoKnownAs: [`urn:v${i}`] }, sign }));
   const logs = entries.map((_, i) => serializeLog(entries.slice(0, i + 1)));
-  return { did, hex: createHash('sha256').update(did).digest('hex'), logs };
+  // did:webvh 1.0 pruning: a controller SHOULD keep only the latest proof per witness, which approves every earlier entry too.
+  const proofs = await Promise.all(entries.map((e) => createWitnessProof(witness, e.versionId)));
+  const pruned = entries.map((e, i) => JSON.stringify([{ versionId: e.versionId, proof: [proofs[i]] }]));
+  const full = entries.map((_, i) => JSON.stringify(entries.slice(0, i + 1).map((e, j) => ({ versionId: e.versionId, proof: [proofs[j]] }))));
+  return { did, hex: createHash('sha256').update(did).digest('hex'), logs, witness: { pruned, full } };
 }
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
@@ -443,6 +448,52 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     // A stored log that does not verify at all can be replaced by any verified log of the DID.
     store.saveBytes('sub-1', `${dir}/did.jsonl`, new TextEncoder().encode('{"junk":1}\n'), 'application/jsonl');
     expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+  });
+
+  test('#965 r4 finding 3: a pruned did:webvh witness file is accepted when the stored log verifies with it; proofs compare canonically; a witness file never weakens the stored log (P7.8)', async () => {
+    const { put, get } = setup();
+    const { hex, logs, witness } = await signerLog(3, { witnessed: true });
+    const dir = `${base}/authors/${hex}`;
+    const w = `${dir}/did-witness.json`;
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+    // The next version's pruned file drops v1's proof. The stored log (v1) does not verify with it alone,
+    // so the host keeps v1's proof too: the upload is merged, never a weakening.
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    expect(JSON.parse((await get(w))!)).toEqual(JSON.parse(witness.full[1]));
+    expect((await put(`${dir}/did.jsonl`, logs[1])).status).toBe(200);
+    // Now the stored log verifies with the pruned file alone: it is stored as uploaded.
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    expect(await get(w)).toBe(witness.pruned[1]);
+    // The same proofs with members in another order are the same proofs (JCS).
+    const reordered = JSON.stringify(JSON.parse(witness.pruned[1]).map((e: { versionId: string; proof: Record<string, unknown>[] }) => ({ proof: e.proof.map((p) => Object.fromEntries(Object.entries(p).reverse())), versionId: e.versionId })));
+    expect((await put(w, reordered)).status).toBe(200);
+    // A file that alone would leave v2 unwitnessed (a rollback of the stored log) never replaces the
+    // stored proofs: what it adds is kept with them, and a file that adds nothing is refused.
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect(JSON.parse((await get(w))!)).toEqual([...JSON.parse(witness.pruned[1]), ...JSON.parse(witness.pruned[0])]);
+    const rollBack = await put(w, witness.pruned[0]);
+    expect(rollBack.status).toBe(409);
+    expect(await rollBack.json()).toMatchObject({ error: 'identity_witness_not_extending' });
+    expect((await put(w, '[]')).status).toBe(409);
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    // A malformed member would make the engine reject the whole file: refused.
+    expect((await put(w, JSON.stringify([...JSON.parse(witness.pruned[1]), { versionId: 'x', proof: [], extra: 1 }]))).status).toBe(409);
+    expect((await put(`${dir}/did.jsonl`, logs[2])).status).toBe(422); // v3 not witnessed by the stored file
+    expect((await put(w, witness.pruned[2])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[2])).status).toBe(200);
+    expect((await put(w, witness.pruned[2])).status).toBe(200);
+    expect(await get(w)).toBe(witness.pruned[2]);
+  });
+
+  test('#965 r4 finding 3: with no stored log, a pruned witness file is kept with the stored proofs', async () => {
+    const { put, get } = setup();
+    const p = (wit: string, v: string) => ({ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${wit}#${wit}`, proofPurpose: 'assertionMethod', proofValue: `z${v}` });
+    const stored = [{ versionId: '1-Qa', proof: [p('zW1', 'a1'), p('zW2', 'a2')] }];
+    const pruned = [{ versionId: '2-Qb', proof: [p('zW1', 'b1'), p('zW2', 'b2')] }];
+    expect((await put(`${authorDir}/did-witness.json`, JSON.stringify(stored))).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, JSON.stringify(pruned))).status).toBe(200);
+    expect(JSON.parse((await get(`${authorDir}/did-witness.json`))!)).toEqual([...stored, ...pruned]);
   });
 
   test('a signer DID witness file only gains proofs: a PUT that drops one is a 409', async () => {

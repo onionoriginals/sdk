@@ -21,7 +21,7 @@
  *
  * A signer's DID log and witness file (authors/<64 hex>/...) only grow: a
  * replacement must extend what is stored (`signerLogVerdict`,
- * `extendsSignerWitness`), so no upload can roll back a newer DID log, and
+ * `signerWitnessVerdict`), so no upload can roll back a newer DID log, and
  * with it a key removal or deactivation, that a save stored (P7.8). A signer
  * DID log is judged by verification, not bytes: it must verify as the log of
  * the DID its directory names, with the witness file the host holds for it,
@@ -32,6 +32,7 @@
  * before its log.
  */
 import { createHash } from 'node:crypto';
+import { canonicalize, type JsonValue } from '@originals/vh/json';
 import { resourceDigest, verifyAuthorHistory } from '@originals/vh/originals';
 
 const NAME = /^o-[1-9A-HJ-NP-Za-km-z]{16}$/;
@@ -176,31 +177,102 @@ export function parseWitnessFile(bytes: Uint8Array | null): unknown {
 
 type WitnessEntry = { versionId: string; proof: unknown[] };
 
+/**
+ * The entries of a witness file in the shape the engine accepts (exactly
+ * `{ versionId, proof }`; anything else makes it reject the whole file), or null.
+ */
 function witnessEntries(bytes: Uint8Array): WitnessEntry[] | null {
+  const text = decodeText(bytes);
+  if (text === null) return null;
   try {
-    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    const value = JSON.parse(text) as unknown;
     if (!Array.isArray(value)) return null;
-    const ok = value.every((e) => typeof e === 'object' && e !== null && typeof (e as WitnessEntry).versionId === 'string' && Array.isArray((e as WitnessEntry).proof));
+    const ok = value.every(
+      (e) =>
+        typeof e === 'object' && e !== null && !Array.isArray(e) && Object.keys(e).length === 2 &&
+        typeof (e as WitnessEntry).versionId === 'string' && Array.isArray((e as WitnessEntry).proof),
+    );
     return ok ? (value as WitnessEntry[]) : null;
   } catch {
     return null;
   }
 }
 
-/**
- * True when `next` may replace the stored signer witness file `stored`:
- * every stored proof is still there, under the same versionId. A stored file
- * that is not a witness file can be replaced by one that is.
- */
-export function extendsSignerWitness(stored: Uint8Array, next: Uint8Array): boolean {
-  const old = witnessEntries(stored);
-  const proposed = witnessEntries(next);
-  if (!proposed) return false;
-  if (!old) return true;
+/** A proof's JCS form, so the same proof with its members in another order is the same proof. */
+function canonicalProof(proof: unknown): string {
+  try {
+    return canonicalize(proof as JsonValue);
+  } catch {
+    return `\u0000${JSON.stringify(proof)}`; // not JCS-serialisable: never equal to a canonical proof
+  }
+}
+
+/** True when every proof of `old` is in `next` under the same versionId (canonically). */
+function containsProofs(next: WitnessEntry[], old: WitnessEntry[]): boolean {
+  const have = new Map<string, Set<string>>();
+  for (const e of next) {
+    const set = have.get(e.versionId) ?? new Set<string>();
+    for (const p of e.proof) set.add(canonicalProof(p));
+    have.set(e.versionId, set);
+  }
   return old.every((o) => {
-    const match = proposed.find((p) => p.versionId === o.versionId);
-    if (!match) return false;
-    const have = new Set(match.proof.map((x) => JSON.stringify(x)));
-    return o.proof.every((x) => have.has(JSON.stringify(x)));
+    const set = have.get(o.versionId);
+    return set !== undefined && o.proof.every((p) => set.has(canonicalProof(p)));
   });
+}
+
+/** `stored` with `next`'s proofs added, per versionId, without canonical duplicates. */
+function mergeWitness(stored: WitnessEntry[], next: WitnessEntry[]): WitnessEntry[] {
+  const out = new Map<string, { proof: unknown[]; seen: Set<string> }>();
+  for (const e of [...stored, ...next]) {
+    const slot = out.get(e.versionId) ?? { proof: [], seen: new Set<string>() };
+    for (const p of e.proof) {
+      const c = canonicalProof(p);
+      if (slot.seen.has(c)) continue;
+      slot.seen.add(c);
+      slot.proof.push(p);
+    }
+    out.set(e.versionId, slot);
+  }
+  return [...out].map(([versionId, { proof }]) => ({ versionId, proof }));
+}
+
+/**
+ * What to store when `next` is uploaded as the witness file of the signer DID
+ * whose directory is `authors/<hex>` (#965 review r4, finding 3), or the
+ * refusal. A witness file never weakens the verification of the stored signer
+ * log (P7.8), and is judged by the proofs it carries, not their bytes:
+ *
+ * - `next` must be a witness file the engine accepts;
+ * - it is stored as uploaded when it holds every stored proof (compared by
+ *   JCS), or when the stored log verifies with it at least as far as with the
+ *   stored file: so a did:webvh 1.0 file pruned to the latest proof per
+ *   witness is accepted once the log it approves is stored;
+ * - otherwise, when it adds a proof, the host stores the stored file with
+ *   `next`'s proofs added (a pruned file uploaded before the log it approves),
+ *   within `maxBytes`. A file that adds nothing and would weaken is refused.
+ */
+export async function signerWitnessVerdict(
+  storedWitness: Uint8Array | null,
+  next: Uint8Array,
+  storedLog: Uint8Array | null,
+  hex: string,
+  options: { maxBytes: number; now?: number },
+): Promise<{ write: Uint8Array } | { error: 'identity_witness_not_extending' | 'identity_witness_too_large' }> {
+  const proposed = witnessEntries(next);
+  if (!proposed) return { error: 'identity_witness_not_extending' };
+  const old = storedWitness ? witnessEntries(storedWitness) : null;
+  if (!old || containsProofs(proposed, old)) return { write: next };
+  const logText = storedLog ? decodeText(storedLog) : null;
+  const did = logText === null ? null : signerDidOf(logText, hex);
+  if (logText !== null && did !== null) {
+    const now = options.now ?? Date.now();
+    const kept = (await verifiedSignerLog(did, logText, old, now)).ids;
+    const withNext = (await verifiedSignerLog(did, logText, proposed, now)).ids;
+    if (kept.every((id, i) => withNext[i] === id)) return { write: next };
+  }
+  const merged = mergeWitness(old, proposed);
+  if (containsProofs(old, merged)) return { error: 'identity_witness_not_extending' }; // adds nothing
+  const bytes = new TextEncoder().encode(JSON.stringify(merged));
+  return bytes.length > options.maxBytes ? { error: 'identity_witness_too_large' } : { write: bytes };
 }

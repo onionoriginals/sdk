@@ -14,7 +14,7 @@ import { json, type Handler } from './router';
 import { extractToken } from './cookies';
 import { createRateLimiter } from './rate-limit';
 import type { OriginalsStore, OriginalInscription } from './originals-store';
-import { bytesMatchDigest, classifyHostedKey, extendsSignerWitness, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict } from './hosted-layout';
+import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout';
 import { readBodyCapped } from './body';
 
 const HOST_PREFIX = '/api/originals/host/';
@@ -130,21 +130,33 @@ export function createOriginalsRoutes(deps: {
     // (#965 review r2 #6). The verdict is reached asynchronously; the stored
     // bytes are then re-read, and the write happens in the same synchronous
     // step only if they are what was judged, so no other upload interleaves.
+    let write = bytes;
     if (hosted.kind === 'evidence' && hosted.signer === 'log') {
+      const witnessKey = key.replace(/did\.jsonl$/, 'did-witness.json');
       for (let attempt = 0; ; attempt++) {
         const stored = store.readHosted(key);
-        const witness = parseWitnessFile(store.readHosted(key.replace(/did\.jsonl$/, 'did-witness.json')));
-        const verdict = await signerLogVerdict(stored, bytes, hosted.signerHex!, witness);
+        const witnessBytes = store.readHosted(witnessKey);
+        const verdict = await signerLogVerdict(stored, bytes, hosted.signerHex!, parseWitnessFile(witnessBytes));
         if (verdict) return json({ error: verdict }, verdict === 'identity_log_invalid' ? 422 : 409);
-        if (sameBytes(store.readHosted(key), stored)) break;
+        if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(witnessKey), witnessBytes)) break;
         if (attempt >= 2) return json({ error: 'identity_log_contended' }, 409);
       }
     } else if (hosted.kind === 'evidence' && hosted.signer === 'witness') {
-      const stored = store.readHosted(key);
-      if (stored && !extendsSignerWitness(stored, bytes)) return json({ error: 'identity_witness_not_extending' }, 409);
+      // Judged by the proofs it carries and by the stored log it must never
+      // weaken (#965 review r4, finding 3), with the same re-read as a log.
+      const logKey = key.replace(/did-witness\.json$/, 'did.jsonl');
+      for (let attempt = 0; ; attempt++) {
+        const stored = store.readHosted(key);
+        const log = store.readHosted(logKey);
+        const verdict = await signerWitnessVerdict(stored, bytes, log, hosted.signerHex!, { maxBytes: MAX_UPLOAD_BYTES });
+        if ('error' in verdict) return json({ error: verdict.error }, verdict.error === 'identity_witness_too_large' ? 413 : 409);
+        write = verdict.write;
+        if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(logKey), log)) break;
+        if (attempt >= 2) return json({ error: 'identity_witness_contended' }, 409);
+      }
     }
     try {
-      store.saveBytes(sub, key, bytes, contentType);
+      store.saveBytes(sub, key, write, contentType);
     } catch (e) {
       return storeError(e);
     }
