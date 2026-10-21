@@ -4,7 +4,8 @@ import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OriginalsError } from "@originals/vh";
-import { FileStore } from "../../../src/originals/fs-store.js";
+import { FileStore, fileRecoveryStore } from "../../../src/originals/fs-store.js";
+import type { InscriptionRecoveryRecord } from "../../../src/bitcoin/inscription-recovery.js";
 import { OriginalsSDK } from "../../../src/originals/index.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -433,6 +434,66 @@ describe("refused candidates (P6.8)", () => {
       expect(await code(store.putRefused(DID, record(2)))).toBe("STORE_CLOSED");
       expect(await code(store.putPending(DID, null))).toBe("STORE_CLOSED");
       expect(await code(store.dropRefused(DID, "2-1"))).toBe("STORE_CLOSED");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fileRecoveryStore: the Bitcoin writer's durable pairs (#975)", () => {
+  const ID = "ab".repeat(32);
+  const OTHER = "cd".repeat(32);
+  const record = (broadcast: InscriptionRecoveryRecord["broadcast"], id = ID): InscriptionRecoveryRecord =>
+    ({ recoveryId: id, broadcast, prepared: { commitTxId: id } as InscriptionRecoveryRecord["prepared"] });
+
+  test("records survive a fresh store over the same directory, one file each, and are listed", async () => {
+    const dir = tempDir();
+    try {
+      const store = fileRecoveryStore(join(dir, "recovery"));
+      expect(await store.list()).toEqual([]);
+      expect(await store.load(ID)).toBeUndefined();
+      await store.save(record("prepared"));
+      await store.save(record("commit_broadcast_unknown"));
+      await store.save(record("prepared", OTHER));
+      const reopened = fileRecoveryStore(join(dir, "recovery"));
+      expect(await reopened.list()).toEqual([ID, OTHER]);
+      expect(await reopened.load(ID)).toEqual(record("commit_broadcast_unknown"));
+      expect(readdirSync(join(dir, "recovery")).sort()).toEqual([`${ID}.json`, `${OTHER}.json`]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a write torn by a crash is ignored: the previous record stays whole and nothing new is listed", async () => {
+    const dir = tempDir();
+    try {
+      await fileRecoveryStore(dir).save(record("commit_broadcast_unknown"));
+      // The process died mid-write: a partial temporary file beside the record, and one for a pair never saved.
+      const torn = JSON.stringify(record("reveal_broadcast_unknown"));
+      writeFileSync(join(dir, `${ID}.json.0a1b2c3d4e5f.tmp`), torn.slice(0, torn.length >> 1));
+      writeFileSync(join(dir, `${OTHER}.json.f00dfeedbeef.tmp`), torn.slice(0, 10));
+      const restarted = fileRecoveryStore(dir);
+      expect(await restarted.list()).toEqual([ID]);
+      expect(await restarted.load(ID)).toEqual(record("commit_broadcast_unknown"));
+      expect(await restarted.load(OTHER)).toBeUndefined();
+      // The next save replaces the record atomically, whatever temporary files remain.
+      await restarted.save(record("reveal_broadcast"));
+      expect(await fileRecoveryStore(dir).load(ID)).toEqual(record("reveal_broadcast"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a damaged record is refused, not read as absent; ids must be commit txids", async () => {
+    const dir = tempDir();
+    try {
+      writeFileSync(join(dir, `${ID}.json`), "{\"recoveryId\":");
+      await expect(fileRecoveryStore(dir).load(ID)).rejects.toMatchObject({ code: "RECOVERY_RECORD_DAMAGED" });
+      await expect(fileRecoveryStore(dir).load("../escape")).rejects.toMatchObject({ code: "RECOVERY_ID_INVALID" });
+      await expect(fileRecoveryStore(dir).save(record("prepared", "not-a-txid"))).rejects.toMatchObject({ code: "RECOVERY_ID_INVALID" });
+      // A record filed under another id is not this pair.
+      writeFileSync(join(dir, `${OTHER}.json`), JSON.stringify(record("prepared")));
+      expect(await fileRecoveryStore(dir).load(OTHER)).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

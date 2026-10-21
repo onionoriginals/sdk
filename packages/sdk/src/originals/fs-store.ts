@@ -59,12 +59,14 @@
  * opening a store needs Node.
  *
  * `fileClockStore(path)` persists an `InscriptionClock` (#973) in one file,
- * written the same way.
+ * written the same way. `fileRecoveryStore(dir)` keeps the Bitcoin writer's
+ * signed pairs, one file per pair (#975).
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 import { hex } from "@scure/base";
+import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
 import type { ClockStore } from "./bitcoin.js";
 import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
 
@@ -349,6 +351,66 @@ export function fileClockStore(path: string): ClockStore {
       await loadNode();
       await fs.mkdir(dir, { recursive: true });
       await writeAtomically(dir, name, state);
+    },
+  };
+}
+
+const RECOVERY_ID = /^[0-9a-f]{64}$/;
+
+/**
+ * The Bitcoin writer's recovery store in a directory (Node only; #975):
+ * `<dir>/<recoveryId>.json`, one signed pair per file, keyed by its commit
+ * txid. Each save writes a temporary file, fsyncs it, renames it over the
+ * record and fsyncs the directory, so it resolves only once the record
+ * survives the process being killed. A crash mid-write leaves at most a
+ * `.tmp` file, which `load` and `list` never read; the previous record, if
+ * any, stays whole. `list` gives `catchUp` the recorded pairs after a
+ * restart. The records hold signed spending transactions: keep the
+ * directory private. One process should write a directory at a time.
+ */
+export function fileRecoveryStore(dir: string): InscriptionRecoveryStore & { list(): Promise<string[]> } {
+  const fileOf = (recoveryId: string) => {
+    if (!RECOVERY_ID.test(recoveryId)) {
+      throw new OriginalsError("invalid-evidence", "RECOVERY_ID_INVALID", `${recoveryId} is not a commit txid`);
+    }
+    return `${recoveryId}.json`;
+  };
+  return {
+    async save(record: InscriptionRecoveryRecord) {
+      await loadNode();
+      const name = fileOf(record.recoveryId);
+      await fs.mkdir(dir, { recursive: true });
+      await writeAtomically(dir, name, JSON.stringify(record));
+    },
+    async load(recoveryId: string) {
+      await loadNode();
+      let text: string;
+      try {
+        text = await fs.readFile(join(dir, fileOf(recoveryId)), "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      }
+      // Renamed into place whole, so a record that does not parse was damaged
+      // after it was written: refuse it rather than treat it as absent.
+      let record: InscriptionRecoveryRecord;
+      try {
+        record = JSON.parse(text) as InscriptionRecoveryRecord;
+      } catch {
+        throw new OriginalsError("invalid-evidence", "RECOVERY_RECORD_DAMAGED", `the recovery record ${recoveryId} in ${dir} does not parse`);
+      }
+      return record?.recoveryId === recoveryId ? record : undefined;
+    },
+    async list() {
+      await loadNode();
+      const names = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [] as string[];
+        throw error;
+      });
+      return names
+        .filter((n) => n.endsWith(".json") && RECOVERY_ID.test(n.slice(0, -5)))
+        .map((n) => n.slice(0, -5))
+        .sort();
     },
   };
 }

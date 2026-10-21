@@ -9,7 +9,9 @@ workspace packages, typechecks the harness, and runs disposable chains in turn:
   validation against an independent Core node;
 - `scripts/regtest/restart-check.ts`: Core and ord restarts;
 - `scripts/regtest/originals-anchor.ts`: anchored Originals end to end (plan 011
-  PR 10, plan 012).
+  PR 10, plan 012);
+- `scripts/regtest/originals-restart.ts`: the Bitcoin writer across a real
+  process kill, with durable stores and a fresh reader (#975).
 
 The Originals journey asserts each step on real transactions:
 
@@ -45,13 +47,48 @@ The Originals journey asserts each step on real transactions:
    is `HEAD_NOT_NEXT`), then the edit in a later block.
 
 The recovery store in this journey is in memory: step 7 shows resuming within
-one process, not after a process restart.
+one process. The restart journey below shows it after a process is killed.
+
+The restart journey (#975) keeps every store on disk in one temporary
+directory: the Original in a `FileStore`, the writer's signed pairs in a
+`fileRecoveryStore` (both from `@originals/sdk/originals/fs`). Each process
+after the first is `scripts/regtest/originals-writer-child.ts`, started with
+only the store paths and the local node's endpoints in its environment.
+
+1. The journey creates an Original, anchors it and inscribes the anchoring
+   entry (unmined, it does not count), then edits it with new resource bytes.
+2. A writer process prepares and submits the edit's pair. When the state
+   machine asks to broadcast the reveal (the commit is out and the record says
+   `reveal_broadcast_unknown` on disk) the writer reports that, re-read from
+   the record file, and sends nothing more; the journey checks the reveal is
+   not in the mempool and kills it with SIGKILL.
+3. With the commit mined and the reveal not, a fresh process reads Bitcoin:
+   the accepted head is still the anchoring entry, and `catchUp`, listing the
+   recovery store itself, says resume (P9.4, P9.6).
+4. Another fresh process resumes: the same commit txid, reveal txid and
+   inscription id. Until the reveal is mined the head is unchanged and
+   `catchUp` waits; once mined, the head is the edit, through that
+   inscription.
+5. A fresh reader, with a new empty store and no author list, given only the
+   did:btco sat and the evidence package the author exported, checks author
+   binding, the history before the anchor, the accepted Bitcoin head, the
+   exact resource bytes, the network, the confirmation depth (3) and the trust
+   boundary (one ord index, reported; ownership provisional; uniqueness not
+   established). Freshness is reported as not established, so the reader does
+   not claim the result current.
+
+It writes a receipt (git revision, Core and ord versions, txids, inscription
+ids, process ids and signals, store paths, PASS or FAIL per check) to
+`$ORIGINALS_REGTEST_RESTART_EVIDENCE` when set, and then keeps the store
+directory; under the runner, `REGTEST_RECEIPT` gives
+`<receipt>-originals-restart.json`.
 
 `REGTEST_RECEIPT=/absolute/path/receipt.json` writes receipts (the Originals
 journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Core
 and ord logs. Set both `BITCOIND_BIN` and `ORD_BIN` to use installed binaries.
 The runner uses no public Bitcoin network and spends nothing outside regtest.
 
-The signer is a disposable local key. This proves the transaction path, not a
-live Turnkey call, a hosted deployment or mainnet; the owner's mainnet release
-proof is separate.
+The signer is a disposable local key (the restart receipt says
+`signer: local-disposable-key (not Turnkey)`). This proves the transaction
+path, not a live Turnkey call, a hosted deployment or mainnet; live
+client-authorized signing and the owner's mainnet release proof are separate.
