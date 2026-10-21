@@ -4,6 +4,9 @@
  * and ord 0.29.0.
  */
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -15,6 +18,7 @@ import type { BitcoinNetwork, SatSnapshot } from "../../../src/bitcoin/sat-snaps
 import type { BitcoinSigner } from "../../../src/types/common.js";
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip } from "../../../src/originals/index.js";
 import { catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeInscriptionOnSat } from "../../../src/originals/bitcoin-writer.js";
+import { fileRecoveryStore } from "../../../src/originals/fs-store.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
 const KEY = seed(21);
@@ -242,6 +246,39 @@ describe("catching up entries committed but not yet inscribed (P9.4, P9.13)", ()
     const mined = node(snapshot([all[1], { line: all[2], id: pair.prepared.inscriptionId }]), [pair.prepared.commitTxId, pair.prepared.revealTxId]);
     expect(await step(sdk, did, mined.provider, r)).toMatchObject({ action: "prepare", versionId: idOf(all[3]), replaces: [] });
     expect(mined.sent).toEqual([]);
+  });
+
+  test("after a restart, catchUp lists a file recovery store itself and resumes the same pair (#975, C12-40)", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 2);
+    const all = await lines();
+    const read = snapshot([all[1]]);
+    const dir = mkdtempSync(join(tmpdir(), "originals-recovery-"));
+    try {
+      const pair = await pairFor(sdk, did, node(read).provider);
+      // The writer persisted the pair and died between the two broadcasts.
+      await fileRecoveryStore(dir).save({ recoveryId: pair.prepared.commitTxId, prepared: pair.prepared, broadcast: "reveal_broadcast_unknown" });
+      // A fresh store over the same directory: no recovery ids passed.
+      const reopened = fileRecoveryStore(dir);
+      const chain = node(read);
+      const plan = await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), recoveryStore: reopened });
+      expect(plan).toMatchObject({ action: "resume", versionId: idOf(all[2]), recoveryId: pair.prepared.commitTxId });
+      const resumed = await resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider: chain.provider, recoveryStore: reopened });
+      expect([resumed.commitTxId, resumed.revealTxId, resumed.inscriptionId]).toEqual([pair.prepared.commitTxId, pair.prepared.revealTxId, pair.prepared.inscriptionId]);
+      expect(await catchUp({ sdk, did, provider: chain.provider, clock: blocks(), recoveryStore: fileRecoveryStore(dir) }))
+        .toMatchObject({ action: "wait-for-confirmation", recoveryId: pair.prepared.commitTxId });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a store that cannot list needs the recovery ids passed", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const r = recovery();
+    await expect(catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), recoveryStore: r.store }))
+      .rejects.toMatchObject({ code: "RECOVERY_IDS_REQUIRED" });
+    // A listing store is used when no ids are given; passed ids still take precedence.
+    const listing = { ...r.store, list: () => Promise.resolve(r.ids()) };
+    expect(await catchUp({ sdk, did, provider: node(snapshot([])).provider, clock: blocks(), recoveryStore: listing })).toMatchObject({ action: "prepare" });
   });
 
   test("a pair whose input has moved on is not resumed", async () => {

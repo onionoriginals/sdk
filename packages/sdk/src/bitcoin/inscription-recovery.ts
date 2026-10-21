@@ -37,6 +37,8 @@ export interface InscriptionRecoveryStore {
   /** Atomically persist the complete record. Resolve only once it survives process termination. */
   save(record: InscriptionRecoveryRecord): Promise<void>;
   load(recoveryId: string): Promise<InscriptionRecoveryRecord | undefined>;
+  /** The recovery ids of every stored record, when the store can list them (`catchUp` uses it after a restart). */
+  list?(): Promise<string[]>;
 }
 
 function samePrepared(a: PreparedInscriptionOnSat, b: PreparedInscriptionOnSat): boolean {

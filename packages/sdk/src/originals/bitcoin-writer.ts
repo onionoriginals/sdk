@@ -177,8 +177,10 @@ export interface CatchUpParams extends ReadAnchoredOptions {
   /**
    * The recovery ids (commit txids) of the pairs prepared for this Original
    * that the store still holds. Records for other entries or sats are skipped.
+   * Omitted, the store's own `list()` is used, so a restarted process needs
+   * nothing but the store; a store that cannot list needs them passed.
    */
-  recoveryIds: Iterable<string>;
+  recoveryIds?: Iterable<string>;
 }
 
 /** One step of publishing the committed entries Bitcoin does not show yet. */
@@ -230,7 +232,9 @@ async function isConfirmed(provider: ReadAnchoredOptions["provider"], txid: stri
  * an entry while a pair for it is pending, nor one Bitcoin already accepts.
  */
 export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
-  const { sdk, did, recoveryStore, recoveryIds, ...read } = params;
+  const { sdk, did, recoveryStore, recoveryIds: given, ...read } = params;
+  const recoveryIds = given ?? (await recoveryStore.list?.());
+  if (!recoveryIds) refuse("incomplete-evidence", "RECOVERY_IDS_REQUIRED", "the recovery store cannot list its records; pass recoveryIds");
   const log = await storedLog(sdk, did);
   const pending = pendingFrom(did, log, await readSat(sdk, did, log, read));
   if (pending.next === null) return { action: "done", pending };

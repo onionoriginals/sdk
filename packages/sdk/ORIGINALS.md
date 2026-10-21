@@ -585,8 +585,10 @@ await submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recove
 // after a crash: resumeInscriptionOnSat({ recoveryId: pair.prepared.commitTxId, provider, recoveryStore }) sends the same pair
 const published = await readAnchored(sdk, did, { provider, clock });          // what Bitcoin shows: the durable boundary (P9.4)
 const pending = await nextPendingEntry(sdk, did, { provider, clock });        // { committed, accepted, acceptedHeight, next, queue, remaining }
-// Catching up, one step at a time, from a fresh read and the recorded pairs (their commit txids):
-const plan = await catchUp({ sdk, did, provider, clock, recoveryStore, recoveryIds });
+// Catching up, one step at a time, from a fresh read and the recorded pairs. A store with `list()`
+// (Node: fileRecoveryStore(dir) from `@originals/sdk/originals/fs`) finds them itself after a restart;
+// otherwise pass `recoveryIds` (their commit txids):
+const plan = await catchUp({ sdk, did, provider, clock, recoveryStore });
 // plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeInscriptionOnSat(plan.recoveryId))
 //            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
 // Or by hand: pass what an adapter read from the sat:
@@ -617,8 +619,15 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   inscription lands in a later block than the one before (P9.13), and a
   reorganisation re-derives the queue from the head Bitcoin shows. A head
   Bitcoin shows that the store does not hold is refused
-  (`BITCOIN_HEAD_NOT_STORED`); nothing is rebased onto it. The recovery store
-  has no listing, so the caller passes the recovery ids it saved.
+  (`BITCOIN_HEAD_NOT_STORED`); nothing is rebased onto it. `catchUp` reads
+  the recorded pairs from the store's optional `list()`; for a store without
+  one, the caller passes the recovery ids it saved (`RECOVERY_IDS_REQUIRED`
+  otherwise). `fileRecoveryStore(dir)` (Node) keeps one file per pair, written
+  to a temporary file, fsynced and renamed, so a record survives the process
+  being killed and a write torn by a crash is never read. Its records hold
+  signed spending transactions: keep the directory private. The regtest
+  restart journey kills a writer between commit and reveal and resumes the
+  identical pair in a fresh process (#975).
 - The anchoring entry is an ordinary update that adds the sat's did:btco alias
   (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere, P14.12;
   the did:btco method does not yet define the prefixes, proposed upstream as
