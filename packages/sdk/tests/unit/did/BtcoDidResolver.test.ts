@@ -127,6 +127,23 @@ describe('resolution (did:btco method v0.2.0)', () => {
     expect((await failing.resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
   });
 
+  test('M1: a delegated or encoded inscription the sat holder adds is observed, not a version, and does not fail resolution (P5.13)', async () => {
+    const v1 = version(10, doc('one'));
+    const delegated = { ...publication(11, {}), body: { status: 'unsupported' as const, reason: 'delegated' as const, mediaType: null } };
+    const encoded = { ...publication(12, {}), body: { status: 'unsupported' as const, reason: 'content-encoding' as const, mediaType: 'text/plain' } };
+    const r = await resolver(snapshot([v1, delegated, encoded])).resolve(DID);
+    expect(r.resolutionMetadata.error).toBeUndefined();
+    expect(r.resolutionMetadata.versions).toEqual([v1.id]);
+  });
+
+  test('M1: an inscription past the reader\'s byte budget could be a version: unresolvable, never the latest version read', async () => {
+    const v1 = version(10, doc('one'));
+    const unread = { ...publication(11, {}), body: { status: 'unavailable' as const, reason: 'over-budget' as const, mediaType: 'text/plain', contentLength: 9 } };
+    const r = await resolver(snapshot([v1, unread, version(12, doc('two'))])).resolve(DID);
+    expect(r.didDocument).toBeNull();
+    expect(r.resolutionMetadata.error).toBe('unresolvable');
+  });
+
   test('a read during which the chain tip moved is unresolvable', async () => {
     const moved = snapshot([version(10)], { tipAfter: { height: 101, hash: 'dd'.repeat(32) } });
     expect((await resolver(moved).resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
