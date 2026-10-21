@@ -18,7 +18,7 @@ import type { BitcoinNetwork, SatSnapshot } from "../../../src/bitcoin/sat-snaps
 import type { BitcoinSigner } from "../../../src/types/common.js";
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip } from "../../../src/originals/index.js";
 import {
-  catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeEntryInscription, resumeInscriptionOnSat, submitPreparedInscriptionOnSat, transferHandoff, verifyHandoff,
+  catchUp, nextPendingEntry, prepareEntryInscription, readAnchored, resumeEntryInscription, resumeInscriptionOnSat, submitEntryInscription, submitPreparedInscriptionOnSat, transferHandoff, verifyHandoff,
   type EntryInscriptionParams,
 } from "../../../src/originals/bitcoin-writer.js";
 import { fileRecoveryStore } from "../../../src/originals/fs-store.js";
@@ -70,7 +70,7 @@ async function original(anchorTo?: string, edits = 0) {
 }
 
 const prepare = (sdk: OriginalsSDK, did: string, network: "regtest" | "mainnet", p: OrdinalsProvider, versionId?: string) =>
-  prepareEntryInscription({ sdk, did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network, provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}) });
+  prepareEntryInscription({ sdk, did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network, provider: p, clock: blocks(), index: INDEX, recoveryStore: null, ...(versionId ? { versionId } : {}) });
 
 describe("inscribing an Original's head entry (P9.10, P9.12)", () => {
   test("an Original that is not anchored has nothing to inscribe yet", async () => {
@@ -186,7 +186,7 @@ function recovery() {
 }
 
 const pairFor = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, versionId?: string, extra: Partial<EntryInscriptionParams> = {}) =>
-  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, ...(versionId ? { versionId } : {}), ...extra });
+  prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, recoveryStore: null, ...(versionId ? { versionId } : {}), ...extra });
 
 const step = (sdk: OriginalsSDK, did: string, p: OrdinalsProvider, r: ReturnType<typeof recovery>) =>
   catchUp({ sdk, did, provider: p, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
@@ -505,13 +505,14 @@ describe("transfer handoff: what the sender holds that Bitcoin does not (P9.18)"
   test("the recipient gets the resource bytes and did:vh signer histories, and verifies them against the sat", async () => {
     const { alice, bob, sdk, did, lines } = await edited();
     const all = await lines();
-    const handoff = await transferHandoff(sdk, did);
+    const sat = { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX };
+    const handoff = await transferHandoff(sdk, did, sat);
     expect(handoff.offChain.identities.map((i) => i.did)).toEqual([alice.did, bob.did]);
     const contents = readZip(handoff.package.bytes);
     expect([...contents.keys()].filter((k) => k.startsWith("resources/"))).toHaveLength(2);
     // A recipient with an empty store and no author list.
     const recipient = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock() });
-    const read = await verifyHandoff(recipient, handoff.package.bytes, { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX });
+    const read = await verifyHandoff(recipient, handoff.package.bytes, { ...sat, expectedSat: btcoAlias("regtest", SAT) });
     expect(read.report.anchoring?.status).toBe("anchored");
     expect(read.report.history.status).toBe("valid");
     expect(read.report.authorBinding.status).toBe("valid");
@@ -692,5 +693,88 @@ describe("recovery review of the writer: retries, liveness and damaged records (
     });
     expect(await step(merged, did, node(snapshot([])).provider, recovery()))
       .toMatchObject({ action: "wait-for-bitcoin", reason: "indexes-disagree", disputed, pending: { publication: "unverified" } });
+  });
+});
+
+describe("second review of the writer (P9.6, P9.10, P9.18)", () => {
+  test("P9.10: reads by two indexes are compared; when they disagree on the anchor, catch-up waits for Bitcoin", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const a = snapshot([anchorBody(all)]);
+    // The second index places the anchoring inscription at another height.
+    const b = snapshot([{ line: anchorBody(all), height: 11 }]);
+    const both = { provider: node(a).provider, clock: blocks(), index: "ord-a", indexes: [{ provider: node(b).provider, index: "ord-b" }] };
+    const view = await readAnchored(sdk, did, both);
+    expect(view.report.anchoring).toMatchObject({ status: "unverified", indexes: ["ord-a", "ord-b"] });
+    expect(view.publication).toBe("unverified");
+    const plan = await catchUp({ sdk, did, ...both, recoveryStore: recovery().store, recoveryIds: [] });
+    expect(plan).toMatchObject({ action: "wait-for-bitcoin", reason: "indexes-disagree", disputed: [`${"1".padStart(64, "e")}i0`] });
+    // Two indexes that agree: anchored, both reported (P9.11).
+    const agreed = await readAnchored(sdk, did, { ...both, indexes: [{ provider: node(a).provider, index: "ord-b" }] });
+    expect(agreed.report.anchoring).toMatchObject({ status: "anchored", indexes: ["ord-a", "ord-b"] });
+    expect(agreed.report.ownership?.indexes).toEqual(["ord-a", "ord-b"]);
+  });
+
+  test("L2: the recipient names the sat it received; a handoff for another sat is refused", async () => {
+    const { sdk, did, lines } = await edited();
+    const all = await lines();
+    const read = { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX };
+    const handoff = await transferHandoff(sdk, did, read);
+    const recipient = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock() });
+    await expect(verifyHandoff(recipient, handoff.package.bytes, { ...read, expectedSat: btcoAlias("regtest", "7000000000") }))
+      .rejects.toMatchObject({ category: "invalid-evidence", code: "HANDOFF_SAT_MISMATCH" });
+    const ok = await verifyHandoff(recipient, handoff.package.bytes, { ...read, expectedSat: btcoAlias("regtest", SAT) });
+    expect(ok.report.anchoring?.status).toBe("anchored");
+  });
+
+  test("L4: a handoff runs through the head Bitcoin accepts by default; the committed head only when asked", async () => {
+    const { sdk, did, asAlice, anchored, lines } = await edited();
+    const local = await sdk.edit(did, { parent: anchored, name: "Harbor, not yet inscribed", ...asAlice });
+    const all = await lines();
+    const read = { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX };
+    const accepted = await transferHandoff(sdk, did, read);
+    expect(accepted.package.manifest.checkpoint).toBe(anchored);
+    expect(accepted.offChain.through).toBe(anchored);
+    const committed = await transferHandoff(sdk, did, { through: "committed" });
+    expect(committed.package.manifest.checkpoint).toBe(local.original.checkpoint);
+    await expect(transferHandoff(sdk, did, {} as never)).rejects.toMatchObject({ code: "SAT_READ_REQUIRED" });
+    // Nothing on Bitcoin yet: there is no accepted head to hand over.
+    await expect(transferHandoff(sdk, did, { ...read, provider: provider(SAT, snapshot([])) })).rejects.toMatchObject({ code: "NOT_ANCHORED_ON_BITCOIN" });
+  });
+
+  test("L6: submitEntryInscription verifies through the entry again before the first broadcast (P9.18)", async () => {
+    const { alice, sdk, did } = await edited();
+    const r = recovery();
+    const chain = node(snapshot([]));
+    const pair = await pairFor(sdk, did, chain.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    await alice.rotate([{ fragment: "other", secret: seed(77) }]);
+    await expect(submitEntryInscription({ sdk, did, pair, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ code: "ANCHORING_NOT_VERIFIED" });
+    expect(chain.sent).toEqual([]);
+    expect(r.ids()).toEqual([]);
+  });
+
+  test("L6: submitEntryInscription sends a pair that still verifies and is still next, and refuses one Bitcoin already shows", async () => {
+    const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
+    const all = await lines();
+    const r = recovery();
+    const chain = node(snapshot([]));
+    const pair = await pairFor(sdk, did, chain.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    const sent = await submitEntryInscription({ sdk, did, pair, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
+    expect(sent.broadcast).toBe("reveal_broadcast");
+    expect(chain.sent).toEqual([pair.prepared.signedCommitHex, pair.prepared.revealTxHex]);
+    const shown = node(snapshot([anchorBody(all)]));
+    await expect(submitEntryInscription({ sdk, did, pair, provider: shown.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() }))
+      .rejects.toMatchObject({ code: "HEAD_NOT_NEXT" });
+    expect(shown.sent).toEqual([]);
+  });
+
+  test("L6: preparing without a recovery store is an explicit choice (recoveryStore: null), never an omission", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
+    const p = node(snapshot([])).provider;
+    await expect(prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX } as never))
+      .rejects.toMatchObject({ category: "invalid-evidence", code: "RECOVERY_STORE_REQUIRED" });
+    const unguarded = await prepareEntryInscription({ sdk, did, fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: p, clock: blocks(), index: INDEX, recoveryStore: null });
+    expect(unguarded.inFlightGuard).toBe("skipped");
   });
 });

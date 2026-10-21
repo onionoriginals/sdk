@@ -8,7 +8,8 @@
  *   the anchoring pair is observed on the network (confirmed, or in the
  *   node's mempool) but Bitcoin does not show it, reads are labelled
  *   `pending-bitcoin-acceptance` (P9.18); submitted but not observed, they
- *   are `submitted-unobserved`;
+ *   are `submitted-unobserved` (PROVISIONAL: stricter than P9.18's single
+ *   pending label, see the spec question in ORIGINALS.md);
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *
@@ -37,14 +38,22 @@
  *   later entry, which is how only the sat's holder can extend an anchored
  *   Original while only the author or an editor can sign it (P9.12). Nothing
  *   is re-signed or rebased: the bytes are the ones already committed (P9.6).
- *   Given the recovery store, a pair for the same entry that can still land
- *   refuses a new one (PAIR_IN_FLIGHT) unless `replaces` names it (P9.6).
- * - Submitting and retrying are the sat builder's durable state machine:
- *   `submitPreparedInscriptionOnSat` persists before every broadcast, and
- *   `resumeInscriptionOnSat` rebroadcasts the same pair, unchecked;
- *   `resumeEntryInscription` does so only when `catchUp` says to resume that
- *   pair. A replacement is a new `prepareEntryInscription`, never a silent
- *   re-sign (P9.6).
+ *   With the recovery store, a pair for the same entry that can still land
+ *   refuses a new one (PAIR_IN_FLIGHT) unless `replaces` names it (P9.6). The
+ *   store must be passed, or `recoveryStore: null` to skip that guard
+ *   explicitly (`inFlightGuard: "skipped"`); omitting it is refused
+ *   (RECOVERY_STORE_REQUIRED).
+ * - `submitEntryInscription` sends a prepared pair the first time: it checks
+ *   again that the entry is the next one Bitcoin can accept, that no other
+ *   pair for it can still land, and verifies the log through it (P9.18), then
+ *   persists and broadcasts. `resumeEntryInscription` rebroadcasts a recorded
+ *   pair only when `catchUp` says to resume exactly it.
+ * - `submitPreparedInscriptionOnSat` and `resumeInscriptionOnSat`, re-exported
+ *   from the sat builder, are the unchecked low-level calls: they persist and
+ *   broadcast the stored bytes and know nothing of Originals. Use them only
+ *   for a pair just checked, or to force a rebroadcast `catchUp` refuses. A
+ *   replacement is a new `prepareEntryInscription`, never a silent re-sign
+ *   (P9.6).
  * - `catchUp` is one step of publishing the queue: it re-reads Bitcoin, finds
  *   any recorded pair for the next inscription, and says whether to resume
  *   it, wait for it, prepare the next one, or stop. A pair can still land
@@ -57,11 +66,14 @@
  *   a strictly greater height (P9.13). Editor entries are published like
  *   author entries.
  * - `readAnchored` reads the sat back; a broadcast or pending transaction never
- *   advances the published boundary (P9.4).
+ *   advances the published boundary (P9.4). Every read can compare several
+ *   indexes (`indexes`), as P9.10 recommends: inscriptions they disagree on
+ *   are missing evidence, and catch-up waits for Bitcoin.
  * - `transferHandoff` and `verifyHandoff`: when the anchoring sat is
- *   transferred, the sender exports the resource bytes and off-chain signer
- *   DID histories it holds, and the recipient verifies them against the sat
- *   (P9.18). Nothing guarantees their replication.
+ *   transferred, the sender exports, through the head Bitcoin accepts, the
+ *   resource bytes and off-chain signer DID histories it holds, and the
+ *   recipient verifies them against the sat it received (P9.18). Nothing
+ *   guarantees their replication.
  */
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -80,6 +92,7 @@ import { prepareInscriptionOnSat, type InscribeOnSatParams, type PreparedInscrip
 import {
   INSCRIPTION_RECORD_STATES,
   resumeInscriptionOnSat,
+  submitPreparedInscriptionOnSat,
   validatePreparedInscriptionOnSat,
   type InscriptionRecoveryRecord,
   type InscriptionRecoveryStore,
@@ -89,6 +102,12 @@ import { readEvidence } from "./evidence.js";
 import { InscriptionClock, satEvidence } from "./bitcoin.js";
 import type { EvidencePackage, LoadedEvidence, OriginalView, OriginalsSDK } from "./sdk.js";
 
+/**
+ * The sat builder's unchecked low-level calls, re-exported: they persist and
+ * broadcast stored bytes and know nothing of Originals. Prefer
+ * `submitEntryInscription` and `resumeEntryInscription`, which check the
+ * entry is still next and verify the log through it first (P9.6, P9.18).
+ */
 export { submitPreparedInscriptionOnSat, resumeInscriptionOnSat } from "../bitcoin/inscribe-on-sat.js";
 
 type Category = ConstructorParameters<typeof OriginalsError>[0];
@@ -163,7 +182,10 @@ export type Publication =
    * A recorded anchoring pair was submitted, but neither its commit nor its
    * reveal is observed: the node rejected or evicted it, or the provider
    * cannot see its mempool. Not pending acceptance: nothing shows Bitcoin has
-   * it. `catchUp` says whether to resume the same pair (P9.6).
+   * it. `catchUp` says whether to resume the same pair (P9.6). PROVISIONAL:
+   * P9.18 names one label, pending Bitcoin acceptance, until confirmation;
+   * this splits off the case where nothing shows the network has the pair
+   * (a spec question, see ORIGINALS.md).
    */
   | "submitted-unobserved"
   /** No anchor on Bitcoin and none known in flight. */
@@ -327,13 +349,18 @@ export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | 
    */
   versionId?: string;
   /**
-   * The writer's recovery store (and, if it cannot list, `recoveryIds`).
-   * Given, a pair for the same entry that can still land refuses the new one
-   * (PAIR_IN_FLIGHT): retrying it is `resumeInscriptionOnSat`, not a second
-   * pair (P9.6). Nothing is saved here; submitting saves.
+   * The writer's recovery store (and, if it cannot list, `recoveryIds`):
+   * a pair for the same entry that can still land refuses the new one
+   * (PAIR_IN_FLIGHT): retrying it is `resumeEntryInscription`, not a second
+   * pair (P9.6). Nothing is saved here; submitting saves. Required: pass
+   * `null` to skip the guard deliberately (the result says
+   * `inFlightGuard: "skipped"`); omitted, the call is refused
+   * (RECOVERY_STORE_REQUIRED).
    */
-  recoveryStore?: InscriptionRecoveryStore;
+  recoveryStore: InscriptionRecoveryStore | null;
   recoveryIds?: Iterable<string>;
+  /** Further indexes whose reads of the sat are compared with `provider`'s (P9.10). */
+  indexes?: SatIndexRead[];
   /**
    * The recovery ids (or inscription ids) of in-flight pairs this one
    * deliberately replaces (P9.6). Their inputs are the same sat-holding
@@ -353,19 +380,24 @@ export interface PreparedEntryInscription {
   remaining: number;
   /** What Bitcoin will not hold, through `versionId` (P9.18). */
   offChain: OffChainEvidence;
+  /** `checked` with a recovery store; `skipped` when `recoveryStore: null` was passed (P9.6). */
+  inFlightGuard: "checked" | "skipped";
   prepared: PreparedInscriptionOnSat;
 }
 
 /** Build (not broadcast) the pair that publishes the next committed entry on the anchoring sat. */
 export async function prepareEntryInscription(params: EntryInscriptionParams): Promise<PreparedEntryInscription> {
-  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], ...rest } = params;
+  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], indexes, ...rest } = params;
+  if (recoveryStore === undefined) {
+    refuse("invalid-evidence", "RECOVERY_STORE_REQUIRED", "pass the writer's recoveryStore, so a pair that can still land is not prepared twice (P9.6), or recoveryStore: null to skip that check deliberately");
+  }
   const log = await storedLog(sdk, did);
   if (NETWORK[log.sat.network] !== params.network) {
     refuse("invalid-evidence", "NETWORK_MISMATCH", `${log.sat.did} is a ${log.sat.network} sat; the writer is on ${params.network}`);
   }
   // A log over the limit through the anchoring entry can never be anchored (P9.17).
   checkSize(log, log.anchor, bodyFor(log, log.anchor));
-  const { pending, found } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
+  const { pending, found } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
   const target = versionId ?? pending.next;
   if (target === null) refuse("invalid-evidence", "NOTHING_TO_INSCRIBE", `Bitcoin already shows the committed head ${pending.committed}`);
   const index = log.ids.indexOf(target);
@@ -396,7 +428,51 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     },
   });
   const carries = index === log.anchor ? log.ids.slice(0, index + 1) : [target];
-  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, offChain, prepared };
+  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", prepared };
+}
+
+export interface SubmitEntryParams extends ReadAnchoredOptions {
+  sdk: OriginalsSDK;
+  did: string;
+  /** The pair `prepareEntryInscription` returned. */
+  pair: PreparedEntryInscription;
+  /** The node that broadcasts. */
+  provider: OrdinalsProvider;
+  recoveryStore: InscriptionRecoveryStore;
+  /** Recovery ids (or inscription ids) of in-flight pairs this one deliberately replaces (P9.6). */
+  replaces?: string[];
+}
+
+/**
+ * Send a prepared pair the first time, checked (P9.6, P9.18). Time passes
+ * between preparing and sending, so it re-reads the sat: the entry must still
+ * be the next one Bitcoin can accept (HEAD_NOT_NEXT), no other recorded pair
+ * for it may be able to land (PAIR_IN_FLIGHT, unless `replaces` names it),
+ * the pair must inscribe exactly the stored bytes (PAIR_BODY_MISMATCH), and
+ * the stored log must verify through the entry again (ANCHORING_NOT_VERIFIED,
+ * ENTRY_NOT_VERIFIED). Then it persists and broadcasts, as
+ * `submitPreparedInscriptionOnSat` does. Nothing is sent when it refuses.
+ */
+export async function submitEntryInscription(params: SubmitEntryParams): Promise<InscribeOnSatResult> {
+  const { sdk, did, pair, provider, recoveryStore, replaces = [], ...read } = params;
+  const log = await storedLog(sdk, did);
+  const index = log.ids.indexOf(pair.versionId);
+  if (index < 0) refuse("invalid-evidence", "ENTRY_NOT_STORED", `${pair.versionId} is not in the stored log of ${did}`);
+  const body = inscribedBytes(pair.prepared);
+  if (!body || !sameBytes(body, bodyFor(log, index)) || pair.prepared.satoshi !== log.sat.sat) {
+    refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored bytes of ${pair.versionId} on ${log.sat.did}`);
+  }
+  const { pending, found } = await observe(sdk, did, log, { ...read, provider, recoveryStore });
+  if (pending.next !== pair.versionId) {
+    refuse("stale-parent", "HEAD_NOT_NEXT", `${pair.versionId} is not the next entry Bitcoin can accept (${pending.next ?? "none: Bitcoin shows the committed head"}); nothing is sent`);
+  }
+  const others = (found?.inFlight ?? []).filter((c) => c.record.recoveryId !== pair.prepared.commitTxId && !replaces.includes(c.record.recoveryId) && !replaces.includes(c.record.prepared.inscriptionId));
+  if (others.length > 0) {
+    const ids = others.map((c) => c.record.recoveryId);
+    refuse("stale-parent", "PAIR_IN_FLIGHT", `another recorded pair for ${pair.versionId} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` (P9.6)`, { recoveryIds: ids });
+  }
+  await verifyThrough(sdk, did, log, index);
+  return submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore });
 }
 
 export interface CatchUpParams extends ReadAnchoredOptions {
@@ -591,7 +667,7 @@ async function observe(sdk: OriginalsSDK, did: string, log: StoredLog, options: 
   const { recoveryStore, recoveryIds, ...read } = options;
   const ids = recoveryStore ? await recoveryIdsOf(recoveryStore, recoveryIds) : undefined;
   const { evidence, holding } = await readSatHeld(log.sat, read);
-  const view = await sdk.get(did, { bitcoin: [evidence] });
+  const view = await sdk.get(did, { bitcoin: evidence });
   const base = pendingFrom(did, log, view, "not-anchored");
   const found = base.next !== null && recoveryStore && ids
     ? await recorded(log, view, holding, bodyFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
@@ -663,11 +739,27 @@ export async function resumeEntryInscription(params: CatchUpParams & { recoveryI
   return resumeInscriptionOnSat({ recoveryId: params.recoveryId, provider: params.provider, recoveryStore: params.recoveryStore });
 }
 
+/** One more index's read of the sat (P9.10, P9.11). */
+export interface SatIndexRead {
+  provider: Pick<OrdinalsProvider, "getSatSnapshot" | "getTransactionStatus">;
+  /** Which index serves it, reported as used. */
+  index: string;
+}
+
 export interface ReadAnchoredOptions {
   provider: Pick<OrdinalsProvider, "getSatSnapshot" | "getTransactionStatus">;
   clock: InscriptionClock;
   /** Which index serves the sat read, reported as used (P9.11; `satEvidence`). */
   index: string;
+  /**
+   * Further independent indexes to read the sat from (P9.10 SHOULD: one you
+   * run yourself, or two independent ones). Every read is compared: an
+   * inscription they place differently is missing evidence, an anchor they
+   * disagree on leaves the Original `unverified`, and `catchUp` waits for
+   * Bitcoin (`wait-for-bitcoin`) instead of preparing. `provider` stays the
+   * node that reports transactions.
+   */
+  indexes?: SatIndexRead[];
   /**
    * The writer's recovery store, to label a broadcast anchor
    * `pending-bitcoin-acceptance` or `submitted-unobserved` (P9.18). Omitted,
@@ -692,31 +784,44 @@ export async function readAnchored(sdk: OriginalsSDK, did: string, options: Read
   return { ...view, publication: pending.publication, recoveryIssues: pending.recoveryIssues };
 }
 
-/** One index's complete read of a sat, as verifier evidence. */
-async function readSat(sat: StoredLog["sat"], options: Pick<ReadAnchoredOptions, "provider" | "clock" | "index">): Promise<SatEvidence> {
+type SatReadOptions = Pick<ReadAnchoredOptions, "provider" | "clock" | "index" | "indexes">;
+
+/** Every index's complete read of a sat, as verifier evidence. */
+async function readSat(sat: StoredLog["sat"], options: SatReadOptions): Promise<SatEvidence[]> {
   return (await readSatHeld(sat, options)).evidence;
 }
 
-/** The read as evidence, and the outpoint the read says holds the sat now (whether or not an anchor is accepted). */
-async function readSatHeld(sat: StoredLog["sat"], options: Pick<ReadAnchoredOptions, "provider" | "clock" | "index">): Promise<{ evidence: SatEvidence; holding?: string }> {
-  if (!options.provider.getSatSnapshot) refuse("incomplete-evidence", "SAT_SNAPSHOT_UNSUPPORTED", "the provider cannot read a complete sat");
-  const snapshot = await options.provider.getSatSnapshot(sat.sat);
-  if (snapshot.network !== NETWORK[sat.network] || snapshot.sat !== sat.sat) {
-    refuse("invalid-evidence", "NETWORK_MISMATCH", `the provider read sat ${snapshot.sat} on ${snapshot.network}, not ${sat.did}`);
+/**
+ * The reads as evidence, one per index, and the outpoint they say holds the
+ * sat now (whether or not an anchor is accepted); none when they disagree.
+ */
+async function readSatHeld(sat: StoredLog["sat"], options: SatReadOptions): Promise<{ evidence: SatEvidence[]; holding?: string }> {
+  const reads: SatIndexRead[] = [{ provider: options.provider, index: options.index }, ...(options.indexes ?? [])];
+  const evidence: SatEvidence[] = [];
+  const holdings = new Set<string | undefined>();
+  for (const { provider, index } of reads) {
+    if (!provider.getSatSnapshot) refuse("incomplete-evidence", "SAT_SNAPSHOT_UNSUPPORTED", `the provider for ${index} cannot read a complete sat`);
+    const snapshot = await provider.getSatSnapshot(sat.sat);
+    if (snapshot.network !== NETWORK[sat.network] || snapshot.sat !== sat.sat) {
+      refuse("invalid-evidence", "NETWORK_MISMATCH", `${index} read sat ${snapshot.sat} on ${snapshot.network}, not ${sat.did}`);
+    }
+    const satpoint = snapshot.ownership.satpoint;
+    const ownerConfirmations = satpoint ? (await provider.getTransactionStatus(satpoint.split(":")[0])).confirmations ?? 0 : 0;
+    evidence.push(await satEvidence(snapshot, { clock: options.clock, ownerConfirmations, index }));
+    holdings.add(satpoint ? satpoint.split(":").slice(0, 2).join(":").toLowerCase() : undefined);
   }
-  const satpoint = snapshot.ownership.satpoint;
-  const ownerConfirmations = satpoint ? (await options.provider.getTransactionStatus(satpoint.split(":")[0])).confirmations ?? 0 : 0;
-  const evidence = await satEvidence(snapshot, { clock: options.clock, ownerConfirmations, index: options.index });
-  return { evidence, ...(satpoint ? { holding: satpoint.split(":").slice(0, 2).join(":").toLowerCase() } : {}) };
+  const [holding] = holdings;
+  return { evidence, ...(holdings.size === 1 && holding !== undefined ? { holding } : {}) };
 }
 
 /** What the sender of an anchoring sat gives its recipient (P9.18). */
 export interface TransferHandoff {
   /**
-   * An evidence package (P7.1) through `checkpoint` (default: the committed
-   * head): the log, the DID histories of its did:vh and did:webvh signers and
-   * the resource bytes this SDK holds. A did:btco signer's history is read
-   * from Bitcoin and is listed in the manifest as missing.
+   * An evidence package (P7.1) through the head Bitcoin accepts (or the
+   * committed head, or an exact checkpoint, when asked): the log, the DID
+   * histories of its did:vh and did:webvh signers and the resource bytes this
+   * SDK holds. A did:btco signer's history is read from Bitcoin and is listed
+   * in the manifest as missing.
    */
   package: EvidencePackage;
   /** What the package carries that Bitcoin does not, and whether this SDK held each. */
@@ -724,27 +829,58 @@ export interface TransferHandoff {
 }
 
 /**
- * For the recipient of the anchoring sat: the resource bytes and off-chain
- * signer DID histories this SDK holds (P9.18 SHOULD). Transferring the sat
- * transfers the Original; this only hands over evidence, and nothing
- * guarantees its replication. The recipient's SDK should check it with
- * `verifyHandoff` against the sat rather than trust it.
+ * Through which head a handoff runs. By default the head Bitcoin accepts,
+ * read from the sat with these options: entries committed locally but not
+ * inscribed are not the recipient's Original (P9.12) and stay out.
+ * `{ through: "committed" }` hands over the committed head instead (entries
+ * Bitcoin does not show yet included, for a recipient who will inscribe
+ * them), and `{ checkpoint }` an exact entry.
  */
-export async function transferHandoff(sdk: OriginalsSDK, did: string, options: { checkpoint?: string } = {}): Promise<TransferHandoff> {
-  const pkg = await sdk.package(did, options);
+export type TransferHandoffOptions = (SatReadOptions & { through?: "accepted" }) | { through: "committed" } | { checkpoint: string };
+
+/**
+ * For the recipient of the anchoring sat: the resource bytes and off-chain
+ * signer DID histories this SDK holds (P9.18 SHOULD), through the head
+ * Bitcoin accepts unless asked otherwise (`TransferHandoffOptions`).
+ * Transferring the sat transfers the Original; this only hands over evidence,
+ * and nothing guarantees its replication. The recipient's SDK should check it
+ * with `verifyHandoff` against the sat it received rather than trust it.
+ */
+export async function transferHandoff(sdk: OriginalsSDK, did: string, options: TransferHandoffOptions): Promise<TransferHandoff> {
+  let checkpoint: string | undefined;
+  if ("checkpoint" in options) checkpoint = options.checkpoint;
+  else if (options.through !== "committed") {
+    if (!options || !("provider" in options) || !options.provider) {
+      refuse("incomplete-evidence", "SAT_READ_REQUIRED", "a handoff runs through the head Bitcoin accepts: pass the sat read (provider, clock, index), or through: \"committed\"");
+    }
+    const pending = await nextPendingEntry(sdk, did, options);
+    if (pending.accepted === null) {
+      refuse("incomplete-evidence", "NOT_ANCHORED_ON_BITCOIN", `Bitcoin does not show ${did}'s anchor on ${pending.sat} (${pending.view.report.anchoring?.status ?? "unverified"}): there is no accepted head to hand over`);
+    }
+    checkpoint = pending.accepted;
+  }
+  const pkg = await sdk.package(did, checkpoint === undefined ? {} : { checkpoint });
   const loaded = await sdk.load(pkg.bytes);
   return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report) };
 }
 
 /**
- * The recipient's check of a handoff (P9.18): read the sat the package's log
- * names and verify the package against it, storing nothing. Bitcoin decides
- * the log (P9.17); the package supplies identity evidence and bytes, each
- * checked: history, author binding, identity evidence and resource
- * availability are reported separately in `report`.
+ * The recipient's check of a handoff (P9.18): read the sat it received
+ * (`expectedSat`, its did:btco alias) and verify the package against it,
+ * storing nothing. A package whose log anchors to another sat is refused
+ * (HANDOFF_SAT_MISMATCH): it is not the Original the recipient holds. Bitcoin
+ * decides the log (P9.17); the package supplies identity evidence and bytes,
+ * each checked: history, author binding, identity evidence and resource
+ * availability are reported separately in `report`. Ownership is the sat's
+ * holder (P9.11): compare `report.ownership.output` with the output the sat
+ * was received in, and `report.ownership.confirmations` with your policy.
  */
-export async function verifyHandoff(sdk: OriginalsSDK, zip: Uint8Array, options: Pick<ReadAnchoredOptions, "provider" | "clock" | "index">): Promise<LoadedEvidence> {
+export async function verifyHandoff(sdk: OriginalsSDK, zip: Uint8Array, options: SatReadOptions & { expectedSat: string }): Promise<LoadedEvidence> {
+  const expected = parseBtcoAlias(options.expectedSat);
   const { log, manifest } = readEvidence(zip);
   const { sat } = parseLines(manifest.original, log);
-  return sdk.load(zip, { bitcoin: [await readSat(sat, options)] });
+  if (sat.did !== expected.did) {
+    refuse("invalid-evidence", "HANDOFF_SAT_MISMATCH", `the package anchors ${manifest.original} to ${sat.did}, not ${expected.did}, the sat received`);
+  }
+  return sdk.load(zip, { bitcoin: await readSat(sat, options) });
 }
