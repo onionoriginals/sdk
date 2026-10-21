@@ -20,27 +20,44 @@
  *    entry that chains to any other entry, to none, or that was changed after
  *    signing, does not extend the head and is a stale-parent conflict naming
  *    the head.
- * 3. The head log plus the entry must verify under the profile
- *    (`verifyOriginal`: VH history, author binding and, through it, any
- *    editor rule the profile has; complete identity evidence), and every
- *    resource the entry introduces must arrive with bytes matching its digest.
- *    Identity evidence is the submitted DID log of each signer where it
- *    extends the one the host holds (else the host's); a submitted log that
- *    diverges from the stored one is refused.
- * 4. Durable before visible (P6.2): new resource bytes and signer DID logs are
+ * 3. Cheap checks first (C7): the entry carries one proof, by the signer it
+ *    names, who is the author or holds a grant in the head's state, and the
+ *    proof verifies with that signer's key at the named version in the DID
+ *    log the host would use (422 proof_invalid otherwise). Then the head log
+ *    plus the entry must verify under the profile (`verifyOriginal`: VH
+ *    history, author binding and, through it, any editor rule the profile
+ *    has; complete identity evidence), and every resource the entry
+ *    introduces must arrive with bytes matching its digest. Identity evidence
+ *    is the submitted DID log of each signer where it extends the one the
+ *    host holds (else the host's); a submitted log that diverges from the
+ *    stored one is refused.
+ * 4. The candidate head must be current apart from freshness: an entry by a
+ *    key the signer's latest DID state no longer lists (P7.9), by a
+ *    deactivated DID (P6.5, P5.18), or that leaves the Original otherwise not
+ *    current, can never be current and is refused (422 entry_not_current).
+ *    Freshness the host cannot establish is not a refusal.
+ * 5. Durable before visible (P6.2): new resource bytes and signer DID logs are
  *    written first (each an fsynced atomic replace), then the asset log, the
  *    commit point that publishes the new head, then the manifest naming it.
- *    The answer follows. A crash before the log write leaves only staged
- *    bytes; one after it leaves the manifest a step behind until the next
- *    save or byte-identical retry repairs it.
+ *    Once the log is written the save is accepted, whatever happens to the
+ *    manifest: a manifest a step behind is repaired by the next request for
+ *    the Original. Resource bytes are served only once the accepted log lists
+ *    them (originals-store.ts), so a save that fails before the log write
+ *    publishes nothing.
+ *
+ * Bounds (PROVISIONAL): the body is read with a byte counter (body.ts); at
+ * most MAX_IDENTITIES signer DID logs of MAX_IDENTITY_BYTES each and
+ * ORIGINALS_LIMITS.resources resources per submission; at most MAX_QUEUED
+ * submissions waiting per Original (503 busy past that).
  *
  * The host stores the exact submitted line. It never re-signs, rebases,
  * reorders or changes a submission, and a refused one writes nothing.
  *
  * Atomicity: one in-process queue per Original serializes submissions, and
  * the head comparison and the log replace run in one synchronous step that
- * first re-reads the log, so an owner's upload in between makes the
- * submission start over rather than race. This assumes ONE server process per
+ * first re-reads the log, and the signer DID logs and resources verification
+ * used, so an owner's upload in between makes the submission start over
+ * rather than race (P1). This assumes ONE server process per
  * data directory, which serve.ts enforces with its instance lock
  * (instance-lock.ts). Several instances would need a shared compare-and-swap
  * on the head: a database row or object-store conditional write keyed by the
@@ -53,9 +70,10 @@
  * against the owner's quota. PROVISIONAL: whether a host should require more
  * of a caller who is not the namespace owner is an open deployment question.
  */
+import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
-import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
+import { ORIGINALS_LIMITS, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { authorPath } from '@originals/sdk/originals';
 import { json } from './router';
 import { signedMediaType } from './hosted-layout';
@@ -66,6 +84,18 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const VERSION_ID = /^(\d+)-(.+)$/;
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const encoder = new TextEncoder();
+
+/** PROVISIONAL bounds on one submission and on the queue for one Original. */
+export const SUBMISSION_LIMITS = Object.freeze({
+  /** The author and every editor a state can grant (P5.15, P7.7). */
+  identities: ORIGINALS_LIMITS.editors + 1,
+  identityBytes: 2 * 1024 * 1024,
+  resources: ORIGINALS_LIMITS.resources,
+  queued: 8,
+});
+
+/** Reasons that only say the host cannot establish freshness; any other keeps the head from being current. */
+const FRESHNESS_ONLY = new Set(['asset-freshness-not-established', 'author-freshness-not-established', 'editor-freshness-not-established']);
 
 export interface ParsedSubmission {
   original: string;
@@ -106,6 +136,7 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
   const resources = new Map<string, Uint8Array>();
   const raw = b.resources ?? {};
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return refuse(400, 'bad_request');
+  if (Object.keys(raw as Record<string, unknown>).length > SUBMISSION_LIMITS.resources) return refuse(400, 'too_many_resources');
   for (const [digest, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!DIGEST.test(digest) || typeof value !== 'string' || !BASE64.test(value)) return refuse(400, 'bad_request');
     const bytes = new Uint8Array(Buffer.from(value, 'base64'));
@@ -115,8 +146,10 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
   const identities: AuthorDidEvidence[] = [];
   const ids = b.identities ?? [];
   if (!Array.isArray(ids)) return refuse(400, 'bad_request');
+  if (ids.length > SUBMISSION_LIMITS.identities) return refuse(400, 'too_many_identities');
   for (const i of ids as Array<Record<string, unknown>>) {
     if (typeof i !== 'object' || i === null || typeof i.did !== 'string' || typeof i.log !== 'string') return refuse(400, 'bad_request');
+    if (encoder.encode(i.log).length > SUBMISSION_LIMITS.identityBytes) return refuse(413, 'identity_too_large', { did: i.did });
     identities.push({ did: i.did, log: i.log, ...(i.witness !== undefined ? { witness: i.witness } : {}) });
   }
   return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities };
@@ -157,6 +190,41 @@ function signerDids(lines: string[]): string[] {
   return [...dids];
 }
 
+/**
+ * The proof check that needs no history verification (C7): the signer's key
+ * at the version the entry names, read from `log`, verifies the entry's one
+ * proof. Undefined when `log` does not show that version or key, which full
+ * verification then decides; false when the key is there and the proof does
+ * not verify with it, which full verification would refuse too.
+ */
+function proofVerifies(entry: JsonObject, signer: { verificationMethod: string; versionId: string }, log: string): boolean | undefined {
+  const proofs = entry.proof;
+  if (!Array.isArray(proofs) || proofs.length !== 1 || !isJsonObject(proofs[0])) return false;
+  const proof = proofs[0] as unknown as DataIntegrityProof;
+  if (proof.verificationMethod !== signer.verificationMethod) return false;
+  let document: Record<string, unknown> | undefined;
+  for (const line of log.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const version = JSON.parse(line) as { versionId?: unknown; state?: unknown };
+      if (version.versionId === signer.versionId && isJsonObject(version.state as never)) document = version.state as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!document || typeof document.id !== 'string') return undefined;
+  const docId = document.id;
+  const methods = [document.verificationMethod, document.assertionMethod].flatMap((list) => (Array.isArray(list) ? list : []));
+  const vm = methods.find((m) => isJsonObject(m as never) && typeof (m as { id?: unknown }).id === 'string' &&
+    ((m as { id: string }).id === signer.verificationMethod || `${docId}${(m as { id: string }).id}` === signer.verificationMethod)) as { publicKeyMultibase?: unknown } | undefined;
+  if (!vm || typeof vm.publicKeyMultibase !== 'string') return undefined;
+  try {
+    return verifyProof(entry, proof, vm.publicKeyMultibase);
+  } catch {
+    return undefined;
+  }
+}
+
 function text(bytes: Uint8Array): string | null {
   try {
     return decoder.decode(bytes);
@@ -172,16 +240,33 @@ function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
 export function createSharedSaves(deps: { store: OriginalsStore; now: () => number }) {
   const { store } = deps;
   const queues = new Map<string, Promise<unknown>>();
+  const waiting = new Map<string, number>();
 
-  /** Run `fn` after every earlier submission for the same Original has finished. */
-  function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const run = (queues.get(key) ?? Promise.resolve()).then(fn, fn);
+  /** Run `fn` after every earlier submission for the same Original has finished; undefined when too many wait. */
+  function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> | undefined {
+    const count = waiting.get(key) ?? 0;
+    if (count >= SUBMISSION_LIMITS.queued) return undefined;
+    waiting.set(key, count + 1);
+    const run = (queues.get(key) ?? Promise.resolve()).then(fn, fn).finally(() => {
+      const left = (waiting.get(key) ?? 1) - 1;
+      if (left > 0) waiting.set(key, left);
+      else waiting.delete(key);
+    });
     const tail = run.catch(() => undefined);
     queues.set(key, tail);
     void tail.then(() => {
       if (queues.get(key) === tail) queues.delete(key);
     });
     return run;
+  }
+
+  /** A manifest write that fails is repaired later: the log is the commit point (C6). */
+  function tryWriteManifest(owner: string, siteKey: string, original: string, head: string, report?: OriginalsReport): void {
+    try {
+      writeManifest(owner, siteKey, original, head, report);
+    } catch {
+      // The next request for this Original writes it again.
+    }
   }
 
   /** Keep the hosted manifest naming the accepted head (P9.1). */
@@ -227,10 +312,11 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       return refuse(409, 'hosted_log_invalid');
     }
     if (typeof head !== 'string' || s.original !== original) return refuse(400, 'original_mismatch');
+    // A manifest left a step behind by an earlier save is repaired first (C6).
+    tryWriteManifest(owner, siteKey, s.original, head);
 
     // 1. Byte-identical to an accepted entry: its checkpoint and the current head (P6.4).
     if (lines.includes(s.entry)) {
-      writeManifest(owner, siteKey, s.original, head);
       return { http: 200, body: { status: 'already-accepted', checkpoint: s.parsed.versionId, head } };
     }
     // 2. Only an entry whose parent is the head; never rebased (P6.7).
@@ -240,11 +326,15 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const candidate = [...lines, s.entry];
     const identities: AuthorDidEvidence[] = [];
     const keepIdentities: AuthorDidEvidence[] = [];
+    // What verification used, to compare again in the append step (P1).
+    const usedFiles = new Map<string, Uint8Array | null>();
     for (const did of signerDids(candidate)) {
       const base = `${siteKey}/originals/${authorPath(did)}`;
       const storedBytes = store.readHosted(`${base}/did.jsonl`);
       const stored = storedBytes ? text(storedBytes) : null;
       const witnessBytes = store.readHosted(`${base}/did-witness.json`);
+      usedFiles.set(`${base}/did.jsonl`, storedBytes);
+      usedFiles.set(`${base}/did-witness.json`, witnessBytes);
       const submitted = s.identities.find((i) => i.did === did) as (AuthorDidEvidence & { log: string }) | undefined;
       if (submitted && (stored === null || (submitted.log.startsWith(stored) && submitted.log !== stored))) {
         identities.push(submitted);
@@ -261,6 +351,18 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
         return refuse(422, 'identity_evidence_conflict', { did });
       }
     }
+    // 3a. Cheap checks before full verification (C7): the signer is the author or granted in the
+    // head's state, and its key at the named version verifies the one proof.
+    const headState = lineState(lines[lines.length - 1]) as { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } } | undefined;
+    const state = lineState(s.entry) as { author?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown }; editor?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown } } | undefined;
+    const signer = state?.editor ?? state?.author;
+    if (!signer || typeof signer.did !== 'string' || typeof signer.verificationMethod !== 'string' || typeof signer.versionId !== 'string') return refuse(422, 'entry_invalid');
+    const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
+    if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
+    const signerLog = identities.find((i) => i.did === signer.did)?.log;
+    const verifies = typeof signerLog === 'string' ? proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog) : undefined;
+    if (verifies === false) return refuse(422, 'proof_invalid');
+
     const entryState = lineState(s.entry) as { transitions?: Array<{ to?: unknown }> } | undefined;
     const added = new Set((entryState?.transitions ?? []).map((t) => t.to).filter((d): d is string => typeof d === 'string'));
     for (const [digest, bytes] of s.resources) {
@@ -283,9 +385,20 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       report.head === s.parsed.versionId &&
       report.resources.versions.filter((v) => v.versionId === s.parsed.versionId).every((v) => v.bytes === 'verified');
     if (!ok) return refuse(422, 'entry_invalid', { reasons: report.reasons, failure: report.history.failure ?? null });
+    // 4. Never accept a head that can never be current (P7.9, P6.5, P5.18); freshness alone is no refusal.
+    const blocking = report.reasons.filter((r) => !FRESHNESS_ONLY.has(r));
+    if (blocking.length > 0) return refuse(422, 'entry_not_current', { reasons: blocking });
 
-    // 4. One synchronous step: compare the head again, then store durably and publish (P6.2).
+    // 5. One synchronous step: compare the head, the signer DID logs and the resources verification
+    // used again (P1), then store durably and publish (P6.2).
     if (!sameBytes(store.readHosted(assetKey), logBytes)) return 'again';
+    for (const [key, used] of usedFiles) {
+      const now = store.readHosted(key);
+      if (now === null ? used !== null : used === null || !sameBytes(now, used)) return 'again';
+    }
+    for (const digest of added) {
+      if (!newBytes.has(digest) && !store.readHosted(`${siteKey}/originals/resources/${digest}`)) return 'again';
+    }
     for (const [digest, bytes] of newBytes) {
       store.saveBytes(owner, `${siteKey}/originals/resources/${digest}`, bytes, signedMediaType(s.entry, digest) ?? 'application/octet-stream');
     }
@@ -295,13 +408,14 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       if (identity.witness !== undefined) store.saveBytes(owner, `${base}/did-witness.json`, encoder.encode(JSON.stringify(identity.witness)), 'application/json');
     }
     store.saveBytes(owner, assetKey, encoder.encode(`${candidate.join('\n')}\n`), 'application/jsonl');
-    writeManifest(owner, siteKey, s.original, s.parsed.versionId, report);
+    // The log write was the commit point: from here the save is accepted (C6).
+    tryWriteManifest(owner, siteKey, s.original, s.parsed.versionId, report);
     return { http: 200, body: { status: 'accepted', checkpoint: s.parsed.versionId, head: s.parsed.versionId } };
   }
 
   /** Accept, recognise or refuse one submission for the Original hosted at `siteKey`. */
   function submit(siteKey: string, s: ParsedSubmission): Promise<Response> {
-    return serialized(siteKey, async () => {
+    const queued = serialized(siteKey, async () => {
       for (let i = 0; i < 3; i++) {
         let outcome: Outcome;
         try {
@@ -316,6 +430,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       }
       return json({ error: 'busy' }, 503, { 'Retry-After': '1' });
     });
+    return queued ?? Promise.resolve(json({ error: 'busy' }, 503, { 'Retry-After': '1' }));
   }
 
   return { submit };

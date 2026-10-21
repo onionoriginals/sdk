@@ -532,21 +532,21 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
   });
 });
 
-describe('the hosted asset log only grows (P6.7)', () => {
+describe('a hosted asset log changes only through the verifying submit route (P6.7)', () => {
   const base = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals';
-  test('an upload that does not extend the stored asset log is refused; one that extends it or repeats it is stored', async () => {
+  test('an upload creates the asset log or repeats it; one that rolls it back or extends it is refused', async () => {
     const store = tmpStore();
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const put = (body: string) =>
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(`${base}/asset/did.jsonl`)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
-    expect((await put('{"versionId":"1-a"}\n')).status).toBe(200);
-    expect((await put('{"versionId":"1-a"}\n')).status).toBe(200);
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
     expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
     const rollback = await put('{"versionId":"1-a"}\n');
     expect(rollback.status).toBe(409);
-    expect(await rollback.json()).toEqual({ error: 'stale_asset_log' });
-    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-c"}\n')).status).toBe(409);
+    expect(await rollback.json()).toEqual({ error: 'asset_log_changes_through_submit' });
+    // Extending it is a save, which goes through the submit route (shared-host PR review C4).
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n{"versionId":"3-c"}\n')).status).toBe(409);
   });
 
   test('a submission needs a signed-in caller and a well-formed site key', async () => {

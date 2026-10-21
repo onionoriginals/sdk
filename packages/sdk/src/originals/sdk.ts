@@ -968,6 +968,7 @@ export class OriginalsSDK {
 
   /** Store a verified candidate's new bytes, then replace the log atomically (P6.2). */
   private async commitCandidate(candidate: SignedCandidate): Promise<CommitResult> {
+    await this.notRefused(candidate.original, candidate.versionId);
     const stored = (await this.store.get(candidate.original))?.log ?? "";
     const log = stored + serializeLog([candidate.entry]);
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
@@ -994,14 +995,21 @@ export class OriginalsSDK {
     const stored = await this.stored(did);
     const committed = lines(stored).includes(candidate.line);
     if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
+    // Kept before it is sent, with its staged bytes, so a lost acknowledgement is retried with the
+    // same signed bytes (P6.4). Staged bytes are content addressed and never a version on their own (P6.1).
+    for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
+    await this.store.putPending(did, { parent: candidate.parent, entry: candidate.line });
     const answer = checkAnswer(
       await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries(candidate.bytes), identities: await this.authorEvidence(stored ? `${stored.trimEnd()}\n${candidate.line}` : candidate.line) }),
       did,
     );
     if (answer.status === "stale-parent") {
       if (answer.head === candidate.parent) sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host refused ${candidate.versionId} as stale while naming its parent as the head`);
-      // Staged bytes are content addressed and are never a version on their own (P6.1).
-      for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
+      await this.store.putPending(did, null);
+      // Already local history: the host and this store have diverged, which is a fork, not a refusal (P6.6).
+      if (committed) {
+        sdkError("fork", "HOST_DIVERGES", `${candidate.versionId} is committed locally but the host's head ${answer.head} does not extend it; sync keeps the host's branch beside local history (P6.6)`, { hostHead: answer.head });
+      }
       const record: StoredRefused = { label: "refused", parent: candidate.parent!, entry: candidate.line, hostHead: answer.head };
       await this.store.putRefused(did, record);
       return { status: "stale-parent", hostHead: answer.head, refused: await this.hydrateRefused(did, record) };
@@ -1010,7 +1018,28 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host answered for ${answer.checkpoint}, not ${candidate.versionId}`);
     }
     const original = committed ? await this.get(did) : (await this.commitCandidate(candidate)).original;
+    await this.store.putPending(did, null);
     return { status: answer.status, checkpoint: candidate.versionId, hostHead: answer.head, behind: answer.head !== candidate.versionId, original };
+  }
+
+  /**
+   * The candidate last sent to a shared host for `did` and not yet answered,
+   * if any: after a lost acknowledgement or a crash, `submit` it again, byte
+   * for byte, rather than preparing a new one (P6.4, P6.7).
+   */
+  async pending(did: string): Promise<SignedCandidate | undefined> {
+    const record = await this.store.getPending(did);
+    if (!record) return undefined;
+    const entry = parseJson(record.entry) as unknown as LogEntry;
+    const { proof: _proof, ...unsigned } = entry;
+    const parentLine = lines((await this.store.get(did))?.log ?? "").find((line) => (JSON.parse(line) as { versionId?: unknown }).versionId === record.parent);
+    const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
+    const bytes = new Map<string, Uint8Array>();
+    for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      const data = await this.store.getResource(t.to);
+      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+    }
+    return { kind: "candidate", original: did, parent: record.parent, versionId: entry.versionId, entry, line: record.entry, summary: summarize(unsigned, previous), bytes };
   }
 
   /** The candidates shared hosts refused for `did`, each with its draft (P6.8). */
@@ -1281,6 +1310,13 @@ export class OriginalsSDK {
         await this.store.putBranch(did, contents.log);
         return result("conflict");
       }
+    }
+    // A refused candidate is never history (P6.8): a log carrying one is kept as a branch, a fork (P6.6).
+    const refused = new Set((await this.store.getRefused(did)).map(refusedVersionId));
+    if (incoming.some((id) => refused.has(id))) {
+      await this.keepEvidence(contents, r);
+      await this.store.putBranch(did, contents.log);
+      return result("conflict");
     }
     await this.keepEvidence(contents, r);
     await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });

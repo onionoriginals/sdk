@@ -29,6 +29,7 @@ import {
 import { dirname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { untrustedHeaders } from './webvh-host';
+import { signedMediaType } from './hosted-layout';
 
 /** Bitcoin inscription state carried on an Original once it migrates to did:btco. */
 export interface OriginalInscription {
@@ -281,8 +282,9 @@ export function createOriginalsStore(opts: {
 
     claimOrVerifyOwner(target, ownerPath, subOrgId);
 
-    atomicWriteFile(target, bytes);
+    // The type first: a crash between the two never leaves bytes served with a stale type (P4).
     atomicWriteFile(target + CTYPE_SUFFIX, contentType);
+    atomicWriteFile(target, bytes);
 
     idx.sizes[key] = bytes.byteLength;
     idx.totalBytes = nextTotal;
@@ -364,10 +366,20 @@ export function createOriginalsStore(opts: {
     // TOCTOU (no window where the file disappears between two syscalls).
     try {
       if (!statSync(path).isFile()) return null;
+      // An Original's resource is public only once the hosted asset log lists it, and is served with
+      // the media type its descriptor there declares (P9.7): bytes staged by a save that never
+      // reached its log write are not served (P4).
+      const resource = /^(.*\/originals)\/resources\/([^/]+)$/.exec(key);
+      let contentType: string;
+      if (resource) {
+        const log = readHosted(`${resource[1]}/asset/did.jsonl`);
+        const mediaType = log ? signedMediaType(new TextDecoder().decode(log), resource[2]) : null;
+        if (!mediaType) return null;
+        contentType = mediaType;
+      } else {
+        contentType = existsSync(path + CTYPE_SUFFIX) ? readFileSync(path + CTYPE_SUFFIX, 'utf8') : 'application/octet-stream';
+      }
       const bytes = readFileSync(path);
-      const contentType = existsSync(path + CTYPE_SUFFIX)
-        ? readFileSync(path + CTYPE_SUFFIX, 'utf8')
-        : 'application/octet-stream';
       return new Response(new Uint8Array(bytes), { status: 200, headers: untrustedHeaders(contentType) });
     } catch {
       return null;

@@ -14,9 +14,12 @@
  * entry's validity under the profile, not the account, authorizes the change
  * (P5.4, P6.7). Accepted files stay the namespace owner's.
  *
- * An Original's hosted asset log only ever grows: an upload that does not
- * extend the stored log is refused (409), so neither a stale re-publish nor
- * anything else rolls back a head the host has accepted.
+ * Once an Original's asset log is hosted, it changes only through the
+ * verifying submit route: a PUT of the asset log is taken only when there is
+ * none yet (the first publication) or it repeats the stored log byte for byte
+ * (a retried publication, P9.2). Anything else is refused (409), so an upload
+ * can neither roll back nor advance, unverified, a head the host accepted
+ * (shared-host PR review C4).
  */
 import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router';
@@ -172,11 +175,13 @@ export function createOriginalsRoutes(deps: {
         if (attempt >= 2) return json({ error: 'identity_witness_contended' }, 409);
       }
     }
-    // The accepted head never moves back: an asset log may only be replaced by one that extends it.
+    // A hosted asset log changes only through the verifying submit route (C4): a PUT may create it
+    // or repeat it, never change it.
     if (hosted.kind === 'evidence' && key.endsWith('/originals/asset/did.jsonl')) {
       const stored = store.readHosted(key);
-      const prefix = stored ? new TextDecoder().decode(stored) : '';
-      if (!new TextDecoder().decode(bytes).startsWith(prefix)) return json({ error: 'stale_asset_log' }, 409);
+      if (stored && !(stored.length === bytes.length && stored.every((b, i) => b === bytes[i]))) {
+        return json({ error: 'asset_log_changes_through_submit' }, 409);
+      }
     }
     try {
       store.saveBytes(sub, key, write, contentType);
@@ -199,10 +204,15 @@ export function createOriginalsRoutes(deps: {
     if (siteKey === null || rest.length > 0 || !ns || !classifyHostedKey(`${siteKey}/originals/asset/did.jsonl`, ns)) {
       return json({ error: 'bad_key' }, 400);
     }
-    const declared = Number(req.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_SUBMIT_BYTES) return json({ error: 'payload_too_large' }, 413);
-    const body = await req.text();
-    if (body.length > MAX_SUBMIT_BYTES) return json({ error: 'payload_too_large' }, 413);
+    // Counted in bytes as it arrives, declared or chunked (R4).
+    const raw = await readBodyCapped(req, MAX_SUBMIT_BYTES);
+    if (!raw) return json({ error: 'payload_too_large' }, 413);
+    let body: string;
+    try {
+      body = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+    } catch {
+      return json({ error: 'bad_request' }, 400);
+    }
     const parsed = parseSubmission(body);
     if ('http' in parsed) return json(parsed.body, parsed.http);
     return sharedSaves.submit(siteKey, parsed);

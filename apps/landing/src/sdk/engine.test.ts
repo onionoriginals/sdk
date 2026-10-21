@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
-import { DemoEngine, FeatureUnavailableError } from './engine';
+import { DemoEngine, FeatureUnavailableError, StaleSaveError } from './engine';
 import { generateArtwork } from './artwork';
 import { FEATURES } from './features';
 import * as ed from '@noble/ed25519';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
+import { landingSharedHost } from './shared-host';
 
 async function created() {
   const engine = new DemoEngine();
@@ -146,5 +147,65 @@ describe('DemoEngine on the Originals Protocol', () => {
     const published = await engine.publish();
     expect(published.webvhDid).not.toBe(first.webvhDid);
     expect(published.webvhDid).toContain(second.did.slice('did:vh:'.length, 'did:vh:'.length + 16));
+  });
+});
+
+describe('DemoEngine shared-host saves after a lost answer or a refusal (P6.4, P6.8)', () => {
+  async function publishedEngine(lossy: { drop: boolean }) {
+    const h = host();
+    const secret = ed.utils.randomSecretKey();
+    const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
+    // The host takes the save, but the answer can be lost on the way back.
+    const upload = Object.assign(Object.create(Object.getPrototypeOf(h.upload)), h.upload, {
+      submit: async (key: string, body: string) => {
+        const answer = await h.upload.submit(key, body);
+        if (lossy.drop) {
+          lossy.drop = false;
+          throw new TypeError('network connection lost');
+        }
+        return answer;
+      },
+    });
+    const engine = new DemoEngine({
+      features: { hostedPublication: true },
+      publishTarget: { upload, read: h.read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+    });
+    await engine.create('Harbor at dawn', 'Orbits', generateArtwork('Harbor at dawn', 'Orbits', 7).svg);
+    const published = await engine.publish();
+    return { h, engine, published };
+  }
+
+  test('C12-128: a save whose answer was lost is retried with the same signed candidate, not a new one', async () => {
+    const lossy = { drop: true };
+    const { h, engine, published } = await publishedEngine(lossy);
+    const dusk = generateArtwork('Harbor at dusk', 'Orbits', 8).svg;
+    await expect(engine.update('Harbor at dusk', 'Orbits', dusk)).rejects.toThrow('network connection lost');
+    // The user saves again: the kept candidate is sent byte for byte and recognised; no refusal, no second entry.
+    const revised = await engine.update('Harbor at dusk', 'Orbits', dusk);
+    expect(revised.history.length).toBe(published.history.length + 1);
+    const r = await OriginalsSDK.create({ store: new MemoryStore(), authors: [] }).loadPublished(published.webvhDid!, h.read);
+    expect(r.report.head).toBe(revised.history.at(-1)!.versionId);
+  });
+
+  test('C12-126: after a refusal the engine syncs the host\'s head and reconciles the change against it, never merging', async () => {
+    const { h, engine, published } = await publishedEngine({ drop: false });
+    // Another device of the same author saves first.
+    const internals = engine as unknown as { sdk: OriginalsSDK; did: string; author(): Promise<{ ref: never; signer: never }>; authoring: { evidence: never } };
+    const { ref, signer } = await internals.author();
+    const other = OriginalsSDK.create({ store: new MemoryStore(), authors: [internals.authoring.evidence] });
+    await other.import((await internals.sdk.package(internals.did)).bytes);
+    const otherHost = landingSharedHost({ sdk: other, aliasDid: published.webvhDid!, transport: h.adapterFor('sub-other-device'), read: h.read });
+    const first = await other.sign(await other.prepareEdit(internals.did, { parent: (await other.get(internals.did)).checkpoint, name: 'Harbor at noon', author: ref }), signer);
+    expect((await other.submit(first, otherHost)).status).toBe('accepted');
+    const refusal = await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg).then(() => undefined, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(StaleSaveError);
+    const synced = await engine.syncWithHost();
+    expect(synced.history.at(-1)!.versionId).toBe(first.versionId);
+    const reconciled = await engine.reconcile((refusal as StaleSaveError).refused, 'Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg);
+    expect(reconciled.history.length).toBe(synced.history.length + 1);
+    const r = await OriginalsSDK.create({ store: new MemoryStore(), authors: [] }).loadPublished(published.webvhDid!, h.read);
+    expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.report.head).toBe(reconciled.history.at(-1)!.versionId);
+    expect(r.report.state?.name).toBe('Harbor at dusk');
   });
 });

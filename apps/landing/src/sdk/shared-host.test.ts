@@ -11,12 +11,12 @@ import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { localSigner, multibaseEncode, proofHashData } from '@originals/vh/crypto';
 import { parseJson } from '@originals/vh/json';
-import { createLog, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
+import { appendEntry, createLog, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
 import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type AuthorRef } from '@originals/vh/originals';
 import { MemoryStore, OriginalsSDK, keySigner, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { publishOriginal } from './publish';
-import { DOMAIN, SUB, host } from './publish.fixture';
+import { DOMAIN, SUB, cookieFor, host } from './publish.fixture';
 import { encodeSubmission, landingSharedHost, siteKeyOf } from './shared-host';
 
 const START = Date.now();
@@ -50,7 +50,22 @@ async function twoKeyAuthor(now: Date) {
     signer: keySigner({ keyType: 'Ed25519', secretKey: secrets[i], verificationMethod: `${authorDid}#author-${i}` }),
   });
   const evidence: AuthorDidEvidence = { did: authorDid, log: serializeLog([genesis]) };
-  return { evidence, ...key(0), second: key(1) };
+  /** v2 of the author DID: key 0 removed, or the DID deactivated. */
+  async function rotate(at: Date, opts: { deactivate?: boolean } = {}): Promise<AuthorDidEvidence> {
+    const v2 = await appendEntry(genesis, {
+      versionTime: new Date(Math.floor(at.getTime() / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      parameters: opts.deactivate ? { deactivated: true, updateKeys: [] } : {},
+      state: {
+        '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+        id: authorDid,
+        verificationMethod: [{ id: `${authorDid}#author-1`, type: 'Multikey', controller: authorDid, publicKeyMultibase: localSigner('Ed25519', secrets[1]).publicKeyMultibase }],
+        assertionMethod: [`${authorDid}#author-1`],
+      },
+      sign: signWith(update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${update.publicKeyMultibase}#${update.publicKeyMultibase}` }),
+    });
+    return { did: authorDid, log: serializeLog([genesis, v2]) };
+  }
+  return { evidence, rotate, ...key(0), second: key(1) };
 }
 
 /** A published Original, a second device that has it, and a host client for each. */
@@ -339,5 +354,170 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect((await env.a.submit(await env.edit(env.a, THEIRS), env.hostA)).status).toBe('accepted');
     await expect(env.h.upload.put(`${env.siteKey}/originals/asset/did.jsonl`, old)).rejects.toThrow(/409/);
     expect(env.hostedLines().length).toBe(3);
+  });
+});
+
+describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
+  const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
+  const { createSharedSaves, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
+  const { authorPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
+
+  /** A third device whose author DID is at v2 (key 0 removed, or deactivated). */
+  async function rotated(deactivate: boolean) {
+    const env = await shared();
+    const v2 = await env.author.rotate(new Date(START + 2000), { deactivate });
+    let tc = START + 5000;
+    const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], freshness: 'asserted', clock: () => (tc += 250) });
+    expect((await c.import((await env.a.package(env.did)).bytes)).status).toBe('imported');
+    const hostC = landingSharedHost({ sdk: c, aliasDid: env.aliasDid, transport: env.h.adapterFor(SUB2), read: env.h.read });
+    const didPath = `${env.siteKey}/originals/${authorPath(env.author.evidence.did)}/did.jsonl`;
+    return { ...env, v2, c, hostC, didPath };
+  }
+
+  test('C12-127: an entry signed with a key the latest author DID state removed is refused, never published (P7.9)', async () => {
+    const env = await rotated(false);
+    // The author saves legitimately with key 1; the host now holds the v2 author DID log.
+    expect((await env.c.submit(await env.edit(env.c, THEIRS, env.author.second), env.hostC)).status).toBe('accepted');
+    const before = env.hostedLines();
+    // A thief holding the removed key 0 signs against the new head.
+    const thief = await env.edit(env.c, MINE, env.author);
+    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'entry_not_current', reasons: expect.arrayContaining(['head-key-not-in-latest-author-document']) });
+    expect(env.hostedLines()).toEqual(before);
+  });
+
+  test('C12-127: an entry by an author whose DID the host knows is deactivated is refused (P6.5)', async () => {
+    const env = await rotated(true);
+    // The owner uploads the deactivated author DID log, which extends the stored one.
+    expect((await env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(env.didPath)}`, { method: 'PUT', body: env.v2.log as string }))).status).toBe(200);
+    const thief = await env.edit(env.a, MINE, env.author);
+    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'entry_not_current', reasons: expect.arrayContaining(['author-did-deactivated']) });
+  });
+
+  test('once hosted, the asset log changes only through the verifying submit route: a PUT that extends it is refused (C4)', async () => {
+    const env = await shared();
+    const current = readFileSync(env.logPath, 'utf8');
+    const put = (body: string) => env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(`${env.siteKey}/originals/asset/did.jsonl`)}`, { method: 'PUT', body }));
+    expect((await put(current)).status).toBe(200); // a retried publication of the same log (P9.2)
+    // A chained entry with a forged signature, appended by PUT, never becomes the head.
+    const forged = parseJson((await env.edit(env.a, THEIRS)).line) as { proof: Array<{ proofValue: string }> };
+    forged.proof[0].proofValue = `z${'1'.repeat(80)}`;
+    const res = await put(`${current}${JSON.stringify(forged)}\n`);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'asset_log_changes_through_submit' });
+    expect(readFileSync(env.logPath, 'utf8')).toBe(current);
+    const reader = await env.stranger().loadPublished(env.aliasDid, env.h.read);
+    expect(reader.verified, JSON.stringify(reader.reasons)).toBe(true);
+    // Shared saves still work.
+    expect((await env.b.submit(await env.edit(env.b, MINE), env.hostB)).status).toBe('accepted');
+  });
+
+  test('C12-128: the log write is the commit point: a manifest write that fails after it still answers accepted, and the next request repairs it (C6)', async () => {
+    const env = await shared();
+    const real = createOriginalsStore({ dataDir: env.h.dataDir });
+    let full = true;
+    const store = { ...real, saveBytes: (o: string, k: string, b: Uint8Array, c: string) => { if (full && k.endsWith('originals-evidence.json')) throw new Error('STORE_FULL'); return real.saveBytes(o, k, b, c); } };
+    const saves = createSharedSaves({ store, now: () => Date.now() });
+    const cand = await env.edit(env.b, THEIRS);
+    const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] }));
+    if ('http' in parsed) throw new Error('expected a submission');
+    const res = await saves.submit(env.siteKey, parsed);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'accepted', checkpoint: cand.versionId });
+    expect(env.hostedLines().at(-1)).toBe(cand.line);
+    const manifestPath = join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'originals-evidence.json');
+    expect((JSON.parse(readFileSync(manifestPath, 'utf8')) as { checkpoint: string }).checkpoint).not.toBe(cand.versionId);
+    full = false;
+    expect((await saves.submit(env.siteKey, parsed)).status).toBe(200); // a retry: already accepted
+    expect((JSON.parse(readFileSync(manifestPath, 'utf8')) as { checkpoint: string }).checkpoint).toBe(cand.versionId);
+  });
+
+  test('cheap checks come before full verification: a proof that does not verify with the signer key is refused at once (C7)', async () => {
+    const env = await shared();
+    const cand = parseJson((await env.edit(env.a, THEIRS)).line) as { proof: Array<{ proofValue: string }> };
+    cand.proof[0].proofValue = `z${'2'.repeat(86)}`;
+    const res = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] }, 'random-stranger');
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'proof_invalid' });
+  });
+
+  test('a submission is bounded: identity count and size, resources, and the body counted in bytes as it arrives (C7, R4)', async () => {
+    const env = await shared();
+    const cand = await env.edit(env.a, THEIRS);
+    const body = { original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS } };
+    const many = Array.from({ length: 40 }, () => env.author.evidence);
+    const tooMany = await env.post({ ...body, identities: many });
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.json()).toMatchObject({ error: 'too_many_identities' });
+    const big = await env.post({ ...body, identities: [{ did: env.author.evidence.did, log: 'x'.repeat(3 * 1024 * 1024) }] });
+    expect(big.status).toBe(413);
+    expect(await big.json()).toMatchObject({ error: 'identity_too_large' });
+    // A chunked body with no length is cut off once past the cap, not read to the end.
+    let pulled = 0;
+    const chunk = new Uint8Array(1024 * 1024).fill(0x61);
+    const stream = new ReadableStream<Uint8Array>({ pull(c) { if (pulled++ < 60) c.enqueue(chunk); else c.close(); } });
+    const url = `http://app.local/api/originals/submit/${encodeURIComponent(env.siteKey)}`;
+    // Straight to the server, as Bun.serve hands it a request (re-wrapping a streamed request is not what a server sees).
+    const chunked = await env.h.serve(new Request(url, { method: 'POST', headers: { cookie: cookieFor(SUB) }, body: stream, duplex: 'half' } as RequestInit));
+    expect(chunked.status).toBe(413);
+    expect(pulled).toBeLessThan(30);
+    // The cap counts bytes: 6 million three-byte characters are 18 MB, though 6 million characters.
+    const wide = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('€'.repeat(6_000_000))); c.close(); } });
+    expect((await env.h.serve(new Request(url, { method: 'POST', headers: { cookie: cookieFor(SUB) }, body: wide, duplex: 'half' } as RequestInit))).status).toBe(413);
+  });
+
+  test('queued submissions for one Original are bounded: past the limit the host answers busy (R4)', async () => {
+    const env = await shared();
+    const cand = await env.edit(env.a, THEIRS);
+    const body = { original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] };
+    const answers = await Promise.all(Array.from({ length: 30 }, () => env.post(body)));
+    const statuses = answers.map((r) => r.status);
+    expect(statuses).toContain(503);
+    expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
+    expect(env.hostedLines().filter((l) => l === cand.line)).toHaveLength(1);
+  });
+
+  test('identity evidence is checked again in the step that appends: a DID log changed during verification is not overwritten or ignored (P1)', async () => {
+    const env = await rotated(true);
+    const real = createOriginalsStore({ dataDir: env.h.dataDir });
+    let raced = false;
+    // The owner uploads the deactivated author DID log while the submission is being verified.
+    const now = () => {
+      if (!raced) {
+        raced = true;
+        real.saveBytes(SUB, env.didPath, new TextEncoder().encode(env.v2.log as string), 'application/jsonl');
+      }
+      return Date.now();
+    };
+    const saves = createSharedSaves({ store: real, now });
+    const thief = await env.edit(env.a, MINE, env.author);
+    const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }));
+    if ('http' in parsed) throw new Error('expected a submission');
+    const res = await saves.submit(env.siteKey, parsed);
+    expect(raced).toBe(true);
+    expect(res.status).toBe(422);
+    expect(readFileSync(join(env.h.dataDir, 'hosted', env.didPath), 'utf8')).toBe(env.v2.log as string);
+  });
+
+  test('bytes from a save that failed before its log write are not served; served resources take the log\'s media type (P4, P9.7)', async () => {
+    const env = await shared();
+    const real = createOriginalsStore({ dataDir: env.h.dataDir });
+    const store = { ...real, saveBytes: (o: string, k: string, b: Uint8Array, c: string) => { if (k.endsWith('asset/did.jsonl')) throw new Error('STORE_FULL'); return real.saveBytes(o, k, b, c); } };
+    const saves = createSharedSaves({ store, now: () => Date.now() });
+    const cand = await env.edit(env.b, THEIRS);
+    const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] }));
+    if ('http' in parsed) throw new Error('expected a submission');
+    expect((await saves.submit(env.siteKey, parsed)).status).toBe(507);
+    const resourceUrl = `http://${env.siteKey}/originals/resources/${resourceDigest(THEIRS)}`;
+    expect((await env.h.serve(new Request(resourceUrl))).status).toBe(404);
+    // Accepted later, it is served, with the media type its descriptor declares whatever the sidecar says.
+    expect((await env.b.submit(cand, env.hostB)).status).toBe('accepted');
+    writeFileSync(join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'resources', `${resourceDigest(THEIRS)}.ctype`), 'text/html');
+    const served = await env.h.serve(new Request(resourceUrl));
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/svg+xml');
   });
 });

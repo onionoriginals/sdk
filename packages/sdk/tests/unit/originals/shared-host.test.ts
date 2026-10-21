@@ -242,3 +242,62 @@ describe("shared-host saves (P6.7, P6.8)", () => {
     expect(host.submissions).toHaveLength(0);
   });
 });
+
+describe("review of the shared-host PR (C3, P2, committed candidates)", () => {
+  /** B's candidate refused by the host after A saved first. */
+  async function refusedOnB() {
+    const env = await twoDevices();
+    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    expect((await env.a.submit(theirs, env.host)).status).toBe("accepted");
+    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author }), env.signer);
+    expect((await env.b.submit(mine, env.host)).status).toBe("stale-parent");
+    return { ...env, theirs, mine };
+  }
+
+  test("C12-129: a package carrying a refused candidate is kept as a branch, never committed as history (P6.8)", async () => {
+    const env = await refusedOnB();
+    // B's other device packages the refused branch: B's committed log plus the refused entry.
+    const pkg = readEvidence((await env.b.package(env.did)).bytes);
+    const log = `${pkg.log}${env.mine.line}\n`;
+    const contents = { ...pkg, log, manifest: { ...pkg.manifest, checkpoint: env.mine.versionId, head: env.mine.versionId }, bytes: { ...pkg.bytes, [resourceDigest(MINE)]: MINE } };
+    const { writeEvidence } = await import("../../../src/originals/index.js");
+    const imported = await env.b.import(writeEvidence(contents));
+    expect(imported.status).toBe("conflict");
+    expect((await env.b.get(env.did)).checkpoint).toBe(env.parent);
+    expect(new TextDecoder().decode((await env.b.package(env.did)).bytes)).not.toContain(env.mine.versionId);
+    expect((await env.b.refused(env.did)).map((r) => r.versionId)).toEqual([env.mine.versionId]);
+  });
+
+  test("C12-128: a candidate is kept as pending before it is sent, so a lost acknowledgement is retried byte-identical (P6.4)", async () => {
+    const env = await twoDevices();
+    const candidate = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    // The host accepts, but the acknowledgement is lost.
+    const lossy: SharedHost = { submit: async (s) => { await env.host.submit(s); throw new Error("connection reset"); }, accepted: () => env.host.accepted() };
+    await expect(env.a.submit(candidate, lossy)).rejects.toThrow("connection reset");
+    const pending = await env.a.pending(env.did);
+    expect(pending?.line).toBe(candidate.line);
+    expect(pending?.bytes.get(resourceDigest(THEIRS))).toEqual(THEIRS);
+    // A fresh SDK on the same store (after a crash) retries the same bytes; the host recognises them.
+    const retried = await env.a.submit(pending!, env.host);
+    expect(retried.status).toBe("already-accepted");
+    expect((await env.a.get(env.did)).checkpoint).toBe(candidate.versionId);
+    expect(await env.a.pending(env.did)).toBeUndefined();
+    expect(env.host.lines.filter((l) => l === candidate.line)).toHaveLength(1);
+  });
+
+  test("a candidate already committed locally that the host refuses is a fork with the host, not a refused candidate (P6.6, P6.8)", async () => {
+    const env = await twoDevices();
+    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    expect((await env.a.submit(theirs, env.host)).status).toBe("accepted");
+    // B commits its own change locally first, then shares that same entry.
+    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author }), env.signer);
+    const draft = await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author });
+    const committed = await env.b.commit(draft, env.signer);
+    const storedLine = readEvidence((await env.b.package(env.did)).bytes).log.trimEnd().split("\n").at(-1)!;
+    const entry = parseJson(storedLine) as unknown as typeof mine.entry;
+    const candidate = { ...mine, entry, line: storedLine, versionId: entry.versionId };
+    await rejects(env.b.submit(candidate, env.host), "fork", "HOST_DIVERGES");
+    expect(await env.b.refused(env.did)).toEqual([]);
+    expect((await env.b.get(env.did)).checkpoint).toBe(committed.original.checkpoint);
+  });
+});

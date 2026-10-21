@@ -14,6 +14,10 @@
  * keeps the refused signed candidate, labelled `refused`, beside the
  * committed log and never in it (P6.8). Nothing that reads the committed log
  * (verification, packaging, hosted files) sees it.
+ *
+ * A candidate being sent to a shared host is kept as `pending` first, so an
+ * acknowledgement lost to a crash or the network is retried with the same
+ * signed bytes rather than a new candidate (P6.4).
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
@@ -51,6 +55,14 @@ export interface StoredRefused {
   reconciledAs?: string;
 }
 
+/** A signed candidate sent, or about to be sent, to a shared host and not yet answered (P6.4). */
+export interface StoredPending {
+  /** The checkpoint it extends; null for a genesis entry. */
+  parent: string | null;
+  /** The signed entry, exactly as submitted: one JSON line without a newline. */
+  entry: string;
+}
+
 export interface OriginalsStore {
   get(did: string): Promise<StoredOriginal | undefined>;
   /** Atomically replace the log if the stored head is `expectedHead`; otherwise a stale-parent conflict. */
@@ -72,6 +84,9 @@ export interface OriginalsStore {
   getRefused(did: string): Promise<StoredRefused[]>;
   /** Forget a refused candidate, when its signer abandons it. Reconciling never drops it (P6.8). */
   dropRefused(did: string, versionId: string): Promise<void>;
+  /** Keep the candidate being sent to a shared host; null forgets it once the host answers (P6.4). */
+  putPending(did: string, pending: StoredPending | null): Promise<void>;
+  getPending(did: string): Promise<StoredPending | undefined>;
   list(): Promise<string[]>;
 }
 
@@ -110,6 +125,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly retained = new Map<string, string>();
   private readonly branches = new Map<string, string[]>();
   private readonly refused = new Map<string, StoredRefused[]>();
+  private readonly pending = new Map<string, StoredPending>();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -177,6 +193,17 @@ export class MemoryStore implements OriginalsStore {
   dropRefused(did: string, versionId: string): Promise<void> {
     this.refused.set(did, (this.refused.get(did) ?? []).filter((r) => refusedVersionId(r) !== versionId));
     return Promise.resolve();
+  }
+
+  putPending(did: string, pending: StoredPending | null): Promise<void> {
+    if (pending) this.pending.set(did, { ...pending });
+    else this.pending.delete(did);
+    return Promise.resolve();
+  }
+
+  getPending(did: string): Promise<StoredPending | undefined> {
+    const pending = this.pending.get(did);
+    return Promise.resolve(pending ? { ...pending } : undefined);
   }
 
   /** Forget stored bytes, as a store that lost them would. */

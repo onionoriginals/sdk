@@ -395,14 +395,21 @@ await sdk.reconcile(did, {
 - **Retries (P6.4, P6.7).** A retried candidate is sent byte for byte. A host
   that already accepted it answers with its checkpoint and its current head;
   the SDK commits it locally and reports `behind: true` when the head has
-  moved on.
+  moved on. `submit` keeps the candidate as pending (`putPending`) before it
+  is sent and forgets it once the host answers, so after a lost answer or a
+  crash `sdk.pending(did)` returns it to submit again, never a new candidate
+  for the same change. A candidate already committed locally that the host
+  refuses as stale is a fork with the host (`fork`, `HOST_DIVERGES`), not a
+  refused candidate.
 - **Refused candidates (P6.8).** After a stale-parent answer the store keeps
   the refused signed entry and its new bytes (`putRefused`; the bytes are
   content addressed and are never a version on their own). Local history does
   not move. `commit`, `sign` and `submit` refuse a refused candidate with
   `CANDIDATE_REFUSED`; `package`, `hostedFiles` and verification read only the
   committed log, so a refused candidate is never packaged, published or
-  inscribed. Publishing it would fork the Original (P6.6).
+  inscribed. Publishing it would fork the Original (P6.6). A log that carries
+  a refused candidate, arriving through `import` or `sync`, is kept as a
+  branch (`conflict`) and never committed.
 - **Reconcile (P6.8).** `reconcile` fetches the host's accepted log and
   verifies it. A log that extends local history becomes local history; one
   that diverges is kept as a branch and reconcile fails with `fork`
@@ -416,8 +423,9 @@ await sdk.reconcile(did, {
   decide nothing. An entry that brings content from another branch is an
   ordinary single-parent entry on its own branch, and the fork remains (P6.6).
 
-Stores implement `putRefused`/`getRefused`/`dropRefused`; `MemoryStore` and
-`FileStore` (`<root>/originals/<scid>/refused/`) do.
+Stores implement `putRefused`/`getRefused`/`dropRefused` and
+`putPending`/`getPending`; `MemoryStore` and `FileStore`
+(`<root>/originals/<scid>/refused/`, `<root>/originals/<scid>/pending.json`) do.
 `sdk.retrieveHosted(aliasDid, fetch)` reads a hosted snapshot, unverified and
 within the `loadPublished` bounds, for a host's `accepted`.
 
@@ -426,17 +434,28 @@ format) takes `POST /api/originals/submit/<domain>/<user-slug>/o-<name>` with
 `{ original, entry, resources: { digest: base64 }, identities }` and answers
 `200 { status: "accepted" | "already-accepted", checkpoint, head }` or
 `409 { status: "stale-parent", head }`; anything else is an error. It checks
-byte-identical retries first, then that the entry chains to its head and
-verifies under the profile against it, using the submitted signer DID log
-where it extends the one it holds. It writes new bytes and DID logs, then the
-asset log (the commit point), then the manifest, and stores the exact
-submitted line. Submissions for one Original run one at a time in-process and
+byte-identical retries first, then that the entry chains to its head, then
+cheap checks (the signer is the author or granted in the head's state, and its
+key at the named version verifies the proof), then that it verifies under the
+profile against the head, using the submitted signer DID log where it extends
+the one it holds, and that the new head would be current apart from freshness
+the host cannot establish (no removed key, P7.9; no deactivated signer DID,
+P6.5, P5.18). It writes new bytes and DID logs, then the asset log (the commit
+point: the save is accepted from then on), then the manifest, which the next
+request repairs if its write failed, and stores the exact submitted line.
+Resource bytes are served only once the accepted log lists them, with the
+media type it declares. The body is read with a byte counter, and identities,
+their size, resources and queued submissions per Original are bounded
+(PROVISIONAL). Submissions for one Original run one at a time in-process and
 the head comparison and log replace are one synchronous step, which assumes
 one server process per data directory (the landing's instance lock enforces
 it); several instances would need a shared compare-and-swap on the head. Any
 signed-in caller may submit, because the signed entry authorizes the change;
-accepted files stay the namespace owner's (an open deployment question). A
-hosted asset log cannot be replaced by one that does not extend it.
+accepted files stay the namespace owner's (an open deployment question).
+Once hosted, an asset log changes only through the submit route: an upload
+(PUT) may create it or repeat it byte for byte (a retried publication, P9.2),
+never roll it back or advance it unverified; a signer's DID log and witness
+file only grow.
 
 ## Bitcoin anchoring and ownership — phase 4
 

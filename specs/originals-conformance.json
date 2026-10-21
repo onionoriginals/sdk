@@ -1557,7 +1557,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/shared-host.test.ts"
+      ]
     },
     {
       "id": "C12-130",

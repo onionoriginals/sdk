@@ -12,7 +12,7 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
 import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
@@ -266,6 +266,18 @@ export class DemoEngine {
   async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     if (!this.did || !this.view) throw new Error("Create an asset first");
     const { ref, signer } = await this.author();
+    // A save whose answer was lost is sent again first, byte for byte (P6.4).
+    await this.retryPending();
+    const input = this.changeFor(title, style, source, ref);
+    if (!input) return this.snapshot();
+    this.view = this.published() ? await this.saveThroughHost(input, signer) : (await this.sdk!.edit(this.did, { ...input, signer })).original;
+    await this.refresh();
+    this.emit("asset:updated", `Revised ${short(this.did)} at ${short(this.view.checkpoint)}`, { checkpoint: this.view.checkpoint });
+    return this.snapshot();
+  }
+
+  /** The edit that makes the current version look like this, or undefined when nothing changes. */
+  private changeFor(title: string, style: string, source: string | AssetSource, ref: AuthorRef): EditInput | undefined {
     const current = this.snapshot();
     const src = asSource(source);
     // The artwork keeps its resource id; only its bytes change (P4.1).
@@ -279,13 +291,13 @@ export class DemoEngine {
     if (
       artworkHash === current.resource.hash &&
       src.contentType === current.resource.contentType &&
-      title === this.view.state.name &&
+      title === this.view!.state.name &&
       (metadata === undefined || metadata === current.metadata?.content)
     ) {
-      return current;
+      return undefined;
     }
-    const input: EditInput = {
-      parent: this.view.checkpoint,
+    return {
+      parent: this.view!.checkpoint,
       name: title,
       resources: [
         { id: current.resource.id, bytes: artwork, mediaType: src.contentType },
@@ -293,10 +305,6 @@ export class DemoEngine {
       ],
       author: ref,
     };
-    this.view = this.published() ? await this.saveThroughHost(input, signer) : (await this.sdk!.edit(this.did, { ...input, signer })).original;
-    await this.refresh();
-    this.emit("asset:updated", `Revised ${short(this.did)} at ${short(this.view.checkpoint)}`, { checkpoint: this.view.checkpoint });
-    return this.snapshot();
   }
 
   /** Published from this engine, with hosted publication on: saves go through the host. */
@@ -310,21 +318,83 @@ export class DemoEngine {
    * A stale parent keeps the refused candidate and throws StaleSaveError.
    */
   private async saveThroughHost(input: EditInput, signer: OriginalsSigner): Promise<OriginalView> {
+    return this.answered(await this.sdk!.submit(await this.sdk!.sign(await this.sdk!.prepareEdit(this.did!, input), signer), this.sharedHost()));
+  }
+
+  /** The published Original's shared host. */
+  private sharedHost(): SharedHost {
     const target = this.target ?? this.accountTarget();
     const transport = target.upload;
     if (typeof transport.submit !== "function") throw new Error("This host does not take saves for published Originals.");
-    const host = landingSharedHost({
+    return landingSharedHost({
       sdk: this.sdk!,
       aliasDid: this.alias!.did,
       transport: { submit: (key, body) => transport.submit!(key, body) },
       read: target.read ?? publicRead,
     });
-    const result = await this.sdk!.submit(await this.sdk!.sign(await this.sdk!.prepareEdit(this.did!, input), signer), host);
+  }
+
+  /** The view a host's answer leaves; a stale parent keeps the refused candidate and throws StaleSaveError. */
+  private answered(result: SubmitResult): OriginalView {
     if (result.status === "stale-parent") {
       this.emit("asset:refused", `The host refused ${short(result.refused.versionId)}: ${short(result.hostHead)} was saved first`, { refused: result.refused.versionId, hostHead: result.hostHead });
       throw new StaleSaveError(result.refused.versionId, result.hostHead);
     }
     return result.original;
+  }
+
+  /**
+   * Send again, byte for byte, a save whose answer never came back (P6.4):
+   * the host recognises it if it took it. Never a new candidate for it.
+   */
+  private async retryPending(): Promise<void> {
+    if (!this.published()) return;
+    const pending = await this.sdk!.pending(this.did!);
+    if (!pending || pending.parent !== this.view!.checkpoint) return;
+    this.view = this.answered(await this.sdk!.submit(pending, this.sharedHost()));
+    await this.refresh();
+    this.emit("asset:updated", `Saved ${short(this.view.checkpoint)}, whose answer was lost`, { checkpoint: this.view.checkpoint });
+  }
+
+  /**
+   * After a StaleSaveError (P6.8): fetch and verify the host's accepted log
+   * and move to it when it extends local history. A host that diverges is a
+   * fork, kept beside local history; nothing is merged.
+   */
+  async syncWithHost(): Promise<DemoAssetState> {
+    if (!this.did || !this.published()) throw new Error("Publish the Original first");
+    const synced = await this.sdk!.sync(this.did, this.sharedHost());
+    this.view = synced.original;
+    await this.refresh();
+    this.emit("asset:synced", `The host's version ${short(this.view.checkpoint)} (${synced.status})`, { checkpoint: this.view.checkpoint });
+    return this.snapshot();
+  }
+
+  /**
+   * Reconcile a refused save (P6.8): the change the user now chooses, signed
+   * against the host's new head and shown as the change from it (P5.11). The
+   * refused candidate stays, labelled with what carried its change. The SDK
+   * never merges: the change is exactly what is given here.
+   */
+  async reconcile(refused: string, title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
+    if (!this.did || !this.published()) throw new Error("Publish the Original first");
+    const { ref, signer } = await this.author();
+    const result = await this.sdk!.reconcile(this.did, {
+      host: this.sharedHost(),
+      refused,
+      author: ref,
+      signer,
+      change: ({ head }) => {
+        this.view = head;
+        const input = this.changeFor(title, style, source, ref);
+        if (!input) throw new Error("Nothing to reconcile: the host's version already matches.");
+        return { name: input.name!, resources: input.resources! };
+      },
+    });
+    this.view = this.answered(result);
+    await this.refresh();
+    this.emit("asset:updated", `Reconciled at ${short(this.view.checkpoint)}`, { checkpoint: this.view.checkpoint });
+    return this.snapshot();
   }
 
   /**
