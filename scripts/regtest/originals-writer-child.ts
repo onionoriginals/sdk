@@ -105,7 +105,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
     const sdk = OriginalsSDK.create({ store: await FileStore.open(need('ORIGINALS_CHILD_READER_STORE')), authors: [] });
     const zip = new Uint8Array(await readFile(need('ORIGINALS_CHILD_PACKAGE')));
     const sat = parseBtcoAlias(need('ORIGINALS_CHILD_SAT'));
-    const snapshot = await provider.getSatSnapshot!(sat.sat);
+    const snapshot = await provider.getSatSnapshot!(sat.sat, { bodies: 'originals' });
     const satpoint = snapshot.ownership.satpoint;
     const ownerConfirmations = satpoint ? (await provider.getTransactionStatus(satpoint.split(':')[0])).confirmations ?? 0 : 0;
     const evidence = await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD_INDEX });
