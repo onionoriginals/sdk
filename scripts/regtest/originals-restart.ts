@@ -50,7 +50,7 @@ import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/Regte
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { OriginalsSDK, btcoAlias, keySigner } from '../../packages/sdk/src/originals/index';
 import { FileStore, fileRecoveryStore } from '../../packages/sdk/src/originals/fs-store';
-import { prepareEntryInscription, readAnchored, submitPreparedInscriptionOnSat } from '../../packages/sdk/src/originals/bitcoin-writer';
+import { prepareEntryInscription, readAnchored, submitEntryInscription } from '../../packages/sdk/src/originals/bitcoin-writer';
 import { ORD_INDEX, headerClock, localWallet, rpcClient } from './originals-writer-child';
 import { startRegtest } from './environment';
 
@@ -165,7 +165,8 @@ try {
   const anchored = await sdk.anchor(did, { parent: genesisId, author, signer, sat: satDid });
   const anchorId = anchored.original.checkpoint;
   const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX, recoveryStore });
-  const anchorSent = await submitPreparedInscriptionOnSat({ prepared: anchorPair.prepared, provider, recoveryStore });
+  // The checked send (P9.6, P9.10, P9.18): still next, indexes agree, the sat still in the pair's input, verified again.
+  const anchorSent = await submitEntryInscription({ sdk, did, pair: anchorPair, provider, clock, index: ORD_INDEX, recoveryStore });
   check('R01', 'the anchoring entry pair is broadcast through the file recovery store', anchorSent.broadcast === 'reveal_broadcast' && anchorPair.versionId === anchorId, anchorSent.broadcast);
   const unmined = await readAnchored(sdk, did, { provider, clock, index: ORD_INDEX, recoveryStore });
   check('R02', 'a broadcast, unmined anchor does not count (P9.4) and is labelled pending Bitcoin acceptance (P9.18)',

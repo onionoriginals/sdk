@@ -382,6 +382,12 @@ export interface PreparedEntryInscription {
   offChain: OffChainEvidence;
   /** `checked` with a recovery store; `skipped` when `recoveryStore: null` was passed (P9.6). */
   inFlightGuard: "checked" | "skipped";
+  /**
+   * The in-flight pairs this one deliberately replaces, as named when it was
+   * prepared (P9.6). `submitEntryInscription` honours them, so the
+   * replacement is not refused as PAIR_IN_FLIGHT at submit.
+   */
+  replaces: string[];
   prepared: PreparedInscriptionOnSat;
 }
 
@@ -397,7 +403,8 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
   }
   // A log over the limit through the anchoring entry can never be anchored (P9.17).
   checkSize(log, log.anchor, bodyFor(log, log.anchor));
-  const { pending, found } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
+  const { pending, found, disagreement } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
+  refuseDisagreement(did, disagreement);
   const target = versionId ?? pending.next;
   if (target === null) refuse("invalid-evidence", "NOTHING_TO_INSCRIBE", `Bitcoin already shows the committed head ${pending.committed}`);
   const index = log.ids.indexOf(target);
@@ -428,7 +435,7 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     },
   });
   const carries = index === log.anchor ? log.ids.slice(0, index + 1) : [target];
-  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", prepared };
+  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared };
 }
 
 export interface SubmitEntryParams extends ReadAnchoredOptions {
@@ -439,7 +446,10 @@ export interface SubmitEntryParams extends ReadAnchoredOptions {
   /** The node that broadcasts. */
   provider: OrdinalsProvider;
   recoveryStore: InscriptionRecoveryStore;
-  /** Recovery ids (or inscription ids) of in-flight pairs this one deliberately replaces (P9.6). */
+  /**
+   * Further recovery ids (or inscription ids) of in-flight pairs this one
+   * deliberately replaces (P9.6), in addition to the pair's own `replaces`.
+   */
   replaces?: string[];
 }
 
@@ -448,13 +458,16 @@ export interface SubmitEntryParams extends ReadAnchoredOptions {
  * between preparing and sending, so it re-reads the sat: the entry must still
  * be the next one Bitcoin can accept (HEAD_NOT_NEXT), no other recorded pair
  * for it may be able to land (PAIR_IN_FLIGHT, unless `replaces` names it),
- * the pair must inscribe exactly the stored bytes (PAIR_BODY_MISMATCH), and
- * the stored log must verify through the entry again (ANCHORING_NOT_VERIFIED,
- * ENTRY_NOT_VERIFIED). Then it persists and broadcasts, as
+ * the pair must inscribe exactly the stored bytes (PAIR_BODY_MISMATCH), the
+ * indexes read must agree (INDEXES_DISAGREE), the sat must still sit in the
+ * pair's funding input (SAT_MOVED; SAT_HOLDER_UNKNOWN when neither the read nor
+ * the funding output shows it), and the stored log must verify through the entry again
+ * (ANCHORING_NOT_VERIFIED, ENTRY_NOT_VERIFIED). Then it persists and broadcasts, as
  * `submitPreparedInscriptionOnSat` does. Nothing is sent when it refuses.
  */
 export async function submitEntryInscription(params: SubmitEntryParams): Promise<InscribeOnSatResult> {
-  const { sdk, did, pair, provider, recoveryStore, replaces = [], ...read } = params;
+  const { sdk, did, pair, provider, recoveryStore, ...read } = params;
+  const replaces = [...(pair.replaces ?? []), ...(params.replaces ?? [])];
   const log = await storedLog(sdk, did);
   const index = log.ids.indexOf(pair.versionId);
   if (index < 0) refuse("invalid-evidence", "ENTRY_NOT_STORED", `${pair.versionId} is not in the stored log of ${did}`);
@@ -462,10 +475,12 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   if (!body || !sameBytes(body, bodyFor(log, index)) || pair.prepared.satoshi !== log.sat.sat) {
     refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored bytes of ${pair.versionId} on ${log.sat.did}`);
   }
-  const { pending, found } = await observe(sdk, did, log, { ...read, provider, recoveryStore });
+  const { pending, found, disagreement, holding } = await observe(sdk, did, log, { ...read, provider, recoveryStore });
+  refuseDisagreement(did, disagreement);
   if (pending.next !== pair.versionId) {
     refuse("stale-parent", "HEAD_NOT_NEXT", `${pair.versionId} is not the next entry Bitcoin can accept (${pending.next ?? "none: Bitcoin shows the committed head"}); nothing is sent`);
   }
+  await checkSatInPair(log, pair.prepared, holding, provider);
   const others = (found?.inFlight ?? []).filter((c) => c.record.recoveryId !== pair.prepared.commitTxId && !replaces.includes(c.record.recoveryId) && !replaces.includes(c.record.prepared.inscriptionId));
   if (others.length > 0) {
     const ids = others.map((c) => c.record.recoveryId);
@@ -473,6 +488,32 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   }
   await verifyThrough(sdk, did, log, index);
   return submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore });
+}
+
+/**
+ * The pair spends the sat-holding output it was built on: if the sat has left
+ * it (or the pair's own commit output), the pair cannot land (P9.6). The sat
+ * read names the holder once the sat carries an inscription; before that (ord
+ * reports no satpoint for a sat it has no inscription on) the funding output
+ * itself is asked for its first sat, which an index refuses once it is spent.
+ */
+async function checkSatInPair(log: StoredLog, prepared: PreparedInscriptionOnSat, holding: string | undefined, provider: OrdinalsProvider): Promise<void> {
+  const [funding, commit] = pairOutputs(prepared);
+  if (holding !== undefined) {
+    if (holding === funding || holding === commit) return;
+    refuse("stale-parent", "SAT_MOVED", `${log.sat.did} is in ${holding}, not in the pair's funding input ${funding}; the pair cannot land, prepare another; nothing is sent`, { holding });
+  }
+  const first = prepared.fundingUtxos[0];
+  let sat: string;
+  try {
+    if (!provider.getFirstSatOfOutput) throw new Error("the provider cannot read an output's sats");
+    sat = await provider.getFirstSatOfOutput({ txid: first.txid, vout: first.vout });
+  } catch (error) {
+    refuse("incomplete-evidence", "SAT_HOLDER_UNKNOWN", `the read of ${log.sat.did} names no output holding the sat, and the pair's funding input ${funding} cannot be shown to hold it unspent (${error instanceof Error ? error.message : String(error)}); nothing is sent`);
+  }
+  if (sat !== log.sat.sat) {
+    refuse("stale-parent", "SAT_MOVED", `the pair's funding input ${funding} holds sat ${sat}, not ${log.sat.did}; nothing is sent`, { holding: funding });
+  }
 }
 
 export interface CatchUpParams extends ReadAnchoredOptions {
@@ -513,11 +554,15 @@ export type CatchUpStep =
    */
   | { action: "wait-for-confirmation"; versionId: string; recoveryId: string; inscriptionId: string; reason: "unconfirmed" | "not-indexed"; pending: PendingEntries }
   /**
-   * The indexes disagree on what the sat holds (anchoring `unverified`,
-   * P9.10): nothing is prepared until they agree, so a second anchor is never
-   * built on missing evidence.
+   * The indexes disagree on what the sat holds (anchoring `unverified` or
+   * `disputed` inscriptions, P9.10) or on which output holds it (`holders`,
+   * each output named): nothing is prepared, submitted or resumed until they
+   * agree, so a second anchor is never built on missing evidence and a pair
+   * the sat may have left is never labelled resumable. The same disagreement
+   * refuses `prepareEntryInscription` and `submitEntryInscription`
+   * (INDEXES_DISAGREE).
    */
-  | { action: "wait-for-bitcoin"; versionId: string; reason: "indexes-disagree"; disputed: string[]; pending: PendingEntries }
+  | { action: "wait-for-bitcoin"; versionId: string; reason: "indexes-disagree"; disputed: string[]; holders: string[]; pending: PendingEntries }
   /**
    * A recorded pair for `versionId` can still land, but the stored log no
    * longer verifies through it (P9.18): nothing is broadcast. `commit` says
@@ -642,14 +687,44 @@ async function recorded(log: StoredLog, view: OriginalView, holding: string | un
       continue;
     }
     // A pair can still land only while the sat sits in its funding input or its own outputs.
-    const first = prepared.fundingUtxos[0];
-    const outputs = [`${first.txid.toLowerCase()}:${first.vout}`, `${prepared.commitTxId}:0`, `${prepared.revealTxId}:0`];
-    if (holding !== undefined && !outputs.includes(holding)) continue;
+    // `holding` is undefined only for a single read naming no holder: indexes that disagree on it stop catch-up first.
+    if (holding !== undefined && !pairOutputs(prepared).includes(holding)) continue;
     found.live.push({ record, commit: await seen(provider, prepared.commitTxId), reveal });
   }
   found.live.sort((a, b) => rank(a) - rank(b) || (a.record.recoveryId < b.record.recoveryId ? -1 : 1));
   found.inFlight = [...found.indexed, ...found.live];
   return found;
+}
+
+/** The outputs a pair's sat passes through: its funding input, its commit output, its reveal output. */
+function pairOutputs(prepared: PreparedInscriptionOnSat): string[] {
+  const first = prepared.fundingUtxos[0];
+  return [`${first.txid.toLowerCase()}:${first.vout}`, `${prepared.commitTxId.toLowerCase()}:0`, `${prepared.revealTxId.toLowerCase()}:0`];
+}
+
+/** What the indexes read disagree on (P9.10); undefined when they agree. */
+interface Disagreement {
+  /** Inscriptions whose placement the indexes disagree on. */
+  disputed: string[];
+  /** The outputs the indexes say hold the sat, when they name different ones (sorted); empty when they agree. */
+  holders: string[];
+}
+
+function disagreementOf(view: OriginalView, holders: string[]): Disagreement | undefined {
+  const anchoring = view.report.anchoring;
+  const disputed = anchoring?.disputed ?? [];
+  if (disputed.length === 0 && anchoring?.status !== "unverified" && holders.length === 0) return undefined;
+  return { disputed, holders };
+}
+
+/** The guard every step that can broadcast shares: refuse while the indexes disagree (P9.6, P9.10). */
+function refuseDisagreement(did: string, disagreement: Disagreement | undefined): void {
+  if (!disagreement) return;
+  const what = [
+    ...(disagreement.disputed.length > 0 ? [`the placement of ${disagreement.disputed.join(", ")}`] : []),
+    ...(disagreement.holders.length > 0 ? [`the sat's holder (${disagreement.holders.join(" / ")})`] : []),
+  ];
+  refuse("incomplete-evidence", "INDEXES_DISAGREE", `the indexes read disagree on ${what.length > 0 ? what.join(" and ") : "the anchor"} of ${did}; nothing is prepared or sent until they agree (P9.10)`, { ...disagreement });
 }
 
 const observed = (c: Candidate) => c.commit === "confirmed" || c.commit === "mempool" || c.reveal === "mempool";
@@ -663,16 +738,20 @@ function publicationOf(view: OriginalView, found: Recorded | undefined): Publica
 }
 
 /** Read the sat, compare the heads, and, with a recovery store, find the next inscription's recorded pairs. */
-async function observe(sdk: OriginalsSDK, did: string, log: StoredLog, options: ReadAnchoredOptions): Promise<{ view: OriginalView; pending: PendingEntries; found?: Recorded }> {
+async function observe(sdk: OriginalsSDK, did: string, log: StoredLog, options: ReadAnchoredOptions): Promise<{ view: OriginalView; pending: PendingEntries; found?: Recorded; disagreement?: Disagreement; holding?: string }> {
   const { recoveryStore, recoveryIds, ...read } = options;
   const ids = recoveryStore ? await recoveryIdsOf(recoveryStore, recoveryIds) : undefined;
-  const { evidence, holding } = await readSatHeld(log.sat, read);
+  const { evidence, holding, holders } = await readSatHeld(log.sat, read);
   const view = await sdk.get(did, { bitcoin: evidence });
   const base = pendingFrom(did, log, view, "not-anchored");
   const found = base.next !== null && recoveryStore && ids
     ? await recorded(log, view, holding, bodyFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
     : undefined;
-  return { view, pending: { ...base, publication: publicationOf(view, found), recoveryIssues: found?.issues ?? [] }, ...(found ? { found } : {}) };
+  const disagreement = disagreementOf(view, holders);
+  return {
+    view, pending: { ...base, publication: publicationOf(view, found), recoveryIssues: found?.issues ?? [] },
+    ...(found ? { found } : {}), ...(disagreement ? { disagreement } : {}), ...(holding !== undefined ? { holding } : {}),
+  };
 }
 
 /**
@@ -689,9 +768,11 @@ export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
   const { sdk, did, recoveryStore, recoveryIds, ...read } = params;
   const ids = await recoveryIdsOf(recoveryStore, recoveryIds);
   const log = await storedLog(sdk, did);
-  const { view, pending, found } = await observe(sdk, did, log, { ...read, recoveryStore, recoveryIds: ids });
+  const { pending, found, disagreement } = await observe(sdk, did, log, { ...read, recoveryStore, recoveryIds: ids });
   if (pending.next === null || !found) return { action: "done", pending };
   const versionId = pending.next;
+  // P9.10: while the indexes disagree, nothing is prepared or resumed (the same guard refuses prepare and submit).
+  if (disagreement) return { action: "wait-for-bitcoin", versionId, reason: "indexes-disagree", ...disagreement, pending };
   const [indexed] = found.indexed;
   if (indexed) {
     return { action: "wait-for-confirmation", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, reason: "not-indexed", pending };
@@ -713,10 +794,6 @@ export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
       return { action: "refused", versionId, recoveryId: record.recoveryId, commit, ifRevealed, error, pending };
     }
     return { action: "resume", versionId, recoveryId: record.recoveryId, broadcast: record.broadcast, pending };
-  }
-  const disputed = view.report.anchoring?.disputed ?? [];
-  if (disputed.length > 0 || view.report.anchoring?.status === "unverified") {
-    return { action: "wait-for-bitcoin", versionId, reason: "indexes-disagree", disputed, pending };
   }
   return { action: "prepare", versionId, replaces: found.replaces, pending };
 }
@@ -793,9 +870,10 @@ async function readSat(sat: StoredLog["sat"], options: SatReadOptions): Promise<
 
 /**
  * The reads as evidence, one per index, and the outpoint they say holds the
- * sat now (whether or not an anchor is accepted); none when they disagree.
+ * sat now (whether or not an anchor is accepted); none when they disagree,
+ * and then `holders` names each.
  */
-async function readSatHeld(sat: StoredLog["sat"], options: SatReadOptions): Promise<{ evidence: SatEvidence[]; holding?: string }> {
+async function readSatHeld(sat: StoredLog["sat"], options: SatReadOptions): Promise<{ evidence: SatEvidence[]; holding?: string; holders: string[] }> {
   const reads: SatIndexRead[] = [{ provider: options.provider, index: options.index }, ...(options.indexes ?? [])];
   const evidence: SatEvidence[] = [];
   const holdings = new Set<string | undefined>();
@@ -811,7 +889,9 @@ async function readSatHeld(sat: StoredLog["sat"], options: SatReadOptions): Prom
     holdings.add(satpoint ? satpoint.split(":").slice(0, 2).join(":").toLowerCase() : undefined);
   }
   const [holding] = holdings;
-  return { evidence, ...(holdings.size === 1 && holding !== undefined ? { holding } : {}) };
+  // Reads that name different holders (or one names none) disagree: `holders` lists them for the guard.
+  const holders = holdings.size > 1 ? [...holdings].map((h) => h ?? "none").sort() : [];
+  return { evidence, holders, ...(holdings.size === 1 && holding !== undefined ? { holding } : {}) };
 }
 
 /** What the sender of an anchoring sat gives its recipient (P9.18). */
@@ -846,12 +926,15 @@ export type TransferHandoffOptions = (SatReadOptions & { through?: "accepted" })
  * and nothing guarantees its replication. The recipient's SDK should check it
  * with `verifyHandoff` against the sat it received rather than trust it.
  */
-export async function transferHandoff(sdk: OriginalsSDK, did: string, options: TransferHandoffOptions): Promise<TransferHandoff> {
+export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: TransferHandoffOptions): Promise<TransferHandoff> {
+  const SAT_READ_REQUIRED = "a handoff runs through the head Bitcoin accepts: pass the sat read (provider, clock, index), or through: \"committed\", or { checkpoint }";
+  // Called without options (from JavaScript, or with none at all): a structured refusal, not a TypeError.
+  if (options === undefined || options === null || typeof options !== "object") refuse("incomplete-evidence", "SAT_READ_REQUIRED", SAT_READ_REQUIRED);
   let checkpoint: string | undefined;
   if ("checkpoint" in options) checkpoint = options.checkpoint;
   else if (options.through !== "committed") {
-    if (!options || !("provider" in options) || !options.provider) {
-      refuse("incomplete-evidence", "SAT_READ_REQUIRED", "a handoff runs through the head Bitcoin accepts: pass the sat read (provider, clock, index), or through: \"committed\"");
+    if (!("provider" in options) || !options.provider) {
+      refuse("incomplete-evidence", "SAT_READ_REQUIRED", SAT_READ_REQUIRED);
     }
     const pending = await nextPendingEntry(sdk, did, options);
     if (pending.accepted === null) {
