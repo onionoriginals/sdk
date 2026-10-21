@@ -1176,7 +1176,23 @@ export class OriginalsSDK {
     }
   }
 
-  private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
+  /**
+   * Retrieve the snapshot hosted under a did:webvh alias, unverified, within
+   * the same bounds as `loadPublished`. A shared host's `accepted` can use it
+   * to give `sync` and `reconcile` the host's accepted log, which they verify
+   * before using any of it (P6.8).
+   */
+  async retrieveHosted(aliasDid: string, fetch: HostedFetch, options: { signal?: AbortSignal } = {}): Promise<EvidenceContents> {
+    const retrieval = new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, options.signal);
+    try {
+      return readEvidenceFiles((await this.retrieveSnapshot(aliasDid, retrieval, false)).files);
+    } finally {
+      retrieval.close();
+    }
+  }
+
+  /** `identities`: plan the identity requests the verification that follows makes in the same budget. */
+  private async retrieveSnapshot(aliasDid: string, retrieval: Retrieval, identities: boolean): Promise<{ alias: AliasEvidence; files: Map<string, Uint8Array> }> {
     // A hosted file that is not UTF-8 is invalid evidence, as in a package (EVIDENCE_ENCODING).
     const text = (data: Uint8Array, name: string) => {
       try {
@@ -1205,14 +1221,18 @@ export class OriginalsSDK {
     const planned = 1 + 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.
-    const identities = this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
-    retrieval.plan(planned + identities, files.size + planned);
+    const identityRequests = identities && this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
+    retrieval.plan(planned + identityRequests, files.size + planned);
     await put("asset/did-witness.json", false);
     for (const did of plan.authors) {
       if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
     }
     for (const digest of plan.digests) await put(`resources/${digest}`, false);
+    return { alias, files };
+  }
 
+  private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
+    const { alias, files } = await this.retrieveSnapshot(aliasDid, retrieval, true);
     // Every file is already within the budget and the archive limits; no archive is assembled.
     const loaded = await this.loadContents(readEvidenceFiles(files), [alias], retrieval);
     const r = loaded.report;
