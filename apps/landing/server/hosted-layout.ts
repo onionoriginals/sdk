@@ -169,7 +169,8 @@ export function parseWitnessFile(bytes: Uint8Array | null): unknown {
   const text = decodeText(bytes);
   if (text === null) return undefined;
   try {
-    return JSON.parse(text) as unknown;
+    const value = JSON.parse(text) as unknown;
+    return deeperThan(value, MAX_WITNESS_DEPTH) ? undefined : value; // never handed to the engine (#965 r5, finding 3)
   } catch {
     return undefined;
   }
@@ -178,14 +179,35 @@ export function parseWitnessFile(bytes: Uint8Array | null): unknown {
 type WitnessEntry = { versionId: string; proof: unknown[] };
 
 /**
- * The entries of a witness file in the shape the engine accepts (exactly
- * `{ versionId, proof }`; anything else makes it reject the whole file), or null.
+ * The nesting a witness file may have: the default depth limit of the strict
+ * JSON layer in @originals/vh. A legitimate file nests a handful of levels;
+ * a deeper one could overflow the stack when canonicalised (#965 r5, finding 3).
  */
-function witnessEntries(bytes: Uint8Array): WitnessEntry[] | null {
+export const MAX_WITNESS_DEPTH = 64;
+
+/** True when `value` nests arrays and objects more than `max` levels deep (iterative, so it never overflows). */
+function deeperThan(value: unknown, max: number): boolean {
+  const stack: Array<[unknown, number]> = [[value, 0]];
+  while (stack.length > 0) {
+    const [v, d] = stack.pop()!;
+    if (typeof v !== 'object' || v === null) continue;
+    if (d + 1 > max) return true;
+    for (const child of Array.isArray(v) ? v : Object.values(v)) stack.push([child, d + 1]);
+  }
+  return false;
+}
+
+/**
+ * The entries of a witness file in the shape the engine accepts (exactly
+ * `{ versionId, proof }`; anything else makes it reject the whole file), null,
+ * or 'too_deep' when it nests beyond MAX_WITNESS_DEPTH.
+ */
+function witnessEntries(bytes: Uint8Array): WitnessEntry[] | null | 'too_deep' {
   const text = decodeText(bytes);
   if (text === null) return null;
   try {
     const value = JSON.parse(text) as unknown;
+    if (deeperThan(value, MAX_WITNESS_DEPTH)) return 'too_deep';
     if (!Array.isArray(value)) return null;
     const ok = value.every(
       (e) =>
@@ -199,11 +221,16 @@ function witnessEntries(bytes: Uint8Array): WitnessEntry[] | null {
 }
 
 /** A proof's JCS form, so the same proof with its members in another order is the same proof. */
+let unserialisable = 0;
 function canonicalProof(proof: unknown): string {
   try {
     return canonicalize(proof as JsonValue);
   } catch {
-    return `\u0000${JSON.stringify(proof)}`; // not JCS-serialisable: never equal to a canonical proof
+    try {
+      return `\u0000${JSON.stringify(proof)}`; // not JCS-serialisable: never equal to a canonical proof
+    } catch {
+      return `\u0001${unserialisable++}`; // not serialisable at all: equal to nothing, and never a throw
+    }
   }
 }
 
@@ -258,10 +285,12 @@ export async function signerWitnessVerdict(
   storedLog: Uint8Array | null,
   hex: string,
   options: { maxBytes: number; now?: number },
-): Promise<{ write: Uint8Array } | { error: 'identity_witness_not_extending' | 'identity_witness_too_large' }> {
+): Promise<{ write: Uint8Array } | { error: 'identity_witness_not_extending' | 'identity_witness_too_large' | 'identity_witness_invalid' }> {
   const proposed = witnessEntries(next);
+  if (proposed === 'too_deep') return { error: 'identity_witness_invalid' };
   if (!proposed) return { error: 'identity_witness_not_extending' };
-  const old = storedWitness ? witnessEntries(storedWitness) : null;
+  const storedEntries = storedWitness ? witnessEntries(storedWitness) : null;
+  const old = storedEntries === 'too_deep' ? null : storedEntries;
   if (!old || containsProofs(proposed, old)) return { write: next };
   const logText = storedLog ? decodeText(storedLog) : null;
   const did = logText === null ? null : signerDidOf(logText, hex);

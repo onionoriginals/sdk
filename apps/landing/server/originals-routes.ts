@@ -149,7 +149,7 @@ export function createOriginalsRoutes(deps: {
         const stored = store.readHosted(key);
         const log = store.readHosted(logKey);
         const verdict = await signerWitnessVerdict(stored, bytes, log, hosted.signerHex!, { maxBytes: MAX_UPLOAD_BYTES });
-        if ('error' in verdict) return json({ error: verdict.error }, verdict.error === 'identity_witness_too_large' ? 413 : 409);
+        if ('error' in verdict) return json({ error: verdict.error }, verdict.error === 'identity_witness_too_large' ? 413 : verdict.error === 'identity_witness_invalid' ? 422 : 409);
         write = verdict.write;
         if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(logKey), log)) break;
         if (attempt >= 2) return json({ error: 'identity_witness_contended' }, 409);

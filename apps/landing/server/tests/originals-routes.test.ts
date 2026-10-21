@@ -496,6 +496,27 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     expect(JSON.parse((await get(`${authorDir}/did-witness.json`))!)).toEqual([...stored, ...pruned]);
   });
 
+  test('#965 r5 finding 3: a witness file nested deeper than the JSON depth limit is a structured 422, never a 500', async () => {
+    const { put, get } = setup();
+    const { hex, logs, witness } = await signerLog(2, { witnessed: true });
+    const dir = `${base}/authors/${hex}`;
+    const w = `${dir}/did-witness.json`;
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+    const full = JSON.parse(witness.full[1]) as Array<{ versionId: string; proof: unknown[] }>;
+    const p0 = JSON.stringify(full[1].proof[0]).slice(0, -1);
+    for (const n of [65, 50_000]) {
+      // A superset of the stored proofs whose extra proof nests n levels: canonicalising it once overflowed the stack.
+      const deep = '['.repeat(n) + ']'.repeat(n);
+      const evil = `${JSON.stringify(full).slice(0, -1)},{"versionId":${JSON.stringify(full[1].versionId)},"proof":[${p0},"x":${deep}}]}]`;
+      const res = await put(w, evil);
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ error: 'identity_witness_invalid' });
+    }
+    expect(await get(w)).toBe(witness.pruned[0]);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+  });
+
   test('a signer DID witness file only gains proofs: a PUT that drops one is a 409', async () => {
     const { put, get } = setup();
     const p1 = { versionId: '1-a', proof: [{ proofValue: 'z1' }] };
