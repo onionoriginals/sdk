@@ -54,6 +54,21 @@ describe("FileStore: durable local commit (P6.2)", () => {
     }
   });
 
+  test("the anchor reported for an anchored Original survives reopening, so a later change is reported (P9.16)", async () => {
+    const dir = tempDir();
+    try {
+      const did = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
+      const anchor = { inscription: `${"e".repeat(64)}i0`, sat: "did:btco:reg:5000000000", owner: `${"cc".repeat(32)}:0` };
+      const store = await FileStore.open(dir);
+      expect(await store.getRetainedAnchor(did)).toBeUndefined();
+      await store.putRetainedAnchor(did, anchor);
+      expect(await (await FileStore.open(dir)).getRetainedAnchor(did)).toEqual(anchor);
+      expect(await store.getRetainedAnchor("did:vh:QmOther")).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("C12-14: an interrupted commit recovers the prior or the fully committed checkpoint", async () => {
     const dir = tempDir();
     try {

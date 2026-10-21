@@ -8,8 +8,10 @@
  * what it derived through a `ClockStore` so a restart does not walk from
  * genesis again (#973). `satEvidence` turns a sat
  * snapshot from the SDK's sat reader into the evidence `verifyOriginal`
- * takes. A publication whose body the reader could not establish fails the
- * whole read: a copy is no substitute for what Bitcoin includes (VH-Log PR 2).
+ * takes: one index's read, with the sat number and network that index
+ * reports for each inscription (P9.10). A publication whose body the reader
+ * could not establish fails the whole read: the anchoring sat carries the
+ * Original's whole log, and a copy is no substitute (P9.17; VH-Log PR 2).
  */
 import { OriginalsError } from "@originals/vh";
 import type { SatEvidence, SatInscription } from "@originals/vh/originals";
@@ -400,8 +402,12 @@ export interface SatEvidenceOptions {
   clock: InscriptionClock;
   /** Confirmations of the output now holding the sat; the adapter reports it (P9.11). */
   ownerConfirmations: number;
-  /** How many independent indexes agreed on the sat's location. */
-  indexes?: number;
+  /**
+   * Which index served the snapshot, reported as used (P9.11). Pass one
+   * `satEvidence` per index: the verifier compares their placement and
+   * accepts nothing they disagree on (P9.10).
+   */
+  index: string;
   /** Cancels the clock's header reads. */
   signal?: AbortSignal;
 }
@@ -420,6 +426,9 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
     const confirmations = p.confirmed ? tip.height - p.creation.height + 1 : 0;
     inscriptions.push({
       id: p.id,
+      // Where the index places it, not the sat the read was asked about (P9.10).
+      sat: p.sat,
+      network: p.network,
       height: p.creation.height,
       transactionIndex: p.creation.transactionIndex,
       inscriptionIndex: p.creation.inscriptionIndex,
@@ -427,17 +436,21 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
       inscriptionTime: await options.clock.at(p.creation.height, p.creation.blockHash, { signal: options.signal }),
       mediaType: p.body.mediaType,
       content: p.body.bytes,
+      metadata: p.body.metadata,
     });
   }
   const satpoint = snapshot.ownership.satpoint;
   const output = satpoint ? satpoint.split(":").slice(0, 2).join(":") : null;
+  if (typeof options.index !== "string" || options.index.length === 0) {
+    throw new OriginalsError("invalid-evidence", "SAT_INDEX_REQUIRED", "name the index that served the sat read (P9.11)");
+  }
   return {
     sat: btcoAlias(snapshot.network, snapshot.sat),
+    index: options.index,
     tip: { height: tip.height, hash: tip.hash },
     inscriptions,
     owner: output
       ? { output, ...(snapshot.ownership.owner ? { address: snapshot.ownership.owner } : {}), confirmations: options.ownerConfirmations }
       : null,
-    indexes: options.indexes ?? 1,
   };
 }

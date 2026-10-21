@@ -27,7 +27,7 @@ const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63
 const clockOver = (times: number[]) =>
   new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
-function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string }>, tip = 10): SatSnapshot {
+function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array }>, tip = 10): SatSnapshot {
   return {
     network: "regtest",
     sat: SAT,
@@ -44,7 +44,7 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
       sat: SAT,
       confirmed: true,
       creation: { height: p.height, blockHash: p.blockHash ?? hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
-      body: p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: null },
+      body: p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: p.metadata ?? null },
     })),
     ownership: { owner: "bcrt1qowner", satpoint: `${"cc".repeat(32)}:0:0` },
   };
@@ -147,7 +147,7 @@ describe("inscription time (P9.15)", () => {
   test("an inscription in a block the clock does not find on the chain fails the read", async () => {
     const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n" }]);
     s.publications[0].creation!.blockHash = hashAt(4, "f");
-    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1 })).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "BLOCK_NOT_ON_CHAIN" });
   });
 });
 
@@ -249,7 +249,7 @@ describe("inscription time at scale (#973, P9.15)", () => {
     during.abort();
     await expect(read).rejects.toMatchObject({ code: "BLOCK_TIME_ABORTED" });
     const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n" }]);
-    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, signal: controller.signal })).rejects.toMatchObject({ code: "BLOCK_TIME_ABORTED" });
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a", signal: controller.signal })).rejects.toMatchObject({ code: "BLOCK_TIME_ABORTED" });
   });
 
   test("a block that does not extend the one before it means the chain moved mid-read: the clock reconciles", async () => {
@@ -303,19 +303,28 @@ describe("inscription time at scale (#973, P9.15)", () => {
 });
 
 describe("sat snapshots as evidence", () => {
-  test("maps chain position, depth, inscription time, the did:btco alias and the holder", async () => {
-    const e = await satEvidence(snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n" }]), { clock: clockOver(HEADERS), ownerConfirmations: 2 });
+  test("maps chain position, depth, inscription time, the did:btco alias, the index, the placement it reports and the holder (P9.10, P9.11)", async () => {
+    const e = await satEvidence(snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n" }]), { clock: clockOver(HEADERS), ownerConfirmations: 2, index: "ord-a" });
     expect(e.sat).toBe(btcoAlias("regtest", SAT));
     expect(e.sat).toBe("did:btco:reg:5000000000");
     expect(e.inscriptions[0]).toMatchObject({ height: 4, transactionIndex: 1, inscriptionIndex: 0, confirmations: 7, inscriptionTime: (T + 1800) * 1000 });
     expect(e.owner).toEqual({ output: `${"cc".repeat(32)}:0`, address: "bcrt1qowner", confirmations: 2 });
-    expect(e.indexes).toBe(1);
+    expect(e.index).toBe("ord-a");
+    // Placement is what the index reports for each inscription, not the sat the read was asked about.
+    expect(e.inscriptions[0]).toMatchObject({ sat: SAT, network: "regtest", metadata: null });
+    const meta = new Uint8Array([0xa0]);
+    const tagged = await satEvidence(snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "{}\n", metadata: meta }]), { clock: clockOver(HEADERS), ownerConfirmations: 2, index: "ord-a" });
+    expect(tagged.inscriptions[0].metadata).toEqual(meta);
   });
 
-  test("an inscription the reader could not read fails the whole read (VH-Log PR 2)", async () => {
+  test("a read must name the index that served it (P9.11)", async () => {
+    await expect(satEvidence(snapshot([]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "" })).rejects.toMatchObject({ code: "SAT_INDEX_REQUIRED" });
+  });
+
+  test("row 95: an inscription the reader could not read fails the whole read (P9.17; VH-Log PR 2)", async () => {
     const s = snapshot([{ id: `${"d".repeat(64)}i0`, height: 4, content: "", complete: false }]);
-    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1 })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
-    await expect(satEvidence({ ...snapshot([]), enumerationComplete: false }, { clock: clockOver(HEADERS), ownerConfirmations: 1 })).rejects.toBeInstanceOf(OriginalsError);
+    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
+    await expect(satEvidence({ ...snapshot([]), enumerationComplete: false }, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toBeInstanceOf(OriginalsError);
   });
 });
 
@@ -334,15 +343,48 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(anchored.original.current).toBe(false);
     await expect(sdk.anchor(c.original.did, { parent: anchored.original.checkpoint, author: alice.ref("orig"), signer, sat })).rejects.toMatchObject({ code: "ALREADY_ANCHORED" });
 
-    // The adapter reads the sat: the anchoring entry inscribed at height 4.
+    // The adapter reads the sat: the anchoring inscription, the whole log through the anchoring entry, at height 4 (P9.17).
     const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
-    const anchorLine = `${log.trimEnd().split("\n").pop()}\n`;
-    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: anchorLine }]), { clock: clockOver(HEADERS), ownerConfirmations: 3 });
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 3, index: "ord-a" });
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring).toMatchObject({ status: "anchored", sat, anchor: { height: 4, confirmations: 7 } });
     expect(view.report.ordering).toBe("anchored");
-    expect(view.report.ownership).toMatchObject({ status: "provisional", output: `${"cc".repeat(32)}:0`, confirmations: 3 });
+    expect(view.report.ownership).toMatchObject({ status: "provisional", output: `${"cc".repeat(32)}:0`, confirmations: 3, indexes: ["ord-a"] });
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
+
+    // Row 105 (P9.16): the store keeps the anchor reported, so learning of an earlier anchoring
+    // inscription is reported as a change of anchor, once, never silently.
+    const earlier = await satEvidence(snapshot([
+      { id: `${"d".repeat(64)}i0`, height: 3, content: log },
+      { id: `${"e".repeat(64)}i0`, height: 4, content: log },
+    ]), { clock: clockOver(HEADERS), ownerConfirmations: 3, index: "ord-a" });
+    const changed = await sdk.get(c.original.did, { bitcoin: [earlier] });
+    expect(changed.report.anchoring?.anchor?.inscription).toBe(`${"d".repeat(64)}i0`);
+    expect(changed.report.anchoring?.conflicting.map((a) => a.inscription)).toEqual([`${"e".repeat(64)}i0`]);
+    expect(changed.report.anchoring?.change?.previous.inscription).toBe(`${"e".repeat(64)}i0`);
+    expect(changed.report.reasons).toContain("anchor-changed");
+    expect(changed.current).toBe(false);
+    const settled = await sdk.get(c.original.did, { bitcoin: [earlier] });
+    expect(settled.report.anchoring?.change).toBeNull();
+    expect(settled.current, JSON.stringify(settled.report.reasons)).toBe(true);
+  });
+
+  test("row 93: an anchored Original loads from Bitcoin alone, whatever copy the package holds", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const pkg = await sdk.package(c.original.did);
+    const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => t });
+    const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
+    expect(loaded.report.head).toBe(anchored.original.checkpoint);
+    expect(loaded.report.anchoring).toMatchObject({ status: "anchored", copy: "agrees" });
+    expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
   });
 
   test("#971: an orphaned block's later timestamp does not carry into the new chain and push an edit past the author's key rotation (C12-41, C12-45)", async () => {
@@ -357,7 +399,8 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: ref, signer, sat });
     const edited = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor at dawn", author: ref, signer });
     const lines = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!).trimEnd().split("\n");
-    const [anchorLine, editLine] = lines.slice(-2).map((l) => `${l}\n`);
+    const anchorLog = lines.slice(0, -1).map((l) => `${l}\n`).join("");
+    const editLine = `${lines[lines.length - 1]}\n`;
 
     const B = Date.parse("2026-10-18T10:10:00Z") / 1000;
     // Chain A: the edit is inscribed at height 2, whose header claims a time 50 minutes on.
@@ -368,9 +411,9 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     ];
     const clock = new InscriptionClock(async (h) => chain[h]);
     const first = await satEvidence(snapshot([
-      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLine },
+      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLog },
       { id: `${"f".repeat(64)}i0`, height: 2, content: editLine },
-    ]), { clock, ownerConfirmations: 1 });
+    ]), { clock, ownerConfirmations: 1, index: "ord-a" });
     expect(first.inscriptions[1].inscriptionTime).toBe((B + 3000) * 1000);
 
     // Block 2 is reorganised away; the edit is re-included at height 3 of the new chain, at 10:13.
@@ -379,9 +422,9 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     await alice.rotate([{ fragment: "orig2", secret: seed(22) }], "2026-10-18T10:30:00Z");
     t = Date.parse("2026-10-18T12:00:00Z");
     const evidence = await satEvidence(snapshot([
-      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLine },
+      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLog },
       { id: `${"f".repeat(64)}i0`, height: 3, content: editLine, blockHash: hashAt(3, "b") },
-    ]), { clock, ownerConfirmations: 1 });
+    ]), { clock, ownerConfirmations: 1, index: "ord-a" });
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring?.ignored, JSON.stringify(view.report.anchoring?.ignored)).toEqual([]);
     expect(view.checkpoint).toBe(edited.original.checkpoint);

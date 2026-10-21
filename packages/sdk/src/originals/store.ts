@@ -21,7 +21,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
-import type { AuthorDidEvidence } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 
 export interface StoredOriginal {
   /** The committed asset log, `did.jsonl` text. Asset logs have no witness file (P9.8). */
@@ -72,6 +72,13 @@ export interface OriginalsStore {
   /** The highest versionId verified for an Original or an author DID. The SDK never lowers it. */
   getRetained(did: string): Promise<string | undefined>;
   putRetained(did: string, versionId: string): Promise<void>;
+  /**
+   * The anchor last reported for an anchored Original, so a later change of
+   * anchor is reported, never silent (P9.16). Optional: a store without it
+   * reports a change only within one verification.
+   */
+  getRetainedAnchor?(did: string): Promise<RetainedAnchor | undefined>;
+  putRetainedAnchor?(did: string, anchor: RetainedAnchor): Promise<void>;
   /** Keep a valid branch of an Original that diverges from its committed log. */
   putBranch(did: string, log: string): Promise<void>;
   getBranches(did: string): Promise<string[]>;
@@ -120,6 +127,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly resources = new Map<string, Uint8Array>();
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
+  private readonly anchors = new Map<string, RetainedAnchor>();
   private readonly branches = new Map<string, string[]>();
   private readonly refused = new Map<string, StoredRefused[]>();
   private readonly pending = new Map<string, StoredPending>();
@@ -161,6 +169,16 @@ export class MemoryStore implements OriginalsStore {
 
   putRetained(did: string, versionId: string): Promise<void> {
     this.retained.set(did, higherVersion(this.retained.get(did), versionId));
+    return Promise.resolve();
+  }
+
+  getRetainedAnchor(did: string): Promise<RetainedAnchor | undefined> {
+    const anchor = this.anchors.get(did);
+    return Promise.resolve(anchor ? { ...anchor } : undefined);
+  }
+
+  putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
+    this.anchors.set(did, { ...anchor });
     return Promise.resolve();
   }
 
