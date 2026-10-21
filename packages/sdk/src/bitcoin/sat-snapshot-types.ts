@@ -39,11 +39,20 @@ export interface PublicationObservation {
      */
     | { status: 'unsupported'; reason: 'delegated' | 'content-encoding'; mediaType: string | null }
     /**
-     * Observed, but its body and metadata were not read because they would
-     * pass the read's content-byte budget (`SatSnapshotBudget.maxContentBytes`).
-     * The read goes on with later, smaller bodies. PROVISIONAL.
+     * Observed, but its body and metadata were not read, or not kept, because
+     * they would pass the read's byte budget (`SatSnapshotBudget.maxContentBytes`,
+     * `maxOriginalsBytes`) or the transport's response cap, or because it is
+     * an `application/vnd.originals.vh+jsonl` body over 350,000 bytes that an
+     * Originals read skips (P9.17). `contentLength` is the length the index
+     * reports. `metadataPresent`: the body was read but it carries metadata
+     * past the budget or cap. The read goes on. PROVISIONAL.
      */
-    | { status: 'unavailable'; reason: 'over-budget'; mediaType: string | null; contentLength: number }
+    | { status: 'unavailable'; reason: 'over-budget'; mediaType: string | null; contentLength: number; metadataPresent?: true }
+    /**
+     * Observed, but its body and metadata were not asked for: an Originals
+     * read (`bodies: 'originals'`) reads only Originals inscriptions. PROVISIONAL.
+     */
+    | { status: 'unavailable'; reason: 'not-requested'; mediaType: string | null; contentLength: number }
     | {
         status: 'complete';
         mediaType: string;
@@ -66,6 +75,8 @@ export interface SatSnapshot {
   publications: PublicationObservation[];
   /** Explicit null means observed absent/unbound, not a missing provider response. */
   ownership: { owner: string | null; satpoint: string | null };
+  /** Which bodies the read fetched (`SatSnapshotOptions.bodies`); absent means all. */
+  bodies?: 'all' | 'originals';
   /** Optional provider claim about how the chain facts were established. */
   chainEvidence?: { assurance: 'provider-asserted' | 'node-validated'; source?: string };
 }

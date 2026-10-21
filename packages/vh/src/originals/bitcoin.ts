@@ -73,12 +73,17 @@ export interface SatInscription {
    *   encoded, and P9.14 defines no encoding. It is never an Originals entry
    *   (an Originals media type is rejected, `unsupported-encoding`; P9.14,
    *   P9.17) and never a did:btco version (P5.13).
-   * - `not-read`: its body was past the reader's byte budget. An unread
-   *   Originals inscription is missing evidence: the verification fails
-   *   (`SAT_READ_INCOMPLETE`, P9.17).
+   * - `not-read`: its body was past the reader's byte budget, or not asked
+   *   for. An unread Originals inscription is missing evidence: the
+   *   verification fails (`SAT_READ_INCOMPLETE`, P9.17), unless `contentLength`
+   *   or `metadataPresent` already rejects it.
    * Inscriptions of other media types are not Originals inscriptions either way.
    */
   unsupported?: "delegated" | "content-encoding" | "not-read";
+  /** For a `not-read` inscription, the body length the index reports. PROVISIONAL. */
+  contentLength?: number;
+  /** For a `not-read` inscription: it carries metadata, which the reader did not read. PROVISIONAL. */
+  metadataPresent?: boolean;
 }
 
 /** What one index reported for one sat at one tip. */
@@ -127,7 +132,8 @@ const sameBytes = (a: Uint8Array | null | undefined, b: Uint8Array | null | unde
 function sameReport(a: SatInscription, b: SatInscription): boolean {
   return a.height === b.height && a.transactionIndex === b.transactionIndex && a.inscriptionIndex === b.inscriptionIndex &&
     a.inscriptionTime === b.inscriptionTime && a.mediaType === b.mediaType && sameBytes(a.content, b.content) && sameBytes(a.metadata, b.metadata) &&
-    (a.unsupported ?? null) === (b.unsupported ?? null);
+    (a.unsupported ?? null) === (b.unsupported ?? null) && (a.contentLength ?? null) === (b.contentLength ?? null) &&
+    (a.metadataPresent ?? false) === (b.metadataPresent ?? false);
 }
 
 export function chainOrder(a: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">, b: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">): number {
@@ -393,6 +399,9 @@ export async function assembleFromBitcoin(
     if (i.confirmations < 1) return void ignore(sat, i, "unconfirmed");
     if (i.mediaType !== ORIGINALS_INSCRIPTION_TYPE) return void ignore(sat, i, "not-an-originals-inscription");
     if (i.unsupported === "not-read") {
+      // What the index reports already rejects it, read or not (P9.17). PROVISIONAL.
+      if (i.metadataPresent) return void ignore(sat, i, "carries-metadata");
+      if ((i.contentLength ?? 0) > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
       throw new OriginalsError("incomplete-evidence", "SAT_READ_INCOMPLETE", `inscription ${i.id} on ${sat} was not read in full (P9.17)`);
     }
     if (i.unsupported) return void ignore(sat, i, "unsupported-encoding");

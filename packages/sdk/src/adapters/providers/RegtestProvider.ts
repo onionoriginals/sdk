@@ -1,5 +1,6 @@
 import type { SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
-import { readSatSnapshot, type SatSnapshotBudget } from "./sat-snapshot.js";
+import { readSatSnapshot, type SatSnapshotBudget, type SatSnapshotOptions } from "./sat-snapshot.js";
+import { ResponseTooLargeError } from "../response-body-limit.js";
 import type { OrdinalsProvider } from '../types.js';
 import { decode as decodeCbor } from '../../utils/cbor.js';
 import { hexToBytes } from '../../utils/encoding.js';
@@ -67,7 +68,7 @@ export class RegtestProvider implements OrdinalsProvider {
       const { done, value } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > 5 * 1024 * 1024) { await reader.cancel(); throw new Error('Regtest response exceeds 5 MiB'); }
+      if (length > 5 * 1024 * 1024) { await reader.cancel(); throw new ResponseTooLargeError(5 * 1024 * 1024); }
       parts.push(value);
     }
     const bytes = new Uint8Array(length);
@@ -162,7 +163,7 @@ export class RegtestProvider implements OrdinalsProvider {
   /** Complete, stable sat observation using ord 0.29's sat enumeration and raw CBOR endpoint.
    * Block creation order comes from Core's active blocks, never inscription numbers or current location.
    */
-  async getSatSnapshot(satoshi: string): Promise<SatSnapshot> {
+  async getSatSnapshot(satoshi: string, options?: SatSnapshotOptions): Promise<SatSnapshot> {
     return readSatSnapshot({
       rpc: (method, params, signal) => this.rpc(method, params, signal),
       status: signal => this.ord('/status', signal),
@@ -174,7 +175,7 @@ export class RegtestProvider implements OrdinalsProvider {
       inscription: (id, signal) => this.ord(`/inscription/${id}`, signal),
       content: (id, signal) => this.bytes(`${this.ordUrl}/content/${id}`, { signal }),
       metadata: (id, signal) => this.ord(`/r/metadata/${id}`, signal),
-    }, satoshi, 'regtest', this.snapshotBudget);
+    }, satoshi, 'regtest', this.snapshotBudget, options);
   }
 
   async getInscriptionsBySatoshi(satoshi: string): Promise<Array<{ inscriptionId: string }>> {
