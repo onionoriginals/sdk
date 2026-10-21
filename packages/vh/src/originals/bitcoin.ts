@@ -360,7 +360,10 @@ export async function assembleFromBitcoin(
     const did = parseBtcoAlias(e.sat).did;
     byAlias.set(did, [...(byAlias.get(did) ?? []), e]);
   }
-  const reads = [...byAlias].map(([did, list]) => readSat(did, list));
+  // A disputed inscription no index reports as an Originals inscription cannot be an entry, so it
+  // holds back nothing after it; a disputed Originals inscription does (P9.10; L3).
+  const couldCount = (reports: SatInscription[]) => reports.some((r) => r.mediaType === ORIGINALS_INSCRIPTION_TYPE);
+  const reads = [...byAlias].map(([did, list]) => readSat(did, list, { couldCount }));
   // The report lists what was ignored in chain order.
   const position = new Map<string, SatInscription>();
   for (const e of evidence) for (const i of e.inscriptions) if (!position.has(i.id)) position.set(i.id, i);
@@ -450,7 +453,12 @@ export async function assembleFromBitcoin(
     for (const r of rejected) ignore(r.read.alias.did, r.inscription, r.reason, r.entries[r.entries.length - 1], r.code);
     const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
     const copyAnchor = copy ? anchoringIndex(copy) : -1;
-    const entries = !copy ? [] : status === "unverified" || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
+    // Without an anchor on Bitcoin the copy's anchoring entry and what follows are not established,
+    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored. With no
+    // Bitcoin evidence at all the copy is the local committed log, reported whole and not current
+    // (bitcoin-evidence-missing): the SDK extends it locally before inscribing (P9.18).
+    const local = status === "unverified" && evidence.length === 0;
+    const entries = !copy ? [] : local || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
     const change = status === "not-anchored" && options.previousAnchor ? { previous: options.previousAnchor, current: null } : null;
     inChainOrder();
     return {

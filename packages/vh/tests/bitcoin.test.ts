@@ -587,6 +587,39 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["other-network"]);
   });
 
+  test("C12-109, L3: a disputed inscription neither index reports as an Originals inscription does not hold back later ones", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const junk = inscribe(copy[0], 5, { mediaType: "text/plain" });
+    const a = anchoring(10);
+    // Only the first index lists the junk; both place the anchoring inscription.
+    const r = await verify(copy, alice, [sat([junk, a]), sat([a], SAT, undefined, "ord-b")]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.disputed).toEqual([]);
+    expect(r.anchoring?.ignored).toEqual([{ sat: SAT, inscription: junk.id, reason: "placement-disputed" }]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    // A disputed Originals inscription still holds back everything after it (P9.10).
+    const entry = inscribe(copy[0], 5);
+    const blocked = await verify(copy, alice, [sat([entry, a]), sat([a], SAT, undefined, "ord-b")]);
+    expect(blocked.anchoring?.status).toBe("unverified");
+    expect(blocked.anchoring?.disputed).toEqual([entry.id]);
+    expect(blocked.anchoring?.ignored.map((i) => i.reason)).toEqual(["placement-disputed", "after-disputed-placement"]);
+    // So does one index's Originals report of it, whatever the other says it is.
+    const mixed = await verify(copy, alice, [sat([entry, a]), sat([{ ...entry, mediaType: "text/plain" }, a], SAT, undefined, "ord-b")]);
+    expect(mixed.anchoring?.status).toBe("unverified");
+  });
+
+  test("L3: an unverified anchoring reports no head from the local copy past the anchor's parent", async () => {
+    const { alice, copy, renamed, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Local only", author: ref, sign });
+    const a = anchoring(10);
+    const r = await verify([...copy, next], alice, [sat([a]), sat([{ ...a, sat: "7000000000" }], SAT, undefined, "ord-b")]);
+    expect(r.anchoring?.status).toBe("unverified");
+    expect(r.head).toBe(renamed.versionId);
+    expect(r.current).toBe(false);
+    expect(r.reasons).toContain("bitcoin-evidence-missing");
+  });
+
   test("C12-109: two indexes that disagree on placement are not accepted; missing evidence is reported until they agree", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Disputed", author: ref, sign });
