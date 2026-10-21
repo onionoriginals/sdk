@@ -30,17 +30,23 @@
  *   `link()` it to `.lock`. `link` fails if `.lock` exists, so exactly one
  *   process wins.
  * - Taking over a stale lock: the record is stale only when its holder is on
- *   this host and is confirmed not to run (no such pid; or the pid is this
- *   process but the token is not one this process holds, so the pid was
- *   reused; or, on Linux, the pid's start time differs from the record's).
- *   The taker claims the break with an exclusive `.lock.break.<hash(record)>`,
- *   re-reads `.lock`, and only if it still holds that same record renames its
- *   own record over `.lock` in one step. Only one process can claim a given
- *   stale record, and `.lock` exists throughout, so a fresh `link` cannot
- *   slip in and two takers cannot both succeed.
+ *   this host and is confirmed not to run (no such pid; or, on Linux, the
+ *   pid's start time differs from the record's, so the pid was reused). A
+ *   record under this process's own pid is held unless its start time proves
+ *   an earlier process instance: worker threads share the pid but not the
+ *   handles, so a token this thread does not know may be another thread's
+ *   (08b review r4 #1). The taker claims the break with an exclusive
+ *   `.lock.break.<hash(record)>`, re-reads `.lock`, and only if it still holds
+ *   that same record renames its own record over `.lock` in one step. Only
+ *   one process can claim a given stale record, and `.lock` exists
+ *   throughout, so a fresh `link` cannot slip in and two takers cannot both
+ *   succeed. A claim records its claimant; a claim whose claimant is
+ *   confirmed dead (killed between the claim and the rename) is replaced in
+ *   one `rename` under a claim on that claim, by the same rule (r4 #2).
  * - A record from another host, an unreadable record, or a live pid is held:
  *   STORE_LOCKED. If such a lock is left by a process known to be gone (a
- *   crash on another host, or a reused pid that `kill -0` still sees), remove
+ *   crash on another host, a reused pid that `kill -0` still sees, or an
+ *   earlier instance of this process's pid where no start time tells), remove
  *   `<root>/.lock` and any `<root>/.lock.break.*` by hand once no process uses
  *   the root. Refusing is the safe default: a wrong takeover would let two
  *   writers share a root.
@@ -121,12 +127,25 @@ function parseRecord(text: string): LockRecord | undefined {
   }
 }
 
-/** True only when the holder is confirmed gone; anything uncertain counts as held. */
+/**
+ * True only when the holder is confirmed gone; anything uncertain counts as held.
+ *
+ * A record under this process's pid is held unless it is provably from an
+ * earlier process instance that had the pid (08b review r4 #1): worker threads
+ * share the pid but not `roots`, so a token this thread does not know may be
+ * another thread's live lock. Only a recorded kernel start time that differs
+ * from this process's (Linux /proc) proves an earlier instance. A wall-clock
+ * stamp (`Date.now() - process.uptime()`) is not used: it moves with clock
+ * steps and, on macOS, with system sleep, so it could make a live lock of this
+ * process look like an earlier one. Elsewhere such a record stays held
+ * (STORE_LOCKED; remove it by hand once no process uses the root).
+ */
 async function stale(record: LockRecord): Promise<boolean> {
   if (record.host !== undefined && record.host !== hostname()) return false; // another host's pid cannot be checked
   if (record.pid === process.pid) {
-    // This process holds it only under a token it knows; otherwise the pid was reused.
-    return ![...roots.values()].some((state) => state.token === record.token);
+    if ([...roots.values()].some((state) => state.token === record.token)) return false;
+    const ours = await startOf(process.pid);
+    return record.start !== undefined && ours !== undefined && record.start !== ours;
   }
   if (!alive(record.pid)) return true;
   if (record.start === undefined) return false;
@@ -144,6 +163,67 @@ const lockedError = (root: string, record: LockRecord | undefined, detail = "") 
     { root, pid: record?.pid, host: record?.host },
   );
 
+/** Read `path`, or undefined when it does not exist. */
+async function readIfAny(path: string): Promise<string | undefined> {
+  return fs.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+}
+
+/** The claim file whose exclusive creation entitles one process to replace the record `text`. */
+const claimPath = (root: string, text: string) => join(root, `.lock.break.${hashHex(text).slice(0, 32)}`);
+
+/** How deep claims on claims may go before an opener gives up (each level needs a taker killed mid-claim). */
+const MAX_CLAIM_DEPTH = 4;
+
+type Claim = { kind: "claimed"; release: () => Promise<void> } | { kind: "moved" } | { kind: "held"; record: LockRecord | undefined; path: string };
+
+/**
+ * Claim the right to replace the stale record `text` at `target`: exactly one
+ * process can hold the claim on a given record. The claim is created with
+ * `wx`. When it exists already, its claimant's record (written in the claim)
+ * is judged like a lock record: a live or uncertain claimant keeps it
+ * ("held"); a claimant confirmed dead on this host (killed between claiming
+ * and renaming, 08b review r4 #2) has its claim replaced in one `rename`,
+ * under a claim on that claim, by the same rule. "moved" when `target` no
+ * longer holds `text`, so the caller should look again.
+ */
+async function claimBreak(root: string, target: string, text: string, mine: string, token: string, depth: number): Promise<Claim> {
+  const path = claimPath(root, text);
+  const release = async () => {
+    // Remove the claim only while it is still this process's (a claim is only replaced once its claimant is dead).
+    if ((await readIfAny(path)) === mine) await fs.rm(path, { force: true });
+  };
+  try {
+    await fs.writeFile(path, mine, { flag: "wx" });
+    return { kind: "claimed", release };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const claimText = await readIfAny(path);
+  if ((await readIfAny(target)) !== text) return { kind: "moved" };
+  if (claimText === undefined) return { kind: "moved" }; // the claimant finished or gave up: look again
+  const claimant = parseRecord(claimText);
+  if (!claimant || depth >= MAX_CLAIM_DEPTH || !(await stale(claimant))) return { kind: "held", record: claimant, path };
+  const inner = await claimBreak(root, path, claimText, mine, token, depth + 1);
+  if (inner.kind !== "claimed") return inner.kind === "moved" ? { kind: "moved" } : inner;
+  try {
+    // Nobody else can replace this dead claimant's claim now: take it over in one step.
+    if ((await readIfAny(path)) !== claimText) return { kind: "moved" };
+    const candidate = `${path}.${process.pid}.${token}.new`;
+    await fs.writeFile(candidate, mine, { flag: "wx" });
+    try {
+      await fs.rename(candidate, path);
+    } finally {
+      await fs.rm(candidate, { force: true });
+    }
+    return { kind: "claimed", release };
+  } finally {
+    await inner.release();
+  }
+}
+
 /**
  * Take `<root>/.lock` for this process under `token`, or refuse when another
  * process may hold it. See the module comment for the protocol.
@@ -151,8 +231,9 @@ const lockedError = (root: string, record: LockRecord | undefined, detail = "") 
 async function takeLock(root: string, token: string): Promise<void> {
   const path = join(root, ".lock");
   const mine: LockRecord = { pid: process.pid, host: hostname(), token, start: await startOf(process.pid) };
+  const mineText = JSON.stringify(mine);
   const candidate = join(root, `.lock.${process.pid}.${token}.new`);
-  await fs.writeFile(candidate, JSON.stringify(mine), { flag: "wx" });
+  await fs.writeFile(candidate, mineText, { flag: "wx" });
   try {
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
@@ -161,29 +242,23 @@ async function takeLock(root: string, token: string): Promise<void> {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
-      const text = await fs.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return undefined;
-        throw error;
-      });
+      const text = await readIfAny(path);
       if (text === undefined) continue; // released meanwhile: link again
       const record = parseRecord(text);
       if (!record || !(await stale(record))) throw lockedError(root, record);
       // Claim the break of exactly this record; one process can.
-      const claim = join(root, `.lock.break.${hashHex(text).slice(0, 32)}`);
-      try {
-        await fs.writeFile(claim, JSON.stringify(mine), { flag: "wx" });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if ((await fs.readFile(path, "utf8").catch(() => undefined)) !== text) continue; // another taker finished
-        throw lockedError(root, record, `; another process is taking over its stale lock (if none is, remove ${claim} by hand)`);
+      const claim = await claimBreak(root, path, text, mineText, token, 0);
+      if (claim.kind === "moved") continue; // another taker finished, or the claim changed hands
+      if (claim.kind === "held") {
+        throw lockedError(root, record, `; another process is taking over its stale lock (if none is, remove ${claim.path} by hand)`);
       }
       try {
         // Nobody else can replace this record now, and its holder is gone: replace it in one step.
-        if ((await fs.readFile(path, "utf8").catch(() => undefined)) !== text) continue;
+        if ((await readIfAny(path)) !== text) continue;
         await fs.rename(candidate, path);
         return;
       } finally {
-        await fs.rm(claim, { force: true });
+        await claim.release();
       }
     }
     throw new OriginalsError("unavailable-bytes", "STORE_LOCKED", `${root} is being opened by other processes`, { root });
@@ -269,7 +344,7 @@ export class FileStore implements OriginalsStore {
     for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
     // Lock candidates a crashed opener left behind.
     for (const name of await readdir(root)) {
-      const pid = Number(/^\.lock\.(\d+)\.[0-9a-f]+\.new$/.exec(name)?.[1]);
+      const pid = Number(/^\.lock\.(?:break\.[0-9a-f]+\.)?(\d+)\.[0-9a-f]+\.new$/.exec(name)?.[1]);
       if (pid && pid !== process.pid && !alive(pid)) await rm(join(root, name), { force: true });
     }
     return new FileStore(root, key, shared, faults);

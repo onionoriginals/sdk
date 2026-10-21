@@ -278,16 +278,86 @@ describe("FileStore: one writer per root (08b review C5)", () => {
     }
   });
 
+  test("08b review r4 #1: a worker thread of the holding process never takes over its live lock", async () => {
+    const dir = tempDir();
+    const script = join(dir, "..", `worker-${process.pid}-${Date.now()}.ts`);
+    try {
+      writeFileSync(
+        script,
+        `import { parentPort, workerData } from "node:worker_threads";\nimport { FileStore } from ${JSON.stringify(FS_STORE)};\ntry { await FileStore.open(workerData); parentPort!.postMessage("opened"); } catch (e) { parentPort!.postMessage((e as { code?: string }).code); }\n`,
+      );
+      const a = await FileStore.open(dir);
+      const held = readFileSync(join(dir, ".lock"), "utf8");
+      const { Worker } = await import("node:worker_threads");
+      const worker = new Worker(script, { workerData: dir });
+      const answer = await new Promise<unknown>((resolve, reject) => {
+        worker.once("message", resolve);
+        worker.once("error", reject);
+      });
+      await worker.terminate();
+      expect(answer).toBe("STORE_LOCKED");
+      expect(readFileSync(join(dir, ".lock"), "utf8")).toBe(held);
+      await a.close();
+      expect(existsSync(join(dir, ".lock"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(script, { force: true });
+    }
+  });
+
+  test("08b review r4 #2: a takeover claim left by a taker that died is broken by a later opener, by exactly one", async () => {
+    const { createHash } = await import("node:crypto");
+    const claimOf = (text: string) => `.lock.break.${createHash("sha256").update(text).digest("hex").slice(0, 32)}`;
+    const deadPid = () => Bun.spawnSync(["true"]).pid;
+    // A live claimant is still taking over: refused.
+    {
+      const dir = tempDir();
+      try {
+        const stale = JSON.stringify({ pid: deadPid(), host: hostname(), token: "aa" });
+        writeFileSync(join(dir, ".lock"), stale);
+        writeFileSync(join(dir, claimOf(stale)), JSON.stringify({ pid: process.ppid, host: hostname(), token: "bb" }));
+        expect((await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError))?.code).toBe("STORE_LOCKED");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    for (let trial = 0; trial < 3; trial++) {
+      const dir = tempDir();
+      try {
+        const stale = JSON.stringify({ pid: deadPid(), host: hostname(), token: "aa" });
+        writeFileSync(join(dir, ".lock"), stale);
+        // The taker was killed between claiming the break and the rename.
+        writeFileSync(join(dir, claimOf(stale)), JSON.stringify({ pid: deadPid(), host: hostname(), token: "bb" }));
+        const results = await race(dir, 6);
+        const opened = results.filter((r) => r.startsWith("opened "));
+        expect(opened).toHaveLength(1);
+        expect(results.filter((r) => r === "STORE_LOCKED")).toHaveLength(5);
+        expect(JSON.parse(readFileSync(join(dir, ".lock"), "utf8")).pid).toBe(Number(opened[0]!.slice("opened ".length)));
+        expect(readdirSync(dir).filter((f) => f.startsWith(".lock."))).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }, 30_000);
+
   test("08b review r2 #4: a lock is a record with a token; a reused pid is recognised where it can be, and an unconfirmable holder is refused", async () => {
     const dir = tempDir();
     try {
-      // This process's pid under a token it never issued: an earlier process that had the pid.
+      // This process's pid under a token this thread never issued: another thread of this process, or an
+      // earlier process that had the pid. Only a recorded start time that is not this process's tells (Linux).
       writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: process.pid, host: hostname(), token: "f00d" }));
-      const a = await FileStore.open(dir);
-      const record = JSON.parse(readFileSync(join(dir, ".lock"), "utf8"));
-      expect(record).toMatchObject({ pid: process.pid, host: hostname() });
-      expect(record.token).toMatch(/^[0-9a-f]{32}$/);
-      await a.close();
+      expect((await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError))?.code).toBe("STORE_LOCKED");
+      writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: process.pid, host: hostname(), token: "f00d", start: "1" }));
+      const earlier = await FileStore.open(dir).then((s) => s, (e: unknown) => e as OriginalsError);
+      if (process.platform === "linux") {
+        expect(earlier).toBeInstanceOf(FileStore);
+        const record = JSON.parse(readFileSync(join(dir, ".lock"), "utf8"));
+        expect(record).toMatchObject({ pid: process.pid, host: hostname() });
+        expect(record.token).toMatch(/^[0-9a-f]{32}$/);
+        await (earlier as FileStore).close();
+      } else {
+        expect((earlier as OriginalsError).code).toBe("STORE_LOCKED");
+      }
       // Another host's holder cannot be checked: refused, never taken over.
       writeFileSync(join(dir, ".lock"), JSON.stringify({ pid: 1, host: `not-${hostname()}`, token: "f00d" }));
       expect((await FileStore.open(dir).then(() => undefined, (e: unknown) => e as OriginalsError))?.code).toBe("STORE_LOCKED");

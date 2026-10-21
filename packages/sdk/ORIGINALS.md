@@ -81,10 +81,15 @@ The `originals` command verifies a package offline:
   atomically (a `link` of a per-process record), so exactly one process holds
   a root; another opening it gets `STORE_LOCKED`. A lock is taken over only
   when its holder is confirmed gone: same host, and its pid no longer runs or
-  now belongs to a different process. A lock from another host, or one whose
-  holder cannot be confirmed gone, stays refused; remove `<root>/.lock` (and
-  any `<root>/.lock.break.*`) by hand once no process uses the store
-  (PROVISIONAL). Handles in one process share the root. `close()` on the last
+  now belongs to a different process. A lock under the opener's own pid is
+  held (worker threads of one process share its pid but not its handles, so
+  a worker opening a root its process holds gets `STORE_LOCKED`) unless a
+  recorded kernel start time (Linux) shows an earlier process that had the
+  pid. A takeover whose taker died between claiming the break and the rename
+  is completed by a later opener, by exactly one. A lock from another host,
+  or one whose holder cannot be confirmed gone, stays refused; remove
+  `<root>/.lock` (and any `<root>/.lock.break.*`) by hand once no process
+  uses the store (PROVISIONAL). Handles in one process share the root. `close()` on the last
   handle waits for every write in flight, then releases the lock, so a store
   can be handed to another process; a closed handle refuses writes
   (`STORE_CLOSED`).
