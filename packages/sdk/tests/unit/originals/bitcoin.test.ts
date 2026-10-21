@@ -388,10 +388,20 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
       { id: id("c"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/png", contentLength: 9 } },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     expect(e.inscriptions.map((i) => [i.mediaType, i.unsupported, i.content.length, i.metadata])).toEqual([
-      ["application/octet-stream", "delegated", 0, null],
-      [ORIGINALS_INSCRIPTION_TYPE, "content-encoding", 0, null],
-      ["image/png", "not-read", 0, null],
+      ["application/octet-stream", "delegated", 0, undefined],
+      [ORIGINALS_INSCRIPTION_TYPE, "content-encoding", 0, undefined],
+      ["image/png", "not-read", 0, undefined],
     ]);
+  });
+
+  test("finding 9, P5.13: a delegated or encoded inscription carries its own metadata; metadata not read stays absent", async () => {
+    const e = await satEvidence(snapshot([
+      { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null, metadata: new Uint8Array([0xa0]) } },
+      { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: null, metadata: null } },
+      { id: id("c"), height: 4, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null } },
+    ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    expect(e.inscriptions.map((i) => i.metadata)).toEqual([new Uint8Array([0xa0]), null, undefined]);
+    expect(e.inscriptions.map((i) => "metadata" in i)).toEqual([true, true, false]);
   });
 
   test("C12-89: an Originals inscription past the read's byte budget is missing evidence: the read fails", async () => {

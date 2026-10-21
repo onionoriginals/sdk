@@ -34,10 +34,13 @@ export interface PublicationObservation {
      * (the holder of a sat, who has no authority over it, must not be able
      * to make every read of it fail; P9.12). `delegated`: ord serves another
      * inscription's bytes for it. `content-encoding`: its body is encoded
-     * (P9.14 defines no encoding). Neither body nor metadata is read.
-     * PROVISIONAL.
+     * (P9.14 defines no encoding). The body is not read. Its own metadata,
+     * which delegation and body encoding do not affect, is read when it fits
+     * the read's byte budget (`null`: it carries none); absent, it was not
+     * read, and a did:btco history fails closed there (P5.13; whether such an
+     * inscription counts as a did:btco version is open: PROVISIONAL).
      */
-    | { status: 'unsupported'; reason: 'delegated' | 'content-encoding'; mediaType: string | null }
+    | { status: 'unsupported'; reason: 'delegated' | 'content-encoding'; mediaType: string | null; metadata?: Uint8Array | null }
     /**
      * Observed, but its body and metadata were not read, or not kept, because
      * they would pass the read's byte budget (`SatSnapshotBudget.maxContentBytes`,

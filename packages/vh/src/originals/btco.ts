@@ -57,16 +57,22 @@ export interface SatInscription {
   /**
    * The inscription's raw metadata, or null or absent when it carries none.
    * Originals inscriptions carry none (P9.17); a did:btco DID document is
-   * carried here as CBOR (P5.13).
+   * carried here as CBOR (P5.13). For a `delegated` or `content-encoding`
+   * inscription, null means it carries none and absent means the reader did
+   * not read it.
    */
   metadata?: Uint8Array | null;
   /**
    * Set when the reader observed the inscription but did not establish its
-   * own body; `content` is then empty and `metadata` absent. PROVISIONAL.
+   * own body; `content` is then empty. PROVISIONAL.
    * - `delegated`, `content-encoding`: its body is another inscription's, or
    *   encoded, and P9.14 defines no encoding. It is never an Originals entry
    *   (an Originals media type is rejected, `unsupported-encoding`; P9.14,
-   *   P9.17) and never a did:btco version (P5.13).
+   *   P9.17). Its own metadata, which delegation and body encoding do not
+   *   affect, is read as for any inscription: on a did:btco DID's sat it is a
+   *   version candidate, and metadata not read (absent) stops the history
+   *   (P5.13; whether such an inscription counts as a version is an open
+   *   question, PROVISIONAL).
    * - `not-read`: its body and metadata were past the reader's byte budget,
    *   or not asked for. An unread Originals inscription is missing evidence:
    *   the verification fails (`SAT_READ_INCOMPLETE`, P9.17), unless

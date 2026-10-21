@@ -363,9 +363,9 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(agreed.current, JSON.stringify(agreed.reasons)).toBe(true);
   });
 
-  test("M1, P5.13: a delegated or encoded inscription is not a version; an unread one leaves the history incomplete from there", async () => {
+  test("M1, P5.13: a delegated or encoded inscription without metadata is not a version; an unread one leaves the history incomplete from there", async () => {
     const { v1, genesis, anchor } = await byA();
-    const delegated = at(20, { content: new Uint8Array(), unsupported: "delegated" });
+    const delegated = at(20, { content: new Uint8Array(), unsupported: "delegated", metadata: null });
     const later = version(22, both());
     const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, delegated, later]) });
     expect(h.versions.map((v) => v.versionId)).toEqual([v1.id, later.id]);
@@ -378,6 +378,22 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     const r = await fromBitcoin([sat(AUTHOR, [v1, unread])], [inscribed([genesis, anchor], 31)]);
     expect(r.anchoring?.ignored[0]?.reason).toBe("author-version-unavailable");
     expect(r.current).toBe(false);
+  });
+
+  test("finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
+    const { v1 } = await byA();
+    // Metadata is the inscription's own, whatever its body's delegation or encoding.
+    for (const unsupported of ["delegated", "content-encoding"] as const) {
+      const v2 = version(20, both(), { content: new Uint8Array(), unsupported });
+      const h = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, v2]) });
+      expect(h.failure).toBeUndefined();
+      expect(h.versions.map((v) => v.versionId)).toEqual([v1.id, v2.id]);
+      // Its metadata was not read (absent, not null): it could be a version, so the history stops.
+      const unreadMeta = at(20, { content: new Uint8Array(), unsupported });
+      const cut = await verifyAuthorHistory({ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, unreadMeta, version(22, both())]) });
+      expect(cut.versions.map((v) => v.versionId)).toEqual([v1.id]);
+      expect(cut.failure?.error).toMatchObject({ category: "incomplete-evidence", code: "AUTHOR_SAT_READ_INCOMPLETE" });
+    }
   });
 
   test("P9.15: an author read whose tip is below the inscription cannot establish the state there", async () => {

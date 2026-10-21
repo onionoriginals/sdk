@@ -171,13 +171,16 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
   let unread: SatInscription | undefined;
   for (const i of read.inscriptions) {
     if (i.confirmations < 1) continue;
-    // Metadata not read could hold a version: the history stops before it (M1). A delegated or
-    // encoded inscription is not a version (P5.13, PROVISIONAL).
-    if (i.unsupported === "not-read") {
+    // Metadata not read could hold a version: the history stops before it, never skips it (M1).
+    // A delegated or encoded inscription carries its own metadata, which delegation and body
+    // encoding do not affect, so it is a version candidate like any other; metadata the reader
+    // did not establish for it (absent, not null) fails closed. Whether such an inscription
+    // counts as a did:btco version is open in P5.13: PROVISIONAL.
+    if (i.unsupported === "not-read" || (i.unsupported && i.metadata === undefined)) {
       unread = i;
       break;
     }
-    if (i.unsupported || !i.metadata) continue;
+    if (!i.metadata) continue;
     let doc;
     try {
       doc = decodeCbor(i.metadata);

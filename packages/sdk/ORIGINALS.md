@@ -639,7 +639,8 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   chain (#971).
 - The holder of the anchoring sat can inscribe anything on it, but cannot
   make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
-  delegated or encoded inscription as observed but unsupported, and a body
+  delegated or encoded inscription as observed but unsupported (with its own
+  metadata, read on a full read: P5.13, PROVISIONAL), and a body
   or metadata past its byte budget or the transport's response cap (for
   example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
   `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
@@ -744,7 +745,13 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   network, whose CBOR metadata is the DID document (strictly decoded), in
   chain order; an inscription the index places on another sat is not a version
   (C12-105), and one the indexes disagree on stops the history there with
-  `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). An entry names its version
+  `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). A delegated or encoded
+  inscription carries its own metadata, which delegation and body encoding do
+  not affect: the sat reader reads it, and it is a version candidate like any
+  other (PROVISIONAL: whether such an inscription counts as a did:btco
+  version is an open P5.13 question). An inscription whose metadata the reader
+  did not read (past its byte budget) stops the history there with
+  `AUTHOR_SAT_READ_INCOMPLETE` (missing evidence); it is never skipped. An entry names its version
   by inscription id (PROVISIONAL); `deactivated: true` is terminal. For an
   anchored Original, the version an entry names must precede, in chain order,
   the inscription that carries it, or the anchoring inscription for an entry
