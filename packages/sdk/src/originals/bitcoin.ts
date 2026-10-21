@@ -428,7 +428,12 @@ export function btcoAlias(network: BitcoinNetwork, sat: string): string {
 }
 
 export interface SatEvidenceOptions {
-  clock: InscriptionClock;
+  /**
+   * Inscription times (P9.15): an `InscriptionClock`, or anything with its
+   * `at`. A reader that orders by chain position only, such as did:btco
+   * resolution (P5.13), can pass block times from the snapshot.
+   */
+  clock: Pick<InscriptionClock, "at">;
   /** Confirmations of the output now holding the sat; the adapter reports it (P9.11). */
   ownerConfirmations: number;
   /**

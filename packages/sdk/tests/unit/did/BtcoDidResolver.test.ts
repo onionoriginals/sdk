@@ -4,7 +4,7 @@
  * order; deactivation is terminal; an unreadable inscription fails closed.
  */
 import { describe, expect, test } from 'bun:test';
-import { encodeCbor } from '@originals/vh/originals';
+import { encodeCbor, parseBtcoAlias } from '@originals/vh/originals';
 import { BtcoDidResolver, parseBtcoDid } from '../../../src/did/BtcoDidResolver.js';
 import { btcoDidDeactivationInscription, btcoDidInscription, createBtcoDidDocument } from '../../../src/did/createBtcoDidDocument.js';
 import type { PublicationObservation, SatSnapshot } from '../../../src/bitcoin/sat-snapshot-types.js';
@@ -46,6 +46,25 @@ describe('did:btco identifiers', () => {
     expect(parseBtcoDid(DID)).toEqual({ satNumber: SAT, network: 'regtest' });
     expect(parseBtcoDid('did:btco:sig:0')).toEqual({ satNumber: '0', network: 'signet' });
     for (const bad of ['did:btco:01', 'did:btco:main:1', 'did:btco:1.5', 'did:btco:2099999997690000', `${DID}/0`]) expect(parseBtcoDid(bad)).toBeNull();
+  });
+
+  test('the grammar is the Originals verifier\'s: non-canonical forms are refused by both (P9.10)', () => {
+    const forms = [
+      DID, `did:btco:${SAT}`, 'did:btco:test:0', 'did:btco:2099999997689999', 'did:btco:2099999997690000',
+      'did:btco:+1', 'did:btco:-1', 'did:btco:007', 'did:btco:reg:01', 'did:btco:REG:1', 'did:btco:regtest:1',
+      'did:btco:reg:', 'did:btco:', 'did:btco:1 ', ' did:btco:1', 'did:btco:1e3', 'did:btco:0x10', 'did:btco:reg:sig:1',
+    ];
+    for (const did of forms) {
+      let alias: { satNumber: string; network: string } | null;
+      try {
+        const a = parseBtcoAlias(did);
+        alias = { satNumber: a.sat, network: a.network };
+      } catch {
+        alias = null;
+      }
+      expect(parseBtcoDid(did), did).toEqual(alias);
+    }
+    for (const bad of ['did:btco:+1', 'did:btco:007', 'did:btco:REG:1', 'did:btco:2099999997690000']) expect(parseBtcoDid(bad), bad).toBeNull();
   });
 });
 
@@ -111,6 +130,26 @@ describe('resolution (did:btco method v0.2.0)', () => {
   test('a read during which the chain tip moved is unresolvable', async () => {
     const moved = snapshot([version(10)], { tipAfter: { height: 101, hash: 'dd'.repeat(32) } });
     expect((await resolver(moved).resolve(DID)).resolutionMetadata.error).toBe('unresolvable');
+  });
+
+  test('an inscription the index reports on another sat, or another network, is not a version (P9.10, P5.13)', async () => {
+    const v1 = version(10, doc('one'));
+    const elsewhere = { ...version(11, doc('elsewhere')), sat: '42' };
+    const otherNetwork = { ...version(12, doc('other network')), network: 'testnet' as const };
+    const r = await resolver(snapshot([v1, elsewhere, otherNetwork])).resolve(DID);
+    expect(r.resolutionMetadata.versions).toEqual([v1.id]);
+    expect(r.didDocument?.alsoKnownAs).toEqual(['one']);
+  });
+
+  test('a placement reported two ways stops the history: unresolvable, never the latest version read (P9.10)', async () => {
+    const v1 = version(10, doc('one'));
+    const v2 = version(12, doc('two'));
+    // The index reports v2 twice, in different positions: a later version may exist, so nothing is current.
+    const again = { ...v2, creation: { ...v2.creation!, transactionIndex: 7 } };
+    const r = await resolver(snapshot([v1, v2, again])).resolve(DID);
+    expect(r.resolutionMetadata.error).toBe('unresolvable');
+    expect(r.resolutionMetadata.message).toMatch(/disagree/);
+    expect(r.didDocument).toBeNull();
   });
 
   test('a DID for another network than the read is refused', async () => {

@@ -16,9 +16,10 @@
  * not define. Nothing is fetched from inscription content URLs.
  */
 import { OriginalsError } from '@originals/vh';
-import { verifyAuthorHistory, type SatEvidence } from '@originals/vh/originals';
+import { parseBtcoAlias, verifyAuthorHistory, type SatEvidence } from '@originals/vh/originals';
 import type { DIDDocument } from '../types/did.js';
 import type { BitcoinNetwork, SatSnapshot } from '../bitcoin/sat-snapshot-types.js';
+import { btcoAlias, satEvidence } from '../originals/bitcoin.js';
 
 export interface BtcoDidResolutionResult {
   didDocument: DIDDocument | null;
@@ -47,14 +48,25 @@ export interface BtcoDidResolutionResult {
 export interface BtcoDidResolutionOptions {
   /** One complete, stable read of a sat (an OrdinalsProvider's `getSatSnapshot`). */
   satSnapshot: (satoshi: string) => Promise<SatSnapshot>;
+  /** The index that serves `satSnapshot`, as the verifier reports it (P9.11). Defaults to `ordinals-provider`. */
+  index?: string;
 }
 
-const NETWORKS: Record<string, BitcoinNetwork> = { '': 'mainnet', reg: 'regtest', sig: 'signet', test: 'testnet' };
-
+/**
+ * The strict did:btco grammar (P9.10; did:btco method v0.2.0): an optional
+ * `reg:`, `sig:` or `test:` prefix, then the sat number in decimal with no
+ * sign and no leading zeros, below the total supply. It is the Originals
+ * verifier's (`parseBtcoAlias`), so the two never disagree about a DID; any
+ * other form is null.
+ */
 export function parseBtcoDid(did: string): { satNumber: string; network: BitcoinNetwork } | null {
-  const m = /^did:btco:(?:(reg|sig|test):)?(0|[1-9]\d{0,15})$/.exec(did);
-  if (!m || BigInt(m[2]) > 2_099_999_997_689_999n) return null;
-  return { satNumber: m[2], network: NETWORKS[m[1] ?? ''] };
+  try {
+    const alias = parseBtcoAlias(did);
+    return { satNumber: alias.sat, network: alias.network };
+  } catch (error) {
+    if (error instanceof OriginalsError) return null;
+    throw error;
+  }
 }
 
 function iso(seconds: number | undefined): string | undefined {
@@ -83,38 +95,32 @@ export class BtcoDidResolver {
       return failed('unresolvable', `The chain moved while the sat ${satNumber} was read`, { satNumber, network });
     }
     const blockTime = new Map(snapshot.blocks.map((b) => [b.height, b.time]));
-    const evidence: SatEvidence = {
-      sat: did,
-      tip: { height: snapshot.tipAfter.height, hash: snapshot.tipAfter.hash },
-      inscriptions: [],
-      owner: null,
-      indexes: 1,
-    };
-    for (const p of snapshot.publications) {
-      if (p.body.status !== 'complete' || !p.creation) {
-        return failed('unresolvable', `Inscription ${p.id} on the sat could not be read; it could be a newer version`, { satNumber, network });
-      }
-      evidence.inscriptions.push({
-        id: p.id,
-        height: p.creation.height,
-        transactionIndex: p.creation.transactionIndex,
-        inscriptionIndex: p.creation.inscriptionIndex,
-        confirmations: p.confirmed ? snapshot.tipAfter.height - p.creation.height + 1 : 0,
-        inscriptionTime: (blockTime.get(p.creation.height) ?? 0) * 1000,
-        mediaType: p.body.mediaType,
-        content: p.body.bytes,
-        metadata: p.body.metadata,
+    // The verifier's evidence shape (P9.10, P9.11): each inscription with the sat and network the
+    // index reports it on, and the index named. Versions follow chain order (P5.13), so block times
+    // serve only the created and updated metadata.
+    let evidence: SatEvidence;
+    try {
+      evidence = await satEvidence(snapshot, {
+        index: this.options.index ?? 'ordinals-provider',
+        ownerConfirmations: 0,
+        clock: { at: (height: number) => Promise.resolve((blockTime.get(height) ?? 0) * 1000) },
       });
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+      return failed('unresolvable', `The sat ${satNumber} could not be read in full; an unread inscription could be a newer version: ${error.message}`, { satNumber, network });
     }
+    if (evidence.sat !== btcoAlias(network, satNumber)) return failed('unresolvable', `The read is of ${evidence.sat}, not ${did}`, { satNumber, network });
     let history;
     try {
-      history = await verifyAuthorHistory({ did, bitcoin: evidence });
+      history = await verifyAuthorHistory({ did, bitcoin: [evidence] });
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       return failed('invalidDidDocument', error.message, { satNumber, network });
     }
     if (history.failure) {
-      const code = history.failure.error.code === 'AUTHOR_DID_NOT_FOUND' ? 'notFound' : 'invalidDidDocument';
+      // A placement the index reports inconsistently stops the history there: a later version may
+      // exist, so the latest one read is never reported as current (P9.10, P5.13).
+      const code = { AUTHOR_DID_NOT_FOUND: 'notFound', AUTHOR_PLACEMENT_DISPUTED: 'unresolvable' }[history.failure.error.code] ?? 'invalidDidDocument';
       return failed(code, history.failure.error.message, { satNumber, network });
     }
     const first = history.versions[0];
