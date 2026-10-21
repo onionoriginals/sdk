@@ -641,3 +641,20 @@ describe("a change of anchor is reported (P9.16)", () => {
     expect(third.current, JSON.stringify(third.reasons)).toBe(true);
   });
 });
+
+describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18)", () => {
+  test("row 103: an anchored Original without its resource bytes, current or historical, verifies with content reported unavailable", async () => {
+    const { alice, anchor, anchoring } = await anchored();
+    const r = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: {} });
+    expect(r.history.status).toBe("valid");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.resources.status).toBe("partial");
+    expect(r.resources.missing.map((v) => [v.resource, v.version])).toEqual([["photo", 1]]);
+    expect(r.reasons).not.toContain("resources-partial");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    // Bytes that are supplied are still checked (P7.4).
+    const wrong = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: { [resourceDigest(bytes(B1))]: bytes("tampered") } });
+    expect(wrong.resources.status).toBe("digest-failure");
+    expect(wrong.current).toBe(false);
+  });
+});
