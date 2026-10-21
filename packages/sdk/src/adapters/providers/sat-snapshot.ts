@@ -156,7 +156,8 @@ async function pool<T, R>(items: readonly T[], limit: number, work: (item: T) =>
 /**
  * One complete, stable sat observation: no decoded metadata, no delegated or
  * encoded bytes taken as a body, no moving index. Delegated and encoded
- * inscriptions, bodies the caller did not ask for (`options.bodies`), and
+ * inscriptions (with their own metadata, read where a did:btco read needs it:
+ * `bodies: 'all'`), bodies the caller did not ask for (`options.bodies`), and
  * bodies or metadata past the byte budget or the transport's response cap,
  * are reported observed but unread instead of failing the read, and the
  * time budget scales with the inscriptions listed, so the holder of a sat
@@ -339,8 +340,12 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   const plan = listed.map(({ observation, info, mediaType, length }) => {
     const unread = (body: Publication['body']): { publication: Publication } => ({ publication: { ...observation, body } });
     // Observed, never taken as its own body: ord would serve another inscription's bytes, or encoded ones (P9.14).
+    // Its own metadata is unaffected; a full read (`bodies: 'all'`, as did:btco reads use) reads it, since on a
+    // did:btco sat it could be a version (P5.13, PROVISIONAL). Not read, it is left absent, never taken as none.
     if (info.delegate != null || info.content_encoding != null) {
-      return unread({ status: 'unsupported', reason: info.delegate != null ? 'delegated' : 'content-encoding', mediaType });
+      const reason = info.delegate != null ? 'delegated' as const : 'content-encoding' as const;
+      if (limits.bodies === 'originals') return unread({ status: 'unsupported', reason, mediaType });
+      return { metadataOf: { observation, mediaType, reason } };
     }
     const originals = mediaType === ORIGINALS_INSCRIPTION_TYPE && length <= ORIGINALS_INSCRIPTION_MAX_BYTES;
     if (limits.bodies === 'originals' && !originals) {
@@ -359,7 +364,19 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
   });
 
   // 3. The chosen bodies and their metadata, a bounded number at a time.
+  const readMetadata = async (id: string): Promise<{ metadataHex: string | null } | { metadataTooLarge: true }> => {
+    let metadataHex: unknown;
+    try {
+      metadataHex = await reader.metadata(id);
+    } catch (error) {
+      if (tooLarge(error)) return { metadataTooLarge: true };
+      throw error;
+    }
+    if (metadataHex !== null && typeof metadataHex !== 'string') throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
+    return { metadataHex };
+  };
   const fetched = await pool(plan, limits.concurrency, async (step) => {
+    if ('metadataOf' in step && step.metadataOf) return readMetadata(step.metadataOf.observation.id);
     if (!('read' in step)) return undefined;
     const { observation: { id }, info, length } = step.read;
     let content: Uint8Array | null;
@@ -372,22 +389,28 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     // Null explicitly reports a bodyless inscription. Never accept delegated/effective bytes as its own body.
     if ((content === null && info.content_length !== null) || (content?.length ?? 0) !== length)
       throw incomplete('SAT_SNAPSHOT_CONTENT_UNAVAILABLE', 'Listed inscription content is unavailable or has a different byte length');
-    let metadataHex: unknown;
-    try {
-      metadataHex = await reader.metadata(id);
-    } catch (error) {
-      if (tooLarge(error)) return { content, metadataTooLarge: true as const };
-      throw error;
-    }
-    if (metadataHex !== null && typeof metadataHex !== 'string') throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
-    return { content, metadataHex };
+    return { content, ...(await readMetadata(id)) };
   }, error => limits.fail(error));
 
   // 4. Metadata, whose length the index does not report beforehand, counted in listing order.
   const publications: SatSnapshot['publications'] = plan.map((step, k) => {
+    if ('metadataOf' in step && step.metadataOf) {
+      // A delegated or encoded inscription's own metadata, from the other bodies' budget; past it, left absent (not read).
+      const { observation, mediaType, reason } = step.metadataOf;
+      const got = fetched[k] as { metadataHex: string | null } | { metadataTooLarge: true };
+      const unsupported = (metadata?: Uint8Array | null): Publication =>
+        ({ ...observation, body: { status: 'unsupported', reason, mediaType, ...(metadata !== undefined ? { metadata } : {}) } });
+      if ('metadataTooLarge' in got) return unsupported();
+      if (got.metadataHex === null) return unsupported(null);
+      if (used.other + got.metadataHex.length / 2 > cap.other) return unsupported();
+      const decoded = decodeHex(got.metadataHex);
+      if (!decoded) throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
+      used.other += decoded.length;
+      return unsupported(decoded);
+    }
     if (!('read' in step)) return step.publication;
     const { observation, mediaType, length, pool } = step.read;
-    const got = fetched[k]!;
+    const got = fetched[k] as { bodyTooLarge: true } | { content: Uint8Array | null; metadataTooLarge: true } | { content: Uint8Array | null; metadataHex: string | null };
     const over = (metadataPresent: boolean): Publication =>
       ({ ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length, ...(metadataPresent ? { metadataPresent: true as const } : {}) } });
     if ('bodyTooLarge' in got) return over(false);
