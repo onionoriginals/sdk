@@ -292,7 +292,18 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
 - An editor entry and a revoking author entry with the same parent are a fork,
   unresolved until anchoring (P6.6). Branch length and the number of signers
   decide nothing; an entry bringing content from another branch is an ordinary
-  single-parent entry and the fork remains.
+  single-parent entry and the fork remains. After anchoring, chain order on
+  the sat decides: whichever is inscribed first extends the head, and the
+  other does not (P5.17, P9.13).
+- Anchored editor entries (P5.18, P9.15): an editor entry inscribed on the
+  anchoring sat is checked against the editor DID's state at its inscription
+  time, exactly as an author entry is against the author DID's (versionTime
+  with the named-later-version exception for did:vh and did:webvh, chain order
+  for did:btco, P5.13), and is refused once the author DID's state at its
+  inscription time is deactivated (`author-deactivated-at-inscription-time`).
+  The `author-*` reasons of `anchoring.ignored` name the signer DID's state.
+  An editor entry inscribed by the sat's holder is accepted (P9.12); only an
+  author entry anchors.
 - Editor authority is VH-Log PR 11's "Editors from a Controller" [S25]
   (swcurran/VH-Log#11 at `2fe380dbf`, treated as merged): the generic engine's
   editor hook (`ControllerKeys.editors` in `@originals/vh/log`) enforces that
@@ -301,9 +312,7 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   against the editors in its parent (`EDITOR_NOT_GRANTED`), leaves the grants
   unchanged and carries one proof by its editor; the Originals profile
   supplies the grants, the `editor` reference, the editor key rules and the
-  grant's scope. Anchored editor
-  entries (P9.15 at inscription time, P9.12 inscription by the owner) arrive
-  with Bitcoin anchoring. No signer is required to use did:btco.
+  grant's scope. No signer is required to use did:btco.
 
 ## Moved author DIDs — identity continuity (P5.14, implemented)
 
@@ -709,8 +718,9 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   October 2026, #47; nothing in the SDK requires them); a did:btco author is
   how Bitcoin alone suffices (P9.18).
 - After anchoring, deactivating the author DID leaves the accepted state
-  current and refuses later inscriptions; a key the author removes later does
-  not unseat entries accepted before (P9.15).
+  current and refuses later inscriptions, editor entries included (P5.18); a
+  key the author or an editor removes later does not unseat entries accepted
+  before (P9.15). See Editors above for editor entries on the sat.
 - An anchored log with no Bitcoin evidence is `unverified`, and one whose
   evidence holds no valid anchor is `not-anchored`; neither is current, and
   neither advances the retained versionId. A

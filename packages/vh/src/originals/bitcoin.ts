@@ -29,9 +29,13 @@
  *   (P9.15). For a did:btco signer DID that state is the latest version
  *   before the inscription in chain order, and a named version must precede
  *   the inscription carrying the entry, or the anchoring inscription for an
- *   entry before it (P5.13). After the anchor, an inscription is accepted when it extends the
- *   head at a strictly greater height (P9.13). Everything else is ignored and
- *   reported.
+ *   entry before it (P5.13). The signer is the editor DID for an editor
+ *   entry, which is also refused when the author DID's state at its
+ *   inscription time is deactivated (P5.18). Only an author entry anchors
+ *   (P5.16). After the anchor, an inscription is accepted when it extends the
+ *   head at a strictly greater height (P9.13), so chain order decides between
+ *   an editor entry and a revocation of its grant with the same parent
+ *   (P5.17). Everything else is ignored and reported.
  * - An inscription counts from 1 confirmation on every network, mainnet
  *   included, with its depth reported (P9.5, D6; owner decision, spec PR #50
  *   (open)). There is no per-network confirmation policy.
@@ -185,6 +189,26 @@ function signerRefOf(entry: unknown): AuthorRef | undefined {
 }
 
 /**
+ * A DID's state at an inscription (P9.15, P5.13): for did:btco, the latest
+ * version preceding the inscription in chain order, established through it
+ * (not past the tip read, nor past an inscription the indexes dispute); for
+ * did:vh and did:webvh, the later of the named version, when there is one,
+ * and the latest version whose versionTime is no later than the inscription
+ * time.
+ */
+function stateAt(history: AuthorHistory, named: AuthorVersion | undefined, inscription: SatInscription): AuthorVersion | IgnoredReason {
+  let state: AuthorVersion | undefined;
+  if (history.method === "did:btco") {
+    if (history.establishedBefore && chainOrder(inscription, history.establishedBefore) >= 0) return "author-version-unavailable";
+    for (const v of history.versions) if (v.position && chainOrder(v.position, inscription) < 0) state = v;
+  } else {
+    for (const v of history.versions) if (v.time <= inscription.inscriptionTime) state = v;
+    if (named && (!state || named.versionNumber > state.versionNumber)) state = named;
+  }
+  return state ?? "author-version-unavailable";
+}
+
+/**
  * The signer DID's state at an inscription, and whether the entry's key holds
  * there. The key must meet P5.3 at the version the entry names and in that
  * state, which must not be deactivated.
@@ -200,26 +224,32 @@ function signerRefOf(entry: unknown): AuthorRef | undefined {
  *   time, so a named later version can list a removed key again (C12-98,
  *   C12-44).
  *
- * The rules are the signer's, through `signerOf`, so they will apply to editor
- * DIDs as they do to the author DID (P5.18).
+ * The signer is the entry's, through `signerOf`: the editor DID for an editor
+ * entry, so these rules apply to editor DIDs as they do to the author DID
+ * (P5.18), and the `author-*` reasons name the signer DID's state. An editor
+ * entry is also refused when the author DID's state at the inscription is
+ * deactivated (P5.18, P9.15): `author-deactivated-at-inscription-time`.
  */
 export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
   const found = signerVersion(entry, histories);
   if (typeof found === "string") return found;
   const { ref, history, named } = found;
-  let state: AuthorVersion;
   if (history.method === "did:btco") {
     if (!named.position) return "author-version-unavailable";
     if (chainOrder(named.position, inscription) >= 0) return "author-version-not-yet-in-effect";
-    if (history.establishedBefore && chainOrder(inscription, history.establishedBefore) >= 0) return "author-version-unavailable";
-    state = named;
-    for (const v of history.versions) if (v.position && chainOrder(v.position, inscription) < 0) state = v;
-  } else {
-    let before: AuthorVersion | undefined;
-    for (const v of history.versions) if (v.time <= inscription.inscriptionTime) before = v;
-    state = before && before.versionNumber > named.versionNumber ? before : named;
   }
+  const state = stateAt(history, named, inscription);
+  if (typeof state === "string") return state;
   if (state.deactivated) return "author-deactivated-at-inscription-time";
+  const editorEntry = stateOf(entry);
+  if (editorEntry.editor && editorEntry.author) {
+    const author = editorEntry.author;
+    const authorHistory = histories.find((h) => h.did === author.did);
+    if (!authorHistory) return "author-version-unavailable";
+    const authorState = stateAt(authorHistory, authorHistory.versions.find((v) => v.versionId === author.versionId), inscription);
+    if (typeof authorState === "string") return authorState;
+    if (authorState.deactivated) return "author-deactivated-at-inscription-time";
+  }
   let key: string;
   try {
     key = authorKey(named, ref);
