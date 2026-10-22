@@ -555,6 +555,15 @@ export type CatchUpStep =
    */
   | { action: "wait-for-confirmation"; versionId: string; recoveryId: string; inscriptionId: string; reason: "unconfirmed" | "not-indexed"; pending: PendingEntries }
   /**
+   * The pair for `versionId` is confirmed on the sat, but this writer holds no
+   * verified copy of the signer DID version the entry names
+   * (`later-inscription-unverifiable`, P9.12, P9.15, P5.6): Bitcoin has not
+   * ignored it, the reader cannot tell yet. Supply `signer`'s DID history
+   * through `signerVersionId` and catch up again. Nothing is prepared over it,
+   * since it may be accepted once that evidence is held (P9.6).
+   */
+  | { action: "wait-for-evidence"; versionId: string; recoveryId: string; inscriptionId: string; signer: string; signerVersionId: string; pending: PendingEntries }
+  /**
    * The indexes disagree on what the sat holds (anchoring `unverified` or
    * `disputed` inscriptions, P9.10) or on which output holds it (`holders`,
    * each output named): nothing is prepared, submitted or resumed until they
@@ -608,6 +617,8 @@ interface Candidate {
   record: InscriptionRecoveryRecord;
   commit: Seen;
   reveal: Seen;
+  /** For a confirmed pair the read cannot verify yet: the signer DID version it lacks. */
+  unverifiable?: { signer: string; signerVersionId: string };
 }
 
 /** What the recovery store holds for the next inscription. */
@@ -629,8 +640,13 @@ async function recoveryIdsOf(store: InscriptionRecoveryStore, given?: Iterable<s
   return [...new Set(ids)].sort();
 }
 
-/** Ignored reasons that are not final: the inscription may still be accepted once confirmed or agreed on. */
-const NOT_SETTLED = new Set(["unconfirmed", "placement-disputed", "after-disputed-placement"]);
+/**
+ * Ignored reasons that are not final: the inscription may still be accepted
+ * once confirmed, agreed on, or verified with the signer DID version it names
+ * (`later-inscription-unverifiable`: the reader lacks that evidence, P9.12,
+ * P9.15, P5.6). Catch-up waits on these and never prepares a replacement.
+ */
+const NOT_SETTLED = new Set(["unconfirmed", "placement-disputed", "after-disputed-placement", "later-inscription-unverifiable"]);
 
 /** Ordering of live pairs: the one furthest along on the network first, then by recovery id. */
 const PROGRESS: Record<InscriptionRecoveryRecord["broadcast"], number> = {
@@ -667,6 +683,7 @@ async function loadRecord(store: InscriptionRecoveryStore, id: string): Promise<
  */
 async function recorded(log: StoredLog, view: OriginalView, holding: string | undefined, content: Uint8Array, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: string[]): Promise<Recorded> {
   const ignored = new Set((view.report.anchoring?.ignored ?? []).filter((i) => !NOT_SETTLED.has(i.reason)).map((i) => i.inscription));
+  const unverifiable = new Map((view.report.anchoring?.unverifiable ?? []).map((u) => [u.inscription, { signer: u.signer, signerVersionId: u.signerVersionId }]));
   const found: Recorded = { indexed: [], live: [], inFlight: [], replaces: [], issues: [] };
   for (const id of ids) {
     const loaded = await loadRecord(store, id);
@@ -684,7 +701,10 @@ async function recorded(log: StoredLog, view: OriginalView, holding: string | un
     if (reveal === "confirmed") {
       // Confirmed: Bitcoin either ignored it for good (a replacement is needed) or has not placed it yet.
       if (ignored.has(prepared.inscriptionId)) found.replaces.push(prepared.inscriptionId);
-      else found.indexed.push({ record, commit: "confirmed", reveal });
+      else {
+        const missing = unverifiable.get(prepared.inscriptionId);
+        found.indexed.push({ record, commit: "confirmed", reveal, ...(missing ? { unverifiable: missing } : {}) });
+      }
       continue;
     }
     // A pair can still land only while the sat sits in its funding input or its own outputs.
@@ -775,6 +795,10 @@ export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
   // P9.10: while the indexes disagree, nothing is prepared or resumed (the same guard refuses prepare and submit).
   if (disagreement) return { action: "wait-for-bitcoin", versionId, reason: "indexes-disagree", ...disagreement, pending };
   const [indexed] = found.indexed;
+  if (indexed?.unverifiable) {
+    const { signer, signerVersionId } = indexed.unverifiable;
+    return { action: "wait-for-evidence", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, signer, signerVersionId, pending };
+  }
   if (indexed) {
     return { action: "wait-for-confirmation", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, reason: "not-indexed", pending };
   }

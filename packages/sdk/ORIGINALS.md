@@ -607,6 +607,8 @@ const pending = await nextPendingEntry(sdk, did, read); // { committed, accepted
 const plan = await catchUp({ sdk, did, ...read, recoveryStore });
 // plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeEntryInscription(plan.recoveryId))
 //            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
+//            | "wait-for-evidence" (the pair is on the sat, but this writer lacks the signer DID version it names,
+//              plan.signer at plan.signerVersionId: supply that history; nothing is prepared over it)
 //            | "wait-for-bitcoin" (indexes disagree on the sat or its holder: nothing is prepared, sent or resumed;
 //              prepare and submit refuse INDEXES_DISAGREE) | "refused" (the recorded pair no longer
 //              verifies, P9.18: nothing is sent; plan.commit and plan.ifRevealed say what broadcasting it would do)
@@ -640,7 +642,10 @@ received.report.ownership?.output;                           // compare with the
   its reveal is unconfirmed or not yet indexed, skips records for entries
   Bitcoin already accepted, and prepares a replacement only when Bitcoin
   confirmed and ignored the earlier inscription for good (`replaces`; one the
-  read shows unconfirmed or disputed is waited on). A pair can still land
+  read shows unconfirmed or disputed is waited on, and so is one it reports
+  `later-inscription-unverifiable`, whose signer DID version the writer has
+  no verified copy of: `wait-for-evidence` names the signer and version, P9.12,
+  P9.15, P5.6). A pair can still land
   only while the sat read shows the sat in its funding input or its own
   outputs, before the anchor is accepted as after; among several the one
   furthest along on the network wins, then the lowest recovery id. A
