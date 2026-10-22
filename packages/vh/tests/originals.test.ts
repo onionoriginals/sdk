@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { base58btcEncode, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
 import { parseJson, type JsonObject } from "../src/json/index.js";
-import { appendEntry, createLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
+import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
 import { resolveDidVh } from "../src/didvh/index.js";
 import {
   ORIGINALS_METHOD,
@@ -555,5 +555,31 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     // Parsed entries are measured as the line they serialize to.
     const parsed = await verifyOriginal({ log: [JSON.parse(over.line)], authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
     failedWith(parsed, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+  });
+
+  test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
+    const key = seeded(21);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    // `1e21` re-serializes as `1e+21`: the same entry, and the same versionId and proof, one byte longer each time.
+    const nums = Array.from({ length: 200 }, () => 1e21);
+    let pad = 0;
+    for (let i = 0; i < 40; i++) {
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+      const line = serializeLog([entry]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const size = new TextEncoder().encode(line).length;
+      if (size !== 65_536) {
+        pad += 65_536 - size;
+        continue;
+      }
+      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(65_736);
+      const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+      // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.
+      const parsed = await verifyOriginal({ log: parseLog(`${line}\n`), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(parsed.history.status, JSON.stringify(parsed.history.failure)).toBe("valid");
+      failedWith(await verifyOriginal({ log: [JSON.parse(line)], authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      return;
+    }
+    throw new Error("no entry of 65,536 bytes");
   });
 });

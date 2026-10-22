@@ -29,7 +29,7 @@ import {
   type ProofSigner,
 } from "../crypto/index.js";
 import { OriginalsError, fail, type ErrorCategory } from "../errors.js";
-import { canonicalBytes, isJsonObject, parseJson, parseJsonLines, type JsonObject, type JsonValue, type ParseLimits } from "../json/index.js";
+import { canonicalBytes, canonicalize, isJsonObject, parseJson, parseJsonLines, type JsonObject, type JsonValue, type ParseLimits } from "../json/index.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -166,8 +166,11 @@ export interface LogLimits {
   /**
    * Maximum size of one entry: the UTF-8 byte length of its stored line,
    * without the line feed (P7.7; P14.13, PROVISIONAL originals-spec #48
-   * 1f90e43bc). A parsed entry is measured as the compact line it serializes
-   * to; a log's text is measured line by line as stored.
+   * 1f90e43bc). A log's text is measured line by line as stored, before it is
+   * parsed, and so is each entry `verifyLog` is given with its stored size
+   * (`lineBytes`) or that `parseLog` parsed. An entry with no stored line
+   * (built or parsed elsewhere) is measured as its JCS serialization, the
+   * line a conforming writer stores (PROVISIONAL).
    */
   maxEntryBytes?: number;
 }
@@ -413,7 +416,7 @@ export function parseVersionTime(value: unknown, fractionalDigits = 0): number {
 const ENTRY_MEMBERS = ["versionId", "versionTime", "parameters", "state", "proof"];
 const VERSION_ID = /^([1-9]\d*)-([1-9A-HJ-NP-Za-km-z]+)$/;
 
-function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
+function checkStructure(raw: unknown, limits: LogLimits, storedBytes: number | undefined): LogEntry {
   if (!isJsonObject(raw)) fail("invalid-evidence", "LOG_LINE_INVALID", "a log line must be a JSON object");
   const keys = Object.keys(raw);
   if (keys.length !== ENTRY_MEMBERS.length || !ENTRY_MEMBERS.every((key) => keys.includes(key))) {
@@ -424,7 +427,8 @@ function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
   }
   if (!isJsonObject(raw.parameters) || !isJsonObject(raw.state)) fail("invalid-evidence", "ENTRY_MEMBERS", "parameters and state must be objects");
   if (!Array.isArray(raw.proof)) fail("invalid-evidence", "ENTRY_MEMBERS", "proof must be an array");
-  if (limits.maxEntryBytes !== undefined && utf8Length(JSON.stringify(raw)) > limits.maxEntryBytes) {
+  // P14.13: the stored line when there is one, else the JCS line a writer stores (PROVISIONAL).
+  if (limits.maxEntryBytes !== undefined && (storedBytes ?? storedLineBytes.get(raw) ?? utf8Length(canonicalize(raw))) > limits.maxEntryBytes) {
     fail("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${limits.maxEntryBytes} bytes`);
   }
   return raw as unknown as LogEntry;
@@ -439,13 +443,14 @@ async function verifyEntry(
   previous: VerifiedEntry | undefined,
   options: VerifyOptions,
   now: number,
+  storedBytes?: number,
 ): Promise<VerifiedEntry> {
   const spec = options.specialisation;
   // Checks run in VH-Log's step order, as vh-log-interop-0 section 4 pins it, so
   // the first failing check names the error: deactivation, structure,
   // parameters (with pre-rotation), proofs, versionId, versionTime, SCID, state.
   if (previous?.active.deactivated) fail("deactivated", "ENTRY_AFTER_DEACTIVATION", "no entry may follow a deactivating entry");
-  const entry = checkStructure(raw, options.limits ?? {});
+  const entry = checkStructure(raw, options.limits ?? {}, storedBytes);
 
   // Parameters (VH-Log Read step 1) and pre-rotation (step 7, which concerns only parameters).
   const { active, version } = applyParameters(entry.parameters, previous?.active, spec);
@@ -578,7 +583,12 @@ function approvals(
   return byVersion;
 }
 
-export async function verifyLog(entries: unknown[], options: VerifyOptions): Promise<LogVerification> {
+/**
+ * Verify parsed log entries. `lineBytes`, when given, is the UTF-8 byte length
+ * of each entry's stored line without its line feed, which the entry size
+ * limit measures (P14.13); without it an entry is measured as its JCS line.
+ */
+export async function verifyLog(entries: unknown[], options: VerifyOptions, lineBytes?: readonly number[]): Promise<LogVerification> {
   const now = options.now === undefined ? Date.now() : typeof options.now === "number" ? options.now : options.now.getTime();
   const verified: VerifiedEntry[] = [];
   let failure: LogFailure | undefined;
@@ -590,7 +600,7 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions): Pro
       break;
     }
     try {
-      verified.push(await verifyEntry(index, entries[index], verified[index - 1], options, now));
+      verified.push(await verifyEntry(index, entries[index], verified[index - 1], options, now, lineBytes?.[index]));
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       const raw = entries[index];
@@ -658,16 +668,20 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const lines = text.length === 0 ? [] : body.split("\n");
   const entries: unknown[] = [];
+  const sizes: number[] = [];
   let parseFailure: LogFailure | undefined;
   for (let index = 0; index < lines.length; index++) {
     try {
       if (lines[index].length === 0) throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
-      // The stored line is what is measured (P7.7, P14.13), before it is parsed.
+      // The stored line is what is measured (P7.7, P14.13), before it is parsed, and only it.
       const max = options.limits?.maxEntryBytes;
-      if (max !== undefined && lines[index].length > max / 3 && utf8Length(lines[index]) > max) {
+      // A line of at most max / 3 UTF-16 code units is at most max UTF-8 bytes: that bound is what is passed on.
+      const size = max === undefined || lines[index].length <= max / 3 ? lines[index].length * 3 : utf8Length(lines[index]);
+      if (max !== undefined && size > max) {
         throw new OriginalsError("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${max} bytes`);
       }
       entries.push(parseJson(lines[index], options.parse));
+      sizes.push(size);
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       parseFailure = { index, error };
@@ -677,7 +691,7 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   if (lines.length === 0) {
     parseFailure = { index: 0, error: new OriginalsError("invalid-evidence", "LOG_EMPTY", "the log has no entries") };
   }
-  const result = await verifyLog(entries, options);
+  const result = await verifyLog(entries, options, sizes);
   if (!parseFailure || result.failure) return result;
   return { ...result, failure: parseFailure };
 }
@@ -967,8 +981,24 @@ export const vhLog10: Specialisation = {
 };
 
 /** Parse a log file (strict JSON Lines). Structural checks happen in `verifyLog`. */
+/**
+ * The UTF-8 byte length of the stored line each entry `parseLog` returned was
+ * parsed from, without its line feed: the size the entry size limit measures
+ * (P14.13), carried with the parsed entry so a log assembled from parsed
+ * entries (an Original's anchoring inscriptions, a copy) is measured as
+ * stored.
+ */
+const storedLineBytes = new WeakMap<object, number>();
+
+/** Parse a log file's text, one entry per line, keeping each entry's stored line size (P14.13). */
 export function parseLog(text: string, limits?: ParseLimits): JsonValue[] {
-  return parseJsonLines(text, limits);
+  const entries = parseJsonLines(text, limits);
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  const lines = body.split("\n");
+  entries.forEach((entry, i) => {
+    if (typeof entry === "object" && entry !== null) storedLineBytes.set(entry, utf8Length(lines[i]));
+  });
+  return entries;
 }
 
 export type { ErrorCategory };
