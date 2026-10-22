@@ -581,15 +581,16 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 ```
 
 - The anchoring entry is an ordinary update that adds the sat's did:btco alias
-  (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere,
-  PROVISIONAL; strict grammar: no sign, no leading zeros, below the total
-  supply). From then on the alias never changes, and no did:webvh alias may be
+  (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere, P14.12;
+  the did:btco method does not yet define the prefixes, proposed upstream as
+  decentralized-identity/labs-ordinals-plus#4 [S30]; strict grammar: no sign,
+  no leading zeros, below the total supply). From then on the alias never changes, and no did:webvh alias may be
   added, replaced or re-added; the one listed at anchoring may stay or go
   (P9.10, D7).
 - The anchoring inscription carries the whole log, genesis through the
   anchoring entry; every later inscription exactly one entry, as
-  `application/vnd.originals.vh+jsonl` (PROVISIONAL), with no metadata and at
-  most 350,000 bytes (P9.17, D6 provisional). So the sat alone verifies the
+  `application/vnd.originals.vh+jsonl`, with no metadata and at most 350,000
+  bytes (P9.17, P14.12; owner decisions, D6; spec PR #50 (open)). So the sat alone verifies the
   log: a stored or packaged copy is only compared (`anchoring.copy`), and one
   that differs is ignored. Entries before the anchoring entry are checked
   against the versions they name, with claimed ordering (P9.15). The writer
@@ -600,7 +601,8 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   (`bitcoin-placement-disputed`), and disagreement on the holder gives no
   owner (`ownership-indexes-disagree`).
 - Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
-  from 1 confirmation (depth reported) when it extends the head at a strictly
+  from 1 confirmation on every network, mainnet included (P9.5; depth
+  reported) when it extends the head at a strictly
   greater height and passes the author checks at its inscription time
   (P9.15). Entries only in a copy are not current, and a copy can neither fork
   nor make stale an anchored log. Only the anchor and accepted inscriptions

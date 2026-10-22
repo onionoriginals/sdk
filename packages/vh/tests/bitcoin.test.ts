@@ -814,3 +814,23 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     expect(r.anchoring?.status).toBe("unverified");
   });
 });
+
+describe("one confirmation on every network (P9.5, D6; spec PR #50 (open), owner decision)", () => {
+  // Mainnet, signet, testnet and regtest sats: one rule, no per-network policy.
+  for (const did of ["did:btco:5000000000", "did:btco:sig:5000000000", "did:btco:test:5000000000", "did:btco:reg:5000000000"]) {
+    test(`C12-90: on ${did} an anchoring inscription counts at 1 confirmation and not at 0`, async () => {
+      const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+      const sign = alice.signer(KEY, "orig");
+      const ref = alice.ref("orig");
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign });
+      const anchor = await updateOriginal(genesis, { versionTime: time(10), aliases: [did], author: ref, sign });
+      const one = await verify([genesis, anchor], alice, [sat([inscribe([genesis, anchor], 10, { confirmations: 1 })], did)]);
+      expect(one.anchoring, JSON.stringify(one.anchoring?.ignored)).toMatchObject({ sat: did, status: "anchored", anchor: { versionId: anchor.versionId, confirmations: 1 } });
+      expect(one.ordering).toBe("anchored");
+      const none = await verify([genesis, anchor], alice, [sat([inscribe([genesis, anchor], 10, { confirmations: 0 })], did)]);
+      expect(none.anchoring?.status).toBe("not-anchored");
+      expect(none.anchoring?.ignored.map((i) => i.reason)).toEqual(["unconfirmed"]);
+      expect(none.current).toBe(false);
+    });
+  }
+});

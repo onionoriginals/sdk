@@ -418,7 +418,11 @@ function decodeClockState(bytes: Uint8Array): { network: BitcoinNetwork; count: 
 
 const PREFIX: Record<BitcoinNetwork, string> = { mainnet: "", signet: "sig:", testnet: "test:", regtest: "reg:" };
 
-/** The did:btco alias of a sat on a network (plan 012 §3.5, PROVISIONAL prefixes). */
+/**
+ * The did:btco alias of a sat on a network (plan 012 §3.5; P9.10, P14.12): the
+ * prefixes are decided (owner decision, D6; spec PR #50 (open)), and proposed to
+ * the did:btco method as decentralized-identity/labs-ordinals-plus#4 [S30].
+ */
 export function btcoAlias(network: BitcoinNetwork, sat: string): string {
   return `did:btco:${PREFIX[network]}${sat}`;
 }

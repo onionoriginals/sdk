@@ -15,7 +15,7 @@
  *   it on that sat, undecided: missing evidence until they agree.
  * - Inscriptions carry complete entries as JSON Lines of
  *   `application/vnd.originals.vh+jsonl`, with no metadata, at most 350,000
- *   bytes (P9.17, D6 provisional). The anchoring inscription carries the whole
+ *   bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). The anchoring inscription carries the whole
  *   log from genesis through the anchoring entry, its last entry; every later
  *   one carries exactly one entry. So every anchoring inscription checks
  *   itself, and a copy of the log is never needed: one that differs from the
@@ -29,8 +29,9 @@
  *   (P9.15). After the anchor, an inscription is accepted when it extends the
  *   head at a strictly greater height (P9.13). Everything else is ignored and
  *   reported.
- * - An inscription counts from 1 confirmation, with its depth reported
- *   (P9.5, D6).
+ * - An inscription counts from 1 confirmation on every network, mainnet
+ *   included, with its depth reported (P9.5, D6; owner decision, spec PR #50
+ *   (open)). There is no per-network confirmation policy.
  */
 import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
@@ -39,10 +40,10 @@ import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type A
 import { btcoAliasOf, parseBtcoAlias, type BitcoinNetwork, type BtcoAlias } from "./btco.js";
 import { signerOf, type AuthorRef, type EntryState } from "./state.js";
 
-/** PROVISIONAL (D6; P9.17): the media type of an Originals inscription. */
+/** The media type of an Originals inscription (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
 export const ORIGINALS_INSCRIPTION_TYPE = "application/vnd.originals.vh+jsonl";
 
-/** PROVISIONAL (D6; P9.17): the largest inscription body, in bytes. */
+/** The largest inscription body, in bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
 export const ORIGINALS_INSCRIPTION_MAX_BYTES = 350_000;
 
 /**

@@ -188,7 +188,9 @@ function scidOfWebvh(did: string): string | undefined {
 }
 
 const DID_VH = /^did:vh:[1-9A-HJ-NP-Za-km-z]{46}$/;
-// did:btco[:sig|:test|:reg]:<sat>, a canonical decimal sat number within the supply (did:btco v0.2.0).
+// did:btco[:sig|:test|:reg]:<sat>, a canonical decimal sat number within the supply (did:btco v0.2.0;
+// P9.10, P14.12). The method does not yet define the network prefixes: proposed upstream as
+// decentralized-identity/labs-ordinals-plus#4 [S30].
 const DID_BTCO = /^did:btco:(?:(?:sig|test|reg):)?(0|[1-9]\d{0,15})$/;
 const MAX_SAT = 2_099_999_997_689_999n;
 
