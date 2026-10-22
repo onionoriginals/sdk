@@ -354,7 +354,7 @@ describe("author checks at inscription time (P9.15)", () => {
   });
 });
 
-describe("the newest known signer DID version (P7.8, P9.15; PROVISIONAL originals-spec #47 2be62b982)", () => {
+describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)", () => {
   const OBTAINED = new Date(NOW - 3_600_000).toISOString();
 
   test("C12-46: an entry inscribed after the newest version the verifier knows is checked against that version, and the report states it and when it was obtained", async () => {
@@ -372,7 +372,7 @@ describe("the newest known signer DID version (P7.8, P9.15; PROVISIONAL original
     expect(r.current).toBe(true);
   });
 
-  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P5.6; PROVISIONAL, spec question on #47)", async () => {
+  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P5.6; PROVISIONAL, spec question raised on #47 and not adopted)", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const older = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
@@ -731,7 +731,7 @@ describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18
   });
 });
 
-describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15; PROVISIONAL, spec question on #47)", () => {
+describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15; PROVISIONAL, spec question raised on #47 and not adopted)", () => {
   const HOLDER = seeded(77);
 
   test("a hash-chained later inscription naming an author version that does not exist is reported unverifiable; the accepted head stays complete and current", async () => {
@@ -776,7 +776,7 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
   });
 });
 
-describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.13; PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.13)", () => {
   /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and re-serializes longer. */
   async function storedAtLimit() {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);

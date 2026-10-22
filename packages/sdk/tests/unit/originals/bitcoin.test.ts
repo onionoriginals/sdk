@@ -523,7 +523,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
   });
 
-  test("C12-64: a verifier that knows a newer signer DID version than the package supplies uses the newer one, and says when and where it got it (P7.8; PROVISIONAL originals-spec #47 2be62b982)", async () => {
+  test("C12-64: a verifier that knows a newer signer DID version than the package supplies uses the newer one, and says when and where it got it (P7.8; originals-spec #47)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
@@ -557,7 +557,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     ["without its final line feed", (log: string) => log.replace(/\n$/, "")],
     ["reformatted", (log: string) => log.split("\n").map((l) => l.replace(/":/g, '": ')).join("\n")],
   ] as const) {
-    test(`C12-64: a package's older author log ${name} never replaces the newer one the reader holds, so a leaked key's later inscription is ignored (P7.8, P9.15; PROVISIONAL originals-spec #47 2be62b982)`, async () => {
+    test(`C12-64: a package's older author log ${name} never replaces the newer one the reader holds, so a leaked key's later inscription is ignored (P7.8, P9.15; originals-spec #47)`, async () => {
       const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
       let t = Date.parse("2026-10-18T10:00:00Z");
       const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });

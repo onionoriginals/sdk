@@ -447,7 +447,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
-  // P9.15 (PROVISIONAL, originals-spec #47 2be62b982): an inscribed entry naming a signer DID version
+  // P9.15 (originals-spec #47): an inscribed entry naming a signer DID version
   // the verifier has no verified copy of, or none at or after, is incomplete identity evidence (P5.6).
   const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
   const identityIncomplete =

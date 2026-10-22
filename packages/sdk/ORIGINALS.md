@@ -667,8 +667,8 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   inscriptions of any size exhaust `maxInscriptions`. A reader raises them
   through `snapshotBudget` (`maxOriginalsBytes` up to 1 GiB,
   `maxInscriptions` up to 100,000) to read such a sat.
-- Signer DID freshness for an anchored Original (PROVISIONAL, open
-  originals-spec #47 at `2be62b982`, P7.8, P9.15): each did:vh or did:webvh
+- Signer DID freshness for an anchored Original (originals-spec #47,
+  P7.8, P9.15): each did:vh or did:webvh
   signer is checked against the newest version of its DID this verifier
   knows of: the newest it obtained from any source in this verification or
   retained from earlier (the SDK compares a package's or host's evidence
@@ -692,7 +692,7 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   inscribed but has no authority (P9.11, P9.12), so otherwise a hash-chained
   junk entry naming a version that does not exist would make the Original
   incomplete, never current, for good. A verifier that obtains the named
-  version verifies the inscription. Spec question (proposed on #47, P9.15
+  version verifies the inscription. Spec question (raised on #47 and not adopted at master 1039c471c, P9.15
   and P5.6): add to P9.15 "An inscription after the anchoring inscription
   whose signer DID version the verifier cannot verify is reported as
   unverifiable. It does not make the identity evidence of the accepted

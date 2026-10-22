@@ -602,7 +602,7 @@
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ],
-      "note": "PROVISIONAL: open originals-spec #47 (head 2be62b982) rewords this row: an anchored entry whose did:vh or did:webvh signer DID is known only up to a version older than its inscription time is checked against the newest known version, and the report states that version and when it was obtained (P7.8, P9.15). Implemented provisionally; with no verified version at or after the named one, identity evidence is incomplete."
+      "note": "Reworded by originals-spec #47 (merged at master 1039c471c). Implemented; with no verified version at or after the named one, identity evidence is incomplete."
     },
     {
       "id": "C12-47",
@@ -852,7 +852,7 @@
         "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/freshness.test.ts"
       ],
-      "note": "PROVISIONAL: open originals-spec #47 (head 2be62b982) rewords this row: older author DID history served when the verifier has retained a newer version: the newer version is used (P7.8). The SDK uses kept or configured evidence that extends a package's; given only a retained versionId, the result is stale and not current."
+      "note": "Reworded by originals-spec #47 (merged at master 1039c471c). The SDK uses kept or configured evidence that extends a package's; given only a retained versionId, the result is stale and not current."
     },
     {
       "id": "C12-65",

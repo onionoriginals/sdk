@@ -209,7 +209,7 @@ export type IgnoredReason =
    * After the anchor: an inscription whose signer DID version this verifier
    * has no verified copy of, numbered past the newest it holds (or of a DID
    * it holds no history for). It is reported in `unverifiable` and holds
-   * nothing back (P9.12; PROVISIONAL, spec question on originals-spec #47).
+   * nothing back (P9.12; PROVISIONAL; a spec question raised on originals-spec #47 that master 1039c471c does not adopt).
    */
   | "later-inscription-unverifiable"
   | "author-key-not-valid-at-inscription-time"
@@ -253,7 +253,7 @@ export interface AnchoringReport {
    * version they name. The holder of the sat decides what is inscribed but
    * has no authority (P9.12), so these never change the accepted head or its
    * identity evidence; a verifier that obtains the named version can verify
-   * them (PROVISIONAL, spec question on originals-spec #47, P9.15, P5.6).
+   * them (PROVISIONAL; a spec question raised on originals-spec #47 that master 1039c471c does not adopt, P9.15, P5.6).
    */
   unverifiable: Array<{ sat: string; inscription: string; versionId?: string; signer: string; signerVersionId: string }>;
   /** Inscriptions whose placement the indexes used disagree on: missing evidence until they agree (P9.10). */
@@ -348,7 +348,7 @@ export function checkAtInscriptionTime(entry: LogEntry, inscriptionTime: number,
 }
 
 /**
- * P9.12, P9.15 (PROVISIONAL; spec question on originals-spec #47): why an
+ * P9.12, P9.15 (PROVISIONAL; a spec question raised on originals-spec #47 that master 1039c471c does not adopt): why an
  * inscription after the anchor whose signer could not be verified is ignored.
  * A named version numbered at or below the newest verified version of a
  * did:vh or did:webvh signer, but not in its history, is not that DID's: the
@@ -532,7 +532,7 @@ export async function assembleFromBitcoin(
   // Inscriptions that are neither anchors nor, on the anchoring sat after the anchor, single entries.
   /**
    * An inscription after the anchor whose signer could not be verified: never incomplete identity
-   * evidence for the accepted head, which it cannot change (P9.12; PROVISIONAL, #47).
+   * evidence for the accepted head, which it cannot change (P9.12; PROVISIONAL, the same spec question).
    */
   const ignoreLater = (on: string, i: SatInscription, entry: LogEntry, reason: IgnoredReason, code?: string) => {
     const unverified = reason === "author-version-unavailable" || code === "AUTHOR_VERSION_UNAVAILABLE" || code === "AUTHOR_HISTORY_MISSING" || code === "EDITOR_HISTORY_MISSING";

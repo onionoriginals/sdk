@@ -3,11 +3,11 @@
 Status: **accepted by the owner on 2026-10-20 (decisions A–D in section 5,
 owner decision Q15); decision A replaced the same day by full-log anchoring
 (P9.17, spec `a432aa67`).** The verifier now follows originals-spec master
-`051049d8b`, with open PRs #47 (head `2be62b982`) and #48 (head `1f90e43bc`)
-implemented provisionally; the writer is plan 011 PR 10. It fills
+`1039c471c` (with #47 and #48 merged) and open PR #50 (head `555ce24d3`),
+whose Bitcoin values the owner has decided; the writer is plan 011 PR 10. It fills
 what the pinned spec leaves open for the Bitcoin layer (D6, D7) and states the
 choices this SDK would make, each marked PROVISIONAL where the spec is silent.
-Pins: originals-spec `051049d8b` (`master`; see `specs/README.md`), VH-Log PRs 2 (`0d5eb134`), 9 (`5552a668`) and
+Pins: originals-spec `1039c471c` (`master`; see `specs/README.md`), VH-Log PRs 2 (`0d5eb134`), 9 (`5552a668`) and
 10 (`1867a2b1`) treated as merged, did:vh PR 3 (`b3e7a56d`), did:btco method
 v0.2.0 (`decentralized-identity/labs-ordinals-plus` `cff856ac`).
 
@@ -217,8 +217,7 @@ is produced from it.
 
 Against that time, a did:vh or did:webvh signer is checked at the later of
 the version the entry names and the newest version the verifier knows of whose
-versionTime is no later than the inscription time (PROVISIONAL, originals-spec
-#47 at `2be62b982`, P7.8, P9.15). The verifier need not show that no newer
+versionTime is no later than the inscription time (originals-spec #47, P7.8, P9.15). The verifier need not show that no newer
 version exists, and the report states the version relied on and when it was
 obtained (`validAsOf.signers`). An entry naming a version the verifier has
 no verified copy of is incomplete identity evidence (P5.6).
