@@ -237,9 +237,10 @@ the newest inscription carrying CBOR DID-document metadata whose `id` is the
 DID is the current version; earlier ones are versions in chain order;
 deactivation is terminal. Entries name a version by its inscription id
 (PROVISIONAL; P5.13 says "by its identifier"). The Originals verifier follows
-this from PR 9b. The SDK's legacy resolver still reads the document from
-inscription content and a 🔥 marker; moving it and its writer to the method's
-metadata is PR 9c (decision C). An anchoring entry naming the author DID's own
+this from PR 9b. PR 9c moved the SDK's legacy resolver and writer
+(`BtcoDidResolver`, `DIDManager.migrateToDIDBTCO`) from the content-based
+convention (inscription content and a 🔥 marker) to the method's metadata
+(decision C). An anchoring entry naming the author DID's own
 sat is rejected (P5.13).
 
 An author DID inscription counts as a version only when the index reports it
@@ -273,13 +274,21 @@ owner. A copy of the same evidence on another sat confers none (C12-33).
   is how Bitcoin alone suffices for identity (P9.18); anchoring does not
   require one (owner decision of 21 October 2026, originals-spec #47).
 - **PR 10 — writer.** Anchor and reinscribe through the existing sat
-  inscription builder and recovery store; the landing server's refusal of
-  inscribed inputs becomes reinscription of the Original's own sat; durable
-  boundary and retries (P9.4–P9.6). The anchoring inscription is the whole
+  inscription builder and recovery store; durable boundary and retries
+  (P9.4–P9.6). The writer's own sat reads use `getSatSnapshot(sat, {
+  bodies: 'originals' })`: only Originals bodies are fetched. The landing
+  server still refuses inscribed inputs (`funding_outpoint_inscribed`); its
+  reinscription of the Original's own sat is plan 011 PR 10b. The anchoring inscription is the whole
   stored log through the anchoring entry, then one entry per inscription
   (P9.17), with the size refusal; the log and every signer's identity
-  evidence are verified before inscribing, the anchor is labelled pending
-  Bitcoin acceptance until confirmed, and the author is told what Bitcoin
+  evidence are verified before inscribing (the entry must not be
+  historically authorized only, P7.9), and an unanchored read carries one
+  of four labels until Bitcoin shows the anchor confirmed and indexed:
+  `pending-bitcoin-acceptance` (the pair observed: commit or reveal
+  confirmed, or in the mempool through `inMempool`), `submitted-unobserved`
+  (submitted, not observed; PROVISIONAL), `not-anchored` (nothing recorded;
+  a broadcast anchor read without `recoveryStore` also reads so) or
+  `unverified`. The author is told what Bitcoin
   will not hold; a transfer handoff exports it for the sat's recipient
   (P9.18). **Real Bitcoin Core 31.1 / ord 0.29.0
   regtest** journey including reorg and retry faults. No mainnet or testnet
