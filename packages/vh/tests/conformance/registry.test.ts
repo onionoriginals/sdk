@@ -8,7 +8,7 @@ import { join } from "node:path";
  * A row an owner decision makes moot is not-applicable, names the decision in
  * its note, and is cited by no test.
  */
-interface Row { id: string; position: number; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string }
+interface Row { id: string; position: number; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string; proposal?: string }
 const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as { rows: Row[] };
 
 function testFiles(dir: string): string[] {
@@ -35,11 +35,13 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec a432aa6) has 139 rows. Ids are stable across re-pins, so
-  // they differ from table positions; each row records its position in the pinned table.
-  test("registers all 139 rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(139);
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(139);
+  // The pinned table (originals-spec master 051049d8b) has 145 rows; open spec PR #48 adds rows
+  // 146-153, registered provisionally with `proposal`. Ids are stable across re-pins, so they need
+  // not equal table positions; each row records its position in the pinned table.
+  test("registers all 145 pinned rows and the 8 proposed ones with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(153);
+    expect(registry.rows.filter((r) => r.proposal === undefined).length).toBe(145);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(153);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
@@ -57,6 +59,13 @@ describe("section 12 conformance registry", () => {
   test("no row claims coverage without a citing test", () => {
     for (const row of registry.rows) {
       if (row.status === "partial" || row.status === "covered") expect(cited.has(row.id), `${row.id} claims ${row.status}`).toBe(true);
+    }
+  });
+
+  test("a row from an open spec pull request names it and is marked PROVISIONAL", () => {
+    for (const row of registry.rows.filter((r) => r.proposal !== undefined)) {
+      expect(row.proposal, row.id).toMatch(/^originals-spec#\d+@[0-9a-f]{9}$/);
+      expect(row.note ?? "", `${row.id} note`).toMatch(/PROVISIONAL/);
     }
   });
 
