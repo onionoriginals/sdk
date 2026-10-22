@@ -93,7 +93,7 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
     return { ...h, fresh, stale: writeZip(files), oldAuthorVersion: before[before.length - 1].versionId };
   }
 
-  test("a reader that has kept a newer author DID version uses it, not the older one a package carries (P7.8; PROVISIONAL originals-spec #47 2be62b982)", async () => {
+  test("a reader that has kept a newer author DID version uses it, not the older one a package carries (P7.8; originals-spec #47, merged)", async () => {
     const { alice, fresh, stale, oldAuthorVersion } = await withStaleAuthorPackage();
     const local = reader();
     expect((await local.import(fresh.bytes)).original.report.reasons).toEqual(["not-anchored"]);
@@ -202,7 +202,7 @@ describe("review fixes (PR 6)", () => {
   });
 });
 
-describe("C12-64: the newest verified author DID version a reader holds is used, compared by verified versionIds (P7.8, P7.9; PROVISIONAL originals-spec #47 2be62b982)", () => {
+describe("C12-64: the newest verified author DID version a reader holds is used, compared by verified versionIds (P7.8, P7.9; originals-spec #47, merged)", () => {
   const SPARE = seed(24);
   /** An Original signed with `orig`, then the author DID drops `orig`. The package carries the log from before the drop. */
   async function removedKey() {

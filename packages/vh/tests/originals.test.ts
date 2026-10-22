@@ -488,7 +488,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
     // There are no publish or migrate operations: publication and anchoring are updates that add an
-    // alias (P9.10; P14.4, PROVISIONAL #48), so any other operation is invalid evidence.
+    // alias (P9.10; P14.4, PROVISIONAL, section 14), so any other operation is invalid evidence.
     for (const operation of ["migrate", "publish"]) {
       const other = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign);
       failedWith(await report([...log, other], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
@@ -525,7 +525,7 @@ describe("creating needs a well-formed entry", () => {
   });
 });
 
-describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13, PROVISIONAL, section 14)", () => {
   /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
   async function genesisOf(target: number) {
     const key = seeded(21);

@@ -1,30 +1,15 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 051049d8b. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 1039c471c. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "051049d8b",
+    "commit": "1039c471c",
     "section": "12",
     "openProposals": [
       {
-        "pr": 47,
-        "head": "2be62b982",
+        "pr": 50,
+        "head": "555ce24d3",
         "rows": [
-          51,
-          70
-        ]
-      },
-      {
-        "pr": 48,
-        "head": "1f90e43bc",
-        "rows": [
-          146,
-          147,
-          148,
-          149,
-          150,
-          151,
-          152,
-          153
+          160
         ]
       }
     ]
@@ -240,8 +225,8 @@
     {
       "id": "C12-16",
       "position": 16,
-      "test": "Resource added, removed or renamed",
-      "requiredResult": "Rejected in baseline fixed-resource profile",
+      "test": "Resource added or removed by an author entry",
+      "requiredResult": "Accepted; an added resource is at version 1; a removed one stays verifiable in history (P4.1, P4.4)",
       "phases": [
         1
       ],
@@ -555,8 +540,8 @@
     {
       "id": "C12-46",
       "position": 43,
-      "test": "Author DID history missing through an inscription time",
-      "requiredResult": "Incomplete identity evidence; not reported as current",
+      "test": "Anchored entry whose did:vh or did:webvh signer DID is known only up to a version older than the entry’s inscription time",
+      "requiredResult": "Checked against the newest known version; the report states that version and when it was obtained (P7.8, P9.15)",
       "phases": [
         4
       ],
@@ -788,8 +773,8 @@
     {
       "id": "C12-64",
       "position": 62,
-      "test": "Stale author DID history served with a current asset log",
-      "requiredResult": "Identity freshness not established; not reported as currently authorized",
+      "test": "Older author DID history served when the verifier has retained a newer version",
+      "requiredResult": "The newer version is used (P7.8)",
       "phases": [
         2
       ],
@@ -1822,8 +1807,7 @@
         1
       ],
       "status": "todo",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
     },
     {
       "id": "C12-147",
@@ -1834,8 +1818,7 @@
         1
       ],
       "status": "todo",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
     },
     {
       "id": "C12-148",
@@ -1846,8 +1829,7 @@
         1
       ],
       "status": "todo",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
     },
     {
       "id": "C12-149",
@@ -1858,8 +1840,7 @@
         1
       ],
       "status": "todo",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
     },
     {
       "id": "C12-150",
@@ -1870,8 +1851,7 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/hosting.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
@@ -1887,8 +1867,7 @@
         1
       ],
       "status": "todo",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
     },
     {
       "id": "C12-152",
@@ -1899,8 +1878,7 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evidence.test.ts"
       ]
@@ -1914,11 +1892,82 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evidence.test.ts"
       ]
+    },
+    {
+      "id": "C12-154",
+      "position": 154,
+      "test": "Editor entry that adds or removes a resource, even one its grant names",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-155",
+      "position": 155,
+      "test": "Entry that adds a resource with a resourceID the Original used before",
+      "requiredResult": "Rejected (P4.1)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-156",
+      "position": 156,
+      "test": "Entry that removes the last resource",
+      "requiredResult": "Rejected (P4.1)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-157",
+      "position": 157,
+      "test": "Author entry removing a resource that a grant still names",
+      "requiredResult": "Rejected (P5.15)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-158",
+      "position": 158,
+      "test": "Added resource not in any grant",
+      "requiredResult": "No editor may change it until an author entry grants it (P5.15)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-159",
+      "position": 159,
+      "test": "Transitions for an added and a removed resource",
+      "requiredResult": "`from: null` for the added one, `to: null` for the removed one, in the order P14.4 gives (P14.4)",
+      "phases": [
+        1
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "C12-160",
+      "position": 160,
+      "test": "Original with 256 resources / 257 resources",
+      "requiredResult": "Accepted / rejected (P14.13)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "proposal": "originals-spec#50@555ce24d3",
+      "note": "PROVISIONAL: open spec PR #50 (head 555ce24d3), not in the pinned table; the owner has decided the 256-resource limit (D6, 21 October 2026)."
     }
   ]
 }

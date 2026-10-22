@@ -292,7 +292,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     }
   });
 
-  test("C12-150: a hosted log line over 65,536 UTF-8 bytes stops all derived requests (P7.7; P14.13, PROVISIONAL originals-spec #48)", async () => {
+  test("C12-150: a hosted log line over 65,536 UTF-8 bytes stops all derived requests (P7.7; P14.13, PROVISIONAL, section 14)", async () => {
     const { alias, files } = await published();
     // 33,000 two-byte characters: 66,000 UTF-8 bytes in fewer than 34,000 UTF-16 code units.
     const forged = forgeLog(files, (t) => [{ ...t, state: { ...t.state, asset: { ...t.state.asset, metadata: { wide: "é".repeat(33_000) } } } }]);
@@ -407,7 +407,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     expect(host.calls).toHaveLength(4);
   });
 
-  test("P8.5: a resource has its own fetch cap, 64 MiB by default, separate from the 16 MiB log-file cap (P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", async () => {
+  test("P8.5: a resource has its own fetch cap, 64 MiB by default, separate from the 16 MiB log-file cap (P14.13, PROVISIONAL, section 14)", async () => {
     expect(RETRIEVAL_LIMITS.maxResourceBytes).toBe(64 * 1024 * 1024);
     expect(RETRIEVAL_LIMITS.maxFileBytes).toBe(16 * 1024 * 1024);
     const size = 4096;
@@ -532,7 +532,7 @@ describe("identity retrieval in loadPublished stays inside its budget (08b revie
   });
 });
 
-describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13, PROVISIONAL, section 14)", () => {
   const big = () => new Uint8Array(RETRIEVAL_LIMITS.maxResourceBytes + 1);
 
   test("it can be created and edited locally, but publication and a shared host refuse it, naming the resource", async () => {

@@ -25,8 +25,8 @@ export const ORIGINALS_LIMITS = Object.freeze({
 
 export type Operation = "create" | "update" | "deactivate";
 /*
- * There are no publish or migrate operations (P9.10; P14.4, PROVISIONAL
- * originals-spec #48): publication is an update that lists a did:webvh alias,
+ * There are no publish or migrate operations (P9.10; P14.4, PROVISIONAL,
+ * section 14): publication is an update that lists a did:webvh alias,
  * and anchoring is an update that lists the sat's did:btco alias.
  */
 

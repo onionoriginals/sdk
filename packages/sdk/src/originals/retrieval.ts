@@ -50,7 +50,7 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
   const digests = new Set<string>();
   lines.forEach((line, i) => {
     try {
-      // P7.7; P14.13 (PROVISIONAL, originals-spec #48): an entry is at most this many UTF-8 bytes as stored.
+      // P7.7; P14.13 (PROVISIONAL, section 14): an entry is at most this many UTF-8 bytes as stored.
       if (utf8Length(line) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       const entry = parseJson(line);
       if (!isJsonObject(entry) || !isJsonObject(entry.state)) unplannable("invalid-evidence", i, "ENTRY_STATE", "an entry is an object with a state object");
@@ -155,7 +155,7 @@ export class Retrieval {
     const byteRoom = this.limits.maxTotalBytes - this.bytes;
     const archiveRoom = archive ? this.archive.maxTotalBytes - this.archiveBytes : Infinity;
     const room = Math.min(byteRoom, archiveRoom);
-    // A resource has its own cap, separate from the log-file cap (P8.5; P14.13, PROVISIONAL originals-spec #48).
+    // A resource has its own cap, separate from the log-file cap (P8.5; P14.13, PROVISIONAL, section 14).
     const cap = resource ? this.limits.maxResourceBytes : this.limits.maxFileBytes;
     const maxBytes = Math.max(0, Math.min(cap, room));
     const overBudget = (size?: number): never =>

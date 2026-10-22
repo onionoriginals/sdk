@@ -14,10 +14,10 @@ The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
-| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/051049d8b/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@051049d8b` (`master`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions) and #46 (an unanchored Original is never current; key custody is out of scope). |
-| Open proposals implemented provisionally | [#47](https://github.com/aviarytech/originals-spec/pull/47) head `2be62b982`: for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco (owner decisions of 21 October 2026; rows 51 and 70) · [#48](https://github.com/aviarytech/originals-spec/pull/48) head `1f90e43bc`, stacked on #47: section 14, the provisional wire format P14.1–P14.13, recorded from SDK revision `1b3cabdd`, and rows 146–153 | Not merged. Code that depends on one is marked `PROVISIONAL` with the pull request and its head, and the pin stays at `master` until they merge. |
+| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/1039c471c/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@1039c471c` (`master`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions), #46 (an unanchored Original is never current; key custody is out of scope), #47 (for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco), #48 (section 14, the provisional wire format P14.1–P14.13) and #49 (the author can add and remove resources; editors cannot; a resourceID is never reused; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5). |
+| Open proposal implemented | [#50](https://github.com/aviarytech/originals-spec/pull/50) head `555ce24d3`: the Bitcoin values (media type `application/vnd.originals.vh+jsonl`, one confirmation on every network, the 350,000-byte inscription limit, the did:btco network prefixes `sig:`, `test:` and `reg:`, proposed upstream as [S30]) and the section 14 limits are decided, with up to 256 resources (owner decisions of 21 October 2026; P9.5, P9.10, P9.17, P14.13; row 160) | Not merged. The owner has decided its values, so the code follows them without `PROVISIONAL` markers; where the behaviour depends on the pull request the code cites "spec PR #50 (open)", and the pin stays at `master` until it merges. |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
-| VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `7bae699a` keys from a controller | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. |
+| VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `2fe380dbf` keys, and editors, from a controller [S25] | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. #11's "Editors from a Controller" is the engine's editor hook (`ControllerKeys.editors`), which the Originals profile implements with its grants (P5.15–P5.18). |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
 | did:vh pull request, treated as merged | [#3](https://github.com/swcurran/didvh/pull/3) `b3e7a56d` extensions | Lets the Originals extension define its own state, parameters and `src` kinds. |
 | [did:webvh on VH-Log (experimental)](https://github.com/decentralized-identity/didwebvh/tree/deef9cf12b9543475a1df70322c362876dc89a58/spec-exp) | `decentralized-identity/didwebvh@deef9cf1` (PR 302), method value `did:webvh:1.0` | Author DIDs and an Original's web alias. Logs written by `didwebvh-ts` (did:webvh 1.0) must verify under it. |
@@ -30,13 +30,16 @@ The SDK baseline cited by the Originals spec is `onionoriginals/sdk@00fc683`.
 
 The pinned spec leaves the asset state schema, the `originals:1.0` method
 values, the entry field names and digest encoding, the evidence package format
-and the Bitcoin representation open (D1, D4, D6). Open PR #48 records the
-SDK's choices as section 14 for review; where it asks the SDK to change (the
-`signers/` package directory, no asset witness file, entry size in UTF-8
-bytes, a 64 MiB resource fetch limit), the SDK follows it, PROVISIONAL. Section 2 of the plan records the
-provisional choices this repository makes. Code that depends on one is marked
-`PROVISIONAL` and cites the decision. A provisional choice is not a published
-test vector, and nothing built on one supports an interoperability claim.
+and the hosted layout open (D1, D4), and section 14 records the SDK's choices
+for them as provisional wire-format values (P14.1–P14.11). Where section 14
+asked the SDK to change (the `signers/` package directory, no asset witness
+file, entry size in UTF-8 bytes, a 64 MiB resource fetch limit), the SDK
+follows it. The Bitcoin values (P14.12) and the limits (P14.13) are decided by
+the owner in open PR #50, so they carry no `PROVISIONAL` marker. Section 2 of
+the plan records the provisional choices this repository makes. Code that
+depends on one is marked `PROVISIONAL` and cites the decision. A provisional
+choice is not a published test vector, and nothing built on one supports an
+interoperability claim.
 
 ### Spec findings
 
@@ -76,8 +79,18 @@ were mapped to the pinned table by their text:
   entry"), 118 (C12-118), 122 (C12-122) and 129 (C12-129, the anchored
   cases). Rows 140–145 are new: C12-140 to C12-145. No row was removed, so
   none is retired; a retired ID would never be reused.
-- Rows 146–153 come from the open PR #48 and are C12-146 to C12-153. They
-  carry `proposal` and are PROVISIONAL until #48 merges.
+- At `master` `1039c471c` the table has 159 rows. Rows 1–153 are the same
+  rows at the same positions (#47 and #48 merged; rows 146–153, C12-146 to
+  C12-153, lose their `proposal`, and stay PROVISIONAL as section 14 values).
+  Three are reworded: row 16 (C12-16, a resource added or removed by an author
+  entry is accepted, P4.1, P4.4; #49), 43 (C12-46, an anchored entry's
+  did:vh or did:webvh signer checked against the newest known version, P7.8,
+  P9.15; #47) and 62 (C12-64, the newer retained author DID version is used,
+  P7.8; #47). Rows 154–159 are new (#49): C12-154 to C12-159. No row was
+  removed, so none is retired.
+- Row 160 comes from the open PR #50 (head `555ce24d3`) and is C12-160 (256
+  resources accepted, 257 rejected, P14.13). It carries `proposal`; the owner
+  has decided its value.
 
 Positive checkpoints come with positive and negative fixtures, pinned
 decisions and a dependency inventory. Fixtures, dry runs and disposable regtest

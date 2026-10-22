@@ -35,13 +35,13 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master 051049d8b) has 145 rows; open spec PR #48 adds rows
-  // 146-153, registered provisionally with `proposal`. Ids are stable across re-pins, so they need
+  // The pinned table (originals-spec master 1039c471c) has 159 rows; open spec PR #50 adds row
+  // 160, registered provisionally with `proposal`. Ids are stable across re-pins, so they need
   // not equal table positions; each row records its position in the pinned table.
-  test("registers all 145 pinned rows and the 8 proposed ones with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(153);
-    expect(registry.rows.filter((r) => r.proposal === undefined).length).toBe(145);
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(153);
+  test("registers all 159 pinned rows and the proposed one with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(160);
+    expect(registry.rows.filter((r) => r.proposal === undefined).length).toBe(159);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(160);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });

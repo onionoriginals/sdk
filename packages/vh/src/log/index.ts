@@ -165,8 +165,8 @@ export interface LogLimits {
   maxEntries?: number;
   /**
    * Maximum size of one entry: the UTF-8 byte length of its stored line,
-   * without the line feed (P7.7; P14.13, PROVISIONAL originals-spec #48
-   * 1f90e43bc). A log's text is measured line by line as stored, before it is
+   * without the line feed (P7.7; P14.13, PROVISIONAL, section
+   *  14). A log's text is measured line by line as stored, before it is
    * parsed, and so is each entry `verifyLog` is given with its stored size
    * (`lineBytes`) or that `parseLog` parsed. An entry with no stored line
    * (built or parsed elsewhere) is measured as its JCS serialization, the

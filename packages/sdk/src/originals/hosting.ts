@@ -73,7 +73,7 @@ export interface RetrievalLimits {
   maxFileBytes?: number;
   /**
    * Bytes in one resource response. Defaults to `FETCH_LIMITS.maxResourceBytes`,
-   * 64 MiB (P8.5; P14.13, PROVISIONAL originals-spec #48). A larger resource
+   * 64 MiB (P8.5; P14.13, PROVISIONAL, section 14). A larger resource
    * is unavailable content, never a failure (P7.4).
    */
   maxResourceBytes?: number;
@@ -102,7 +102,7 @@ export function aliasLogPath(aliasDid: string): string {
 /**
  * Refuse hosted publication of a log any of whose resources is larger than a
  * hosted reader fetches: 64 MiB, `FETCH_LIMITS.maxResourceBytes` (P8.5; P14.13,
- * PROVISIONAL originals-spec #48 1f90e43bc). No reader could retrieve it, so
+ * PROVISIONAL, section 14). No reader could retrieve it, so
  * it is refused before anything is published (limit-exceeded,
  * RESOURCE_OVER_FETCH_LIMIT, naming the resource). A local Original is never
  * fetched, so creating and editing one are not limited.

@@ -100,7 +100,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
-- **Entry size (P7.7; P14.13, PROVISIONAL #48).** An entry is at most
+- **Entry size (P7.7; P14.13, PROVISIONAL, section 14).** An entry is at most
   `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
   length of its stored line without the line feed (previously UTF-16 code
   units of the re-serialized entry), measured before the line is parsed and
@@ -162,8 +162,8 @@ every signer (the author and each editor that signed an entry, P7.1) under
 `signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
 that DID's method has witnesses; `signerPath(did)`), and the resource bytes
 under `resources/<digest>`. There is no asset witness file: asset logs have
-no witnesses (P9.8). PROVISIONAL (P14.10, open originals-spec #48 at
-`1f90e43bc`; BREAKING): the directory was `authors/` and an
+no witnesses (P9.8). PROVISIONAL (P14.10, section 14;
+BREAKING): the directory was `authors/` and an
 `asset/did-witness.json` was written; neither is written or read any more,
 and a package or hosted snapshot carrying them is rejected
 (`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a
@@ -200,8 +200,8 @@ configures and the store keeps, the one with the newest verified version is
 used, compared by the versionIds that verify and never by bytes: an older log
 that differs only in formatting or a final line feed never rolls a newer one
 back, so an entry whose key that newer version removed is still reported
-historically authorized only (P7.8, P7.9; PROVISIONAL originals-spec #47
-2be62b982). The newest verified versionId held is compared against as
+historically authorized only (P7.8, P7.9; originals-spec #47,
+merged). The newest verified versionId held is compared against as
 retained. Evidence whose verified versions diverge from another's is an
 identity fork: incomplete identity evidence (`AUTHOR_DID_FORK`), never the
 package's history.
@@ -354,7 +354,7 @@ const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> 
 ```
 
 A resource larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
-64 MiB; P8.5, P14.13, PROVISIONAL #48) can be created and edited locally, since
+64 MiB; P8.5, P14.13, PROVISIONAL, section 14) can be created and edited locally, since
 a local package is never fetched, but it is never published: `publish`,
 `hostedFiles` and a shared-host `submit` refuse a log that lists one, at any
 version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the resource
@@ -392,7 +392,7 @@ implementation limits (PROVISIONAL), set with the SDK's `retrievalLimits`:
 | `maxRequests` | 1,024 | requests in one call, failed and optional ones included |
 | `maxTotalBytes` | `archiveLimits.maxTotalBytes` (512 MiB) | bytes accepted in one call, counted as they arrive, alias log included |
 | `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response other than a resource: logs, witness files, the manifest (P7.7) |
-| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13, PROVISIONAL #48); a larger resource is unavailable content, not a failure (P7.4) |
+| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13, PROVISIONAL, section 14); a larger resource is unavailable content, not a failure (P7.4) |
 | `requestTimeoutMs` | `FETCH_LIMITS.timeoutMs` (15 s) | one request |
 | `timeoutMs` | 120 s | the whole call, so slow or absent optional files cannot multiply the per-request timeout |
 

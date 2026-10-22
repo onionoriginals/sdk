@@ -6,7 +6,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@051049d8b` (`master`) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity) and #46 (an unanchored Original is never current) merged; re-pinned from `a432aa6`. §12 has 145 rows; IDs are kept and the mapping is in `specs/README.md`. Open #47 (head `2be62b982`) and #48 (head `1f90e43bc`, section 14 wire format) are implemented provisionally |
+| Originals Protocol | `aviarytech/originals-spec@1039c471c` (`master`) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; re-pinned from `051049d8b`. §12 has 159 rows; IDs are kept and the mapping is in `specs/README.md`. Open #50 (head `555ce24d3`: Bitcoin values and limits decided, 256 resources, row 160) is implemented |
 | VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `7bae699a` | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
@@ -116,7 +116,7 @@ Rules this implies:
 - `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Asset logs use no witnesses (Q14); S3's witness-proof suite applies only if that is ever revisited. It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
 - Files: `did.jsonl`, as did:vh requires at a `src` location (no `did-witness.json`, Q14).
 - Further PROVISIONAL rules, as implemented in PR 3:
-  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Their order is fixed at genesis.
+  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Existing resources keep their order; an author entry appends added resources and may remove resources while one remains, an editor entry neither adds nor removes, and a resourceID is never used again in the Original (P4.1, P5.16, P14.5; originals-spec #49).
   - Media types are RFC 6838 `type/subtype`, without parameters. `size` is the exact byte length.
   - A descriptor's `mediaType` or `size` changes only together with its digest.
   - A deactivation changes no resource.
@@ -187,6 +187,7 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **8c** | 2 | Editors (P5.15–P5.18): grants in the asset state, editor entries signed by editors' own DIDs, `outside-grant` | §12 rows C12-113 to C12-124 (unanchored parts) |
 | **8d** | 3 | Shared-host saves (P6.7, P6.8): `sign`, `submit`, `refused`, `sync`, `reconcile`; the landing's verifying submit route | §12 rows C12-125 to C12-131 |
 | **8e** | 2, 3 | Re-pin to originals-spec master `051049d8b`: an unanchored Original is never current, valid as of its checkpoint (P7.10, #46); historically authorized only (P7.9); #48's provisional wire format (`signers/`, no asset witness file, UTF-8 entry size, 64 MiB resource fetch cap) | §12 rows C12-22, C12-48, C12-140 to C12-145, C12-150, C12-152, C12-153 |
+| **8f** | 1, 2 | Re-pin to originals-spec master `1039c471c` (#47–#49) with open #50: the author adds and removes resources, editors cannot, resourceIDs are never reused (P4.1, P4.4, P5.15, P5.16, P14.4); editors move into the VH-Log engine as VH-Log PR 11's "Editors from a Controller" hook [S25]; up to 256 resources (P14.13) | §12 rows C12-16, C12-154 to C12-160 |
 | **9** | 4 | Bitcoin representation proposal → then did:btco (author + alias), sat assembly (P9.13), inscription-time checks (P9.15), anchor selection (P9.16), ownership report (P9.11) against fixtures | Bitcoin §12 rows on fixtures |
 | **10** | 4 | Writer/provider: prepare/submit/retry/durable boundary, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
 
