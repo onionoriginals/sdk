@@ -2,18 +2,20 @@
 
 Status: **accepted by the owner on 2026-10-20 (decisions A–D in section 5,
 owner decision Q15); decision A replaced the same day by full-log anchoring
-(P9.17, spec `a432aa67`).** The verifier follows spec `a432aa67`; the writer
-is plan 011 PR 10. It fills
+(P9.17, spec `a432aa67`).** The verifier now follows originals-spec master
+`051049d8b`, with open PRs #47 (head `2be62b982`) and #48 (head `1f90e43bc`)
+implemented provisionally; the writer is plan 011 PR 10. It fills
 what the pinned spec leaves open for the Bitcoin layer (D6, D7) and states the
 choices this SDK would make, each marked PROVISIONAL where the spec is silent.
-Pins: originals-spec `b8e8323`, VH-Log PRs 2 (`0d5eb134`), 9 (`5552a668`) and
+Pins: originals-spec `051049d8b` (`master`; see `specs/README.md`), VH-Log PRs 2 (`0d5eb134`), 9 (`5552a668`) and
 10 (`1867a2b1`) treated as merged, did:vh PR 3 (`b3e7a56d`), did:btco method
 v0.2.0 (`decentralized-identity/labs-ordinals-plus` `cff856ac`).
 
 ## 1. What the spec fixes
 
 - **Anchoring (P9.10).** The author anchors an Original once, terminally, with a
-  "migrate entry", an ordinary entry whose signed state names one sat,
+  "migrate entry" (now: an anchoring entry, an ordinary update; there is no
+  migrate operation, §3.1), whose signed state names one sat,
   inscribed on that sat. Later entries naming another sat, removing it or
   migrating elsewhere are rejected. An Original anchored from the local layer
   never gains a web alias.
@@ -75,7 +77,11 @@ recognises an entry as anchoring when it first lists a did:btco alias.
   type open; this one is new and unambiguous).
 - **Content:** UTF-8 JSON Lines of complete log entries, exactly as in
   `did.jsonl`. No ord metadata, no did:btco metadata (S11), no delegation, no
-  compression (`content-encoding` refused, as the sat reader already does).
+  compression. The sat reader does not refuse a delegated or
+  `content-encoding` inscription: it reports it observed but unsupported, and
+  the verifier ignores an Originals-typed one with the reason
+  `unsupported-encoding` (P9.12, P9.14, P9.17); the holder cannot make the
+  read fail.
 - **The anchoring inscription carries the whole log** (P9.17, replacing
   decision A): genesis through the anchoring entry, which is its last entry.
   Every later inscription carries exactly one new entry that extends the head
@@ -105,10 +111,44 @@ decoded entry.
 
 ### 3.4 Assembling the log from Bitcoin (VH-Log PR 2, PR 9; P9.13–P9.16)
 
-The Originals extension defines a Bitcoin `src` kind (did:vh PR 3): the sat's
-did:btco alias itself, so `src` is `did:btco:<sat>`. Retrieval reads every
-inscription on the sat with the existing sat reader, which already bounds
-counts (10,000), bytes (32 MiB) and time, and checks ord against Bitcoin Core.
+**Not implemented: a Bitcoin `src` kind.** The did:vh resolver
+(`packages/vh/src/didvh`) retrieves from no `src` reference: every `src`,
+`did:btco:<sat>` included, gets `featureNotSupported`. Sat evidence reaches the
+verifier as `verifyOriginal({ bitcoin: SatEvidence[] })` (SDK: `get`/`load`
+with `{ bitcoin }`, from `satEvidence(getSatSnapshot(...))`). Deferred; a
+Bitcoin `src` kind (did:vh PR 3) would need: the Originals extension to
+register `did:btco:<sat>` as a `src` kind, a sat-reader adapter injected into
+the resolver (it holds no network code), one read per index used with the
+placement and confirmation rules below, the inscription clock, and a
+resolution result that carries the anchoring report and ownership rather
+than a bare DID document.
+
+Retrieval reads the sat with the SDK's sat reader (`getSatSnapshot`), which
+checks ord against Bitcoin Core and is bounded (PROVISIONAL defaults,
+`snapshotBudget`, `packages/sdk/src/adapters/providers/sat-snapshot.ts`):
+
+- `maxListedInscriptions` 100,000 (at most 1,000,000): a sat listing more is
+  refused (`SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`, incomplete evidence).
+- `maxInscriptions` 10,000 (at most 100,000) is a read cap, not a refusal: at
+  most this many bodies and metadata are read, in listing order, counting
+  only those the read fetches; later inscriptions are still listed and
+  placed but reported observed and unread (`over-budget`).
+- Bytes come from two pools: `maxOriginalsBytes` 64 MiB (at most 1 GiB) for
+  Originals bodies of at most 350,000 bytes, and `maxContentBytes` 32 MiB (at
+  most 512 MiB) for everything else. Past a pool an item is reported unread,
+  not a failed read; an unread Originals inscription then fails the
+  Originals read closed (P9.17).
+- Time scales with the listing: 30 s plus 250 ms per listed inscription, at
+  most `maxTimeoutMs` (10 minutes; at most 1 hour); an explicit `timeoutMs`
+  is used as given (up to 1 hour). Each request has `requestTimeoutMs` (15 s;
+  at most 10 minutes). Requests: 7 plus 5 per listed inscription unless
+  `maxRequests` is set.
+- `bodies: 'all' | 'originals'`: `'originals'` fetches only
+  `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
+  their metadata, and reports every other inscription `not-requested`;
+  `'all'` (the default) reads every body, as a did:btco read needs (P5.13).
+  `satEvidence` passes unread non-Originals inscriptions on, flagged, and
+  fails only on an unread Originals one.
 
 Assembly:
 
@@ -165,11 +205,23 @@ by the index on another sat number, is not on the alias's sat.
 ### 3.7 Inscription time (P9.15)
 
 Inscription time is the running maximum of block timestamps from genesis to
-the inscription's block. The sat reader already calls `getblock`; it will
-record each block's `time`, and the adapter computes the running maximum from
-block headers, caching it per height (a one-time header walk, then
-incremental). A verifier that cannot establish it reports incomplete identity
-evidence.
+the inscription's block. `satEvidence` takes it from an `InscriptionClock`
+(`packages/sdk/src/originals/bitcoin.ts`), not from the times the sat reader
+records: the clock reads headers (in batches where the source allows),
+follows reorganisations by block hash and refuses a block no longer on the
+chain (`BLOCK_NOT_ON_CHAIN`), has a per-call request budget, and can persist
+its state through a `ClockStore` to restart cheaply (#971, #973). A time the
+clock cannot establish fails the whole read (`BLOCK_TIME_UNAVAILABLE`,
+unavailable-bytes; a spent budget or abort, incomplete-evidence): no report
+is produced from it.
+
+Against that time, a did:vh or did:webvh signer is checked at the later of
+the version the entry names and the newest version the verifier knows of whose
+versionTime is no later than the inscription time (PROVISIONAL, originals-spec
+#47 at `2be62b982`, P7.8, P9.15). The verifier need not show that no newer
+version exists, and the report states the version relied on and when it was
+obtained (`validAsOf.signers`). An entry naming a version the verifier has
+no verified copy of is incomplete identity evidence (P5.6).
 
 ### 3.8 did:btco author DIDs (P5.13)
 
@@ -183,18 +235,21 @@ naming the author DID's own sat is rejected (P5.13).
 ### 3.9 Ownership report (P9.11)
 
 The owner is the holder of the anchoring sat at the reported tip:
-`{ status: "provisional", output, address?, confirmations, indexes: [ids] }`.
-Ownership is never authority (P9.12). An Original that is not anchored has no
+`{ status: "provisional", sat, output, address?, confirmations, indexes: [ids] }`.
+Ownership is never established, only provisional (P9.11, P9.16), and never
+authority (P9.12). An Original that is not anchored has no
 owner. A copy of the same evidence on another sat confers none (C12-33).
 
 ## 4. Delivery
 
-- **PR 9a — verifier on fixtures.** Anchoring entry and alias rules; Bitcoin
-  `src` and assembly over a sat snapshot; chain order; inscription time;
+- **PR 9a — verifier on fixtures.** Anchoring entry and alias rules;
+  assembly over sat snapshots supplied as evidence (no Bitcoin `src`, §3.4); chain order; inscription time;
   P9.15 checks for did:vh and did:webvh author DIDs; anchors and conflicting
   anchors; ownership report; reorg reporting. Section 12 rows 8 (anchored),
   27–47 and 62, on recorded fixtures.
-- **PR 9b — did:btco author DIDs.** Rows 58–61.
+- **PR 9b — did:btco author DIDs.** Rows 58–61. A did:btco author or editor
+  is how Bitcoin alone suffices for identity (P9.18); anchoring does not
+  require one (owner decision of 21 October 2026, originals-spec #47).
 - **PR 10 — writer.** Anchor and reinscribe through the existing sat
   inscription builder and recovery store; the landing server's refusal of
   inscribed inputs becomes reinscription of the Original's own sat; durable
