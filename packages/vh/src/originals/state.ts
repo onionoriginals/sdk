@@ -12,11 +12,16 @@ import { parseDidWebvh } from "../webvh/index.js";
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
 
-/** PROVISIONAL limits (P7.7). */
+/**
+ * The profile's limits (P7.7, P14.13), decided by the owner on 21 October 2026
+ * (D6; spec PR #50 (open), which raises resources from 64 to 256). `nameLength`
+ * is this SDK's own, PROVISIONAL.
+ */
 export const ORIGINALS_LIMITS = Object.freeze({
   entries: 10_000,
   entryBytes: 65_536,
-  resources: 64,
+  /** Resources at any one time (P14.13; spec PR #50 (open)): removing one makes room for another. */
+  resources: 256,
   nameLength: 1_024,
   authorVersions: 1_000,
   /** Editor grants in one asset state (P5.15, P7.7). */
@@ -249,7 +254,7 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
   if (a.metadata !== undefined && !isJsonObject(a.metadata)) invalid("STATE_METADATA", "metadata must be an object when present");
   if (a.status !== "active" && a.status !== "deactivated") invalid("STATE_STATUS", "status must be active or deactivated");
   if (!Array.isArray(a.resources)) invalid("STATE_MEMBERS", "state.asset.resources must be an array");
-  if (a.resources.length > ORIGINALS_LIMITS.resources) fail("limit-exceeded", "STATE_TOO_MANY_RESOURCES", `at most ${ORIGINALS_LIMITS.resources} resources`);
+  if (a.resources.length > ORIGINALS_LIMITS.resources) fail("limit-exceeded", "STATE_TOO_MANY_RESOURCES", `at most ${ORIGINALS_LIMITS.resources} resources at one time (P14.13)`);
   const ids = new Set<string>();
   a.resources.forEach((r, i) => {
     const d = checkDescriptor(r, `state.asset.resources[${i}]`);

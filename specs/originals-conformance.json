@@ -1990,9 +1990,13 @@
       "phases": [
         1
       ],
-      "status": "todo",
+      "status": "covered",
       "proposal": "originals-spec#50@555ce24d3",
-      "note": "PROVISIONAL: open spec PR #50 (head 555ce24d3), not in the pinned table; the owner has decided the 256-resource limit (D6, 21 October 2026)."
+      "note": "PROVISIONAL: open spec PR #50 (head 555ce24d3), not in the pinned table; the owner has decided the 256-resource limit (D6, 21 October 2026).",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     }
   ]
 }

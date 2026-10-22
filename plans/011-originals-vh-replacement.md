@@ -159,7 +159,7 @@ resources/<digest>
 
 ### 2.4 Limits (P7.7)
 
-The provisional limits (P14.13, PROVISIONAL #48) are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 64 resources, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
+The limits (P14.13), decided by the owner on 21 October 2026 (D6; spec PR #50 (open)), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 256 resources at one time, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
 
 ### 2.5 Bitcoin representation (D6)
 

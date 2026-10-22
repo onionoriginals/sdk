@@ -515,7 +515,7 @@ describe("creating needs a well-formed entry", () => {
   });
 });
 
-describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13, PROVISIONAL, section 14)", () => {
+describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13)", () => {
   /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
   async function genesisOf(target: number) {
     const key = seeded(21);

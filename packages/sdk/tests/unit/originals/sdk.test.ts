@@ -193,7 +193,7 @@ describe("C12-20: import, then edit without authority", () => {
   });
 });
 
-describe("C12-150: the SDK never commits an entry over 65,536 UTF-8 bytes (P7.7; P14.13, PROVISIONAL, section 14)", () => {
+describe("C12-150: the SDK never commits an entry over 65,536 UTF-8 bytes (P7.7; P14.13)", () => {
   test("an entry whose line is 66,000 UTF-8 bytes but fewer UTF-16 code units is refused", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const store = new MemoryStore();

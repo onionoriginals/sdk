@@ -239,3 +239,32 @@ describe("C12-159: transitions for an added and a removed resource", () => {
     failedWith(await verify([genesis, three, notNull], [alice]), 2, "STATE_TRANSITIONS", "invalid-evidence");
   });
 });
+
+describe("C12-160: an Original with 256 resources / 257 resources (P14.13; spec PR #50 (open), owner decision)", () => {
+  const many = (n: number, from = 0) => Array.from({ length: n }, (_, i) => note(`r${from + i}`, `r${from + i}`));
+  const manyBytes = (n: number, from = 0) => Object.fromEntries(many(n, from).map((d, i) => [d.digest, bytes(`r${from + i}`)]));
+
+  test("256 resources at one time are accepted; a 257th is limit-exceeded, from the builder and in a forged entry", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KA }]);
+    const at = clock();
+    const author = { author: alice.ref("orig"), sign: alice.signer(KA, "orig") };
+    const genesis = await createOriginal({ versionTime: at(), name: "Many", resources: many(256), ...author });
+    const ok = await verifyOriginal({ log: [genesis], authors: [alice.evidence()], now: NOW, bytes: manyBytes(257) });
+    expect(ok.history.status, JSON.stringify(ok.history.failure)).toBe("valid");
+    expect(ok.state?.resources.length).toBe(256);
+    await expect(createOriginal({ versionTime: at(), name: "Too many", resources: many(257), ...author })).rejects.toMatchObject({ category: "limit-exceeded", code: "STATE_TOO_MANY_RESOURCES" });
+    await expect(updateOriginal(genesis, { versionTime: at(), resources: many(1, 256), ...author })).rejects.toMatchObject({ category: "limit-exceeded", code: "STATE_TOO_MANY_RESOURCES" });
+    const forged = await forge(genesis, {
+      ...genesis.state, operation: "update", asset: { ...assetOf(genesis), resources: many(257) },
+      transitions: [{ resource: "r256", from: null, to: many(1, 256)[0].digest }],
+    }, author.sign);
+    const r = await verifyOriginal({ log: [genesis, forged], authors: [alice.evidence()], now: NOW, bytes: manyBytes(257) });
+    expect(r.history.status).toBe("limit-exceeded");
+    expect(r.history.failure).toMatchObject({ index: 1, code: "STATE_TOO_MANY_RESOURCES", category: "limit-exceeded" });
+    // The limit is on resources at any one time: removing one makes room for another (P4.1).
+    const swapped = await updateOriginal(genesis, { versionTime: at(), resources: many(1, 256), remove: ["r0"], ...author });
+    const s = await verifyOriginal({ log: [genesis, swapped], authors: [alice.evidence()], now: NOW, bytes: manyBytes(257) });
+    expect(s.history.status, JSON.stringify(s.history.failure)).toBe("valid");
+    expect(s.state?.resources.length).toBe(256);
+  });
+});

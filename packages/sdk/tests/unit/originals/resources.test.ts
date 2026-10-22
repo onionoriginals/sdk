@@ -198,3 +198,19 @@ describe("C12-159 through the API: transitions for an added and a removed resour
     expect(committed.original.state.resources.map((r) => r.id)).toEqual(["note", "sketch"]);
   });
 });
+
+describe("C12-160 through the API: 256 resources / 257 resources (P14.13; spec PR #50 (open))", () => {
+  test("a create with 256 is committed; a 257th, at create or by an edit, is limit-exceeded and nothing is signed", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KA }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });
+    const items = (n: number, from = 0) => Array.from({ length: n }, (_, i) => ({ id: `r${from + i}`, mediaType: "text/plain", bytes: bytes(`r${from + i}`) }));
+    const created = await sdk.create({ name: "Many", resources: items(256), author: alice.ref("orig"), signer: alice.signer("orig", KA) });
+    if (created.kind !== "original") throw new Error("expected an Original");
+    expect(created.original.state.resources.length).toBe(256);
+    let asked = 0;
+    const signer: OriginalsSigner = { ...alice.signer("orig", KA), sign: (r) => (asked++, alice.signer("orig", KA).sign(r)) };
+    await rejects(sdk.create({ name: "Too many", resources: items(257), author: alice.ref("orig"), signer }), "limit-exceeded", "STATE_TOO_MANY_RESOURCES");
+    await rejects(sdk.edit(created.original.did, { parent: created.original.checkpoint, resources: items(1, 256), author: alice.ref("orig"), signer }), "limit-exceeded", "STATE_TOO_MANY_RESOURCES");
+    expect(asked).toBe(0);
+  });
+});

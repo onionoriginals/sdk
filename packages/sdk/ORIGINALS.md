@@ -101,7 +101,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
-- **Entry size (P7.7; P14.13, PROVISIONAL, section 14).** An entry is at most
+- **Entry size (P7.7; P14.13).** An entry is at most
   `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
   length of its stored line without the line feed (previously UTF-16 code
   units of the re-serialized entry), measured before the line is parsed and
@@ -126,6 +126,11 @@ on; it never reports an unanchored Original as current (P7.10). The
   `from: null` for an added resource and `to: null` for a removed one: first
   the resulting resources in order, then the removed ones in their previous
   order. BREAKING for TypeScript: `Transition.to` is `string | null`.
+- **Limits (P7.7, P14.13; decided by the owner, spec PR #50 (open)).**
+  `ORIGINALS_LIMITS`: 10,000 entries, 65,536 bytes per entry, 256 resources at
+  any one time (removing one makes room for another), 32 editor grants and
+  1,000 versions of one signer DID. Exceeding one is `limit-exceeded`
+  (`STATE_TOO_MANY_RESOURCES` for resources).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version. A
   resource added after genesis starts at version 1.
@@ -261,7 +266,7 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   lists (did:vh, did:webvh, did:btco), never the author DID or a DID of the
   author's identity (for a did:webvh author, any did:webvh with its SCID).
   `resources` are resourceIDs of the Original's current resource set. At most
-  `ORIGINALS_LIMITS.editors` (32, PROVISIONAL) grants (P7.7). An empty list is
+  `ORIGINALS_LIMITS.editors` (32) grants (P7.7). An empty list is
   not used: no editors means no `editors` member (PROVISIONAL).
 - An editor entry carries `editor: { did, verificationMethod, versionId }` in
   its signed state. It is checked against the grant in its parent's state, so
@@ -379,7 +384,7 @@ const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> 
 ```
 
 A resource larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
-64 MiB; P8.5, P14.13, PROVISIONAL, section 14) can be created and edited locally, since
+64 MiB; P8.5, P14.13) can be created and edited locally, since
 a local package is never fetched, but it is never published: `publish`,
 `hostedFiles` and a shared-host `submit` refuse a log that lists one, at any
 version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the resource
@@ -417,7 +422,7 @@ implementation limits (PROVISIONAL), set with the SDK's `retrievalLimits`:
 | `maxRequests` | 1,024 | requests in one call, failed and optional ones included |
 | `maxTotalBytes` | `archiveLimits.maxTotalBytes` (512 MiB) | bytes accepted in one call, counted as they arrive, alias log included |
 | `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response other than a resource: logs, witness files, the manifest (P7.7) |
-| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13, PROVISIONAL, section 14); a larger resource is unavailable content, not a failure (P7.4) |
+| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13); a larger resource is unavailable content, not a failure (P7.4) |
 | `requestTimeoutMs` | `FETCH_LIMITS.timeoutMs` (15 s) | one request |
 | `timeoutMs` | 120 s | the whole call, so slow or absent optional files cannot multiply the per-request timeout |
 
