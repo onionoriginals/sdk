@@ -148,11 +148,11 @@ try {
   // The author's DID evidence lives in the durable store, so a restarted writer needs no author list.
   await store.putAuthorEvidence({ did: authorDid, log: serializeLog([authorGenesis]) });
   const recoveryStore = fileRecoveryStore(stores.recovery);
-  let sdk = OriginalsSDK.create({ store, authors: [], freshness: 'asserted' });
+  let sdk = OriginalsSDK.create({ store, authors: [] });
   handOver = () => store.close();
   handBack = async () => {
     store = await FileStore.open(stores.store);
-    sdk = OriginalsSDK.create({ store, authors: [], freshness: 'asserted' });
+    sdk = OriginalsSDK.create({ store, authors: [] });
   };
   const bytesA = new TextEncoder().encode('regtest restart photo, version 1');
   const bytesB = new TextEncoder().encode('regtest restart photo, version 2 (the edit)');
@@ -295,10 +295,13 @@ try {
     read.evidenceIndex === ORD_INDEX && JSON.stringify(read.ownership?.indexes) === JSON.stringify([ORD_INDEX]) && read.ownership?.status === 'provisional' && a?.uniqueness === 'not-established' && read.snapshot.indexHealthy && read.snapshot.enumerationComplete,
     { provider: read.provider, index: read.evidenceIndex, ownership: read.ownership, uniqueness: a?.uniqueness });
   check('R28', 'the reader stored nothing (load verifies without storing)', (await readdir(join(stores.reader, 'originals'))).length === 0);
-  // Section 7: a reader with only public inputs cannot vouch that the author DID or
-  // asset log it holds is the latest. That is reported, never passed.
-  check('R29', 'freshness is reported separately as not established, so the fresh reader does not claim current',
-    read.current === false && read.reasons.includes('author-freshness-not-established'), { current: read.current, reasons: read.reasons });
+  // P7.8, P9.15 (PROVISIONAL, originals-spec #47 2be62b982): for an anchored Original the reader checks
+  // the author DID against the newest version it knows of, the package's, and says which and when it
+  // obtained it. Bitcoin decides the log, so the anchored state is current.
+  const relied = read.validAsOf?.signers?.[0];
+  check('R29', 'the reader states the author DID version it relied on and when it obtained it (the package, now); the anchored state is current',
+    read.current === true && relied?.did === authorDid && relied?.versionId === read.identityEvidence.latestVersionId && relied?.source === 'package' && typeof relied?.obtainedAt === 'string',
+    { current: read.current, reasons: read.reasons, validAsOf: read.validAsOf });
   const alone = read.fromBitcoinAlone;
   check('R31', 'with no copy of the log, the sat alone plus the package\'s author DID history verifies the Original to the edit (P9.17, P9.18)',
     alone.copy === 'absent' && alone.anchoring === 'anchored' && alone.head === editId && alone.entries === 3 && alone.history === 'valid' && alone.authorBinding === 'valid' && alone.identity === 'complete' &&
@@ -306,7 +309,7 @@ try {
     alone);
   receipt.reader = {
     pid: read.pid, store: read.store, inputs: { sat: satDid, package: stores.package, packageSha256: digest(exported.bytes) },
-    provider: read.provider, head: read.head, ordering: read.ordering, current: read.current, reasons: read.reasons,
+    provider: read.provider, head: read.head, ordering: read.ordering, current: read.current, reasons: read.reasons, validAsOf: read.validAsOf,
     tip: read.snapshot.tip, anchor: a?.anchor, accepted: a?.accepted, ownership: read.ownership,
     resources: versions, fromBitcoinAlone: alone,
   };

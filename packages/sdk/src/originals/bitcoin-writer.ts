@@ -298,14 +298,11 @@ function offChainOf(did: string, through: string, report: OriginalsReport): OffC
   };
 }
 
-/** Reasons a fresh verification gives that Bitcoin would refuse the entry for (P9.15, P5.18). */
-const REFUSED_ON_BITCOIN = new Set(["author-did-deactivated", "head-key-not-in-latest-author-document", "head-key-not-in-latest-signer-document"]);
-
 /**
  * P9.18: before inscribing, verify the stored log through the entry as a fresh
  * reader of this SDK's evidence package would: history, author binding and the
  * identity evidence of every signer through it (author and editors), and the
- * signing key still valid in its signer's latest state. Resource availability
+ * entry not historically authorized only (P7.9). Resource availability
  * is reported (`offChain`), never a gate (P7.4). Freshness is a separate
  * policy and is not gated here.
  */
@@ -328,7 +325,11 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
   if (r.history.status !== "valid" || r.checkpoint !== versionId) problems.push(`history-${r.history.status}`);
   if (r.authorBinding.status !== "valid") problems.push(`author-binding-${r.authorBinding.status}`);
   if (r.identityEvidence.status !== "complete") problems.push("identity-evidence-incomplete");
-  for (const reason of r.reasons) if (REFUSED_ON_BITCOIN.has(reason)) problems.push(reason);
+  // Bitcoin would refuse an entry that a fresh reader finds historically authorized only: its key
+  // is no longer in its signer's latest DID state, its editor DID or the author DID is deactivated
+  // (P7.9, P9.15, P5.18).
+  const historical = r.historicallyAuthorizedOnly.find((h) => h.versionId === versionId);
+  if (historical) problems.push(historical.reason);
   if (problems.length > 0) {
     const category = problems.every((p) => p === "identity-evidence-incomplete") ? "incomplete-evidence" : r.history.failure?.category ?? "invalid-evidence";
     refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${problems.join(", ")}`, { problems, report: r });

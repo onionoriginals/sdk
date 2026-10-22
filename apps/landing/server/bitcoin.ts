@@ -1957,7 +1957,7 @@ export function createBitcoinRoutes(deps: {
       const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);
       // Spending an inscribed input would continue an anchored Original on its
       // sat. That authorization is rebuilt on the Originals Protocol with
-      // Bitcoin anchoring (plan 011, PR 10); until then it is always refused.
+      // Bitcoin anchoring (plan 011, PR 10b); until then it is always refused.
       return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'Inscribed inputs cannot be spent here yet; fee inputs must carry no inscriptions.' }, 400);
     }
 

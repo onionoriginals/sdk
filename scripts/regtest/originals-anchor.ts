@@ -132,7 +132,7 @@ try {
   const author = alice.ref;
   const signer = alice.signer;
   const originals = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store: originals, authors: [alice.evidence, bob.evidence], freshness: 'asserted' });
+  const sdk = OriginalsSDK.create({ store: originals, authors: [alice.evidence, bob.evidence] });
   const recorded = () => ({ recoveryStore, recoveryIds: [...records.keys()] });
   /** The exact stored lines of an Original, oldest first. */
   const storedLines = async (of: string) => (await sdk.committedLog(of)).trimEnd().split('\n');
@@ -370,7 +370,7 @@ try {
     (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
   );
   // Without Bob's DID history the log through the anchoring entry does not verify: nothing is inscribed (P9.18).
-  const forgetful = OriginalsSDK.create({ store: originals, authors: [alice.evidence], freshness: 'asserted' });
+  const forgetful = OriginalsSDK.create({ store: originals, authors: [alice.evidence] });
   const refusedWithoutBob = await prepareEntryInscription({ sdk: forgetful, did: did2, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null })
     .then(() => 'prepared', (error: unknown) => (error as { code?: string }).code ?? String(error));
   assert.equal(refusedWithoutBob, 'ANCHORING_NOT_VERIFIED', 'the same store without the editor\'s DID history refuses to inscribe');

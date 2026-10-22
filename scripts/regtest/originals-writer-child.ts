@@ -123,7 +123,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
       evidenceIndex: evidence.index,
       manifest: loaded.manifest, packageVersionIds: ids,
       history: r.history, authorBinding: r.authorBinding, identityEvidence: { status: r.identityEvidence.status, author: r.identityEvidence.author, latestVersionId: r.identityEvidence.latestVersionId },
-      ordering: r.ordering, head: r.head, checkpoint: r.checkpoint, current: r.current, reasons: loaded.reasons,
+      ordering: r.ordering, head: r.head, checkpoint: r.checkpoint, current: r.current, reasons: loaded.reasons, validAsOf: r.validAsOf,
       anchoring: r.anchoring, ownership: r.ownership, state: { name: r.state?.name },
       fromBitcoinAlone: {
         copy: alone.anchoring?.copy, anchoring: alone.anchoring?.status, head: alone.head, entries: alone.history.entries, history: alone.history.status,
@@ -144,7 +144,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
   const storeRoot = need('ORIGINALS_CHILD_STORE');
   const recoveryDir = need('ORIGINALS_CHILD_RECOVERY');
   // The author's DID evidence is in the durable store; nothing is passed in memory.
-  const sdk = OriginalsSDK.create({ store: await FileStore.open(storeRoot), authors: [], freshness: 'asserted' });
+  const sdk = OriginalsSDK.create({ store: await FileStore.open(storeRoot), authors: [] });
   const recoveryStore = fileRecoveryStore(recoveryDir);
   const base = { mode, pid: process.pid, store: storeRoot, recovery: recoveryDir, recordedBefore: await recoveryStore.list() };
 
