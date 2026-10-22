@@ -30,7 +30,7 @@ async function aliasFor(target: string, domain = "example.com"): Promise<AliasEv
 
 async function published() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
   const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
   if (c.kind !== "original") throw new Error("expected an Original");
@@ -240,7 +240,7 @@ function withResources(template: Record<string, any>, resources: unknown[]): Rec
 /** An Original published with `count` resources of `size` bytes each. */
 async function publishedWith(count: number, size: number) {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
   const resources = Array.from({ length: count }, (_, i) => ({ id: `r${i}`, mediaType: "application/octet-stream", bytes: new Uint8Array(size).fill(i + 1) }));
   const c = await sdk.create({ name: "Contact sheet", resources, author: alice.ref("orig"), signer });
@@ -450,7 +450,7 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     const v1 = alice.evidence();
     // The publisher was configured with v1 of the author DID.
     const at = clock();
-    const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [v1], freshness: "asserted", clock: at });
+    const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [v1], clock: at });
     const signer = alice.signer("orig", KEY);
     const c = await a.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
@@ -458,7 +458,7 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     // The author rotates to v2 elsewhere and edits there; the publisher imports that package.
     await alice.rotate([{ fragment: "orig", secret: KEY }, { fragment: "next", secret: K2 }]);
     const v2 = alice.evidence();
-    const b = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], freshness: "asserted", clock: at });
+    const b = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], clock: at });
     await b.import((await a.package(did)).bytes);
     const e = await b.edit(did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: alice.ref("next"), signer: alice.signer("next", K2) });
     expect((await a.import((await b.package(did)).bytes)).status).toBe("imported");

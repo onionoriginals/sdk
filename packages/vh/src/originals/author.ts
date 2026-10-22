@@ -42,7 +42,22 @@ export interface AuthorDidEvidence {
    * never taken from a package.
    */
   retrievedFrom?: string;
+  /**
+   * When this history was obtained (ISO 8601), and from where. A report on an
+   * unanchored Original states both for each signer DID it relied on, because
+   * it is valid only as of that evidence (P7.10). Absent means the supplier did
+   * not say, and the report says null rather than guess.
+   */
+  obtainedAt?: string;
+  source?: EvidenceSource;
 }
+
+/**
+ * Where a signer DID history came from: an evidence package, a host's
+ * snapshot, a retrieval from the DID's location (P5.14), a verifier's own
+ * store of evidence verified before (P7.8), or the caller.
+ */
+export type EvidenceSource = "package" | "host" | "fetched" | "retained" | "supplied";
 
 export interface AuthorVersion {
   versionId: string;

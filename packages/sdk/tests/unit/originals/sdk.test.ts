@@ -11,7 +11,7 @@ const KEY = seed(21);
 async function setup() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
   return { alice, store, sdk, signer, author };
@@ -39,7 +39,7 @@ async function rejects(promise: Promise<unknown>, category: string, code?: strin
 describe("create, edit and deactivate", () => {
   test("the photo example through the SDK: versions derived from history (P4.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
-    expect(original.current).toBe(true);
+    expect(original.report.reasons).toEqual(["not-anchored"]);
     const cropped = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author, signer });
     const corrected = await sdk.edit(original.did, { parent: cropped.original.checkpoint, metadata: { caption: "Corrected" }, author, signer });
     expect(corrected.status).toBe("committed");

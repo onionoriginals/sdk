@@ -12,8 +12,14 @@
  *   or importing never confers signing authority (P7.5, P8.4).
  * - Every verification compares against the highest versionIds this store has
  *   verified for the Original and its author DIDs, so an older prefix is stale
- *   rather than current (P7.6, P7.8). Reads, commits and imports retain the
- *   new highest; loading a package changes nothing.
+ *   (P7.6, P7.8). Reads, commits and imports retain the new highest; loading a
+ *   package changes nothing.
+ * - An unanchored Original is never current (P7.10): a valid one is reported
+ *   valid as of its verified checkpoint (`validAsOf`), naming the signer DID
+ *   versions relied on and when each history was obtained. Evidence is stamped
+ *   with when and where the SDK obtained it: `package`, `host` (a hosted
+ *   snapshot), `fetched` (`identityFetch`), `retained` (this store), or
+ *   `supplied` (the `authors` option, with the caller's own `obtainedAt`).
  * - Publication (P3.6): `publish` lists a did:webvh alias that already points
  *   back to the Original. `loadPublished` is the public reader: it retrieves
  *   the hosted snapshot through the alias and verifies that exact checkpoint
@@ -57,6 +63,7 @@ import {
   type ResourceDescriptor,
   type ResourceVersion,
   type RetainedVersions,
+  type ValidAsOf,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
@@ -72,13 +79,12 @@ export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<Autho
 
 export interface OriginalsSDKOptions {
   store?: OriginalsStore;
-  /** Where author DID histories come from. */
-  authors: AuthorSource;
   /**
-   * `asserted` when the caller vouches that the evidence it supplies is the
-   * latest, as an author's own SDK can (P7.8). Reports say so.
+   * Where author DID histories come from. Give each its `obtainedAt` (ISO
+   * 8601): reports on unanchored Originals state when the evidence they relied
+   * on was obtained (P7.10), and say null when it was not given.
    */
-  freshness?: "asserted";
+  authors: AuthorSource;
   /** Milliseconds since the epoch; used for entry timestamps and verification time. */
   clock?: () => number;
   /** Bounds on one evidence package: `load`, `import`, and the snapshot `loadPublished` retrieves. */
@@ -240,7 +246,15 @@ export interface OriginalView {
   head: string;
   state: AssetState;
   resources: ResourceVersion[];
+  /** Never true for an unanchored Original (P7.10). */
   current: boolean;
+  /**
+   * P7.10: the checkpoint this result is valid as of, the signer DID versions
+   * it relied on and when each history was obtained; null when it does not
+   * verify (see `report.reasons`). Entries that are historically authorized
+   * only are in `report.historicallyAuthorizedOnly` (P7.9).
+   */
+  validAsOf: ValidAsOf | null;
   report: OriginalsReport;
 }
 
@@ -268,8 +282,9 @@ export interface PublishedOriginal extends LoadedEvidence {
    * that fail their digest, and the alias in both directions (P9.1, P3.6).
    * Missing bytes do not fail it: they are unavailable content, reported in
    * `report.resources` (P7.3, P7.4, P9.18); an application that needs the
-   * content checks that too. Whether it is the latest state is
-   * `report.current`, under the freshness policy.
+   * content checks that too. It is never the latest state of an unanchored
+   * Original: that is valid only as of the snapshot's checkpoint
+   * (`report.validAsOf`, P7.10).
    */
   verified: boolean;
 }
@@ -515,9 +530,17 @@ export class OriginalsSDK {
 
   private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
     const source = this.options.authors;
-    const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
-    const stored = await this.store.getAuthorEvidence(did);
+    const found = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+    const configured = found ? { ...found, source: found.source ?? ("supplied" as const) } : undefined;
+    const kept = await this.store.getAuthorEvidence(did);
+    // Kept by this store when it verified it (P7.8): when and where it was first obtained is kept with it.
+    const stored = kept ? { ...kept, source: "retained" as const } : undefined;
     return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+  }
+
+  /** `evidence` as obtained now, from `source` (P7.10). */
+  private obtained(evidence: AuthorDidEvidence, source: "package" | "host" | "fetched"): AuthorDidEvidence {
+    return { ...evidence, obtainedAt: new Date(this.clock()).toISOString(), source };
   }
 
   /** `identityFetch`, with a fetcher's TypeError (offline, DNS) treated as unavailable. */
@@ -678,7 +701,7 @@ export class OriginalsSDK {
       if (error instanceof OriginalsError) return undefined;
       throw error;
     }
-    const candidate: AuthorDidEvidence = { did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url };
+    const candidate: AuthorDidEvidence = this.obtained({ did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url }, "fetched");
     const ids = async (evidence: AuthorDidEvidence) => {
       const h = await verifyAuthorHistory(evidence, { now: this.clock() });
       return h.failure ? undefined : h.versions.map((v) => v.versionId);
@@ -758,7 +781,6 @@ export class OriginalsSDK {
         now: this.clock(),
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
-        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
     const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
     return (await this.withIdentities(log, base, run)).report;
@@ -769,7 +791,7 @@ export class OriginalsSDK {
       const failure = report.history.failure;
       sdkError(failure?.category ?? "incomplete-evidence", "ORIGINAL_NOT_VERIFIED", `${did} has no verified checkpoint: ${failure?.message ?? report.reasons.join(", ")}`, { report });
     }
-    return { did, checkpoint: report.checkpoint, head: report.head, state: report.state, resources: report.resources.versions, current: report.current, report };
+    return { did, checkpoint: report.checkpoint, head: report.head, state: report.state, resources: report.resources.versions, current: report.current, validAsOf: report.validAsOf, report };
   }
 
   private async stored(did: string): Promise<string> {
@@ -1070,7 +1092,7 @@ export class OriginalsSDK {
    * branch and reported as a fork (P6.6), exactly as `import` does.
    */
   async sync(did: string, host: SharedHost): Promise<ImportResult> {
-    return this.importContents(await host.accepted(did), did);
+    return this.importContents(await host.accepted(did), did, "host");
   }
 
   /**
@@ -1114,7 +1136,7 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
     const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
     for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
@@ -1142,10 +1164,10 @@ export class OriginalsSDK {
    * bounded by a budget of their own (`retrievalLimits`).
    */
   async load(zip: Uint8Array): Promise<LoadedEvidence> {
-    return this.loadContents(readEvidence(zip, this.options.archiveLimits));
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package");
   }
 
-  private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
+  private async loadContents(contents: EvidenceContents, from: "package" | "host", aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
     const run = (authors: AuthorDidEvidence[]) =>
@@ -1158,9 +1180,8 @@ export class OriginalsSDK {
         checkpoint: contents.manifest.checkpoint,
         now: this.clock(),
         ...comparisons,
-        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
-    const supplied = contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
     const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
@@ -1256,7 +1277,7 @@ export class OriginalsSDK {
   private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
     const { alias, files } = await this.retrieveSnapshot(aliasDid, retrieval, true);
     // Every file is already within the budget and the archive limits; no archive is assembled.
-    const loaded = await this.loadContents(readEvidenceFiles(files), [alias], retrieval);
+    const loaded = await this.loadContents(readEvidenceFiles(files), "host", [alias], retrieval);
     const r = loaded.report;
     // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
     // merely points at an Original gives no result through it.
@@ -1282,8 +1303,8 @@ export class OriginalsSDK {
     return this.importContents(readEvidence(zip, this.options.archiveLimits));
   }
 
-  private async importContents(contents: EvidenceContents, expected?: string): Promise<ImportResult> {
-    const loaded = await this.loadContents(contents);
+  private async importContents(contents: EvidenceContents, expected?: string, from: "package" | "host" = "package"): Promise<ImportResult> {
+    const loaded = await this.loadContents(contents, from);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });
@@ -1306,7 +1327,7 @@ export class OriginalsSDK {
       if (have.length === incoming.length && sharesPrefix(incoming, have)) return result("already-current");
       if (incoming.length < have.length && sharesPrefix(incoming, have)) return result("kept-newer-local");
       if (!sharesPrefix(have, incoming)) {
-        await this.keepEvidence(contents, r);
+        await this.keepEvidence(contents, r, from);
         await this.store.putBranch(did, contents.log);
         return result("conflict");
       }
@@ -1314,23 +1335,26 @@ export class OriginalsSDK {
     // A refused candidate is never history (P6.8): a log carrying one is kept as a branch, a fork (P6.6).
     const refused = new Set((await this.store.getRefused(did)).map(refusedVersionId));
     if (incoming.some((id) => refused.has(id))) {
-      await this.keepEvidence(contents, r);
+      await this.keepEvidence(contents, r, from);
       await this.store.putBranch(did, contents.log);
       return result("conflict");
     }
-    await this.keepEvidence(contents, r);
+    await this.keepEvidence(contents, r, from);
     await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
     return result("imported");
   }
 
-  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport): Promise<void> {
+  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }
     for (const evidence of contents.authors) {
       const history = await verifyAuthorHistory(evidence, { now: this.clock() });
       const latest = history.versions[history.versions.length - 1]?.versionId;
-      if (latest !== undefined && report.retain.authors[evidence.did] === latest) await this.store.putAuthorEvidence(evidence);
+      // Kept with when and where it was obtained, which later reports state (P7.10).
+      if (latest !== undefined && report.retain.authors[evidence.did] === latest) {
+        await this.store.putAuthorEvidence(this.obtained({ did: evidence.did, log: evidence.log, ...(evidence.witness !== undefined ? { witness: evidence.witness } : {}) }, from));
+      }
     }
   }
 }

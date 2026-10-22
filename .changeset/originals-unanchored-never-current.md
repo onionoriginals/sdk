@@ -1,0 +1,7 @@
+---
+'@originals/sdk': minor
+'@originals/vh': minor
+'@originals/landing': minor
+---
+
+Unanchored Originals are never current (Originals spec master 051049d8b, originals-spec #46; P7.9, P7.10, P6.5). BREAKING: `verifyOriginal` no longer takes `freshness`, `Freshness` loses `asserted`, and `current` is always false for an Original that is not anchored, with `not-anchored` first in `reasons`. Reports gain `validAsOf` (`{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`, null when the checkpoint does not verify or the Original is forked) and `historicallyAuthorizedOnly` (each entry whose key the signer's latest DID state no longer lists, by a deactivated editor DID, or after the author DID's deactivation; reason `historically-authorized-only`), which replace the `head-key-not-in-latest-*`, `editor-did-deactivated` and `*-freshness-not-established` reasons. `AuthorDidEvidence` gains `obtainedAt` and `source`, which the SDK stamps for evidence it obtains. The SDK drops its `freshness` option, `OriginalView` gains `validAsOf`, and `originals verify` drops `--freshness` and prints what the result is valid as of. A grant naming the Original's own did:vh or one of its aliases is rejected (P5.15). The landing's shared-host submit route refuses an entry that is historically authorized only (`422 entry_historically_authorized_only`) instead of one that would not be current.

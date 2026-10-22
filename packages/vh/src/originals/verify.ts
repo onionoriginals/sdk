@@ -1,10 +1,20 @@
 /**
  * Fresh verification of an Original (spec section 7). The report keeps history
  * validity, author binding, identity evidence, resource availability,
- * freshness and ordering separate; `current` is true only when every part
- * passes under the selected freshness policy, except content availability:
- * missing resource bytes are reported as unavailable content and never fail
- * the log (P7.3, P7.4, P9.18). No private key or network is involved (P7.3).
+ * freshness and ordering separate. Missing resource bytes are reported as
+ * unavailable content and never fail the log (P7.3, P7.4, P9.18). No private
+ * key or network is involved (P7.3).
+ *
+ * An Original that is not anchored is never current, and its signers are never
+ * reported as currently authorized, however fresh the evidence (P7.10;
+ * originals-spec #46): off Bitcoin nothing shows that a newer entry or another
+ * branch does not exist. A valid unanchored Original is reported as valid as
+ * of its verified checkpoint (`validAsOf`), with the latest versionId relied
+ * on for each signer DID and when that history was obtained. An entry whose
+ * key the latest verified state of its signer's DID no longer lists, or any
+ * entry once the author DID is deactivated, is historically authorized only
+ * (`historicallyAuthorizedOnly`, P7.9, P6.5, P5.18); that does not invalidate
+ * the checkpoint, and every result that includes such an entry says so.
  *
  * Freshness (P7.6, P7.8): a caller may supply other copies of the asset log
  * and the highest versionIds it has verified before, for the Original and for
@@ -27,7 +37,7 @@ import {
   type VerifiedEntry,
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
-import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory } from "./author.js";
+import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, signerOf, type AssetState, type EntryState } from "./state.js";
@@ -42,13 +52,6 @@ export interface VerifyOriginalOptions {
   bytes?: Record<string, Uint8Array> | ((digest: string) => Uint8Array | undefined);
   /** Verify this exact checkpoint instead of the head (P3.2). */
   checkpoint?: string;
-  /**
-   * The freshness of the supplied asset log and author DID histories (P7.6,
-   * P7.8). `asserted` means the caller vouches that they are the latest, as an
-   * author's own SDK can; the report says so. Without it, freshness is not
-   * established. A retained versionId the evidence falls short of overrides it.
-   */
-  freshness?: "asserted";
   /** Other copies of the asset log, compared with the supplied one (VH-Log "Comparing Copies"). */
   copies?: LogCopy[];
   /** The highest versionIds verified before, for the Original and per author DID (P7.8). */
@@ -65,13 +68,48 @@ export interface RetainedVersions {
 }
 
 /**
- * asserted: the caller vouches for the evidence. retrieved (PROVISIONAL,
- * P5.14): an identity's log was retrieved, without redirects, from where the
- * latest entry it signed says the DID is. not-established: neither. stale:
- * shorter than a retained versionId. Only `asserted` and `retrieved` are
- * established freshness (P7.8).
+ * Whether a log's freshness was independently established (P7.8). retrieved
+ * (PROVISIONAL, P5.14): an identity's log was retrieved, without redirects,
+ * from where the latest entry it signed says the DID is. not-established:
+ * nothing shows it is the latest. stale: shorter than a retained versionId.
+ * None of these makes an unanchored Original current (P7.10).
  */
-export type Freshness = "asserted" | "retrieved" | "not-established" | "stale";
+export type Freshness = "retrieved" | "not-established" | "stale";
+
+/** A signer DID a result relies on: the latest versionId used, and when and where that history was obtained (P7.8, P7.10). */
+export interface SignerReliance {
+  did: string;
+  role: "author" | "editor";
+  versionId: string | null;
+  /** As the evidence states it (`AuthorDidEvidence.obtainedAt`); null when it does not say. */
+  obtainedAt: string | null;
+  source: EvidenceSource | null;
+}
+
+/**
+ * P7.10: what a valid unanchored Original is reported as. It is valid as of
+ * `checkpoint`, judged with the signer DID versions listed, and nothing more:
+ * it is never current.
+ */
+export interface ValidAsOf {
+  checkpoint: string;
+  /** The author first, then each editor that signed an entry through the checkpoint. */
+  signers: SignerReliance[];
+}
+
+/**
+ * P7.9, P6.5, P5.18: an entry through the checkpoint that is historically
+ * authorized only. It may have been signed after its key was removed or the
+ * DID deactivated, so it shows only that the key was authorized at the
+ * version it names. It does not invalidate the checkpoint.
+ */
+export interface HistoricalAuthorization {
+  versionId: string;
+  /** The signer DID: the author, or the editor of an editor entry. */
+  did: string;
+  role: "author" | "editor";
+  reason: "key-not-in-latest-signer-document" | "author-did-deactivated" | "signer-did-deactivated";
+}
 
 /** Divergent valid histories of one Original. No branch is current (Q5). */
 export interface OriginalsFork {
@@ -144,7 +182,11 @@ export interface OriginalsReport {
    * versions and is not a verification failure (P7.3, P9.18); `digest-failure` is.
    */
   resources: { status: "available" | "partial" | "digest-failure"; versions: ResourceVersion[]; missing: ResourceVersion[]; failures: ResourceVersion[] };
-  /** Whether the asset log is the latest, under the freshness policy and the retained versionId (P7.6). */
+  /**
+   * The asset log against the retained versionId and other copies (P7.6):
+   * stale when it falls short of either; otherwise not established, because
+   * off Bitcoin nothing shows it is the latest (P7.10).
+   */
   assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
   fork: OriginalsFork | null;
   /**
@@ -158,8 +200,18 @@ export interface OriginalsReport {
   state: AssetState | null;
   /** The derived DID document at the checkpoint (P3.8). */
   document: JsonObject | null;
+  /**
+   * P7.10: set when the checkpoint verifies: valid history, author binding,
+   * complete identity evidence, no failed digest and no unresolved fork. A
+   * stale prefix is still valid as of its own checkpoint (C12-22). Null
+   * otherwise.
+   */
+  validAsOf: ValidAsOf | null;
+  /** P7.9: the entries through the checkpoint that are historically authorized only, oldest first. */
+  historicallyAuthorizedOnly: HistoricalAuthorization[];
+  /** Never true for an Original that is not anchored (P7.10). */
   current: boolean;
-  /** Why the result is not current. */
+  /** Why the result is not current: `not-anchored` for every unanchored Original, and anything else that applies. */
   reasons: string[];
   /**
    * The versionIds to retain after this verification: never lower than those
@@ -302,7 +354,6 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const latest = history?.versions[history.versions.length - 1];
   const signerFreshness = (did: string | null, role: "author" | "editor"): Freshness => {
     if (did && staleAuthors.has(did)) return "stale";
-    if (options.freshness === "asserted") return "asserted";
     return did && retrievedAtLocation(did, role, options.authors, log.entries) ? "retrieved" : "not-established";
   };
 
@@ -370,7 +421,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       failures: mismatched,
     },
     assetFreshness: {
-      status: stale ? "stale" : options.freshness === "asserted" ? "asserted" : "not-established",
+      status: stale ? "stale" : "not-established",
       retainedVersionId: options.retained?.original ?? null,
       copies,
     },
@@ -380,6 +431,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     deactivated: log.deactivated,
     state: state?.asset ?? null,
     document: selected ? deriveDocument(prefix) : null,
+    validAsOf: null,
+    historicallyAuthorizedOnly: historicallyAuthorizedOnly(prefix, histories, authorDid),
     current: false,
     reasons,
     retain: { original: retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null), authors: retainedAuthors },
@@ -389,47 +442,87 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     if (latestId && !staleAuthors.has(h.did) && !forkedAuthors.has(h.did)) report.retain.authors[h.did] = latestId;
   }
 
+  // P7.10: nothing off Bitcoin shows that a newer entry or another branch does not exist.
+  reasons.push("not-anchored");
   if (failure) reasons.push(`history-${report.history.status}`);
   if (report.identityEvidence.status === "incomplete") reasons.push("identity-evidence-incomplete");
   if (fork) reasons.push("fork-unresolved");
   if (report.assetFreshness.status === "stale") reasons.push("asset-log-older-than-retained");
-  if (report.assetFreshness.status === "not-established") reasons.push("asset-freshness-not-established");
   if (report.identityEvidence.freshness === "stale") reasons.push("author-history-older-than-retained");
-  if (report.identityEvidence.freshness === "not-established") reasons.push("author-freshness-not-established");
   if (editors.some((e) => e.freshness === "stale")) reasons.push("editor-history-older-than-retained");
-  if (editors.some((e) => e.freshness === "not-established")) reasons.push("editor-freshness-not-established");
-  // P6.5, P5.18: once the author DID is deactivated, no entry, author's or editor's, is current.
+  // P6.5: the author DID's deactivation is reported with the result.
   if (report.identityEvidence.deactivated) reasons.push("author-did-deactivated");
+  // P7.9: any result that includes a historically authorized entry says so.
+  if (report.historicallyAuthorizedOnly.length > 0) reasons.push("historically-authorized-only");
   // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
-  // `resources` as unavailable content, never as a failure, and do not affect `current`
-  // (section 7: the default acceptance check excludes content availability). Bytes that are
-  // supplied are still checked, and a mismatch fails.
+  // `resources` as unavailable content, never as a failure. Bytes that are supplied are still
+  // checked, and a mismatch fails.
   if (report.resources.status === "digest-failure") reasons.push("resources-digest-failure");
   if (!head) reasons.push("no-verified-entry");
-  // P7.9, P5.18: an unanchored head signed by a key the latest state of its signer's DID (the
-  // author's, or the editor's for an editor entry) no longer lists is never current.
-  if (head) {
-    const { role, ref } = signerOf(head.entry.state as unknown as EntryState);
-    const signerHistory = histories.find((h) => h.did === ref.did);
-    const signerLatest = signerHistory?.versions[signerHistory.versions.length - 1];
-    if (signerHistory && signerLatest) {
-      const signedWith = signerHistory.versions.find((v) => v.versionId === ref.versionId);
-      let key: string | undefined;
-      try {
-        key = signedWith ? authorKey(signedWith, ref) : undefined;
-      } catch (error) {
-        if (!(error instanceof OriginalsError)) throw error;
-      }
-      if (typeof key !== "string" || !stillAuthorized(signerLatest, ref, key)) {
-        reasons.push(role === "author" ? "head-key-not-in-latest-author-document" : "head-key-not-in-latest-signer-document");
-      }
-      // P5.18, P6.5, P7.9: an editor whose DID is deactivated authorizes nothing further, so its
-      // entry at the head is not current, even if the deactivated document still lists the key.
-      if (role === "editor" && signerLatest.deactivated) reasons.push("editor-did-deactivated");
-    }
-  }
-  report.current = reasons.length === 0;
+  const valid =
+    !failure && report.authorBinding.status === "valid" && report.identityEvidence.status === "complete" &&
+    report.resources.status !== "digest-failure" && fork === null;
+  if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
+  // P7.10: only an anchored Original can be current, and none is anchored here.
+  report.current = false;
   return report;
+}
+
+/** The latest verified version of `did`, if any. */
+function latestOf(histories: AuthorHistory[], did: string) {
+  const h = histories.find((x) => x.did === did);
+  return h?.versions[h.versions.length - 1];
+}
+
+/** P7.9, P6.5, P5.18: each entry of `prefix` its signer's latest verified DID state no longer authorizes. */
+function historicallyAuthorizedOnly(prefix: VerifiedEntry[], histories: AuthorHistory[], authorDid: string | null): HistoricalAuthorization[] {
+  const out: HistoricalAuthorization[] = [];
+  const authorDeactivated = authorDid !== null && latestOf(histories, authorDid)?.deactivated === true;
+  for (const v of prefix) {
+    const { role, ref } = signerOf(v.entry.state as unknown as EntryState);
+    const entry = { versionId: v.entry.versionId, did: ref.did, role };
+    // An editor entry is subject to the author DID's deactivation exactly as an author entry is (P5.18).
+    if (authorDeactivated) {
+      out.push({ ...entry, reason: "author-did-deactivated" });
+      continue;
+    }
+    const h = histories.find((x) => x.did === ref.did);
+    const latest = h?.versions[h.versions.length - 1];
+    if (!h || !latest) continue; // missing identity evidence is reported as incomplete, not here
+    // An editor whose DID is deactivated authorizes nothing further, even if its document still lists the key.
+    if (role === "editor" && latest.deactivated) {
+      out.push({ ...entry, reason: "signer-did-deactivated" });
+      continue;
+    }
+    const signedWith = h.versions.find((x) => x.versionId === ref.versionId);
+    let key: string | undefined;
+    try {
+      key = signedWith ? authorKey(signedWith, ref) : undefined;
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+    }
+    if (typeof key !== "string" || !stillAuthorized(latest, ref, key)) out.push({ ...entry, reason: "key-not-in-latest-signer-document" });
+  }
+  return out;
+}
+
+/** P7.8, P7.10: the signer DIDs a result through `prefix` relies on, the author first. */
+function reliedOn(prefix: VerifiedEntry[], histories: AuthorHistory[], evidence: AuthorDidEvidence[]): SignerReliance[] {
+  const out: SignerReliance[] = [];
+  for (const v of prefix) {
+    const { role, ref } = signerOf(v.entry.state as unknown as EntryState);
+    if (out.some((s) => s.did === ref.did)) continue;
+    const supplied = evidence.find((e) => e.did === ref.did);
+    out.push({
+      did: ref.did,
+      role,
+      versionId: latestOf(histories, ref.did)?.versionId ?? null,
+      obtainedAt: supplied?.obtainedAt ?? null,
+      source: supplied?.source ?? null,
+    });
+  }
+  // The author signs the genesis entry, so it comes first.
+  return out;
 }
 
 /**

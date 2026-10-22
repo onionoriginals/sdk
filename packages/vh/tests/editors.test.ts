@@ -51,7 +51,7 @@ async function harbor() {
 
 type Options = Parameters<typeof verifyOriginal>[0];
 const verify = (log: LogEntry[], dids: Array<VhAuthor | WebvhAuthor>, extra: Partial<Options> = {}): Promise<OriginalsReport> =>
-  verifyOriginal({ log, authors: dids.map((a) => a.evidence()), now: NOW, bytes: allBytes, freshness: "asserted", ...extra });
+  verifyOriginal({ log, authors: dids.map((a) => a.evidence()), now: NOW, bytes: allBytes, ...extra });
 
 function failedWith(r: OriginalsReport, index: number, code: string, category?: string) {
   expect(r.history.failure?.index, JSON.stringify(r.history.failure)).toBe(index);
@@ -80,13 +80,13 @@ describe("C12-113: two editors sign within their grants, on successive heads, wi
     expect(r.identityEvidence.author).toBe(alice.did);
     expect(r.identityEvidence.status).toBe("complete");
     expect(r.identityEvidence.editors.map((e) => [e.did, e.status, e.latestVersionId, e.freshness])).toEqual([
-      [bob.did, "complete", bob.versionId, "asserted"],
-      [carol.did, "complete", carol.versionId, "asserted"],
+      [bob.did, "complete", bob.versionId, "not-established"],
+      [carol.did, "complete", carol.versionId, "not-established"],
     ]);
     expect(r.state?.metadata).toEqual({ caption: "Corrected caption" });
     expect(r.resources.versions.map((v) => [v.version, v.versionId])).toEqual([[1, genesis.versionId], [2, byBob.versionId]]);
     expect(r.document?.controller).toBe(alice.did);
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
   test("an editor DID's history is needed only for the editors that signed (P7.1)", async () => {
@@ -94,7 +94,7 @@ describe("C12-113: two editors sign within their grants, on successive heads, wi
     const byBob = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], ...asBob });
     const r = await verify([genesis, byBob], [alice, bob]);
     expect(r.identityEvidence.editors.map((e) => e.did)).toEqual([bob.did]);
-    expect(r.current).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 });
 
@@ -145,6 +145,17 @@ describe("C12-115: an editor entry that changes grants, aliases, lifecycle or pa
     await expect(deactivateOriginal(genesis, { versionTime: at(), ...asBob } as never)).rejects.toThrow();
   });
 
+  test("C12-140: an editor entry whose proof's verificationMethod is the author's, or whose operation is not update, is rejected (P5.2, P5.16)", async () => {
+    const { alice, bob, carol, genesis, sign } = await harbor();
+    const asset = genesis.state.asset as JsonObject;
+    const byAuthorKey = await forge(genesis, { ...genesis.state, operation: "update", transitions: [], asset: { ...asset, name: "x" }, editor: bob.ref("edit") }, sign);
+    const r = await verify([genesis, byAuthorKey], [alice, bob, carol]);
+    expect(r.history.failure?.index).toBe(1);
+    expect(r.history.failure?.category).toBe("author-binding");
+    const deactivating = await forge(genesis, { ...genesis.state, operation: "deactivate", transitions: [], asset: { ...asset, status: "deactivated" }, editor: bob.ref("edit") }, bob.signer(KB, "edit"), { deactivated: true });
+    failedWith(await verify([genesis, deactivating], [alice, bob, carol]), 1, "EDITOR_AUTHOR_ONLY");
+  });
+
   test("an editor entry cannot be the genesis entry", async () => {
     const { alice, bob, asBob } = await harbor();
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("orig"), sign: asBob.sign, editor: bob.ref("edit") } as never).catch((e: unknown) => e);
@@ -184,7 +195,7 @@ describe("C12-117, C12-119: grants take effect from the next entry, revocations 
     const r = await verify([genesis, byBob, revoked], [alice, bob, carol]);
     expect(r.history.status).toBe("valid");
     expect(r.resources.versions.at(-1)?.versionId).toBe(byBob.versionId);
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
     // C12-05: a key of another identity, never granted, changes nothing.
     const dave = await VhAuthor.create([{ fragment: "edit", signer: seeded(33) }]);
     const byDave = await forge(genesis, { ...genesis.state, operation: "update", transitions: [], editor: dave.ref("edit"), asset: { ...(genesis.state.asset as JsonObject), metadata: { x: 1 } } }, dave.signer(seeded(33), "edit"));
@@ -206,7 +217,7 @@ describe("C12-117, C12-119: grants take effect from the next entry, revocations 
   });
 });
 
-describe("C12-120: grant rules (P5.15)", () => {
+describe("C12-120, C12-142: grant rules (P5.15)", () => {
   test("a grant naming the author DID, a DID of the author's identity, a duplicate editor or an unlisted DID method is rejected", async () => {
     const { alice, bob, at, ref, sign, genesis } = await harbor();
     const webAlice = await WebvhAuthor.create([{ fragment: "orig", signer: KA }]);
@@ -233,7 +244,20 @@ describe("C12-120: grant rules (P5.15)", () => {
     expect(() => checkAsset({ ...asset, editors: [] }, alice.did)).toThrow(/editors/);
   });
 
-  test("the profile limits the number of grants (P7.7)", async () => {
+  test("C12-144: a grant naming the Original's own did:vh or one of its aliases is rejected (P5.15, P9.12)", async () => {
+    const { alice, bob, at, ref, sign, genesis } = await harbor();
+    const own = genesis.state.id as string;
+    await expect(updateOriginal(genesis, { versionTime: at(), editors: [grant(own)], author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
+    const asset = genesis.state.asset as JsonObject;
+    const self = await forge(genesis, { ...genesis.state, operation: "update", transitions: [], asset: { ...asset, editors: [grant(own)] } }, sign);
+    failedWith(await verify([genesis, self], [alice, bob]), 1, "STATE_EDITORS");
+    // The Original's did:webvh alias names the Original too, so a grant to it confers nothing.
+    const alias = "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com";
+    const aliased = await forge(genesis, { ...genesis.state, operation: "update", transitions: [], asset: { ...asset, aliases: [alias], editors: [grant(alias)] } }, sign);
+    failedWith(await verify([genesis, aliased], [alice, bob]), 1, "STATE_EDITORS");
+  });
+
+  test("C12-142: the profile limits the number of grants (P7.7)", async () => {
     const { alice, genesis } = await harbor();
     const asset = genesis.state.asset as JsonObject;
     const many = Array.from({ length: ORIGINALS_LIMITS.editors + 1 }, (_, i) => grant(`did:vh:Qm${String(i).padStart(44, "x")}`));
@@ -269,7 +293,7 @@ describe("C12-06: a key that is not a method of the editor DID", () => {
   });
 });
 
-describe("per-signer version order (P5.8, P5.18)", () => {
+describe("C12-141: per-signer version order (P5.8, P5.18)", () => {
   test("an editor may not name an older editor DID version than its own previous entry; the author's order is its own", async () => {
     const { alice, bob, carol, at, ref, sign, genesis, asBob } = await harbor();
     const v1 = bob.versionId;
@@ -290,7 +314,7 @@ describe("C12-121 (unanchored), C12-122 (unanchored): editor keys and the author
     await bob.rotate([{ fragment: "edit-2", signer: seeded(35) }]);
     const r = await verify([genesis, byBob], [alice, bob, carol]);
     expect(r.history.status).toBe("valid");
-    expect(r.reasons).toEqual(["head-key-not-in-latest-signer-document"]);
+    expect(r.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
     expect(r.current).toBe(false);
   });
 
@@ -318,12 +342,12 @@ describe("C12-124: editor DID history missing for an editor entry", () => {
 });
 
 describe("editor freshness and retained versions (P7.8)", () => {
-  test("each editor's freshness is reported; one not established keeps the Original from being current", async () => {
+  test("each editor's freshness is reported (P7.8)", async () => {
     const { alice, bob, carol, at, genesis, asBob } = await harbor();
     const byBob = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], ...asBob });
     const plain = await verifyOriginal({ log: [genesis, byBob], authors: [alice.evidence(), bob.evidence(), carol.evidence()], now: NOW, bytes: allBytes });
     expect(plain.identityEvidence.editors[0]).toMatchObject({ did: bob.did, freshness: "not-established" });
-    expect(plain.reasons).toContain("editor-freshness-not-established");
+    expect(plain.current).toBe(false);
     // A retained editor version the evidence falls short of is stale.
     const v2 = await bob.rotate([{ fragment: "edit", signer: KB }]);
     const stale = await verify([genesis, byBob], [alice, carol], { authors: [alice.evidence(), bob.evidence(bob.entries.slice(0, 1)), carol.evidence()], retained: { authors: { [bob.did]: v2 } } });
@@ -391,7 +415,7 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry (P
     // The log is where Alice now is, but nothing in the asset log says so: not established.
     const atNew = await verifyOriginal({ log, authors: [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.location) }, bob.evidence()], now: NOW, bytes: allBytes });
     expect(atNew.identityEvidence.freshness).toBe("not-established");
-    expect(atNew.reasons).toContain("author-freshness-not-established");
+
     expect(atNew.current).toBe(false);
     // Found where the latest author entry says she was.
     const atOld = await verifyOriginal({ log, authors: [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }, bob.evidence()], now: NOW, bytes: allBytes });
@@ -408,7 +432,7 @@ describe("review of the editors PR (A1, A2, A5, grant DID syntax)", () => {
     const r = await verify([genesis, byBob], [alice, bob, carol]);
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.editors[0]).toMatchObject({ did: bob.did, deactivated: true });
-    expect(r.reasons).toContain("editor-did-deactivated");
+    expect(r.reasons).toContain("historically-authorized-only");
     expect(r.current).toBe(false);
   });
 
@@ -457,7 +481,7 @@ describe("review of the editors PR (A1, A2, A5, grant DID syntax)", () => {
       ...regrant.state, operation: "update", editor: oldRef, author: regrant.state.author,
       asset: { ...(regrant.state.asset as JsonObject), resources: [photo(B3)] }, transitions: [{ resource: "photo", from: photo(B2).digest, to: photo(B3).digest }],
     }, ed.signer(KE1, oldRef));
-    const r = await verifyOriginal({ log: [genesis, e1, regrant, back], authors: [alice.evidence(), ed.evidence(), ed.evidence(undefined, ed.location)], now: NOW, bytes: allBytes, freshness: "asserted" });
+    const r = await verifyOriginal({ log: [genesis, e1, regrant, back], authors: [alice.evidence(), ed.evidence(), ed.evidence(undefined, ed.location)], now: NOW, bytes: allBytes });
     failedWith(r, 3, "SIGNER_VERSION_REGRESSED");
   });
 

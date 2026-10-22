@@ -40,6 +40,16 @@ describe("C12-01: package in one process, verify in another", () => {
       const text = run(["verify", file, "--now", "2026-10-19T00:00:00Z"]);
       expect(text.stdout).toContain("verified");
       expect(text.stdout).toContain(e.original.checkpoint);
+      // C12-145: valid as of its checkpoint, with the author DID version relied on and when the
+      // package was read; never current (P7.10). The freshness option is gone (originals-spec #46).
+      expect((JSON.parse(out.stdout) as { current: boolean; validAsOf: unknown }).validAsOf).toEqual({
+        checkpoint: e.original.checkpoint,
+        signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: "2026-10-19T00:00:00.000Z", source: "package" }],
+      });
+      expect(JSON.parse(out.stdout).current).toBe(false);
+      expect(text.stdout).toContain(`valid as of ${e.original.checkpoint}, not current: not anchored (P7.10)`);
+      expect(text.stdout).toContain(`author ${alice.did} at ${alice.versionId}, obtained 2026-10-19T00:00:00.000Z from package`);
+      expect(run(["verify", file, "--freshness", "asserted"]).code).toBe(2);
       // Missing bytes leave the package verified, with the content reported unavailable (P7.3, P7.4).
       const store = new MemoryStore();
       const partialSdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });

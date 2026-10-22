@@ -3,21 +3,26 @@
  * `originals`: verify or inspect an evidence package offline. It needs no key
  * and makes no network request.
  *
- *   originals verify <package.zip> [--json] [--now <ISO time>] [--freshness asserted]
+ *   originals verify <package.zip> [--json] [--now <ISO time>]
  *   originals inspect <package.zip>
  *
  * `verify` exits 0 when history, author binding, identity evidence and every
- * resource version verify; 1 otherwise; 2 for a usage error.
+ * resource version verify; 1 otherwise; 2 for a usage error. A verified
+ * unanchored Original is reported valid as of its checkpoint, with the signer
+ * DID versions relied on and when they were obtained (the package's, at
+ * verification time); it is never current (P7.10). Entries historically
+ * authorized only are listed (P7.9).
  */
 import { readFileSync } from "node:fs";
 import { OriginalsError } from "@originals/vh";
 import { MemoryStore, OriginalsSDK, readEvidence } from "./index.js";
 
-const USAGE = "usage: originals verify <package.zip> [--json] [--now <ISO time>] [--freshness asserted]\n       originals inspect <package.zip>\n";
+const USAGE = "usage: originals verify <package.zip> [--json] [--now <ISO time>]\n       originals inspect <package.zip>\n";
 
 async function main(argv: string[]): Promise<number> {
   const [command, file, ...rest] = argv;
-  if ((command !== "verify" && command !== "inspect") || !file) {
+  // `--freshness asserted` is gone: no freshness policy makes an unanchored Original current (P7.10).
+  if ((command !== "verify" && command !== "inspect") || !file || rest.includes("--freshness")) {
     process.stderr.write(USAGE);
     return 2;
   }
@@ -43,7 +48,7 @@ async function main(argv: string[]): Promise<number> {
       process.stderr.write(USAGE);
       return 2;
     }
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => at, ...(flag("--freshness") === "asserted" ? { freshness: "asserted" as const } : {}) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => at });
     const { manifest, report, reasons } = await sdk.load(zip);
     const verified = report.history.status === "valid" && report.authorBinding.status === "valid" &&
       // Missing bytes are unavailable content, not a failure (P7.3, P7.4); served bytes must match.
@@ -54,6 +59,11 @@ async function main(argv: string[]): Promise<number> {
     } else {
       process.stdout.write(`${verified ? "verified" : "not verified"}: ${report.original ?? "unknown Original"} at ${report.checkpoint ?? "no checkpoint"}\n`);
       for (const v of report.resources.versions) process.stdout.write(`  ${v.resource} v${v.version} ${v.digest} ${v.bytes}\n`);
+      if (report.validAsOf) {
+        process.stdout.write(`  valid as of ${report.validAsOf.checkpoint}, not current: not anchored (P7.10)\n`);
+        for (const s of report.validAsOf.signers) process.stdout.write(`  ${s.role} ${s.did} at ${s.versionId ?? "no version"}, obtained ${s.obtainedAt ?? "at an unknown time"} from ${s.source ?? "an unknown source"}\n`);
+      }
+      for (const h of report.historicallyAuthorizedOnly) process.stdout.write(`  ${h.versionId}: historically authorized only (${h.reason}, P7.9)\n`);
       if (reasons.length > 0) process.stdout.write(`  not current: ${reasons.join(", ")}\n`);
     }
     return verified ? 0 : 1;

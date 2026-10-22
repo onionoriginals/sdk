@@ -144,6 +144,14 @@ export function RealExample() {
                             <code>{result.profile}</code>
                           </dd>
                         </div>
+                        {result.validAsOf && (
+                          <div>
+                            <dt>{realExample.fields.validAsOf}</dt>
+                            <dd>
+                              <code title={realExample.validAsOfNote}>{short(result.validAsOf, 34, 8)}</code>
+                            </dd>
+                          </div>
+                        )}
                         {result.issuedAt && (
                           <div>
                             <dt>{realExample.fields.issued}</dt>

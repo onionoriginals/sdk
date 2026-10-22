@@ -11,7 +11,7 @@ const KEY = seed(21);
 
 async function harbor(store = new MemoryStore()) {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
   const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author, signer });
@@ -20,18 +20,18 @@ async function harbor(store = new MemoryStore()) {
   return { alice, store, sdk, signer, author, did: c.original.did, v1: c.original.checkpoint, v2: e.original.checkpoint };
 }
 
-const reader = (alice: Author, freshness?: "asserted") =>
-  OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], ...(freshness ? { freshness } : {}), clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+const reader = (alice: Author) =>
+  OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
 
 describe("evidence packages (section 7)", () => {
   test("C12-01: a complete package verifies in a fresh reader with no key: same checkpoint and versions", async () => {
     const { sdk, alice, did, v2 } = await harbor();
     const pkg = await sdk.package(did);
     expect(pkg.manifest).toMatchObject({ format: "originals-evidence/0.1", profile: "originals:1.0", original: did, checkpoint: v2, head: v2, completeness: "complete", missing: [] });
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.checkpoint).toBe(v2);
     expect(loaded.report.resources.versions.map((r) => [r.version, r.bytes])).toEqual([[1, "verified"], [2, "verified"]]);
-    expect(loaded.report.current).toBe(true);
+    expect(loaded.report.reasons).toEqual(["not-anchored"]);
     // The package carries its own author evidence: a reader with no author source still verifies.
     const bare = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock() });
     const alone = await bare.load(pkg.bytes);
@@ -45,20 +45,21 @@ describe("evidence packages (section 7)", () => {
     const pkg = await sdk.package(did);
     expect(pkg.manifest.completeness).toBe("partial");
     expect(pkg.manifest.missing).toEqual([{ kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: v1 }]);
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.resources.status).toBe("partial");
     expect(loaded.report.resources.versions[1].bytes).toBe("verified");
-    // The package says it is partial, honestly: the log verifies and is current; the
-    // unavailable content is reported, not a failure (P7.3, P7.4, P9.18).
-    expect(loaded.reasons).toEqual([]);
-    expect(loaded.report.current).toBe(true);
+    // The package says it is partial, honestly: the log verifies; the unavailable content is
+    // reported, not a failure (P7.3, P7.4, P9.18).
+    expect(loaded.reasons).toEqual(["not-anchored"]);
+    expect(loaded.report.validAsOf).not.toBeNull();
+    expect(loaded.report.reasons).toEqual(["not-anchored"]);
   });
 
   test("a package of an earlier checkpoint holds that prefix and is not the latest state (P7.6)", async () => {
     const { sdk, alice, did, v1, v2 } = await harbor();
     const pkg = await sdk.package(did, { checkpoint: v1 });
     expect(pkg.manifest).toMatchObject({ checkpoint: v1, head: v2 });
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.checkpoint).toBe(v1);
     expect(loaded.report.history.entries).toBe(1);
     expect(loaded.report.current).toBe(false);
@@ -71,7 +72,7 @@ describe("evidence packages (section 7)", () => {
     const files = readZip((await sdk.package(did)).bytes);
     const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json")!)) as Record<string, unknown>;
     files.set("originals-evidence.json", bytes(JSON.stringify({ ...manifest, completeness: "complete", missing: [] })));
-    const loaded = await reader(alice, "asserted").load(writeZip(files));
+    const loaded = await reader(alice).load(writeZip(files));
     expect(loaded.reasons).toContain("manifest-completeness-mismatch");
     expect(loaded.report.current).toBe(false);
   });

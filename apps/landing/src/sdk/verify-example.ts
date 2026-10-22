@@ -22,6 +22,10 @@ export interface VerifiedExample {
   issuedAt?: string;
   checks: ExampleCheck[];
   allOk: boolean;
+  /** The checkpoint the example is valid as of, when it verifies (P7.10). */
+  validAsOf?: string;
+  /** Always false: a local Original is never reported current (P7.10). */
+  current: boolean;
 }
 
 function decodeBase64(text: string): Uint8Array {
@@ -64,5 +68,7 @@ export async function verifyExample(now: number = Date.now()): Promise<VerifiedE
     issuedAt: undefined,
     checks,
     allOk: checks.every((c) => c.ok),
+    ...(report.validAsOf ? { validAsOf: report.validAsOf.checkpoint } : {}),
+    current: report.current,
   };
 }

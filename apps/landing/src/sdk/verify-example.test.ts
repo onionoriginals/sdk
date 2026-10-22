@@ -11,6 +11,9 @@ test('the bundled "First Light" evidence package verifies in this tab, with no k
   expect(result.profile).toBe('originals:1.0');
   expect(result.title).toBe('First Light');
   expect(result.medium).toBe('Orbits');
+  // A local Original is valid as of its checkpoint and never reported current (P7.10, C12-145).
+  expect(result.validAsOf).toMatch(/^\d+-Qm/);
+  expect(result.current).toBe(false);
 });
 
 test('the generated module and the published ZIP are the same package', () => {

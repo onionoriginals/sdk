@@ -16,7 +16,7 @@ const directory = join(import.meta.dir, "..", "public", "example");
 mkdirSync(directory, { recursive: true });
 
 const author = await createLocalAuthor();
-const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], freshness: "asserted" });
+const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence] });
 const artwork = new TextEncoder().encode(generateArtwork("First Light", "Orbits", 20260706).svg);
 const metadata = new TextEncoder().encode(
   JSON.stringify({ title: "First Light", style: "Orbits", creator: "Originals example" }, null, 2),
@@ -30,7 +30,7 @@ const created = await sdk.create({
   author: author.ref,
   signer: author.signer,
 });
-if (created.kind !== "original" || !created.original.current) throw new Error("the example did not verify");
+if (created.kind !== "original" || !created.original.validAsOf) throw new Error("the example did not verify");
 const pkg = await sdk.package(created.original.did);
 if (pkg.manifest.completeness !== "complete") throw new Error("the example package is not complete");
 

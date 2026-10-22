@@ -204,7 +204,7 @@ describe('a signed-in author DID verifies as Originals identity evidence', () =>
     expect(history.failure).toBeUndefined();
     expect(history.versions.length).toBe(1);
 
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [evidence], freshness: 'asserted' });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [evidence] });
     const author = { did: built.did, verificationMethod: `${built.did}#key-1`, versionId: history.versions[0].versionId };
     const c = await sdk.create({
       name: 'Signed in',
@@ -213,6 +213,7 @@ describe('a signed-in author DID verifies as Originals identity evidence', () =>
       signer: keySigner({ keyType: 'Ed25519', secretKey: authorship, verificationMethod: author.verificationMethod }),
     });
     if (c.kind !== 'original') throw new Error('expected an Original');
-    expect(c.original.current, JSON.stringify(c.original.report.reasons)).toBe(true);
+    expect(c.original.report.reasons).toEqual(['not-anchored']);
+    expect(c.original.validAsOf?.checkpoint).toBe(c.original.checkpoint);
   });
 });

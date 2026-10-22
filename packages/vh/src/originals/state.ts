@@ -328,6 +328,11 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   const author = checkAuthorRef(s.author);
   const asset = checkAsset(s.asset, author.did);
   if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
+  // P5.15: no grant names the Original itself, its did:vh or any of its aliases (whose did:btco is the
+  // anchoring sat), before or after anchoring, so holding the sat confers no edit authority (P9.12).
+  for (const g of asset.editors ?? []) {
+    if (g.did === s.id || asset.aliases.includes(g.did)) invalid("STATE_EDITORS", `editor DID ${g.did} names this Original itself (P5.15, P9.12)`);
+  }
 
   // PROVISIONAL (plan 011, PR 7b): layers move one way. An Original starts local, and
   // once published keeps a did:webvh alias, moving only within that alias's SCID (P9.3).

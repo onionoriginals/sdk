@@ -206,9 +206,9 @@ export class DemoEngine {
     this.authoring = this.authed ? await this.signedInAuthor() : await createLocalAuthor();
     this.sdk = OriginalsSDK.create({
       store: this.store,
-      authors: [this.authoring.evidence],
-      // This page holds or just read the author's own DID, so it vouches for its freshness (P7.8).
-      freshness: "asserted",
+      // This page holds or just read the author's own DID: it obtained that evidence now. An
+      // unanchored Original is still only valid as of its checkpoint, never current (P7.10).
+      authors: [{ ...this.authoring.evidence, obtainedAt: new Date().toISOString() }],
     });
     this.emit("authorship:key", `Authoring as ${short(this.authoring.ref.did)}`, { author: this.authoring.ref });
     return this.authoring;

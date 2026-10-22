@@ -17,7 +17,7 @@ const LATER = Date.parse("2026-10-18T13:00:00Z");
 
 async function harbor() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
   const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer });
   if (c.kind !== "original") throw new Error("expected an Original");
@@ -29,7 +29,32 @@ async function harbor() {
 }
 
 const reader = (store: OriginalsStore = new MemoryStore()) =>
-  OriginalsSDK.create({ store, authors: [], freshness: "asserted", clock: clock(LATER) });
+  OriginalsSDK.create({ store, authors: [], clock: clock(LATER) });
+
+describe("C12-145: an unanchored Original is never current; it is valid as of its checkpoint (P7.10)", () => {
+  test("each read names the signer DID version relied on and when and where that history was obtained", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const obtainedAt = "2026-10-18T11:59:00.000Z";
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ ...alice.evidence(), obtainedAt }], clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    expect(c.original.current).toBe(false);
+    expect(c.original.validAsOf).toEqual({ checkpoint: c.original.checkpoint, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied" }] });
+    // A fresh reader: the package's evidence, obtained when it was read.
+    const local = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
+    const pkg = await sdk.package(c.original.did);
+    const loaded = await local.load(pkg.bytes);
+    expect(loaded.report.current).toBe(false);
+    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "package" }]);
+    // Imported, the evidence is kept with when it was obtained, and later reads say it is retained.
+    await local.import(pkg.bytes);
+    const view = await local.get(c.original.did);
+    expect(view.current).toBe(false);
+    expect(view.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "retained" }]);
+    expect(view.report.reasons).toEqual(["not-anchored"]);
+  });
+});
 
 describe("C12-22: an old valid prefix is not the latest state (P7.6)", () => {
   test("loading an older prefix of an Original this reader holds is stale, not current", async () => {
@@ -71,7 +96,7 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
   test("a reader that has seen a newer author DID version reports the older one as stale", async () => {
     const { alice, fresh, stale, oldAuthorVersion } = await withStaleAuthorPackage();
     const local = reader();
-    expect((await local.import(fresh.bytes)).original.current).toBe(true);
+    expect((await local.import(fresh.bytes)).original.report.reasons).toEqual(["not-anchored"]);
     const loaded = await local.load(stale);
     expect(loaded.report.identityEvidence).toMatchObject({ freshness: "stale", latestVersionId: oldAuthorVersion, retainedVersionId: alice.versionId });
     expect(loaded.report.current).toBe(false);
@@ -86,14 +111,14 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
     expect((await local.import(stale)).status).toBe("imported");
     const view = await local.get(did);
     expect(view.report.identityEvidence.latestVersionId).toBe(alice.versionId);
-    expect(view.current).toBe(true);
+    expect(view.report.reasons).toEqual(["not-anchored"]);
   });
 });
 
 describe("C12-23: a fork found on import is kept and never current (P6.6, P7.5, Q5)", () => {
   async function forked(store: OriginalsStore = new MemoryStore()) {
     const { alice, sdk, signer, did, v1, v2, v1Package } = await harbor();
-    const elsewhere = OriginalsSDK.create({ store, authors: async () => alice.evidence(), freshness: "asserted", clock: clock(LATER) });
+    const elsewhere = OriginalsSDK.create({ store, authors: async () => alice.evidence(), clock: clock(LATER) });
     await elsewhere.import(v1Package.bytes);
     const other = await elsewhere.edit(did, { parent: v1, name: "Harbor, renamed elsewhere", author: alice.ref("orig"), signer });
     return { alice, sdk, elsewhere, did, v2, theirs: other.original.checkpoint };
@@ -118,7 +143,7 @@ describe("C12-23: a fork found on import is kept and never current (P6.6, P7.5, 
       await elsewhere.import((await sdk.package(did)).bytes);
       const more = await elsewhere.edit(did, { parent: theirs, name: "Still elsewhere", author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
       expect(more.original.current).toBe(false);
-      const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: async () => alice.evidence(), freshness: "asserted", clock: clock(LATER) });
+      const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: async () => alice.evidence(), clock: clock(LATER) });
       const view = await reopened.get(did);
       expect(view.report.fork).not.toBeNull();
       expect(view.current).toBe(false);
@@ -135,7 +160,7 @@ describe("review fixes (PR 6)", () => {
     const v3 = (await sdk.edit(did, { parent: v2, name: "Harbor, third", author: alice.ref("orig"), signer })).original.checkpoint;
     const local = reader();
     await local.import((await sdk.package(did)).bytes);
-    const elsewhere = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock(LATER) });
+    const elsewhere = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock(LATER) });
     await elsewhere.import(v1Package.bytes);
     await elsewhere.edit(did, { parent: v1, name: "Elsewhere", author: alice.ref("orig"), signer });
     const branchPackage = (await elsewhere.package(did)).bytes;

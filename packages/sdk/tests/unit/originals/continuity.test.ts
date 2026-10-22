@@ -26,7 +26,7 @@ const K2 = seed(22);
 async function journey() {
   const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), clock: clock() });
   const before = alice.ref("orig-1");
   const created = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: before, signer: alice.signer(before, K1) });
   if (created.kind !== "original") throw new Error("expected an Original");
@@ -77,7 +77,10 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     expect(after.did).toBe(alice.did);
     const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: alice.signer(after, K2) });
     expect(appended.status).toBe("committed");
-    expect(appended.original.current, JSON.stringify(appended.original.report.reasons)).toBe(true);
+    // The rotation removed orig-1, so the entries signed with it are historically authorized only (P7.9).
+    expect(appended.original.report.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
+    expect(appended.original.report.historicallyAuthorizedOnly.map((h) => h.versionId)).not.toContain(appended.original.checkpoint);
+    expect(appended.original.validAsOf?.checkpoint).toBe(appended.original.checkpoint);
     expect(appended.original.report.identityEvidence).toMatchObject({ author: alice.did, latestVersionId: alice.versionId });
     // Entries before the move still verify against the versions before it.
     for (const checkpoint of [v1, v2]) {
@@ -161,7 +164,6 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(seen).toContain(didWebvhLogUrl(alice.location));
     expect(r.checkpoint).toBe(head);
     expect(r.identityEvidence.freshness).toBe("not-established");
-    expect(r.reasons).toContain("author-freshness-not-established");
     expect(r.current).toBe(false);
   });
 
