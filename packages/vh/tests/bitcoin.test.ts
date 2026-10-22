@@ -553,7 +553,7 @@ async function paddedTo(target: number) {
   throw new Error(`could not pad a log to ${target} bytes`);
 }
 
-describe("the inscription body limit (P9.17, D6 provisional)", () => {
+describe("the inscription body limit (P9.17, P14.12; decided, D6; spec PR #50 (open))", () => {
   test("C12-111: an anchoring inscription of exactly 350,000 bytes is accepted", async () => {
     expect(ORIGINALS_INSCRIPTION_MAX_BYTES).toBe(350_000);
     const { alice, entries } = await paddedTo(350_000);
