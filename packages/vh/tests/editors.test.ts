@@ -158,7 +158,15 @@ describe("C12-115: an editor entry that changes grants, aliases, lifecycle or pa
     failedWith(await verify([genesis, deactivating], [alice, bob, carol]), 1, "EDITOR_PARAMETERS", "outside-grant");
     // Without the parameter, the operation itself is the author's (P5.16).
     const operationOnly = await forge(genesis, { ...genesis.state, operation: "deactivate", transitions: [], editor: bob.ref("edit") }, bob.signer(KB, "edit"));
-    expect((await verify([genesis, operationOnly], [alice, bob, carol])).history.failure?.category).toBe("invalid-evidence");
+    failedWith(await verify([genesis, operationOnly], [alice, bob, carol]), 1, "EDITOR_AUTHOR_ONLY", "outside-grant");
+  });
+
+  test("the grant's scope is judged before the state's other rules: an editor dropping a published Original's alias is outside its grant (P5.16, P9.3)", async () => {
+    const { alice, bob, carol, at, ref, sign, genesis } = await harbor();
+    const web = "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com";
+    const published = await updateOriginal(genesis, { versionTime: at(), aliases: [web], author: ref, sign });
+    const dropped = await forge(published, { ...published.state, operation: "update", transitions: [], editor: bob.ref("edit"), asset: { ...(published.state.asset as JsonObject), aliases: [] } }, bob.signer(KB, "edit"));
+    failedWith(await verify([genesis, published, dropped], [alice, bob, carol]), 2, "EDITOR_AUTHOR_ONLY", "outside-grant");
   });
 
   test("an editor entry cannot be the genesis entry", async () => {

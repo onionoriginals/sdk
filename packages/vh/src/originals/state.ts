@@ -348,14 +348,14 @@ export interface EntryStateContext {
   usedResourceIds?: Iterable<string>;
   /**
    * Whether to apply the editor-entry rules here (default true). The VH-Log
-   * engine applies them through the specialisation's editor hook instead
-   * (VH-Log PR 11, "Editors from a Controller" [S25]).
+   * engine applies them first, through the specialisation's editor hook
+   * (`checkEditorChange`; VH-Log PR 11, "Editors from a Controller" [S25]).
    */
   editorRules?: boolean;
 }
 
-/** Validate an entry's state against the Originals rules and its predecessor. */
-export function checkEntryState(state: JsonObject, ctx: EntryStateContext): EntryState {
+/** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
+function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; operation: string; author: AuthorRef; asset: AssetState } {
   const s = members(state, ["id", "operation", "author", "asset", "transitions"], ["editor"], "state");
   if (s.id !== `did:vh:${ctx.scid}`) invalid("STATE_ID", "state.id must be the Original's did:vh");
   const operation = s.operation;
@@ -364,7 +364,24 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
     invalid("STATE_OPERATION", ctx.index === 0 ? "the first entry must be a create" : "a later entry is an update or a deactivate");
   }
   const author = checkAuthorRef(s.author);
-  const asset = checkAsset(s.asset, author.did);
+  return { s, operation, author, asset: checkAsset(s.asset, author.did) };
+}
+
+/**
+ * The editor-entry rules of P5.16 for an entry's state, after the state's
+ * members, operation, author reference and asset are checked, and before
+ * every other state rule: an editor's change outside its grant is reported as
+ * that (outside-grant), whatever else it breaks. The Originals profile's
+ * VH-Log PR 11 editor limit [S25].
+ */
+export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): void {
+  const { s, operation, author, asset } = entryHead(state, ctx);
+  if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
+}
+
+/** Validate an entry's state against the Originals rules and its predecessor. */
+export function checkEntryState(state: JsonObject, ctx: EntryStateContext): EntryState {
+  const { s, operation, author, asset } = entryHead(state, ctx);
   if (s.editor !== undefined) {
     const editor = checkEditorRef(s.editor);
     if (ctx.editorRules !== false) checkEditorEntry(editor, operation, author, asset, ctx.previous);

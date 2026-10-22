@@ -16,7 +16,7 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import { ORIGINALS_METHOD, checkAuthorRef, checkEditorEntry, checkEditorRef, checkEntryState, resourceIdsThrough, type AuthorRef, type EntryState } from "./state.js";
+import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, resourceIdsThrough, type AuthorRef, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -155,10 +155,12 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         lists: (record, editor) => Array.isArray(record) && record.some((g) => isJsonObject(g) && g.did === editor),
         authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "editor"),
         // P5.16: only the name, metadata and resource descriptors the grant allows change, and no resource
-        // is added or removed; the author reference is the parent's and the operation is update.
-        limit: ({ entry, previous }) => {
-          const state = entry.state as unknown as EntryState;
-          checkEditorEntry(state.editor!, state.operation, state.author, state.asset, previous?.entry.state as unknown as EntryState | undefined);
+        // is added or removed; the author reference is the parent's and the operation is update. Judged
+        // before the state's other rules, so a change outside the grant is reported as that.
+        limit: ({ entry, previous, scid, index }) => {
+          checkEditorChange(entry.state, {
+            scid, index, previous: previous?.entry.state as unknown as EntryState | undefined, deactivatedParameter: entry.parameters.deactivated === true,
+          });
         },
       },
     },

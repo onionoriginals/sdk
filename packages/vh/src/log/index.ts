@@ -138,7 +138,11 @@ export interface ControllerEditors {
    * entries), or reject. It must never fall back to trusting the proof's key.
    */
   authorize(context: EntryContext & { proof: DataIntegrityProof; editor: string }): Promise<string>;
-  /** Any further limit on what the editor may change in the state, checked after `validateEntry`. */
+  /**
+   * Any further limit on what the editor may change in the state, checked at
+   * the state step before `validateEntry`, so a change outside the editor's
+   * limit is reported as that whatever else the state breaks.
+   */
   limit?(context: EntryContext & { editor: string }): void | Promise<void>;
 }
 
@@ -592,9 +596,9 @@ async function verifyEntry(
     if (computeScid(preliminary) !== scid) fail("invalid-evidence", "SCID_MISMATCH", "the SCID does not match the first entry");
   }
 
-  // State (step 6), then any limit the specialisation sets on an editor's change (VH-Log PR 11).
-  await spec.validateEntry?.(context);
+  // State (step 6): first any limit the specialisation sets on an editor's change (VH-Log PR 11), then its state rules.
   if (editors?.limit && editor !== undefined) await editors.limit({ ...context, editor });
+  await spec.validateEntry?.(context);
 
   const prior = previous ? witnessListOf(previous.active.witness) : null;
   // VH-Log: a change from {} is active immediately; a replacement or removal applies after the entry.
