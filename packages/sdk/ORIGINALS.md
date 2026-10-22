@@ -287,8 +287,15 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   unresolved until anchoring (P6.6). Branch length and the number of signers
   decide nothing; an entry bringing content from another branch is an ordinary
   single-parent entry and the fork remains.
-- PROVISIONAL: editor authority is an Originals profile rule. No VH-Log hook
-  carries it yet (VH-Log PR 11 and plan 011 PR 6 pending). Anchored editor
+- Editor authority is VH-Log PR 11's "Editors from a Controller" [S25]
+  (swcurran/VH-Log#11 at `2fe380dbf`, treated as merged): the generic engine's
+  editor hook (`ControllerKeys.editors` in `@originals/vh/log`) enforces that
+  an editor entry is not the genesis entry, sets no parameter
+  (`EDITOR_PARAMETERS`, so an editor deactivation is refused there), is checked
+  against the editors in its parent (`EDITOR_NOT_GRANTED`), leaves the grants
+  unchanged and carries one proof by its editor; the Originals profile
+  supplies the grants, the `editor` reference, the editor key rules and the
+  grant's scope. Anchored editor
   entries (P9.15 at inscription time, P9.12 inscription by the owner) arrive
   with Bitcoin anchoring. No signer is required to use did:btco.
 

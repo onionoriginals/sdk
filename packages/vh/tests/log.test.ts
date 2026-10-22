@@ -8,10 +8,12 @@ import {
   createLog,
   keyHash,
   parseLog,
+  resolveCopies,
   selectVersion,
   serializeLog,
   signWith,
   verifyLog,
+  type ControllerKeys,
   type LogEntry,
   type LogVerification,
   type Specialisation,
@@ -326,6 +328,142 @@ describe("keys from a controller (VH-Log PR 11)", () => {
     const result = await verify([genesis, foreign], [], controlled);
     expect(result.failure?.index).toBe(1);
     expect(result.failure?.error.category).toBe("unauthorized-key");
+  });
+});
+
+/**
+ * VH-Log PR 11, "Editors from a Controller" [S25], with a generic
+ * specialisation: the controller records the current editors in its own
+ * entries (`state.editors`, a list of editor ids); an entry names its editor
+ * in `state.editor`; each editor has one key; and an editor may change only
+ * `state.note`. The engine enforces the rest.
+ */
+describe("editors from a controller (VH-Log PR 11)", () => {
+  const author = seeded(40);
+  const ed = seeded(41);
+  const other = seeded(42);
+  const keys: Record<string, string> = { "did:example:ed": ed.publicKeyMultibase, "did:example:other": other.publicKeyMultibase };
+  const seen: string[] = [];
+  const authorizeController: ControllerKeys["authorize"] = ({ proof }) => {
+    if (proof.verificationMethod !== "did:example:author#k") throw new OriginalsError("unauthorized-key", "TEST_NOT_AUTHOR", "not the controller's key");
+    return Promise.resolve(author.publicKeyMultibase);
+  };
+  const editing: Specialisation = {
+    name: "test editors",
+    versionParameter: "method",
+    versions: { "test:1.0": { vhLog: "vh-log:1.0", rank: 1, entrySuites: ["eddsa-jcs-2022"], witnessSuites: ["eddsa-jcs-2022"] } },
+    keys: {
+      kind: "controller",
+      authorize: authorizeController,
+      editors: {
+        editorOf: (entry) => (typeof entry.state.editor === "string" ? entry.state.editor : undefined),
+        recordOf: (entry) => entry.state.editors,
+        lists: (record, editor) => Array.isArray(record) && record.includes(editor),
+        authorize: ({ proof, editor }) => {
+          seen.push(editor);
+          if (proof.verificationMethod !== `${editor}#k` || !keys[editor]) throw new OriginalsError("unauthorized-key", "TEST_NOT_EDITOR_KEY", "not the editor's key");
+          return Promise.resolve(keys[editor]);
+        },
+        limit: ({ entry, previous }) => {
+          const { note: _a, editor: _b, ...now } = entry.state;
+          const { note: _c, editor: _d, ...before } = previous!.entry.state;
+          if (JSON.stringify(now) !== JSON.stringify(before)) throw new OriginalsError("outside-grant", "TEST_OUTSIDE", "an editor changes only the note");
+        },
+      },
+    },
+  };
+  const asAuthor = signWith(author, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:author#k" });
+  const asEd = signWith(ed, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:ed#k" });
+  const asOther = signWith(other, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:other#k" });
+  let t = 0;
+  const at = () => `2026-10-18T10:00:${String(t++).padStart(2, "0")}Z`;
+  const genesisWith = (editors?: string[]) => createLog({ versionTime: at(), parameters: { method: "test:1.0", scid: "{SCID}" }, state: { note: "v1", ...(editors ? { editors } : {}) }, sign: asAuthor });
+  const next = (previous: LogEntry, state: JsonObject, sign: Parameters<typeof appendEntry>[1]["sign"], parameters: JsonObject = {}) =>
+    appendEntry(previous, { versionTime: at(), parameters, state, sign });
+  const verifyEditing = (entries: LogEntry[]) => verify(entries, [], editing);
+
+  test("an editor recorded in the previous entry signs with its own key, with no controller proof; behaviour is unchanged for controller entries", async () => {
+    const genesis = await genesisWith(["did:example:ed"]);
+    const byEd = await next(genesis, { ...genesis.state, note: "v2", editor: "did:example:ed" }, asEd);
+    const byAuthor = await next(byEd, { note: "v3", editors: [] }, asAuthor);
+    seen.length = 0;
+    const result = await verifyEditing([genesis, byEd, byAuthor]);
+    expect(result.failure).toBeUndefined();
+    expect(result.entries.length).toBe(3);
+    // Only the editor entry went to the editor hook, and with the editor it names.
+    expect(seen).toEqual(["did:example:ed"]);
+  });
+
+  test("editors are read from the entry before: adding or removing one takes effect from the next entry", async () => {
+    const genesis = await genesisWith();
+    const granting = await next(genesis, { note: "v1", editors: ["did:example:ed"] }, asAuthor);
+    // The same entry that records the editor cannot already be the editor's.
+    const tooSoon = await next(genesis, { note: "v2", editors: ["did:example:ed"], editor: "did:example:ed" }, asEd);
+    failedAt(await verifyEditing([genesis, tooSoon]), 1, "EDITOR_NOT_GRANTED");
+    const byEd = await next(granting, { ...granting.state, note: "v2", editor: "did:example:ed" }, asEd);
+    expect((await verifyEditing([genesis, granting, byEd])).failure).toBeUndefined();
+    const revoking = await next(granting, { note: "v1", editors: ["did:example:other"] }, asAuthor);
+    const afterRevoke = await next(revoking, { ...revoking.state, note: "v2", editor: "did:example:ed" }, asEd);
+    const result = await verifyEditing([genesis, granting, revoking, afterRevoke]);
+    failedAt(result, 3, "EDITOR_NOT_GRANTED");
+    expect(result.failure?.error.category).toBe("unauthorized-key");
+  });
+
+  test("an editor entry with any parameter is rejected, whatever the parameter", async () => {
+    const genesis = await genesisWith(["did:example:ed"]);
+    for (const parameters of [{ ttl: 60 }, { deactivated: true }, { witness: {} }, { method: "test:1.0" }, { watchers: [] }]) {
+      const entry = await next(genesis, { ...genesis.state, note: "v2", editor: "did:example:ed" }, asEd, parameters);
+      const result = await verifyEditing([genesis, entry]);
+      failedAt(result, 1, "EDITOR_PARAMETERS");
+      expect(result.failure?.error.category).toBe("outside-grant");
+    }
+  });
+
+  test("an editor entry cannot be the first entry", async () => {
+    const first = await createLog({ versionTime: at(), parameters: { method: "test:1.0", scid: "{SCID}" }, state: { note: "v1", editors: ["did:example:ed"], editor: "did:example:ed" }, sign: asEd });
+    const result = await verifyEditing([first]);
+    expect(result.failure?.index).toBe(0);
+    expect(result.failure?.error.code).toBe("EDITOR_AUTHOR_ONLY");
+    expect(result.scid).toBeNull();
+  });
+
+  test("exactly one proof, by an authorized key of that editor: a second proof, a controller proof or another editor's key is rejected", async () => {
+    const genesis = await genesisWith(["did:example:ed", "did:example:other"]);
+    const state = { ...genesis.state, note: "v2", editor: "did:example:ed" };
+    const twice = await next(genesis, state, async (unsigned) => [...(await asEd(unsigned)), ...(await asAuthor(unsigned))]);
+    failedAt(await verifyEditing([genesis, twice]), 1, "PROOF_COUNT");
+    const byController = await next(genesis, state, asAuthor);
+    const controllerResult = await verifyEditing([genesis, byController]);
+    failedAt(controllerResult, 1, "TEST_NOT_EDITOR_KEY");
+    const byOtherEditor = await next(genesis, state, asOther);
+    failedAt(await verifyEditing([genesis, byOtherEditor]), 1, "TEST_NOT_EDITOR_KEY");
+    // The right verification method with the wrong key is a bad signature, never trusted.
+    const wrongKey = await next(genesis, state, signWith(other, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:ed#k" }));
+    failedAt(await verifyEditing([genesis, wrongKey]), 1, "PROOF_SIGNATURE");
+  });
+
+  test("an editor entry cannot change where the editors are recorded, and the specialisation's own limit applies", async () => {
+    const genesis = await genesisWith(["did:example:ed"]);
+    const widening = await next(genesis, { note: "v2", editors: ["did:example:ed", "did:example:other"], editor: "did:example:ed" }, asEd);
+    failedAt(await verifyEditing([genesis, widening]), 1, "EDITOR_AUTHOR_ONLY");
+    const outside = await next(genesis, { ...genesis.state, note: "v2", extra: true, editor: "did:example:ed" }, asEd);
+    failedAt(await verifyEditing([genesis, outside]), 1, "TEST_OUTSIDE");
+  });
+
+  test("forks are unchanged: an editor entry and a controller entry with the same predecessor diverge", async () => {
+    const genesis = await genesisWith(["did:example:ed"]);
+    const byEd = await next(genesis, { ...genesis.state, note: "ed", editor: "did:example:ed" }, asEd);
+    const byAuthor = await next(genesis, { note: "author", editors: [] }, asAuthor);
+    const resolution = await resolveCopies({ source: "a", log: serializeLog([genesis, byEd]) }, [{ source: "b", log: serializeLog([genesis, byAuthor]) }], { specialisation: editing, now: NOW });
+    expect(resolution.fork?.version).toBe(2);
+    expect(resolution.reference).toBeNull();
+  });
+
+  test("a specialisation without the editor hook treats an editor-looking entry as the controller's", async () => {
+    const genesis = await genesisWith(["did:example:ed"]);
+    const plain: Specialisation = { ...editing, keys: { kind: "controller", authorize: authorizeController } };
+    const byEd = await next(genesis, { ...genesis.state, note: "v2", editor: "did:example:ed" }, asEd);
+    failedAt(await verify([genesis, byEd], [], plain), 1, "TEST_NOT_AUTHOR");
   });
 });
 

@@ -2,9 +2,9 @@
  * Editors (P5.9, P5.11, P5.15-P5.18, P6.6, P7.8, P7.9): the author grants an
  * editor DID permission to change named content; the editor signs its own
  * entries with its own DID, checked against the grant in the parent's state.
- * The `editors` member names are PROVISIONAL (D4). Editor authority is an
- * Originals profile rule: no VH-Log hook carries it yet (PROVISIONAL; VH-Log
- * PR 11 and plan 011 PR 6 pending).
+ * The `editors` member names are PROVISIONAL (D4). Editor authority is VH-Log
+ * PR 11's "Editors from a Controller" [S25]: the engine's editor hook, which
+ * the Originals profile implements with its grants.
  */
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../src/json/index.js";
@@ -130,7 +130,8 @@ describe("C12-115: an editor entry that changes grants, aliases, lifecycle or pa
       [{ ...base, asset: { ...asset, editors: [grant(bob.did, { name: true, resources: ["photo"] })] } }, {}, "EDITOR_AUTHOR_ONLY"],
       [{ ...base, asset: { ...asset, editors: [grant(bob.did, { resources: ["photo"] })] } }, {}, "EDITOR_AUTHOR_ONLY"],
       [{ ...base, asset: { ...asset, aliases: ["did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com"] } }, {}, "EDITOR_AUTHOR_ONLY"],
-      [{ ...base, operation: "deactivate", asset: { ...asset, status: "deactivated" } }, { deactivated: true }, "EDITOR_AUTHOR_ONLY"],
+      // Deactivating sets a parameter, which no editor entry may (VH-Log PR 11 [S25], P5.16).
+      [{ ...base, operation: "deactivate", asset: { ...asset, status: "deactivated" } }, { deactivated: true }, "EDITOR_PARAMETERS"],
       [base, { ttl: 60 }, "EDITOR_PARAMETERS"],
     ];
     for (const [state, parameters, code] of cases) {
@@ -153,7 +154,11 @@ describe("C12-115: an editor entry that changes grants, aliases, lifecycle or pa
     expect(r.history.failure?.index).toBe(1);
     expect(r.history.failure?.category).toBe("author-binding");
     const deactivating = await forge(genesis, { ...genesis.state, operation: "deactivate", transitions: [], asset: { ...asset, status: "deactivated" }, editor: bob.ref("edit") }, bob.signer(KB, "edit"), { deactivated: true });
-    failedWith(await verify([genesis, deactivating], [alice, bob, carol]), 1, "EDITOR_AUTHOR_ONLY");
+    // Its `deactivated` parameter is refused first: an editor entry sets no parameter (VH-Log PR 11 [S25]).
+    failedWith(await verify([genesis, deactivating], [alice, bob, carol]), 1, "EDITOR_PARAMETERS", "outside-grant");
+    // Without the parameter, the operation itself is the author's (P5.16).
+    const operationOnly = await forge(genesis, { ...genesis.state, operation: "deactivate", transitions: [], editor: bob.ref("edit") }, bob.signer(KB, "edit"));
+    expect((await verify([genesis, operationOnly], [alice, bob, carol])).history.failure?.category).toBe("invalid-evidence");
   });
 
   test("an editor entry cannot be the genesis entry", async () => {

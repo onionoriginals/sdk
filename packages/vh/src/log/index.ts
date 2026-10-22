@@ -1,7 +1,8 @@
 /**
  * A generic VH-Log engine (swcurran/VH-Log@f2f9fda with PRs 2, 3, 8, 9, 10 and
- * 11 treated as merged). It implements the log mechanism only; every rule that
- * VH-Log leaves to a specialisation comes from a `Specialisation`.
+ * 11 treated as merged; PR 11 at 2fe380dbf, including "Editors from a
+ * Controller"). It implements the log mechanism only; every rule that VH-Log
+ * leaves to a specialisation comes from a `Specialisation`.
  *
  * Verification follows VH-Log "Read (Resolve)": every entry is fully checked,
  * the first failure ends the valid prefix, and a failing first entry
@@ -94,8 +95,51 @@ export interface ControllerKeys {
    * Return the Multikey that may verify `proof` for this entry, or reject with
    * an `OriginalsError` (for example `unauthorized-key`, `author-binding` or
    * `incomplete-evidence`). It must never fall back to trusting the proof's key.
+   * Entries an editor signs go to `editors.authorize` instead.
    */
   authorize(context: EntryContext & { proof: DataIntegrityProof }): Promise<string>;
+  /** VH-Log PR 11, "Editors from a Controller" [S25]: editors the controller authorizes. */
+  editors?: ControllerEditors;
+}
+
+/**
+ * VH-Log PR 11 (swcurran/VH-Log#11 at 2fe380dbf), "Editors from a Controller"
+ * [S25]: the controller may authorize editors, other identities with their own
+ * verifiable histories, whose entries change only the state. The
+ * specialisation defines where the current editors are recorded, how an entry
+ * identifies its signer as an editor, each editor's own key rules, and any
+ * further limit on what an editor may change. The engine enforces the rest:
+ * an editor entry is never the first entry, is checked against the editors
+ * recorded in the entry before it (so adding or removing an editor takes
+ * effect from the next entry), has empty `parameters`, leaves the record of
+ * editors unchanged (only the controller's entries change it), and carries
+ * exactly one proof, by an authorized key of that editor, and no controller
+ * proof. Forks are unchanged: two entries with the same predecessor are a fork
+ * whoever signed them.
+ */
+export interface ControllerEditors {
+  /**
+   * The editor an entry names as its signer, by identity, or undefined for an
+   * entry of the controller. Reject with an `OriginalsError` when the entry's
+   * editor reference is malformed.
+   */
+  editorOf(entry: LogEntry): string | undefined;
+  /**
+   * The record of the current editors an entry carries, which only an entry
+   * the controller signs may change. Compared by JCS; undefined when absent.
+   */
+  recordOf(entry: LogEntry): JsonValue | undefined;
+  /** Whether `record`, the previous entry's, lists `editor`. */
+  lists(record: JsonValue | undefined, editor: string): boolean;
+  /**
+   * The Multikey that may verify `proof` by `editor`, under the editor's own
+   * history rules (the version it relies on, which keys are authorized, how
+   * its history is obtained and how a removed key is kept from adding
+   * entries), or reject. It must never fall back to trusting the proof's key.
+   */
+  authorize(context: EntryContext & { proof: DataIntegrityProof; editor: string }): Promise<string>;
+  /** Any further limit on what the editor may change in the state, checked after `validateEntry`. */
+  limit?(context: EntryContext & { editor: string }): void | Promise<void>;
 }
 
 export interface Specialisation {
@@ -461,6 +505,21 @@ async function verifyEntry(
 
   // Parameters (VH-Log Read step 1) and pre-rotation (step 7, which concerns only parameters).
   const { active, version } = applyParameters(entry.parameters, previous?.active, spec);
+
+  // VH-Log PR 11, "Editors from a Controller": an editor entry follows a controller entry
+  // that records the editor, sets no parameter and leaves the record of editors alone.
+  const editors = spec.keys.kind === "controller" ? spec.keys.editors : undefined;
+  const editor = editors?.editorOf(entry);
+  if (editors && editor !== undefined) {
+    const only = (message: string): never => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an entry the controller signs may (VH-Log PR 11)`);
+    if (!previous) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the first entry; only an entry the controller signs may (VH-Log PR 11)");
+    if (Object.keys(entry.parameters).length > 0) {
+      fail("outside-grant", "EDITOR_PARAMETERS", "an editor entry's parameters must be empty: it cannot change keys, editors, witnesses, the version or deactivation (VH-Log PR 11)");
+    }
+    const record = editors.recordOf(previous.entry);
+    if (!editors.lists(record, editor)) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor} is not an editor in the previous entry (VH-Log PR 11)`);
+    if (canonicalize(editors.recordOf(entry) ?? null) !== canonicalize(record ?? null)) only("an editor entry cannot change the editors");
+  }
   let authorizedKeys: string[] = [];
   if (spec.keys.kind === "updateKeys") {
     const prerotation = (previous?.active.nextKeyHashes.length ?? 0) > 0;
@@ -479,6 +538,9 @@ async function verifyEntry(
   if (spec.maxProofs !== undefined && entry.proof.length > spec.maxProofs) {
     fail("invalid-evidence", "PROOF_COUNT", `an entry may carry at most ${spec.maxProofs} proof(s)`);
   }
+  if (editor !== undefined && entry.proof.length !== 1) {
+    fail("invalid-evidence", "PROOF_COUNT", "an editor entry carries exactly one proof, by its editor, and no controller proof (VH-Log PR 11)");
+  }
   const context: EntryContext = { index, entry, previous, history, scid: active.scid, active, version };
   const document = withoutProof(entry);
   for (const proof of entry.proof) {
@@ -487,6 +549,8 @@ async function verifyEntry(
     if (spec.keys.kind === "updateKeys") {
       key = asProofError(() => didKeyMultikey(proof.verificationMethod, { fragment: "optional" }));
       if (!authorizedKeys.includes(key)) fail("unauthorized-key", "UNAUTHORIZED_KEY", `${proof.verificationMethod} is not an active update key`);
+    } else if (editors && editor !== undefined) {
+      key = await editors.authorize({ ...context, proof, editor });
     } else {
       key = await spec.keys.authorize({ ...context, proof });
     }
@@ -529,8 +593,9 @@ async function verifyEntry(
     if (computeScid(preliminary) !== scid) fail("invalid-evidence", "SCID_MISMATCH", "the SCID does not match the first entry");
   }
 
-  // State (step 6).
+  // State (step 6), then any limit the specialisation sets on an editor's change (VH-Log PR 11).
   await spec.validateEntry?.(context);
+  if (editors?.limit && editor !== undefined) await editors.limit({ ...context, editor });
 
   const prior = previous ? witnessListOf(previous.active.witness) : null;
   // VH-Log: a change from {} is active immediately; a replacement or removal applies after the entry.

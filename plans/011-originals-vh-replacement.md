@@ -7,7 +7,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 | Dependency | Pin | Notes |
 |---|---|---|
 | Originals Protocol | `aviarytech/originals-spec@1039c471c` (`master`) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; re-pinned from `051049d8b`. §12 has 159 rows; IDs are kept and the mapping is in `specs/README.md`. Open #50 (head `555ce24d3`: Bitcoin values and limits decided, 256 resources, row 160) is implemented |
-| VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `7bae699a` | PRs treated as merged |
+| VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `2fe380dbf` (keys and editors from a controller) | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
 | bip340-jcs-2025 | Data Integrity BIP340 Cryptosuite v0.1 (dcdpr) | Draft; see S6 below |
@@ -25,7 +25,7 @@ A new package **`@originals/vh`** (`packages/vh`) replaces `@originals/cel`. Eac
 |---|---|---|
 | `@originals/vh/json` | Strict JSON parser (rejects duplicate keys, lone surrogates, non-I-JSON numbers), JCS (RFC 8785), bounded sizes | P5.7, VH-Log |
 | `@originals/vh/crypto` | multibase/multihash/multikey; `eddsa-jcs-2022`; `bip340-jcs-2025`; did:key decode | P5.12, VH-Log PR 3 |
-| `@originals/vh/log` | Generic VH-Log engine: SCID, entry hash, parameters (accumulation/activation), proofs, witness threshold, version selection, comparing copies with retained versionIds and minCopies (in PR 2, checked by the vh interop vectors). **Specialisation hooks** for: designated version param, permitted suites, versionTime precision (PR 8), controller keys (PR 11), authoritative source (PR 2), alternative encoding (PR 10), non-HTTPS locations (PR 9) | VH-Log + PRs |
+| `@originals/vh/log` | Generic VH-Log engine: SCID, entry hash, parameters (accumulation/activation), proofs, witness threshold, version selection, comparing copies with retained versionIds and minCopies (in PR 2, checked by the vh interop vectors). **Specialisation hooks** for: designated version param, permitted suites, versionTime precision (PR 8), controller keys and editors from a controller (PR 11, `ControllerKeys.editors`), authoritative source (PR 2), alternative encoding (PR 10), non-HTTPS locations (PR 9) | VH-Log + PRs |
 | `@originals/vh/didvh` | Plain `did:vh:1.0` resolver plus the extension registry (did:vh PR 3) | did:vh |
 | `@originals/vh/webvh` | `did:webvh:1.0` as a VH-Log specialisation (PR 302); DID-to-HTTPS, `#files`, verification of logs produced by `didwebvh-ts` | did:webvh exp. (see Q1) |
 | `@originals/vh/originals` | The `originals:1.0` extension: state schema, transitions, author binding, derived DID document, fork/anchor rules, verification report, evidence package codec | Originals §2–9 |
