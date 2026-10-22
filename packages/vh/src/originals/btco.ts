@@ -1,7 +1,8 @@
 /**
  * The did:btco alias that names an Original's anchoring sat (plan 012 §3.1,
- * §3.5; owner decision Q15). PROVISIONAL: network prefixes `sig`, `test` and
- * `reg` follow the SDK; the did:btco method spec names none.
+ * §3.5; owner decision Q15). The network prefixes `sig:`, `test:` and `reg:`
+ * are this profile's, as the SDK uses them (P9.10, P14.12; owner decision, D6;
+ * spec PR #50 (open)).
  */
 import { fail } from "../errors.js";
 
@@ -19,7 +20,11 @@ export interface BtcoAlias {
   sat: string;
 }
 
-/** Parse `did:btco[:sig|:test|:reg]:<sat>`, or throw STATE_ALIASES. */
+/**
+ * Parse `did:btco[:sig|:test|:reg]:<sat>`, or throw STATE_ALIASES (P9.10, P14.12).
+ * The did:btco method v0.2.0 does not yet define network prefixes; this grammar
+ * is proposed upstream as decentralized-identity/labs-ordinals-plus#4 [S30].
+ */
 export function parseBtcoAlias(did: string): BtcoAlias {
   const m = /^did:btco:((?:sig|test|reg):)?(0|[1-9]\d{0,15})$/.exec(did);
   if (!m || BigInt(m[2]) > MAX_SAT) fail("invalid-evidence", "STATE_ALIASES", `${did} is not a did:btco naming a sat`);
