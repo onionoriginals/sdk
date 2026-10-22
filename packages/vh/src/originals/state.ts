@@ -24,12 +24,11 @@ export const ORIGINALS_LIMITS = Object.freeze({
 });
 
 export type Operation = "create" | "update" | "deactivate";
-/**
- * Operations later phases define: migrate (anchoring, PR 9). PROVISIONAL (D1):
- * publication is an ordinary update that lists a did:webvh alias (plan 011,
- * PR 7b), so there is no publish operation.
+/*
+ * There are no publish or migrate operations (P9.10; P14.4, PROVISIONAL
+ * originals-spec #48): publication is an update that lists a did:webvh alias,
+ * and anchoring is an update that lists the sat's did:btco alias.
  */
-const LATER_OPERATIONS = new Set(["migrate"]);
 
 export interface ResourceDescriptor {
   id: string;
@@ -321,7 +320,6 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   if (s.id !== `did:vh:${ctx.scid}`) invalid("STATE_ID", "state.id must be the Original's did:vh");
   const operation = s.operation;
   if (typeof operation !== "string") invalid("STATE_OPERATION", "operation must be a string");
-  if (LATER_OPERATIONS.has(operation)) fail("unsupported-profile", "STATE_OPERATION_UNSUPPORTED", `${operation} is not supported by this verifier yet`);
   if (ctx.index === 0 ? operation !== "create" : operation !== "update" && operation !== "deactivate") {
     invalid("STATE_OPERATION", ctx.index === 0 ? "the first entry must be a create" : "a later entry is an update or a deactivate");
   }

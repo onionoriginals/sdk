@@ -487,8 +487,12 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const { alice, log, sign } = await harbor();
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
-    const migrate = await resign(log[2], { ...log[2].state, transitions: [], operation: "migrate" }, sign);
-    failedWith(await report([...log, migrate], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
+    // There are no publish or migrate operations: publication and anchoring are updates that add an
+    // alias (P9.10; P14.4, PROVISIONAL #48), so any other operation is invalid evidence.
+    for (const operation of ["migrate", "publish"]) {
+      const other = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign);
+      failedWith(await report([...log, other], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+    }
   });
 
   test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {
