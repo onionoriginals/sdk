@@ -379,6 +379,37 @@ async function edited() {
   return { alice, bob, known, store, sdk, did, asAlice, asBob, anchored: anchored.original.checkpoint, lines };
 }
 
+describe("a confirmed inscription whose signer evidence the writer lacks is not settled (P9.12, P9.18; later-inscription-unverifiable)", () => {
+  test("catch-up waits for the evidence and never prepares a replacement for it", async () => {
+    const { alice, bob, store, sdk, did, asBob, anchored, lines } = await edited();
+    // Bob rotates and edits after the anchor, naming his DID's version 2.
+    await bob.rotate([{ fragment: "edit", secret: seed(31) }]);
+    await sdk.edit(did, { parent: anchored, resources: [{ id: "photo", bytes: bytes("three") }], editor: bob.ref("edit"), signer: asBob.signer });
+    const all = await lines();
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all, 2)])).provider);
+    expect(pair.versionId).toBe(idOf(all[3]));
+    r.put(pair.prepared, "reveal_broadcast");
+    // The pair is mined and on the sat. A writer that holds Bob's DID only through version 1 cannot verify it.
+    const fresh = new MemoryStore();
+    await fresh.commit(did, { expectedHead: null, log: (await store.get(did))!.log });
+    const bobV1 = bob.evidence(bob.entries.slice(0, 1));
+    const writer = OriginalsSDK.create({ store: fresh, authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bobV1 : undefined), freshness: "asserted", clock: clock() });
+    const mined = snapshot([anchorBody(all, 2), { line: all[3], id: pair.prepared.inscriptionId }]);
+    const chain = node(mined, [pair.prepared.commitTxId, pair.prepared.revealTxId]);
+    const view = await readAnchored(writer, did, { provider: chain.provider, clock: blocks(), index: INDEX });
+    expect(view.report.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: pair.prepared.inscriptionId, reason: "later-inscription-unverifiable" })]);
+    const plan = await step(writer, did, chain.provider, r);
+    expect(plan).toMatchObject({ action: "wait-for-evidence", versionId: idOf(all[3]), recoveryId: pair.prepared.commitTxId, inscriptionId: pair.prepared.inscriptionId, signer: bob.did });
+    // Nothing is prepared over it: a second pair must name the one it would replace (P9.6).
+    await expect(pairFor(writer, did, chain.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() })).rejects.toMatchObject({ code: "PAIR_IN_FLIGHT" });
+    expect(chain.sent).toEqual([]);
+    // With Bob's version 2, the same inscription is accepted and the queue is done.
+    const informed = OriginalsSDK.create({ store: fresh, authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), freshness: "asserted", clock: clock() });
+    expect(await step(informed, did, chain.provider, r)).toMatchObject({ action: "done" });
+  });
+});
+
 describe("C12-112: the anchoring inscription is the log through the anchoring entry, at most 350,000 bytes (P9.17)", () => {
   test("the SDK refuses to anchor an Original whose log through the anchoring entry would be over the limit", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
