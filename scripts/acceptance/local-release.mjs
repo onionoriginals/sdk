@@ -186,7 +186,7 @@ const receipt = {
     "didwebvh-ts": JSON.parse(readFileSync(join(root, "node_modules/didwebvh-ts/package.json"), "utf8")).version,
   },
   runtimes: { node: process.version, bun: sh(bun ?? "bun", ["--version"]).stdout.trim(), platform: `${process.platform}-${process.arch}` },
-  profile: { protocol: "originals:1.0 (PROVISIONAL method value)", cryptosuite: "eddsa-jcs-2022", witnesses: "none (Q14)", ordering: "claimed (unanchored)", freshness: "author clients: asserted; readers: default (not established) unless stated" },
+  profile: { protocol: "originals:1.0 (PROVISIONAL method value)", cryptosuite: "eddsa-jcs-2022", witnesses: "none (Q14)", ordering: "claimed (unanchored)", freshness: "no freshness policy: an unanchored Original is never current, only valid as of its checkpoint (P7.10, originals-spec #46)" },
   author: { method: "did:webvh", builder: "apps/landing/src/auth/webvh.ts buildUserWebVHDid + BrowserWebVHSigner (the #964 regression path)", signerMode: "local Ed25519 keySigner over the authorship key (#key-1) from a custody file; the identity key (#key-0) is the DID's update key only", did: results[0]?.facts?.author?.did ?? null },
   original: results.find((r) => r.phase === "1-author-a")?.facts?.original ?? null,
   isolation,

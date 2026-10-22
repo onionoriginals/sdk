@@ -24,7 +24,7 @@ const zip = readBytes(join(dirs.artifacts, "original-A.zip"));
 const expected = JSON.parse(readFileSync(join(dirs.artifacts, "expected-A.json"), "utf8"));
 const store = await FileStore.open(dirs.storeB);
 // Client B knows no author DID up front: the evidence comes with the package.
-const sdk = OriginalsSDK.create({ store, authors: [], freshness: "asserted" });
+const sdk = OriginalsSDK.create({ store, authors: [] });
 const did = expected.original;
 let imported;
 let authorVersionId;
@@ -89,7 +89,10 @@ await phase.check("continue-editing", "with the author key supplied separately, 
   const e = await sdk.edit(did, { parent: imported.checkpoint, name: "Harbor at dawn (framed)", resources: [{ id: "notes.md", bytes: notes3, expectedDigest: notes.digest }], author: ref(), signer });
   assertEqual([e.status, e.original.did], ["committed", did], "edit");
   const ids = e.original.report.resources.versions.map((v) => v.versionId);
-  assert(e.original.current, "client B's head is not current", e.original.report.reasons);
+  // Never current off Bitcoin (P7.10): valid as of its checkpoint, judged with the author DID log this
+  // store kept from the import, reported with when it was obtained.
+  assertEqual([e.original.current, e.original.validAsOf?.checkpoint, e.original.report.reasons], [false, e.original.checkpoint, ["not-anchored"]], "client B's head is valid as of its checkpoint");
+  assertEqual(e.original.validAsOf?.signers?.[0]?.source, "retained", "the author DID evidence client B kept");
   continued = e.original;
   // Identity and history preserved: the log is A's log plus one entry.
   const log = (await store.get(did)).log.trimEnd().split("\n").map((l) => JSON.parse(l).versionId);

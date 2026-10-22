@@ -49,7 +49,7 @@ const secrets = { authorship: fromHex(custody.authorship.secretKeyHex), identity
 const evidence = { did: authorDid.did, log: authorDid.log };
 const author = { did: authorDid.did, verificationMethod: authorDid.assertionMethod, versionId: authorDid.versionId };
 const signer = keySigner({ keyType: "Ed25519", secretKey: secrets.authorship, verificationMethod: custody.authorship.verificationMethod });
-const sdk = OriginalsSDK.create({ store: await FileStore.open(dirs.storeA), authors: [evidence], freshness: "asserted" });
+const sdk = OriginalsSDK.create({ store: await FileStore.open(dirs.storeA), authors: [{ ...evidence, obtainedAt: new Date().toISOString() }] });
 
 const art1 = png(noise());
 const art2 = png(noise());
@@ -79,7 +79,8 @@ await phase.check("create", "create an Original with binary (image/png, octet-st
   assertEqual(created.kind, "original", "create returned a draft");
   const v = created.original;
   assert(v.did.startsWith("did:vh:"), "not a did:vh", v.did);
-  assert(v.current, "a fresh Original is not current for its author", v.report.reasons);
+  // An unanchored Original is never current, even for its author: it is valid as of its checkpoint (P7.10).
+  assertEqual([v.current, v.validAsOf?.checkpoint, v.report.reasons], [false, v.checkpoint, ["not-anchored"]], "a fresh Original is valid as of its checkpoint");
   did = v.did;
   head = v.checkpoint;
   record(v);
@@ -100,7 +101,7 @@ await phase.check("revise-binary", "revise: change the image bytes, the name and
   head = e.original.checkpoint;
   record(e.original);
   assertEqual(e.original.resources.map((r) => `${r.resource}@${r.version}`), ["artwork.png@1", "scan.bin@1", "notes.md@1", "notes.md@2", "artwork.png@2"], "resource versions");
-  assert(e.original.current, "the author's head is not current", e.original.report.reasons);
+  assertEqual([e.original.current, e.original.validAsOf?.checkpoint, e.original.report.reasons], [false, head, ["not-anchored"]], "the author's head is valid as of its checkpoint");
   return { checkpoint: head };
 });
 

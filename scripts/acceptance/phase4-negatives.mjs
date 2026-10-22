@@ -30,12 +30,12 @@ const did = expected.original;
 const v1 = expected.versions[0];
 const lostDigest = v1.resources.find((r) => r.id === "artwork.png").digest;
 const store = async (name) => FileStore.open(join(dirs.storeC, name));
-const reader = (s, freshness) => OriginalsSDK.create({ ...(s ? { store: s } : {}), authors: [], ...(freshness ? { freshness } : {}) });
-const parts = (r) => ({ history: r.history.status, authorBinding: r.authorBinding.status, identity: r.identityEvidence.status, resources: r.resources.status, assetFreshness: r.assetFreshness.status, fork: r.fork ? { version: r.fork.version, branches: r.fork.branches.map((b) => b.versionId) } : null, current: r.current });
+const reader = (s) => OriginalsSDK.create({ ...(s ? { store: s } : {}), authors: [] });
+const parts = (r) => ({ history: r.history.status, authorBinding: r.authorBinding.status, identity: r.identityEvidence.status, resources: r.resources.status, assetFreshness: r.assetFreshness.status, fork: r.fork ? { version: r.fork.version, branches: r.fork.branches.map((b) => b.versionId) } : null, validAsOf: r.validAsOf?.checkpoint ?? null, current: r.current });
 
 await phase.check("missing-bytes-store", "a store that lost a historical resource packages it as explicitly partial; history stays valid (C12-10)", async () => {
   const s = await store("missing");
-  const sdk = reader(s, "asserted");
+  const sdk = reader(s);
   await sdk.import(pkgA);
   // Simulated storage loss: the content-addressed file is removed from disk. There is no API to drop bytes.
   rmSync(join(dirs.storeC, "missing", "resources", lostDigest));
@@ -43,10 +43,9 @@ await phase.check("missing-bytes-store", "a store that lost a historical resourc
   assertEqual([view.report.history.status, view.report.authorBinding.status, view.report.identityEvidence.status], ["valid", "valid", "complete"], "history/binding/identity");
   assertEqual(view.report.resources.status, "partial", "resources");
   assertEqual(view.report.resources.missing.map((m) => m.digest), [lostDigest], "missing");
-  // P7.3, P7.4 (spec a432): missing bytes are unavailable content, never a verification failure,
-  // and the acceptance check excludes content availability. Here freshness is asserted, so current holds.
-  assertEqual(view.current, true, "current with missing bytes (content availability is reported separately)");
-  assertEqual(view.report.reasons.filter((r) => r.startsWith("resources-")), [], "no resource reason blocks acceptance");
+  // P7.3, P7.4: missing bytes are unavailable content, never a verification failure: the result is
+  // still valid as of its checkpoint (P7.10), and no resource reason is given.
+  assertEqual([view.current, view.validAsOf?.checkpoint, view.report.reasons], [false, expected.checkpoint, ["not-anchored"]], "valid as of its checkpoint with missing bytes (content availability is reported separately)");
   const pkg = await sdk.package(did);
   assertEqual([pkg.manifest.completeness, pkg.manifest.missing], ["partial", [{ kind: "resource", resource: "artwork.png", version: 1, digest: lostDigest, versionId: v1.versionId }]], "manifest");
   writeFileSync(join(dirs.artifacts, "original-A-partial.zip"), pkg.bytes);
@@ -74,7 +73,8 @@ await phase.check("stale-prefix", "an older, valid package is stale for a reader
   const loaded = await sdk.load(pkgA);
   const r = loaded.report;
   assertEqual([r.history.status, r.authorBinding.status, r.resources.status, r.fork], ["valid", "valid", "available", null], "history/binding/resources/fork");
-  assertEqual([r.assetFreshness.status, r.current], ["stale", false], "freshness/current");
+  // Valid as of its own, older checkpoint; never current (C12-22, P7.10).
+  assertEqual([r.assetFreshness.status, r.current, r.validAsOf?.checkpoint], ["stale", false, expected.checkpoint], "freshness/current/validAsOf");
   assert(loaded.reasons.includes("asset-log-older-than-retained"), "no stale reason", loaded.reasons);
   assertEqual((await sdk.import(pkgA)).status, "kept-newer-local", "importing the prefix (C12-77)");
   return { reader: parts(r), reasons: loaded.reasons };
@@ -86,14 +86,14 @@ let branchX;
 const checkpointB = JSON.parse(new TextDecoder().decode(readZip(pkgB).get("originals-evidence.json"))).checkpoint;
 
 await phase.check("divergent-local", "client C, signing from an earlier checkpoint, then imports client B's history: an unresolved fork (C12-23)", async () => {
-  const sdk = reader(await store("fork-local"), "asserted");
+  const sdk = reader(await store("fork-local"));
   await sdk.import(pkgA);
   const imported = await sdk.get(did);
   const ref = { did: expected.author, verificationMethod: custody.authorship.verificationMethod, versionId: imported.report.identityEvidence.latestVersionId };
   // Branch X is later in time and longer than client B's branch: neither may decide anything.
   const x1 = await sdk.edit(did, { parent: expected.checkpoint, name: "Harbor at dawn (client C)", author: ref, signer });
   const x2 = await sdk.edit(did, { parent: x1.original.checkpoint, resources: [{ id: "notes.md", bytes: utf8("client C notes") }], author: ref, signer });
-  assert(x2.original.current, "client C's own branch is not current before the fork is known", x2.original.report.reasons);
+  assertEqual([x2.original.validAsOf?.checkpoint, x2.original.report.reasons], [x2.original.checkpoint, ["not-anchored"]], "client C's own branch is valid as of its head before the fork is known");
   const pkgX = await sdk.package(did);
   assertEqual(findSecrets(pkgX.bytes, { authorship: fromHex(custody.authorship.secretKeyHex) }), [], "secrets in package X");
   writeFileSync(join(dirs.artifacts, "original-X.zip"), pkgX.bytes);
@@ -105,7 +105,7 @@ await phase.check("divergent-local", "client C, signing from an earlier checkpoi
   const r = view.report;
   assertEqual([r.history.status, r.authorBinding.status, r.identityEvidence.status, r.resources.status], ["valid", "valid", "complete", "available"], "each branch stays valid history with valid binding");
   assertEqual([r.fork?.version, r.fork?.branches.map((b) => b.versionId).sort()], [expected.versions.length + 1, [branchX.first, checkpointB].sort()], "fork");
-  assertEqual(view.current, false, "current");
+  assertEqual([view.current, view.validAsOf], [false, null], "current/validAsOf: a forked Original is valid as of no checkpoint");
   assert(r.reasons.includes("fork-unresolved"), "no fork reason", r.reasons);
   assertEqual(view.checkpoint, branchX.head, "the local branch is kept, not replaced");
   // An edit still continues on the local branch and is still not current (P6.6).

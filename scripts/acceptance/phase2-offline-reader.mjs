@@ -93,26 +93,34 @@ await phase.check("historical-versions", "every historical checkpoint verifies f
   }
   return out;
 });
-await phase.check("verified-vs-current", "verified is true; current, freshness and ordering are reported separately (P7.6)", () => {
+await phase.check("verified-vs-current", "verified is true; an unanchored Original is valid as of its checkpoint, never current (P7.6, P7.10)", () => {
   const verified = report.history.status === "valid" && report.authorBinding.status === "valid" && report.identityEvidence.status === "complete" && report.resources.status === "available" && report.checkpoint === manifest.checkpoint && report.fork === null;
   assert(verified, "the package does not verify");
-  // A first-time reader cannot vouch that this is the latest state: not current, and says why.
+  // Off Bitcoin nothing shows this is the latest state (P7.10): not current, and says why.
   assertEqual([report.current, report.assetFreshness.status, report.identityEvidence.freshness, report.ordering, report.fork], [false, "not-established", "not-established", "claimed", null], "current/freshness/ordering/fork");
-  assert(reasons.length > 0, "not current without a reason");
-  phase.facts.result = { verified, current: report.current, assetFreshness: report.assetFreshness.status, identityFreshness: report.identityEvidence.freshness, ordering: report.ordering, fork: report.fork, reasons };
+  assertEqual(reasons, ["not-anchored"], "the only reason is that it is not anchored");
+  // Valid as of its checkpoint, with the author DID version relied on and when this reader obtained it (C12-145).
+  const signer = report.validAsOf?.signers?.[0];
+  assertEqual([report.validAsOf?.checkpoint, signer?.did, signer?.role, signer?.versionId, signer?.source], [manifest.checkpoint, expected.author, "author", report.identityEvidence.latestVersionId, "package"], "validAsOf");
+  assert(typeof signer?.obtainedAt === "string", "no obtainedAt", signer);
+  assertEqual(report.historicallyAuthorizedOnly, [], "historically authorized only");
+  phase.facts.result = { verified, current: report.current, validAsOf: report.validAsOf, assetFreshness: report.assetFreshness.status, identityFreshness: report.identityEvidence.freshness, ordering: report.ordering, fork: report.fork, reasons };
   return phase.facts.result;
 });
-await phase.check("asserted-policy", "only the freshness policy changes current; verification does not change", async () => {
-  const asserted = await OriginalsSDK.create({ authors: [], freshness: "asserted" }).load(zip);
-  assertEqual([asserted.report.current, asserted.report.assetFreshness.status, asserted.report.checkpoint, asserted.report.history.status], [true, "asserted", expected.checkpoint, "valid"], "under freshness: asserted");
-  return { current: asserted.report.current, assetFreshness: asserted.report.assetFreshness.status };
+await phase.check("no-freshness-policy", "no freshness policy makes an unanchored Original current: the option and the CLI flag are gone (P7.10)", async () => {
+  const again = await OriginalsSDK.create({ authors: [], freshness: "asserted" }).load(zip);
+  assertEqual([again.report.current, again.report.assetFreshness.status, again.report.checkpoint, again.report.history.status], [false, "not-established", expected.checkpoint, "valid"], "an unknown freshness option changes nothing");
+  const cli = join(dirname(fileURLToPath(import.meta.resolve("@originals/sdk/originals"))), "cli.js");
+  const run = spawnSync(process.execPath, [...process.execArgv, cli, "verify", join(dirs.artifacts, "original-A.zip"), "--freshness", "asserted"], { encoding: "utf8", env: process.env, timeout: 60_000 });
+  assertEqual(run.status, 2, "`--freshness asserted` is a usage error");
+  return { current: again.report.current, cliExit: run.status };
 });
 await phase.check("cli", "the `originals verify --json` CLI agrees, offline", () => {
   const cli = join(dirname(fileURLToPath(import.meta.resolve("@originals/sdk/originals"))), "cli.js");
   const run = spawnSync(process.execPath, [...process.execArgv, cli, "verify", join(dirs.artifacts, "original-A.zip"), "--json"], { encoding: "utf8", env: process.env, timeout: 60_000 });
   assertEqual(run.status, 0, `cli exit (stderr: ${run.stderr})`);
   const out = JSON.parse(run.stdout);
-  assertEqual([out.verified, out.checkpoint, out.current], [true, expected.checkpoint, false], "cli verified/checkpoint/current");
+  assertEqual([out.verified, out.checkpoint, out.current, out.validAsOf?.checkpoint], [true, expected.checkpoint, false, expected.checkpoint], "cli verified/checkpoint/current/validAsOf");
   return { exit: run.status, verified: out.verified, current: out.current };
 });
 
