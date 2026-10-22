@@ -295,7 +295,7 @@ try {
     read.evidenceIndex === ORD_INDEX && JSON.stringify(read.ownership?.indexes) === JSON.stringify([ORD_INDEX]) && read.ownership?.status === 'provisional' && a?.uniqueness === 'not-established' && read.snapshot.indexHealthy && read.snapshot.enumerationComplete,
     { provider: read.provider, index: read.evidenceIndex, ownership: read.ownership, uniqueness: a?.uniqueness });
   check('R28', 'the reader stored nothing (load verifies without storing)', (await readdir(join(stores.reader, 'originals'))).length === 0);
-  // P7.8, P9.15 (PROVISIONAL, originals-spec #47 2be62b982): for an anchored Original the reader checks
+  // P7.8, P9.15 (originals-spec #47): for an anchored Original the reader checks
   // the author DID against the newest version it knows of, the package's, and says which and when it
   // obtained it. Bitcoin decides the log, so the anchored state is current.
   const relied = read.validAsOf?.signers?.[0];

@@ -18,7 +18,7 @@
  * anchoring entry last; every later inscription carries exactly one entry,
  * the successor of the head Bitcoin accepts. Media type
  * `application/vnd.originals.vh+jsonl`, no metadata, at most 350,000 bytes
- * (`ORIGINALS_INSCRIPTION_MAX_BYTES`, provisional D6). Entries committed after
+ * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; spec PR #50 (open)). Entries committed after
  * the anchoring entry before the anchor is accepted wait, and then go one per
  * later block.
  *
