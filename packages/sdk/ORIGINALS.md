@@ -153,7 +153,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
-| `assetFreshness` | not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
+| `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
@@ -667,6 +667,25 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   inscriptions of any size exhaust `maxInscriptions`. A reader raises them
   through `snapshotBudget` (`maxOriginalsBytes` up to 1 GiB,
   `maxInscriptions` up to 100,000) to read such a sat.
+- Signer DID freshness for an anchored Original (PROVISIONAL, open
+  originals-spec #47 at `2be62b982`, P7.8, P9.15): each did:vh or did:webvh
+  signer is checked against the newest version of its DID this verifier
+  knows of: the newest it obtained from any source in this verification or
+  retained from earlier (the SDK uses configured or stored evidence in place
+  of a package's or host's when it extends it). It need not show that no
+  newer version exists. `validAsOf.signers` states, for each signer, the
+  versionId relied on and when and where that history was obtained
+  (`obtainedAt`, `source`: `package`, `host`, `fetched`, `retained` or
+  `supplied`). An entry inscribed after the newest known version is checked
+  against it and is not incomplete identity evidence; an entry naming a
+  version the verifier has no verified copy of is (P5.6). A retained
+  versionId the evidence falls short of is `stale`, and the result is not
+  current. The cost, accepted by the owner: a host that withholds a key
+  removal can get later inscriptions accepted by readers who do not know of
+  it. did:btco signers are read from Bitcoin (P5.13). Anchoring does not
+  require did:btco DIDs for the author or editors (owner decision of 21
+  October 2026, #47; nothing in the SDK requires them); a did:btco author is
+  how Bitcoin alone suffices (P9.18).
 - After anchoring, deactivating the author DID leaves the accepted state
   current and refuses later inscriptions; a key the author removes later does
   not unseat entries accepted before (P9.15).

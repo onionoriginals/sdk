@@ -602,7 +602,7 @@
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ],
-      "note": "Author DID history missing entirely makes the anchored Original incomplete, not current. A history that stops short of an inscription time needs the freshness checks of P7.8 against the inscription time, which arrive with the writer (PR 10)."
+      "note": "PROVISIONAL: open originals-spec #47 (head 2be62b982) rewords this row: an anchored entry whose did:vh or did:webvh signer DID is known only up to a version older than its inscription time is checked against the newest known version, and the report states that version and when it was obtained (P7.8, P9.15). Implemented provisionally; with no verified version at or after the named one, identity evidence is incomplete."
     },
     {
       "id": "C12-47",
@@ -847,9 +847,12 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/freshness.test.ts"
-      ]
+      ],
+      "note": "PROVISIONAL: open originals-spec #47 (head 2be62b982) rewords this row: older author DID history served when the verifier has retained a newer version: the newer version is used (P7.8). The SDK uses kept or configured evidence that extends a package's; given only a retained versionId, the result is stale and not current."
     },
     {
       "id": "C12-65",
