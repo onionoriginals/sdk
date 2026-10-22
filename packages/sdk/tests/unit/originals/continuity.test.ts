@@ -37,7 +37,7 @@ async function journey() {
 
 /** The same package without the author DID logs, declared partial, as a reader with no identity evidence gets it. */
 function withoutIdentity(zip: Uint8Array, author: string): Uint8Array {
-  const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("authors/")));
+  const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("signers/")));
   const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
   files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author }] })));
   return writeZip(files);
@@ -298,7 +298,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     expect(p.status).toBe("committed");
     const files = await hostedFiles(env.sdk, env.did, alias);
     // A reader of a host that serves no author DID log: the identity must come from its location.
-    for (const path of [...files.keys()]) if (path.startsWith("originals/authors/")) files.delete(path);
+    for (const path of [...files.keys()]) if (path.startsWith("originals/signers/")) files.delete(path);
     const base = didWebvhFilesUrl(alias.did);
     const hosted: HostedFetch = (url) => {
       const data = url.startsWith(base) ? files.get(url.slice(base.length)) : undefined;
@@ -388,7 +388,7 @@ describe("C12-134: a forged hash-chained line chooses no identity location (P5.1
     const forged: Record<string, any> = { ...rest, versionTime: "2026-10-18T12:59:00Z", state: { ...last.state, transitions: [], author: { ...last.state.author, verificationMethod: `${tracker}#orig-1` } } };
     forged.versionId = `${Number(String(last.versionId).split("-")[0]) + 1}-${vhHash({ ...forged, versionId: last.versionId })}`;
     files.set("asset/did.jsonl", new TextEncoder().encode(`${log}${JSON.stringify({ ...forged, proof })}\n`));
-    for (const path of [...files.keys()]) if (path.startsWith("authors/")) files.delete(path);
+    for (const path of [...files.keys()]) if (path.startsWith("signers/")) files.delete(path);
     const forgedZip = writeZip(files);
     // The author's own host serves the log: the forged line's location is never requested.
     const seen: string[] = [];

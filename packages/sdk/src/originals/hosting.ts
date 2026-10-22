@@ -6,8 +6,9 @@
  *   did.jsonl, did-witness.json      the did:webvh alias log, where did:webvh
  *                                    publishes it (.well-known/ for a bare domain)
  *   originals/...                    the Original's evidence package, unpacked
- *                                    (originals-evidence.json, asset/, authors/,
- *                                    resources/)
+ *                                    (originals-evidence.json, asset/did.jsonl,
+ *                                    signers/, resources/; no asset witness
+ *                                    file: asset logs have none, P9.8)
  *
  * The files for one checkpoint are deterministic, so a retried publication
  * repeats the same snapshot and creates no transition (P9.2). The public
@@ -55,8 +56,8 @@ export type HostedFetch = (url: string, options: HostedFetchOptions) => Promise<
 export interface RetrievalLimits {
   /**
    * Requests in one call, failed and optional ones included. The plan
-   * derived from the asset log (asset witness, each author's log and witness,
-   * each resource) must fit before any of it is requested.
+   * derived from the asset log (each signer's log and witness, each
+   * resource) must fit before any of it is requested.
    */
   maxRequests?: number;
   /**
@@ -67,8 +68,14 @@ export interface RetrievalLimits {
    * that archive limit, and their number to `archiveLimits.maxEntries`.
    */
   maxTotalBytes?: number;
-  /** Bytes in one response. Defaults to `FETCH_LIMITS.maxBytes`, the profile's per-file cap (P7.7). */
+  /** Bytes in one response other than a resource. Defaults to `FETCH_LIMITS.maxBytes`, the profile's 16 MiB log-file cap (P7.7). */
   maxFileBytes?: number;
+  /**
+   * Bytes in one resource response. Defaults to `FETCH_LIMITS.maxResourceBytes`,
+   * 64 MiB (P8.5; P14.13, PROVISIONAL originals-spec #48). A larger resource
+   * is unavailable content, never a failure (P7.4).
+   */
+  maxResourceBytes?: number;
   /** Milliseconds for one request. Defaults to `FETCH_LIMITS.timeoutMs`. */
   requestTimeoutMs?: number;
   /** Milliseconds for the whole call, so slow or absent optional files cannot multiply the per-request timeout. */
@@ -79,6 +86,7 @@ export interface RetrievalLimits {
 export const RETRIEVAL_LIMITS = Object.freeze({
   maxRequests: 1_024,
   maxFileBytes: FETCH_LIMITS.maxBytes,
+  maxResourceBytes: FETCH_LIMITS.maxResourceBytes,
   requestTimeoutMs: FETCH_LIMITS.timeoutMs,
   timeoutMs: 120_000,
 });

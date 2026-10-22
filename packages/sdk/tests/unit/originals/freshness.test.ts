@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore } from "../../../src/originals/fs-store.js";
 import { MemoryStore, OriginalsSDK, readZip, writeZip, type OriginalsStore } from "../../../src/originals/index.js";
-import { authorPath } from "../../../src/originals/evidence.js";
+import { signerPath } from "../../../src/originals/evidence.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
 const KEY = seed(21);
@@ -89,7 +89,7 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
     const fresh = await h.sdk.package(h.did);
     // A host serves the current asset log with the author DID log as it was before the rotation.
     const files = readZip(fresh.bytes);
-    files.set(`${authorPath(h.alice.did)}/did.jsonl`, bytes(h.alice.evidence(before).log as string));
+    files.set(`${signerPath(h.alice.did)}/did.jsonl`, bytes(h.alice.evidence(before).log as string));
     return { ...h, fresh, stale: writeZip(files), oldAuthorVersion: before[before.length - 1].versionId };
   }
 

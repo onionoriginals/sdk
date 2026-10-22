@@ -251,7 +251,7 @@ async function publishedWith(count: number, size: number) {
 }
 
 const RESOURCE = /^originals\/resources\//;
-const FAN_OUT = /^originals\/(?:asset\/did-witness\.json|authors\/|resources\/)/;
+const FAN_OUT = /^originals\/(?:signers\/|resources\/)/;
 
 describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
   test("an oversized request plan is refused before any resource is requested", async () => {
@@ -292,6 +292,18 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     }
   });
 
+  test("C12-150: a hosted log line over 65,536 UTF-8 bytes stops all derived requests (P7.7; P14.13, PROVISIONAL originals-spec #48)", async () => {
+    const { alias, files } = await published();
+    // 33,000 two-byte characters: 66,000 UTF-8 bytes in fewer than 34,000 UTF-16 code units.
+    const forged = forgeLog(files, (t) => [{ ...t, state: { ...t.state, asset: { ...t.state.asset, metadata: { wide: "é".repeat(33_000) } } } }]);
+    const host = instrumented(forged, didWebvhFilesUrl(alias.did));
+    const error = await rejection(stranger().loadPublished(alias.did, host.fetch));
+    expect(error.category).toBe("limit-exceeded");
+    expect(error.code).toBe("SNAPSHOT_LOG_INVALID");
+    expect(error.details).toMatchObject({ line: 4, cause: "ENTRY_TOO_LARGE" });
+    expect(host.calls.filter((c) => FAN_OUT.test(c.path))).toEqual([]);
+  });
+
   test("a resource descriptor whose digest is not a digest stops all derived requests", async () => {
     const { alias, files } = await published();
     const forged = forgeLog(files, (t) => [withResources(t, [{ ...t.state.asset.resources[0], digest: "not-a-digest" }])]);
@@ -319,7 +331,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
       const resources = host.calls.filter((c) => RESOURCE.test(c.path));
       expect(resources.map((c) => c.path)).toEqual(digests.slice(0, 3).map((d) => `originals/resources/${d}`));
       expect(resources.map((c) => c.options?.maxBytes)).toEqual([1_000 + 1_500, 1_500, 500]);
-      expect(host.calls).toHaveLength(7 + 3);
+      expect(host.calls).toHaveLength(6 + 3);
       expect(host.served()).toBe(cooperative ? fixed + 2_000 : fixed + 3_000);
     });
   }
@@ -329,18 +341,18 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     const base = didWebvhFilesUrl(alias.did);
     const reader = (maxRequests: number) =>
       OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { maxRequests } });
-    // Alias witness (404), alias log, manifest, asset log; then asset witness (404), author log
-    // and witness (404), and two resources: 9 requests, 3 of which fail.
+    // Alias witness (404), alias log, manifest, asset log; then the author's log and witness (404),
+    // and two resources: 8 requests, 2 of which fail. There is no asset witness file (P9.8).
     const enough = instrumented(files, base);
-    const r = await reader(9).loadPublished(alias.did, enough.fetch);
+    const r = await reader(8).loadPublished(alias.did, enough.fetch);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
-    expect(enough.calls).toHaveLength(9);
+    expect(enough.calls).toHaveLength(8);
 
     // With one fewer, the plan does not fit: the failed alias-witness request counted.
     const short = instrumented(files, base);
-    const error = await rejection(reader(8).loadPublished(alias.did, short.fetch));
+    const error = await rejection(reader(7).loadPublished(alias.did, short.fetch));
     expect(error.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
-    expect(error.details).toMatchObject({ limit: "requests", requests: 4, maxRequests: 8 });
+    expect(error.details).toMatchObject({ limit: "requests", requests: 4, maxRequests: 7 });
     expect(short.calls).toHaveLength(4);
 
     // Exhausted before the plan is known: the fourth request is never made.
@@ -353,16 +365,16 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     const { alias, files } = await published();
     const optional = (path: string) => path.endsWith("did-witness.json");
     const host = instrumented(files, didWebvhFilesUrl(alias.did), { cooperative: true, hang: optional });
-    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { requestTimeoutMs: 200, timeoutMs: 500 } });
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { requestTimeoutMs: 200, timeoutMs: 350 } });
     const started = Date.now();
     const error = await rejection(reader.loadPublished(alias.did, host.fetch));
     expect(Date.now() - started).toBeLessThan(1_500);
     expect(error.category).toBe("limit-exceeded");
-    expect(error.details).toMatchObject({ limit: "time", timeoutMs: 500 });
-    // Two witnesses time out at 200 ms each; the third is cut off by the 500 ms deadline.
-    expect(host.calls.map((c) => c.path.replace(/^.*\//, ""))).toEqual(["did-witness.json", "did.jsonl", "originals-evidence.json", "did.jsonl", "did-witness.json", "did.jsonl", "did-witness.json"]);
+    expect(error.details).toMatchObject({ limit: "time", timeoutMs: 350 });
+    // The alias witness times out at 200 ms; the signer's is cut off by the 350 ms deadline.
+    expect(host.calls.map((c) => c.path.replace(/^.*\//, ""))).toEqual(["did-witness.json", "did.jsonl", "originals-evidence.json", "did.jsonl", "did.jsonl", "did-witness.json"]);
     for (const c of host.calls) expect(c.options!.timeoutMs).toBeLessThanOrEqual(200);
-    expect(host.calls[6].options!.signal.aborted).toBe(true);
+    expect(host.calls[5].options!.signal.aborted).toBe(true);
   });
 
   test("a host that ignores the signal is still bounded by the deadline", async () => {
@@ -395,14 +407,37 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     expect(host.calls).toHaveLength(4);
   });
 
+  test("P8.5: a resource has its own fetch cap, 64 MiB by default, separate from the 16 MiB log-file cap (P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", async () => {
+    expect(RETRIEVAL_LIMITS.maxResourceBytes).toBe(64 * 1024 * 1024);
+    expect(RETRIEVAL_LIMITS.maxFileBytes).toBe(16 * 1024 * 1024);
+    const size = 4096;
+    const { alias, files, digests } = await publishedWith(1, size);
+    const largestOther = Math.max(...[...files].filter(([path]) => !RESOURCE.test(path)).map(([, data]) => data.length));
+    expect(largestOther).toBeLessThan(size);
+    const read = async (maxResourceBytes: number) => {
+      const host = instrumented(files, didWebvhFilesUrl(alias.did), { cooperative: true });
+      const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { maxFileBytes: largestOther, maxResourceBytes } });
+      return { r: await reader.loadPublished(alias.did, host.fetch), host };
+    };
+    // A resource larger than the log-file cap is still read, under the resource cap.
+    const { r, host } = await read(size);
+    expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.report.resources.versions.find((v) => v.digest === digests[0])?.bytes).toBe("verified");
+    expect(host.calls.find((c) => RESOURCE.test(c.path))!.options!.maxBytes).toBe(size);
+    // Past the resource cap it is unavailable content, not a failure (P7.4, P9.18).
+    const capped = (await read(size - 1)).r;
+    expect(capped.verified).toBe(true);
+    expect(capped.report.resources.status).toBe("partial");
+  });
+
   test("a valid snapshot within budget passes each request its remaining allowance", async () => {
     const { alias, files } = await published();
     const host = instrumented(files, didWebvhFilesUrl(alias.did), { cooperative: true });
     const r = await stranger().loadPublished(alias.did, host.fetch);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
-    expect(host.calls).toHaveLength(9);
+    expect(host.calls).toHaveLength(8);
     for (const c of host.calls) {
-      expect(c.options!.maxBytes).toBeLessThanOrEqual(RETRIEVAL_LIMITS.maxFileBytes);
+      expect(c.options!.maxBytes).toBeLessThanOrEqual(RESOURCE.test(c.path) ? RETRIEVAL_LIMITS.maxResourceBytes : RETRIEVAL_LIMITS.maxFileBytes);
       expect(c.options!.timeoutMs).toBeLessThanOrEqual(RETRIEVAL_LIMITS.requestTimeoutMs);
       expect(c.options!.signal.aborted).toBe(false);
     }
@@ -465,7 +500,7 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     const alias = await aliasFor(did);
     const p = await a.publish(did, { parent: e.original.checkpoint, author: alice.ref("next"), signer: alice.signer("next", K2), alias });
     const files = await hostedFiles(a, did, alias);
-    const authorLog = [...files].find(([path]) => /^originals\/authors\/[0-9a-f]{64}\/did\.jsonl$/.test(path));
+    const authorLog = [...files].find(([path]) => /^originals\/signers\/[0-9a-f]{64}\/did\.jsonl$/.test(path));
     expect(decoder.decode(authorLog![1])).toBe(v2.log as string);
     expect(p.original.checkpoint).toBeDefined();
   });

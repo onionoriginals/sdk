@@ -8,9 +8,14 @@
  *   <host>/<user-slug>/o-<name>/did-witness.json       its did:webvh witness file
  *   <host>/<user-slug>/o-<name>/originals/<file>       the Original's evidence package,
  *                                                      unpacked (originals-evidence.json,
- *                                                      asset/did.jsonl, asset/did-witness.json,
- *                                                      authors/<64 hex>/did.jsonl|did-witness.json,
+ *                                                      asset/did.jsonl,
+ *                                                      signers/<64 hex>/did.jsonl|did-witness.json,
  *                                                      resources/<digest>)
+ *
+ * PROVISIONAL (P14.10, P14.11; originals-spec #48 1f90e43bc): each signer
+ * DID's history is under `signers/<hex sha256 of the DID>/`, and there is no
+ * asset witness file, since asset logs have no witnesses (P9.8). Neither
+ * `authors/` nor `asset/did-witness.json` is part of the layout.
  *
  * Every write is inside the caller's own namespace, so no shape can shadow the
  * app's static assets or another author's files. A key holds no `%` or `\`,
@@ -21,7 +26,7 @@
  * uploaded asset log may only extend the stored one, and saves from several
  * signers go through the verifying submit route instead (shared-saves.ts).
  *
- * A signer's DID log and witness file (authors/<64 hex>/...) only grow: a
+ * A signer's DID log and witness file (signers/<64 hex>/...) only grow: a
  * replacement must extend what is stored (`signerLogVerdict`,
  * `signerWitnessVerdict`), so no upload can roll back a newer DID log, and
  * with it a key removal or deactivation, that a save stored (P7.8). A signer
@@ -67,9 +72,8 @@ export function classifyHostedKey(key: string, slug: string): HostedKey | null {
   const jsonl = { kind: 'evidence' as const, contentType: 'application/jsonl' };
   if (p.length === 1 && p[0] === 'originals-evidence.json') return json;
   if (p.length === 2 && p[0] === 'asset' && p[1] === 'did.jsonl') return jsonl;
-  if (p.length === 2 && p[0] === 'asset' && p[1] === 'did-witness.json') return json;
-  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return { ...jsonl, signer: 'log', signerHex: p[1] };
-  if (p.length === 3 && p[0] === 'authors' && HEX64.test(p[1]) && p[2] === 'did-witness.json') return { ...json, signer: 'witness', signerHex: p[1] };
+  if (p.length === 3 && p[0] === 'signers' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return { ...jsonl, signer: 'log', signerHex: p[1] };
+  if (p.length === 3 && p[0] === 'signers' && HEX64.test(p[1]) && p[2] === 'did-witness.json') return { ...json, signer: 'witness', signerHex: p[1] };
   if (p.length === 2 && p[0] === 'resources' && DIGEST.test(p[1])) {
     return { kind: 'resource', digest: p[1], assetLogKey: [host, ns, name, 'originals', 'asset', 'did.jsonl'].join('/') };
   }
@@ -109,7 +113,7 @@ export function bytesMatchDigest(bytes: Uint8Array, digest: string): boolean {
   return resourceDigest(bytes) === digest;
 }
 
-/** The DID a signer DID log's genesis names, when `authors/<hex>` is that DID's directory. */
+/** The DID a signer DID log's genesis names, when `signers/<hex>` is that DID's directory. */
 function signerDidOf(text: string, hex: string): string | null {
   try {
     const first = JSON.parse(text.split('\n', 1)[0]) as { state?: { id?: unknown } };
@@ -140,7 +144,7 @@ function decodeText(bytes: Uint8Array): string | null {
 
 /**
  * Whether `next` may replace the stored signer DID log `stored` in the
- * directory `authors/<hex>` (#965 review C2, r2 #6): null when it may,
+ * directory `signers/<hex>` (#965 review C2, r2 #6): null when it may,
  * otherwise the refusal. `next` must verify, every line, as the log of the
  * DID whose directory it is (with `witness`, the witness file the host holds
  * for it), and its versions must begin with the versions of `stored` that
@@ -274,7 +278,7 @@ function mergeWitness(stored: WitnessEntry[], next: WitnessEntry[]): WitnessEntr
 
 /**
  * What to store when `next` is uploaded as the witness file of the signer DID
- * whose directory is `authors/<hex>` (#965 review r4, finding 3), or the
+ * whose directory is `signers/<hex>` (#965 review r4, finding 3), or the
  * refusal. A witness file never weakens the verification of the stored signer
  * log (P7.8), and is judged by the proofs it carries, not their bytes:
  *

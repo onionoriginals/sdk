@@ -163,8 +163,20 @@ export interface LogVerification {
 
 export interface LogLimits {
   maxEntries?: number;
-  /** Maximum JSON length of one entry. */
+  /**
+   * Maximum size of one entry: the UTF-8 byte length of its stored line,
+   * without the line feed (P7.7; P14.13, PROVISIONAL originals-spec #48
+   * 1f90e43bc). A parsed entry is measured as the compact line it serializes
+   * to; a log's text is measured line by line as stored.
+   */
   maxEntryBytes?: number;
+}
+
+const utf8 = new TextEncoder();
+
+/** The UTF-8 byte length of `text`. */
+export function utf8Length(text: string): number {
+  return utf8.encode(text).length;
 }
 
 export interface VerifyOptions {
@@ -412,7 +424,7 @@ function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
   }
   if (!isJsonObject(raw.parameters) || !isJsonObject(raw.state)) fail("invalid-evidence", "ENTRY_MEMBERS", "parameters and state must be objects");
   if (!Array.isArray(raw.proof)) fail("invalid-evidence", "ENTRY_MEMBERS", "proof must be an array");
-  if (limits.maxEntryBytes !== undefined && JSON.stringify(raw).length > limits.maxEntryBytes) {
+  if (limits.maxEntryBytes !== undefined && utf8Length(JSON.stringify(raw)) > limits.maxEntryBytes) {
     fail("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${limits.maxEntryBytes} bytes`);
   }
   return raw as unknown as LogEntry;
@@ -650,6 +662,11 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   for (let index = 0; index < lines.length; index++) {
     try {
       if (lines[index].length === 0) throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
+      // The stored line is what is measured (P7.7, P14.13), before it is parsed.
+      const max = options.limits?.maxEntryBytes;
+      if (max !== undefined && lines[index].length > max / 3 && utf8Length(lines[index]) > max) {
+        throw new OriginalsError("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${max} bytes`);
+      }
       entries.push(parseJson(lines[index], options.parse));
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;

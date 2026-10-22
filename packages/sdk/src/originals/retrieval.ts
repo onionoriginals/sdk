@@ -24,6 +24,7 @@
  */
 import { OriginalsError, type ErrorCategory } from "@originals/vh";
 import { isJsonObject, parseJson } from "@originals/vh/json";
+import { utf8Length } from "@originals/vh/log";
 import { ORIGINALS_LIMITS, checkAsset, checkAuthorRef, checkEditorRef } from "@originals/vh/originals";
 import { RETRIEVAL_LIMITS, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { ZIP_LIMITS, type ZipLimits } from "./zip.js";
@@ -49,6 +50,8 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
   const digests = new Set<string>();
   lines.forEach((line, i) => {
     try {
+      // P7.7; P14.13 (PROVISIONAL, originals-spec #48): an entry is at most this many UTF-8 bytes as stored.
+      if (utf8Length(line) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       const entry = parseJson(line);
       if (!isJsonObject(entry) || !isJsonObject(entry.state)) unplannable("invalid-evidence", i, "ENTRY_STATE", "an entry is an object with a state object");
       const author = checkAuthorRef(entry.state.author);
@@ -97,6 +100,7 @@ export class Retrieval {
       maxRequests: limits.maxRequests ?? RETRIEVAL_LIMITS.maxRequests,
       maxTotalBytes: limits.maxTotalBytes ?? this.archive.maxTotalBytes,
       maxFileBytes: limits.maxFileBytes ?? RETRIEVAL_LIMITS.maxFileBytes,
+      maxResourceBytes: limits.maxResourceBytes ?? RETRIEVAL_LIMITS.maxResourceBytes,
       requestTimeoutMs: limits.requestTimeoutMs ?? RETRIEVAL_LIMITS.requestTimeoutMs,
       timeoutMs: limits.timeoutMs ?? RETRIEVAL_LIMITS.timeoutMs,
     };
@@ -144,14 +148,16 @@ export class Retrieval {
    * Make one request. An optional file that is unavailable gives undefined;
    * any other failure throws. `archive` files are part of the snapshot.
    */
-  async get(url: string, { required, archive, fetch = this.fetch }: { required: boolean; archive: boolean; fetch?: HostedFetch }): Promise<Uint8Array | undefined> {
+  async get(url: string, { required, archive, resource = false, fetch = this.fetch }: { required: boolean; archive: boolean; resource?: boolean; fetch?: HostedFetch }): Promise<Uint8Array | undefined> {
     this.checkRunning();
     if (this.requests >= this.limits.maxRequests) this.exceeded("requests", `at most ${this.limits.maxRequests} requests`);
     this.requests++;
     const byteRoom = this.limits.maxTotalBytes - this.bytes;
     const archiveRoom = archive ? this.archive.maxTotalBytes - this.archiveBytes : Infinity;
     const room = Math.min(byteRoom, archiveRoom);
-    const maxBytes = Math.max(0, Math.min(this.limits.maxFileBytes, room));
+    // A resource has its own cap, separate from the log-file cap (P8.5; P14.13, PROVISIONAL originals-spec #48).
+    const cap = resource ? this.limits.maxResourceBytes : this.limits.maxFileBytes;
+    const maxBytes = Math.max(0, Math.min(cap, room));
     const overBudget = (size?: number): never =>
       byteRoom <= archiveRoom
         ? this.exceeded("bytes", `${url} ${size === undefined ? "is larger than" : `is ${size} bytes, more than`} the ${byteRoom} bytes left of ${this.limits.maxTotalBytes}`)
@@ -186,7 +192,7 @@ export class Retrieval {
         this.bytes += read;
         if (this.bytes > this.limits.maxTotalBytes) this.exceeded("bytes", `${url} was refused after ${read} bytes, past the budget of ${this.limits.maxTotalBytes}`);
       }
-      if (error instanceof OriginalsError && error.code === "FETCH_TOO_LARGE" && room < this.limits.maxFileBytes) overBudget();
+      if (error instanceof OriginalsError && error.code === "FETCH_TOO_LARGE" && room < cap) overBudget();
       if (error instanceof OriginalsError && error.category === "unavailable-bytes") return unavailable(error);
       throw error;
     } finally {

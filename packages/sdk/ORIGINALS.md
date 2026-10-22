@@ -100,6 +100,12 @@ on; it never reports an unanchored Original as current (P7.10). The
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
+- **Entry size (P7.7; P14.13, PROVISIONAL #48).** An entry is at most
+  `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
+  length of its stored line without the line feed (previously UTF-16 code
+  units of the re-serialized entry). A commit of a larger entry fails with
+  `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
+  log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version.
 - **Signing (P5.11).** The signer receives the unsigned entry, the proof options,
@@ -147,10 +153,16 @@ editor's grant, or one only the author may make), `stale-parent`, `fork`,
 ## Evidence package — phase 1, implemented (PROVISIONAL format, D4)
 
 The package is an uncompressed ZIP containing `originals-evidence.json` (the
-manifest), `asset/did.jsonl` through the checkpoint, `asset/did-witness.json`,
-the DID histories of every signer (the author and each editor that signed an
-entry, P7.1) under `authors/<sha256(did)>/`, and the resource bytes
-under `resources/<digest>`. The manifest records the packager's head, so a
+manifest), `asset/did.jsonl` through the checkpoint, the DID histories of
+every signer (the author and each editor that signed an entry, P7.1) under
+`signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
+that DID's method has witnesses; `signerPath(did)`), and the resource bytes
+under `resources/<digest>`. There is no asset witness file: asset logs have
+no witnesses (P9.8). PROVISIONAL (P14.10, open originals-spec #48 at
+`1f90e43bc`; BREAKING): the directory was `authors/` and an
+`asset/did-witness.json` was written; neither is written or read any more,
+and a package or hosted snapshot carrying them is rejected
+(`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a
 package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
 declares the package complete or partial, listing any missing items (a
@@ -357,7 +369,8 @@ implementation limits (PROVISIONAL), set with the SDK's `retrievalLimits`:
 | --- | --- | --- |
 | `maxRequests` | 1,024 | requests in one call, failed and optional ones included |
 | `maxTotalBytes` | `archiveLimits.maxTotalBytes` (512 MiB) | bytes accepted in one call, counted as they arrive, alias log included |
-| `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response (P7.7) |
+| `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response other than a resource: logs, witness files, the manifest (P7.7) |
+| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13, PROVISIONAL #48); a larger resource is unavailable content, not a failure (P7.4) |
 | `requestTimeoutMs` | `FETCH_LIMITS.timeoutMs` (15 s) | one request |
 | `timeoutMs` | 120 s | the whole call, so slow or absent optional files cannot multiply the per-request timeout |
 
@@ -366,8 +379,9 @@ applies to one package: at most `maxEntries` files and `maxTotalBytes` bytes.
 The manifest is checked first. The asset log is unverified, so before anything
 it asks for is requested, every line must carry a well-formed author reference
 and asset state (else `SNAPSHOT_LOG_INVALID`, in the category of the rule it
-breaks), and the whole plan (asset witness, each author's log and witness, each
-resource) must fit the request and file limits. Each request gets
+breaks) and be at most 65,536 UTF-8 bytes (`ENTRY_TOO_LARGE`, P7.7), and the
+whole plan (each signer's log and witness, each resource) must fit the
+request and file limits. Each request gets
 `{ maxBytes, timeoutMs, signal }`: the smaller of its own cap and what is left
 of the budget. A fetcher that ignores them is still bounded, because the SDK
 checks every returned size and stops waiting at the deadline. Exhausting a

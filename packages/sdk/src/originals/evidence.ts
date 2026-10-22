@@ -4,13 +4,18 @@
  *
  *   originals-evidence.json               the manifest
  *   asset/did.jsonl                       the asset log, through the checkpoint
- *   asset/did-witness.json                witness proofs, when there are any
- *   authors/<sha256(did) hex>/did.jsonl   each signer DID's log: the author's and
+ *   signers/<sha256(did) hex>/did.jsonl   each signer DID's log: the author's and
  *                                         each editor's that signed an entry (P7.1)
- *   authors/<sha256(did) hex>/did-witness.json
+ *   signers/<sha256(did) hex>/did-witness.json
+ *                                         that DID's witness file, where its method
+ *                                         has witnesses
  *   resources/<digest>                    resource bytes, named by digest
  *
- * Nothing outside this layout is accepted (P7.5).
+ * PROVISIONAL (P14.10, originals-spec #48 1f90e43bc): signer histories are
+ * under `signers/`, because editors are signers too, and there is no asset
+ * witness file, because asset logs have no witnesses (P9.8). Nothing outside
+ * this layout is accepted (P7.5); in particular `authors/` and
+ * `asset/did-witness.json` are not read (no legacy layout).
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
@@ -42,7 +47,7 @@ export interface EvidenceManifest {
 export interface EvidenceContents {
   manifest: EvidenceManifest;
   log: string;
-  witness?: unknown;
+  /** Each signer DID's history (the author's and each editor's). */
   authors: AuthorDidEvidence[];
   bytes: Record<string, Uint8Array>;
 }
@@ -54,17 +59,17 @@ function evidenceError(code: string, message: string): never {
   throw new OriginalsError("invalid-evidence", code, message);
 }
 
-export function authorPath(did: string): string {
-  return `authors/${hex.encode(sha256(encoder.encode(did)))}`;
+/** The directory of a signer DID's history in a package or hosted layout: `signers/<hex sha256 of the DID>` (P14.10, PROVISIONAL #48). */
+export function signerPath(did: string): string {
+  return `signers/${hex.encode(sha256(encoder.encode(did)))}`;
 }
 
 export function writeEvidence(contents: EvidenceContents): Uint8Array {
   const files = new Map<string, Uint8Array>();
   files.set(MANIFEST, encoder.encode(`${JSON.stringify(contents.manifest, null, 2)}\n`));
   files.set("asset/did.jsonl", encoder.encode(contents.log));
-  if (contents.witness !== undefined) files.set("asset/did-witness.json", encoder.encode(JSON.stringify(contents.witness)));
   for (const author of contents.authors) {
-    const base = authorPath(author.did);
+    const base = signerPath(author.did);
     files.set(`${base}/did.jsonl`, encoder.encode(typeof author.log === "string" ? author.log : author.log.map((e) => `${JSON.stringify(e)}\n`).join("")));
     if (author.witness !== undefined) files.set(`${base}/did-witness.json`, encoder.encode(JSON.stringify(author.witness)));
   }
@@ -72,7 +77,7 @@ export function writeEvidence(contents: EvidenceContents): Uint8Array {
   return writeZip(files);
 }
 
-const LAYOUT = /^(?:originals-evidence\.json|asset\/did\.jsonl|asset\/did-witness\.json|authors\/[0-9a-f]{64}\/(?:did\.jsonl|did-witness\.json)|resources\/z[1-9A-HJ-NP-Za-km-z]{1,120})$/;
+const LAYOUT = /^(?:originals-evidence\.json|asset\/did\.jsonl|signers\/[0-9a-f]{64}\/(?:did\.jsonl|did-witness\.json)|resources\/z[1-9A-HJ-NP-Za-km-z]{1,120})$/;
 
 function text(bytes: Uint8Array, name: string): string {
   try {
@@ -129,14 +134,14 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
     }
   }
   for (const did of authorDids) {
-    const base = authorPath(did);
+    const base = signerPath(did);
     const log = files.get(`${base}/did.jsonl`);
     if (!log) continue;
     const witness = files.get(`${base}/did-witness.json`);
     authors.set(did, { did, log: text(log, `${base}/did.jsonl`), ...(witness ? { witness: parseJson(text(witness, `${base}/did-witness.json`)) } : {}) });
   }
   for (const name of files.keys()) {
-    if (name.startsWith("authors/") && ![...authorDids].some((did) => name.startsWith(`${authorPath(did)}/`))) {
+    if (name.startsWith("signers/") && ![...authorDids].some((did) => name.startsWith(`${signerPath(did)}/`))) {
       evidenceError("EVIDENCE_LAYOUT", `${name} belongs to no signer the log names`);
     }
   }
@@ -147,11 +152,9 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
     checkDigest(digest, name);
     bytes[digest] = data;
   }
-  const witness = files.get("asset/did-witness.json");
   return {
     manifest,
     log: text(logBytes, "asset/did.jsonl"),
-    ...(witness ? { witness: parseJson(text(witness, "asset/did-witness.json")) } : {}),
     authors: [...authors.values()],
     bytes,
   };

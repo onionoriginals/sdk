@@ -11,7 +11,7 @@ import { didWebvhLogUrl } from "@originals/vh/webvh";
 import {
   MemoryStore,
   OriginalsSDK,
-  authorPath,
+  signerPath,
   describeEntry,
   keySigner,
   readZip,
@@ -115,9 +115,9 @@ describe("C12-124 and P7.1: evidence packages carry every signer's DID history",
     const pkg = await sdk.package(did);
     expect(pkg.manifest).toMatchObject({ completeness: "complete", missing: [] });
     const files = readZip(pkg.bytes);
-    expect(files.has(`${authorPath(bob.did)}/did.jsonl`)).toBe(true);
+    expect(files.has(`${signerPath(bob.did)}/did.jsonl`)).toBe(true);
     // Carol signed nothing, so her history is not needed (P7.1).
-    expect(files.has(`${authorPath(carol.did)}/did.jsonl`)).toBe(false);
+    expect(files.has(`${signerPath(carol.did)}/did.jsonl`)).toBe(false);
     const fresh = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
     const loaded = await fresh.load(pkg.bytes);
     expect(loaded.report.identityEvidence).toMatchObject({ status: "complete" });
@@ -128,7 +128,7 @@ describe("C12-124 and P7.1: evidence packages carry every signer's DID history",
   test("without the editor's history the result is incomplete identity evidence and not current", async () => {
     const { bob, sdk, did, v1, asBob } = await harbor();
     await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
-    const files = new Map([...readZip((await sdk.package(did)).bytes)].filter(([path]) => !path.startsWith(`${authorPath(bob.did)}/`)));
+    const files = new Map([...readZip((await sdk.package(did)).bytes)].filter(([path]) => !path.startsWith(`${signerPath(bob.did)}/`)));
     const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
     files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: bob.did, role: "editor" }] })));
     const fresh = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });

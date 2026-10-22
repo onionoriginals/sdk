@@ -67,7 +67,7 @@ import {
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
-import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
@@ -969,7 +969,9 @@ export class OriginalsSDK {
       report.authorBinding.status !== "valid" || report.identityEvidence.status !== "complete" ||
       added.some((v) => v.bytes !== "verified")
     ) {
-      sdkError("invalid-evidence", "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
+      // An entry over a profile limit is limit-exceeded (P7.7); any other failure is invalid evidence.
+      const category = report.history.failure?.category === "limit-exceeded" ? "limit-exceeded" : "invalid-evidence";
+      sdkError(category, "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
     }
     const signed: SignedCandidate = {
       kind: "candidate", original: draft.original, parent: draft.parent, versionId: entry.versionId, entry, line: JSON.stringify(entry), summary: draft.summary, bytes: draft.bytes,
@@ -1176,7 +1178,6 @@ export class OriginalsSDK {
         log: contents.log,
         authors,
         bytes: contents.bytes,
-        witnessFile: contents.witness,
         checkpoint: contents.manifest.checkpoint,
         now: this.clock(),
         ...comparisons,
@@ -1252,8 +1253,8 @@ export class OriginalsSDK {
 
     const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
     const files = new Map<string, Uint8Array>();
-    const put = async (path: string, required: boolean) => {
-      const data = await retrieval.get(`${base}${path}`, { required, archive: true });
+    const put = async (path: string, required: boolean, resource = false) => {
+      const data = await retrieval.get(`${base}${path}`, { required, archive: true, resource });
       if (data) files.set(path, data);
       return data;
     };
@@ -1261,16 +1262,16 @@ export class OriginalsSDK {
     const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
-    const planned = 1 + 2 * plan.authors.length + plan.digests.length;
+    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10, PROVISIONAL #48).
+    const planned = 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.
     const identityRequests = identities && this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
     retrieval.plan(planned + identityRequests, files.size + planned);
-    await put("asset/did-witness.json", false);
     for (const did of plan.authors) {
-      if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
+      if (await put(`${signerPath(did)}/did.jsonl`, false)) await put(`${signerPath(did)}/did-witness.json`, false);
     }
-    for (const digest of plan.digests) await put(`resources/${digest}`, false);
+    for (const digest of plan.digests) await put(`resources/${digest}`, false, true);
     return { alias, files };
   }
 

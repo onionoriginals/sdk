@@ -47,7 +47,6 @@ export interface VerifyOriginalOptions {
   log: string | unknown[];
   /** Author DID histories. Missing history is incomplete evidence, never trust in the key (P5.6). */
   authors: AuthorDidEvidence[];
-  witnessFile?: unknown;
   /** Resource bytes by digest. */
   bytes?: Record<string, Uint8Array> | ((digest: string) => Uint8Array | undefined);
   /** Verify this exact checkpoint instead of the head (P3.2). */
@@ -319,7 +318,6 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
 
   const verifyOptions = {
     specialisation: originalsSpecialisation(histories),
-    witnessFile: options.witnessFile,
     now: options.now,
     limits: { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes, ...options.limits },
   };
@@ -331,7 +329,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   let stale = false;
   if ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined) {
     const text = typeof options.log === "string" ? options.log : options.log.map((e) => `${JSON.stringify(e)}\n`).join("");
-    const resolution = await resolveCopies({ source: "supplied", log: text, witnessFile: options.witnessFile }, options.copies ?? [], {
+    const resolution = await resolveCopies({ source: "supplied", log: text }, options.copies ?? [], {
       ...verifyOptions,
       ...(options.retained?.original !== undefined ? { retainedVersionId: options.retained.original } : {}),
     });

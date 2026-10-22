@@ -110,6 +110,12 @@ describe('originals routes — auth gating', () => {
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
+    // P14.10 (PROVISIONAL, originals-spec #48 1f90e43bc): signer DID histories are under signers/, and an
+    // asset log has no witness file (P9.8), so neither authors/ nor asset/did-witness.json is part of the layout.
+    const hex = 'a'.repeat(64);
+    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/asset/did-witness.json`)).status).toBe(403);
+    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did.jsonl`)).status).toBe(403);
+    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did-witness.json`)).status).toBe(403);
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
@@ -367,7 +373,7 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
 describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
   const NAME = 'o-9xKpQ2mN4vR7tW1z';
   const base = `demo.example.com/user-sub-1/${NAME}/originals`;
-  const authorDir = `${base}/authors/${'a'.repeat(64)}`;
+  const authorDir = `${base}/signers/${'a'.repeat(64)}`;
 
   function setup() {
     const store = tmpStore();
@@ -416,7 +422,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     const { put, get } = setup();
     const { hex, logs } = await signerLog(2);
     const [v1, v2] = logs;
-    const dir = `${base}/authors/${hex}`;
+    const dir = `${base}/signers/${hex}`;
     expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
     expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200);
     expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200); // a retry of the same log
@@ -432,7 +438,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     const { store, put, get } = setup();
     const { hex, logs } = await signerLog(3);
     const [v1, v2, v3] = logs;
-    const dir = `${base}/authors/${hex}`;
+    const dir = `${base}/signers/${hex}`;
     expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
     // Bytes that extend the stored log but do not verify are refused, so they cannot block a later save.
     const junk = await put(`${dir}/did.jsonl`, `${v1}{"junk":1}\n`);
@@ -454,7 +460,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
   test('#965 r4 finding 3: a pruned did:webvh witness file is accepted when the stored log verifies with it; proofs compare canonically; a witness file never weakens the stored log (P7.8)', async () => {
     const { put, get } = setup();
     const { hex, logs, witness } = await signerLog(3, { witnessed: true });
-    const dir = `${base}/authors/${hex}`;
+    const dir = `${base}/signers/${hex}`;
     const w = `${dir}/did-witness.json`;
     expect((await put(w, witness.pruned[0])).status).toBe(200);
     expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
@@ -500,7 +506,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
   test('#965 r5 finding 3: a witness file nested deeper than the JSON depth limit is a structured 422, never a 500', async () => {
     const { put, get } = setup();
     const { hex, logs, witness } = await signerLog(2, { witnessed: true });
-    const dir = `${base}/authors/${hex}`;
+    const dir = `${base}/signers/${hex}`;
     const w = `${dir}/did-witness.json`;
     expect((await put(w, witness.pruned[0])).status).toBe(200);
     expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);

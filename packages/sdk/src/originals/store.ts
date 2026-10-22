@@ -24,17 +24,14 @@ import { parseJson } from "@originals/vh/json";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 
 export interface StoredOriginal {
-  /** The committed asset log, `did.jsonl` text. */
+  /** The committed asset log, `did.jsonl` text. Asset logs have no witness file (P9.8). */
   log: string;
-  /** The witness proofs file, once witnesses exist (plan 011, PR 7). */
-  witness?: unknown;
 }
 
 export interface CommitUpdate {
   /** The head the new log extends; null for a new Original. */
   expectedHead: string | null;
   log: string;
-  witness?: unknown;
 }
 
 /**
@@ -134,7 +131,7 @@ export class MemoryStore implements OriginalsStore {
   commit(did: string, update: CommitUpdate): Promise<void> {
     const current = headOf(this.originals.get(did)?.log);
     if (current !== update.expectedHead) return Promise.reject(staleHead(did, update.expectedHead, current));
-    this.originals.set(did, { log: update.log, ...(update.witness !== undefined ? { witness: update.witness } : {}) });
+    this.originals.set(did, { log: update.log });
     return Promise.resolve();
   }
 

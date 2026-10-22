@@ -1869,9 +1869,14 @@
       "phases": [
         1
       ],
-      "status": "todo",
+      "status": "covered",
       "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-151",
@@ -1893,9 +1898,12 @@
       "phases": [
         1
       ],
-      "status": "todo",
+      "status": "covered",
       "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
     },
     {
       "id": "C12-153",
@@ -1905,9 +1913,12 @@
       "phases": [
         1
       ],
-      "status": "todo",
+      "status": "covered",
       "proposal": "originals-spec#48@1f90e43bc",
-      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table."
+      "note": "PROVISIONAL: section 14 wire format, open spec PR #48 (head 1f90e43bc), not in the pinned table.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
     }
   ]
 }

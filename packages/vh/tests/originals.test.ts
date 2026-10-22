@@ -520,3 +520,36 @@ describe("creating needs a well-formed entry", () => {
     await expect(createLog({ versionTime: base.versionTime, parameters: { method: ORIGINALS_METHOD, scid: "{SCID}" }, state: {}, sign: base.sign })).resolves.toBeDefined();
   });
 });
+
+describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+  /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
+  async function genesisOf(target: number) {
+    const key = seeded(21);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const ref = alice.ref("orig");
+    const wide = "é".repeat(30_000); // 60,000 UTF-8 bytes, 30,000 UTF-16 code units
+    let pad = 0;
+    for (let i = 0; i < 40; i++) {
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { wide, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign: alice.signer(key, "orig") });
+      const line = serializeLog([entry]).slice(0, -1);
+      const size = new TextEncoder().encode(line).length;
+      if (size === target) return { alice, line, codeUnits: line.length };
+      pad += target - size;
+    }
+    throw new Error(`no entry of ${target} bytes`);
+  }
+
+  test("a line of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
+    const atLimit = await genesisOf(65_536);
+    expect(atLimit.codeUnits).toBeLessThan(40_000);
+    const ok = await verifyOriginal({ log: `${atLimit.line}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    expect(ok.history.status, JSON.stringify(ok.history.failure)).toBe("valid");
+    const over = await genesisOf(65_537);
+    const r = await verifyOriginal({ log: `${over.line}\n`, authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    failedWith(r, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+    expect(r.history.status).toBe("limit-exceeded");
+    // Parsed entries are measured as the line they serialize to.
+    const parsed = await verifyOriginal({ log: [JSON.parse(over.line)], authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    failedWith(parsed, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+  });
+});

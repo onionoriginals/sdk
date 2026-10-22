@@ -380,7 +380,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
 describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
   const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
   const { createSharedSaves, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
-  const { authorPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
+  const { signerPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
 
   /** A third device whose author DID is at v2 (key 0 removed, or deactivated). */
   async function rotated(deactivate: boolean, opts: { witnessed?: boolean } = {}) {
@@ -390,7 +390,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], clock: () => (tc += 250) });
     expect((await c.import((await env.a.package(env.did)).bytes)).status).toBe('imported');
     const hostC = landingSharedHost({ sdk: c, aliasDid: env.aliasDid, transport: env.h.adapterFor(SUB2), read: env.h.read });
-    const didPath = `${env.siteKey}/originals/${authorPath(env.author.evidence.did)}/did.jsonl`;
+    const didPath = `${env.siteKey}/originals/${signerPath(env.author.evidence.did)}/did.jsonl`;
     return { ...env, v2, c, hostC, didPath };
   }
 
