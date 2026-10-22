@@ -266,8 +266,9 @@ export interface OriginalView {
   current: boolean;
   /**
    * P7.10: the checkpoint this result is valid as of, the signer DID versions
-   * it relied on and when each history was obtained; null when it does not
-   * verify (see `report.reasons`). Entries that are historically authorized
+   * it relied on and when each history was obtained, for an anchored Original
+   * as for an unanchored one; null when it does not verify (see
+   * `report.reasons`). Entries that are historically authorized
    * only are in `report.historicallyAuthorizedOnly` (P7.9).
    */
   validAsOf: ValidAsOf | null;

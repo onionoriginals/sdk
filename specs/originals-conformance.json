@@ -2001,6 +2001,7 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/hosting.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },

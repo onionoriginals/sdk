@@ -159,7 +159,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
-| `validAsOf` | for a valid result, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
+| `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
 | `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
@@ -671,14 +671,34 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   originals-spec #47 at `2be62b982`, P7.8, P9.15): each did:vh or did:webvh
   signer is checked against the newest version of its DID this verifier
   knows of: the newest it obtained from any source in this verification or
-  retained from earlier (the SDK uses configured or stored evidence in place
-  of a package's or host's when it extends it). It need not show that no
+  retained from earlier (the SDK compares a package's or host's evidence
+  with what it is configured with and keeps by verified versionIds, never by
+  bytes, and uses the newest; evidence that diverges is an identity fork,
+  incomplete). It need not show that no
   newer version exists. `validAsOf.signers` states, for each signer, the
   versionId relied on and when and where that history was obtained
   (`obtainedAt`, `source`: `package`, `host`, `fetched`, `retained` or
   `supplied`). An entry inscribed after the newest known version is checked
-  against it and is not incomplete identity evidence; an entry naming a
-  version the verifier has no verified copy of is (P5.6). A retained
+  against it and is not incomplete identity evidence. An entry before or at
+  the anchor naming a version the verifier has no verified copy of is
+  incomplete identity evidence (P5.6). After the anchor such an inscription
+  never downgrades the accepted head (P9.12; PROVISIONAL): one naming a
+  version numbered at or below the newest verified version of that DID, but
+  not in its history, is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`);
+  one naming a newer version, or signed by a DID with no history here, is
+  `later-inscription-unverifiable`, listed in `anchoring.unverifiable` with
+  the signer DID and version it names, and the accepted head keeps its
+  identity evidence and stays current. The holder of the sat decides what is
+  inscribed but has no authority (P9.11, P9.12), so otherwise a hash-chained
+  junk entry naming a version that does not exist would make the Original
+  incomplete, never current, for good. A verifier that obtains the named
+  version verifies the inscription. Spec question (proposed on #47, P9.15
+  and P5.6): add to P9.15 "An inscription after the anchoring inscription
+  whose signer DID version the verifier cannot verify is reported as
+  unverifiable. It does not make the identity evidence of the accepted
+  state incomplete, and it does not prevent that state from being current;
+  an inscription naming a version number the verifier holds under another
+  versionId is invalid." A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key
   removal can get later inscriptions accepted by readers who do not know of
