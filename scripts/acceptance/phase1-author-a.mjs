@@ -3,7 +3,8 @@
  *
  * A FileStore in dir A, the author's did:webvh from phase 0 and the
  * authorship key from the custody file. Create an Original with a binary
- * image, a binary blob and a text resource; revise it twice; export the
+ * image, a binary blob and a text resource; revise it twice; add a resource
+ * and remove it again (P4.1; originals-spec #49); export the
  * complete evidence package. The package and an expectations file (public
  * claims a reader checks against) go to the artifacts directory; the key never
  * leaves the custody file.
@@ -105,11 +106,46 @@ await phase.check("revise-binary", "revise: change the image bytes, the name and
   return { checkpoint: head };
 });
 
-await phase.check("resource-set-fixed", "adding a resource after genesis is rejected (P4.1); the head does not move", async () => {
-  const error = await rejection(sdk.edit(did, { parent: head, resources: [{ id: "extra.txt", mediaType: "text/plain", bytes: utf8("extra") }], author, signer }), "adding a resource");
-  assertEqual([error.category, error.code], ["invalid-evidence", "STATE_RESOURCE_SET"], "error");
-  assertEqual((await sdk.get(did)).checkpoint, head, "head after the rejected add");
-  return { rejected: describeError(error), removal: "EditInput has no removal operation; P4.1 fixes the resource set at genesis" };
+const extra = utf8("An attachment, added after genesis and removed again.\n");
+
+await phase.check("resource-add", "the author adds a resource after genesis: appended, at version 1 (P4.1, P4.4; originals-spec #49)", async () => {
+  const e = await sdk.edit(did, { parent: head, resources: [{ id: "extra.txt", mediaType: "text/plain", bytes: extra }], author, signer });
+  assertEqual(e.status, "committed", "edit status");
+  assertEqual(e.original.state.resources.map((r) => r.id), ["artwork.png", "scan.bin", "notes.md", "extra.txt"], "resources after the addition");
+  assertEqual(e.original.resources.filter((r) => r.resource === "extra.txt").map((r) => r.version), [1], "extra.txt versions");
+  head = e.original.checkpoint;
+  record(e.original);
+  return { checkpoint: head, resources: e.original.state.resources.map((r) => r.id) };
+});
+
+await phase.check("resource-remove", "the author removes it again; its version stays in history and verified (P4.1, P8.3)", async () => {
+  const e = await sdk.edit(did, { parent: head, remove: ["extra.txt"], author, signer });
+  assertEqual(e.status, "committed", "edit status");
+  assertEqual(e.original.state.resources.map((r) => r.id), ["artwork.png", "scan.bin", "notes.md"], "resources after the removal");
+  const kept = e.original.resources.filter((r) => r.resource === "extra.txt");
+  assertEqual(kept.map((r) => [r.version, r.bytes]), [[1, "verified"]], "the removed resource's history");
+  head = e.original.checkpoint;
+  record(e.original);
+  return { checkpoint: head, removed: "extra.txt", history: kept.map((r) => `${r.resource}@${r.version}`) };
+});
+
+await phase.check("resource-set-refusals", "refused before signing: an editor adding or removing a resource (P5.16), a reused resourceID (P4.1) and removing the last resource (P4.1); the head does not move", async () => {
+  let asked = 0;
+  const counting = { ...signer, sign: (request) => (asked++, signer.sign(request)) };
+  // This journey has no editor DID: an editor's addition or removal is refused before any grant or key is consulted.
+  const editorDid = "did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ";
+  const editor = { did: editorDid, verificationMethod: `${editorDid}#edit`, versionId: "1-QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ" };
+  const added = await rejection(sdk.edit(did, { parent: head, resources: [{ id: "editor.txt", mediaType: "text/plain", bytes: utf8("x") }], editor, signer: counting }), "an editor adding a resource");
+  assertEqual([added.category, added.code], ["outside-grant", "EDITOR_AUTHOR_ONLY"], "editor addition");
+  const removed = await rejection(sdk.edit(did, { parent: head, remove: ["notes.md"], editor, signer: counting }), "an editor removing a resource");
+  assertEqual([removed.category, removed.code], ["outside-grant", "EDITOR_AUTHOR_ONLY"], "editor removal");
+  const reused = await rejection(sdk.edit(did, { parent: head, resources: [{ id: "extra.txt", mediaType: "text/plain", bytes: utf8("reused") }], author, signer: counting }), "re-adding a removed resourceID");
+  assertEqual([reused.category, reused.code], ["invalid-evidence", "STATE_RESOURCE_REUSED"], "reused resourceID");
+  const last = await rejection(sdk.edit(did, { parent: head, remove: ["artwork.png", "scan.bin", "notes.md"], author, signer: counting }), "removing every resource");
+  assertEqual([last.category, last.code], ["invalid-evidence", "STATE_RESOURCE_SET"], "last resource");
+  assertEqual(asked, 0, "the signer was asked to sign");
+  assertEqual((await sdk.get(did)).checkpoint, head, "head after the refusals");
+  return { editorAdd: describeError(added), editorRemove: describeError(removed), reused: describeError(reused), lastResource: describeError(last) };
 });
 
 await phase.check("export-package", "export the complete evidence package; no private key in it or in store A", async () => {
@@ -122,7 +158,7 @@ await phase.check("export-package", "export the complete evidence package; no pr
   const path = join(dirs.artifacts, "original-A.zip");
   writeFileSync(path, pkg.bytes);
   const digests = {};
-  for (const [label, bytes] of Object.entries({ "artwork.png@1": art1, "artwork.png@2": art2, "scan.bin@1": blob, "notes.md@1": notes1, "notes.md@2": notes2 })) digests[label] = sha256Hex(bytes);
+  for (const [label, bytes] of Object.entries({ "artwork.png@1": art1, "artwork.png@2": art2, "scan.bin@1": blob, "notes.md@1": notes1, "notes.md@2": notes2, "extra.txt@1": extra })) digests[label] = sha256Hex(bytes);
   const expected = { original: did, checkpoint: head, author: author.did, authorMethod: "did:webvh", versions, sha256: digests };
   writeFileSync(join(dirs.artifacts, "expected-A.json"), `${JSON.stringify(expected, null, 2)}\n`);
   phase.facts.original = { did, checkpoint: head, versionIds: versions.map((v) => v.versionId) };

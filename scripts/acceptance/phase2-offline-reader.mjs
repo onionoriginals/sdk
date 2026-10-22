@@ -65,7 +65,9 @@ await phase.check("author-binding", "author binding: every entry signed by an as
 await phase.check("resources", "every resource version's bytes are present and verified", () => {
   assertEqual(report.resources.status, "available", "resources.status");
   assert(report.resources.versions.every((v) => v.bytes === "verified"), "a version is not verified", report.resources.versions);
-  assertEqual(report.resources.versions.length, 5, "resource versions");
+  // Every version the author claimed, including the removed extra.txt@1 (P4.1, P8.3).
+  assertEqual(report.resources.versions.map((v) => `${v.resource}@${v.version}`).sort(), Object.keys(expected.sha256).sort(), "resource versions");
+  assert(!report.state.resources.some((r) => r.id === "extra.txt"), "extra.txt is still in the current resource set");
   return report.resources.versions.map((v) => `${v.resource}@${v.version}:${v.bytes}`);
 });
 await phase.check("byte-digests", "independently: each packaged byte string hashes to its SHA-256 multihash digest and the author's claim", () => {
