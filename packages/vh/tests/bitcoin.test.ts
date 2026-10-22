@@ -405,6 +405,20 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
   });
 });
 
+describe("C12-144: no grant names the anchoring sat's did:btco, before or after anchoring (P5.15, P9.12)", () => {
+  test("a grant made before anchoring to the sat later anchored on refuses the anchoring entry; after anchoring it is refused outright", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const editors = [{ did: SAT, name: true, metadata: false, resources: [] }];
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign, editors });
+    await expect(updateOriginal(genesis, { versionTime: time(10), aliases: [SAT], author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
+    const plain = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign });
+    const anchor = await updateOriginal(plain, { versionTime: time(10), aliases: [SAT], author: ref, sign });
+    await expect(updateOriginal(anchor, { versionTime: time(11), editors, author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
+  });
+});
+
 describe("the deactivation of an anchored Original (P9.12)", () => {
   test("a deactivation counts only once inscribed on the sat", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();

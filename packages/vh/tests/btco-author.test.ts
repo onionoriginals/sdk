@@ -94,10 +94,10 @@ describe("review fixes (PR 9b)", () => {
   test("a retained did:btco author version is found by its inscription id", async () => {
     const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
     const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
-    const options = { log: [genesis], now: NOW, bytes: allBytes, freshness: "asserted" as const, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }] };
+    const options = { log: [genesis], now: NOW, bytes: allBytes, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }] };
     const r = await verifyOriginal({ ...options, retained: { authors: { [AUTHOR]: v1.id } } });
-    expect(r.identityEvidence.freshness).toBe("asserted");
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    expect(r.reasons).toEqual(["not-anchored"]); // found, not stale; unanchored, so valid as of its checkpoint (P7.10)
     const gone = await verifyOriginal({ ...options, retained: { authors: { [AUTHOR]: id() } } });
     expect(gone.identityEvidence.freshness).toBe("stale");
   });
@@ -108,7 +108,7 @@ describe("review fixes (PR 9b)", () => {
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
     const content = bytes(`\uFEFF${serializeLog([genesis, anchor])}`);
     const r = await verifyOriginal({
-      log: [genesis, anchor], now: NOW, bytes: allBytes, freshness: "asserted",
+      log: [genesis, anchor], now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }],
       bitcoin: [sat(SAT, [at(31, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content })])],
     });
@@ -157,7 +157,7 @@ describe("Originals by a did:btco author", () => {
   test("C12-58: an anchored Original with a did:btco author verifies from Bitcoin alone", async () => {
     const { v1, genesis, anchor } = await setup();
     const r = await verifyOriginal({
-      log: [genesis, anchor], now: NOW, bytes: allBytes, freshness: "asserted",
+      log: [genesis, anchor], now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }],
       bitcoin: [sat(SAT, [inscribed([genesis, anchor], 31)])],
     });
@@ -169,7 +169,7 @@ describe("Originals by a did:btco author", () => {
   test("C12-59: an author DID version inscribed after an Originals inscription in the same block is not in effect for it", async () => {
     const { v1, genesis, anchor } = await setup();
     const removal = (transactionIndex: number) => version(31, document([{ fragment: "orig2", signer: seeded(23) }]), { transactionIndex });
-    const evidence = (tx: number) => ({ log: [genesis, anchor], now: NOW, bytes: allBytes, freshness: "asserted" as const, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, removal(tx)]) }], bitcoin: [sat(SAT, [inscribed([genesis, anchor], 31, { transactionIndex: 5 })])] });
+    const evidence = (tx: number) => ({ log: [genesis, anchor], now: NOW, bytes: allBytes, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, removal(tx)]) }], bitcoin: [sat(SAT, [inscribed([genesis, anchor], 31, { transactionIndex: 5 })])] });
     // The removal comes later in the same block: the anchor stands.
     expect((await verifyOriginal(evidence(9))).anchoring?.status).toBe("anchored");
     // The removal comes earlier in the same block: the anchor's key is gone.
@@ -188,10 +188,11 @@ describe("Originals by a did:btco author", () => {
     const v2 = version(40, document([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]));
     const authors = [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, v2]) }];
     const next = await updateOriginal(genesis, { versionTime: time(41), name: "Harbor, later", author: ref(v2.id), sign });
-    const r = await verifyOriginal({ log: [genesis, next], authors, now: NOW, bytes: allBytes, freshness: "asserted" });
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    const r = await verifyOriginal({ log: [genesis, next], authors, now: NOW, bytes: allBytes });
+    expect(r.reasons).toEqual(["not-anchored"]);
+    expect(r.validAsOf?.checkpoint).toBe(next.versionId);
     const back = await updateOriginal(next, { versionTime: time(42), name: "Older version", author: ref(v1.id), sign });
-    const regressed = await verifyOriginal({ log: [genesis, next, back], authors, now: NOW, bytes: allBytes, freshness: "asserted" });
+    const regressed = await verifyOriginal({ log: [genesis, next, back], authors, now: NOW, bytes: allBytes });
     expect(regressed.history.failure?.code).toBe("AUTHOR_VERSION_REGRESSED");
   });
 });
@@ -217,7 +218,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   /** Verify from Bitcoin alone: the author's sat and the anchoring sat, no copy of the log (P9.18). */
   const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[]) =>
     verifyOriginal({
-      now: NOW, bytes: allBytes, freshness: "asserted",
+      now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: "index" in (author[0] ?? {}) ? (author as SatEvidence[]) : sat(AUTHOR, author as Inscribed[]) }],
       bitcoin: [sat(SAT, anchoring)],
     });
@@ -416,7 +417,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     await alice.rotate([{ fragment: "orig", signer: KEY }]);
     const next = await updateOriginal(anchor, { versionTime: time(30), name: "Names the re-grant", author: alice.ref("orig"), sign: vhSign });
     const r = await verifyOriginal({
-      now: NOW, bytes: allBytes, freshness: "asserted", authors: [alice.evidence()],
+      now: NOW, bytes: allBytes, authors: [alice.evidence()],
       bitcoin: [sat(SAT, [inscribed([genesis, anchor], 11), inscribed([next], 30)])],
     });
     expect(r.head).toBe(next.versionId);

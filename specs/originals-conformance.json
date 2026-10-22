@@ -1959,6 +1959,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/editors.test.ts"
       ]
     },

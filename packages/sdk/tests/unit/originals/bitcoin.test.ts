@@ -661,11 +661,12 @@ describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
     const read = await satEvidence(snapshot([{ id: docId, height: 2, content: "art", mediaType: "image/png", metadata: encodeCbor(doc) }], 10, AUTHOR_SAT), { clock: clockOver(HEADERS), ownerConfirmations: 4, index: "ord-a" });
     expect(read.inscriptions[0].metadata).toEqual(encodeCbor(doc));
     let t = Date.parse("2026-10-18T13:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
     const ref = { did: author, verificationMethod: `${author}#orig`, versionId: docId };
     const c = await sdk.create({ name: "By a did:btco author", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
     if (c.kind !== "original") throw new Error("expected an Original");
-    expect(c.original.current, JSON.stringify(c.original.report.reasons)).toBe(true);
+    expect(c.original.report.reasons).toEqual(["not-anchored"]);
+    expect(c.original.validAsOf?.checkpoint).toBe(c.original.checkpoint);
     const pkg = await sdk.package(c.original.did);
     expect(pkg.manifest.missing).toEqual([{ kind: "identity", did: author, role: "author" }]);
     expect(readEvidence(pkg.bytes).authors).toEqual([]);
