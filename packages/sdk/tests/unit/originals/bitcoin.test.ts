@@ -12,7 +12,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileClockStore } from "../../../src/originals/fs-store.js";
-import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip, satEvidence, type BlockInfo } from "../../../src/originals/index.js";
+import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, readZip, satEvidence, writeZip, type BlockInfo } from "../../../src/originals/index.js";
+import { signerPath } from "../../../src/originals/evidence.js";
 import { SyntheticChain, memoryClockStore } from "../../../scripts/bench-inscription-clock.js";
 import { Author, bytes, seed } from "./helpers.js";
 
@@ -551,6 +552,42 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const kept = await keeper.load(pkg.bytes, { bitcoin: [evidence] });
     expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained" }]);
   });
+
+  for (const [name, change] of [
+    ["without its final line feed", (log: string) => log.replace(/\n$/, "")],
+    ["reformatted", (log: string) => log.split("\n").map((l) => l.replace(/":/g, '": ')).join("\n")],
+  ] as const) {
+    test(`C12-64: a package's older author log ${name} never replaces the newer one the reader holds, so a leaked key's later inscription is ignored (P7.8, P9.15; PROVISIONAL originals-spec #47 2be62b982)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      let t = Date.parse("2026-10-18T10:00:00Z");
+      const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
+      const signer = alice.signer("orig", KEY);
+      const ref = alice.ref("orig");
+      const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: ref, signer, sat: btcoAlias("regtest", SAT) });
+      // Signed with the key while it was listed; inscribed only after the author removed it.
+      const leaked = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor, leaked key", author: ref, signer });
+      const pkg = await sdk.package(c.original.did);
+      const files = readZip(pkg.bytes);
+      const lines = new TextDecoder().decode(files.get("asset/did.jsonl")!).trimEnd().split("\n");
+      const older = alice.evidence().log as string;
+      // At 11:00 the author removes the key.
+      await alice.rotate([{ fragment: "spare", secret: seed(23) }], "2026-10-18T11:00:00Z");
+      // The package carries the author DID log from before the removal, byte-different but verifying.
+      files.set(`${signerPath(alice.did)}/did.jsonl`, bytes(change(older)));
+      const B = Date.parse("2026-10-18T10:10:00Z") / 1000;
+      const evidence = await satEvidence(snapshot([
+        { id: `${"e".repeat(64)}i0`, height: 1, content: lines.slice(0, -1).map((l) => `${l}\n`).join("") },
+        { id: `${"f".repeat(64)}i0`, height: 2, content: `${lines[lines.length - 1]}\n` }, // 11:30
+      ]), { clock: clockOver([B, B + 60, B + 4800]), ownerConfirmations: 1, index: "ord-a" });
+      const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => Date.parse("2026-10-18T12:00:00Z") });
+      const loaded = await reader.load(writeZip(files), { bitcoin: [evidence] });
+      expect(loaded.report.head).toBe(anchored.original.checkpoint);
+      expect(loaded.report.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: leaked.original.checkpoint, reason: "author-key-not-valid-at-inscription-time" })]);
+      expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId });
+    });
+  }
 
   test("#971: an orphaned block's later timestamp does not carry into the new chain and push an edit past the author's key rotation (C12-41, C12-45)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
