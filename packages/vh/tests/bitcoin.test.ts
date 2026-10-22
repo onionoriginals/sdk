@@ -372,16 +372,22 @@ describe("the newest known signer DID version (P7.8, P9.15; PROVISIONAL original
     expect(r.current).toBe(true);
   });
 
-  test("an entry naming a version the verifier has no verified copy of is incomplete identity evidence (P5.6)", async () => {
+  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P5.6; PROVISIONAL, spec question on #47)", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const older = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
     const next = await updateOriginal(anchor, { versionTime: time(30), name: "Names a version the reader lacks", author: alice.ref("orig"), sign: alice.signer(KEY, "orig") });
-    const r = await verifyOriginal({ log: [...copy, next], authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(next, 30)])] });
+    const later = inscribe(next, 30);
+    const r = await verifyOriginal({ log: [...copy, next], authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), later])] });
     expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "AUTHOR_VERSION_UNAVAILABLE", versionId: next.versionId })]);
-    expect(r.identityEvidence.status).toBe("incomplete");
-    expect(r.current).toBe(false);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "later-inscription-unverifiable", versionId: next.versionId })]);
+    expect(r.anchoring?.unverifiable).toEqual([{ sat: SAT, inscription: later.id, versionId: next.versionId, signer: alice.did, signerVersionId: alice.versionId }]);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    // With the newer version it verifies and is the head.
+    const fresh = await verifyOriginal({ log: [...copy, next], authors: [alice.evidence()], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), later])] });
+    expect(fresh.head).toBe(next.versionId);
+    expect(fresh.anchoring?.unverifiable).toEqual([]);
   });
 
   test("C12-64: when the verifier has retained a newer version than the evidence it is given, it cannot use the older one: stale, not current", async () => {
@@ -722,5 +728,50 @@ describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18
     const wrong = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: { [resourceDigest(bytes(B1))]: bytes("tampered") } });
     expect(wrong.resources.status).toBe("digest-failure");
     expect(wrong.current).toBe(false);
+  });
+});
+
+describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15; PROVISIONAL, spec question on #47)", () => {
+  const HOLDER = seeded(77);
+
+  test("a hash-chained later inscription naming an author version that does not exist is reported unverifiable; the accepted head stays complete and current", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    // The holder has no author key: it names a version the author DID never had and signs with its own key.
+    const fake = { ...alice.ref("orig"), versionId: "9-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" };
+    const junk = await updateOriginal(anchor, { versionTime: time(30), name: "The holder's junk", author: fake, sign: alice.signer(HOLDER, "orig") });
+    const later = inscribe(junk, 30);
+    const r = await verify(copy, alice, [sat([anchoring(10), later])]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+    expect(r.anchoring?.unverifiable).toEqual([{ sat: SAT, inscription: later.id, versionId: junk.versionId, signer: alice.did, signerVersionId: fake.versionId }]);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.validAsOf?.checkpoint).toBe(anchor.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("a later inscription naming a version number the verifier holds under another id is invalid, not unverifiable", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const fake = { ...alice.ref("orig"), versionId: "1-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" };
+    const junk = await updateOriginal(anchor, { versionTime: time(30), name: "Names version 1 under another id", author: fake, sign: alice.signer(HOLDER, "orig") });
+    const r = await verify(copy, alice, [sat([anchoring(10), inscribe(junk, 30)])]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY", versionId: junk.versionId })]);
+    expect(r.anchoring?.unverifiable).toEqual([]);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("a later inscription naming another author DID is invalid, and changes nothing", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const stranger = { did: "did:vh:QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y", verificationMethod: "did:vh:QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y#k", versionId: "1-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" };
+    const junk = await updateOriginal(anchor, { versionTime: time(30), name: "Signed by a stranger", author: stranger, sign: alice.signer(HOLDER, "orig") });
+    const later = inscribe(junk, 30);
+    const r = await verify(copy, alice, [sat([anchoring(10), later])]);
+    expect(r.head).toBe(anchor.versionId);
+    // The author DID is fixed at genesis (P5.8): this is invalid whatever the verifier holds.
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "invalid-entry" })]);
+    expect(r.anchoring?.unverifiable).toEqual([]);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 });
