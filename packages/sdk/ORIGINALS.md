@@ -103,7 +103,11 @@ on; it never reports an unanchored Original as current (P7.10). The
 - **Entry size (P7.7; P14.13, PROVISIONAL #48).** An entry is at most
   `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
   length of its stored line without the line feed (previously UTF-16 code
-  units of the re-serialized entry). A commit of a larger entry fails with
+  units of the re-serialized entry), measured before the line is parsed and
+  never again after. Entries parsed with `parseLog` carry their stored line's
+  size, and `verifyLog` takes the sizes (`lineBytes`) from a caller that has
+  the lines; an entry with no stored line is measured as its JCS
+  serialization (PROVISIONAL). A commit of a larger entry fails with
   `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
   log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
@@ -132,7 +136,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
-| `validAsOf` | for a valid unanchored Original, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
+| `validAsOf` | for a valid result, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
 | `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |

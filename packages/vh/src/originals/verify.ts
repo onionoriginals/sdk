@@ -86,9 +86,10 @@ export interface SignerReliance {
 }
 
 /**
- * P7.10: what a valid unanchored Original is reported as. It is valid as of
- * `checkpoint`, judged with the signer DID versions listed, and nothing more:
- * it is never current.
+ * P7.10: what a valid result is valid as of: `checkpoint`, judged with the
+ * signer DID versions listed. It is set whenever the checkpoint verifies,
+ * whether or not the Original is current; for an unanchored Original it is
+ * all the result shows, since that is never current.
  */
 export interface ValidAsOf {
   checkpoint: string;
