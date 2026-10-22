@@ -531,3 +531,37 @@ describe("identity retrieval in loadPublished stays inside its budget (08b revie
     expect(host.calls.length + identity.length).toBeLessThanOrEqual(200);
   });
 });
+
+describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13, PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+  const big = () => new Uint8Array(RETRIEVAL_LIMITS.maxResourceBytes + 1);
+
+  test("it can be created and edited locally, but publication and a shared host refuse it, naming the resource", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    // Local: a package is never fetched, so the cap does not apply to it.
+    const c = await sdk.create({ name: "Harbor, full size", resources: [{ id: "master", mediaType: "image/tiff", bytes: big() }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const alias = await aliasFor(c.original.did);
+    const refused = sdk.publish(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias });
+    await expect(refused).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "master", size: RETRIEVAL_LIMITS.maxResourceBytes + 1, limit: RETRIEVAL_LIMITS.maxResourceBytes } });
+    expect((await sdk.get(c.original.did)).head).toBe(c.original.checkpoint);
+    // A shared host serves what it accepts: the candidate is refused before it is sent.
+    let sent = 0;
+    const shared = { submit: async () => { sent++; throw new Error("not reached"); }, accepted: async () => { throw new Error("not reached"); } };
+    const draft = await sdk.prepareEdit(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), name: "Harbor, full size, renamed" });
+    const candidate = await sdk.sign(draft, signer);
+    await expect(sdk.submit(candidate, shared)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "master" } });
+    expect(sent).toBe(0);
+    expect(await sdk.pending(c.original.did)).toBeUndefined();
+  });
+
+  test("an Original published before a large resource was added has no hosted files", async () => {
+    const { sdk, did, alias, alice, signer, head } = await published();
+    const e = await sdk.edit(did, { parent: head, resources: [{ id: "photo", bytes: big() }], author: alice.ref("orig"), signer });
+    expect(e.status).toBe("committed");
+    await expect(hostedFiles(sdk, did, alias)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "photo" } });
+    // An earlier checkpoint, from before it, is still hosted.
+    expect((await hostedFiles(sdk, did, alias, { checkpoint: head })).size).toBeGreaterThan(0);
+  });
+});

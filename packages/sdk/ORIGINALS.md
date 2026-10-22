@@ -349,6 +349,14 @@ await sdk.publish(did, { parent, author, signer, alias }); // alias: { did, log,
 const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> under the alias's #files base
 ```
 
+A resource larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
+64 MiB; P8.5, P14.13, PROVISIONAL #48) can be created and edited locally, since
+a local package is never fetched, but it is never published: `publish`,
+`hostedFiles` and a shared-host `submit` refuse a log that lists one, at any
+version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the resource
+(`details.resource`, `digest`, `size`, `limit`), before anything is written or
+sent. `assertHostable(log)` runs the same check.
+
 An alias counts only in both directions: the asset state lists it and its
 latest document points back (P3.6). Reports list each alias as `confirmed`,
 `not-confirmed` (with a reason), `unavailable` or `invalid`; an unconfirmed

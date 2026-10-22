@@ -68,7 +68,7 @@ import {
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
-import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
+import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import type { HostAnswer, SharedHost } from "./shared.js";
@@ -973,6 +973,7 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${input.alias.did} does not point to ${did}: ${check.reason ?? check.message ?? check.status}`);
     }
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [input.alias.did]);
+    assertHostable(await this.stored(did));
     await this.store.putAuthorEvidence(input.alias);
     return this.commit(draft, input.signer);
   }
@@ -1076,6 +1077,8 @@ export class OriginalsSDK {
     const stored = await this.stored(did);
     const committed = lines(stored).includes(candidate.line);
     if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
+    // A shared host serves what it accepts (P6.7): nothing it could not serve is sent (P8.5, P14.13).
+    assertHostable(committed ? stored : `${stored.trimEnd()}\n${candidate.line}`);
     // Kept before it is sent, with its staged bytes, so a lost acknowledgement is retried with the
     // same signed bytes (P6.4). Staged bytes are content addressed and never a version on their own (P6.1).
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);

@@ -14,6 +14,7 @@
  * repeats the same snapshot and creates no transition (P9.2). The public
  * reader (`OriginalsSDK.loadPublished`) verifies that exact snapshot (P9.1).
  */
+import { OriginalsError } from "@originals/vh";
 import { FETCH_LIMITS } from "@originals/vh/fetch";
 import type { AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
@@ -98,7 +99,38 @@ export function aliasLogPath(aliasDid: string): string {
   return didWebvhLogUrl(aliasDid).slice(didWebvhFilesUrl(aliasDid).length);
 }
 
-/** The files a host serves for an Original's checkpoint, by path relative to the alias's `#files` base. */
+/**
+ * Refuse hosted publication of a log any of whose resources is larger than a
+ * hosted reader fetches: 64 MiB, `FETCH_LIMITS.maxResourceBytes` (P8.5; P14.13,
+ * PROVISIONAL originals-spec #48 1f90e43bc). No reader could retrieve it, so
+ * it is refused before anything is published (limit-exceeded,
+ * RESOURCE_OVER_FETCH_LIMIT, naming the resource). A local Original is never
+ * fetched, so creating and editing one are not limited.
+ */
+export function assertHostable(log: string): void {
+  for (const line of log.split("\n")) {
+    let resources: unknown;
+    try {
+      resources = (JSON.parse(line) as { state?: { asset?: { resources?: unknown } } }).state?.asset?.resources;
+    } catch {
+      continue; // Verification reports a malformed line.
+    }
+    if (!Array.isArray(resources)) continue;
+    for (const r of resources as Array<{ id?: unknown; digest?: unknown; size?: unknown }>) {
+      if (typeof r?.size === "number" && r.size > FETCH_LIMITS.maxResourceBytes) {
+        throw new OriginalsError("limit-exceeded", "RESOURCE_OVER_FETCH_LIMIT", `resource ${String(r.id)} is ${r.size} bytes; a hosted reader fetches at most ${FETCH_LIMITS.maxResourceBytes}`, {
+          resource: r.id, digest: r.digest, size: r.size, limit: FETCH_LIMITS.maxResourceBytes,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * The files a host serves for an Original's checkpoint, by path relative to the
+ * alias's `#files` base. A resource no hosted reader could fetch is refused
+ * (`assertHostable`).
+ */
 export async function hostedFiles(
   sdk: { package(did: string, options?: { checkpoint?: string }): Promise<{ bytes: Uint8Array }> },
   did: string,
@@ -110,7 +142,10 @@ export async function hostedFiles(
   const logPath = aliasLogPath(alias.did);
   files.set(logPath, encoder.encode(typeof alias.log === "string" ? alias.log : alias.log.map((e) => `${JSON.stringify(e)}\n`).join("")));
   if (alias.witness !== undefined) files.set(logPath.replace(/did\.jsonl$/, "did-witness.json"), encoder.encode(JSON.stringify(alias.witness)));
-  for (const [path, data] of readZip((await sdk.package(did, options)).bytes)) files.set(`${HOSTED_PREFIX}${path}`, data);
+  const packaged = readZip((await sdk.package(did, options)).bytes);
+  const log = packaged.get("asset/did.jsonl");
+  if (log) assertHostable(new TextDecoder().decode(log));
+  for (const [path, data] of packaged) files.set(`${HOSTED_PREFIX}${path}`, data);
   return files;
 }
 
