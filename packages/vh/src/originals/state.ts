@@ -240,6 +240,9 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
     if (!Array.isArray(g.resources) || !g.resources.every((r) => typeof r === "string")) bad(`state.asset.editors[${i}].resources is a list of resourceIDs`);
     const granted = g.resources;
     if (new Set(granted).size !== granted.length) bad(`state.asset.editors[${i}].resources lists a resource twice`);
+    // PROVISIONAL (P5.15, originals-spec #49): "a resource it adds is in no grant until an author entry
+    // adds it to one" is read as permitting the adding author entry itself to grant it; the grant takes
+    // effect from the next entry (P5.17), so no editor can change it in the entry that adds it.
     for (const r of granted) if (!ids.has(r)) bad(`state.asset.editors[${i}] grants ${r}, which is not in the resource set; removing a resource removes it from every grant (P4.1, P5.15)`);
     return g as unknown as EditorGrant;
   });

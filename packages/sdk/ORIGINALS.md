@@ -119,7 +119,8 @@ on; it never reports an unanchored Original as current (P7.10). The
   resource is removed (`STATE_RESOURCE_REUSED`); there is no rename. A removed
   resource must also leave every grant, so pass `editors` without it
   (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
-  author grants it. An editor never adds or removes a resource
+  author grants it (PROVISIONAL: the adding entry may itself grant it; the
+  grant takes effect from the next entry, P5.17). An editor never adds or removes a resource
   (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
   resource's earlier versions stay in `resources`, in evidence packages and in
   hosted snapshots, and stay checked (P8.3). The entry's transitions give

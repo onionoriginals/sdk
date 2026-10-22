@@ -210,6 +210,17 @@ describe("C12-158: an added resource not in any grant", () => {
   });
 });
 
+describe("C12-158: the author entry that adds a resource may grant it (PROVISIONAL reading of P5.15)", () => {
+  test("the grant takes effect from the next entry, so only then may the editor change it (P5.17)", async () => {
+    const { alice, bob, at, genesis, asAlice, asBob } = await harbor((bob) => [grant(bob.did, { resources: ["photo"] })]);
+    const both = await updateOriginal(genesis, { versionTime: at(), resources: [note(N1)], editors: [grant(bob.did, { resources: ["photo", "note"] })], ...asAlice });
+    const byBob = await updateOriginal(both, { versionTime: at(), resources: [note(N2)], ...asBob });
+    const r = await verify([genesis, both, byBob], [alice, bob]);
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.resources.versions.filter((v) => v.resource === "note").map((v) => v.version)).toEqual([1, 2]);
+  });
+});
+
 describe("C12-159: transitions for an added and a removed resource", () => {
   test("`from: null` for the added one and `to: null` for the removed one; resulting resources first, then removed ones in their previous order (P14.4)", async () => {
     const { alice, at, genesis, asAlice } = await harbor();
