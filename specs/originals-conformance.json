@@ -232,8 +232,9 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
-        "packages/vh/tests/originals.test.ts"
+        "packages/vh/tests/resources.test.ts"
       ]
     },
     {
@@ -1905,7 +1906,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-155",
@@ -1915,7 +1920,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-156",
@@ -1925,7 +1934,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-157",
@@ -1935,7 +1948,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-158",
@@ -1945,7 +1962,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-159",
@@ -1955,7 +1976,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     },
     {
       "id": "C12-160",

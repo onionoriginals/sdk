@@ -56,7 +56,8 @@ const edited = await sdk.edit(did, {
   parent: original.checkpoint,   // required; a moved parent is a StaleParent conflict (P4.5)
   name,                          // omitted keeps the value; null is rejected (P4.6)
   metadata,                      // omitted keeps the value; null removes it (P4.6)
-  resources: [{ id: "photo", bytes, expectedDigest }], // same resourceIDs as genesis (P4.1)
+  resources: [{ id: "photo", bytes, expectedDigest }], // a new id adds a resource (P4.1)
+  remove: ["sketch"],            // author only; at least one resource remains (P4.1)
   author, signer,
 });
 await sdk.deactivate(did, { parent, author, signer }); // terminal (P6.5)
@@ -110,8 +111,24 @@ on; it never reports an unanchored Original as current (P7.10). The
   serialization (PROVISIONAL). A commit of a larger entry fails with
   `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
   log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
+- **Resource set (P4.1, P5.16, P14.4, P14.5; originals-spec #49).** Genesis
+  names at least one resource. The author's `edit` adds a resource by giving
+  bytes and a `mediaType` for a new id, appended after the existing resources
+  in the order given, and removes resources with `remove: [id]`, as long as one
+  remains. A resourceID is never used again in the Original, even after its
+  resource is removed (`STATE_RESOURCE_REUSED`); there is no rename. A removed
+  resource must also leave every grant, so pass `editors` without it
+  (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
+  author grants it. An editor never adds or removes a resource
+  (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
+  resource's earlier versions stay in `resources`, in evidence packages and in
+  hosted snapshots, and stay checked (P8.3). The entry's transitions give
+  `from: null` for an added resource and `to: null` for a removed one: first
+  the resulting resources in order, then the removed ones in their previous
+  order. BREAKING for TypeScript: `Transition.to` is `string | null`.
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
-  counter is rejected, and an unchanged digest does not advance a version.
+  counter is rejected, and an unchanged digest does not advance a version. A
+  resource added after genesis starts at version 1.
 - **Signing (P5.11).** The signer receives the unsigned entry, the proof options,
   a summary of the Original, the operation and the resource changes, with
   `summary.signer` naming whose key signs (the author, or the editor of an
@@ -243,7 +260,7 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
 - A grant names one editor DID, unique in the list, using a method P5.8
   lists (did:vh, did:webvh, did:btco), never the author DID or a DID of the
   author's identity (for a did:webvh author, any did:webvh with its SCID).
-  `resources` are resourceIDs of the Original's resource set. At most
+  `resources` are resourceIDs of the Original's current resource set. At most
   `ORIGINALS_LIMITS.editors` (32, PROVISIONAL) grants (P7.7). An empty list is
   not used: no editors means no `editors` member (PROVISIONAL).
 - An editor entry carries `editor: { did, verificationMethod, versionId }` in
@@ -251,8 +268,9 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   a grant, a change to it and a revocation take effect from the next entry
   (P5.17). Its author reference is its parent's, its operation is update, its
   parameters are empty, and only the name, metadata and resources the grant
-  allows change. Only author entries change grants, aliases, lifecycle or
-  parameters, start an Original, anchor it or deactivate it. A change outside
+  allows change. Only author entries add or remove resources, change grants,
+  aliases, lifecycle or parameters, start an Original, anchor it or deactivate
+  it. A change outside
   the grant is refused before anything is signed (`outside-grant`); an editor
   with no grant is `unauthorized-key` (`EDITOR_NOT_GRANTED`).
 - Editor keys follow the author key rules against the editor DID (P5.3,

@@ -51,8 +51,8 @@ export interface HistoryEntry {
   operation: string;
   /** The author verification method that signed it. */
   authorKey: string;
-  /** Resource changes: id and new digest. */
-  changes: Array<{ resource: string; to: string }>;
+  /** Resource changes: id and new digest, or null for a removed resource (P4.1, P14.4). */
+  changes: Array<{ resource: string; to: string | null }>;
   name: string;
 }
 
@@ -124,7 +124,7 @@ interface LogLine {
   state: {
     operation: string;
     author: { verificationMethod: string };
-    transitions: Array<{ resource: string; to: string }>;
+    transitions: Array<{ resource: string; to: string | null }>;
     asset: { name: string };
   };
 }

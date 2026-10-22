@@ -261,13 +261,18 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
   return typeof bytes === "function" ? bytes(digest) : (Object.prototype.hasOwnProperty.call(bytes, digest) ? bytes[digest] : undefined);
 }
 
-/** Resource versions through the prefix, with each version's bytes checked (P4.3, P4.4, P7.4). */
+/**
+ * Resource versions through the prefix, with each version's bytes checked (P4.3, P4.4, P7.4).
+ * An added resource starts at version 1; a removal adds no version, and a removed resource's
+ * earlier versions stay listed and checked (P4.1, P8.3; originals-spec #49).
+ */
 function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"]): ResourceVersion[] {
   const out: ResourceVersion[] = [];
   const counts = new Map<string, number>();
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
     for (const t of state.transitions) {
+      if (t.to === null) continue;
       const d = state.asset.resources.find((r) => r.id === t.resource)!;
       const version = (counts.get(d.id) ?? 0) + 1;
       counts.set(d.id, version);

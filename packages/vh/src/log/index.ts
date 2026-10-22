@@ -75,6 +75,12 @@ export interface EntryContext {
   entry: LogEntry;
   /** The verified predecessor, absent for the first entry. */
   previous?: VerifiedEntry;
+  /**
+   * Every verified entry before this one, oldest first, for rules that depend
+   * on the whole history (such as Originals' never-reused resourceIDs, P4.1).
+   * Read it during the call only.
+   */
+  history: readonly VerifiedEntry[];
   scid: string;
   /** Parameters in effect after this entry. */
   active: ActiveParameters;
@@ -440,12 +446,13 @@ function checkStructure(raw: unknown, limits: LogLimits, storedBytes: number | u
 async function verifyEntry(
   index: number,
   raw: unknown,
-  previous: VerifiedEntry | undefined,
+  history: readonly VerifiedEntry[],
   options: VerifyOptions,
   now: number,
   storedBytes?: number,
 ): Promise<VerifiedEntry> {
   const spec = options.specialisation;
+  const previous = index > 0 ? history[index - 1] : undefined;
   // Checks run in VH-Log's step order, as vh-log-interop-0 section 4 pins it, so
   // the first failing check names the error: deactivation, structure,
   // parameters (with pre-rotation), proofs, versionId, versionTime, SCID, state.
@@ -472,7 +479,7 @@ async function verifyEntry(
   if (spec.maxProofs !== undefined && entry.proof.length > spec.maxProofs) {
     fail("invalid-evidence", "PROOF_COUNT", `an entry may carry at most ${spec.maxProofs} proof(s)`);
   }
-  const context: EntryContext = { index, entry, previous, scid: active.scid, active, version };
+  const context: EntryContext = { index, entry, previous, history, scid: active.scid, active, version };
   const document = withoutProof(entry);
   for (const proof of entry.proof) {
     if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
@@ -600,7 +607,7 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions, line
       break;
     }
     try {
-      verified.push(await verifyEntry(index, entries[index], verified[index - 1], options, now, lineBytes?.[index]));
+      verified.push(await verifyEntry(index, entries[index], verified, options, now, lineBytes?.[index]));
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       const raw = entries[index];

@@ -78,11 +78,13 @@ describe("create, edit and deactivate", () => {
     await rejects(sdk.edit(original.did, { parent: original.checkpoint, resources: [input], author, signer }), "invalid-evidence", "INPUT_INVALID");
   });
 
-  test("C12-19 and C12-16 through the API: same bytes do not advance; unknown resources are rejected", async () => {
+  test("C12-19 and C12-16 through the API: same bytes do not advance; a new id is an addition at version 1 (P4.1, P4.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
     const same = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B1 }], author, signer });
     expect(same.original.resources.length).toBe(1);
-    await rejects(sdk.edit(original.did, { parent: same.original.checkpoint, resources: [{ id: "sidecar", bytes: B2, mediaType: "text/plain" }], author, signer }), "invalid-evidence", "STATE_RESOURCE_SET");
+    const added = await sdk.edit(original.did, { parent: same.original.checkpoint, resources: [{ id: "sidecar", bytes: B2, mediaType: "text/plain" }], author, signer });
+    expect(added.original.state.resources.map((r) => r.id)).toEqual(["photo", "sidecar"]);
+    expect(added.original.resources.map((r) => [r.resource, r.version])).toEqual([["photo", 1], ["sidecar", 1]]);
   });
 
   test("C12-21 through the API: deactivation is terminal", async () => {

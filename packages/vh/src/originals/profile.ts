@@ -15,7 +15,7 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import { ORIGINALS_METHOD, checkAuthorRef, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
+import { ORIGINALS_METHOD, checkAuthorRef, checkEditorRef, checkEntryState, resourceIdsThrough, type AuthorRef, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -79,6 +79,17 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
 export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
+  // P4.1: every resourceID used through an entry, so none is used again, even after removal.
+  const usedIds = new WeakMap<LogEntry, ReadonlySet<string>>();
+  const usedThrough = (history: readonly VerifiedEntry[]): ReadonlySet<string> => {
+    const last = history[history.length - 1];
+    if (!last) return new Set();
+    const known = usedIds.get(last.entry);
+    if (known) return known;
+    let used = new Set<string>();
+    for (const v of history) used = resourceIdsThrough((v.entry.state as unknown as EntryState).asset, used);
+    return used;
+  };
   return {
     name: "originals",
     versionTime: { fractionalDigits: 3 },
@@ -130,16 +141,19 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         return Promise.resolve(key);
       },
     },
-    validateEntry: ({ entry, previous, scid, index, active }) => {
+    validateEntry: ({ entry, previous, history, scid, index, active }) => {
       if (Object.keys(active.witness).length > 0) {
         fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
-      checkEntryState(entry.state, {
+      const used = usedThrough(history);
+      const state = checkEntryState(entry.state, {
         scid,
         index,
         previous: previous?.entry.state as unknown as EntryState | undefined,
         deactivatedParameter: entry.parameters.deactivated === true,
+        usedResourceIds: used,
       });
+      usedIds.set(entry, resourceIdsThrough(state.asset, used));
       // P5.16: an editor entry's parameters are empty; only an author entry may change any parameter.
       if (entry.state.editor !== undefined && Object.keys(entry.parameters).length > 0) {
         fail("outside-grant", "EDITOR_PARAMETERS", "an editor entry's parameters must be empty (P5.16)");

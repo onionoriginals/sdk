@@ -122,12 +122,19 @@ export interface ResourceInput {
   bytes: Uint8Array;
 }
 
+/**
+ * New bytes for a resource. An id in the parent's resource set changes that
+ * resource; a new id adds a resource, appended after the existing ones in the
+ * order given, at version 1 (P4.1, P4.4). Only the author adds (P5.16), and a
+ * resourceID the Original has used before, even for a removed resource, is
+ * refused (P4.1).
+ */
 export interface ResourceChange {
   id: string;
   bytes: Uint8Array;
-  /** Defaults to the current media type. */
+  /** Defaults to the current media type; required for an added resource. */
   mediaType?: string;
-  /** The digest the caller edited from; a different current digest is a conflict (P4.5). */
+  /** The digest the caller edited from; a different current digest is a conflict (P4.5). Not for an added resource. */
   expectedDigest?: string;
 }
 
@@ -146,6 +153,13 @@ export interface EditInput {
   name?: string;
   metadata?: JsonObject | null;
   resources?: ResourceChange[];
+  /**
+   * ResourceIDs to remove (P4.1). Author only (P5.16). At least one resource
+   * must remain, and a removed resource must also leave every grant: pass
+   * `editors` without it. Its earlier versions stay in history, packages and
+   * hosted retrieval (P8.3).
+   */
+  remove?: string[];
   /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
   author?: AuthorRef;
   /**
@@ -224,7 +238,7 @@ export type SubmitResult =
   | { status: "stale-parent"; hostHead: string; refused: RefusedCandidate };
 
 /** The content a reconciled candidate changes; its parent is always the host's new head. */
-export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources">;
+export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources" | "remove">;
 
 export interface ReconcileInput {
   host: SharedHost;
@@ -913,28 +927,45 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "editor", "editors", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resources", "remove", "author", "editor", "editors", "signer"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
   private async prepareUpdate(did: string, input: EditInput, aliases?: string[]): Promise<Draft> {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
+    // P4.1: every resourceID the Original has used through its verified history, removed ones included.
+    const used = new Set([...view.state.resources.map((r) => r.id), ...view.resources.map((v) => v.resource)]);
+    if (input.remove !== undefined && (!Array.isArray(input.remove) || !input.remove.every((id) => typeof id === "string"))) {
+      sdkError("invalid-evidence", "INPUT_INVALID", "remove must be a list of resourceIDs");
+    }
     const resources = (input.resources ?? []).map((r, i) => {
       exactKeys(r, ["id", "bytes", "mediaType", "expectedDigest"], `resources[${i}]`);
+      if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}].bytes must be a Uint8Array`);
       const current = view.state.resources.find((c) => c.id === r.id);
       if (r.expectedDigest !== undefined && current?.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `resource ${r.id} is at ${current?.digest ?? "nothing"}, not ${r.expectedDigest}`);
+      }
+      if (!current) {
+        // An addition (P4.1): the author's only, a fresh id, and a media type of its own.
+        if (input.editor !== undefined) sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", `an editor cannot add a resource (${r.id}); only the author may (P4.1, P5.16)`);
+        if (used.has(r.id)) sdkError("invalid-evidence", "STATE_RESOURCE_REUSED", `resourceID ${r.id} was used before in this Original and cannot be used again (P4.1)`);
+        if (r.mediaType === undefined) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}] adds ${r.id}, so it needs a mediaType`);
       }
       const digest = resourceDigest(r.bytes);
       bytes.set(digest, r.bytes.slice());
       return { id: r.id, mediaType: r.mediaType ?? current?.mediaType ?? "", size: r.bytes.length, digest };
     });
+    if (input.editor !== undefined && (input.remove ?? []).length > 0) {
+      sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor cannot remove a resource; only the author may (P4.1, P5.16)");
+    }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       resources,
+      ...(input.remove !== undefined ? { remove: input.remove } : {}),
+      usedResourceIds: used,
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1120,6 +1151,7 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1140,6 +1172,7 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1179,7 +1212,7 @@ export class OriginalsSDK {
     const head = synced.original;
     const change = typeof input.change === "function" ? await input.change({ head, ...(kept ? { refused: kept } : {}) }) : input.change;
     if (typeof change !== "object" || change === null) sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
-    exactKeys(change, ["name", "metadata", "resources"], "reconciled change");
+    exactKeys(change, ["name", "metadata", "resources", "remove"], "reconciled change");
     const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
     const result = await this.submit(await this.sign(draft, input.signer), input.host);
     // The refused candidate stays, labelled with what carried its change (P6.8).

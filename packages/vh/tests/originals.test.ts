@@ -152,16 +152,6 @@ describe("resources", () => {
     failedWith(await report([...log, counted], [alice]), 3, "STATE_MEMBERS");
   });
 
-  test("C12-16: resources cannot be added, removed or renamed after genesis", async () => {
-    const { alice, log, ref, sign, at } = await harbor();
-    await expect(updateOriginal(log[2], { versionTime: at(), resources: [photo("x", "sidecar")], author: ref, sign })).rejects.toThrow(OriginalsError);
-    const asset = log[2].state.asset as JsonObject;
-    for (const resources of [[photo(B2), photo("x", "sidecar")], [], [photo(B2, "image")]]) {
-      const entry = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...asset, resources } }, sign);
-      failedWith(await report([...log, entry], [alice]), 3, "STATE_RESOURCE_SET");
-    }
-  });
-
   test("C12-80: a digest outside the SHA-256 set is an unsupported profile", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
