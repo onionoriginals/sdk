@@ -400,7 +400,7 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
   test("C12-74: the holder's delegated and encoded inscriptions around the anchor do not stop an anchored Original verifying", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
@@ -420,7 +420,7 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
   test("C12-112, C12-87: the holder's unread oversized Originals-typed body, Originals-typed metadata and skipped bodies hold nothing back", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
@@ -467,7 +467,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
   test("anchoring commits the entry; it counts only once the sat shows it inscribed", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
@@ -507,7 +507,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
   test("C12-87: an anchored Original loads from Bitcoin alone, whatever copy the package holds", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
@@ -515,17 +515,47 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const pkg = await sdk.package(c.original.did);
     const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
     const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
-    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => t });
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => t });
     const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
     expect(loaded.report.head).toBe(anchored.original.checkpoint);
     expect(loaded.report.anchoring).toMatchObject({ status: "anchored", copy: "agrees" });
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
   });
 
+  test("C12-64: a verifier that knows a newer signer DID version than the package supplies uses the newer one, and says when and where it got it (P7.8; PROVISIONAL originals-spec #47 2be62b982)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const pkg = await sdk.package(c.original.did); // carries the author DID log as it was
+    const packaged = alice.versionId;
+    const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    // Later the author adds a key: a newer version than the package holds.
+    await alice.rotate([{ fragment: "orig", secret: KEY }, { fragment: "spare", secret: seed(23) }], "2026-10-18T13:00:00Z");
+    expect(alice.versionId).not.toBe(packaged);
+    const obtainedAt = "2026-10-18T14:00:00.000Z";
+    const later = () => Date.parse("2026-10-18T15:00:00Z");
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ ...alice.evidence(), obtainedAt }], clock: later });
+    const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
+    expect(loaded.report.head).toBe(anchored.original.checkpoint);
+    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied" }]);
+    expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
+    // Kept by the verifier's store from earlier, the newer version is used too, labelled retained.
+    const store = new MemoryStore();
+    await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt, source: "fetched" });
+    const keeper = OriginalsSDK.create({ store, authors: [], clock: later });
+    const kept = await keeper.load(pkg.bytes, { bitcoin: [evidence] });
+    expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained" }]);
+  });
+
   test("#971: an orphaned block's later timestamp does not carry into the new chain and push an edit past the author's key rotation (C12-41, C12-45)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T10:00:00Z");
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: () => (t += 1000) });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const ref = alice.ref("orig");
     const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer });

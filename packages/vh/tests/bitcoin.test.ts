@@ -73,7 +73,7 @@ async function anchored(opts: { aliases?: string[] } = {}) {
 }
 
 const verify = (log: LogEntry[] | undefined, alice: VhAuthor, bitcoin?: SatEvidence[], extra: Partial<Parameters<typeof verifyOriginal>[0]> = {}): Promise<OriginalsReport> =>
-  verifyOriginal({ ...(log ? { log } : {}), authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted", ...(bitcoin ? { bitcoin } : {}), ...extra });
+  verifyOriginal({ ...(log ? { log } : {}), authors: [alice.evidence()], now: NOW, bytes: allBytes, ...(bitcoin ? { bitcoin } : {}), ...extra });
 
 describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
   test("C12-34: anchoring from the local layer is accepted, with claimed ordering before it and provisional ownership", async () => {
@@ -216,7 +216,7 @@ describe("review fixes (PR 9a)", () => {
     const r = await verify(copy, alice, [sat([anchoring(10)])], { copies });
     expect(r.head).toBe(anchor.versionId);
     expect(r.fork).toBeNull();
-    expect(r.assetFreshness.status).toBe("asserted");
+    expect(r.assetFreshness.status).toBe("anchored");
     expect(r.ordering).toBe("anchored");
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
@@ -275,7 +275,7 @@ describe("review fixes (PR 9a)", () => {
 
   test("a copy that does not parse is ignored: the sat carries the log (P9.17; C12-88)", async () => {
     const { alice, anchor, anchoring } = await anchored();
-    const r = await verifyOriginal({ log: "not a log\n", authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted", bitcoin: [sat([anchoring(10)])] });
+    const r = await verifyOriginal({ log: "not a log\n", authors: [alice.evidence()], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10)])] });
     expect(r.head).toBe(anchor.versionId);
     expect(r.anchoring?.copy).toBe("differs");
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
@@ -336,7 +336,7 @@ describe("author checks at inscription time (P9.15)", () => {
 
   test("C12-62 and C12-46: without the author DID's history the anchored Original is incomplete, not current", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
-    const r = await verifyOriginal({ log: copy, authors: [], now: NOW, bytes: allBytes, freshness: "asserted", bitcoin: [sat([anchoring(10)])] });
+    const r = await verifyOriginal({ log: copy, authors: [], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10)])] });
     expect(r.identityEvidence.status).toBe("incomplete");
     expect(r.current).toBe(false);
     void alice;
@@ -351,6 +351,51 @@ describe("author checks at inscription time (P9.15)", () => {
     const r = await verify([...copy, next], alice, [sat([anchoring(10), inscribe(next, 20)])], { retained: { original: next.versionId } });
     expect(r.reasons).toContain("retroactive-revocation-conflict");
     expect(r.current).toBe(false);
+  });
+});
+
+describe("the newest known signer DID version (P7.8, P9.15; PROVISIONAL originals-spec #47 2be62b982)", () => {
+  const OBTAINED = new Date(NOW - 3_600_000).toISOString();
+
+  test("C12-46: an entry inscribed after the newest version the verifier knows is checked against that version, and the report states it and when it was obtained", async () => {
+    const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
+    const known = alice.versionId; // the author's DID log ends here: nothing about later times is known
+    const next = await updateOriginal(anchor, { versionTime: time(30), name: "Long after the last known version", author: ref, sign });
+    const r = await verifyOriginal({
+      log: [...copy, next], authors: [{ ...alice.evidence(), obtainedAt: OBTAINED, source: "fetched" }], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(next, 30)])],
+    });
+    expect(r.head).toBe(next.versionId);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.assetFreshness.status).toBe("anchored");
+    expect(r.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: known, obtainedAt: OBTAINED, source: "fetched" }]);
+    expect(r.reasons).toEqual([]);
+    expect(r.current).toBe(true);
+  });
+
+  test("an entry naming a version the verifier has no verified copy of is incomplete identity evidence (P5.6)", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const older = alice.entries.slice();
+    await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const next = await updateOriginal(anchor, { versionTime: time(30), name: "Names a version the reader lacks", author: alice.ref("orig"), sign: alice.signer(KEY, "orig") });
+    const r = await verifyOriginal({ log: [...copy, next], authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(next, 30)])] });
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "AUTHOR_VERSION_UNAVAILABLE", versionId: next.versionId })]);
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.current).toBe(false);
+  });
+
+  test("C12-64: when the verifier has retained a newer version than the evidence it is given, it cannot use the older one: stale, not current", async () => {
+    const { alice, copy, anchoring } = await anchored();
+    const older = alice.entries.slice();
+    alice.timeOverride = new Date(T0 + 50 * 600_000).toISOString();
+    const newer = await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const r = await verifyOriginal({ log: copy, authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10)])], retained: { authors: { [alice.did]: newer } } });
+    expect(r.identityEvidence.freshness).toBe("stale");
+    expect(r.current).toBe(false);
+    // With the newer version supplied it is used.
+    const fresh = await verifyOriginal({ log: copy, authors: [alice.evidence()], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10)])], retained: { authors: { [alice.did]: newer } } });
+    expect(fresh.validAsOf?.signers[0].versionId).toBe(newer);
+    expect(fresh.current, JSON.stringify(fresh.reasons)).toBe(true);
   });
 });
 

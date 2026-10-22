@@ -204,7 +204,7 @@ export interface OriginalsReport {
    * stale when it falls short of either; otherwise not established, because
    * off Bitcoin nothing shows it is the latest (P7.10).
    */
-  assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
+  assetFreshness: { status: Freshness | "anchored"; retainedVersionId: string | null; copies: CopyReport[] };
   fork: OriginalsFork | null;
   /**
    * Each alias the checkpoint's state lists, and whether it is confirmed in both
@@ -446,7 +446,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
-  const identityIncomplete = failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete");
+  // P9.15 (PROVISIONAL, originals-spec #47 2be62b982): an inscribed entry naming a signer DID version
+  // the verifier has no verified copy of, or none at or after, is incomplete identity evidence (P5.6).
+  const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
+  const identityIncomplete =
+    failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
     ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null }
     : options.retained?.anchor;
@@ -474,7 +478,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       failures: mismatched,
     },
     assetFreshness: {
-      status: stale ? "stale" : "not-established",
+      // An anchored log is the sat's, as of the read's tip (P9.13, P9.17).
+      status: stale ? "stale" : onBitcoin ? "anchored" : "not-established",
       retainedVersionId: options.retained?.original ?? null,
       copies,
     },
