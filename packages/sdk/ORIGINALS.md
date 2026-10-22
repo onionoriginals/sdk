@@ -191,6 +191,16 @@ Freshness is still reported per log (P7.8): `retrieved` for a moved identity's
 log fetched from its latest location, otherwise not established, or stale.
 The store retains the highest versionId it has verified for each Original and
 each author DID.
+Of the signer DID evidence a package or host supplies, the `authors` option
+configures and the store keeps, the one with the newest verified version is
+used, compared by the versionIds that verify and never by bytes: an older log
+that differs only in formatting or a final line feed never rolls a newer one
+back, so an entry whose key that newer version removed is still reported
+historically authorized only (P7.8, P7.9; PROVISIONAL originals-spec #47
+2be62b982). The newest verified versionId held is compared against as
+retained. Evidence whose verified versions diverge from another's is an
+identity fork: incomplete identity evidence (`AUTHOR_DID_FORK`), never the
+package's history.
 Evidence that falls short of a retained versionId is `stale`; the result is
 valid as of its own, older checkpoint.
 Evidence that diverges from it is a fork (for the Original) or incomplete

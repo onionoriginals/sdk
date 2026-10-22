@@ -72,7 +72,7 @@ import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import type { HostAnswer, SharedHost } from "./shared.js";
-import { MemoryStore, headOf, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
+import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
@@ -294,15 +294,48 @@ export interface ImportResult {
   original: OriginalView;
 }
 
-function logText(evidence: AuthorDidEvidence): string {
-  return typeof evidence.log === "string" ? evidence.log : evidence.log.map((e) => `${JSON.stringify(e)}\n`).join("");
+/** One candidate for a signer DID's evidence, with the versionIds of its log that verify (P7.8). */
+interface HeldEvidence {
+  evidence: AuthorDidEvidence;
+  ids: string[] | undefined;
+  complete: boolean;
 }
 
-/** True when `longer`'s log strictly extends `shorter`'s: the same lines, then more. */
-function extendsLog(longer: AuthorDidEvidence, shorter: AuthorDidEvidence): boolean {
-  const a = logText(longer);
-  const b = logText(shorter);
-  return a.length > b.length && a.startsWith(b) && (b.length === 0 || b.endsWith("\n"));
+/** True when `a`'s verified versionIds are `b`'s, then possibly more. */
+function extendsIds(a: string[], b: string[]): boolean {
+  return a.length >= b.length && b.every((id, i) => a[i] === id);
+}
+
+/**
+ * The evidence to verify with, of `candidates` (most preferred first), compared
+ * by the versionIds that verify, never by their bytes: the one with the newest
+ * verified version is used (P7.8, P7.9; PROVISIONAL originals-spec #47
+ * 2be62b982). Two whose verified versions diverge are an identity fork: the
+ * first is used, and `fork` names the other's versionId where they diverge,
+ * which the verifier reports as AUTHOR_DID_FORK, incomplete identity evidence
+ * (P7.8). `newest` is the newest verified versionId known, so a log that falls
+ * short of it is stale.
+ */
+function newestEvidence(candidates: HeldEvidence[]): { chosen: AuthorDidEvidence; newest?: string; fork?: string } | undefined {
+  const [first, ...rest] = candidates;
+  if (!first) return undefined;
+  let best = first;
+  let fork: string | undefined;
+  for (const c of rest) {
+    if (!c.ids || !best.ids) {
+      if (!best.ids && c.ids) best = c;
+      continue;
+    }
+    if (extendsIds(c.ids, best.ids)) {
+      if (c.ids.length > best.ids.length || (!best.complete && c.complete)) best = c;
+    } else if (!extendsIds(best.ids, c.ids)) {
+      const at = c.ids.findIndex((id, i) => best.ids![i] !== id);
+      fork ??= c.ids[at];
+    }
+  }
+  const verified = candidates.flatMap((c) => (c.ids && c.ids.length > 0 ? [c.ids] : []));
+  const longest = verified.reduce<string[] | undefined>((a, b) => (!a || b.length > a.length ? b : a), undefined);
+  return { chosen: best.evidence, ...(longest ? { newest: longest[longest.length - 1] } : {}), ...(fork ? { fork } : {}) };
 }
 
 function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], code: string, message: string, details?: Record<string, unknown>): never {
@@ -510,32 +543,56 @@ export class OriginalsSDK {
 
   /**
    * Signer identity evidence for a log, looked up by identity DID (P5.14): an
-   * evidence package's own, else the author source's, else the store's; then,
-   * with `identityFetch`, the log at the identity's current location, if it
-   * extends that. Stored evidence was verified when it was kept (P7.8), so
-   * where it extends the configured log it is used instead: a static
-   * `authors` list never rolls a newer DID log back, in verification or in
-   * what is published (#965 review C2).
+   * evidence package's own, the author source's, and the store's; then, with
+   * `identityFetch`, the log at the identity's current location, if it
+   * extends that. Of what is supplied, configured and kept, the one with the
+   * newest verified version is used, compared by verified versionIds and never
+   * by bytes, so older evidence never rolls a newer DID log back, in
+   * verification or in what is published (P7.8, P7.9; PROVISIONAL
+   * originals-spec #47 2be62b982; #965 review C2). With `retained`, the newest
+   * verified versionId known is retained for the DID, so evidence that falls
+   * short of it is stale; evidence that diverges is an identity fork, reported
+   * as incomplete identity evidence (AUTHOR_DID_FORK), never as the package's.
    */
-  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = []): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = [], retained?: RetainedVersions): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
     // Other branches compared with this log are verified too, and their editors may differ (P6.6).
     const dids = [...new Set([log, ...others].flatMap(signerDidsOf))];
     for (const did of dids) {
-      const found = supplied.find((a) => a.did === did) ?? (await this.configuredOrStored(did));
-      if (found) out.push(found);
+      const given = supplied.find((a) => a.did === did);
+      const candidates = [...(given ? [given] : []), ...(await this.configuredAndStored(did))];
+      const found = newestEvidence(await Promise.all(candidates.map((c) => this.held(c))));
+      if (!found) continue;
+      out.push(found.chosen);
+      if (retained) {
+        const authors = (retained.authors ??= {});
+        if (found.fork) authors[did] = found.fork;
+        else if (found.newest) authors[did] = higherVersion(authors[did], found.newest);
+      }
     }
     return out;
   }
 
-  private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
+  /** The author source's evidence for `did`, then this store's, as candidates (P7.8). */
+  private async configuredAndStored(did: string): Promise<AuthorDidEvidence[]> {
     const source = this.options.authors;
     const found = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
     const configured = found ? { ...found, source: found.source ?? ("supplied" as const) } : undefined;
     const kept = await this.store.getAuthorEvidence(did);
     // Kept by this store when it verified it (P7.8): when and where it was first obtained is kept with it.
     const stored = kept ? { ...kept, source: "retained" as const } : undefined;
-    return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+    return [...(configured ? [configured] : []), ...(stored ? [stored] : [])];
+  }
+
+  /** `evidence` with the versionIds of its log that verify; none when its method is not verified here. */
+  private async held(evidence: AuthorDidEvidence): Promise<HeldEvidence> {
+    try {
+      const h = await verifyAuthorHistory(evidence, { now: this.clock() });
+      return { evidence, ids: h.versions.map((v) => v.versionId), complete: !h.failure };
+    } catch (error) {
+      if (error instanceof OriginalsError) return { evidence, ids: undefined, complete: false };
+      throw error;
+    }
   }
 
   /** `evidence` as obtained now, from `source` (P7.10). */
@@ -782,7 +839,7 @@ export class OriginalsSDK {
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
       });
-    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
+    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     return (await this.withIdentities(log, base, run)).report;
   }
 
@@ -1183,7 +1240,7 @@ export class OriginalsSDK {
         ...comparisons,
       });
     const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
-    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
+    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
     const m = contents.manifest;

@@ -93,12 +93,14 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
     return { ...h, fresh, stale: writeZip(files), oldAuthorVersion: before[before.length - 1].versionId };
   }
 
-  test("a reader that has seen a newer author DID version reports the older one as stale", async () => {
+  test("a reader that has kept a newer author DID version uses it, not the older one a package carries (P7.8; PROVISIONAL originals-spec #47 2be62b982)", async () => {
     const { alice, fresh, stale, oldAuthorVersion } = await withStaleAuthorPackage();
     const local = reader();
     expect((await local.import(fresh.bytes)).original.report.reasons).toEqual(["not-anchored"]);
     const loaded = await local.load(stale);
-    expect(loaded.report.identityEvidence).toMatchObject({ freshness: "stale", latestVersionId: oldAuthorVersion, retainedVersionId: alice.versionId });
+    expect(oldAuthorVersion).not.toBe(alice.versionId);
+    expect(loaded.report.identityEvidence).toMatchObject({ freshness: "not-established", latestVersionId: alice.versionId, retainedVersionId: alice.versionId });
+    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained" });
     expect(loaded.report.current).toBe(false);
   });
 
@@ -197,5 +199,82 @@ describe("review fixes (PR 6)", () => {
     await store.putRetained("did:vh:x", "3-Qmabc");
     await store.putRetained("did:vh:x", "2-Qmdef");
     expect(await store.getRetained("did:vh:x")).toBe("3-Qmabc");
+  });
+});
+
+describe("C12-64: the newest verified author DID version a reader holds is used, compared by verified versionIds (P7.8, P7.9; PROVISIONAL originals-spec #47 2be62b982)", () => {
+  const SPARE = seed(24);
+  /** An Original signed with `orig`, then the author DID drops `orig`. The package carries the log from before the drop. */
+  async function removedKey() {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
+    const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const pkg = (await sdk.package(c.original.did)).bytes;
+    const before = alice.entries.slice();
+    await alice.rotate([{ fragment: "spare", secret: SPARE }]);
+    return { alice, did: c.original.did, pkg, before, entry: c.original.checkpoint };
+  }
+  /** `pkg` with the author DID log replaced by `log`. */
+  const carrying = (pkg: Uint8Array, did: string, log: string) => {
+    const files = readZip(pkg);
+    files.set(`${signerPath(did)}/did.jsonl`, bytes(log));
+    return writeZip(files);
+  };
+  const noFinalLf = (log: string) => log.replace(/\n$/, "");
+  // Whitespace JCS ignores: the same verified versions, different bytes.
+  const reformatted = (log: string) => log.split("\n").map((l) => l.replace(/":/g, '": ')).join("\n");
+
+  for (const [name, change] of [["without its final line feed", noFinalLf], ["reformatted", reformatted]] as const) {
+    test(`a package's older author log ${name} never replaces the newer one the reader is configured with`, async () => {
+      const { alice, did, pkg, before, entry } = await removedKey();
+      const older = change(alice.evidence(before).log as string);
+      const local = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock(LATER) });
+      const loaded = await local.load(carrying(pkg, alice.did, older));
+      expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId, retainedVersionId: alice.versionId });
+      expect(loaded.report.historicallyAuthorizedOnly).toEqual([{ versionId: entry, did: alice.did, role: "author", reason: "key-not-in-latest-signer-document" }]);
+      expect(loaded.reasons).toContain("historically-authorized-only");
+      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "supplied" });
+      void did;
+    });
+
+    test(`a configured older author log ${name} never replaces the newer one the store kept`, async () => {
+      const { alice, did, pkg, before, entry } = await removedKey();
+      const store = new MemoryStore();
+      // The store kept the newer log when it verified it (P7.8), and has no retained versionId for the author.
+      await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt: "2026-10-18T12:30:00.000Z", source: "package" });
+      const older = { did: alice.did, log: change(alice.evidence(before).log as string) };
+      const local = OriginalsSDK.create({ store, authors: [older], clock: clock(LATER) });
+      const loaded = await local.load(carrying(pkg, alice.did, older.log));
+      expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId });
+      expect(loaded.report.historicallyAuthorizedOnly).toEqual([{ versionId: entry, did: alice.did, role: "author", reason: "key-not-in-latest-signer-document" }]);
+      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained" });
+      void did;
+    });
+  }
+
+  test("an author log that diverges from the one the reader holds is an identity fork: incomplete, never the package's", async () => {
+    const { alice, pkg, before } = await removedKey();
+    const held = alice.evidence();
+    // The same author DID, a different version 2.
+    alice.entries = before.slice();
+    await alice.rotate([{ fragment: "orig", secret: KEY }, { fragment: "other", secret: seed(25) }]);
+    const theirs = alice.evidence();
+    expect(theirs.log).not.toBe(held.log);
+    const local = OriginalsSDK.create({ store: new MemoryStore(), authors: [held], clock: clock(LATER) });
+    const loaded = await local.load(carrying(pkg, alice.did, theirs.log as string));
+    expect(loaded.report.identityEvidence.status).toBe("incomplete");
+    expect(loaded.report.identityEvidence.failure?.code).toBe("AUTHOR_DID_FORK");
+    expect(loaded.reasons).toContain("identity-evidence-incomplete");
+    expect(loaded.report.validAsOf).toBeNull();
+    expect(loaded.report.current).toBe(false);
+  });
+
+  test("a package's newer author log is used over an older one the reader holds", async () => {
+    const { alice, pkg, before } = await removedKey();
+    const local = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ did: alice.did, log: noFinalLf(alice.evidence(before).log as string) }], clock: clock(LATER) });
+    const loaded = await local.load(carrying(pkg, alice.did, alice.evidence().log as string));
+    expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId });
+    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "package" });
   });
 });
