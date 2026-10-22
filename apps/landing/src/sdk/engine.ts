@@ -24,6 +24,7 @@ import { publishOriginal, type HostedUpload } from "./publish";
 import { landingSharedHost, type SubmitTransport } from "./shared-host";
 import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
 import { short } from "./format";
+import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
@@ -200,15 +201,25 @@ export class DemoEngine {
     for (const l of this.listeners) l(event);
   }
 
+  /** The author DID evidence the SDK reads, with when it was obtained (P7.10). */
+  private readonly authorEvidence = new StampedAuthorEvidence();
+
+  /** Hand the SDK new author DID evidence: restamped if it changed, so `obtainedAt` is never a stale setup time. */
+  private setAuthorEvidence(evidence: AuthorDidEvidence): void {
+    this.authorEvidence.set(evidence);
+  }
+
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
     this.authoring = this.authed ? await this.signedInAuthor() : await createLocalAuthor();
+    this.setAuthorEvidence(this.authoring.evidence);
     this.sdk = OriginalsSDK.create({
       store: this.store,
-      // This page holds or just read the author's own DID: it obtained that evidence now. An
-      // unanchored Original is still only valid as of its checkpoint, never current (P7.10).
-      authors: [{ ...this.authoring.evidence, obtainedAt: new Date().toISOString() }],
+      // This page holds or just read the author's own DID: the SDK reads it as stamped when it was
+      // obtained, restamped whenever it changes. An unanchored Original is still only valid as of
+      // its checkpoint, never current (P7.10).
+      authors: async (did) => this.authorEvidence.get(did),
     });
     this.emit("authorship:key", `Authoring as ${short(this.authoring.ref.did)}`, { author: this.authoring.ref });
     return this.authoring;
