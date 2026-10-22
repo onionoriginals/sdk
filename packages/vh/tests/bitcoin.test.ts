@@ -775,3 +775,42 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 });
+
+describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.13; PROVISIONAL originals-spec #48 1f90e43bc)", () => {
+  /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and re-serializes longer. */
+  async function storedAtLimit() {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const nums = Array.from({ length: 200 }, () => 1e21);
+    let pad = 0;
+    for (let i = 0; i < 40; i++) {
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign });
+      const line = serializeLog([genesis]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const size = bytes(line).length;
+      if (size !== 65_536) {
+        pad += 65_536 - size;
+        continue;
+      }
+      const anchor = await updateOriginal(genesis, { versionTime: time(10), metadata: null, aliases: [SAT], author: ref, sign });
+      return { alice, genesis, anchor, text: `${line}\n${serializeLog([anchor])}` };
+    }
+    throw new Error("no entry of 65,536 bytes");
+  }
+
+  test("an anchoring inscription whose stored line is 65,536 bytes is accepted, however long it re-serializes", async () => {
+    const { alice, anchor, text } = await storedAtLimit();
+    const r = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(text) })])]);
+    expect(r.anchoring?.status, JSON.stringify(r.anchoring?.ignored)).toBe("anchored");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("an anchored copy given as text is measured as stored too", async () => {
+    const { alice, anchor, text } = await storedAtLimit();
+    const r = await verifyOriginal({ log: text, authors: [alice.evidence()], now: NOW, bytes: allBytes });
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.status).toBe("unverified");
+  });
+});
