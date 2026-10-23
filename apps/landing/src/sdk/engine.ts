@@ -12,7 +12,7 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type OriginalsStore, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
 import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
@@ -37,6 +37,7 @@ import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
 import { short } from "./format";
 import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
+import { IndexedDbStore } from "./idb-store";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
 import { authorshipPublicKeyMultibase, turnkeyAuthorshipSigner } from "./turnkey-authorship-signer";
@@ -157,6 +158,14 @@ interface LogLine {
   };
 }
 
+/** An Original this account's store holds, read from its stored log for a list. `open` verifies it. */
+export interface StoredOriginalSummary {
+  did: string;
+  name: string;
+  checkpoint: string;
+  published: boolean;
+}
+
 /**
  * Where an Original is published, and the key that controls its alias (P3.7).
  * An upload that can also `submit` takes shared-host saves of the published
@@ -170,7 +179,7 @@ export interface PublishTarget {
   aliasSigner: () => Promise<WebVHSigner>;
 }
 
-interface Authoring {
+export interface Authoring {
   ref: AuthorRef;
   signer: OriginalsSigner;
   evidence: AuthorDidEvidence;
@@ -185,7 +194,15 @@ export class DemoEngine {
   private readonly authed: boolean;
   private readonly subOrgId?: string;
   private readonly listeners = new Set<Listener>();
-  private readonly store = new MemoryStore();
+  /**
+   * Signed in, the account's IndexedDB store, so work survives a browser
+   * restart (#976 B, G2). Signed out, a MemoryStore: that work is page-scoped
+   * and its key is discarded with the page (B5).
+   */
+  private store: OriginalsStore | null = null;
+  private storeOpening: Promise<OriginalsStore> | null = null;
+  private readonly openStoreWith?: () => Promise<OriginalsStore>;
+  private readonly authorWith?: () => Promise<Authoring>;
   private authoring: Authoring | null = null;
   private sdk: OriginalsSDK | null = null;
   private did: string | null = null;
@@ -217,17 +234,21 @@ export class DemoEngine {
      * Overrides the signed-in author (Turnkey `#key-1`), for tests and the
      * regtest journey, which sign with local keys and say so.
      */
-    author?: Authoring;
+    author?: Authoring | (() => Promise<Authoring>);
     /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
     anchoring?: AnchoringOptions;
+    /** Overrides the store, for tests. */
+    openStore?: () => Promise<OriginalsStore>;
   }) {
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
     this.target = opts?.publishTarget;
-    this.authorOverride = opts?.author;
+    this.authorOverride = typeof opts?.author === "function" ? undefined : opts?.author;
     this.anchoringOpts = opts?.anchoring ?? {};
     this.networkFlag = opts?.networkFlag ?? btcNetwork();
+    this.openStoreWith = opts?.openStore;
+    this.authorWith = typeof opts?.author === "function" ? opts.author : undefined;
     (globalThis as Record<string, unknown>).__originalsDemo = this;
     this.tier = demoTier(this.networkFlag, this.authed);
   }
@@ -253,13 +274,26 @@ export class DemoEngine {
     this.authorEvidence.set(evidence);
   }
 
+  /** This engine's store: the account's durable one when signed in and the browser has IndexedDB. */
+  private openStore(): Promise<OriginalsStore> {
+    this.storeOpening ??= (
+      this.openStoreWith
+        ? this.openStoreWith()
+        : this.authed && this.subOrgId && globalThis.indexedDB
+          ? IndexedDbStore.open(this.subOrgId)
+          : Promise.resolve(new MemoryStore())
+    ).then((store) => (this.store = store));
+    return this.storeOpening;
+  }
+
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    this.authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await createLocalAuthor());
+    const store = await this.openStore();
+    this.authoring = this.authorOverride ?? (this.authorWith ? await this.authorWith() : this.authed ? await this.signedInAuthor() : await createLocalAuthor());
     this.setAuthorEvidence(this.authoring.evidence);
     this.sdk = OriginalsSDK.create({
-      store: this.store,
+      store,
       // This page holds or just read the author's own DID: the SDK reads it as stamped when it was
       // obtained, restamped whenever it changes. An unanchored Original is still only valid as of
       // its checkpoint, never current (P7.10).
@@ -320,6 +354,41 @@ export class DemoEngine {
     this.view = result.original;
     await this.refresh();
     this.emit("asset:created", `Created ${short(this.did)}, signed by ${short(ref.did)}`, { did: this.did, checkpoint: this.view.checkpoint });
+    return this.snapshot();
+  }
+
+  /**
+   * The Originals this account's store holds, read from each stored log's
+   * last entry: a list, not a verification. `open` verifies.
+   */
+  async listOriginals(): Promise<StoredOriginalSummary[]> {
+    const store = await this.openStore();
+    const out: StoredOriginalSummary[] = [];
+    for (const did of await store.list()) {
+      const log = (await store.get(did))?.log.trimEnd();
+      if (!log) continue;
+      const last = parseJson(log.slice(log.lastIndexOf("\n") + 1)) as unknown as LogLine;
+      out.push({ did, name: last.state.asset.name, checkpoint: last.versionId, published: (last.state.asset.aliases?.length ?? 0) > 0 });
+    }
+    return out;
+  }
+
+  /**
+   * Reopen an Original from this account's store (#976 B3), verified as any
+   * load is. A published one gets its alias back from the stored evidence,
+   * so its revisions go through the host again. Continuing still needs this
+   * author's signer: the store holds no key.
+   */
+  async open(did: string): Promise<DemoAssetState> {
+    await this.author();
+    const view = await this.sdk!.get(did);
+    const aliasDid = view.state.aliases[0];
+    const alias = aliasDid ? await this.store!.getAuthorEvidence(aliasDid) : undefined;
+    this.did = did;
+    this.view = view;
+    this.alias = alias ? { did: alias.did, log: alias.log, ...(alias.witness === undefined ? {} : { witness: alias.witness }) } : null;
+    await this.refresh();
+    this.emit("asset:opened", `Opened ${short(did)} at ${short(view.checkpoint)}`, { did, checkpoint: view.checkpoint });
     return this.snapshot();
   }
 
@@ -703,11 +772,11 @@ export class DemoEngine {
   /** Refresh the cached log and bytes from the store after each commit. */
   private async refresh(): Promise<void> {
     if (!this.did) return;
-    const stored = await this.store.get(this.did);
+    const stored = await this.store!.get(this.did);
     const text = stored?.log ?? "";
     this.logEntries = text.trimEnd().split("\n").filter(Boolean).map((line) => parseJson(line) as unknown as LogLine);
     for (const v of this.view?.resources ?? []) {
-      const bytes = await this.store.getResource(v.digest);
+      const bytes = await this.store!.getResource(v.digest);
       if (bytes) this.bytes.set(v.digest, bytes);
     }
   }
