@@ -269,14 +269,19 @@ export interface PublishNextResult {
   resent: boolean;
 }
 
+/** Send again, identical, a pair whose answer was lost; null when none is waiting (P9.6). */
+export async function resendWaiting(transport: AnchoringTransport, outbox: AnchoringOutbox, did: string): Promise<PublishNextResult | null> {
+  const waiting = await outbox.get(did);
+  if (!waiting) return null;
+  const sent = await deliver(transport, outbox, did, waiting);
+  return { sent, pair: waiting.pair, offChain: waiting.pair.offChain, resent: true };
+}
+
 /** Publish the next entry Bitcoin can accept on the Original's sat (P9.13, P9.17). */
 export async function publishNextEntry(p: PublishNextParams): Promise<PublishNextResult> {
   // A pair whose answer was lost goes again, identical: never a second pair for it (P9.6).
-  const waiting = await p.outbox.get(p.did);
-  if (waiting) {
-    const sent = await deliver(p.transport, p.outbox, p.did, waiting);
-    return { sent, pair: waiting.pair, offChain: waiting.pair.offChain, resent: true };
-  }
+  const resent = await resendWaiting(p.transport, p.outbox, p.did);
+  if (resent) return resent;
   p.guard.check();
   const satSigner: BitcoinSigner = {
     signAndFinalizeCommitPsbt: (psbt) => guardedSign(p.guard, () => p.satSigner.signAndFinalizeCommitPsbt(psbt)),

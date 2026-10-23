@@ -311,7 +311,64 @@ export const demo = {
     hostedPublication:
       'Publishing to the web is being rebuilt on the Originals Protocol and returns soon. Your Original is complete without it: download its evidence to keep a copy anyone can check.',
     bitcoinAnchoring:
-      'Adding to Bitcoin is being rebuilt on the Originals Protocol and returns after web publication.'
+      'Adding to Bitcoin is being rebuilt on the Originals Protocol and opens after its release checks pass.'
+  },
+  /**
+   * Anchoring an Original on Bitcoin (plan 011, PR 10b; behind bitcoinAnchoring).
+   * Each label names one state of the anchor (P9.18); none of them is a verdict
+   * on anything else (history, author, files and holder are reported apart).
+   */
+  anchoring: {
+    beforeHeading: 'Before you sign',
+    terminal:
+      'Anchoring happens once and cannot be undone: from then on, Bitcoin is where this Original’s history is read, and each new version is inscribed on the same sat.',
+    twoKeys:
+      'Two keys sign. Your authorship key signs the entry that names the sat; your deposit key signs the Bitcoin transaction that pays for it. Holding the sat makes you its owner, not its author: only the authorship key can change the Original.',
+    offChainLead: 'Bitcoin will hold the signed history only. These stay off chain, with you and this site:',
+    offChainIdentity: (did: string) => `the history of your DID, ${did}`,
+    offChainNote:
+      'Nothing guarantees anyone else keeps them. Download the evidence package to keep your own copy, and hand it on with the sat if you sell or give it away.',
+    cancel: 'Cancel',
+    cancelled: 'Cancelled before anything was sent. Nothing was spent.',
+    sessionExpired:
+      'Your signing session expired before the next signature, so nothing was sent. Sign in again, then retry: anything already signed is kept.',
+    retry: 'Retry',
+    resend: 'Send again',
+    resendNote:
+      'The server never answered the last send. Sending again uses the same signed transactions, so nothing is paid twice.',
+    labels: {
+      'not-anchored': 'Not on Bitcoin',
+      'submitted-unobserved': 'Sent, not seen on the network yet',
+      'pending-bitcoin-acceptance': 'Pending Bitcoin acceptance',
+      anchored: 'Anchored on Bitcoin',
+      unverified: 'Bitcoin evidence missing or disputed',
+    } as Record<string, string>,
+    labelNotes: {
+      'not-anchored': 'Nothing for this Original is known to be on its way to Bitcoin.',
+      'submitted-unobserved':
+        'The transactions were handed to the network, but no node we read shows them. The server sends the same ones again; nothing new is signed.',
+      'pending-bitcoin-acceptance':
+        'On its way: the inscription is in the network, and Bitcoin has not accepted it yet. It counts at one confirmation.',
+      anchored: 'Bitcoin shows the anchor. Each later version is inscribed on the same sat, one per block.',
+      unverified: 'The index we read could not show the sat, or two indexes disagree. Nothing is prepared or sent until they agree.',
+    } as Record<string, string>,
+    actions: {
+      resume: 'The server holds a pair for the next entry and is sending it again.',
+      'wait-for-confirmation': 'Waiting for a block to confirm the inscription.',
+      'wait-for-evidence': 'Waiting for the signer history this inscription names before anything else is sent.',
+      'wait-for-bitcoin': 'Indexes disagree about the sat or its holder: waiting before preparing or sending anything.',
+      refused: 'A recorded inscription no longer checks out, so it will not be sent.',
+    } as Record<string, string>,
+    confirmations: (n: number) => (n === 1 ? '1 confirmation' : `${n} confirmations`),
+    unpublished: (n: number) => (n === 1 ? '1 version is not on Bitcoin yet.' : `${n} versions are not on Bitcoin yet.`),
+    inscribeNext: 'Inscribe the next version',
+    inscribeNextPending: 'Inscribing…',
+    holderLead: 'Held in',
+    holderNote: 'The sat’s holder owns the Original. Ownership is reported, never established; it confers no right to change it.',
+    holderElsewhere: 'The sat is no longer at your address. Whoever holds it now is the one who can inscribe next.',
+    indexSingle: (index: string) => `Read from one index (${index}); no second index was compared.`,
+    indexCompared: (indexes: string[]) => `Read from ${indexes.length} indexes that agree: ${indexes.join(', ')}.`,
+    neverCurrentNote: 'Until Bitcoin shows the anchor, this Original is valid as of its last version, never confirmed current.',
   },
   evidence: {
     action: 'Download evidence',

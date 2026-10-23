@@ -23,8 +23,8 @@ import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
 import {
-  AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, signingGuard,
-  type AnchoringOutbox, type AnchoringStatus, type AnchoringTransport, type SubmitAnswer,
+  AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
+  type AnchoringOutbox, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
 } from "./anchoring";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import { TurnkeySatSigner } from "./turnkey-sat-signer";
@@ -528,11 +528,14 @@ export class DemoEngine {
     }
     if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
     if (!this.authed && !this.authorOverride) throw new Error("Sign in to anchor: the sat is funded from, and returned to, your own address.");
-    const funding = opts?.funding;
-    if (!funding || funding.fundingUtxos.length === 0) throw new Error("Anchoring needs funding from your deposit address.");
     const network = this.anchoringNetwork();
     const transport = this.anchoringTransport();
     const outbox = this.outbox();
+    // A pair whose answer was lost goes first, identical, needing no funding or signature (P9.6).
+    const resent = await resendWaiting(transport, outbox, this.did);
+    if (resent) return this.afterSend(transport, resent);
+    const funding = opts?.funding;
+    if (!funding || funding.fundingUtxos.length === 0) throw new Error("Anchoring needs funding from your deposit address.");
     const guard = signingGuard({ signal: opts?.signal, sessionActive: opts?.sessionActive });
     const { ref, signer } = await this.author();
     const script = p2wpkhScript(funding.changeAddress, network);
@@ -559,9 +562,13 @@ export class DemoEngine {
       sdk: this.sdk, did: this.did, network, transport, outbox, satSigner, changeAddress: funding.changeAddress, fundingUtxos, feeRate,
       index: this.anchoringOpts.index ?? `ord@landing-${network}`, guard,
     });
+    return this.afterSend(transport, result);
+  }
+
+  private async afterSend(transport: AnchoringTransport, result: PublishNextResult): Promise<DemoAssetState> {
     this.lastSubmission = { broadcast: result.sent.broadcast };
     this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain };
-    this.view = await this.sdk.get(this.did);
+    this.view = await this.sdk!.get(this.did!);
     await this.refresh();
     this.emit("asset:inscribed", `${result.resent ? "Resent" : "Sent"} ${short(result.sent.versionId)} for inscription (${result.sent.broadcast})`, {
       versionId: result.sent.versionId, commitTxId: result.sent.commitTxId, revealTxId: result.sent.revealTxId, broadcast: result.sent.broadcast,

@@ -14,6 +14,7 @@ import type { AssetSource } from '../sdk/engine';
 import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { HistoryChain } from './HistoryChain';
 import { featureEnabled } from '../sdk/features';
+import { AnchoringBeforeSign, AnchoringPanel } from './AnchoringPanel';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import {
@@ -124,12 +125,21 @@ interface CommittedSource {
 export function Demo() {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, signingNotice, reauth, beginReauth } = useAuth();
+  // Read at each signature, not when the click started (anchoring checks it before every one).
+  const signingRef = useRef(signing);
+  signingRef.current = signing;
+  const cancelRef = useRef<AbortController | null>(null);
+  const [pendingHandOff, setPendingHandOff] = useState(false);
   const network = btcNetwork();
   // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
   // engine derives its provider from this same value, so an enabled money
   // button and a mock provider can no longer end up on screen together.
   const real = demoTier(network, isAuthenticated).real;
   const inscribeView = inscribeStepView(real, network);
+  // Anchoring Originals (plan 011, PR 10b; off). With web publication off it
+  // starts from the local layer (P9.10): step 3 follows step 1 directly.
+  const anchoringOn = featureEnabled('bitcoinAnchoring');
+  const anchorFromLocal = anchoringOn && !featureEnabled('hostedPublication');
   // Every tier-dependent string, resolved once from the same `real` /
   // `isAuthenticated` values the behavior is driven by, so copy and behavior
   // cannot drift apart (KTD9).
@@ -424,14 +434,70 @@ export function Demo() {
   }, [bitcoin, asset]);
   useEffect(() => {
     if (networkMismatch) return;
-    if ((network !== 'mainnet' && network !== 'regtest') || phase !== 'published' || gate !== 'ok' || !bitcoin) return;
+    const ready = phase === 'published' || (anchorFromLocal && phase === 'created') || (anchoringOn && phase === 'inscribed');
+    if ((network !== 'mainnet' && network !== 'regtest') || !ready || gate !== 'ok' || !bitcoin) return;
     void fetchDeposit();
     const t = setInterval(() => void fetchDeposit(), 15_000);
     return () => clearInterval(t);
-  }, [network, phase, gate, bitcoin, fetchDeposit, networkMismatch]);
+  }, [network, phase, gate, bitcoin, fetchDeposit, networkMismatch, anchorFromLocal, anchoringOn]);
+
+  /**
+   * Fund from the account's own confirmed deposit, re-read at click time. With
+   * anchoring, the engine puts the output holding the sat first (P9.12).
+   */
+  const depositFunding = async () => {
+    const info = await fetchDeposit();
+    if (!info && depositErrorRef.current) throw new DemoCopyError(depositErrorRef.current);
+    if (!info) throw new DemoCopyError(demo.deposit.needed);
+    if (info.ordinalCheck === 'unavailable') throw new DemoCopyError(demo.deposit.ordinalCheckUnavailable);
+    const selection = selectFundingUtxos(info.confirmedUtxos, info.estimatedCostSats);
+    if (selection.selected.length === 0) {
+      throw new DemoCopyError(depositShortfallMessage(selection.totalSats, selection.shortfallSats));
+    }
+    return selection.selected;
+  };
+
+  /** One anchoring step through the engine: cancellable, and checked against the session before each signature. */
+  const anchorStep = async (engine: DemoEngine) => {
+    const blocked = signingGateMessage(gate, network, signing);
+    if (blocked || !bitcoin) throw new DemoCopyError(blocked ?? demo.session.missingBody);
+    const controller = new AbortController();
+    cancelRef.current = controller;
+    try {
+      // A pair whose answer was lost is resent as is; it needs no new funding.
+      const pending = await engine.pendingHandOff();
+      return await engine.inscribe({
+        ...(pending ? {} : { funding: { fundingUtxos: await depositFunding(), changeAddress: bitcoin.fundingAddress, signingClient: bitcoin.signingClient } }),
+        signal: controller.signal,
+        sessionActive: () => signingRef.current === 'active',
+      });
+    } finally {
+      cancelRef.current = null;
+      setPendingHandOff(await engine.pendingHandOff().catch(() => false));
+    }
+  };
+
+  const inscribeNext = () =>
+    runExclusive(runningRef, async () => {
+      setError(null);
+      setUpdating(true);
+      try {
+        setAsset(await anchorStep(await getEngine()));
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+      } finally {
+        setUpdating(false);
+      }
+    });
 
   const inscribe = () =>
-    run('published', 'inscribing', 'inscribed', async (engine) => {
+    run(phase === 'created' ? 'created' : 'published', 'inscribing', 'inscribed', async (engine) => {
+      if (anchoringOn) {
+        if (networkMismatch) throw new DemoCopyError(demo.deposit.networkMismatch);
+        if (network !== 'mainnet' && network !== 'regtest') throw new DemoCopyError(demo.unavailable.bitcoinAnchoring);
+        return anchorStep(engine);
+      }
       setSubmitOutcome({ kind: 'not-observed' });
       // Mock path (no real network enabled): unchanged bare inscribe.
       if (!real) return engine.inscribe();
@@ -495,6 +561,15 @@ export function Demo() {
       });
     });
 
+  // The publication label follows Bitcoin, so it is re-read while the panel is open (P9.18).
+  useEffect(() => {
+    if (!anchoringOn || phase !== 'inscribed') return;
+    const t = setInterval(() => {
+      void getEngine().then((engine) => engine.anchoringStatus()).then(setAsset).catch(() => undefined);
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [anchoringOn, phase, getEngine]);
+
   const reset = () => {
     setPhase('idle');
     setAsset(null);
@@ -549,12 +624,14 @@ export function Demo() {
 
   // One decision, used by all three parts of the completion panel.
   const doneView = inscribeDoneView(submitOutcome);
-  const step = phaseToStep[phase];
+  const step = anchorFromLocal && phase === 'created' ? 2 : phaseToStep[phase];
   const busy =
     phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
   // Revisable while the asset is authorable for free — did:cel and did:webvh.
   // Not once inscribed: that append is paid on-chain (see DemoEngine.update).
-  const canRevise = phase === 'created' || phase === 'published';
+  // With anchoring, a revision after the anchor is committed locally and then
+  // inscribed on the same sat, one per block (P9.13): revising stays open.
+  const canRevise = phase === 'created' || phase === 'published' || (anchoringOn && phase === 'inscribed');
   // Compare the BYTES on screen against the bytes in the log. Retyping the
   // title back to its committed value therefore clears the pending state, and
   // a nonce bump that happened to reproduce the same art would too.
@@ -575,7 +652,7 @@ export function Demo() {
   // The form is the edit surface once an asset exists: typing a new title
   // regenerates the artwork, which IS the new version. Locked only while an
   // operation is in flight, or once inscribed (that append costs sats).
-  const formLocked = busy || phase === 'inscribed';
+  const formLocked = busy || (phase === 'inscribed' && !anchoringOn);
   // Linked so a creator can watch the funding transaction confirm. Uses the
   // same explorer helper as the completed view, so a simulated run — where the
   // helper withholds the URL — offers no link to a transaction that isn't.
@@ -930,8 +1007,24 @@ export function Demo() {
                   </div>
                 )}
 
-                {(phase === 'inscribing' || phase === 'inscribed') && (
+                {(phase === 'inscribing' || phase === 'inscribed') && !anchoringOn && (
                   <p className="demo-revise-locked">{demo.revise.lockedNote}</p>
+                )}
+
+                {phase === 'inscribing' && anchoringOn && (
+                  <button type="button" className="demo-reset" onClick={() => cancelRef.current?.abort()}>
+                    {demo.anchoring.cancel}
+                  </button>
+                )}
+
+                {phase === 'inscribed' && asset && anchoringOn && (
+                  <AnchoringPanel
+                    asset={asset}
+                    busy={busy}
+                    pendingHandOff={pendingHandOff}
+                    onInscribeNext={inscribeNext}
+                    onResend={inscribeNext}
+                  />
                 )}
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
@@ -948,11 +1041,11 @@ export function Demo() {
                   </p>
                 )}
 
-                {phase === 'published' && real && networkMismatch && (
+                {(phase === 'published' || (anchorFromLocal && phase === 'created')) && real && networkMismatch && (
                   <p className="demo-error" role="alert">{demo.deposit.networkMismatch}</p>
                 )}
 
-                {phase === 'published' && (network === 'mainnet' || network === 'regtest') && !networkMismatch && (
+                {(phase === 'published' || (anchorFromLocal && phase === 'created')) && (network === 'mainnet' || network === 'regtest') && !networkMismatch && (
                   gate === 'ok' && bitcoin ? (
                     <div className="demo-deposit">
                       <div className="demo-deposit-head">
@@ -1019,6 +1112,7 @@ export function Demo() {
                           {demo.deposit.ordinalCheckPartial(deposit.uncheckedOutputs ?? 0)}
                         </p>
                       )}
+                      {anchoringOn && asset && <AnchoringBeforeSign asset={asset} />}
                     </div>
                   ) : gate === 'unavailable' ? (
                     // No re-auth CTA here on purpose: signing in is what
@@ -1082,7 +1176,7 @@ export function Demo() {
                     </div>
                   )}
 
-                {phase === 'inscribed' && asset && (
+                {phase === 'inscribed' && asset && !anchoringOn && (
                   <div className="demo-done" data-sim={inscribeView.simulated ? '' : undefined}>
                     {/* Commit-only is not "inscribed": the reveal carries
                         the inscription, and until it propagates there is
