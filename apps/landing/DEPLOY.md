@@ -132,14 +132,27 @@ real-money action; a mismatch is reported in both directions.
 
 `VITE_WEBVH_HOST` is the same shape of value and the more permanent one. It is
 the single host every `did:webvh` identifier this site publishes will name,
-**forever** — a did:webvh domain cannot be changed after publication. Unset, the
-SPA falls back to `window.location.host`, so a visitor who arrives on the
-Railway-generated `*.up.railway.app` hostname mints DIDs pinned to it. Set it to
-the canonical domain (`originals.build`) as a **bare hostname** — no scheme, no
-port, no path. Required on a mainnet deploy and reported by name at boot; the
-server also reads it at runtime and 301s document requests from any other host,
-so the redirect and the DID cannot disagree. `/api/*` is exempt from that
-redirect, so publishing writes and platform probes are unaffected.
+**forever** — a did:webvh domain cannot be changed after publication. The SPA
+mints new identities and Original aliases on it (`src/auth/webvh-domain.ts`,
+#976 B gap G1). Unset, it keeps the legacy domain `magby.originals.build`; a
+malformed value refuses to mint. Set it to the canonical domain
+(`originals.build`) as a **bare hostname** — no scheme, no port, no path.
+Required on a mainnet deploy and reported by name at boot; the server also
+reads it at runtime and 301s document requests from any other host, so the
+redirect and the DID cannot disagree. `/api/*` is exempt from that redirect,
+so publishing writes and platform probes are unaffected.
+
+An identity already minted on the legacy domain stays its author's identity:
+signing in finds it and never mints a second one. Its log is served on the
+host it names. A hosted-layout read (`/user-<slug>/…`) for an object stored
+under the request's own host is answered there, not redirected. That host
+must still route to this service for a reader to reach it.
+
+`GET /api/version` reports the deployed revision: `revision` is
+`RAILWAY_GIT_COMMIT_SHA` at runtime, and `spaRevision` is the commit Vite baked
+into `index.html` (`<meta name="originals-revision">`). Either is `null` when
+unknown. The hosted acceptance receipt requires both to equal the source SHA
+(`scripts/acceptance/hosted-README.md`).
 
 ## Before enabling mainnet
 

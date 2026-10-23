@@ -301,3 +301,62 @@ test('a mixed-case canonical host still redirects a foreign host, to the lowerca
   expect(res.status).toBe(301);
   expect(res.headers.get('location')).toBe('https://originals.build/page');
 });
+
+/**
+ * #976 B, gap G1. A did:webvh names the host it was published on, and the
+ * durable store serves by that host. A hosted-layout read on a non-canonical
+ * host that holds the object is served there, never bounced to a host that
+ * doesn't hold it. Anything else on that host still redirects.
+ */
+describe('hosted-layout reads on the host they were published under', () => {
+  const stored = '/user-abc0123456789ab/did.jsonl';
+  const publications = {
+    serve: (url: URL) => (url.host === 'magby.originals.build' && url.pathname === stored ? new Response('log') : null),
+  };
+  const fetchFn = () =>
+    buildFetch({ apiRoutes: configuredRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0, canonicalHost: 'originals.build', publications });
+
+  test('a stored object is served, not redirected', async () => {
+    const res = await fetchFn()(new Request(`https://magby.originals.build${stored}`));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('log');
+  });
+
+  test('a hosted-layout path with nothing stored still redirects', async () => {
+    const res = await fetchFn()(new Request('https://magby.originals.build/user-zzz/did.jsonl'));
+    expect(res.status).toBe(301);
+  });
+
+  test('a document on that host still redirects', async () => {
+    const res = await fetchFn()(new Request('https://magby.originals.build/some/page'));
+    expect(res.status).toBe(301);
+  });
+});
+
+/**
+ * #976 B, gap G6. The acceptance receipt compares the deployed revision with
+ * the source SHA, so the server reports its own and the SPA's, with or without
+ * sign-in configured.
+ */
+describe('GET /api/version', () => {
+  test('reports the server revision and the SPA revision baked into index.html', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'landing-dist-rev-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><head><meta name="originals-revision" content="abc1234"></head>');
+    try {
+      for (const apiRoutes of [configuredRoutes, null]) {
+        const fetchFn = buildFetch({ apiRoutes, hostStore: noopHostStore, distDir: dir + '/', trustedProxyHops: 0, revision: 'def456' });
+        const res = await fetchFn(new Request('https://originals.build/api/version'));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ revision: 'def456', spaRevision: 'abc1234' });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an unknown revision is null, never a guess', async () => {
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore, distDir, trustedProxyHops: 0 });
+    const res = await fetchFn(new Request('https://originals.build/api/version'));
+    expect(await res.json()).toEqual({ revision: null, spaRevision: null });
+  });
+});

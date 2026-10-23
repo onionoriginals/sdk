@@ -267,6 +267,8 @@ const server = Bun.serve({
     // bakes in, read at runtime here so the redirect and the DID agree; a bad
     // value is already a named violation in the boot config report.
     canonicalHost: canonicalWebvhHost(),
+    // Railway sets this for the deployed commit; /api/version reports it (#976 B, G6).
+    revision: process.env.RAILWAY_GIT_COMMIT_SHA || null,
   }),
   // Last line of defence (R3): a handler that throws must not reach a client
   // as an untyped 500 with nothing in the log. One named JSON body, one

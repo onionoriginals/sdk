@@ -117,6 +117,8 @@ export function buildFetch(deps: {
   // requests on any other host are redirected here. Undefined in dev and tests,
   // where no redirect happens at all.
   canonicalHost?: string;
+  // The deployed revision (RAILWAY_GIT_COMMIT_SHA), reported by /api/version.
+  revision?: string | null;
   log?: (message: string) => void;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
   const { apiRoutes, hostStore, distDir, originals } = deps;
@@ -130,6 +132,12 @@ export function buildFetch(deps: {
   // One sample per process so the hop count can be checked against the live
   // proxy (see client-ip.ts) without a debug endpoint or per-request logging.
   let sampled = false;
+  let spaRevision: Promise<string | null> | undefined;
+
+  // Hosted-layout paths (`/user-<slug>/…`). A did:webvh names the host it was
+  // published under, and the durable store serves by that host.
+  const durableHosted = (url: URL): Response | null =>
+    /^\/user-[^/]+\//.test(url.pathname) ? ((deps.publications ?? originals)?.serve(url) ?? null) : null;
 
   // Bun calls this with (request, server); server exposes the real peer IP.
   return async (req, server?: BunServerLike) => {
@@ -152,6 +160,18 @@ export function buildFetch(deps: {
     // is not obliged to follow redirects, so bouncing it could break credential
     // verification for an external verifier — the one thing that route exists
     // to keep working.
+    //
+    // A hosted-layout object stored under this very host is served here, not
+    // bounced: a did:webvh minted on another domain is fetched from that domain,
+    // and the canonical host doesn't hold it (#976 B, G1; P3.6).
+    if (
+      canonicalHost &&
+      url.host !== canonicalHost &&
+      (req.method === 'GET' || req.method === 'HEAD')
+    ) {
+      const hosted = durableHosted(url);
+      if (hosted) return hosted;
+    }
     if (
       canonicalHost &&
       url.host !== canonicalHost &&
@@ -196,6 +216,13 @@ export function buildFetch(deps: {
     if (req.method === 'GET' && path.startsWith('/api/btc/sat-snapshot/')) {
       const handler = apiRoutes?.['GET /api/btc/sat-snapshot/:sat'];
       if (handler) return handler(req, url, clientIp);
+    }
+
+    // The deployed revision, for the hosted acceptance receipt (#976 B, G6).
+    // Answered with or without sign-in configured; unknown is null, never a guess.
+    if (path === '/api/version' && (req.method === 'GET' || req.method === 'HEAD')) {
+      spaRevision ??= readSpaRevision(distDir);
+      return json({ revision: deps.revision ?? null, spaRevision: await spaRevision });
     }
 
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
@@ -246,4 +273,14 @@ export function buildFetch(deps: {
     // 5. Static SPA + fallback (with traversal guard).
     return (await serveStatic(url, distDir))!;
   };
+}
+
+/** The revision Vite baked into the built index.html (`<meta name="originals-revision">`), or null. */
+async function readSpaRevision(distDir: string): Promise<string | null> {
+  try {
+    const html = await file(`${distDir.replace(/\/?$/, '/')}index.html`).text();
+    return /<meta name="originals-revision" content="([0-9a-f]{7,64})">/.exec(html)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
