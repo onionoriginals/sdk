@@ -363,6 +363,110 @@ the signed type, `nosniff`, a script-free sandboxing CSP, and `attachment` for
 active types. Hosts must also serve resources from an origin without user
 credentials, and clients must escape names and metadata.
 
+## Shared-host saves (implemented; P6.4, P6.7, P6.8)
+
+A host that accepts entries for one Original from several signers serializes
+them: one accepted append at a time at that host. It is not consensus and does
+not prevent forks published elsewhere (P6.6). The SDK talks to it through a
+`SharedHost` (`submit(submission)` and `accepted(original)`); the transport is
+the host's.
+
+```ts
+const draft = await sdk.prepareEdit(did, { parent, resources, author });
+const candidate = await sdk.sign(draft, signer); // verified against the exact parent; not history yet
+const saved = await sdk.submit(candidate, host);
+// saved.status: "accepted" | "already-accepted" -> committed locally; saved.hostHead, saved.behind
+//               "stale-parent"                  -> saved.refused is kept, labelled "refused"
+const kept = await sdk.refused(did);             // each with its signed entry and its draft
+await sdk.sync(did, host);                       // fetch and verify the host's accepted log
+await sdk.reconcile(did, {
+  host, refused: kept[0].versionId, author, signer,
+  change: ({ head, refused }) => ({ resources: [...] }), // the caller's reconciled change; required
+});
+```
+
+- **Local commit.** A shared-host save signs and verifies the candidate
+  against the exact local parent (P6.1, P6.4) and commits it locally only once
+  the host answers `accepted` or `already-accepted`. A candidate whose parent
+  is no longer the local head is a `STALE_PARENT` conflict before anything is
+  sent. Once an Original is shared-hosted, save through `submit`: a plain
+  `commit` advances only local history, and the host refuses anything that
+  does not extend its head.
+- **Retries (P6.4, P6.7).** A retried candidate is sent byte for byte. A host
+  that already accepted it answers with its checkpoint and its current head;
+  the SDK commits it locally and reports `behind: true` when the head has
+  moved on. `submit` keeps the candidate as pending (`putPending`) before it
+  is sent and forgets it once the host answers, so after a lost answer or a
+  crash `sdk.pending(did)` returns it to submit again, never a new candidate
+  for the same change. A candidate already committed locally that the host
+  refuses as stale is a fork with the host (`fork`, `HOST_DIVERGES`), not a
+  refused candidate.
+- **Refused candidates (P6.8).** After a stale-parent answer the store keeps
+  the refused signed entry and its new bytes (`putRefused`; the bytes are
+  content addressed and are never a version on their own). Local history does
+  not move. `commit`, `sign` and `submit` refuse a refused candidate with
+  `CANDIDATE_REFUSED`; `package`, `hostedFiles` and verification read only the
+  committed log, so a refused candidate is never packaged, published or
+  inscribed. Publishing it would fork the Original (P6.6). A log that carries
+  a refused candidate, arriving through `import` or `sync`, is kept as a
+  branch (`conflict`) and never committed.
+- **Reconcile (P6.8).** `reconcile` fetches the host's accepted log and
+  verifies it. A log that extends local history becomes local history; one
+  that diverges is kept as a branch and reconcile fails with `fork`
+  (`HOST_DIVERGES`). The new candidate's parent is the new head and its
+  content is what the caller supplies: the SDK never merges. The signer's
+  request summarizes the change from the new head (P5.11), and the SDK never
+  signs on anyone's behalf. Once the reconciled candidate is accepted, the
+  refused one it names is dropped.
+- **What a host judges with (P7.8, PROVISIONAL).** A host verifies each
+  submission with the signer DID logs it holds, or a submitted one that
+  verifies and extends what it holds. A host never sent a newer DID log,
+  for example one deactivating the author DID or removing a key, accepts an
+  entry that log would refuse: the host judges with the identity evidence
+  it holds, and its acceptance does not establish freshness (P7.8). Readers
+  judge for themselves with the newest evidence they can get, and an entry
+  that newer evidence refuses is not current for them (P6.5, P7.9). Sending
+  the newer log to the host (with a save, or by the owner) makes it refuse
+  such entries from then on.
+- **Forks.** A refused candidate published elsewhere is a fork, unresolved
+  until anchoring; branch length, number of entries and which keys signed
+  decide nothing. An entry that brings content from another branch is an
+  ordinary single-parent entry on its own branch, and the fork remains (P6.6).
+
+Stores implement `putRefused`/`getRefused`/`dropRefused` and
+`putPending`/`getPending`; `MemoryStore` and `FileStore`
+(`<root>/originals/<scid>/refused/`, `<root>/originals/<scid>/pending.json`) do.
+`sdk.retrieveHosted(aliasDid, fetch)` reads a hosted snapshot, unverified and
+within the `loadPublished` bounds, for a host's `accepted`.
+
+The landing host (`apps/landing/server/shared-saves.ts`, PROVISIONAL wire
+format) takes `POST /api/originals/submit/<domain>/<user-slug>/o-<name>` with
+`{ original, entry, resources: { digest: base64 }, identities }` and answers
+`200 { status: "accepted" | "already-accepted", checkpoint, head }` or
+`409 { status: "stale-parent", head }`; anything else is an error. It checks
+byte-identical retries first, then that the entry chains to its head, then
+cheap checks (the signer is the author or granted in the head's state, and its
+key at the named version verifies the proof), then that it verifies under the
+profile against the head, using the submitted signer DID log where it extends
+the one it holds, and that the new head would be current apart from freshness
+the host cannot establish (no removed key, P7.9; no deactivated signer DID,
+P6.5, P5.18). It writes new bytes and DID logs, then the asset log (the commit
+point: the save is accepted from then on), then the manifest, which the next
+request repairs if its write failed, and stores the exact submitted line.
+Resource bytes are served only once the accepted log lists them, with the
+media type it declares. The body is read with a byte counter, and identities,
+their size, resources and queued submissions per Original are bounded
+(PROVISIONAL). Submissions for one Original run one at a time in-process and
+the head comparison and log replace are one synchronous step, which assumes
+one server process per data directory (the landing's instance lock enforces
+it); several instances would need a shared compare-and-swap on the head. Any
+signed-in caller may submit, because the signed entry authorizes the change;
+accepted files stay the namespace owner's (an open deployment question).
+Once hosted, an asset log changes only through the submit route: an upload
+(PUT) may create it or repeat it byte for byte (a retried publication, P9.2),
+never roll it back or advance it unverified; a signer's DID log and witness
+file only grow.
+
 ## Bitcoin anchoring and ownership — phase 4
 
 An Original can be anchored from the local or the web layer, once, terminally,

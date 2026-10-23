@@ -188,6 +188,11 @@ export function buildFetch(deps: {
       return originals.hostPut(req, url, clientIp);
     }
 
+    // 1c. Shared-host saves of one Original's asset log (P6.7; shared-saves.ts).
+    if (originals && path.startsWith('/api/originals/submit/')) {
+      return originals.submit(req, url, clientIp);
+    }
+
     if (req.method === 'GET' && path.startsWith('/api/btc/sat-snapshot/')) {
       const handler = apiRoutes?.['GET /api/btc/sat-snapshot/:sat'];
       if (handler) return handler(req, url, clientIp);

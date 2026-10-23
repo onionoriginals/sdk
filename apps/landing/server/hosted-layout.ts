@@ -17,7 +17,9 @@
  * because the store decodes it once more. The server assigns every content
  * type itself: a resource is served with the media type its descriptor
  * declares in the uploaded asset log, never a header the uploader chose
- * (P9.7). The host does not verify that log; readers do.
+ * (P9.7). The host does not verify a log uploaded here; readers do. An
+ * uploaded asset log may only extend the stored one, and saves from several
+ * signers go through the verifying submit route instead (shared-saves.ts).
  *
  * A signer's DID log and witness file (authors/<64 hex>/...) only grow: a
  * replacement must extend what is stored (`signerLogVerdict`,
@@ -119,7 +121,7 @@ function signerDidOf(text: string, hex: string): string | null {
 }
 
 /** The versionIds of `log` that verify as `did`'s own log from its genesis, and whether all of it does. */
-async function verifiedSignerLog(did: string, log: string, witness: unknown, now: number): Promise<{ ids: string[]; complete: boolean }> {
+export async function verifiedSignerLog(did: string, log: string, witness: unknown, now: number): Promise<{ ids: string[]; complete: boolean }> {
   try {
     const h = await verifyAuthorHistory({ did, log, ...(witness !== undefined ? { witness } : {}) }, { now });
     return { ids: h.versions.map((v) => v.versionId), complete: !h.failure && h.versions.length > 0 };
@@ -145,6 +147,12 @@ function decodeText(bytes: Uint8Array): string | null {
  * verify. A stored log that does not verify at all can be replaced (repair);
  * an identical log is a retry. Never a rollback (P7.8).
  */
+/** The first `count` lines of a JSONL log, newline-terminated: a log's verified prefix. */
+export function logPrefix(log: string, count: number): string {
+  const lines = log.split('\n').filter((l) => l.trim() !== '');
+  return count === 0 ? '' : `${lines.slice(0, count).join('\n')}\n`;
+}
+
 export async function signerLogVerdict(
   stored: Uint8Array | null,
   next: Uint8Array,
@@ -186,7 +194,7 @@ type WitnessEntry = { versionId: string; proof: unknown[] };
 export const MAX_WITNESS_DEPTH = 64;
 
 /** True when `value` nests arrays and objects more than `max` levels deep (iterative, so it never overflows). */
-function deeperThan(value: unknown, max: number): boolean {
+export function deeperThan(value: unknown, max: number): boolean {
   const stack: Array<[unknown, number]> = [[value, 0]];
   while (stack.length > 0) {
     const [v, d] = stack.pop()!;

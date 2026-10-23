@@ -346,8 +346,9 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
   });
 
   test('a declared media type that is not a bare type/subtype is not served', async () => {
-    const { put } = setup();
     for (const mediaType of ['text/html\r\nx-evil: 1', 'image/svg+xml; charset=utf-8', 'svg', '']) {
+      // A fresh host each time: an asset log can only be extended, never replaced.
+      const { put } = setup();
       const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'a', mediaType, size: bytes.length, digest }] } } })}\n`;
       expect((await put(`${base}/asset/did.jsonl`, bad)).status).toBe(200);
       expect((await put(`${base}/resources/${digest}`, bytes)).status, JSON.stringify(mediaType)).toBe(409);
@@ -528,5 +529,54 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
     expect((await put(`${authorDir}/did-witness.json`, '[]')).status).toBe(409);
     expect((await put(`${authorDir}/did-witness.json`, 'not json')).status).toBe(409);
     expect(await get(`${authorDir}/did-witness.json`)).toBe(w2);
+  });
+});
+
+describe('a hosted asset log changes only through the verifying submit route (P6.7)', () => {
+  const base = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals';
+  test('an upload creates the asset log or repeats it; a prefix of it is already published (08d review r2 #9); one that changes or extends it is refused', async () => {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (body: string) =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(`${base}/asset/did.jsonl`)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n')).status).toBe(200);
+    // A retried first publication after a save landed: nothing is written, never a rollback.
+    const retried = await put('{"versionId":"1-a"}\n');
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual({ ok: true, alreadyPublished: true });
+    expect(await (await fetchFn(new Request(`http://${base}/asset/did.jsonl`))).text()).toBe('{"versionId":"1-a"}\n{"versionId":"2-b"}\n');
+    const changed = await put('{"versionId":"1-a"}\n{"versionId":"2-x"}\n');
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toEqual({ error: 'asset_log_changes_through_submit' });
+    // Extending it is a save, which goes through the submit route (shared-host PR review C4).
+    expect((await put('{"versionId":"1-a"}\n{"versionId":"2-b"}\n{"versionId":"3-c"}\n')).status).toBe(409);
+  });
+
+  test('a submission needs a signed-in caller and a well-formed site key', async () => {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const post = (key: string, cookie?: string, method = 'POST') =>
+      fetchFn(new Request(`http://demo.local/api/originals/submit/${encodeURIComponent(key)}`, { method, headers: cookie ? { cookie } : {}, body: method === 'POST' ? '{}' : undefined }));
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z')).status).toBe(401);
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'), 'PUT')).status).toBe(405);
+    for (const key of ['demo.example.com/user-sub-1', 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/extra', '../x/o-9xKpQ2mN4vR7tW1z', 'demo.example.com/user-sub-1/not-a-name']) {
+      expect((await post(key, cookieFor('sub-1'))).status, key).toBe(400);
+    }
+    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'))).status).toBe(400);
+  });
+});
+
+describe('#965 r5 finding 3: a submitted witness file is depth-bounded', () => {
+  test('a witness nested beyond the JSON depth limit is a structured 400, never a thrown RangeError', async () => {
+    const { parseSubmission } = await import('../shared-saves');
+    for (const n of [65, 50_000]) {
+      const text = `{"original":"did:vh:x","entry":"{\\"versionId\\":\\"2-Qa\\"}","identities":[{"did":"did:vh:a","log":"","witness":${JSON.stringify([{ versionId: '1-Qa', proof: [] }]).slice(0, -1)},${'['.repeat(n)}${']'.repeat(n)}]}]}`;
+      const out = parseSubmission(text) as { http?: number; body?: { error?: string } };
+      expect(out.http).toBe(400);
+      expect(out.body?.error).toBe('identity_witness_invalid');
+    }
   });
 });

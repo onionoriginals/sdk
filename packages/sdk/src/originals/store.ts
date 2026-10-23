@@ -9,6 +9,15 @@
  * A store also keeps what freshness checks need (P7.8): the highest versionId
  * verified for each Original and each author DID, and any valid branch that
  * diverges from the committed log, so a fork stays visible (P6.6, Q5).
+ *
+ * After a shared host refuses a save with a stale-parent conflict, the store
+ * keeps the refused signed candidate, labelled `refused`, beside the
+ * committed log and never in it (P6.8). Nothing that reads the committed log
+ * (verification, packaging, hosted files) sees it.
+ *
+ * A candidate being sent to a shared host is kept as `pending` first, so an
+ * acknowledgement lost to a crash or the network is retried with the same
+ * signed bytes rather than a new candidate (P6.4).
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
@@ -28,6 +37,32 @@ export interface CommitUpdate {
   witness?: unknown;
 }
 
+/**
+ * A signed candidate a shared host refused with a stale-parent conflict
+ * (P6.7, P6.8). It is a valid entry with the same parent as an accepted one,
+ * so it is never history: it is kept so the signer's intended change is not
+ * lost, and reconciled into a new candidate against the new head.
+ */
+export interface StoredRefused {
+  label: "refused";
+  /** The checkpoint it was signed against. */
+  parent: string;
+  /** The refused signed entry, exactly as submitted: one JSON line without a newline. */
+  entry: string;
+  /** The host's head when it refused. */
+  hostHead: string;
+  /** The accepted candidate that carried its change, once reconciled (P6.8). The refused entry is kept either way. */
+  reconciledAs?: string;
+}
+
+/** A signed candidate sent, or about to be sent, to a shared host and not yet answered (P6.4). */
+export interface StoredPending {
+  /** The checkpoint it extends; null for a genesis entry. */
+  parent: string | null;
+  /** The signed entry, exactly as submitted: one JSON line without a newline. */
+  entry: string;
+}
+
 export interface OriginalsStore {
   get(did: string): Promise<StoredOriginal | undefined>;
   /** Atomically replace the log if the stored head is `expectedHead`; otherwise a stale-parent conflict. */
@@ -43,7 +78,22 @@ export interface OriginalsStore {
   /** Keep a valid branch of an Original that diverges from its committed log. */
   putBranch(did: string, log: string): Promise<void>;
   getBranches(did: string): Promise<string[]>;
+  /** Keep a refused candidate (P6.8). Idempotent by its versionId. */
+  /** Keep a refused candidate. Storing it again with the same entry updates its label; the entry itself never changes. */
+  putRefused(did: string, refused: StoredRefused): Promise<void>;
+  getRefused(did: string): Promise<StoredRefused[]>;
+  /** Forget a refused candidate, when its signer abandons it. Reconciling never drops it (P6.8). */
+  dropRefused(did: string, versionId: string): Promise<void>;
+  /** Keep the candidate being sent to a shared host; null forgets it once the host answers (P6.4). */
+  putPending(did: string, pending: StoredPending | null): Promise<void>;
+  getPending(did: string): Promise<StoredPending | undefined>;
   list(): Promise<string[]>;
+}
+
+/** The versionId a stored refused candidate's entry names. */
+export function refusedVersionId(refused: StoredRefused): string {
+  const entry = parseJson(refused.entry) as { versionId?: unknown };
+  return typeof entry.versionId === "string" ? entry.versionId : "";
 }
 
 /**
@@ -74,6 +124,8 @@ export class MemoryStore implements OriginalsStore {
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
   private readonly branches = new Map<string, string[]>();
+  private readonly refused = new Map<string, StoredRefused[]>();
+  private readonly pending = new Map<string, StoredPending>();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -123,6 +175,35 @@ export class MemoryStore implements OriginalsStore {
 
   getBranches(did: string): Promise<string[]> {
     return Promise.resolve([...(this.branches.get(did) ?? [])]);
+  }
+
+  putRefused(did: string, refused: StoredRefused): Promise<void> {
+    const known = this.refused.get(did) ?? [];
+    const id = refusedVersionId(refused);
+    const at = known.findIndex((r) => refusedVersionId(r) === id);
+    if (at < 0) this.refused.set(did, [...known, { ...refused }]);
+    else if (known[at].entry === refused.entry) this.refused.set(did, known.map((r, k) => (k === at ? { ...refused } : r)));
+    return Promise.resolve();
+  }
+
+  getRefused(did: string): Promise<StoredRefused[]> {
+    return Promise.resolve((this.refused.get(did) ?? []).map((r) => ({ ...r })));
+  }
+
+  dropRefused(did: string, versionId: string): Promise<void> {
+    this.refused.set(did, (this.refused.get(did) ?? []).filter((r) => refusedVersionId(r) !== versionId));
+    return Promise.resolve();
+  }
+
+  putPending(did: string, pending: StoredPending | null): Promise<void> {
+    if (pending) this.pending.set(did, { ...pending });
+    else this.pending.delete(did);
+    return Promise.resolve();
+  }
+
+  getPending(did: string): Promise<StoredPending | undefined> {
+    const pending = this.pending.get(did);
+    return Promise.resolve(pending ? { ...pending } : undefined);
   }
 
   /** Forget stored bytes, as a store that lost them would. */

@@ -42,6 +42,21 @@ export class DurableHostingStorageAdapter {
     return `https://${objectKey}`;
   }
 
+  /**
+   * A shared-host save (./shared-host.ts): POST the submission for the
+   * Original hosted at `siteKey`. Returns the status and JSON body; the
+   * caller decides what is an answer and what is an error.
+   */
+  async submit(siteKey: string, body: string): Promise<{ status: number; body: unknown }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/originals/submit/${encodeURIComponent(siteKey)}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  }
+
   async get(objectKey: string): Promise<{ content: Buffer; contentType: string } | null> {
     const res = await this.fetchImpl(this.endpoint(objectKey), {
       method: 'GET',

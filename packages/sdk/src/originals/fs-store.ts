@@ -4,6 +4,10 @@
  *   <root>/originals/<scid>/did.jsonl   the committed log
  *   <root>/originals/<scid>/branches/<sha256(log)>.jsonl
  *                                       valid branches that diverge from it
+ *   <root>/originals/<scid>/refused/<sha256(versionId)>.json
+ *                                       refused candidates, never history (P6.8)
+ *   <root>/originals/<scid>/pending.json
+ *                                       the candidate being sent to a shared host (P6.4)
  *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
@@ -58,7 +62,7 @@ import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
 import { hex } from "@scure/base";
-import { headOf, higherVersion, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal } from "./store.js";
+import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
@@ -338,8 +342,10 @@ export class FileStore implements OriginalsStore {
     };
     for (const scid of await readdir(join(root, "originals"))) {
       await sweep(join(root, "originals", scid), await readdir(join(root, "originals", scid)));
-      const branches = join(root, "originals", scid, "branches");
-      await sweep(branches, await readdir(branches).catch(() => [] as string[]));
+      for (const sub of ["branches", "refused"]) {
+        const dir = join(root, "originals", scid, sub);
+        await sweep(dir, await readdir(dir).catch(() => [] as string[]));
+      }
     }
     for (const dir of ["resources", "authors", "retained"]) await sweep(join(root, dir), await readdir(join(root, dir)));
     // Lock candidates a crashed opener left behind.
@@ -557,6 +563,60 @@ export class FileStore implements OriginalsStore {
       if (log !== undefined) out.push(log);
     }
     return out;
+  }
+
+  /** Run `fn` after every earlier operation under `key` in this process (shared by every handle on the root). */
+  private serialized(key: string, fn: () => Promise<void>): Promise<void> {
+    const run = (this.locks.get(key) ?? Promise.resolve()).then(fn);
+    this.locks.set(key, run.catch(() => undefined));
+    return run;
+  }
+
+  async putRefused(did: string, refused: StoredRefused): Promise<void> {
+    const dir = join(this.dirOf(did), "refused");
+    // Under the Original's lock: a concurrent label update cannot be lost between the read and the write.
+    return this.track(() => this.serialized(did, async () => {
+      await fs.mkdir(dir, { recursive: true });
+      const name = this.didFile(refusedVersionId(refused));
+      const existing = await this.readText(join(dir, name));
+      if (existing === undefined || (JSON.parse(existing) as StoredRefused).entry === refused.entry) await this.writeAtomically(dir, name, JSON.stringify(refused));
+    }));
+  }
+
+  async putPending(did: string, pending: StoredPending | null): Promise<void> {
+    const dir = this.dirOf(did);
+    return this.track(() => this.serialized(did, async () => {
+      await fs.mkdir(dir, { recursive: true });
+      if (pending) await this.writeAtomically(dir, "pending.json", JSON.stringify(pending));
+      else {
+        await fs.rm(join(dir, "pending.json"), { force: true });
+        await fsyncDir(dir).catch(() => undefined);
+      }
+    }));
+  }
+
+  async getPending(did: string): Promise<StoredPending | undefined> {
+    const text = await this.readText(join(this.dirOf(did), "pending.json"));
+    return text === undefined ? undefined : (JSON.parse(text) as StoredPending);
+  }
+
+  async getRefused(did: string): Promise<StoredRefused[]> {
+    const dir = join(this.dirOf(did), "refused");
+    const names = (await fs.readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith(".json")).sort();
+    const out: StoredRefused[] = [];
+    for (const name of names) {
+      const text = await this.readText(join(dir, name));
+      if (text !== undefined) out.push(JSON.parse(text) as StoredRefused);
+    }
+    return out;
+  }
+
+  async dropRefused(did: string, versionId: string): Promise<void> {
+    const dir = join(this.dirOf(did), "refused");
+    return this.track(async () => {
+      await fs.rm(join(dir, this.didFile(versionId)), { force: true });
+      await fsyncDir(dir).catch(() => undefined);
+    });
   }
 
   async list(): Promise<string[]> {

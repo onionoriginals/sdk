@@ -18,26 +18,30 @@ export const JWT = 'test-secret-at-least-32-chars-long!!';
 export const SUB = 'sub-publisher-0001';
 export const DOMAIN = 'demo.example.com';
 
+export function cookieFor(sub: string): string {
+  return serializeCookie(getAuthCookieConfig(signToken(sub, `${sub}@example.com`, undefined, { secret: JWT })));
+}
+
 export function host() {
-  const store = createOriginalsStore({ dataDir: mkdtempSync(join(tmpdir(), 'landing-publish-')) });
+  const dataDir = mkdtempSync(join(tmpdir(), 'landing-publish-'));
+  const store = createOriginalsStore({ dataDir });
   const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
   const noop = { async handlePut() { return new Response(null, { status: 501 }); }, read() { return new Response(null, { status: 404 }); }, serve() { return null as Response | null; } };
   const serve = buildFetch({ apiRoutes: null, hostStore: noop, distDir: '/nonexistent/', originals });
-  const cookie = serializeCookie(getAuthCookieConfig(signToken(SUB, 'p@example.com', undefined, { secret: JWT })));
-  const upload = new DurableHostingStorageAdapter({
-    baseUrl: 'http://app.local',
-    fetchImpl: ((input: RequestInfo | URL, init?: RequestInit) => {
+  /** A browser signed in as `sub` (no cookie when null), talking to the app's origin. */
+  const fetchAs = (sub: string | null) =>
+    ((input: RequestInfo | URL, init?: RequestInit) => {
       const r = new Request(input, init);
-      r.headers.set('cookie', cookie);
+      if (sub) r.headers.set('cookie', cookieFor(sub));
       return serve(r);
-    }) as typeof fetch,
-  });
+    }) as typeof fetch;
+  const adapterFor = (sub: string) => new DurableHostingStorageAdapter({ baseUrl: 'http://app.local', fetchImpl: fetchAs(sub) });
+  const upload = adapterFor(SUB);
   // A stranger's fetch: the HTTPS URL a resolver derives, answered by the same server.
   const read: HostedFetch = async (url) => {
     const res = await serve(new Request(url.replace(/^https:/, 'http:')));
     if (!res.ok) throw new OriginalsError('unavailable-bytes', 'FETCH_STATUS', `${url} answered ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   };
-  return { upload, read };
+  return { upload, read, serve, fetchAs, adapterFor, dataDir };
 }
-
