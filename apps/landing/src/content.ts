@@ -821,7 +821,8 @@ export const legal = {
           'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
           'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, that key does not exist and the Original is signed by a key generated in the page and discarded with it.',
           'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
-          'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.'
+          'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
+          'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted once the server answers.'
         ]
       },
       {
@@ -829,6 +830,7 @@ export const legal = {
         body: [
           'The Originals you publish while signed in are written to a mounted volume: the did:webvh log, the Original’s signed history, and the bytes of the artwork itself, indexed under your Turnkey sub-organization id. Publishing is what makes them public — they are served at the exact URLs a DID resolver fetches, so anyone holding the DID can read them.',
           'When you inscribe, the signed commit and reveal transactions are stored before anything is broadcast. That copy is what lets the server finish an inscription for a browser tab that died between the two, and it stays on the volume afterwards — only a superseded pair that can no longer land has its signed transactions dropped. A per-account ceiling bounds how many of these records are kept, oldest spent ones first.',
+          'When you anchor an Original on Bitcoin, the server keeps its own copy of the evidence you send with it: the Original’s signed history, your DID’s log, and the bytes of its files. It checks that copy before anything is broadcast, and keeps it, with the signed transactions, so it can finish or re-send an inscription later. Bitcoin itself holds only the signed history; that copy, and your own, are where the files live.',
           'The deposit address your account is bound to is stored too, along with the last balance read we could trust and any unresolved problem reading it, in a file named after your sub-organization id. That is what puts a warning on Your Originals after you have closed the tab.',
           'The anonymous demo stores nothing durable. What it publishes goes to an in-memory store with a size budget and a time limit, and it is gone by the next deploy.'
         ]
@@ -837,7 +839,7 @@ export const legal = {
         heading: 'Server logs',
         body: [
           'Every point at which real Bitcoin moves or gets stuck writes one line to the server’s standard output, prefixed [landing][money], which the hosting platform’s log drain collects. Those lines are the only instrument we have for noticing that someone’s funds are stranded.',
-          'A line carries the event name and a timestamp, your Turnkey sub-organization id, the Bitcoin network, the deposit address, sat amounts, transaction ids, and a reason where something failed. The events are:'
+          'A line carries the event name and a timestamp, your Turnkey sub-organization id, the Bitcoin network, the deposit address, sat amounts, transaction ids, the identifier of an Original being anchored, and a reason where something failed. The events are:'
         ],
         list: [
           'deposit_address_issued — an address is bound to your account for the first time',
@@ -857,7 +859,13 @@ export const legal = {
           'inscription_sweep_waiting — your commit had not confirmed yet, so we held the reveal and pushed nothing this hour',
           'inscription_sweep_lookup_failed — we could not read whether your commit had confirmed, so we pushed nothing',
           'inscription_sweep_raced — another check had already updated your inscription while we were pushing it, so we left that result alone rather than overwrite it',
-          'inscription_sweep_unreadable — an account\u2019s inscription file could not be read, which is where a signed reveal lives'
+          'inscription_sweep_unreadable — an account\u2019s inscription file could not be read, which is where a signed reveal lives',
+          'originals_anchor_attempted — an Original\u2019s signed pair passed our checks and goes to the final check before broadcast',
+          'originals_anchor_broadcast — that pair was stored and reached the network',
+          'originals_anchor_broadcast_failed — the pair is stored but a broadcast failed; we re-send the same transactions later',
+          'originals_anchor_refused — the pair was refused before anything was sent, with the reason',
+          'originals_anchor_resumed — we re-sent a stored pair, the same transactions, after checking the Original again',
+          'originals_anchor_sweep_failed — we could not read or re-send one Original\u2019s pair, so nothing was sent for it'
         ],
         footer: [
           'You are identified by your Turnkey sub-organization id, never by your email address. The formatter enforces that rather than trusting the code calling it: a field named like an email, or any value shaped like an email address, is replaced with [redacted] before the line is written.',

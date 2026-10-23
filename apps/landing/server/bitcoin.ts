@@ -1018,7 +1018,8 @@ export function createBitcoinRoutes(deps: {
     if (!/^(0|[1-9]\d*)$/.test(satoshi) || !validateSatoshiNumber(satoshi).valid) return json({ error: 'bad_request' }, 400);
     if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
     try {
-      const snapshot = await provider.getSatSnapshot(satoshi);
+      // The anchoring writer asks for Originals bodies only (P9.12): the holder's other inscriptions cost no body reads.
+      const snapshot = await provider.getSatSnapshot(satoshi, url.searchParams.get('bodies') === 'originals' ? { bodies: 'originals' } : undefined);
       return json(encodeSatSnapshot(snapshot));
     } catch {
       return json({ error: 'sat_snapshot_unavailable' }, 502);

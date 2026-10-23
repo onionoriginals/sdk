@@ -34,7 +34,9 @@ export const walletSigner: BitcoinSigner = {
 
 const T = Date.parse('2026-10-22T12:00:00Z') / 1000;
 const hashAt = (h: number) => h.toString(16).padStart(64, '0');
-export const headerClock = () => new InscriptionClock(async (h) => ({ time: T + h * 600, hash: hashAt(h), ...(h > 0 ? { prev: hashAt(h - 1) } : {}) }));
+/** The simulated chain's header at a height: what Core's getblockheader gives (P9.15). */
+export const blockHeader = (h: number) => ({ time: T + h * 600, hash: hashAt(h), ...(h > 0 ? { prev: hashAt(h - 1) } : {}) });
+export const headerClock = () => new InscriptionClock(async (h) => blockHeader(h));
 
 const parse = (raw: string) => btc.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true, allowUnknownOutputs: true });
 
