@@ -110,6 +110,24 @@ journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Cor
 and ord logs. Set both `BITCOIND_BIN` and `ORD_BIN` to use installed binaries.
 The runner uses no public Bitcoin network and spends nothing outside regtest.
 
+`landing-anchor.ts` runs the landing's path (plan 011 PR 10b) on the same
+nodes. The server is `apps/landing/serve.ts`, a child process with
+`ORIGINALS_BITCOIN_ANCHORING=1`. The browser is the landing's own `DemoEngine`
+in the runner, over HTTP. The journey covers:
+- the anchor;
+- a reinscription of the Original's own sat;
+- the server SIGKILLed between commit and reveal (a Core RPC proxy holds the
+  reveal), and a fresh process resuming the identical reveal while the
+  browser's retry is answered from the record;
+- a reorg out and back;
+- a fresh reader.
+
+Its receipt (`$ORIGINALS_REGTEST_LANDING_EVIDENCE`, or
+`<receipt>-landing-anchor.json` under the runner) labels the local author and
+commit keys as not Turnkey. `landing-live.ts` is the owner-run, interactive
+stage A of #975, with a real Turnkey session in a real browser. See
+[`docs/regtest/originals-live-acceptance.md`](../../docs/regtest/originals-live-acceptance.md).
+
 The signer is a disposable local key (the restart receipt says
 `signer: local-disposable-key (not Turnkey)`). This proves the transaction
 path, not a live Turnkey call, a hosted deployment or mainnet; live

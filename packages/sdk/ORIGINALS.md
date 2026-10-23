@@ -568,7 +568,7 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
-## Bitcoin anchoring and ownership — phase 4 (implemented in the SDK; the landing's path is PR 10b)
+## Bitcoin anchoring and ownership — phase 4 (implemented in the SDK; the landing's path, PR 10b, is behind `bitcoinAnchoring`, off)
 
 The representation is [plan 012](../../plans/012-bitcoin-representation.md)
 (owner decision Q15). An Original can be anchored from the local or the web
