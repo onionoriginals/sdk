@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import { hex, base64 } from '@scure/base';
 import { Utxo } from '../types/bitcoin.js';
 import { BitcoinSigner } from '../types/common.js';
 import { OrdinalsProvider } from '../adapters/types.js';
@@ -94,7 +95,7 @@ export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Prom
       { declared: outpoints, selected });
   }
 
-  const template = btc.Transaction.fromPSBT(Buffer.from(commit.commitPsbtBase64, 'base64'), {
+  const template = btc.Transaction.fromPSBT(base64.decode(commit.commitPsbtBase64), {
     allowUnknownOutputs: true
   });
 
@@ -107,7 +108,7 @@ export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Prom
   let commitTxId: string;
   let parsed: btc.Transaction;
   try {
-    parsed = btc.Transaction.fromRaw(Buffer.from(signedCommit, 'hex'), {
+    parsed = btc.Transaction.fromRaw(hex.decode(signedCommit), {
       allowUnknownInputs: true,
       allowUnknownOutputs: true
     });
@@ -137,16 +138,16 @@ export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Prom
   // ORDER matters, not just membership: the DID sat is the first sat of input[0].
   const inputMatches = outpoints.every((expected, i) => {
     const input = parsed.getInput(i);
-    const txidHex = Buffer.from(input.txid ?? new Uint8Array()).toString('hex').toLowerCase();
+    const txidHex = hex.encode(input.txid ?? new Uint8Array()).toLowerCase();
     return `${txidHex}:${input.index}` === expected && input.sequence === template.getInput(i).sequence;
   });
   const expectedCommitScriptHex = scriptPubKeyForAddress(commit.commitAddress, network);
-  const output0ScriptHex = Buffer.from(output0.script ?? new Uint8Array()).toString('hex');
+  const output0ScriptHex = hex.encode(output0.script ?? new Uint8Array());
   const outputMatches = output0.amount === BigInt(commit.commitAmount) && output0ScriptHex === expectedCommitScriptHex;
   const allOutputsMatch = Array.from({ length: template.outputsLength }, (_, index) => {
     const actual = parsed.getOutput(index);
     const expected = template.getOutput(index);
-    return actual.amount === expected.amount && Buffer.from(actual.script ?? []).equals(Buffer.from(expected.script ?? []));
+    return actual.amount === expected.amount && hex.encode(Uint8Array.from(actual.script ?? [])) === hex.encode(Uint8Array.from(expected.script ?? []));
   }).every(Boolean);
   if (!inputMatches || !outputMatches || !allOutputsMatch) {
     throw new StructuredError('COMMIT_TX_MISMATCH',
