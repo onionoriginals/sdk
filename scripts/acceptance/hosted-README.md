@@ -9,9 +9,13 @@ needs real resources:
 - a deployed public host;
 - a signed-out reader on the open network.
 
-**Status.** Section B can't pass yet. The gaps in [Gaps](#gaps) must land
-first, and the harness (`hosted-release.mjs`, gap G9) is not written yet. This
-document is the contract the harness and the operator follow.
+**Status.** The gaps in [Gaps](#gaps) are implemented in the PRs stacked on
+this runbook. The harness is `hosted-release.mjs` (G9). Its `--target local`
+dry run passes and runs in CI. The staging driver's signed-out action has run
+in real Chromium against the real server; its signed-in actions run for the
+first time on the staging host. Section B has **not** passed: no staging
+receipt exists. Where each gap landed: G1 and G6 in #985, G7 and G10 in #986,
+G2 in #987, G4 and G5 in #988, G3 in #989, and G9 in the harness PR.
 
 **What this runbook doesn't authorize:** deploying, publishing to
 production, changing credentials, or any Bitcoin activity. The owner
@@ -87,11 +91,15 @@ These must not appear in the receipt, an artifact, a log or a commit:
 
 ```sh
 bun run build
-node scripts/acceptance/hosted-release.mjs --base-url https://<staging-host> [--out <dir>] [--receipt <file>]
-node scripts/acceptance/hosted-release.mjs --target local    # dry run, see below
+node scripts/acceptance/hosted-release.mjs --base-url https://<staging-host> --email <test inbox> [--production-url https://originals.build] [--out <dir>] [--receipt <file>]
+bun run acceptance:hosted:local    # dry run, see below
 ```
 
-The harness drives Chromium through `playwright-core`.
+The staging run drives Chromium through `playwright-core`
+(`hosted/browser-client.mjs`), one Node process per client action. Each
+client calls the page's own engine (`window.__originalsDemo`), so every
+signature comes from the real Turnkey session in that page. Sign-in goes
+through the page's own modal.
 
 - **Browser restarts are real.** Each author client has its own persistent
   user-data dir. A restart closes the browser process and launches a new one
@@ -105,11 +113,22 @@ The harness drives Chromium through `playwright-core`.
   author profile dirs. This matches the section A reader, except that it has
   the network.
 
-`--target local` boots `apps/landing/server` on a temp data dir, the way
-`src/sdk/publish.fixture.ts` does. It replaces Turnkey with a local
-Ed25519 signer that has the same two key roles. It runs the B2, B4 and B5
-checks so CI can catch harness regressions. **A local run is never a B
-receipt.** It writes `target: "local"`, and every gate becomes `NOT-RUN`.
+`--target local` is a dry run, with no browser and no Turnkey:
+
+- `hosted/local-server.ts` serves the landing's real hosting, submit and
+  account-index routes and its durable store, on loopback with a temp data dir.
+- The author is a did:webvh built by the landing's own builder, with the same
+  two key roles. Its secrets come from a custody file that stands in for
+  Turnkey.
+- Each client is the landing engine in a fresh Bun process with its own
+  FileStore. A restart is a new process on the same store directory.
+- The reader is a fresh Node process. It gets no directory and no secret, and
+  reads the public URLs under the alias's own `Host`.
+
+It runs every gate's checks, so CI catches regressions. **A local run is never
+a B receipt.** The receipt says `target: "local"` and `status:
+"DRY-RUN-PASS"`, every gate is `NOT-RUN`, and the results are under
+`dryRun`.
 
 ## Gates
 
@@ -210,7 +229,7 @@ Automated. There are two runs, each on a new Original in client A:
   `PUT /api/originals/host/*` once the publish entry is committed locally
   (`page.route`).
 - **(ii) During the uploads.** The alias log and the asset log upload, then
-  the harness aborts `originals/resources/*` partway through.
+  the harness aborts every `originals/resources/*` upload.
 
 After each abort:
 
@@ -348,7 +367,7 @@ one of them.
 | G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host. A test pins production off |
 | G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the key is page-scoped, discarded, and not recoverable. Add a content-claim test |
 | G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | An IndexedDB `OriginalsStore`, one database per sub-org, holding the log, resources, author and alias evidence, retained versions, branches, and pending and refused candidates. Signed-in engines use it; signed out stays `MemoryStore` |
-| G4 | After a restart, a publication interrupted after its entry can't resume | B4 | Persist a publication record (the alias evidence, the phase, the files uploaded) before each step. On open, an incomplete record offers "Resume", which passes the stored alias, so no second publish entry is signed |
+| G4 | After a restart, a publication interrupted after its entry can't resume | B4 | Persist a publication record (`{ alias, state: started \| uploaded \| complete }`) before each step. Reopening restores the alias, and publishing again passes it, so no second publish entry is signed. The files for a checkpoint are deterministic and the host accepts identical repeats, so a resume puts them all again; no per-file list is kept |
 | G5 | `publish()` reports success when the PUTs resolve, with no read-back | B1, B4 | Report complete only after a cookie-less `loadPublished` sees the local checkpoint with every byte. Otherwise the state is `uploaded-unverified` with "Resume" |
 | G3 | Nothing lists or reopens an account's Originals. `GET`/`POST /api/originals` exist but the client never calls them | B3 | Publishing records `{did, alias}` in the account index. The engine lists the durable store plus the index, opens local work, and restores a published Original from the host with `sdk.sync` |
 | G9 | No hosted harness | all | `hosted-release.mjs`, reusing `lib/phase.mjs`, with the `--target local` dry run in CI |

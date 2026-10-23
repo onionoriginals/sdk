@@ -1,0 +1,272 @@
+/**
+ * The staging B run's author clients (Node + playwright-core, one process per
+ * action). Each client is Chromium on a persistent user-data dir, so a
+ * "restart" closes the browser process and launches a new one on the same
+ * profile: IndexedDB, localStorage and cookies survive as they do for a
+ * person. "Another client" is a second, empty profile.
+ *
+ * The page's own engine (`window.__originalsDemo`, set by DemoEngine) is
+ * driven through its public methods, so every signature is made by the real
+ * client-held Turnkey session in that page. Sign-in goes through the UI; the
+ * OTP is read from the operator on stdin, typed into the page, and dropped.
+ * It never reaches a file, a log or the receipt.
+ *
+ * Input (ACCEPTANCE_INPUT): { action, baseUrl, email?, profile, prior?, productionUrl? }.
+ * NOT YET EXERCISED against a deployed host: the first staging run is its
+ * test (scripts/acceptance/hosted-README.md).
+ */
+import { createInterface } from "node:readline/promises";
+import { chromium } from "playwright-core";
+import { safeFetch } from "@originals/vh/fetch";
+import { didWebvhLogUrl } from "@originals/vh/webvh";
+import { readEvidence } from "@originals/sdk/originals";
+import { chromiumExecutablePath } from "../../../apps/landing/scripts/browser.mjs";
+import { assert, assertEqual, Phase, sha256Hex } from "../lib/phase.mjs";
+
+const phase = new Phase(`browser-${JSON.parse(process.env.ACCEPTANCE_INPUT).action}`);
+const input = phase.input;
+const base = input.baseUrl.replace(/\/$/, "");
+phase.facts.manual = [];
+
+// A real PNG (1x1) and a second one with a different pixel, so the revision changes bytes.
+const PNG_A = "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a5c8a26f0000000049454e44ae426082";
+const PNG_B = "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63606060f80f0001040100c39e6a2b0000000049454e44ae426082";
+
+/** A persistent profile (a client), or a fresh incognito context whose browser closes with it. */
+async function launch(profile) {
+  if (profile) return chromium.launchPersistentContext(profile, { executablePath: chromiumExecutablePath(), acceptDownloads: true });
+  const browser = await chromium.launch({ executablePath: chromiumExecutablePath() });
+  const ctx = await browser.newContext();
+  const close = ctx.close.bind(ctx);
+  ctx.close = async () => {
+    await close();
+    await browser.close();
+  };
+  return ctx;
+}
+
+async function ask(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return (await rl.question(question)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+/** Sign in through the page's own modal; the operator types the OTP. */
+async function signIn(page) {
+  const signedIn = await page.evaluate(() => fetch("/api/me", { credentials: "same-origin" }).then((r) => r.ok));
+  if (signedIn) return false;
+  await page.getByRole("button", { name: "Sign in" }).first().click();
+  await page.locator("input.login-email").fill(input.email);
+  await page.locator("form.login-form button[type=submit]").click();
+  const code = await ask(`[${phase.name}] OTP sent to the test inbox. Enter it: `);
+  assert(/^\d{6}$/.test(code), "the OTP is six digits");
+  const digits = page.locator("input.otp-digit");
+  for (let i = 0; i < 6; i++) await digits.nth(i).fill(code[i]);
+  await page.locator("input.login-email, input.otp-digit").first().waitFor({ state: "detached", timeout: 60_000 });
+  phase.facts.manual.push({ step: "otp", phase: phase.name, at: new Date().toISOString() });
+  return true;
+}
+
+/** The demo's engine for the signed-in account, once it exists. */
+async function engineReady(page, authed = true) {
+  await page.evaluate(() => document.getElementById("demo")?.scrollIntoView());
+  await page.waitForFunction((want) => globalThis.__originalsDemo && globalThis.__originalsDemo.authed === want, authed, { timeout: 60_000 });
+}
+
+async function ensureIdentity(page) {
+  const cta = page.locator("button.idp-cta");
+  if (await cta.count()) {
+    await cta.click();
+    await cta.waitFor({ state: "detached", timeout: 120_000 });
+  }
+}
+
+const call = (page, method, ...args) =>
+  page.evaluate(
+    async ([m, a]) => {
+      const revive = (v) => (v && v.__bytes ? Uint8Array.from(v.__bytes) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)])) : v);
+      try {
+        const out = await globalThis.__originalsDemo[m](...a.map(revive));
+        return { ok: true, value: out instanceof Uint8Array ? { __bytes: [...out] } : JSON.parse(JSON.stringify(out, (_k, x) => (x instanceof Uint8Array ? { __bytes: [...x] } : x))) };
+      } catch (e) {
+        return { ok: false, name: e?.name, message: String(e?.message ?? e) };
+      }
+    },
+    [method, args],
+  );
+const must = async (page, method, ...args) => {
+  const r = await call(page, method, ...args);
+  assert(r.ok, `${method} failed`, r);
+  return r.value;
+};
+const png = (hex) => ({ content: { __bytes: [...Buffer.from(hex, "hex")] }, contentType: "image/png", filename: "work.png" });
+const resourcesOf = (s) => [{ id: s.resource.id, mediaType: s.resource.contentType, sha256: s.resource.hash }, ...(s.metadata ? [{ id: s.metadata.id, mediaType: "application/json", sha256: s.metadata.hash }] : [])];
+const facts = (s) => ({ did: s.did, alias: s.webvhDid, checkpoint: s.history.at(-1).versionId, entries: s.history.length, resources: resourcesOf(s) });
+const text = async (url) => new TextDecoder().decode((await safeFetch(url)).bytes);
+const jsonl = (t) => t.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+
+/** Abort uploads matching `match` (the decoded host key) in this page. */
+async function interruptUploads(page, match) {
+  await page.route("**/api/originals/host/**", (route) => {
+    const key = decodeURIComponent(new URL(route.request().url()).pathname.slice("/api/originals/host/".length));
+    return route.request().method() === "PUT" && match(key) ? route.abort("connectionreset") : route.continue();
+  });
+}
+
+const actions = {
+  /** B1 and the B4 setup, in client A. */
+  async "client-a"() {
+    const ctx = await launch(input.profile);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await signIn(page);
+    await ensureIdentity(page);
+    await engineReady(page);
+    await phase.check("b1-create-revise-publish", "create, revise and publish through the page's Turnkey session", async () => {
+      await must(page, "create", "Acceptance harbor", "Orbits", png(PNG_A));
+      await must(page, "update", "Acceptance harbor, revised", "Orbits", png(PNG_B));
+      const published = await must(page, "publish");
+      assertEqual(published.publication, "complete", "publication");
+      phase.facts.work1 = facts(published);
+      return phase.facts.work1;
+    });
+    await phase.check("b1-key-roles", "the hosted logs show separate identity (alias control) and authorship roles", async () => {
+      const s = await must(page, "snapshot");
+      const authorLog = jsonl(await text(didWebvhLogUrl(s.author)));
+      const aliasLog = jsonl(await text(didWebvhLogUrl(s.webvhDid)));
+      const doc = authorLog.at(-1).state;
+      const key = (f) => doc.verificationMethod.find((vm) => vm.id.endsWith(f)).publicKeyMultibase;
+      const updateKeys = (log) => log.flatMap((e) => e.parameters?.updateKeys ?? []);
+      assert(doc.assertionMethod.length === 1 && doc.assertionMethod[0].endsWith("#key-1"), "assertionMethod is not exactly #key-1", doc.assertionMethod);
+      assert(s.history.every((h) => h.authorKey === `${s.author}#key-1`), "an entry is not signed by #key-1", s.history);
+      assert(updateKeys(authorLog).some((k) => k.includes(key("#key-0"))), "the identity key is not the author DID's update key");
+      assert(updateKeys(aliasLog).some((k) => k.includes(key("#key-0"))), "the identity key does not control the alias (P3.7)");
+      assert(![...updateKeys(authorLog), ...updateKeys(aliasLog)].some((k) => k.includes(key("#key-1"))), "the authorship key is an update key (P5.11)");
+      phase.facts.author = { did: s.author, logUrl: didWebvhLogUrl(s.author) };
+      phase.facts.roles = {
+        identity: { verificationMethod: "#key-0", turnkeyPath: "m/44'/501'/1'/0'", publicKeyMultibase: key("#key-0"), updateKey: true, controlsAlias: true },
+        authorship: { verificationMethod: "#key-1", turnkeyPath: "m/44'/501'/0'/0'", publicKeyMultibase: key("#key-1"), updateKey: false, assertionMethod: true },
+      };
+      return phase.facts.roles;
+    });
+    for (const [name, match] of [["work2", () => true], ["work3", (k) => k.includes("/originals/resources/")]]) {
+      await phase.check(`b4-interrupt-${name}`, name === "work2" ? "publication interrupted after the publish entry" : "publication interrupted during the resource uploads", async () => {
+        const created = await must(page, "create", `Acceptance ${name}`, "Orbits", png(PNG_A));
+        await interruptUploads(page, match);
+        const r = await call(page, "publish");
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+        assert(!r.ok, "the interrupted publication reported success", r);
+        const s = await must(page, "snapshot");
+        assertEqual(s.publication, "incomplete", "publication after the interruption");
+        assertEqual(s.history.length, created.history.length + 1, "the publish entry is committed");
+        phase.facts[name] = facts(s);
+        return phase.facts[name];
+      });
+    }
+    await ctx.close();
+  },
+
+  /** B3 same client, and B4 resume: a new browser process on client A's profile. */
+  async "client-a-restart"() {
+    const ctx = await launch(input.profile);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await signIn(page);
+    await engineReady(page);
+    const { work1, work2, work3 } = input.prior;
+    await phase.check("b3-reopen-continue", "after the restart the work is listed, reopens and takes the next revision", async () => {
+      const listed = await must(page, "listOriginals");
+      for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && o.where === "this-browser"), `${w.did} is not listed`, listed);
+      const reopened = await must(page, "open", work1.did);
+      assertEqual(reopened.history.at(-1).versionId, work1.checkpoint, "checkpoint");
+      const next = await must(page, "update", "Acceptance harbor, after restart", "Orbits", png(PNG_A));
+      assertEqual(next.history.length, work1.entries + 1, "entries");
+      phase.facts.work1 = facts(next);
+      return phase.facts.work1;
+    });
+    for (const name of ["work2", "work3"]) {
+      const w = input.prior[name];
+      await phase.check(`b4-resume-${name}`, `${name}: resumes with the same alias and checkpoint and one publish entry`, async () => {
+        const reopened = await must(page, "open", w.did);
+        assertEqual(reopened.publication, "incomplete", "publication after the restart");
+        const early = await call(page, "update", "too early", "Orbits", png(PNG_B));
+        assert(!early.ok && /Finish publishing/.test(early.message), "an edit on a half-published snapshot was not refused", early);
+        const resumed = await must(page, "publish");
+        assertEqual([resumed.publication, resumed.webvhDid, resumed.history.at(-1).versionId, resumed.history.length], ["complete", w.alias, w.checkpoint, w.entries], "publication, alias, checkpoint, entries");
+        phase.facts[name] = facts(resumed);
+        return phase.facts[name];
+      });
+    }
+    await ctx.close();
+  },
+
+  /** B3 another client: an empty profile, signed in to the same account. */
+  async "client-b"() {
+    const ctx = await launch(input.profile);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await signIn(page);
+    await engineReady(page);
+    const { work1 } = input.prior;
+    await phase.check("b3-other-client-restore", "another client restores the published work from the host and continues it", async () => {
+      const listed = await must(page, "listOriginals");
+      assert(listed.some((o) => o.did === work1.did && o.where === "host"), "the published work is not listed from the account", listed);
+      const restored = await must(page, "restore", work1.did);
+      assertEqual([restored.publication, restored.webvhDid, restored.history.at(-1).versionId], ["complete", work1.alias, work1.checkpoint], "publication, alias, head");
+      const next = await must(page, "update", "Acceptance harbor, other client", "Orbits", png(PNG_B));
+      assertEqual(next.history.length, work1.entries + 1, "entries");
+      phase.facts.work1 = facts(next);
+      return phase.facts.work1;
+    });
+    await ctx.close();
+  },
+
+  /** B5: a signed-out, ephemeral page. */
+  async "signed-out"() {
+    const ctx = await launch(null);
+    const page = await ctx.newPage();
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await engineReady(page, false);
+    await phase.check("b5-ephemeral", "signed out: the key is discarded, publishing needs sign-in, and a reload keeps nothing", async () => {
+      const body = await page.textContent("body");
+      assert(/discarded/.test(body), "the page doesn't say the signed-out key is discarded");
+      await must(page, "create", "Signed-out sketch", "Orbits", png(PNG_A));
+      const zip = Uint8Array.from((await must(page, "evidencePackage")).__bytes);
+      const pub = await call(page, "publish");
+      assert(!pub.ok, "a signed-out Original was published", pub);
+      const latin = Buffer.from(zip).toString("latin1");
+      const hits = ["secretKey", "privateKey", "secretKeyMultibase"].filter((n) => latin.includes(n));
+      if (/z3u2[1-9A-HJ-NP-Za-km-z]{40,}/.test(latin)) hits.push("multikey-secret");
+      assertEqual(hits, [], "private key material in the package");
+      const stored = await page.evaluate(async () => ({ idb: (await indexedDB.databases()).map((d) => d.name), local: Object.keys(localStorage) }));
+      assert(!stored.idb.some((n) => n?.startsWith("originals-store:")), "a signed-out page opened an Originals store", stored);
+      await page.reload();
+      await engineReady(page, false);
+      assertEqual(await must(page, "listOriginals"), [], "a reloaded page's list");
+      return { packageSha256: sha256Hex(zip), files: Object.keys(readEvidence(zip).bytes).length, stored };
+    });
+    await ctx.close();
+  },
+
+  /** B6: production still has publishing off. */
+  async production() {
+    const prod = (input.productionUrl ?? "https://originals.build").replace(/\/$/, "");
+    const ctx = await launch(null);
+    const page = await ctx.newPage();
+    await phase.check("b6-production-off", "production serves a build with publishing disabled", async () => {
+      const version = await (await fetch(`${prod}/api/version`)).json().catch(() => null);
+      await page.goto(prod, { waitUntil: "domcontentloaded" });
+      await page.evaluate(() => document.getElementById("demo")?.scrollIntoView());
+      await page.getByText("Publishing to the web is being rebuilt", { exact: false }).first().waitFor({ timeout: 30_000 });
+      return { version };
+    });
+    await ctx.close();
+  },
+};
+
+if (typeof actions[input.action] !== "function") throw new Error(`unknown action ${input.action}; one of ${Object.keys(actions).join(", ")}`);
+await actions[input.action]();
+phase.finish();

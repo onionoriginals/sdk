@@ -142,6 +142,13 @@ jobs:
       - name: Local release acceptance (fresh processes, offline)
         run: node scripts/acceptance/local-release.mjs --out "$RUNNER_TEMP/originals-acceptance"
 
+      # Issue #976 section B, dry run only: the landing's real routes on
+      # loopback, the engine in fresh processes, restarts, interrupted
+      # publication and a signed-out reader. Never a section B receipt: Turnkey
+      # and a public host are what B proves (scripts/acceptance/hosted-README.md).
+      - name: Hosted acceptance dry run (loopback host, fresh processes)
+        run: node scripts/acceptance/hosted-release.mjs --target local --out "$RUNNER_TEMP/originals-hosted-acceptance"
+
   landing:
     name: Landing app typechecks, tests and builds
     runs-on: ubuntu-latest
