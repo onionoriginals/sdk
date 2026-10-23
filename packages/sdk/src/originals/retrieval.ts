@@ -24,7 +24,7 @@
  */
 import { OriginalsError, type ErrorCategory } from "@originals/vh";
 import { isJsonObject, parseJson } from "@originals/vh/json";
-import { ORIGINALS_LIMITS, checkAsset, checkAuthorRef } from "@originals/vh/originals";
+import { ORIGINALS_LIMITS, checkAsset, checkAuthorRef, checkEditorRef } from "@originals/vh/originals";
 import { RETRIEVAL_LIMITS, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { ZIP_LIMITS, type ZipLimits } from "./zip.js";
 
@@ -54,7 +54,13 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
       const author = checkAuthorRef(entry.state.author);
       if (!DID.test(author.did)) unplannable("invalid-evidence", i, "STATE_AUTHOR", "state.author.did is not a DID");
       authors.add(author.did);
-      for (const r of checkAsset(entry.state.asset).resources) digests.add(r.digest);
+      // An editor entry's signer DID history is needed too (P7.1).
+      if (entry.state.editor !== undefined) {
+        const editor = checkEditorRef(entry.state.editor);
+        if (!DID.test(editor.did)) unplannable("invalid-evidence", i, "STATE_EDITOR", "state.editor.did is not a DID");
+        authors.add(editor.did);
+      }
+      for (const r of checkAsset(entry.state.asset, author.did).resources) digests.add(r.digest);
     } catch (error) {
       if (error instanceof OriginalsError && error.code !== "SNAPSHOT_LOG_INVALID") unplannable(error.category, i, error.code, error.message);
       throw error;

@@ -30,7 +30,7 @@ import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from ".
 import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
-import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, type AssetState, type EntryState } from "./state.js";
+import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
   /** The asset log: `did.jsonl` text or parsed entries. */
@@ -93,6 +93,18 @@ export interface ResourceVersion {
   bytes: "verified" | "missing" | "mismatch";
 }
 
+/** Identity evidence for one editor DID the report relied on (P7.8, P5.18). */
+export interface SignerEvidence {
+  did: string;
+  status: "complete" | "incomplete";
+  latestVersionId: string | null;
+  freshness: Freshness;
+  /** The retained versionId for this DID, when one was supplied. */
+  retainedVersionId: string | null;
+  deactivated: boolean;
+  failure?: { code: string; message: string };
+}
+
 export interface ReportFailure {
   index: number;
   versionId?: string;
@@ -120,6 +132,12 @@ export interface OriginalsReport {
     retainedVersionId: string | null;
     deactivated: boolean;
     failure?: { code: string; message: string };
+    /**
+     * Each editor DID that signed a verified entry, or whose missing history
+     * stopped verification (P7.1, P7.8). The fields above are the author's;
+     * `status` is incomplete when the author's or any editor's evidence is.
+     */
+    editors: SignerEvidence[];
   };
   /**
    * Content availability, reported separately (P7.4): `partial` lists the missing resource
@@ -167,12 +185,15 @@ function historyStatus(failure?: ReportFailure): OriginalsReport["history"]["sta
  * signed. A log found anywhere else (an old location, a redirect target, a
  * host's claim) establishes nothing.
  */
-function retrievedAtLocation(did: string, authors: AuthorDidEvidence[], entries: VerifiedEntry[]): boolean {
+function retrievedAtLocation(did: string, role: "author" | "editor", authors: AuthorDidEvidence[], entries: VerifiedEntry[]): boolean {
   const evidence = authors.find((a) => a.did === did);
   if (!evidence?.retrievedFrom) return false;
   for (let i = entries.length - 1; i >= 0; i--) {
-    const ref = (entries[i].entry.state as unknown as EntryState).author;
-    if (ref.did !== did) continue;
+    // An editor entry carries its parent's author reference, so it says nothing about where a
+    // moved author DID now is (P5.14): only entries the identity itself signed count.
+    const signer = signerOf(entries[i].entry.state as unknown as EntryState);
+    if (signer.role !== role || signer.ref.did !== did) continue;
+    const ref = signer.ref;
     try {
       return didWebvhLogUrl(signerLocation(ref)) === evidence.retrievedFrom;
     } catch (error) {
@@ -216,6 +237,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const reasons: string[] = [];
   const histories: AuthorHistory[] = [];
   const identityFailures: Array<{ code: string; message: string }> = [];
+  const failuresByDid = new Map<string, { code: string; message: string }>();
+  const noteFailure = (did: string, failure: { code: string; message: string }) => {
+    identityFailures.push(failure);
+    if (!failuresByDid.has(did)) failuresByDid.set(did, failure);
+  };
   const retainedAuthors = { ...options.retained?.authors };
   const staleAuthors = new Set<string>();
   const forkedAuthors = new Set<string>();
@@ -223,19 +249,19 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     try {
       const h = await verifyAuthorHistory(evidence, { now: options.now, maxVersions: options.limits?.maxAuthorVersions });
       histories.push(h);
-      if (h.failure) identityFailures.push({ code: h.failure.error.code, message: `author DID ${h.did}: ${h.failure.error.message}` });
+      if (h.failure) noteFailure(h.did, { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` });
       const retained = retainedAuthors[h.did];
       if (retained !== undefined) {
         const at = h.versions[versionNumberOf(retained) - 1];
         if (!at) staleAuthors.add(h.did);
         else if (at.versionId !== retained) {
           forkedAuthors.add(h.did);
-          identityFailures.push({ code: "AUTHOR_DID_FORK", message: `author DID ${h.did} diverges from the retained version ${retained}` });
+          noteFailure(h.did, { code: "AUTHOR_DID_FORK", message: `DID ${h.did} diverges from the retained version ${retained}` });
         }
       }
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
-      identityFailures.push({ code: error.code, message: error.message });
+      noteFailure(evidence.did, { code: error.code, message: error.message });
     }
   }
 
@@ -274,11 +300,37 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
-  const authorFreshness = (did: string | null): Freshness => {
+  const signerFreshness = (did: string | null, role: "author" | "editor"): Freshness => {
     if (did && staleAuthors.has(did)) return "stale";
     if (options.freshness === "asserted") return "asserted";
-    return did && retrievedAtLocation(did, options.authors, log.entries) ? "retrieved" : "not-established";
+    return did && retrievedAtLocation(did, role, options.authors, log.entries) ? "retrieved" : "not-established";
   };
+
+  // The editor DIDs relied on: each that signed a verified entry, and one whose missing history stopped verification.
+  const editorDids: string[] = [];
+  for (const v of log.entries) {
+    const editor = (v.entry.state as unknown as EntryState).editor;
+    if (editor && !editorDids.includes(editor.did)) editorDids.push(editor.did);
+  }
+  const stoppedAt = log.failure?.error.details?.did;
+  if (log.failure?.error.category === "incomplete-evidence" && typeof stoppedAt === "string" && log.failure.error.details?.role === "editor" && !editorDids.includes(stoppedAt)) {
+    editorDids.push(stoppedAt);
+  }
+  const editors: SignerEvidence[] = editorDids.map((did) => {
+    const h = histories.find((x) => x.did === did);
+    const last = h?.versions[h.versions.length - 1];
+    const stopped = stoppedAt === did ? { code: log.failure!.error.code, message: log.failure!.error.message } : undefined;
+    const failure = failuresByDid.get(did) ?? stopped;
+    return {
+      did,
+      status: !h || h.versions.length === 0 || failure || forkedAuthors.has(did) ? "incomplete" : "complete",
+      latestVersionId: last?.versionId ?? null,
+      freshness: signerFreshness(did, "editor"),
+      retainedVersionId: retainedAuthors[did] ?? null,
+      deactivated: last?.deactivated ?? false,
+      ...(failure ? { failure } : {}),
+    };
+  });
 
   let selected: VerifiedEntry | undefined = head;
   if (options.checkpoint !== undefined) {
@@ -292,8 +344,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const mismatched = versions.filter((v) => v.bytes === "mismatch");
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
-  const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key");
-  const identityIncomplete = failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history;
+  const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
+  const identityIncomplete = failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete");
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
     original: log.scid ? `did:vh:${log.scid}` : null,
@@ -305,10 +357,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       status: identityIncomplete ? "incomplete" : "complete",
       author: authorDid ?? history?.did ?? null,
       latestVersionId: latest?.versionId ?? null,
-      freshness: authorFreshness(authorDid),
+      freshness: signerFreshness(authorDid, "author"),
       retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
       deactivated: latest?.deactivated ?? false,
       ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
+      editors,
     },
     resources: {
       status: mismatched.length > 0 ? "digest-failure" : missing.length > 0 ? "partial" : "available",
@@ -343,6 +396,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (report.assetFreshness.status === "not-established") reasons.push("asset-freshness-not-established");
   if (report.identityEvidence.freshness === "stale") reasons.push("author-history-older-than-retained");
   if (report.identityEvidence.freshness === "not-established") reasons.push("author-freshness-not-established");
+  if (editors.some((e) => e.freshness === "stale")) reasons.push("editor-history-older-than-retained");
+  if (editors.some((e) => e.freshness === "not-established")) reasons.push("editor-freshness-not-established");
+  // P6.5, P5.18: once the author DID is deactivated, no entry, author's or editor's, is current.
   if (report.identityEvidence.deactivated) reasons.push("author-did-deactivated");
   // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
   // `resources` as unavailable content, never as a failure, and do not affect `current`
@@ -350,17 +406,27 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // supplied are still checked, and a mismatch fails.
   if (report.resources.status === "digest-failure") reasons.push("resources-digest-failure");
   if (!head) reasons.push("no-verified-entry");
-  // P7.9: an unwitnessed head signed by a key the latest author DID no longer lists is never current.
-  if (head && latest) {
-    const ref = (head.entry.state as unknown as EntryState).author;
-    const signedWith = history.versions.find((v) => v.versionId === ref.versionId);
-    let key: string | undefined;
-    try {
-      key = signedWith ? authorKey(signedWith, ref) : undefined;
-    } catch (error) {
-      if (!(error instanceof OriginalsError)) throw error;
+  // P7.9, P5.18: an unanchored head signed by a key the latest state of its signer's DID (the
+  // author's, or the editor's for an editor entry) no longer lists is never current.
+  if (head) {
+    const { role, ref } = signerOf(head.entry.state as unknown as EntryState);
+    const signerHistory = histories.find((h) => h.did === ref.did);
+    const signerLatest = signerHistory?.versions[signerHistory.versions.length - 1];
+    if (signerHistory && signerLatest) {
+      const signedWith = signerHistory.versions.find((v) => v.versionId === ref.versionId);
+      let key: string | undefined;
+      try {
+        key = signedWith ? authorKey(signedWith, ref) : undefined;
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+      if (typeof key !== "string" || !stillAuthorized(signerLatest, ref, key)) {
+        reasons.push(role === "author" ? "head-key-not-in-latest-author-document" : "head-key-not-in-latest-signer-document");
+      }
+      // P5.18, P6.5, P7.9: an editor whose DID is deactivated authorizes nothing further, so its
+      // entry at the head is not current, even if the deactivated document still lists the key.
+      if (role === "editor" && signerLatest.deactivated) reasons.push("editor-did-deactivated");
     }
-    if (typeof key !== "string" || !stillAuthorized(latest, ref, key)) reasons.push("head-key-not-in-latest-author-document");
   }
   report.current = reasons.length === 0;
   return report;

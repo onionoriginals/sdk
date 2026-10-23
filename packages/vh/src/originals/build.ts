@@ -15,6 +15,8 @@ import {
   expectedTransitions,
   type AssetState,
   type AuthorRef,
+  type EditorGrant,
+  type EditorRef,
   type EntryState,
   type ResourceDescriptor,
 } from "./state.js";
@@ -25,6 +27,8 @@ export interface PrepareCreateInput {
   metadata?: JsonObject;
   resources: ResourceDescriptor[];
   author: AuthorRef;
+  /** Editor grants from genesis (P5.15). Genesis is always an author entry (P5.16). */
+  editors?: EditorGrant[];
 }
 
 export interface CreateOriginalInput extends PrepareCreateInput {
@@ -39,9 +43,20 @@ export interface PrepareUpdateInput {
   metadata?: JsonObject | null;
   /** New descriptors for existing resources, by id. Others are unchanged. */
   resources?: ResourceDescriptor[];
-  author: AuthorRef;
-  /** Replaces the aliases: listing a did:webvh alias publishes the Original (PROVISIONAL, plan 011 PR 7b). */
+  /**
+   * The author reference. Required for an author entry. An editor entry
+   * carries its parent's unchanged (P5.16): omit it, or give exactly that.
+   */
+  author?: AuthorRef;
+  /**
+   * Sign as a granted editor (P5.16): the editor DID, its verification method
+   * and exact versionId. The grant in the parent's state must cover the change.
+   */
+  editor?: EditorRef;
+  /** Replaces the aliases: listing a did:webvh alias publishes the Original (PROVISIONAL, plan 011 PR 7b). Author entries only. */
   aliases?: string[];
+  /** Replaces the editor grants (P5.15); null or [] removes them all. Author entries only (P5.16). */
+  editors?: EditorGrant[] | null;
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -58,6 +73,7 @@ function stateOf(entry: UnsignedEntry): EntryState {
 
 /** The unsigned genesis entry of a new Original: `did:vh:{SCID}` until the SCID is computed. */
 export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry {
+  if ((input as { editor?: unknown }).editor !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the genesis entry; only an author entry may (P5.16)");
   const resources = input.resources.map((r, i) => checkDescriptor(r, `resources[${i}]`));
   const asset: AssetState = {
     name: input.name,
@@ -65,6 +81,7 @@ export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry 
     status: "active",
     resources,
     aliases: [],
+    ...(input.editors !== undefined && input.editors.length > 0 ? { editors: input.editors } : {}),
   };
   const state = {
     id: `did:vh:${SCID_PLACEHOLDER}`,
@@ -89,23 +106,43 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
   for (const id of changes.keys()) {
     if (!previous.resources.some((r) => r.id === id)) invalidInput("STATE_RESOURCE_SET", `resource ${id} is not in the genesis resource set (P4.1)`);
   }
-  const { metadata: _old, ...rest } = previous;
+  const { metadata: _old, editors: _editors, ...rest } = previous;
   const metadata = input.metadata === undefined ? previous.metadata : input.metadata;
+  const editors = input.editors === undefined ? previous.editors : input.editors;
   return {
     ...rest,
     name: input.name ?? previous.name,
     ...(metadata !== null && metadata !== undefined ? { metadata } : {}),
     resources: previous.resources.map((r) => changes.get(r.id) ?? r),
     aliases: input.aliases ?? previous.aliases,
+    ...(editors !== null && editors !== undefined && editors.length > 0 ? { editors } : {}),
   };
 }
 
-function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
+interface NextInput {
+  versionTime: string;
+  author?: AuthorRef;
+  editor?: EditorRef;
+  aliases?: string[];
+  editors?: EditorGrant[] | null;
+}
+
+function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: NextInput): UnsignedEntry {
   const before = stateOf(previous);
+  if (input.editor !== undefined) {
+    // P5.16: an editor entry is an update, carries its parent's author reference, and changes no
+    // grant or alias. The state rules check the rest against the grant in the parent's state.
+    if (input.editors !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change the editor grants; only an author entry may (P5.16)");
+    if (input.aliases !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change aliases; only an author entry may (P5.16)");
+  } else if (input.author === undefined) {
+    invalidInput("STATE_AUTHOR", "an author entry needs the author reference");
+  }
+  const author = input.editor !== undefined ? (input.author ?? before.author) : input.author;
   const state = {
     id: before.id,
     operation,
-    author: input.author,
+    author,
+    ...(input.editor !== undefined ? { editor: input.editor } : {}),
     asset,
     transitions: expectedTransitions(before.asset, asset),
   } as unknown as JsonObject;
@@ -120,9 +157,10 @@ export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpd
   return next(previous, "update", nextAsset(stateOf(previous).asset, input), input);
 }
 
-/** An unsigned deactivation entry after `previous` (P6.5). */
+/** An unsigned deactivation entry after `previous` (P6.5). Only the author deactivates (P5.16). */
 export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
-  return next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, input);
+  if ((input as { editor?: unknown }).editor !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor cannot deactivate; only an author entry may (P5.16)");
+  return next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, { versionTime: input.versionTime, author: input.author });
 }
 
 /** A signed update entry after `previous`. */

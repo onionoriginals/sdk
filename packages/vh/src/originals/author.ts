@@ -130,7 +130,7 @@ function sameId(reference: JsonValue, absolute: string, documentId: string): boo
 export function namedVersion(history: AuthorHistory, ref: AuthorRef): AuthorVersion {
   const version = history.versions.find((v) => v.versionId === ref.versionId);
   if (!version) {
-    fail("incomplete-evidence", "AUTHOR_VERSION_UNAVAILABLE", `author DID version ${ref.versionId} is not in the verified author history`);
+    fail("incomplete-evidence", "AUTHOR_VERSION_UNAVAILABLE", `DID version ${ref.versionId} is not in the verified history of ${ref.did}`, { did: ref.did });
   }
   return version;
 }

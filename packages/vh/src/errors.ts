@@ -24,6 +24,8 @@ export type ErrorCategory =
   | "unsupported-profile"
   | "unauthorized-key"
   | "author-binding"
+  /** A change outside the editor's grant (section 6; P5.16). */
+  | "outside-grant"
   | "stale-parent"
   | "fork"
   | "deactivated"
