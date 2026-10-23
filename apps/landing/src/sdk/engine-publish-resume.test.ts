@@ -19,7 +19,7 @@ const art = (title: string, seed: number) => generateArtwork(title, 'Orbits', se
 async function setup() {
   const idb = new IDBFactory();
   const author = await createLocalAuthor();
-  const { upload, read } = host();
+  const { upload, read, serve } = host();
   const secret = ed.utils.randomSecretKey();
   const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
   let aliasSignatures = 0;
@@ -41,7 +41,7 @@ async function setup() {
       return null;
     }
   };
-  return { engine, upload, read, author, stranger, aliasSignatures: () => aliasSignatures };
+  return { engine, upload, read, serve, author, stranger, aliasSignatures: () => aliasSignatures };
 }
 
 /** An uploader that fails every PUT whose key matches, until `heal()`. */
@@ -139,5 +139,24 @@ describe('what the page says about an unfinished publication', () => {
     expect(demoFailureMessage(new PublicationNotVerifiedError(['x']))).toBe(demo.hosting.notVerified);
     expect(demoFailureMessage(new Error('Finish publishing this Original first, then keep editing.'))).toBe(demo.hosting.finishFirst);
     expect(demo.hosting.notVerified).toMatch(/isn’t published/);
+  });
+});
+
+describe('the default reader (the page\'s own fetch)', () => {
+  test('an absent optional file (did-witness.json) is missing, not a failure: publication completes through it', async () => {
+    const s = await setup();
+    // The page's fetch, answered by the fixture host for the alias's https URLs, with its real 404s.
+    const saved = globalThis.fetch;
+    globalThis.fetch = ((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url instanceof Request ? url.url : url);
+      return href.startsWith('https://') ? s.serve(new Request(href.replace(/^https:/, 'http:'))) : saved(url, init);
+    }) as typeof fetch;
+    try {
+      const engine = s.engine({ read: undefined });
+      await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+      expect((await engine.publish()).publication).toBe('complete');
+    } finally {
+      globalThis.fetch = saved;
+    }
   });
 });

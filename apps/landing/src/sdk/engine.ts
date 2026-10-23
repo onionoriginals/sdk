@@ -21,6 +21,7 @@ import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
+import { OriginalsError } from "@originals/vh";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
 import {
   AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
@@ -888,10 +889,22 @@ function p2wpkhScript(address: string, network: "mainnet" | "regtest"): string {
 }
 
 /** A public read of a hosted file, as any reader makes it. */
+/**
+ * A stranger's read in the page: no cookie, no redirect, no cache. Failures
+ * are the SDK's `unavailable-bytes`, as `safeFetch` reports them, so an absent
+ * optional file (a did-witness.json) is missing rather than fatal.
+ */
 const publicRead: HostedFetch = async (url, options) => {
-  const res = await fetch(url, { signal: options.signal, credentials: "omit", redirect: "error", cache: "no-store" });
-  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: options.signal, credentials: "omit", redirect: "error", cache: "no-store" });
+  } catch {
+    throw new OriginalsError("unavailable-bytes", "FETCH_FAILED", `${url} could not be retrieved`);
+  }
+  if (!res.ok) throw new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length > options.maxBytes) throw new OriginalsError("unavailable-bytes", "FETCH_TOO_LARGE", `${url} is over ${options.maxBytes} bytes`);
+  return bytes;
 };
 
 function asSource(source: string | AssetSource): AssetSource {
