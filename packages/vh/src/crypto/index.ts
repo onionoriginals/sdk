@@ -113,10 +113,16 @@ export function decodeMultikey(publicKeyMultibase: string): DecodedMultikey {
  * The Multikey named by a did:key verification method of the form
  * `did:key:<multibase>#<multibase>`, with the two values equal (did:vh, did:webvh).
  * The key is recovered only by decoding; nothing is resolved.
+ *
+ * With `fragment: "optional"`, a bare `did:key:<multibase>` is accepted too:
+ * VH-Log only requires an entry proof's verificationMethod to resolve to an
+ * active update key ("Authorized Keys"), and didwebvh-ts signers name their key
+ * that way. Witness proofs keep the fragment, which did:webvh requires.
  */
-export function didKeyMultikey(verificationMethod: string): string {
-  const match = typeof verificationMethod === "string" ? /^did:key:(z[1-9A-HJ-NP-Za-km-z]+)#(z[1-9A-HJ-NP-Za-km-z]+)$/.exec(verificationMethod) : null;
-  if (!match || match[1] !== match[2]) {
+export function didKeyMultikey(verificationMethod: string, options: { fragment?: "required" | "optional" } = {}): string {
+  const match = typeof verificationMethod === "string" ? /^did:key:(z[1-9A-HJ-NP-Za-km-z]+)(?:#(z[1-9A-HJ-NP-Za-km-z]+))?$/.exec(verificationMethod) : null;
+  const fragmentOk = match && (match[2] === undefined ? options.fragment === "optional" : match[1] === match[2]);
+  if (!match || !fragmentOk) {
     fail("invalid-evidence", "DID_KEY_INVALID", "verification method must be did:key:<multikey>#<multikey>");
   }
   decodeMultikey(match[1]);

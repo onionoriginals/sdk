@@ -2,7 +2,7 @@
  * Durable, filesystem-backed store for signed-in users' Originals.
  *
  * Two trees under `dataDir`:
- *   hosted/<host>/<path>      the did:webvh log / cel / resource bytes (public;
+ *   hosted/<host>/<path>      did:webvh logs and hosted Originals (public; see hosted-layout.ts;
  *                             served at the resolver's exact URL). A sibling
  *                             <file>.ctype holds the content-type so serve()
  *                             survives a restart.
@@ -77,6 +77,8 @@ export interface OriginalsStore {
   serve(url: URL): Response | null;
   /** Auth-scoped read by object key (adapter.get) — only keys this user wrote. */
   read(subOrgId: string, key: string): Response;
+  /** The bytes of a hosted key, whoever wrote it, or null. For the server's own checks. */
+  readHosted(key: string): Uint8Array | null;
 }
 
 const CTYPE_SUFFIX = '.ctype';
@@ -397,5 +399,15 @@ export function createOriginalsStore(opts: {
     }
   }
 
-  return { saveBytes, recordOriginal, list, serve, read };
+  function readHosted(key: string): Uint8Array | null {
+    try {
+      const path = keyToPath(hostedDir, key);
+      if (!statSync(path).isFile()) return null;
+      return new Uint8Array(readFileSync(path));
+    } catch {
+      return null;
+    }
+  }
+
+  return { saveBytes, recordOriginal, list, serve, read, readHosted };
 }

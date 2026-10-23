@@ -7,6 +7,35 @@ import { serializeCookie } from '../cookies';
 import { createOriginalsStore } from '../originals-store';
 import { createOriginalsRoutes } from '../originals-routes';
 import { buildFetch } from '../app';
+import { resourceDigest } from '@originals/vh/originals';
+import { createHash } from 'node:crypto';
+import { localSigner } from '@originals/vh/crypto';
+import { appendEntry, createLog, createWitnessProof, serializeLog, signWith } from '@originals/vh/log';
+
+/** A real did:vh signer DID log of `versions` entries, and the directory hex it lives under. */
+async function signerLog(versions = 2, opts: { witnessed?: boolean } = {}) {
+  const witness = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const update = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const author = localSigner('Ed25519', crypto.getRandomValues(new Uint8Array(32)));
+  const sign = signWith(update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${update.publicKeyMultibase}#${update.publicKeyMultibase}` });
+  const doc = (id: string) => ({
+    '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'],
+    id,
+    verificationMethod: [{ id: `${id}#k`, type: 'Multikey', controller: id, publicKeyMultibase: author.publicKeyMultibase }],
+    assertionMethod: [`${id}#k`],
+  });
+  const t = Date.now() - 60_000;
+  const iso = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const entries = [await createLog({ versionTime: iso(t), parameters: { method: 'did:vh:1.0', scid: '{SCID}', updateKeys: [update.publicKeyMultibase], ...(opts.witnessed ? { witness: { threshold: 1, witnesses: [{ id: `did:key:${witness.publicKeyMultibase}` }] } } : {}) }, state: doc('did:vh:{SCID}'), sign })];
+  const did = entries[0].state.id as string;
+  for (let i = 1; i < versions; i++) entries.push(await appendEntry(entries[i - 1], { versionTime: iso(t + i * 1000), parameters: {}, state: { ...doc(did), alsoKnownAs: [`urn:v${i}`] }, sign }));
+  const logs = entries.map((_, i) => serializeLog(entries.slice(0, i + 1)));
+  // did:webvh 1.0 pruning: a controller SHOULD keep only the latest proof per witness, which approves every earlier entry too.
+  const proofs = await Promise.all(entries.map((e) => createWitnessProof(witness, e.versionId)));
+  const pruned = entries.map((e, i) => JSON.stringify([{ versionId: e.versionId, proof: [proofs[i]] }]));
+  const full = entries.map((_, i) => JSON.stringify(entries.slice(0, i + 1).map((e, j) => ({ versionId: e.versionId, proof: [proofs[j]] }))));
+  return { did, hex: createHash('sha256').update(did).digest('hex'), logs, witness: { pruned, full } };
+}
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -39,7 +68,7 @@ describe('originals routes — auth gating', () => {
     const store = tmpStore();
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const endpoint = `http://demo.local/api/originals/host/${encodeURIComponent(key)}`;
     const cookie = cookieFor('sub-1');
 
@@ -54,7 +83,7 @@ describe('originals routes — auth gating', () => {
     expect(await getRes.text()).toBe('{"v":1}');
 
     // A key this user never wrote → 404, which the adapter maps to null.
-    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/nope/did.jsonl')}`;
+    const missUrl = `http://demo.local/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/o-111111111111111a/did.jsonl')}`;
     const missRes = await fetchFn(new Request(missUrl, { headers: { cookie } }));
     expect(missRes.status).toBe(404);
   });
@@ -71,18 +100,16 @@ describe('originals routes — auth gating', () => {
     };
     expect((await shadow('magby.originals.build/assets/app-abc123.js')).status).toBe(403);
     expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
-    // A bare 'resources/<name>' whose name isn't a multibase is refused too.
+    // CEL-era shapes and anything outside the hosted layout are refused.
     expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
-    // A 'cel/…' key that isn't the content-digest copy is refused.
-    expect((await shadow('cel/index.html')).status).toBe(403);
-    expect((await shadow('cel/evil.json')).status).toBe(403); // no 'u' multibase prefix
-    expect((await shadow('cel/uAbc.json/../../index.html')).status).toBe(403);
-    expect((await shadow('magby.originals.build/cel/uAbc.json')).status).toBe(403); // 2 segments only
-    // But real did:webvh artifacts are allowed.
+    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(403);
+    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(403);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/cel.json')).status).toBe(403);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/../../index.html')).status).toBe(403);
+    // The hosted layout in the caller's own namespace is allowed.
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
-    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(200);
-    // …as is the SDK's layer-agnostic CEL copy (persistCelArtifacts).
-    expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(200);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
+    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
@@ -102,7 +129,7 @@ describe('originals routes — auth gating', () => {
 
   test('a second user cannot overwrite the first user’s object (403)', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
     const put = (sub: string) =>
       routes.hostPut(
@@ -119,10 +146,9 @@ describe('originals routes — auth gating', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'originals-routes-'));
     const store = createOriginalsStore({ dataDir });
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store });
-    // A hash-derived asset path (`u<...>` segment), not a `user-<slug>`
-    // namespace — this is the class of key the namespace guard leaves open to
-    // any signed-in user, relying solely on the store's owner sidecar (#690).
-    const key = 'demo.example.com/uEiExample/resources/uJZtLeUr';
+    // Every hosted key is inside its author's namespace; the owner sidecar still
+    // guards against claiming bytes whose ownership was never recorded (#690).
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json';
     // Simulate the crash window this store's write ordering closes: resource
     // bytes on disk with no `.owner` sidecar (store-level coverage of the
     // same state lives in originals-store.test.ts). This must fail closed at
@@ -140,7 +166,7 @@ describe('originals routes — auth gating', () => {
       );
     };
     expect((await put('sub-1')).status).toBe(409);
-    expect((await put('sub-2')).status).toBe(409);
+    expect((await put('sub-2')).status).toBe(403); // not sub-2's namespace at all
   });
 
   test('pre-squat blocked: cannot write another user’s namespace even when unclaimed (403)', async () => {
@@ -242,7 +268,7 @@ describe('originals routes — auth gating', () => {
     const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
 
-    const key = 'demo.example.com/user-sub-1/abc/did.jsonl';
+    const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const putRes = await fetchFn(
       new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, {
         method: 'PUT',
@@ -253,7 +279,7 @@ describe('originals routes — auth gating', () => {
     expect(putRes.status).toBe(200);
 
     // Anyone GETting the resolver URL gets the durable object via the serve fallback.
-    const getRes = await fetchFn(new Request('http://demo.example.com/user-sub-1/abc/did.jsonl'));
+    const getRes = await fetchFn(new Request('http://demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl'));
     expect(getRes.status).toBe(200);
     expect(await getRes.text()).toBe('{"v":1}');
     expect(getRes.headers.get('content-disposition')).toBe('attachment');
@@ -270,17 +296,237 @@ function noopHostStore() {
 }
 
 
-describe('CEL 3 account namespace', () => {
-  test('an authenticated attacker cannot squat an absent account publication', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
-    const put = (sub: string, key: string) => {
-      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
-      return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor(sub) }, body: '{}' }), url, sub);
-    };
-    const key = 'demo.test/published/accounts/victim/uEiExample/cel.json';
-    expect((await put('attacker', key)).status).toBe(403);
-    expect((await put('victim', key)).status).toBe(200);
-    expect((await put('attacker', 'demo.test/assets/cel.json')).status).toBe(403);
-    expect((await put('attacker', 'demo.test/published/anonymous/uEiExample/cel.json')).status).toBe(403);
+describe('hosted Original layout (plan 011, PR 8)', () => {
+  const NAME = 'o-9xKpQ2mN4vR7tW1z';
+  const base = `demo.example.com/user-sub-1/${NAME}/originals`;
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const digest = resourceDigest(bytes);
+  const log = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', size: bytes.length, digest }] } } })}\n`;
+
+  function setup() {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (key: string, body: BodyInit, contentType = 'text/html') =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'content-type': contentType, cookie: cookieFor('sub-1') }, body }));
+    return { fetchFn, put };
+  }
+
+  test('a resource must be listed in the uploaded asset log and match its digest', async () => {
+    const { put } = setup();
+    expect((await put(`${base}/resources/${digest}`, bytes)).status).toBe(409); // log not uploaded yet
+    expect((await put(`${base}/asset/did.jsonl`, log)).status).toBe(200);
+    expect((await put(`${base}/resources/${digest}`, new TextEncoder().encode('other bytes'))).status).toBe(422);
+    const unlisted = resourceDigest(new TextEncoder().encode('not in the log'));
+    expect((await put(`${base}/resources/${unlisted}`, new TextEncoder().encode('not in the log'))).status).toBe(409);
+    expect((await put(`${base}/resources/${digest}`, bytes)).status).toBe(200);
+  });
+
+  test('C12-84: a resource is served with the media type its asset log declares, isolated, whatever the uploader claimed (P9.7)', async () => {
+    const { fetchFn, put } = setup();
+    await put(`${base}/asset/did.jsonl`, log);
+    await put(`${base}/resources/${digest}`, bytes, 'text/html');
+    const res = await fetchFn(new Request(`http://${base}/resources/${digest}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/svg+xml');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    expect(res.headers.get('content-disposition')).toBe('attachment');
+  });
+
+  test('a key that decodes again into another namespace is refused', async () => {
+    const { put } = setup();
+    // %2F survives the route's decode and would become "/" in the store's.
+    expect((await put(`demo.example.com%2Fuser-sub-2/user-sub-1/${NAME}/did.jsonl`, '{}')).status).toBe(403);
+    expect((await put(`demo.example.com/user-sub-1/${NAME}%2Fdid.jsonl`, '{}')).status).toBe(403);
+    for (const host of ['..', '.', 'a..b', '-x.com', 'a b.com', 'a\\b']) {
+      expect((await put(`${host}/user-sub-1/${NAME}/did.jsonl`, '{}')).status, host).toBe(403);
+    }
+    expect((await put(`localhost:8080/user-sub-1/${NAME}/did.jsonl`, '{}')).status).toBe(200);
+  });
+
+  test('a declared media type that is not a bare type/subtype is not served', async () => {
+    const { put } = setup();
+    for (const mediaType of ['text/html\r\nx-evil: 1', 'image/svg+xml; charset=utf-8', 'svg', '']) {
+      const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'a', mediaType, size: bytes.length, digest }] } } })}\n`;
+      expect((await put(`${base}/asset/did.jsonl`, bad)).status).toBe(200);
+      expect((await put(`${base}/resources/${digest}`, bytes)).status, JSON.stringify(mediaType)).toBe(409);
+    }
+  });
+
+  test('logs and evidence files get the server\'s content types', async () => {
+    const { fetchFn, put } = setup();
+    await put(`${base}/asset/did.jsonl`, log);
+    await put(`${base}/originals-evidence.json`, '{}');
+    expect((await fetchFn(new Request(`http://${base}/asset/did.jsonl`))).headers.get('content-type')).toBe('application/jsonl');
+    expect((await fetchFn(new Request(`http://${base}/originals-evidence.json`))).headers.get('content-type')).toBe('application/json');
+  });
+});
+
+describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
+  const NAME = 'o-9xKpQ2mN4vR7tW1z';
+  const base = `demo.example.com/user-sub-1/${NAME}/originals`;
+  const authorDir = `${base}/authors/${'a'.repeat(64)}`;
+
+  function setup() {
+    const store = tmpStore();
+    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
+    const put = (key: string, body: BodyInit) =>
+      fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
+    const get = async (key: string) => (await fetchFn(new Request(`http://${key}`)))?.text();
+    return { originals, store, put, get };
+  }
+
+  test('a chunked body with no Content-Length is refused once it passes the cap, without reading it all', async () => {
+    const { originals } = setup();
+    const chunk = new Uint8Array(1024 * 1024).fill(0x61);
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (pulled++ < 60) c.enqueue(chunk);
+        else c.close();
+      },
+    });
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/did.jsonl')}`);
+    const req = new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body, duplex: 'half' } as RequestInit);
+    expect(req.headers.get('content-length')).toBeNull();
+    const res = await originals.hostPut(req, url, '1.1.1.1');
+    expect(res.status).toBe(413);
+    expect(pulled).toBeLessThan(20);
+  });
+
+  test('the cap counts bytes, not characters', async () => {
+    const { originals } = setup();
+    // 3 million three-byte characters: 9 MB, past the 8 MiB cap, though under it in string length.
+    const text = '€'.repeat(3_000_000);
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(text));
+        c.close();
+      },
+    });
+    const url = new URL(`http://h/api/originals/host/${encodeURIComponent('demo.example.com/user-sub-1/did.jsonl')}`);
+    const res = await originals.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body, duplex: 'half' } as RequestInit), url, '1.1.1.1');
+    expect(res.status).toBe(413);
+  });
+
+  test('a signer DID log only grows: a PUT that does not extend the stored log is a 409 (P7.8)', async () => {
+    const { put, get } = setup();
+    const { hex, logs } = await signerLog(2);
+    const [v1, v2] = logs;
+    const dir = `${base}/authors/${hex}`;
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200); // a retry of the same log
+    const rollBack = await put(`${dir}/did.jsonl`, v1);
+    expect(rollBack.status).toBe(409);
+    expect(await rollBack.json()).toMatchObject({ error: 'identity_log_not_extending' });
+    const other = await signerLog(1);
+    expect((await put(`${dir}/did.jsonl`, other.logs[0])).status).toBe(422); // another DID's log, in this DID's directory
+    expect(await get(`${dir}/did.jsonl`)).toBe(v2);
+  });
+
+  test('#965 review r2 #6: a signer DID log must verify; junk appended is refused, and a stored log that does not verify is repaired by a verified one', async () => {
+    const { store, put, get } = setup();
+    const { hex, logs } = await signerLog(3);
+    const [v1, v2, v3] = logs;
+    const dir = `${base}/authors/${hex}`;
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+    // Bytes that extend the stored log but do not verify are refused, so they cannot block a later save.
+    const junk = await put(`${dir}/did.jsonl`, `${v1}{"junk":1}\n`);
+    expect(junk.status).toBe(422);
+    expect(await junk.json()).toMatchObject({ error: 'identity_log_invalid' });
+    expect((await put(`${dir}/did.jsonl`, 'not a log')).status).toBe(422);
+    expect(await get(`${dir}/did.jsonl`)).toBe(v1);
+    expect((await put(`${dir}/did.jsonl`, v2)).status).toBe(200);
+    // A stored log poisoned before this rule (junk after its verified prefix) is replaced by a verified extension.
+    store.saveBytes('sub-1', `${dir}/did.jsonl`, new TextEncoder().encode(`${v2}{"junk":1}\n`), 'application/jsonl');
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(409); // still never a rollback of what verifies
+    expect((await put(`${dir}/did.jsonl`, v3)).status).toBe(200);
+    expect(await get(`${dir}/did.jsonl`)).toBe(v3);
+    // A stored log that does not verify at all can be replaced by any verified log of the DID.
+    store.saveBytes('sub-1', `${dir}/did.jsonl`, new TextEncoder().encode('{"junk":1}\n'), 'application/jsonl');
+    expect((await put(`${dir}/did.jsonl`, v1)).status).toBe(200);
+  });
+
+  test('#965 r4 finding 3: a pruned did:webvh witness file is accepted when the stored log verifies with it; proofs compare canonically; a witness file never weakens the stored log (P7.8)', async () => {
+    const { put, get } = setup();
+    const { hex, logs, witness } = await signerLog(3, { witnessed: true });
+    const dir = `${base}/authors/${hex}`;
+    const w = `${dir}/did-witness.json`;
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+    // The next version's pruned file drops v1's proof. The stored log (v1) does not verify with it alone,
+    // so the host keeps v1's proof too: the upload is merged, never a weakening.
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    expect(JSON.parse((await get(w))!)).toEqual(JSON.parse(witness.full[1]));
+    expect((await put(`${dir}/did.jsonl`, logs[1])).status).toBe(200);
+    // Now the stored log verifies with the pruned file alone: it is stored as uploaded.
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    expect(await get(w)).toBe(witness.pruned[1]);
+    // The same proofs with members in another order are the same proofs (JCS).
+    const reordered = JSON.stringify(JSON.parse(witness.pruned[1]).map((e: { versionId: string; proof: Record<string, unknown>[] }) => ({ proof: e.proof.map((p) => Object.fromEntries(Object.entries(p).reverse())), versionId: e.versionId })));
+    expect((await put(w, reordered)).status).toBe(200);
+    // A file that alone would leave v2 unwitnessed (a rollback of the stored log) never replaces the
+    // stored proofs: what it adds is kept with them, and a file that adds nothing is refused.
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect(JSON.parse((await get(w))!)).toEqual([...JSON.parse(witness.pruned[1]), ...JSON.parse(witness.pruned[0])]);
+    const rollBack = await put(w, witness.pruned[0]);
+    expect(rollBack.status).toBe(409);
+    expect(await rollBack.json()).toMatchObject({ error: 'identity_witness_not_extending' });
+    expect((await put(w, '[]')).status).toBe(409);
+    expect((await put(w, witness.pruned[1])).status).toBe(200);
+    // A malformed member would make the engine reject the whole file: refused.
+    expect((await put(w, JSON.stringify([...JSON.parse(witness.pruned[1]), { versionId: 'x', proof: [], extra: 1 }]))).status).toBe(409);
+    expect((await put(`${dir}/did.jsonl`, logs[2])).status).toBe(422); // v3 not witnessed by the stored file
+    expect((await put(w, witness.pruned[2])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[2])).status).toBe(200);
+    expect((await put(w, witness.pruned[2])).status).toBe(200);
+    expect(await get(w)).toBe(witness.pruned[2]);
+  });
+
+  test('#965 r4 finding 3: with no stored log, a pruned witness file is kept with the stored proofs', async () => {
+    const { put, get } = setup();
+    const p = (wit: string, v: string) => ({ type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${wit}#${wit}`, proofPurpose: 'assertionMethod', proofValue: `z${v}` });
+    const stored = [{ versionId: '1-Qa', proof: [p('zW1', 'a1'), p('zW2', 'a2')] }];
+    const pruned = [{ versionId: '2-Qb', proof: [p('zW1', 'b1'), p('zW2', 'b2')] }];
+    expect((await put(`${authorDir}/did-witness.json`, JSON.stringify(stored))).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, JSON.stringify(pruned))).status).toBe(200);
+    expect(JSON.parse((await get(`${authorDir}/did-witness.json`))!)).toEqual([...stored, ...pruned]);
+  });
+
+  test('#965 r5 finding 3: a witness file nested deeper than the JSON depth limit is a structured 422, never a 500', async () => {
+    const { put, get } = setup();
+    const { hex, logs, witness } = await signerLog(2, { witnessed: true });
+    const dir = `${base}/authors/${hex}`;
+    const w = `${dir}/did-witness.json`;
+    expect((await put(w, witness.pruned[0])).status).toBe(200);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+    const full = JSON.parse(witness.full[1]) as Array<{ versionId: string; proof: unknown[] }>;
+    const p0 = JSON.stringify(full[1].proof[0]).slice(0, -1);
+    for (const n of [65, 50_000]) {
+      // A superset of the stored proofs whose extra proof nests n levels: canonicalising it once overflowed the stack.
+      const deep = '['.repeat(n) + ']'.repeat(n);
+      const evil = `${JSON.stringify(full).slice(0, -1)},{"versionId":${JSON.stringify(full[1].versionId)},"proof":[${p0},"x":${deep}}]}]`;
+      const res = await put(w, evil);
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ error: 'identity_witness_invalid' });
+    }
+    expect(await get(w)).toBe(witness.pruned[0]);
+    expect((await put(`${dir}/did.jsonl`, logs[0])).status).toBe(200);
+  });
+
+  test('a signer DID witness file only gains proofs: a PUT that drops one is a 409', async () => {
+    const { put, get } = setup();
+    const p1 = { versionId: '1-a', proof: [{ proofValue: 'z1' }] };
+    const w1 = JSON.stringify([p1]);
+    const w2 = JSON.stringify([{ ...p1, proof: [...p1.proof, { proofValue: 'z2' }] }, { versionId: '2-b', proof: [{ proofValue: 'z3' }] }]);
+    expect((await put(`${authorDir}/did-witness.json`, w1)).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, w2)).status).toBe(200);
+    expect((await put(`${authorDir}/did-witness.json`, w1)).status).toBe(409);
+    expect((await put(`${authorDir}/did-witness.json`, '[]')).status).toBe(409);
+    expect((await put(`${authorDir}/did-witness.json`, 'not json')).status).toBe(409);
+    expect(await get(`${authorDir}/did-witness.json`)).toBe(w2);
   });
 });

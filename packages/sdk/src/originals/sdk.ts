@@ -164,6 +164,17 @@ export interface ImportResult {
   original: OriginalView;
 }
 
+function logText(evidence: AuthorDidEvidence): string {
+  return typeof evidence.log === "string" ? evidence.log : evidence.log.map((e) => `${JSON.stringify(e)}\n`).join("");
+}
+
+/** True when `longer`'s log strictly extends `shorter`'s: the same lines, then more. */
+function extendsLog(longer: AuthorDidEvidence, shorter: AuthorDidEvidence): boolean {
+  const a = logText(longer);
+  const b = logText(shorter);
+  return a.length > b.length && a.startsWith(b) && (b.length === 0 || b.endsWith("\n"));
+}
+
 function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], code: string, message: string, details?: Record<string, unknown>): never {
   throw new OriginalsError(category, code, message, details);
 }
@@ -247,12 +258,25 @@ export class OriginalsSDK {
 
   // ---------------------------------------------------------------- reading
 
+  /**
+   * Each DID's evidence: what a package supplies, else the configured
+   * evidence, else what this store kept. Stored evidence was verified when it
+   * was kept (P7.8), so where it extends the configured log it is used
+   * instead: a static `authors` list never rolls a newer DID log back, in
+   * verification or in what is published (#965 review C2).
+   */
   private async authorEvidence(dids: string[], supplied: AuthorDidEvidence[] = []): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
     for (const did of dids) {
       const own = supplied.find((a) => a.did === did);
+      if (own) {
+        out.push(own);
+        continue;
+      }
       const source = this.options.authors;
-      const found = own ?? (Array.isArray(source) ? source.find((a) => a.did === did) : await source(did)) ?? (await this.store.getAuthorEvidence(did));
+      const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+      const stored = await this.store.getAuthorEvidence(did);
+      const found = configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
       if (found) out.push(found);
     }
     return out;
@@ -454,6 +478,10 @@ export class OriginalsSDK {
 
   /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
   async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
+    // Holding evidence is not authority (P8.4): with no usable signer there is nothing to sign with.
+    if (typeof signer !== "object" || signer === null || typeof signer.sign !== "function") {
+      sdkError("unauthorized-key", "SIGNER_REQUIRED", `committing to ${draft.original} needs a signer for an author key`);
+    }
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
       return { status: "duplicate", original: await this.get(draft.original) };
