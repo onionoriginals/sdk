@@ -92,14 +92,27 @@ function checkManifest(value: JsonValue): EvidenceManifest {
   return value as unknown as EvidenceManifest;
 }
 
+/** Read and check a manifest on its own, as `readEvidence` does. */
+export function readManifest(bytes: Uint8Array): EvidenceManifest {
+  return checkManifest(parseJson(text(bytes, MANIFEST)));
+}
+
 /** Read and check an evidence package's archive, layout and manifest. Verification is separate. */
 export function readEvidence(zip: Uint8Array, limits?: ZipLimits): EvidenceContents {
-  const files = readZip(zip, limits);
+  return readEvidenceFiles(readZip(zip, limits));
+}
+
+/**
+ * Check the layout and manifest of an evidence package's files, as
+ * `readEvidence` does after reading the archive. The caller bounds their
+ * number and size: `OriginalsSDK.loadPublished` does so while retrieving.
+ */
+export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): EvidenceContents {
   for (const name of files.keys()) if (!LAYOUT.test(name)) evidenceError("EVIDENCE_LAYOUT", `${name} is not part of the evidence package layout`);
   const manifestBytes = files.get(MANIFEST);
   const logBytes = files.get("asset/did.jsonl");
   if (!manifestBytes || !logBytes) evidenceError("EVIDENCE_LAYOUT", "the manifest and asset/did.jsonl are required");
-  const manifest = checkManifest(parseJson(text(manifestBytes, MANIFEST)));
+  const manifest = readManifest(manifestBytes);
 
   const authors = new Map<string, AuthorDidEvidence>();
   const authorDids = new Set<string>();

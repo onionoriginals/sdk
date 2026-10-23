@@ -468,8 +468,8 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const { alice, log, sign } = await harbor();
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
-    const publish = await resign(log[2], { ...log[2].state, transitions: [], operation: "publish" }, sign);
-    failedWith(await report([...log, publish], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
+    const migrate = await resign(log[2], { ...log[2].state, transitions: [], operation: "migrate" }, sign);
+    failedWith(await report([...log, migrate], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
   });
 
   test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {

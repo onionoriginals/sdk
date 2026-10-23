@@ -282,8 +282,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ]
     },
     {
@@ -295,8 +295,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ],
       "note": "Owner decision Q5: every branch is reported and none is current until anchoring settles it (P9.16)."
     },
@@ -327,7 +327,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts"
+      ]
     },
     {
       "id": "C12-27",
@@ -716,8 +719,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/freshness.test.ts",
-        "packages/sdk/tests/unit/originals/freshness.test.ts"
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/freshness.test.ts"
       ]
     },
     {
@@ -739,7 +742,11 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/vh/tests/alias.test.ts"
+      ]
     },
     {
       "id": "C12-67",
@@ -748,7 +755,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/alias.test.ts"
+      ]
     },
     {
       "id": "C12-68",
@@ -874,7 +884,11 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/vh/tests/fetch.test.ts"
+      ]
     },
     {
       "id": "C12-79",
@@ -908,7 +922,10 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/fetch.test.ts"
+      ]
     },
     {
       "id": "C12-82",
@@ -942,7 +959,11 @@
       "phases": [
         3
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts"
+      ],
+      "note": "Serving headers (servingHeaders): signed type, nosniff, script-free sandboxing CSP, attachment for active types. The landing host and client rendering apply them in PR 8."
     }
   ]
 }

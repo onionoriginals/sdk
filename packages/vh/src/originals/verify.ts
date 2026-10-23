@@ -25,6 +25,7 @@ import {
   type LogVerification,
   type VerifiedEntry,
 } from "../log/index.js";
+import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
 import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory } from "./author.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, type AssetState, type EntryState } from "./state.js";
@@ -50,6 +51,8 @@ export interface VerifyOriginalOptions {
   copies?: LogCopy[];
   /** The highest versionIds verified before, for the Original and per author DID (P7.8). */
   retained?: RetainedVersions;
+  /** did:webvh alias logs, to confirm the aliases the asset state lists (P3.6). */
+  aliases?: AliasEvidence[];
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
 }
@@ -113,6 +116,11 @@ export interface OriginalsReport {
   /** Whether the asset log is the latest, under the freshness policy and the retained versionId (P7.6). */
   assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
   fork: OriginalsFork | null;
+  /**
+   * Each alias the checkpoint's state lists, and whether it is confirmed in both
+   * directions (P3.6). An unconfirmed alias does not affect the Original itself.
+   */
+  aliases: AliasReport[];
   /** Unwitnessed and unanchored: claimed ordering only (P7.6). */
   ordering: "claimed";
   deactivated: boolean;
@@ -274,6 +282,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       copies,
     },
     fork,
+    aliases: await Promise.all((state?.asset.aliases ?? []).map((did) => checkAlias(`did:vh:${log.scid}`, options.aliases?.find((a) => a.did === did), did, options.now))),
     ordering: "claimed",
     deactivated: log.deactivated,
     state: state?.asset ?? null,
@@ -310,5 +319,22 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     if (typeof key !== "string" || !stillAuthorized(latest, ref, key)) reasons.push("head-key-not-in-latest-author-document");
   }
   report.current = reasons.length === 0;
+  return report;
+}
+
+/**
+ * Verify an Original reached through its did:webvh alias. The alias log names
+ * the did:vh; the result is that Original's own verification, and only when
+ * the alias is confirmed in both directions (P3.6). Otherwise there is no
+ * Originals result through that did:webvh (ALIAS_NOT_CONFIRMED).
+ */
+export async function verifyOriginalByAlias(options: VerifyOriginalOptions & { alias: AliasEvidence }): Promise<OriginalsReport> {
+  const target = await aliasTarget(options.alias, options.now);
+  if (!target) throw new OriginalsError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${options.alias.did} does not name one did:vh`);
+  const report = await verifyOriginal({ ...options, aliases: [options.alias, ...(options.aliases ?? [])] });
+  const confirmed = report.original === target && report.aliases.some((a) => a.did === options.alias.did && a.status === "confirmed");
+  if (!confirmed) {
+    throw new OriginalsError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${target} does not list ${options.alias.did} as its alias`, { report });
+  }
   return report;
 }
