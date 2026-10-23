@@ -219,10 +219,9 @@ export function resolvedCopy(authenticated: boolean): {
 }
 
 /**
- * R7 — the durability caveat for an anonymous publish, returned for the
- * PUBLISH STEP rather than for the log that comes back from it. U8 introduced
- * the string but rendered it only after the fact, which is the one moment it
- * cannot change anyone's mind.
+ * R7 — the signed-out caveat, returned for the PUBLISH STEP rather than for
+ * the log that comes back from it: the key is page-scoped and discarded, and
+ * publishing needs sign-in (#976 B5).
  */
 export function publishDurabilityNote(authenticated: boolean): string | null {
   return authenticated ? null : demo.hosting.temporaryNote;

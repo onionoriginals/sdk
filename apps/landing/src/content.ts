@@ -452,7 +452,7 @@ export const demo = {
   },
   resolved: {
     heading: 'Signed history—available on this site',
-    /** Anonymous logs live in the shared in-memory host store; see `hosting.temporaryNote`. */
+    /** Signed-out heading. Publishing needs sign-in; see `hosting.temporaryNote`. */
     temporaryHeading: 'Signed history—available here for now',
     resolvedBadge: 'Available ✓',
     pendingBadge: 'Available on the published site',
@@ -671,7 +671,7 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Without signing in, your published history is stored in a shared demo area and removed after a couple of hours. Sign in before publishing to save it under your account for as long as this service runs.'
+      'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be published or continued once you leave. Download its evidence to keep a copy anyone can verify. Sign in to publish it and keep editing.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -873,11 +873,10 @@ export const legal = {
         ]
       },
       {
-        heading: 'Keys held in your browser',
+        heading: 'Keys and your browser',
         body: [
-          'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
-          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, that key does not exist and the Original is signed by a key generated in the page and discarded with it.',
-          'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
+          'Signed in, the keys behind your did:webvh identity and the Originals you author are Ed25519 keys in your Turnkey sub-organization, not in this browser. The identity key controls your DID and each published Original’s web address; a different key signs your Originals. This site publishes your DID log and never holds either private key.',
+          'Signed out, neither key exists. The Original is signed by a key generated in the page and discarded with it: it is never stored or sent anywhere, and nothing can recover it, so that Original can’t be continued after you leave. Its evidence package holds no private key.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
           'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted once the server answers.'
         ]

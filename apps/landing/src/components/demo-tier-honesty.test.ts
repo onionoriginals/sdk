@@ -166,9 +166,9 @@ describe('the published log’s durability (R7)', () => {
     expect(publishDurabilityNote(true)).toBeNull();
   });
 
-  test('the caveat names both halves: temporary, and shared with every other visitor', () => {
+  test('the caveat names both halves: the key is discarded, and sign-in is how to keep it (#976 B5)', () => {
     const note = demo.hosting.temporaryNote;
-    expect(note).toMatch(/temporar|dropped|expire|a few hours|couple of hours/i);
+    expect(note).toMatch(/discard/i);
     expect(note).toMatch(/sign in|signed in/i);
   });
 
