@@ -48,7 +48,10 @@ describe("evidence packages (section 7)", () => {
     const loaded = await reader(alice, "asserted").load(pkg.bytes);
     expect(loaded.report.resources.status).toBe("partial");
     expect(loaded.report.resources.versions[1].bytes).toBe("verified");
-    expect(loaded.report.current).toBe(false);
+    // The package says it is partial, honestly: the log verifies and is current; the
+    // unavailable content is reported, not a failure (P7.3, P7.4, P9.18).
+    expect(loaded.reasons).toEqual([]);
+    expect(loaded.report.current).toBe(true);
   });
 
   test("a package of an earlier checkpoint holds that prefix and is not the latest state (P7.6)", async () => {

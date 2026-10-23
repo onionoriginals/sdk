@@ -40,6 +40,18 @@ describe("C12-01: package in one process, verify in another", () => {
       const text = run(["verify", file, "--now", "2026-10-19T00:00:00Z"]);
       expect(text.stdout).toContain("verified");
       expect(text.stdout).toContain(e.original.checkpoint);
+      // Missing bytes leave the package verified, with the content reported unavailable (P7.3, P7.4).
+      const store = new MemoryStore();
+      const partialSdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
+      const p = await partialSdk.create({ name: "Partial", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("P1") }], author, signer });
+      if (p.kind !== "original") throw new Error("expected an Original");
+      await partialSdk.edit(p.original.did, { parent: p.original.checkpoint, resources: [{ id: "photo", bytes: bytes("P2") }], author, signer });
+      store.deleteResource(p.original.resources[0].digest);
+      const partial = join(dir, "partial.zip");
+      writeFileSync(partial, (await partialSdk.package(p.original.did)).bytes);
+      const partialOut = run(["verify", partial, "--json", "--now", "2026-10-19T00:00:00Z"]);
+      expect(partialOut.code).toBe(0);
+      expect((JSON.parse(partialOut.stdout) as { resources: { status: string }; verified: boolean })).toMatchObject({ resources: { status: "partial" }, verified: true });
       const tampered = join(dir, "bad.zip");
       writeFileSync(tampered, new Uint8Array([1, 2, 3]));
       expect(run(["verify", tampered]).code).toBe(1);

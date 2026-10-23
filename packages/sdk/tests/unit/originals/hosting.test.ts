@@ -120,13 +120,21 @@ describe("the public reader verifies one exact snapshot (P9.1)", () => {
     await expect(stranger().loadPublished(claim.did, host(files, didWebvhFilesUrl(claim.did)))).rejects.toMatchObject({ code: "ALIAS_NOT_CONFIRMED" });
   });
 
-  test("missing bytes leave an explicitly partial, unverified result (P7.4)", async () => {
+  test("missing bytes leave the snapshot verified, with the content reported unavailable (P7.3, P7.4, P9.18)", async () => {
     const { alias, files } = await published();
     const partial = new Map(files);
     partial.delete(`originals/resources/${resourceDigest(B1)}`);
     const r = await stranger().loadPublished(alias.did, host(partial, didWebvhFilesUrl(alias.did)));
-    expect(r.verified).toBe(false);
+    expect(r.verified).toBe(true);
     expect(r.report.resources.status).toBe("partial");
+    expect(r.report.resources.missing.map((v) => v.digest)).toEqual([resourceDigest(B1)]);
+    expect(r.reasons).not.toContain("resources-partial");
+    // Bytes that are served but wrong still fail.
+    const wrong = new Map(files);
+    wrong.set(`originals/resources/${resourceDigest(B1)}`, bytes("not the first crop"));
+    const bad = await stranger().loadPublished(alias.did, host(wrong, didWebvhFilesUrl(alias.did)));
+    expect(bad.verified).toBe(false);
+    expect(bad.report.resources.status).toBe("digest-failure");
   });
 
   test("the hosted files are the same for a retried publication of the same checkpoint (P9.2)", async () => {
@@ -443,5 +451,31 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     const authorLog = [...files].find(([path]) => /^originals\/authors\/[0-9a-f]{64}\/did\.jsonl$/.test(path));
     expect(decoder.decode(authorLog![1])).toBe(v2.log as string);
     expect(p.original.checkpoint).toBeDefined();
+  });
+});
+
+describe("identity retrieval in loadPublished stays inside its budget (08b review R1)", () => {
+  test("forged lines naming many did:webvh signers are planned against the request budget, and none is requested", async () => {
+    const { alias, files } = await published();
+    const scid = alias.did.split(":")[2];
+    const forged = forgeLog(files, (t) => Array.from({ length: 90 }, (_, i) => {
+      const did = `did:webvh:${scid}:evil${i}.example`;
+      return { ...t, state: { ...t.state, author: { did, verificationMethod: `${did}#k`, versionId: "1-x" } } };
+    }));
+    const host = instrumented(forged, didWebvhFilesUrl(alias.did));
+    const identity: string[] = [];
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      retrievalLimits: { maxRequests: 200, maxTotalBytes: 1_000_000, timeoutMs: 5_000 },
+      identityFetch: async (url) => {
+        identity.push(url);
+        return new Uint8Array(900_000).fill(0x7b);
+      },
+    });
+    const error = await rejection(reader.loadPublished(alias.did, host.fetch));
+    expect(error.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+    expect(error.details).toMatchObject({ limit: "requests" });
+    expect(identity).toEqual([]);
+    expect(host.calls.length + identity.length).toBeLessThanOrEqual(200);
   });
 });

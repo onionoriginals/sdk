@@ -27,6 +27,9 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
   Asset logs do not use witnesses (owner decision Q14). Accepted
   cryptosuites are `eddsa-jcs-2022` and `bip340-jcs-2025`.
 - Keys rotate in the author DID only. The asset log has no update keys.
+- A did:webvh author can move to another host under did:webvh portability
+  and stays the same identity: the DID at genesis, which every entry keeps
+  naming (P5.14).
 - The DID document of the did:vh is derived from the log. It is never stored or
   taken from a host.
 
@@ -74,6 +77,22 @@ The `originals` command verifies a package offline:
   interrupted commit recovers to either the prior checkpoint or the fully
   committed one. A signer rejection or an invalid proof leaves the prior
   checkpoint unchanged (P6.1).
+- **One writing process per store.** `FileStore.open` takes `<root>/.lock`
+  atomically (a `link` of a per-process record), so exactly one process holds
+  a root; another opening it gets `STORE_LOCKED`. A lock is taken over only
+  when its holder is confirmed gone: same host, and its pid no longer runs or
+  now belongs to a different process. A lock under the opener's own pid is
+  held (worker threads of one process share its pid but not its handles, so
+  a worker opening a root its process holds gets `STORE_LOCKED`) unless a
+  recorded kernel start time (Linux) shows an earlier process that had the
+  pid. A takeover whose taker died between claiming the break and the rename
+  is completed by a later opener, by exactly one. A lock from another host,
+  or one whose holder cannot be confirmed gone, stays refused; remove
+  `<root>/.lock` (and any `<root>/.lock.break.*`) by hand once no process
+  uses the store (PROVISIONAL). Handles in one process share the root. `close()` on the last
+  handle waits for every write in flight, then releases the lock, so a store
+  can be handed to another process; a closed handle refuses writes
+  (`STORE_CLOSED`).
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
@@ -92,14 +111,14 @@ The `originals` command verifies a package offline:
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · not-established · stale against the retained versionId (P7.8) |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8) |
 | `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
-| `resources` | available · partial (resource and checkpoint missing) · digest failure |
+| `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
-| `current` | true only when every part above passes under the selected policy |
+| `current` | true only when every part above passes under the selected policy, except content availability (section 7): an application that needs the content also checks `resources` |
 | `reasons`, `retain` | why the result is not current; the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
 
 Errors are `OriginalsError` (a `StructuredError`) in one of these categories:
@@ -152,6 +171,57 @@ replaces stored author DID evidence with an older or diverging history.
 Stores implement `getRetained`/`putRetained` and `putBranch`/`getBranches` in
 addition to the phase 1 methods; `MemoryStore` and `FileStore` do.
 
+## Moved author DIDs — identity continuity (P5.14, implemented)
+
+A did:webvh author DID can move to another host or path under the did:webvh
+method's portability rules: `portable: true` at genesis, then a version whose
+document `id` is the new DID with the same SCID and the prior DID in
+`alsoKnownAs` (didwebvh-ts writes such moves with `updateDID({ domain })`).
+The identity is still the DID at genesis, and every entry keeps naming it as
+`author.did`. An entry names the verification method as it appears at the
+version it names, so after a move it is `<new DID>#key`:
+
+```ts
+const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, versionId: afterMove };
+```
+
+- P5.3 is checked against the document `id` at the named version: the
+  method's id must be in that `id`'s namespace and its controller must be
+  that `id`. A method that kept the old DID as its controller across a move
+  (as didwebvh-ts writes one) fails author binding; rotate to a method of the
+  new `id`. Entries signed before the move keep verifying against the
+  versions before it.
+- The author's history is the identity DID's own log, verified from genesis,
+  with the same SCID. `alsoKnownAs`, a log with another SCID, a redirect, a
+  host's claim or a change of DID method never makes another DID the author.
+  Histories are looked up by the identity DID (evidence packages already file
+  them under it).
+- A reader finds a moved log in the evidence package, or, with the SDK's
+  `identityFetch` option, at the location of the DID in the verification
+  method id of the latest entry the identity signed, without redirects
+  (`safeFetch` refuses them). That entry is the latest one that verified
+  with the evidence the reader holds, so an appended line whose proof does
+  not verify cannot choose the request. A reader holding no evidence that
+  verifies any entry of that identity can check no proof before retrieving
+  (PROVISIONAL): it first asks the location named by the earliest chained
+  entry the identity signed (for the author, the genesis entry, which is
+  bound to the Original's SCID), and the latest chained entry's location
+  only when that gives no usable log. A log found first verifies the
+  entries, and the latest verified entry's location is then asked. An
+  unverified line can choose a request, never the result. A log retrieved
+  from the latest verified entry's location that verifies and extends
+  the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
+  retrieval from that location is how this SDK establishes a moved
+  identity's freshness). Otherwise the identity's freshness is not
+  established and the Original is not reported as current.
+
+```ts
+const reader = OriginalsSDK.create({ store, authors: [], identityFetch: async (url, o) => (await safeFetch(url, o)).bytes });
+```
+
+- An Original's own did:webvh alias moving is an alias change by an author
+  entry; it does not affect author binding.
+
 ## No witnesses (owner decision Q14)
 
 Asset logs never activate VH witnesses: an entry that sets the witness
@@ -194,7 +264,8 @@ publication repeats the same snapshot (P9.2). The public reader:
 ```ts
 import { safeFetch } from "@originals/vh/fetch";
 const r = await reader.loadPublished(aliasDid, async (url, options) => (await safeFetch(url, options)).bytes, { signal });
-r.verified; // the exact snapshot: history ending at its checkpoint, binding, identity, every byte, the alias
+r.verified; // the exact snapshot: history ending at its checkpoint, binding, identity, no failed digest, the alias
+r.report.resources; // content availability, separately: missing bytes do not fail `verified` (P7.3, P7.4)
 r.report.current; // whether it is the latest, under the freshness policy
 ```
 

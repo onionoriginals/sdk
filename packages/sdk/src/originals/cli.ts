@@ -46,7 +46,8 @@ async function main(argv: string[]): Promise<number> {
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => at, ...(flag("--freshness") === "asserted" ? { freshness: "asserted" as const } : {}) });
     const { manifest, report, reasons } = await sdk.load(zip);
     const verified = report.history.status === "valid" && report.authorBinding.status === "valid" &&
-      report.identityEvidence.status === "complete" && report.resources.status === "available" &&
+      // Missing bytes are unavailable content, not a failure (P7.3, P7.4); served bytes must match.
+      report.identityEvidence.status === "complete" && report.resources.status !== "digest-failure" &&
       !reasons.some((r) => r.startsWith("manifest-"));
     if (rest.includes("--json")) {
       process.stdout.write(`${JSON.stringify({ ...report, reasons, manifest, verified })}\n`);

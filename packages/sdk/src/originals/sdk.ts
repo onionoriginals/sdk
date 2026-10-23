@@ -25,14 +25,15 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { multibaseEncode } from "@originals/vh/crypto";
-import { parseJson, type JsonObject } from "@originals/vh/json";
-import { serializeLog, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
+import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
+import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
   prepareCreateOriginal,
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
   checkAlias,
   resourceDigest,
+  signerLocation,
   verifyAuthorHistory,
   verifyOriginal,
   type AliasEvidence,
@@ -47,7 +48,7 @@ import {
   type RetainedVersions,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
-import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
+import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
@@ -75,6 +76,26 @@ export interface OriginalsSDKOptions {
    * Its byte budget defaults to `archiveLimits.maxTotalBytes`.
    */
   retrievalLimits?: RetrievalLimits;
+  /**
+   * Retrieve a did:webvh signer identity's log where P5.14 says to find it:
+   * at the location of the DID in the verification method id of the latest
+   * entry that identity signed. Redirects must not be followed (P8.5);
+   * `safeFetch` fits: `async (url, o) => (await safeFetch(url, o)).bytes`.
+   * A log retrieved there that verifies from the identity DID's genesis, and
+   * extends any other evidence for it, is used and its freshness reported as
+   * `retrieved` (PROVISIONAL). If it cannot be obtained, the other evidence is
+   * used and the identity's freshness is not established.
+   *
+   * Bounded (08b review R1, R2, A4): only the author DID fixed at genesis is
+   * an identity to retrieve, and its location is read from the log's
+   * VH-chained entries. At most two requests (log and witness file) per
+   * identity are made. In `loadPublished` they are planned and counted in the
+   * call's retrieval budget, deadline and signal; every other operation gives
+   * them a budget of its own from `retrievalLimits`, and an identity not
+   * retrieved within it keeps its freshness not established. Without this
+   * option nothing is ever requested.
+   */
+  identityFetch?: HostedFetch;
 }
 
 export interface ResourceInput {
@@ -152,9 +173,12 @@ export interface PublishedOriginal extends LoadedEvidence {
   alias: AliasReport;
   /**
    * The exact hosted snapshot verifies: valid history ending at the manifest's
-   * checkpoint, author binding, complete identity evidence, every resource's
-   * bytes, and the alias in both directions (P9.1, P3.6). Whether it is the
-   * latest state is `report.current`, under the freshness policy.
+   * checkpoint, author binding, complete identity evidence, no served bytes
+   * that fail their digest, and the alias in both directions (P9.1, P3.6).
+   * Missing bytes do not fail it: they are unavailable content, reported in
+   * `report.resources` (P7.3, P7.4, P9.18); an application that needs the
+   * content checks that too. Whether it is the latest state is
+   * `report.current`, under the freshness policy.
    */
   verified: boolean;
 }
@@ -204,6 +228,105 @@ function authorDidsOf(log: string): string[] {
     }
   }
   return [...dids];
+}
+
+type ChainedEntry = JsonObject & { versionId: string };
+
+/**
+ * The parsed entries of the log's VH-chained prefix: each versionId is the
+ * hash of its entry over its predecessor's versionId (the SCID for the
+ * first), as VH-Log chains them. Checking this needs no key, so it can be
+ * done before identity evidence is retrieved; it stops at the first line
+ * that does not chain.
+ */
+function chainedEntries(log: string): ChainedEntry[] {
+  const out: ChainedEntry[] = [];
+  let predecessor: unknown;
+  for (const [i, line] of lines(log).entries()) {
+    try {
+      const entry = parseJson(line);
+      if (!isJsonObject(entry) || typeof entry.versionId !== "string") break;
+      const id = /^(\d+)-(.+)$/.exec(entry.versionId);
+      if (!id || Number(id[1]) !== i + 1) break;
+      if (i === 0) predecessor = isJsonObject(entry.parameters) ? entry.parameters.scid : undefined;
+      if (typeof predecessor !== "string") break;
+      const { proof: _proof, ...unsigned } = entry;
+      if (vhHash({ ...unsigned, versionId: predecessor }) !== id[2]) break;
+      out.push(entry as ChainedEntry);
+      predecessor = entry.versionId;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * The signer identities whose logs `identityFetch` may retrieve (P5.14): the
+ * author DID fixed at genesis (P5.8). No other DID a line names is an
+ * identity of the Original, so none is requested.
+ */
+function retrievableIdentities(chained: ChainedEntry[]): string[] {
+  const author = isJsonObject(chained[0]?.state) && isJsonObject(chained[0].state.author) ? chained[0].state.author.did : undefined;
+  return typeof author === "string" ? [author] : [];
+}
+
+/**
+ * Where to retrieve `did`'s log (P5.14), in the order to try: the DID in the
+ * verification method id of the latest entry `did` signed among the first
+ * `verified` chained entries, those whose proofs and author binding verified
+ * with the identity evidence already held (08b review r2 #5). A hash-chained
+ * line anyone can append, whose proof does not verify, chooses nothing.
+ *
+ * PROVISIONAL (P5.14; 08b review r4 #5): when the evidence held verifies no
+ * entry `did` signed (a reader with no evidence for it), no proof can be
+ * checked before the log is retrieved. The location named by the earliest
+ * chained entry `did` signed (the genesis entry for the author), which is
+ * bound to the Original's SCID and so cannot be steered by a line appended
+ * to someone else's Original, is tried first; P5.14's latest chained entry
+ * only when that location gives no usable log. A log retrieved from the
+ * earlier location verifies the entries, and the latest verified entry then
+ * names the location retrieved next (`withIdentities`). The verifier checks
+ * that a retrieved log came from the latest verified entry's location, so an
+ * unverified line can choose a request but never the result.
+ */
+function identityLocations(chained: ChainedEntry[], did: string, verified: number): string[] {
+  const signedBy = (i: number) => {
+    const state = chained[i].state;
+    const author = isJsonObject(state) ? state.author : undefined;
+    return isJsonObject(author) && author.did === did && typeof author.verificationMethod === "string" ? signerLocation(author as unknown as AuthorRef) : undefined;
+  };
+  for (let i = Math.min(verified, chained.length) - 1; i >= 0; i--) {
+    const location = signedBy(i);
+    if (location) return [location];
+  }
+  if (verified > 0) return []; // the held evidence verified entries, none by `did`: nothing vouches for a location
+  const out: string[] = [];
+  for (let i = 0; i < chained.length; i++) {
+    const location = signedBy(i);
+    if (location) {
+      out.push(location);
+      break;
+    }
+  }
+  for (let i = chained.length - 1; i >= 0; i--) {
+    const location = signedBy(i);
+    if (location) {
+      if (!out.includes(location)) out.push(location);
+      break;
+    }
+  }
+  return out;
+}
+
+/** The did:webvh log URL of `location`, or undefined when it is not a did:webvh. */
+function logUrlOf(location: string): string | undefined {
+  try {
+    return didWebvhLogUrl(location);
+  } catch (error) {
+    if (error instanceof OriginalsError) return undefined;
+    throw error;
+  }
 }
 
 /** The did:vh a log's genesis names, before verification; only used to look up what to compare with. */
@@ -259,27 +382,160 @@ export class OriginalsSDK {
   // ---------------------------------------------------------------- reading
 
   /**
-   * Each DID's evidence: what a package supplies, else the configured
-   * evidence, else what this store kept. Stored evidence was verified when it
-   * was kept (P7.8), so where it extends the configured log it is used
-   * instead: a static `authors` list never rolls a newer DID log back, in
-   * verification or in what is published (#965 review C2).
+   * Signer identity evidence for a log, looked up by identity DID (P5.14): an
+   * evidence package's own, else the author source's, else the store's; then,
+   * with `identityFetch`, the log at the identity's current location, if it
+   * extends that. Stored evidence was verified when it was kept (P7.8), so
+   * where it extends the configured log it is used instead: a static
+   * `authors` list never rolls a newer DID log back, in verification or in
+   * what is published (#965 review C2).
    */
-  private async authorEvidence(dids: string[], supplied: AuthorDidEvidence[] = []): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = []): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
-    for (const did of dids) {
-      const own = supplied.find((a) => a.did === did);
-      if (own) {
-        out.push(own);
-        continue;
-      }
-      const source = this.options.authors;
-      const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
-      const stored = await this.store.getAuthorEvidence(did);
-      const found = configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+    for (const did of authorDidsOf(log)) {
+      const found = supplied.find((a) => a.did === did) ?? (await this.configuredOrStored(did));
       if (found) out.push(found);
     }
     return out;
+  }
+
+  /** `identityFetch`, with a fetcher's TypeError (offline, DNS) treated as unavailable. */
+  private identityFetcher(): HostedFetch | undefined {
+    const fetch = this.options.identityFetch;
+    if (!fetch) return undefined;
+    return async (url, options) => {
+      try {
+        return await fetch(url, options);
+      } catch (error) {
+        if (error instanceof TypeError) throw new OriginalsError("unavailable-bytes", "FETCH_FAILED", `${url} could not be retrieved`);
+        throw error;
+      }
+    };
+  }
+
+  /**
+   * Verify with `base` identity evidence; then, with `identityFetch`, retrieve
+   * each retrievable identity's log from its latest location (P5.14) and
+   * verify again with what was retrieved. Requests count in `retrieval`, the
+   * call's budget (`loadPublished`), whose exhaustion, deadline or abort ends
+   * the call. Any other operation gets a budget of its own from
+   * `retrievalLimits`; when that runs out, what was not retrieved stays
+   * unretrieved and its freshness is not established (PROVISIONAL).
+   */
+  private async withIdentities(
+    log: string,
+    base: AuthorDidEvidence[],
+    run: (authors: AuthorDidEvidence[]) => Promise<OriginalsReport>,
+    retrieval?: Retrieval,
+  ): Promise<{ report: OriginalsReport; authors: AuthorDidEvidence[] }> {
+    const report = await run(base);
+    const first = await this.identityRound(log, base, report.history.entries, retrieval);
+    if (first === base) return { report, authors: base };
+    // A log first retrieved where an unverified entry said (`identityLocations`) verifies the
+    // entries, and the latest verified entry may name another location: one more round from there.
+    const again = await run(first);
+    const second = await this.identityRound(log, first, again.history.entries, retrieval);
+    return second === first ? { report: again, authors: first } : { report: await run(second), authors: second };
+  }
+
+  /** One bounded round of identity retrieval; `base` itself when nothing new was retrieved. */
+  /** `verified`: how many of `log`'s entries verified with `base` (P5.14 locations come only from them). */
+  private async identityRound(log: string, base: AuthorDidEvidence[], verified: number, retrieval?: Retrieval): Promise<AuthorDidEvidence[]> {
+    const fetch = this.identityFetcher();
+    if (!fetch) return base;
+    const chained = chainedEntries(log);
+    const identities = retrievableIdentities(chained).filter((did) => did.startsWith("did:webvh:"));
+    if (identities.length === 0) return base;
+    const budget = retrieval ?? new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
+    let out = base;
+    try {
+      // Up to two requests per location tried, its log and its witness file, planned before any is made.
+      const locations = identities.map((did) => {
+        const known = out.find((a) => a.did === did);
+        // A location this evidence was just retrieved from is not asked again.
+        return identityLocations(chained, did, verified).filter((l) => !known?.retrievedFrom || logUrlOf(l) !== known.retrievedFrom);
+      });
+      budget.plan(2 * locations.reduce((n, l) => n + l.length, 0), 0);
+      for (const [i, did] of identities.entries()) {
+        const known = out.find((a) => a.did === did);
+        const retrieved = await this.retrieveIdentity(did, locations[i], known, budget, fetch);
+        if (retrieved) out = known ? out.map((a) => (a.did === did ? retrieved : a)) : [...out, retrieved];
+      }
+    } catch (error) {
+      if (!retrieval && error instanceof OriginalsError && (error.code === "RETRIEVAL_BUDGET_EXCEEDED" || error.code === "RETRIEVAL_ABORTED")) return out;
+      throw error;
+    } finally {
+      if (!retrieval) budget.close();
+    }
+    return out;
+  }
+
+  private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
+    const source = this.options.authors;
+    const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+    const stored = await this.store.getAuthorEvidence(did);
+    return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+  }
+
+  /**
+   * P5.14: retrieve a did:webvh identity's log from the location of the DID in
+   * the verification method id of the latest entry it signed, with no
+   * redirects (P8.5). Used only when it verifies from the identity DID's
+   * genesis and extends `known`. The locations come from `identityLocations`;
+   * they only choose the URL, and the verifier checks that the URL is the
+   * latest verified entry's location.
+   */
+  private async retrieveIdentity(did: string, locations: string[], known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
+    for (const location of locations) {
+      const found = await this.retrieveIdentityAt(did, location, known, retrieval, fetch);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** `did`'s log retrieved from `location` (with its witness file), when it verifies from genesis and extends `known`. */
+  private async retrieveIdentityAt(did: string, location: string, known: AuthorDidEvidence | undefined, retrieval: Retrieval, fetch: HostedFetch): Promise<AuthorDidEvidence | undefined> {
+    let url: string;
+    try {
+      if (parseDidWebvh(location).scid !== parseDidWebvh(did).scid) return undefined;
+      url = didWebvhLogUrl(location);
+    } catch (error) {
+      if (error instanceof OriginalsError) return undefined;
+      throw error;
+    }
+    const get = async (target: string): Promise<string | undefined> => {
+      try {
+        const data = await retrieval.get(target, { required: false, archive: false, fetch });
+        return data === undefined ? undefined : new TextDecoder("utf-8", { fatal: true }).decode(data);
+      } catch (error) {
+        // The budget's own end stops the round; anything else leaves the identity unretrieved.
+        if (error instanceof OriginalsError && (error.code === "RETRIEVAL_BUDGET_EXCEEDED" || error.code === "RETRIEVAL_ABORTED")) throw error;
+        if (error instanceof OriginalsError || error instanceof TypeError) return undefined; // unavailable: freshness stays not established
+        throw error;
+      }
+    };
+    const text = await get(url);
+    if (text === undefined) return undefined;
+    const witnessText = await get(url.replace(/did\.jsonl$/, "did-witness.json"));
+    let witness: unknown;
+    try {
+      witness = witnessText === undefined ? undefined : parseJson(witnessText);
+    } catch (error) {
+      if (error instanceof OriginalsError) return undefined;
+      throw error;
+    }
+    const candidate: AuthorDidEvidence = { did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url };
+    const ids = async (evidence: AuthorDidEvidence) => {
+      const h = await verifyAuthorHistory(evidence, { now: this.clock() });
+      return h.failure ? undefined : h.versions.map((v) => v.versionId);
+    };
+    const retrieved = await ids(candidate);
+    if (!retrieved || retrieved.length === 0) return undefined;
+    if (known) {
+      const have = await ids(known);
+      if (have && !have.every((id, i) => retrieved[i] === id)) return undefined; // shorter or diverging: not used
+    }
+    return candidate;
   }
 
   private async storedBytes(log: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<Record<string, Uint8Array>> {
@@ -336,16 +592,21 @@ export class OriginalsSDK {
   }
 
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<OriginalsReport> {
-    return verifyOriginal({
-      log,
-      aliases: await this.aliasEvidence(log),
-      authors: await this.authorEvidence(authorDidsOf(log)),
-      bytes: await this.storedBytes(log, extra),
-      now: this.clock(),
-      ...(await this.comparisons(log)),
-      ...(checkpoint ? { checkpoint } : {}),
-      ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
-    });
+    const aliases = await this.aliasEvidence(log);
+    const bytes = await this.storedBytes(log, extra);
+    const comparisons = await this.comparisons(log);
+    const run = (authors: AuthorDidEvidence[]) =>
+      verifyOriginal({
+        log,
+        aliases,
+        authors,
+        bytes,
+        now: this.clock(),
+        ...comparisons,
+        ...(checkpoint ? { checkpoint } : {}),
+        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
+      });
+    return (await this.withIdentities(log, await this.authorEvidence(log), run)).report;
   }
 
   private view(did: string, report: OriginalsReport): OriginalView {
@@ -517,7 +778,7 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = await this.authorEvidence(authorDidsOf(prefix));
+    const authors = (await this.identityRound(prefix, await this.authorEvidence(prefix), view.report.history.entries)).map(({ retrievedFrom: _, ...evidence }) => evidence);
     const missing: MissingItem[] = [];
     for (const did of authorDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did });
     const bytes: Record<string, Uint8Array> = {};
@@ -538,23 +799,32 @@ export class OriginalsSDK {
     return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
   }
 
-  /** Verify an evidence package without storing it. Needs no key and no network (P7.3). */
+  /**
+   * Verify an evidence package without storing it. Needs no key (P7.3), and
+   * no network unless `identityFetch` is configured; its requests are then
+   * bounded by a budget of their own (`retrievalLimits`).
+   */
   async load(zip: Uint8Array): Promise<LoadedEvidence> {
     return this.loadContents(readEvidence(zip, this.options.archiveLimits));
   }
 
-  private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = []): Promise<LoadedEvidence> {
-    const report = await verifyOriginal({
-      aliases: await this.aliasEvidence(contents.log, aliases),
-      log: contents.log,
-      authors: await this.authorEvidence(authorDidsOf(contents.log), contents.authors),
-      bytes: contents.bytes,
-      witnessFile: contents.witness,
-      checkpoint: contents.manifest.checkpoint,
-      now: this.clock(),
-      ...(await this.comparisons(contents.log)),
-      ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
-    });
+  private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
+    const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
+    const comparisons = await this.comparisons(contents.log);
+    const run = (authors: AuthorDidEvidence[]) =>
+      verifyOriginal({
+        aliases: aliasEvidence,
+        log: contents.log,
+        authors,
+        bytes: contents.bytes,
+        witnessFile: contents.witness,
+        checkpoint: contents.manifest.checkpoint,
+        now: this.clock(),
+        ...comparisons,
+        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
+      });
+    const base = await this.authorEvidence(contents.log, contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence));
+    const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
     const m = contents.manifest;
     if (m.original !== report.original) reasons.push("manifest-original-mismatch");
@@ -567,7 +837,8 @@ export class OriginalsSDK {
   /**
    * The public reader (P9.1, P3.6). Retrieve the snapshot hosted under the
    * alias did:webvh's `#files` base with `fetch`, and verify that exact
-   * checkpoint with no key. Missing bytes leave a partial, unverified result;
+   * checkpoint with no key. Missing bytes are reported as unavailable content
+   * and do not fail the result (P7.3, P7.4);
    * an alias that does not name this Original in both directions gives no
    * result (ALIAS_NOT_CONFIRMED).
    *
@@ -616,7 +887,10 @@ export class OriginalsSDK {
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
     const planned = 1 + 2 * plan.authors.length + plan.digests.length;
-    retrieval.plan(planned, files.size + planned);
+    // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
+    // a log and witness file from up to two locations, then from the latest verified location.
+    const identities = this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
+    retrieval.plan(planned + identities, files.size + planned);
     await put("asset/did-witness.json", false);
     for (const did of plan.authors) {
       if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
@@ -624,7 +898,7 @@ export class OriginalsSDK {
     for (const digest of plan.digests) await put(`resources/${digest}`, false);
 
     // Every file is already within the budget and the archive limits; no archive is assembled.
-    const loaded = await this.loadContents(readEvidenceFiles(files), [alias]);
+    const loaded = await this.loadContents(readEvidenceFiles(files), [alias], retrieval);
     const r = loaded.report;
     // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
     // merely points at an Original gives no result through it.
@@ -636,7 +910,7 @@ export class OriginalsSDK {
     if (r.head !== loaded.manifest.checkpoint) reasons.push("snapshot-history-is-not-its-checkpoint");
     const verified =
       r.history.status === "valid" && r.authorBinding.status === "valid" && r.identityEvidence.status === "complete" &&
-      r.resources.status === "available" && r.checkpoint === loaded.manifest.checkpoint && r.head === loaded.manifest.checkpoint && r.fork === null;
+      r.resources.status !== "digest-failure" && r.checkpoint === loaded.manifest.checkpoint && r.head === loaded.manifest.checkpoint && r.fork === null;
     return { ...loaded, reasons, alias: aliasReport, verified };
   }
 
