@@ -9,10 +9,12 @@
  *
  * Every route requires a valid JWT (cookie or Bearer); the store is namespaced
  * by the JWT `sub`, so a user only ever writes/reads under their own account.
- * The one exception is a shared-host save: any signed-in caller may submit a
- * signed entry for an Original hosted in someone's namespace, because the
- * entry's validity under the profile, not the account, authorizes the change
- * (P5.4, P6.7). Accepted files stay the namespace owner's.
+ * The one exception is a shared-host save into someone's namespace: the
+ * entry's validity under the profile authorizes the change (P5.4, P6.7), and
+ * the caller must be the namespace owner or an account whose landing DID the
+ * head state names as author or editor (P5.15; owner decision of 22 October
+ * 2026). Any other caller is refused before its body is read. Accepted files
+ * stay the namespace owner's.
  *
  * Once an Original's asset log is hosted, it changes only through the
  * verifying submit route: a PUT of the asset log is taken only when there is
@@ -45,7 +47,6 @@ const MAX_SUBMIT_BYTES = 12 * 1024 * 1024;
 // users hit.
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
-/** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
 function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (a === null || b === null) return a === b;
   return a.length === b.length && a.every((x, i) => x === b[i]);
@@ -70,6 +71,7 @@ function supersededManifest(manifest: Uint8Array, log: Uint8Array | null): boole
   }
 }
 
+/** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
 function userSlug(sub: string): string {
   return `user-${sub.slice(0, 16)}`;
 }
@@ -237,6 +239,10 @@ export function createOriginalsRoutes(deps: {
     if (siteKey === null || rest.length > 0 || !ns || !classifyHostedKey(`${siteKey}/originals/asset/did.jsonl`, ns)) {
       return json({ error: 'bad_key' }, 400);
     }
+    // Who may submit is decided before the body is read (shared-saves.ts, owner decision of 22 October 2026).
+    const caller = { sub, slug: userSlug(sub) };
+    const refused = sharedSaves.mayCall(siteKey, caller);
+    if (refused) return json(refused.body, refused.http);
     // Counted in bytes as it arrives, declared or chunked (R4).
     const raw = await readBodyCapped(req, MAX_SUBMIT_BYTES);
     if (!raw) return json({ error: 'payload_too_large' }, 413);
@@ -248,7 +254,7 @@ export function createOriginalsRoutes(deps: {
     }
     const parsed = parseSubmission(body);
     if ('http' in parsed) return json(parsed.body, parsed.http);
-    return sharedSaves.submit(siteKey, parsed);
+    return sharedSaves.submit(siteKey, parsed, caller);
   }
 
   // adapter.get: read back an object under this user's account (auth-scoped in

@@ -7,7 +7,7 @@
  *     body      { original, entry, resources: { <digest>: <base64> }, identities: [{ did, log, witness? }] }
  *     200       { status: "accepted" | "already-accepted", checkpoint, head }
  *     409       { status: "stale-parent", error: "stale_parent", head }
- *     400 malformed · 401 not signed in · 404 not hosted · 413 too large
+ *     400 malformed · 401 not signed in · 403 caller not authorized · 404 not hosted · 413 too large
  *     422 the entry does not verify against the head, its bytes are missing or wrong, or the Original is anchored
  *
  * In the order P6.7 sets:
@@ -86,16 +86,22 @@
  * on the head: a database row or object-store conditional write keyed by the
  * Original, or a lock service, held across the compare and the log replace.
  *
- * Who may call: any signed-in account (the existing JWT model; rate limited),
- * because the signed entry, not the account, authorizes the change (P5.4,
- * P5.9). The namespace owner, and any other signed-in caller presenting a
- * valid entry, may save; accepted files stay the namespace owner's and count
- * against the owner's quota. PROVISIONAL: whether a host should require more
- * of a caller who is not the namespace owner is an open deployment question.
+ * Who may call (owner decision of 22 October 2026): the signed entry, not
+ * the account, authorizes the change (P5.4, P6.7). The account only decides
+ * who may spend the namespace owner's quota and make the host read a body.
+ * The caller must be the namespace owner, or an account whose landing DID the
+ * head state names as the author or a granted editor (P5.15): a did:webvh on
+ * the Original's host whose one path segment is the account's slug, a
+ * namespace only that account can write (originals-routes.ts `hostPut`). Any
+ * other caller is refused (403 caller_not_authorized) before the body is
+ * read, and again in the queued attempt against the head it would extend
+ * (P1), so a grant removed meanwhile counts. Accepted files stay the namespace
+ * owner's and count against the owner's quota.
  */
 import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
+import { parseDidWebvh } from '@originals/vh/webvh';
 import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { signerPath } from '@originals/sdk/originals';
 import { json } from './router';
@@ -177,6 +183,35 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
     identities.push({ did: i.did, log: i.log, ...(i.witness !== undefined ? { witness: i.witness } : {}) });
   }
   return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities };
+}
+
+/** The signed-in account submitting: its JWT `sub` and its namespace slug. */
+export interface Caller {
+  sub: string;
+  slug: string;
+}
+
+/**
+ * True when `did` is the landing DID of the account whose namespace is
+ * `<host>/<slug>/`: a did:webvh on `host` whose one path segment is `slug`.
+ */
+export function namesAccount(did: string, host: string, slug: string): boolean {
+  try {
+    const parts = parseDidWebvh(did);
+    return `${parts.host}${parts.port ? `:${parts.port}` : ''}`.toLowerCase() === host.toLowerCase() && parts.path.length === 1 && parts.path[0] === slug;
+  } catch {
+    return false;
+  }
+}
+
+/** Null when `caller` owns the namespace or the head state names its landing DID as author or editor (P5.15); otherwise a 403. */
+function callerRefusal(siteKey: string, owner: string, head: string, caller: Caller): Refusal | null {
+  if (owner === caller.sub) return null;
+  const state = lineState(head) as { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } } | undefined;
+  const editors = Array.isArray(state?.asset?.editors) ? state.asset.editors : [];
+  const host = siteKey.split('/')[0];
+  const named = [state?.author?.did, ...editors.map((g) => g?.did)].some((did) => typeof did === 'string' && namesAccount(did, host, caller.slug));
+  return named ? null : refuse(403, 'caller_not_authorized');
 }
 
 /** True when `entry` is the next entry after the entry whose versionId is `head` (VH-Log chaining). */
@@ -326,7 +361,18 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     store.saveBytes(owner, key, encoder.encode(`${JSON.stringify(next, null, 2)}\n`), 'application/json');
   }
 
-  async function attempt(siteKey: string, s: ParsedSubmission): Promise<Outcome> {
+  /** Whether `caller` may submit to the Original hosted at `siteKey`, judged before its body is read: null when it may. */
+  function mayCall(siteKey: string, caller: Caller): Refusal | null {
+    const assetKey = `${siteKey}/originals/asset/did.jsonl`;
+    const owner = store.ownerOf(assetKey);
+    const logBytes = store.readHosted(assetKey);
+    const logText = logBytes ? text(logBytes) : null;
+    if (!owner || logText === null || logText.trim() === '') return refuse(404, 'not_hosted');
+    const lines = logText.trimEnd().split('\n');
+    return callerRefusal(siteKey, owner, lines[lines.length - 1], caller);
+  }
+
+  async function attempt(siteKey: string, s: ParsedSubmission, caller: Caller): Promise<Outcome> {
     const assetKey = `${siteKey}/originals/asset/did.jsonl`;
     const owner = store.ownerOf(assetKey);
     const logBytes = store.readHosted(assetKey);
@@ -341,6 +387,9 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     } catch {
       return refuse(409, 'hosted_log_invalid');
     }
+    // The caller again, against the head this attempt would extend: a grant removed since the route's check counts (P1).
+    const callerRefused = callerRefusal(siteKey, owner, lines[lines.length - 1], caller);
+    if (callerRefused) return callerRefused;
     if (typeof head !== 'string' || s.original !== original) return refuse(400, 'original_mismatch');
     // A manifest left a step behind by an earlier save is repaired first (C6).
     tryWriteManifest(owner, siteKey, s.original, head);
@@ -478,13 +527,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     return { http: 200, body: { status: 'accepted', checkpoint: s.parsed.versionId, head: s.parsed.versionId } };
   }
 
-  /** Accept, recognise or refuse one submission for the Original hosted at `siteKey`. */
-  function submit(siteKey: string, s: ParsedSubmission): Promise<Response> {
+  /** Accept, recognise or refuse one submission by `caller` for the Original hosted at `siteKey`. */
+  function submit(siteKey: string, s: ParsedSubmission, caller: Caller): Promise<Response> {
     const queued = serialized(siteKey, async () => {
       for (let i = 0; i < 3; i++) {
         let outcome: Outcome;
         try {
-          outcome = await attempt(siteKey, s);
+          outcome = await attempt(siteKey, s, caller);
         } catch (e) {
           const msg = (e as Error).message;
           if (msg === 'STORE_FULL') return json({ error: 'store_full' }, 507);
@@ -498,5 +547,5 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     return queued ?? Promise.resolve(json({ error: 'busy' }, 503, { 'Retry-After': '1' }));
   }
 
-  return { submit };
+  return { mayCall, submit };
 }

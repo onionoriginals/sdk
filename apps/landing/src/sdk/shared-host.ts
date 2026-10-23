@@ -9,7 +9,9 @@
  * and the answers
  *   200 { status: "accepted" | "already-accepted", checkpoint, head }
  *   409 { status: "stale-parent", head }
- * Anything else (400, 401, 404, 413, 422, 429, 5xx) is an error, never an answer.
+ * Anything else (400, 401, 403, 404, 413, 422, 429, 5xx) is an error, never an answer.
+ * 403 means the signed-in account is neither the namespace owner nor one whose
+ * landing DID the head state names as author or editor.
  *
  * The host's accepted log is read back the way any reader reads it: through
  * the alias's public URLs (`OriginalsSDK.retrieveHosted`), and the SDK
