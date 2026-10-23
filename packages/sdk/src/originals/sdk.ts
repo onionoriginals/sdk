@@ -10,6 +10,14 @@
  *   identical candidate returns its checkpoint.
  * - Package, load and import work on evidence packages (section 7). Loading
  *   or importing never confers signing authority (P7.5, P8.4).
+ * - Every verification compares against the highest versionIds this store has
+ *   verified for the Original and its author DIDs, so an older prefix is stale
+ *   rather than current (P7.6, P7.8). Reads, commits and imports retain the
+ *   new highest; loading a package changes nothing.
+ * - An import that diverges from the committed log keeps the other branch.
+ *   From then on the Original reports the fork, with every branch, and is not
+ *   current; edits continue on the local branch. Only anchoring settles a
+ *   fork (P6.6, P9.16; owner decision Q5).
  */
 import { OriginalsError } from "@originals/vh";
 import { multibaseEncode } from "@originals/vh/crypto";
@@ -20,6 +28,7 @@ import {
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
   resourceDigest,
+  verifyAuthorHistory,
   verifyOriginal,
   type AssetState,
   type AuthorDidEvidence,
@@ -28,6 +37,8 @@ import {
   type OriginalsReport,
   type ResourceDescriptor,
   type ResourceVersion,
+  type RetainedVersions,
+  type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { readEvidence, writeEvidence, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
@@ -157,6 +168,16 @@ function authorDidsOf(log: string): string[] {
   return [...dids];
 }
 
+/** The did:vh a log's genesis names, before verification; only used to look up what to compare with. */
+function originalOf(log: string): string | undefined {
+  try {
+    const first = JSON.parse(lines(log)[0] ?? "null") as { state?: { id?: unknown } } | null;
+    return typeof first?.state?.id === "string" ? first.state.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function digestsOf(log: string): string[] {
   const digests = new Set<string>();
   for (const line of lines(log)) {
@@ -205,12 +226,47 @@ export class OriginalsSDK {
     return out;
   }
 
+  /** What this store retains about a log's Original and author DIDs: retained versionIds and known branches (P7.8). */
+  private async comparisons(log: string): Promise<Pick<VerifyOriginalOptions, "retained" | "copies">> {
+    // The genesis id is unverified here: a malformed one simply has nothing to compare with.
+    const quietly = async <T>(read: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await read();
+      } catch (error) {
+        if (error instanceof OriginalsError) return fallback;
+        throw error;
+      }
+    };
+    const did = originalOf(log);
+    const retained: RetainedVersions = { authors: {} };
+    const original = did ? await quietly(() => this.store.getRetained(did), undefined) : undefined;
+    if (original) retained.original = original;
+    for (const author of authorDidsOf(log)) {
+      const version = await quietly(() => this.store.getRetained(author), undefined);
+      if (version) retained.authors![author] = version;
+    }
+    const branches = did ? await quietly(() => this.store.getBranches(did), []) : [];
+    const copies = branches.map((branch, i) => ({ source: `branch-${i + 1}`, log: branch }));
+    // A log that is not this store's committed one is also compared with the committed log, so
+    // a shorter log that diverges from local history is a fork, not merely stale (P6.6, P7.8).
+    const committed = did ? (await quietly(() => this.store.get(did), undefined))?.log : undefined;
+    if (committed !== undefined && committed !== log) copies.unshift({ source: "local", log: committed });
+    return { retained, copies };
+  }
+
+  /** Keep the highest versionIds a report verified. The report never lowers them. */
+  private async retain(report: OriginalsReport): Promise<void> {
+    if (report.original && report.retain.original) await this.store.putRetained(report.original, report.retain.original);
+    for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
+  }
+
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<OriginalsReport> {
     return verifyOriginal({
       log,
       authors: await this.authorEvidence(authorDidsOf(log)),
       bytes: await this.storedBytes(log, extra),
       now: this.clock(),
+      ...(await this.comparisons(log)),
       ...(checkpoint ? { checkpoint } : {}),
       ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
     });
@@ -234,6 +290,7 @@ export class OriginalsSDK {
   async get(did: string, options: { checkpoint?: string } = {}): Promise<OriginalView> {
     const log = await this.stored(did);
     const report = await this.verify(log, options.checkpoint);
+    await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
     }
@@ -347,6 +404,7 @@ export class OriginalsSDK {
     }
     for (const [digest, bytes] of draft.bytes) await this.store.putResource(digest, bytes);
     await this.store.commit(draft.original, { expectedHead: head, log: candidate });
+    await this.retain(report);
     return { status: "committed", original: this.view(draft.original, report) };
   }
 
@@ -389,6 +447,7 @@ export class OriginalsSDK {
       witnessFile: contents.witness,
       checkpoint: contents.manifest.checkpoint,
       now: this.clock(),
+      ...(await this.comparisons(contents.log)),
       ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
     });
     const reasons = [...report.reasons];
@@ -400,13 +459,23 @@ export class OriginalsSDK {
     return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons };
   }
 
-  /** Verify a package and store it, unless that would roll back or replace local history (P7.5). */
+  /**
+   * Verify a package and store it, unless that would roll back or replace
+   * local history (P7.5). A diverging branch is kept beside the local one and
+   * reported as a fork. Author evidence is stored only when it is at least as
+   * new as what this store has verified (P7.8).
+   */
   async import(zip: Uint8Array): Promise<ImportResult> {
     const contents = readEvidence(zip, this.options.archiveLimits);
     const loaded = await this.load(zip);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });
+    }
+    // The verified head must be the package's own last entry: nothing else may be stored (P7.5).
+    const own = versionIds(contents.log);
+    if (r.head !== own[own.length - 1]) {
+      sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
     const did = r.original;
     const incoming = versionIds(contents.log);
@@ -417,14 +486,26 @@ export class OriginalsSDK {
       const sharesPrefix = (a: string[], b: string[]) => a.every((id, i) => b[i] === id);
       if (have.length === incoming.length && sharesPrefix(incoming, have)) return result("already-current");
       if (incoming.length < have.length && sharesPrefix(incoming, have)) return result("kept-newer-local");
-      if (!sharesPrefix(have, incoming)) return result("conflict");
+      if (!sharesPrefix(have, incoming)) {
+        await this.keepEvidence(contents, r);
+        await this.store.putBranch(did, contents.log);
+        return result("conflict");
+      }
     }
+    await this.keepEvidence(contents, r);
+    await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
+    return result("imported");
+  }
+
+  private async keepEvidence(contents: ReturnType<typeof readEvidence>, report: OriginalsReport): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }
-    for (const evidence of contents.authors) await this.store.putAuthorEvidence(evidence);
-    await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
-    return result("imported");
+    for (const evidence of contents.authors) {
+      const history = await verifyAuthorHistory(evidence, { now: this.clock() });
+      const latest = history.versions[history.versions.length - 1]?.versionId;
+      if (latest !== undefined && report.retain.authors[evidence.did] === latest) await this.store.putAuthorEvidence(evidence);
+    }
   }
 }
 

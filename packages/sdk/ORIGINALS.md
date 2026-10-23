@@ -1,7 +1,7 @@
 # Originals SDK: the Originals Protocol contract
 
-**Status: target contract, partly implemented.** Phase 1 (local use) is in
-`@originals/sdk/originals`. This document describes what
+**Status: target contract, partly implemented.** Phases 1 (local use) and 2
+(author DID rotation, freshness and forks) are in `@originals/sdk/originals`. This document describes what
 `@originals/sdk` provides once the phases of
 [plan 011](../../plans/011-originals-vh-replacement.md) land. Each section
 names the phase that delivers it. API names are provisional until that phase's
@@ -90,12 +90,15 @@ The `originals` command verifies a package offline:
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and whether its freshness was established (P7.8) |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · not-established · stale against the retained versionId (P7.8) |
+| `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure |
 | `ordering` | claimed · witnessed · anchored (P7.6) |
-| `forks`, `anchors` | every known branch and anchoring entry. A fork not on Bitcoin is an unresolved conflict with no current branch (plan 011, S1); only an anchor settles one (P9.16) |
+| `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
+| `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
 | `current` | true only when every part above passes under the selected policy |
+| `reasons`, `retain` | why the result is not current; the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
 
 Errors are `OriginalsError` (a `StructuredError`) in one of these categories:
 `invalid-evidence`, `incomplete-evidence`, `unsupported-profile`,
@@ -120,14 +123,32 @@ confers signing authority (P8.4).
 The SDK and resolvers do not encrypt. Plaintext metadata and base64 are not
 confidentiality (P8.2).
 
-## Author DID rotation and forks — phase 2
+## Author DID rotation, freshness and forks — phase 2 (implemented)
 
 Rotation is an author DID update. Entries naming the new author DID version
-can use the new key without any asset log entry. An unwitnessed entry signed
-by a key the latest author DID no longer lists is reported as historically
-authorized with unproven ordering, never as current (P7.9). Divergent valid
-branches are reported as an unresolved fork, with no branch current. Only
-anchoring on Bitcoin settles a fork (plan 011, S1).
+can use the new key without any asset log entry (P5.10). An unwitnessed entry
+signed by a key the latest author DID no longer lists is reported as
+historically authorized with unproven ordering, never as current, whatever
+time it claims (P7.9).
+
+A valid log is a historical result unless the freshness policy holds (P7.6,
+P7.8). `freshness: "asserted"` is for a caller that vouches its evidence is
+the latest, as an author's own SDK can. Whatever the policy, the store retains
+the highest versionId it has verified for each Original and each author DID.
+Evidence that falls short of a retained versionId is `stale` and not current.
+Evidence that diverges from it is a fork (for the Original) or incomplete
+identity evidence (for an author DID). Reads, commits and imports advance the
+retained versionIds; `load` only compares against them.
+
+Divergent valid branches are an unresolved fork with no branch current. An
+import that diverges from the local log returns `conflict` and the store keeps
+the other branch, so every later read reports the fork with both branches
+(P6.6). Edits continue on the local branch and stay non-current. Only
+anchoring on Bitcoin settles a fork (owner decision Q5, P9.16). Import never
+replaces stored author DID evidence with an older or diverging history.
+
+Stores implement `getRetained`/`putRetained` and `putBranch`/`getBranches` in
+addition to the phase 1 methods; `MemoryStore` and `FileStore` do.
 
 ## Hosted publication and witnesses — phase 3
 
