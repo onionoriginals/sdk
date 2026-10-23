@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { demo } from '../content';
 import type { AnchoringStatus } from '../sdk/anchoring';
 import { AnchoringCancelledError, AnchoringSubmitError, SigningSessionExpiredError } from '../sdk/anchoring';
-import { anchoringFailureMessage, anchoringView, offChainPreview } from './anchoring-view';
+import { anchoringFailureMessage, anchoringInMotion, anchoringView, offChainPreview } from './anchoring-view';
 
 const status = (over: Partial<AnchoringStatus>): AnchoringStatus => ({
   did: 'did:vh:x', sat: 'did:btco:reg:5000000000', publication: 'not-anchored', action: 'prepare',
@@ -44,6 +44,13 @@ describe('the anchoring panel (P9.18)', () => {
     expect(anchoringView({ status: { ...anchored, action: 'wait-for-confirmation' }, unpublished: ['3-c'] })!.canInscribeNext).toBe(false);
     expect(anchoringView({ status: { ...anchored, heldByThisAccount: false }, unpublished: ['3-c'] })!).toMatchObject({ canInscribeNext: false, holderElsewhere: true });
     expect(anchoringView({ status: status({ publication: 'pending-bitcoin-acceptance', action: 'wait-for-confirmation' }), unpublished: ['2-b', '3-c'] })!.canInscribeNext).toBe(false);
+  });
+
+  test('a settled panel is not polled; one still in motion is', () => {
+    expect(anchoringInMotion({ status: status({ publication: 'anchored', action: 'done' }), unpublished: ['3-c'] })).toBe(false);
+    expect(anchoringInMotion({ status: status({ publication: 'anchored', action: 'wait-for-confirmation' }), unpublished: [] })).toBe(true);
+    expect(anchoringInMotion({ status: status({ publication: 'submitted-unobserved', action: 'resume' }), unpublished: [] })).toBe(true);
+    expect(anchoringInMotion({ status: null, unpublished: [] })).toBe(false);
   });
 
   test('what Bitcoin will not hold is listed before signing: the files and the author\'s DID history', () => {

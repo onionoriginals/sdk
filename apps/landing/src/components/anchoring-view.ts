@@ -54,6 +54,17 @@ export function anchoringView(anchoring: DemoAssetState['anchoring']): Anchoring
   };
 }
 
+/**
+ * Whether the label can still change by itself: anything short of anchored
+ * with nothing in flight. The status read costs the account's provider quota,
+ * so a settled panel is not polled.
+ */
+export function anchoringInMotion(anchoring: DemoAssetState['anchoring']): boolean {
+  const status = anchoring?.status;
+  if (!status) return false;
+  return status.publication !== 'anchored' || IN_FLIGHT.has(status.action);
+}
+
 /** The off-chain notice before signing (P9.18): what Bitcoin will not hold. */
 export function offChainPreview(asset: Pick<DemoAssetState, 'resource' | 'metadata' | 'author'>): string[] {
   return [

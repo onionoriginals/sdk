@@ -103,6 +103,18 @@ describe('POST /api/btc/originals/submit', () => {
     });
   });
 
+  test('the holder is read from the sat, not from the address\'s unspent outputs: a pending spend does not read as moved (P9.11)', async () => {
+    const h = harness();
+    const a = await authorWithOriginal();
+    await submit(h, a, await prepare(a, h.chain));
+    h.chain.mine();
+    await a.edit('Harbor, revised');
+    const next = await prepare(a, h.chain, [h.chain.holderUtxo(), h.chain.fund(50_000)]);
+    await submit(h, a, next);
+    // The reinscription's commit is in the mempool: the holder output is spent there, still the holder on chain.
+    expect((await status(h, a.did)).body).toMatchObject({ heldByThisAccount: true, action: 'wait-for-confirmation' });
+  });
+
   test('reinscribes the Original\'s own sat: an inscribed input 0 whose inscriptions are all on that sat (plan 011, PR 10b)', async () => {
     const h = harness();
     const a = await authorWithOriginal();

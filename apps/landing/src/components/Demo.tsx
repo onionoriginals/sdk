@@ -15,6 +15,7 @@ import { getArtSeed, setArtSeed } from '../sdk/artwork-sync';
 import { HistoryChain } from './HistoryChain';
 import { featureEnabled } from '../sdk/features';
 import { AnchoringBeforeSign, AnchoringPanel } from './AnchoringPanel';
+import { anchoringInMotion } from './anchoring-view';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import {
@@ -561,14 +562,17 @@ export function Demo() {
       });
     });
 
-  // The publication label follows Bitcoin, so it is re-read while the panel is open (P9.18).
+  // The publication label follows Bitcoin, so it is re-read while it can still
+  // change (P9.18). Each read costs the account's provider quota: once a minute,
+  // and not at all once anchored with nothing in flight.
+  const anchoringMoving = anchoringInMotion(asset?.anchoring);
   useEffect(() => {
-    if (!anchoringOn || phase !== 'inscribed') return;
+    if (!anchoringOn || phase !== 'inscribed' || !anchoringMoving) return;
     const t = setInterval(() => {
       void getEngine().then((engine) => engine.anchoringStatus()).then(setAsset).catch(() => undefined);
-    }, 15_000);
+    }, 60_000);
     return () => clearInterval(t);
-  }, [anchoringOn, phase, getEngine]);
+  }, [anchoringOn, phase, anchoringMoving, getEngine]);
 
   const reset = () => {
     setPhase('idle');

@@ -2729,14 +2729,17 @@ export function createBitcoinRoutes(deps: {
     let heldByThisAccount: boolean | null = null;
     const network = deps.network ?? 'testnet';
     const bound = (() => { try { return deps.inscriptions?.depositBinding(sub, network) ?? null; } catch { return null; } })();
-    if (status.ownership && indexer && bound) {
+    // Who holds the sat is the sat read's (P9.11): the address it names. The
+    // address's unspent list only supplies the output's value, and leaves out
+    // an output a pending reinscription is already spending.
+    if (status.ownership?.address && bound) heldByThisAccount = status.ownership.address === bound;
+    if (status.ownership && heldByThisAccount !== false && indexer && bound) {
       try {
         const utxos = await fetchAddressUtxos({ ...indexer, address: bound, network, fetchImpl: deps.fetchImpl });
         const found = utxos.confirmed.find((u) => `${u.txid}:${u.vout}` === status.ownership!.output);
-        heldByThisAccount = !!found;
         if (found) satUtxo = { txid: found.txid, vout: found.vout, value: found.value };
       } catch {
-        // Unknown, not "elsewhere": the UI says the holder could not be read.
+        // No value read: the next inscription waits for one; the holder is still reported.
       }
     }
     return json({ ...status, satUtxo, heldByThisAccount });
