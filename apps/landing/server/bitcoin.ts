@@ -1609,6 +1609,197 @@ export function createBitcoinRoutes(deps: {
     revealRebroadcastAfterMs: REVEAL_REBROADCAST_AFTER_MS,
   });
 
+  /** A refusal on the money path: logged with its reason, then served. */
+  type Refuse = (reason: string, body: Record<string, unknown>, status: number) => Response;
+  type DeclaredUtxo = { txid?: string; vout?: number; value?: number };
+
+  /**
+   * The commit spends EXACTLY the declared funding set, IN ORDER (the sat an
+   * inscription lands on is the first sat of input 0, so a reordered input
+   * moves it), with at most two outputs (commit output + optional change).
+   */
+  function parseCommit(signedCommitHex: string, outpoints: string[], refuse: Refuse): btc.Transaction | Response {
+    const commit = parseRawTx(signedCommitHex);
+    if (!commit) return refuse('bad_commit_tx', { error: 'bad_commit_tx' }, 400);
+    if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
+      return refuse('commit_invariant_violation', { error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
+    }
+    const inputsMatch = outpoints.every((expected, i) => {
+      const input = commit.getInput(i);
+      const txid = input.txid ? hex.encode(input.txid).toLowerCase() : '';
+      return `${txid}:${input.index}` === expected;
+    });
+    if (!inputsMatch) {
+      return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
+    }
+    return commit;
+  }
+
+  /** The reveal spends the commit's vout 0, and nothing else. */
+  function parseReveal(revealTxHex: string, commitTxId: string, refuse: Refuse): btc.Transaction | Response {
+    const reveal = parseRawTx(revealTxHex);
+    if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
+    // Shape before indexing: getInput(0) throws on an input-less tx. No raw
+    // hex can currently reach here with zero inputs (fromRaw rejects it — the
+    // 0x00 input count is read as the segwit marker), so this is defensive
+    // only, kept symmetric with the commit path above.
+    if (reveal.inputsLength !== 1) {
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+    }
+    const revealInput = reveal.getInput(0);
+    const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
+    if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+    }
+    return reveal;
+  }
+
+  /**
+   * Where the money goes (#493): step 5b never looked at output 1, so a signer that
+   * redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
+   * Returns the bound address's script.
+   */
+  function checkDestinations(
+    sub: string,
+    store: InscriptionsStore,
+    commit: btc.Transaction,
+    reveal: btc.Transaction,
+    changeAddress: string,
+    refuse: Refuse
+  ): string | Response {
+    const network = deps.network ?? 'testnet';
+    if (!isValidBitcoinAddress(changeAddress, network)) {
+      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
+    }
+    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
+    let bound: string | null;
+    try {
+      bound = store.depositBinding(sub, network);
+    } catch {
+      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
+    }
+    // Fail CLOSED on an unbound account. `bound && …` skipped the check
+    // entirely when nothing was bound, and nothing forces the deposit route
+    // (the only thing that binds, `bindDepositAddress` above) to run first — so
+    // a caller could go straight to this route, never bind, and name any
+    // change address it liked. That is precisely the browser-shaped adversary
+    // this route exists to stop, so an absent binding is a refusal, not a pass.
+    if (bound !== changeAddress) {
+      return refuse(
+        'change_address_not_bound',
+        {
+          error: 'address_not_bound',
+          message: bound
+            ? 'changeAddress is not the deposit address bound to this account.'
+            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
+        },
+        403
+      );
+    }
+    let changeScript: string;
+    try {
+      changeScript = p2wpkhScriptHex(changeAddress, network);
+    } catch (e) {
+      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
+    }
+    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
+    }
+    // Exactly one output, not merely "at least one" (hostile-audit M07): an
+    // extra reveal output is an undeclared, unchecked place for value to go —
+    // the amount check below only looks at output 0.
+    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal must have exactly one output, paying changeAddress.' }, 400);
+    }
+    return changeScript;
+  }
+
+  /**
+   * Reconstruct funding independently of client-declared values and bound the
+   * fees both transactions pay (#493/M07). Null when the pair is economic.
+   */
+  async function checkEconomics(
+    commit: btc.Transaction,
+    reveal: btc.Transaction,
+    declared: DeclaredUtxo[],
+    changeScript: string,
+    refuse: Refuse
+  ): Promise<Response | null> {
+    if (!indexer) {
+      return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
+    }
+    const totalInputSats = await resolveFundingValues(
+      declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
+    );
+    if (totalInputSats === null) {
+      return refuse('funding_value_unavailable', {
+        error: 'funding_value_unavailable',
+        message: 'Could not independently verify funding values at the bound deposit address.',
+      }, 503);
+    }
+
+    let reasonableFeeRate: number;
+    try {
+      reasonableFeeRate = await currentFeeRate(1);
+    } catch (e) {
+      return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+    }
+    // Generous but bounded: absorbs a real fee-rate move between quote and
+    // broadcast without letting a signer relabel skimmed change as "fee".
+    const maxFeeRateSatVb = Math.min(MAX_FEE_RATE_SAT_VB, Math.max(reasonableFeeRate, 1) * MAX_FEE_RATE_TOLERANCE_MULTIPLIER);
+
+    const commitOutput0Amount = commit.getOutput(0).amount ?? 0n;
+    const commitChangeAmount = commit.outputsLength === 2 ? (commit.getOutput(1).amount ?? 0n) : 0n;
+    if (commitOutput0Amount + commitChangeAmount > totalInputSats) {
+      return refuse(
+        'commit_outputs_exceed_inputs',
+        { error: 'commit_invariant_violation', message: 'Commit outputs exceed the independently verified funding value.' },
+        400
+      );
+    }
+    const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
+    const commitVsize = safeCommitVsize(commit);
+    const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
+    if (commitFeeSats > maxCommitFeeSats) {
+      return refuse(
+        'commit_fee_excessive',
+        { error: 'commit_invariant_violation', message: 'Commit pays an unreasonably high fee for its size; change may have been redirected to fee.' },
+        400
+      );
+    }
+    if (commit.outputsLength === 1) {
+      // No change output at all: legitimate only when the true surplus, after
+      // a reasonable fee, would not clear dust. Otherwise a signer could
+      // simply DROP the change output and let the whole surplus become fee.
+      const reasonableFeeSats = BigInt(Math.ceil(reasonableFeeRate * commitVsize));
+      const undisclosedSurplus = commitFeeSats > reasonableFeeSats ? commitFeeSats - reasonableFeeSats : 0n;
+      if (undisclosedSurplus >= BigInt(POSTAGE_SATS)) {
+        return refuse(
+          'commit_change_omitted',
+          { error: 'commit_invariant_violation', message: 'Commit omits a change output despite a spendable surplus above dust.' },
+          400
+        );
+      }
+    } else if (commitChangeAmount > 0n && commitChangeAmount < BigInt(POSTAGE_SATS)) {
+      return refuse('commit_change_dust', { error: 'commit_invariant_violation', message: 'Commit change output is below the dust limit.' }, 400);
+    }
+
+    // The reveal's input value is CRYPTOGRAPHICALLY bound to commit output 0's
+    // amount — validateInscriptionReveal above verified the Schnorr signature
+    // over exactly that amount — so only its allocation between the creator's
+    // output and fee is still unverified.
+    const revealOutput0Amount = reveal.getOutput(0).amount ?? 0n;
+    if (revealOutput0Amount > commitOutput0Amount) {
+      return refuse('reveal_outputs_exceed_input', { error: 'reveal_invariant_violation', message: 'Reveal output exceeds its input value.' }, 400);
+    }
+    const revealFeeSats = commitOutput0Amount - revealOutput0Amount;
+    const maxRevealFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * reveal.vsize));
+    if (revealFeeSats > maxRevealFeeSats) {
+      return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
+    }
+    return null;
+  }
+
   /**
    * POST /api/btc/inscribe — the stranded-funds fix. Accepts the SIGNED commit
    * and reveal, re-checks the SDK's step-5b invariants server-side (a client
@@ -1630,7 +1821,6 @@ export function createBitcoinRoutes(deps: {
     const bodyText = await readBodyCapped(req, MAX_INSCRIBE_BODY_BYTES);
     if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
 
-    type DeclaredUtxo = { txid?: string; vout?: number; value?: number };
     let body: {
       signedCommitHex?: string;
       revealTxHex?: string;
@@ -1677,19 +1867,8 @@ export function createBitcoinRoutes(deps: {
       return json(body, status);
     };
 
-    const commit = parseRawTx(signedCommitHex);
-    if (!commit) return refuse('bad_commit_tx', { error: 'bad_commit_tx' }, 400);
-    if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
-      return refuse('commit_invariant_violation', { error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
-    }
-    const inputsMatch = outpoints.every((expected, i) => {
-      const input = commit.getInput(i);
-      const txid = input.txid ? hex.encode(input.txid).toLowerCase() : '';
-      return `${txid}:${input.index}` === expected;
-    });
-    if (!inputsMatch) {
-      return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
-    }
+    const commit = parseCommit(signedCommitHex, outpoints, refuse);
+    if (commit instanceof Response) return commit;
     const commitTxId = commit.id;
     // Cached approval applies only to retained signed bytes, including witnesses.
     let existingByCommitId: InscriptionRecord | null;
@@ -1701,20 +1880,8 @@ export function createBitcoinRoutes(deps: {
       throw e;
     }
 
-    const reveal = parseRawTx(revealTxHex);
-    if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
-    // Shape before indexing: getInput(0) throws on an input-less tx. No raw
-    // hex can currently reach here with zero inputs (fromRaw rejects it — the
-    // 0x00 input count is read as the segwit marker), so this is defensive
-    // only, kept symmetric with the commit path above.
-    if (reveal.inputsLength !== 1) {
-      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
-    }
-    const revealInput = reveal.getInput(0);
-    const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
-    if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
-      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
-    }
+    const reveal = parseReveal(revealTxHex, commitTxId, refuse);
+    if (reveal instanceof Response) return reveal;
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
@@ -1783,52 +1950,8 @@ export function createBitcoinRoutes(deps: {
     const pairMismatch = checkRecordedPair(existingByCommitId);
     if (pairMismatch) return pairMismatch;
 
-    // Where the money goes (#493): step 5b never looked at output 1, so a signer that
-    // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
-    const network = deps.network ?? 'testnet';
-    if (!isValidBitcoinAddress(changeAddress, network)) {
-      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
-    }
-    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
-    let bound: string | null;
-    try {
-      bound = store.depositBinding(sub, network);
-    } catch {
-      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
-    }
-    // Fail CLOSED on an unbound account. `bound && …` skipped the check
-    // entirely when nothing was bound, and nothing forces the deposit route
-    // (the only thing that binds, `bindDepositAddress` above) to run first — so
-    // a caller could go straight to this route, never bind, and name any
-    // change address it liked. That is precisely the browser-shaped adversary
-    // this route exists to stop, so an absent binding is a refusal, not a pass.
-    if (bound !== changeAddress) {
-      return refuse(
-        'change_address_not_bound',
-        {
-          error: 'address_not_bound',
-          message: bound
-            ? 'changeAddress is not the deposit address bound to this account.'
-            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
-        },
-        403
-      );
-    }
-    let changeScript: string;
-    try {
-      changeScript = p2wpkhScriptHex(changeAddress, network);
-    } catch (e) {
-      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
-    }
-    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
-      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
-    }
-    // Exactly one output, not merely "at least one" (hostile-audit M07): an
-    // extra reveal output is an undeclared, unchecked place for value to go —
-    // the amount check below only looks at output 0.
-    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
-      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal must have exactly one output, paying changeAddress.' }, 400);
-    }
+    const changeScript = checkDestinations(sub, store, commit, reveal, changeAddress, refuse);
+    if (changeScript instanceof Response) return changeScript;
 
     // Transaction ids exclude witness bytes. Validate the committed script and
     // reveal signature before persisting or exposing the parent to the network.
@@ -1869,78 +1992,8 @@ export function createBitcoinRoutes(deps: {
       existingByCommitId.signedCommitHex?.toLowerCase() === signedPair.commit &&
       existingByCommitId.revealTxHex?.toLowerCase() === signedPair.reveal;
     if (!alreadyVerified) {
-      if (!indexer) {
-        return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
-      }
-      const totalInputSats = await resolveFundingValues(
-        declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
-      );
-      if (totalInputSats === null) {
-        return refuse('funding_value_unavailable', {
-          error: 'funding_value_unavailable',
-          message: 'Could not independently verify funding values at the bound deposit address.',
-        }, 503);
-      }
-
-      let reasonableFeeRate: number;
-      try {
-        reasonableFeeRate = await currentFeeRate(1);
-      } catch (e) {
-        return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
-      }
-      // Generous but bounded: absorbs a real fee-rate move between quote and
-      // broadcast without letting a signer relabel skimmed change as "fee".
-      const maxFeeRateSatVb = Math.min(MAX_FEE_RATE_SAT_VB, Math.max(reasonableFeeRate, 1) * MAX_FEE_RATE_TOLERANCE_MULTIPLIER);
-
-      const commitOutput0Amount = commit.getOutput(0).amount ?? 0n;
-      const commitChangeAmount = commit.outputsLength === 2 ? (commit.getOutput(1).amount ?? 0n) : 0n;
-      if (commitOutput0Amount + commitChangeAmount > totalInputSats) {
-        return refuse(
-          'commit_outputs_exceed_inputs',
-          { error: 'commit_invariant_violation', message: 'Commit outputs exceed the independently verified funding value.' },
-          400
-        );
-      }
-      const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
-      const commitVsize = safeCommitVsize(commit);
-      const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
-      if (commitFeeSats > maxCommitFeeSats) {
-        return refuse(
-          'commit_fee_excessive',
-          { error: 'commit_invariant_violation', message: 'Commit pays an unreasonably high fee for its size; change may have been redirected to fee.' },
-          400
-        );
-      }
-      if (commit.outputsLength === 1) {
-        // No change output at all: legitimate only when the true surplus, after
-        // a reasonable fee, would not clear dust. Otherwise a signer could
-        // simply DROP the change output and let the whole surplus become fee.
-        const reasonableFeeSats = BigInt(Math.ceil(reasonableFeeRate * commitVsize));
-        const undisclosedSurplus = commitFeeSats > reasonableFeeSats ? commitFeeSats - reasonableFeeSats : 0n;
-        if (undisclosedSurplus >= BigInt(POSTAGE_SATS)) {
-          return refuse(
-            'commit_change_omitted',
-            { error: 'commit_invariant_violation', message: 'Commit omits a change output despite a spendable surplus above dust.' },
-            400
-          );
-        }
-      } else if (commitChangeAmount > 0n && commitChangeAmount < BigInt(POSTAGE_SATS)) {
-        return refuse('commit_change_dust', { error: 'commit_invariant_violation', message: 'Commit change output is below the dust limit.' }, 400);
-      }
-
-      // The reveal's input value is CRYPTOGRAPHICALLY bound to commit output 0's
-      // amount — validateInscriptionReveal above verified the Schnorr signature
-      // over exactly that amount — so only its allocation between the creator's
-      // output and fee is still unverified.
-      const revealOutput0Amount = reveal.getOutput(0).amount ?? 0n;
-      if (revealOutput0Amount > commitOutput0Amount) {
-        return refuse('reveal_outputs_exceed_input', { error: 'reveal_invariant_violation', message: 'Reveal output exceeds its input value.' }, 400);
-      }
-      const revealFeeSats = commitOutput0Amount - revealOutput0Amount;
-      const maxRevealFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * reveal.vsize));
-      if (revealFeeSats > maxRevealFeeSats) {
-        return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
-      }
+      const uneconomic = await checkEconomics(commit, reveal, declared, changeScript, refuse);
+      if (uneconomic) return uneconomic;
     }
 
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
