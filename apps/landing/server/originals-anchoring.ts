@@ -143,7 +143,9 @@ function refusal(error: unknown, fallback: string): AnchoringRefusal {
       ...(Object.keys(rest).length > 0 ? { details: rest } : {}),
     };
   }
-  return { ok: false, httpStatus: 502, error: fallback, message: error instanceof Error ? error.message : String(error) };
+  // Not one of the writer's refusals: its message can name server paths, so it stays in the server log.
+  console.warn(`[landing] originals anchoring: ${fallback}:`, error);
+  return { ok: false, httpStatus: 502, error: fallback, message: 'The writer could not complete this request; nothing was sent.' };
 }
 
 /** The shape a browser can send. Anything else is refused before any read. */
@@ -318,7 +320,8 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
         ? { status: ownership.status, output: ownership.output, ...(ownership.address ? { address: ownership.address } : {}), confirmations: ownership.confirmations, indexes: ownership.indexes }
         : null,
       indexes: { used: indexesUsed, compared: indexesUsed.length > 1 },
-      recoveryIssues: p.recoveryIssues,
+      // Codes only: a store's message can name server paths.
+      recoveryIssues: p.recoveryIssues.map(({ recoveryId, code }) => ({ recoveryId, code, message: 'This recovery record could not be used; an operator needs to look at it.' })),
     };
   }
 

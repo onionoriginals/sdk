@@ -78,6 +78,8 @@ export function fakeChain() {
   const sent: string[] = [];
   /** Throw on broadcasting the transaction with this id once (a crash or a refusal between commit and reveal). */
   const refuseOnce = new Set<string>();
+  /** Where in the holder output the sat sits; ord reports another first sat when it is not 0. */
+  const place = { offset: 0 };
 
   function fund(value: number): { txid: string; vout: number; value: number; scriptPubKey: string } {
     seq++;
@@ -117,7 +119,7 @@ export function fakeChain() {
   const provider = {
     getSatSnapshot: () => Promise.resolve(snapshot()),
     getFirstSatOfOutput: ({ txid, vout }: { txid: string; vout: number }) =>
-      `${txid}:${vout}` === holder ? Promise.resolve(SAT) : Promise.reject(new Error(`output ${txid}:${vout} is spent or unknown`)),
+      `${txid}:${vout}` === holder ? Promise.resolve(place.offset === 0 ? SAT : String(Number(SAT) - place.offset)) : Promise.reject(new Error(`output ${txid}:${vout} is spent or unknown`)),
     getTransactionStatus: (txid: string) => {
       const h = confirmedAt.get(txid);
       return Promise.resolve(h !== undefined ? { confirmed: true, confirmations: height - h + 1, blockHeight: h, blockHash: hashAt(h) } : { confirmed: false, confirmations: 0, inMempool: mempool.includes(txid) });
@@ -196,7 +198,19 @@ export function fakeChain() {
     return { txid, vout: Number(vout), value: Number(out.amount), scriptPubKey: WALLET_SCRIPT };
   }
 
-  return { provider, ordinals, indexerFetch, fund, mine, satUtxo, holderUtxo, sent, refuseOnce, foreign, publications, mempool, height: () => height };
+  /** Spend an output in a confirmed block, outside any pair (another wallet's spend of a shared input). */
+  function spendElsewhere(utxo: { txid: string; vout: number; value: number }) {
+    const tx = new btc.Transaction({ allowUnknownOutputs: true });
+    tx.addInput({ txid: utxo.txid, index: utxo.vout, sequence: 0xfffffffd, witnessUtxo: { script: wallet.script, amount: BigInt(utxo.value) } });
+    tx.addOutput({ script: wallet.script, amount: BigInt(utxo.value - 500) });
+    tx.sign(WALLET_PRIV);
+    tx.finalize();
+    txs.set(tx.id, hex.encode(tx.extract()));
+    mempool.push(tx.id);
+    mine();
+  }
+
+  return { provider, ordinals, indexerFetch, fund, mine, satUtxo, holderUtxo, sent, refuseOnce, foreign, publications, mempool, place, spendElsewhere, height: () => height };
 }
 
 /** An author's browser: a local did:vh author and an Original anchored to SAT (the anchoring entry, P9.10). */

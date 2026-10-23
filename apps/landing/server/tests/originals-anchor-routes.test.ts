@@ -137,6 +137,32 @@ describe('POST /api/btc/originals/submit', () => {
     expect((await status(h, a.did)).body).toMatchObject({ publication: 'anchored', heads: { accepted: revised, committed: revised } });
   });
 
+  test('the Original\'s sat must be the first sat of input 0, not merely in it: else it would move to change or fee', async () => {
+    const h = harness();
+    const a = await authorWithOriginal();
+    await submit(h, a, await prepare(a, h.chain));
+    h.chain.mine();
+    await a.edit('Harbor, revised');
+    const next = await prepare(a, h.chain, [h.chain.holderUtxo(), h.chain.fund(50_000)]);
+    // The sat now sits deeper in the same output (a client that skipped its own prepare check).
+    h.chain.place.offset = 600;
+    const sentBefore = h.chain.sent.length;
+    expect(await submit(h, a, next)).toMatchObject({ status: 409, body: { error: 'sat_not_first' } });
+    expect(h.chain.sent.length).toBe(sentBefore);
+  });
+
+  test('a pair whose inputs are already spent is refused before it is recorded, so it never blocks the Original (P9.6)', async () => {
+    const h = harness();
+    const a = await authorWithOriginal();
+    const fee = h.chain.fund(50_000);
+    const pair = await prepare(a, h.chain, [h.chain.satUtxo, fee]);
+    h.chain.spendElsewhere(fee);
+    expect(await submit(h, a, pair)).toMatchObject({ status: 409, body: { error: 'funding_input_spent' } });
+    expect(h.chain.sent.length).toBe(0);
+    // Nothing recorded: a fresh pair for the same entry goes through.
+    expect(await submit(h, a, await prepare(a, h.chain, [h.chain.satUtxo, h.chain.fund(50_000)]))).toMatchObject({ status: 200, body: { outcome: 'sent' } });
+  });
+
   test('an input 0 carrying an inscription on another sat is refused, nothing sent', async () => {
     const h = harness();
     const a = await authorWithOriginal();

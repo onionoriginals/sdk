@@ -2661,6 +2661,20 @@ export function createBitcoinRoutes(deps: {
     const uneconomic = await checkEconomics(commit, reveal, declared, changeScript, refuse);
     if (uneconomic) return uneconomic;
 
+    // Every input still unspent at the bound address. A pair spending an output
+    // already spent elsewhere can never land, and once recorded it would block
+    // every later pair for its entry (PAIR_IN_FLIGHT, P9.6): refuse it unrecorded.
+    if (!indexer) return refuse('funding_check_unavailable', { error: 'funding_check_unavailable', message: 'Funding outputs cannot be checked on this server.' }, 503);
+    let unspent: Set<string>;
+    try {
+      const utxos = await fetchAddressUtxos({ ...indexer, address: prepared.changeAddress, network: deps.network ?? 'testnet', fetchImpl: deps.fetchImpl });
+      unspent = new Set(utxos.confirmed.map((u) => `${u.txid.toLowerCase()}:${u.vout}`));
+    } catch {
+      return refuse('funding_check_unavailable', { error: 'funding_check_unavailable', message: 'Could not confirm the funding outputs are unspent.' }, 503);
+    }
+    if (outpoints.some((o) => !unspent.has(o))) {
+      return refuse('funding_input_spent', { error: 'funding_input_spent', message: 'An input of this pair is spent or unconfirmed; prepare it again from the current deposit.' }, 409);
+    }
     // Fee inputs: strictly free of inscriptions, as on /api/btc/inscribe (R26).
     const fees = await classifySpendableUtxos(declared.slice(1), deps.ordinals, declared.length);
     if (!fees.ok) {
@@ -2694,6 +2708,21 @@ export function createBitcoinRoutes(deps: {
           message: 'The sat-holding input carries an inscription on another sat; it cannot be spent here.',
         }, 400);
       }
+    }
+
+    // The Original's sat must be input 0's FIRST sat (P9.12): anywhere else in
+    // the output it would move to the commit's change or fee, and the entry
+    // would be inscribed on another sat. The writer checks which output holds
+    // the sat, not where in it.
+    let first: string;
+    try {
+      if (typeof provider.getFirstSatOfOutput !== 'function') throw new Error('no sat reads');
+      first = await provider.getFirstSatOfOutput({ txid: declared[0].txid, vout: declared[0].vout });
+    } catch {
+      return refuse('sat_check_unavailable', { error: 'sat_check_unavailable', message: 'Could not read the first sat of the sat-holding input.' }, 503);
+    }
+    if (first !== prepared.satoshi) {
+      return refuse('sat_not_first', { error: 'sat_not_first', message: 'The Original\'s sat is not the first sat of input 0; spending it here would move it to change or fees.' }, 409);
     }
 
     const result = await deps.anchoring.submit(sub, { did, evidence, pair: pair! });
