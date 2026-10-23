@@ -665,6 +665,10 @@ export const demo = {
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
     unavailable:
       'We couldn’t publish your signed history. Your Original is still in this tab. Try again in a moment.',
+    notVerified:
+      'Your files are uploaded, but a reader can’t verify the published copy yet, so it isn’t published. Publish again to finish; it keeps the same web address.',
+    finishFirst:
+      'This Original’s publishing was interrupted. Publish it again to finish, then keep editing.',
     quotaFull:
       'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still available.',
     // R7 — rendered in the PUBLISH step, before the button that publishes, not

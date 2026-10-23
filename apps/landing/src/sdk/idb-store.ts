@@ -13,10 +13,13 @@
  * - refused candidates are kept beside the log, never in it (P6.8), and the
  *   pending candidate until the host answers (P6.4).
  *
+ * It also keeps each Original's publication record (G4), so a publication
+ * interrupted by a restart resumes under the same alias.
+ *
  * Nothing here is trusted on read: the SDK verifies logs, evidence and byte
  * digests every time (P8.1). No private key is ever written here.
  */
-import type { AuthorDidEvidence } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence } from "@originals/vh/originals";
 import {
   headOf,
   higherVersion,
@@ -29,8 +32,9 @@ import {
   type StoredRefused,
 } from "@originals/sdk/originals";
 
-const VERSION = 1;
-const TABLES = ["originals", "resources", "authors", "retained", "branches", "refused", "pending"] as const;
+// 2 adds `publications` (#976 B, G4). Upgrades only add tables.
+const VERSION = 2;
+const TABLES = ["originals", "resources", "authors", "retained", "branches", "refused", "pending", "publications"] as const;
 type Table = (typeof TABLES)[number];
 
 /** The database for one account. */
@@ -38,9 +42,44 @@ export function storeName(subOrgId: string): string {
   return `originals-store:${subOrgId}`;
 }
 
+/**
+ * Where an Original's web publication stands (#976 B, G4, G5). `started`: the
+ * alias is built, so a retry reuses it; `uploaded`: the publish entry is
+ * committed and every file was put; `complete`: a stranger with no cookie
+ * verified the exact snapshot, every byte included. The alias log is public,
+ * so nothing secret is here.
+ */
+export interface PublicationRecord {
+  alias: AliasEvidence;
+  state: "started" | "uploaded" | "complete";
+}
+
+/** A store that also keeps publication records. */
+export interface PublicationRecords {
+  getPublication(did: string): Promise<PublicationRecord | undefined>;
+  putPublication(did: string, record: PublicationRecord): Promise<void>;
+}
+
+/** Publication records in memory, for a store that has none of its own. */
+export class MemoryPublicationRecords implements PublicationRecords {
+  private readonly records = new Map<string, PublicationRecord>();
+  getPublication(did: string): Promise<PublicationRecord | undefined> {
+    const record = this.records.get(did);
+    return Promise.resolve(record ? structuredClone(record) : undefined);
+  }
+  putPublication(did: string, record: PublicationRecord): Promise<void> {
+    this.records.set(did, structuredClone(record));
+    return Promise.resolve();
+  }
+}
+
+export function hasPublicationRecords(store: object): store is PublicationRecords {
+  return typeof (store as Partial<PublicationRecords>).getPublication === "function" && typeof (store as Partial<PublicationRecords>).putPublication === "function";
+}
+
 type Body<T> = (table: (name: Table) => IDBObjectStore, done: (value: T) => void, fail: (error: unknown) => void) => void;
 
-export class IndexedDbStore implements OriginalsStore {
+export class IndexedDbStore implements OriginalsStore, PublicationRecords {
   private constructor(private readonly db: IDBDatabase) {}
 
   /** Open (or create) the account's database. */
@@ -181,6 +220,14 @@ export class IndexedDbStore implements OriginalsStore {
 
   getPending(did: string): Promise<StoredPending | undefined> {
     return this.read<StoredPending>("pending", did);
+  }
+
+  getPublication(did: string): Promise<PublicationRecord | undefined> {
+    return this.read<PublicationRecord>("publications", did);
+  }
+
+  putPublication(did: string, record: PublicationRecord): Promise<void> {
+    return this.update<PublicationRecord>("publications", did, () => structuredClone(record));
   }
 
   list(): Promise<string[]> {

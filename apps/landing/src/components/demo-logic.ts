@@ -565,6 +565,9 @@ export function demoFailureMessage(err: unknown): string {
   const anchoring = anchoringFailureMessage(err);
   if (anchoring) return anchoring;
   const raw = err instanceof Error ? err.message : '';
+  // By name: this module must not import the lazily loaded engine (#976 B4).
+  if (err instanceof Error && err.name === 'PublicationNotVerifiedError') return demo.hosting.notVerified;
+  if (/^Finish publishing this Original first/.test(raw)) return demo.hosting.finishFirst;
   if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
     // 507 from the durable per-user store is a QUOTA, not a blip — "try again
     // in a moment" would be a lie. The anonymous store no longer 507s at all.

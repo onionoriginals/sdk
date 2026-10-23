@@ -77,7 +77,7 @@ describe('DemoEngine on the Originals Protocol', () => {
     const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
     const engine = new DemoEngine({
       features: { hostedPublication: true },
-      publishTarget: { upload, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+      publishTarget: { upload, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
     });
     const state = await engine.create('Harbor at dawn', 'Orbits', generateArtwork('Harbor at dawn', 'Orbits', 7).svg);
     const published = await engine.publish();
@@ -106,7 +106,7 @@ describe('DemoEngine on the Originals Protocol', () => {
     const flaky = { put: (key: string, data: Uint8Array | string, o?: { contentType?: string }) => (failing ? Promise.reject(new Error('network down')) : upload.put(key, data, o)) };
     const engine = new DemoEngine({
       features: { hostedPublication: true },
-      publishTarget: { upload: flaky, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+      publishTarget: { upload: flaky, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
     });
     const state = await engine.create('Harbor at dawn', 'Orbits', generateArtwork('Harbor at dawn', 'Orbits', 7).svg);
     await expect(engine.publish()).rejects.toThrow(/network down/);
@@ -138,12 +138,12 @@ describe('DemoEngine on the Originals Protocol', () => {
   });
 
   test('a new Original does not inherit the previous Original\'s alias', async () => {
-    const { upload } = host();
+    const { upload, read } = host();
     const secret = ed.utils.randomSecretKey();
     const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
     const engine = new DemoEngine({
       features: { hostedPublication: true },
-      publishTarget: { upload, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+      publishTarget: { upload, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
     });
     await engine.create('First', 'Orbits', generateArtwork('First', 'Orbits', 1).svg);
     const first = await engine.publish();
