@@ -55,7 +55,19 @@ export type MoneyEvent =
    *  pass's write was skipped rather than clobbering that result (#694). */
   | 'inscription_sweep_raced'
   /** Records files that could not be parsed — signed reveals unreachable. */
-  | 'inscription_sweep_unreadable';
+  | 'inscription_sweep_unreadable'
+  /** An Original's pair passed the landing's checks and goes to the writer's checked submit (plan 011, PR 10b). */
+  | 'originals_anchor_attempted'
+  /** The writer sent it: the pair is persisted, and its commit (and reveal) are on the network. */
+  | 'originals_anchor_broadcast'
+  /** The pair is persisted but a broadcast failed; the sweep resumes it, re-verified (P9.6, P9.18). */
+  | 'originals_anchor_broadcast_failed'
+  /** Refused before anything was sent, with the writer's code (P9.6, P9.10, P9.18). */
+  | 'originals_anchor_refused'
+  /** The sweep resumed a recorded pair, the same bytes, after re-verifying it (P9.18). */
+  | 'originals_anchor_resumed'
+  /** A sweep pass could not read or resume one Original; nothing was sent for it. */
+  | 'originals_anchor_sweep_failed';
 
 export type MoneyFields = Record<string, string | number | boolean | undefined>;
 

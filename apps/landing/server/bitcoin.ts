@@ -24,6 +24,8 @@ import type { InscriptionsStore, InscriptionRecord, InscriptionStatus } from './
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-reconciliation';
 import { encodeSatSnapshot } from './sat-snapshot-codec';
+import type { OriginalsAnchoring } from './originals-anchoring';
+import type { PreparedEntryInscription } from '@originals/sdk/originals/bitcoin';
 
 /**
  * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
@@ -48,6 +50,16 @@ export function isBitcoinConfigured(
     !!env.BTC_FAUCET_ADDRESS &&
     (!!env.BTC_FAUCET_WIF || !!env.BTC_FAUCET_WALLET_ID)
   );
+}
+
+/**
+ * The server half of `bitcoinAnchoring` (plan 011, PR 10b): off unless
+ * ORIGINALS_BITCOIN_ANCHORING is exactly "1". The bundle's half is
+ * VITE_ORIGINALS_BITCOIN_ANCHORING; config.ts reports a disagreement, and
+ * reports a deployment that turns it on (the owner's release gate, #975).
+ */
+export function serverAnchoringEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env.ORIGINALS_BITCOIN_ANCHORING === '1';
 }
 
 // Provider surface these routes use (a superset of OrdinalsProvider — the
@@ -637,6 +649,13 @@ export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 // inscriptions burn the creator's fee and our QuickNode bandwidth.
 const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
 
+/**
+ * Ceiling on POST /api/btc/originals/submit: the pair plus the author's
+ * evidence package, which carries the resource bytes the Original holds.
+ * PROVISIONAL: an Original whose package is larger cannot be anchored here.
+ */
+const MAX_ORIGINALS_SUBMIT_BYTES = 4 * 1024 * 1024;
+
 /** Bitcoin Core's RPC -27 ("already in chain/mempool"), independent of wording. */
 const RPC_TRANSACTION_ALREADY_IN_CHAIN = -27;
 
@@ -770,6 +789,14 @@ export function createBitcoinRoutes(deps: {
    * nothing left to recover from.
    */
   recoveryConfirmations?: number;
+  /**
+   * Bitcoin anchoring of signed-in authors' Originals (plan 011, PR 10b).
+   * ABSENT unless the server enables it (ORIGINALS_BITCOIN_ANCHORING): the
+   * anchoring routes then answer `bitcoin_anchoring_off`.
+   */
+  anchoring?: OriginalsAnchoring;
+  /** Block headers for the browser's inscription clock (P9.15). The header route is 501 without it. */
+  headers?: (height: number) => Promise<{ time: number; hash: string; prev?: string }>;
 }): {
   funding: Handler;
   sat: Handler;
@@ -782,6 +809,10 @@ export function createBitcoinRoutes(deps: {
   inscribe: Handler;
   inscribeList: Handler;
   inscribeRebroadcast: Handler;
+  originalsSubmit: Handler;
+  originalsStatus: Handler;
+  txStatus: Handler;
+  blockHeader: Handler;
   sweepInscriptions: () => Promise<{ processed: number; unreadable: string[] }>;
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
@@ -2535,6 +2566,204 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId, inscriptionId, status: 'reveal_broadcast' });
   };
 
+  /**
+   * POST /api/btc/originals/submit { did, evidence, pair } — anchor or
+   * reinscribe a signed-in author's Original (plan 011, PR 10b). The pair was
+   * prepared and signed in the browser: the author key signed the entry, the
+   * deposit key the commit, the SDK's ephemeral key the reveal. Here it passes
+   * the same money-path checks as /api/btc/inscribe (shape, bound address,
+   * reveal signature, economics), then the one ordinal rule that differs:
+   * input 0 may carry inscriptions only when all of them are on the sat the
+   * pair inscribes, the Original's own sat. Fee inputs carry none. Then the
+   * writer's checked submit (originals-anchoring.ts) verifies again, persists
+   * and broadcasts (P9.6, P9.18).
+   */
+  const originalsSubmit: Handler = async (req, _url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    if (!deps.anchoring) return json({ error: 'bitcoin_anchoring_off', message: 'Anchoring on Bitcoin is not open on this server.' }, 404);
+    if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
+    const store = deps.inscriptions;
+
+    const bodyText = await readBodyCapped(req, MAX_ORIGINALS_SUBMIT_BYTES);
+    if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
+    let body: { did?: unknown; evidence?: unknown; pair?: PreparedEntryInscription };
+    try {
+      body = JSON.parse(bodyText) as typeof body;
+    } catch {
+      return json({ error: 'bad_request' }, 400);
+    }
+    const { did, pair } = body;
+    const prepared = pair?.prepared;
+    const hexRe = /^(?:[0-9a-fA-F]{2})+$/;
+    let evidence: Uint8Array;
+    try {
+      evidence = base64.decode(typeof body.evidence === 'string' ? body.evidence : '');
+    } catch {
+      return json({ error: 'bad_request', message: 'evidence must be the base64 evidence package.' }, 400);
+    }
+    if (
+      typeof did !== 'string' || evidence.length === 0 || !prepared ||
+      typeof prepared.signedCommitHex !== 'string' || !hexRe.test(prepared.signedCommitHex) ||
+      typeof prepared.revealTxHex !== 'string' || !hexRe.test(prepared.revealTxHex) ||
+      typeof prepared.changeAddress !== 'string' || typeof prepared.satoshi !== 'string' ||
+      !Array.isArray(prepared.fundingUtxos) || prepared.fundingUtxos.length === 0 ||
+      prepared.fundingUtxos.some((u) => !u || typeof u.txid !== 'string' || typeof u.vout !== 'number' || typeof u.value !== 'number')
+    ) {
+      return json({ error: 'bad_request' }, 400);
+    }
+    const declared = prepared.fundingUtxos;
+    const outpoints = declared.map((u) => `${u.txid.toLowerCase()}:${u.vout}`);
+    if (new Set(outpoints).size !== outpoints.length) return json({ error: 'bad_request', message: 'Duplicate funding outpoint.' }, 400);
+    const refuse: Refuse = (reason, b, status) => {
+      money('originals_anchor_refused', { sub, did, reason, inputs: outpoints.length });
+      return json(b, status);
+    };
+
+    const commit = parseCommit(prepared.signedCommitHex, outpoints, refuse);
+    if (commit instanceof Response) return commit;
+    const reveal = parseReveal(prepared.revealTxHex, commit.id, refuse);
+    if (reveal instanceof Response) return reveal;
+    // The record the writer keeps is keyed and checked by these ids (P9.6): they must be the bytes' own.
+    if (prepared.commitTxId !== commit.id || prepared.revealTxId !== reveal.id || prepared.inscriptionId !== `${reveal.id}i0`) {
+      return refuse('pair_ids_mismatch', { error: 'pair_ids_mismatch', message: 'The pair\'s declared transaction ids are not its bytes\'.' }, 400);
+    }
+    const changeScript = checkDestinations(sub, store, commit, reveal, prepared.changeAddress, refuse);
+    if (changeScript instanceof Response) return changeScript;
+    try {
+      validateInscriptionReveal(commit, reveal);
+    } catch {
+      return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
+    }
+    const perUser = inscribeUserLimiter.check(sub);
+    if (!perUser.allowed) {
+      return json({ error: 'inscribe_user_cap' }, 429, { 'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)) });
+    }
+    const uneconomic = await checkEconomics(commit, reveal, declared, changeScript, refuse);
+    if (uneconomic) return uneconomic;
+
+    // Fee inputs: strictly free of inscriptions, as on /api/btc/inscribe (R26).
+    const fees = await classifySpendableUtxos(declared.slice(1), deps.ordinals, declared.length);
+    if (!fees.ok) {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the fee inputs carry no inscription.' }, 503);
+    }
+    if (fees.ordinalBearing > 0) {
+      return refuse('fee_input_inscribed', { error: 'fee_input_inscribed', message: 'Fee inputs must carry no inscriptions; only the Original\'s own sat may be spent with one.' }, 400);
+    }
+    // Input 0 holds the sat the pair inscribes at offset 0 (the writer checks
+    // that sat is the Original's and still there: WRONG_SAT, SAT_MOVED). Any
+    // inscription in it must be on that sat: an inscription on another sat
+    // in the same output would move with the spend or burn as fee.
+    let onInput0: string[];
+    try {
+      if (!deps.ordinals) throw new Error('no ordinal lookup configured');
+      onInput0 = await deps.ordinals.outpointInscriptions({ txid: declared[0].txid, vout: declared[0].vout });
+    } catch {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not read the inscriptions on the sat-holding input.' }, 503);
+    }
+    if (onInput0.length > 0) {
+      let onSat: Set<string>;
+      try {
+        if (typeof provider.getSatSnapshot !== 'function') throw new Error('no sat reads');
+        onSat = new Set((await provider.getSatSnapshot(prepared.satoshi, { bodies: 'originals' })).publications.map((p) => p.id));
+      } catch {
+        return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not read the Original\'s sat.' }, 503);
+      }
+      if (onInput0.some((id) => !onSat.has(id))) {
+        return refuse('funding_outpoint_inscribed_foreign', {
+          error: 'funding_outpoint_inscribed_foreign',
+          message: 'The sat-holding input carries an inscription on another sat; it cannot be spent here.',
+        }, 400);
+      }
+    }
+
+    const result = await deps.anchoring.submit(sub, { did, evidence, pair: pair! });
+    if (!result.ok) {
+      const { ok: _ok, httpStatus, ...refusal } = result;
+      return json(refusal, httpStatus);
+    }
+    const { ok: _ok, ...sent } = result;
+    return json(sent);
+  };
+
+  /**
+   * GET /api/btc/originals/status?did= — the Original's anchoring, as this
+   * server's writer sees it: publication label, next step, the three heads
+   * and the sat's holder, reported apart (P9.4, P9.11, P9.18). `satUtxo` is
+   * the output holding the sat when it is at this account's bound address:
+   * the next inscription's input 0. Null otherwise: whoever holds the sat
+   * inscribes next (P9.12). Never transaction bytes.
+   */
+  const originalsStatus: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    if (!deps.anchoring) return json({ error: 'bitcoin_anchoring_off', message: 'Anchoring on Bitcoin is not open on this server.' }, 404);
+    const result = await deps.anchoring.status(sub, url.searchParams.get('did') ?? '');
+    if ('ok' in result && result.ok === false) {
+      const { ok: _ok, httpStatus, ...refusal } = result;
+      return json(refusal, httpStatus);
+    }
+    const status = result as Exclude<typeof result, { ok: false }>;
+    let satUtxo: { txid: string; vout: number; value: number } | null = null;
+    let heldByThisAccount: boolean | null = null;
+    const network = deps.network ?? 'testnet';
+    const bound = (() => { try { return deps.inscriptions?.depositBinding(sub, network) ?? null; } catch { return null; } })();
+    if (status.ownership && indexer && bound) {
+      try {
+        const utxos = await fetchAddressUtxos({ ...indexer, address: bound, network, fetchImpl: deps.fetchImpl });
+        const found = utxos.confirmed.find((u) => `${u.txid}:${u.vout}` === status.ownership!.output);
+        heldByThisAccount = !!found;
+        if (found) satUtxo = { txid: found.txid, vout: found.vout, value: found.value };
+      } catch {
+        // Unknown, not "elsewhere": the UI says the holder could not be read.
+      }
+    }
+    return json({ ...status, satUtxo, heldByThisAccount });
+  };
+
+  /** GET /api/btc/tx?txid= — a transaction's status, for the browser's sat reads. */
+  const txStatus: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const txid = url.searchParams.get('txid') ?? '';
+    if (!/^[0-9a-f]{64}$/i.test(txid)) return json({ error: 'bad_txid' }, 400);
+    try {
+      const st = await provider.getTransactionStatus(txid);
+      return json({
+        confirmed: st.confirmed,
+        ...(st.confirmations !== undefined ? { confirmations: st.confirmations } : {}),
+        ...(st.blockHeight !== undefined ? { blockHeight: st.blockHeight } : {}),
+        ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
+        ...(st.inMempool !== undefined ? { inMempool: st.inMempool } : {}),
+      });
+    } catch {
+      return json({ error: 'tx_status_unavailable' }, 502);
+    }
+  };
+
+  /** GET /api/btc/header?height= — one block header's time, hash and previous hash (P9.15). */
+  const blockHeader: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const raw = url.searchParams.get('height') ?? '';
+    if (!/^(0|[1-9]\d{0,7})$/.test(raw)) return json({ error: 'bad_height' }, 400);
+    if (!deps.headers) return json({ error: 'headers_unsupported' }, 501);
+    try {
+      const h = await deps.headers(Number(raw));
+      return json({ time: h.time, hash: h.hash, ...(h.prev ? { prev: h.prev } : {}) });
+    } catch {
+      return json({ error: 'header_unavailable' }, 502);
+    }
+  };
+
   return {
     funding,
     sat,
@@ -2547,6 +2776,10 @@ export function createBitcoinRoutes(deps: {
     inscribe,
     inscribeList,
     inscribeRebroadcast,
+    originalsSubmit,
+    originalsStatus,
+    txStatus,
+    blockHeader,
     sweepInscriptions: reconciler.sweepInscriptions,
   };
 }

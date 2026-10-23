@@ -31,11 +31,17 @@ import {
   cachedOrdinalLookup,
   createDepositBalanceSweep,
   positiveInt,
+  serverAnchoringEnabled,
   type FaucetProvider,
   type FaucetTxSigner,
   type OrdinalLookup,
 } from './server/bitcoin';
 import { startBlockCompletion } from './server/block-completion';
+import { join } from 'node:path';
+import { InscriptionClock } from '@originals/sdk/originals';
+import { fileClockStore } from '@originals/sdk/originals/fs';
+import { coreBlockHeaders } from './server/block-headers';
+import { createOriginalsAnchoring, type OriginalsAnchoring } from './server/originals-anchoring';
 import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
@@ -115,7 +121,38 @@ function createFaucetProviderFromEnv(): FaucetProvider {
   return provider;
 }
 
-function buildApiRoutes(): { routes: Record<string, Handler>; originals: OriginalsRoutes; sweepInscriptions?: () => Promise<{ processed: number; unreadable: string[] }> } | null {
+/**
+ * Bitcoin anchoring of Originals (plan 011, PR 10b), only with
+ * ORIGINALS_BITCOIN_ANCHORING=1 (off; config.ts reports a deployment that
+ * sets it). One index serves every read: the local ord on regtest, QuickNode's
+ * ord on mainnet. PROVISIONAL (owner decision, 22 Oct 2026): no second index is
+ * compared on mainnet, so P9.10's SHOULD is not met, and every status says so
+ * (`indexes.compared: false`).
+ */
+function anchoringFromEnv(provider: FaucetProvider): { anchoring: OriginalsAnchoring; headers: ReturnType<typeof coreBlockHeaders> } | undefined {
+  if (!serverAnchoringEnabled()) return undefined;
+  const headers = btcNet === 'regtest'
+    ? coreBlockHeaders({ rpcUrl: process.env.REGTEST_RPC_URL!, rpcAuth: process.env.REGTEST_RPC_AUTH })
+    : coreBlockHeaders({ rpcUrl: process.env.QUICKNODE_ENDPOINT! });
+  const network = btcNet === 'regtest' ? 'regtest' : 'mainnet';
+  const clock = new InscriptionClock(headers, { network, store: fileClockStore(join(originalsDataDir, `inscription-clock-${network}.bin`)) });
+  const anchoring = createOriginalsAnchoring({
+    dataDir: originalsDataDir,
+    provider,
+    clock,
+    index: btcNet === 'regtest' ? 'ord@regtest-local' : 'ord@quicknode',
+    money,
+  });
+  console.warn(`[landing] Bitcoin anchoring of Originals is ON (${network}) — plan 011 PR 10b; off unless the owner approved this instance`);
+  return { anchoring, headers };
+}
+
+function buildApiRoutes(): {
+  routes: Record<string, Handler>;
+  originals: OriginalsRoutes;
+  sweepInscriptions?: () => Promise<{ processed: number; unreadable: string[] }>;
+  sweepOriginals?: () => Promise<{ examined: number; resumed: number; failed: number }>;
+} | null {
   const jwtSecret = process.env.JWT_SECRET;
   const configured =
     jwtSecret &&
@@ -125,14 +162,19 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
   if (!configured) return null;
   const turnkey = getTurnkey();
   let bitcoin;
+  let anchoring: OriginalsAnchoring | undefined;
   if (isBitcoinConfigured()) {
     if (btcNet === 'mainnet' || btcNet === 'regtest') {
       // Creator-pays mainnet: NO faucet — the creator deposits to their own
       // Turnkey-derived bc1q address and the inscription spends their UTXO.
       // The funding route is stripped entirely (not merely disabled).
+      const provider = createFaucetProviderFromEnv();
+      const anchored = anchoringFromEnv(provider);
+      anchoring = anchored?.anchoring;
       const routes = createBitcoinRoutes({
         jwtSecret,
-        provider: createFaucetProviderFromEnv(),
+        provider,
+        ...(anchored ? { anchoring: anchored.anchoring, headers: anchored.headers } : {}),
         network: providerNetwork,
         indexer,
         ordinals,
@@ -147,6 +189,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
         `[landing] deposit indexer: ${indexer.api}${indexer.authToken ? ' (authenticated)' : ' (no token — free public tier)'}`
       );
     } else {
+      if (serverAnchoringEnabled()) console.warn('[landing] ORIGINALS_BITCOIN_ANCHORING is ignored on testnet4: anchoring runs on regtest and mainnet only');
       // Pick the faucet signer: a raw testnet WIF (simplest) or a Turnkey-org wallet.
       let faucetAddress = process.env.BTC_FAUCET_ADDRESS!;
       let signFundingTx: FaucetTxSigner;
@@ -187,6 +230,7 @@ function buildApiRoutes(): { routes: Record<string, Handler>; originals: Origina
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
     sweepInscriptions: bitcoin?.sweepInscriptions,
+    sweepOriginals: anchoring?.sweep,
   };
 }
 
@@ -265,6 +309,12 @@ if (api) {
     if (result?.unreadable.length) {
       console.warn(`[landing] inscription recovery sweep could not reconcile ${result.unreadable.length} account(s)`);
     }
+    // Anchored Originals: resume recorded pairs, re-verified; never prepare one (P9.6, P9.18).
+    const originals = await api.sweepOriginals?.().catch((err) => {
+      console.warn('[landing] Originals anchoring sweep failed', err);
+      return undefined;
+    });
+    if (originals?.failed) console.warn(`[landing] Originals anchoring sweep: ${originals.failed} Original(s) could not be read or resumed`);
   };
   const blockCompletion = startBlockCompletion({
     url: resolveBlockEventsUrl(process.env),
