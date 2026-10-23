@@ -66,9 +66,9 @@ async function twoDevices() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const author = alice.ref("orig");
   const signer = alice.signer("orig", KEY);
-  const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });
   const storeB = new MemoryStore();
-  const b = OriginalsSDK.create({ store: storeB, authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:00:00.100Z")) });
+  const b = OriginalsSDK.create({ store: storeB, authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:00:00.100Z")) });
   const created = await a.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author, signer });
   if (created.kind !== "original") throw new Error("expected an Original");
   await b.import((await a.package(created.original.did)).bytes);

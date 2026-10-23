@@ -647,8 +647,11 @@ export const realExample = {
     identity: 'Original ID',
     author: 'Author DID',
     profile: 'Record format',
-    issued: 'Recorded'
-  }
+    issued: 'Recorded',
+    validAsOf: 'Valid as of'
+  },
+  /** P7.10: a local Original is checked as of an entry, never as the latest version. */
+  validAsOfNote: 'Valid as of this entry. A local Original is never shown as the latest version: only an Original recorded on Bitcoin can be.'
 };
 
 export const protocol = {

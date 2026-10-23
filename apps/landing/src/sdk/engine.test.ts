@@ -26,7 +26,11 @@ describe('DemoEngine on the Originals Protocol', () => {
     expect(state.metadata?.id).toBe('metadata.json');
     expect(state.history.map((h) => h.operation)).toEqual(['create']);
     expect(state.history[0].authorKey).toBe(`${state.author}#author`);
-    expect((state.provenance as { current: boolean }).current).toBe(true);
+    // A local Original is never current; it is valid as of its checkpoint (P7.10).
+    const provenance = state.provenance as { current: boolean; validAsOf: { checkpoint: string } | null; reasons: string[] };
+    expect(provenance.current).toBe(false);
+    expect(provenance.validAsOf?.checkpoint).toBe(state.history[0].versionId);
+    expect(provenance.reasons).toEqual(['not-anchored']);
   });
 
   test('a revision appends a signed entry; the artwork version comes from history (P4.4)', async () => {

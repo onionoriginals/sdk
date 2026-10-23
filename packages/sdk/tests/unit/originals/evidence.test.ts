@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { resourceDigest } from "@originals/vh/originals";
-import { MemoryStore, OriginalsSDK, readEvidence, readZip, writeZip } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, readEvidence, readZip, signerPath, writeZip } from "../../../src/originals/index.js";
 import { encodeZip } from "../../../src/originals/zip.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -11,7 +11,7 @@ const KEY = seed(21);
 
 async function harbor(store = new MemoryStore()) {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
   const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author, signer });
@@ -20,18 +20,18 @@ async function harbor(store = new MemoryStore()) {
   return { alice, store, sdk, signer, author, did: c.original.did, v1: c.original.checkpoint, v2: e.original.checkpoint };
 }
 
-const reader = (alice: Author, freshness?: "asserted") =>
-  OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], ...(freshness ? { freshness } : {}), clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+const reader = (alice: Author) =>
+  OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
 
 describe("evidence packages (section 7)", () => {
   test("C12-01: a complete package verifies in a fresh reader with no key: same checkpoint and versions", async () => {
     const { sdk, alice, did, v2 } = await harbor();
     const pkg = await sdk.package(did);
     expect(pkg.manifest).toMatchObject({ format: "originals-evidence/0.1", profile: "originals:1.0", original: did, checkpoint: v2, head: v2, completeness: "complete", missing: [] });
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.checkpoint).toBe(v2);
     expect(loaded.report.resources.versions.map((r) => [r.version, r.bytes])).toEqual([[1, "verified"], [2, "verified"]]);
-    expect(loaded.report.current).toBe(true);
+    expect(loaded.report.reasons).toEqual(["not-anchored"]);
     // The package carries its own author evidence: a reader with no author source still verifies.
     const bare = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock() });
     const alone = await bare.load(pkg.bytes);
@@ -45,20 +45,21 @@ describe("evidence packages (section 7)", () => {
     const pkg = await sdk.package(did);
     expect(pkg.manifest.completeness).toBe("partial");
     expect(pkg.manifest.missing).toEqual([{ kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: v1 }]);
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.resources.status).toBe("partial");
     expect(loaded.report.resources.versions[1].bytes).toBe("verified");
-    // The package says it is partial, honestly: the log verifies and is current; the
-    // unavailable content is reported, not a failure (P7.3, P7.4, P9.18).
-    expect(loaded.reasons).toEqual([]);
-    expect(loaded.report.current).toBe(true);
+    // The package says it is partial, honestly: the log verifies; the unavailable content is
+    // reported, not a failure (P7.3, P7.4, P9.18).
+    expect(loaded.reasons).toEqual(["not-anchored"]);
+    expect(loaded.report.validAsOf).not.toBeNull();
+    expect(loaded.report.reasons).toEqual(["not-anchored"]);
   });
 
   test("a package of an earlier checkpoint holds that prefix and is not the latest state (P7.6)", async () => {
     const { sdk, alice, did, v1, v2 } = await harbor();
     const pkg = await sdk.package(did, { checkpoint: v1 });
     expect(pkg.manifest).toMatchObject({ checkpoint: v1, head: v2 });
-    const loaded = await reader(alice, "asserted").load(pkg.bytes);
+    const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.checkpoint).toBe(v1);
     expect(loaded.report.history.entries).toBe(1);
     expect(loaded.report.current).toBe(false);
@@ -71,7 +72,7 @@ describe("evidence packages (section 7)", () => {
     const files = readZip((await sdk.package(did)).bytes);
     const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json")!)) as Record<string, unknown>;
     files.set("originals-evidence.json", bytes(JSON.stringify({ ...manifest, completeness: "complete", missing: [] })));
-    const loaded = await reader(alice, "asserted").load(writeZip(files));
+    const loaded = await reader(alice).load(writeZip(files));
     expect(loaded.reasons).toContain("manifest-completeness-mismatch");
     expect(loaded.report.current).toBe(false);
   });
@@ -149,6 +150,32 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     const many = new Map(Array.from({ length: 5 }, (_, i) => [`resources/r${i}`, bytes("x")] as [string, Uint8Array]));
     fails(writeZip(many), "ARCHIVE_TOO_MANY_ENTRIES", { maxEntries: 4 });
     fails(writeZip(new Map([["big", new Uint8Array(100)]])), "ARCHIVE_TOO_LARGE", { maxTotalBytes: 99 });
+  });
+
+  test("C12-152: an evidence package built twice from the same contents is byte-identical (P14.10, PROVISIONAL, section 14)", async () => {
+    const { sdk, did } = await harbor();
+    expect((await sdk.package(did)).bytes).toEqual((await sdk.package(did)).bytes);
+  });
+
+  test("C12-153: an archive with a compressed entry or a name over 255 bytes is rejected (P14.10, PROVISIONAL, section 14)", () => {
+    fails(encodeZip([raw("a", { method: 8 })]), "ARCHIVE_COMPRESSED");
+    fails(encodeZip([raw("x".repeat(256))]), "ARCHIVE_PATH");
+  });
+
+  test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (P14.10, P9.8; PROVISIONAL, section 14)", async () => {
+    const { sdk, alice, did } = await harbor();
+    const files = readZip((await sdk.package(did)).bytes);
+    const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(alice.did)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    expect(signerPath(alice.did)).toBe(`signers/${hex}`);
+    expect(files.has(`signers/${hex}/did.jsonl`)).toBe(true);
+    expect([...files.keys()].some((name) => name.startsWith("authors/") || name === "asset/did-witness.json")).toBe(false);
+    // The old directory and an asset witness file are not part of the layout (no legacy reading).
+    for (const extra of [[`authors/${hex}/did.jsonl`, files.get(`signers/${hex}/did.jsonl`)!], ["asset/did-witness.json", bytes("[]")]] as const) {
+      const changed = new Map(files);
+      if (extra[0].startsWith("signers/")) changed.delete(`signers/${hex}/did.jsonl`);
+      changed.set(extra[0], extra[1]);
+      expect(() => readEvidence(writeZip(changed))).toThrow(expect.objectContaining({ code: "EVIDENCE_LAYOUT" }) as never);
+    }
   });
 
   test("an evidence package accepts only its own layout", () => {

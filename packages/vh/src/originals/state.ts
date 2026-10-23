@@ -12,11 +12,16 @@ import { parseDidWebvh } from "../webvh/index.js";
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
 
-/** PROVISIONAL limits (P7.7). */
+/**
+ * The profile's limits (P7.7, P14.13), decided by the owner on 21 October 2026
+ * (D6; spec PR #50 (open), which raises resources from 64 to 256). `nameLength`
+ * is this SDK's own, PROVISIONAL.
+ */
 export const ORIGINALS_LIMITS = Object.freeze({
   entries: 10_000,
   entryBytes: 65_536,
-  resources: 64,
+  /** Resources at any one time (P14.13; spec PR #50 (open)): removing one makes room for another. */
+  resources: 256,
   nameLength: 1_024,
   authorVersions: 1_000,
   /** Editor grants in one asset state (P5.15, P7.7). */
@@ -24,12 +29,11 @@ export const ORIGINALS_LIMITS = Object.freeze({
 });
 
 export type Operation = "create" | "update" | "deactivate";
-/**
- * Operations later phases define: migrate (anchoring, PR 9). PROVISIONAL (D1):
- * publication is an ordinary update that lists a did:webvh alias (plan 011,
- * PR 7b), so there is no publish operation.
+/*
+ * There are no publish or migrate operations (P9.10; P14.4, PROVISIONAL,
+ * section 14): publication is an update that lists a did:webvh alias,
+ * and anchoring is an update that lists the sat's did:btco alias.
  */
-const LATER_OPERATIONS = new Set(["migrate"]);
 
 export interface ResourceDescriptor {
   id: string;
@@ -71,10 +75,15 @@ export interface AuthorRef {
 /** An editor entry's editor reference: the editor DID, its verification method and exact versionId (P5.16). */
 export type EditorRef = AuthorRef;
 
+/**
+ * A resource transition (P14.4): `from` is the previous digest, or null for a
+ * resource this entry adds; `to` is the new digest, or null for a resource
+ * this entry removes (P4.1; originals-spec #49).
+ */
 export interface Transition {
   resource: string;
   from: string | null;
-  to: string;
+  to: string | null;
 }
 
 export interface EntryState {
@@ -196,7 +205,9 @@ function wellFormedSigner(did: string): boolean {
  * and is neither the author DID nor a DID of the author's identity: for a
  * did:webvh author, any did:webvh with its SCID, which is the author's DID at
  * another location after a move (P5.14). Resources are resourceIDs of the
- * Original's resource set. The number of grants is limited (P7.7).
+ * Original's current resource set, so an author entry that removes a resource
+ * removes it from every grant (P4.1, P5.15). The number of grants is limited
+ * (P7.7).
  */
 function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid: string | undefined): EditorGrant[] {
   const bad: (message: string) => never = (message) => invalid("STATE_EDITORS", message);
@@ -229,7 +240,10 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
     if (!Array.isArray(g.resources) || !g.resources.every((r) => typeof r === "string")) bad(`state.asset.editors[${i}].resources is a list of resourceIDs`);
     const granted = g.resources;
     if (new Set(granted).size !== granted.length) bad(`state.asset.editors[${i}].resources lists a resource twice`);
-    for (const r of granted) if (!ids.has(r)) bad(`state.asset.editors[${i}] grants ${r}, which is not in the resource set (P4.1)`);
+    // PROVISIONAL (P5.15, originals-spec #49): "a resource it adds is in no grant until an author entry
+    // adds it to one" is read as permitting the adding author entry itself to grant it; the grant takes
+    // effect from the next entry (P5.17), so no editor can change it in the entry that adds it.
+    for (const r of granted) if (!ids.has(r)) bad(`state.asset.editors[${i}] grants ${r}, which is not in the resource set; removing a resource removes it from every grant (P4.1, P5.15)`);
     return g as unknown as EditorGrant;
   });
 }
@@ -243,7 +257,7 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
   if (a.metadata !== undefined && !isJsonObject(a.metadata)) invalid("STATE_METADATA", "metadata must be an object when present");
   if (a.status !== "active" && a.status !== "deactivated") invalid("STATE_STATUS", "status must be active or deactivated");
   if (!Array.isArray(a.resources)) invalid("STATE_MEMBERS", "state.asset.resources must be an array");
-  if (a.resources.length > ORIGINALS_LIMITS.resources) fail("limit-exceeded", "STATE_TOO_MANY_RESOURCES", `at most ${ORIGINALS_LIMITS.resources} resources`);
+  if (a.resources.length > ORIGINALS_LIMITS.resources) fail("limit-exceeded", "STATE_TOO_MANY_RESOURCES", `at most ${ORIGINALS_LIMITS.resources} resources at one time (P14.13)`);
   const ids = new Set<string>();
   a.resources.forEach((r, i) => {
     const d = checkDescriptor(r, `state.asset.resources[${i}]`);
@@ -272,12 +286,10 @@ const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicaliz
  * P5.16, P5.17: an editor entry, checked against its parent. The grant is
  * the parent's; the author reference is the parent's; the operation is
  * update; and only the name, metadata and resource descriptors the grant
- * allows change. Grants, aliases and lifecycle are the author's. The empty
- * parameters rule is the profile's (it sees the entry's parameters).
- * PROVISIONAL (VH-Log PR 11 and plan 011 PR 6 pending): editor authority is
- * an Originals profile rule; no VH-Log hook carries it yet.
+ * allows change. Grants, aliases, lifecycle and the resource set are the
+ * author's: an editor entry never adds or removes a resource (P4.1, P5.16).
  */
-function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
+export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
   if (!previous) authorOnly("an editor entry cannot be the genesis entry");
   if (operation !== "update") authorOnly("an editor entry is an update; it cannot deactivate");
@@ -293,19 +305,37 @@ function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRe
   const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
   if (asset.name !== before.name && !grant.name) outside("the name");
   if (!same(asset.metadata, before.metadata) && !grant.metadata) outside("the metadata");
+  const kept = new Set(asset.resources.map((r) => r.id));
   for (const r of asset.resources) {
     const was = before.resources.find((p) => p.id === r.id);
+    if (!was) authorOnly(`an editor entry cannot add a resource (${r.id})`);
     if (!same(r as unknown as JsonValue, was as unknown as JsonValue) && !grant.resources.includes(r.id)) outside(`resource ${r.id}`);
   }
+  for (const p of before.resources) if (!kept.has(p.id)) authorOnly(`an editor entry cannot remove a resource (${p.id})`);
 }
 
-/** The transitions an entry must list: every resource whose digest changed (P4.2, P4.4). */
+/**
+ * The transitions an entry must list (P4.2, P4.4, P14.4): every resource added,
+ * removed or whose digest changed. First those in the resulting `resources`,
+ * in that order, with `from: null` for an added one; then the removed ones, in
+ * their previous order, with `to: null` (originals-spec #49).
+ */
 export function expectedTransitions(previous: AssetState | undefined, next: AssetState): Transition[] {
-  return next.resources.flatMap((r) => {
+  const changed = next.resources.flatMap((r) => {
     const before = previous?.resources.find((p) => p.id === r.id);
     if (before && before.digest === r.digest) return [];
     return [{ resource: r.id, from: before?.digest ?? null, to: r.digest }];
   });
+  const kept = new Set(next.resources.map((r) => r.id));
+  const removed = (previous?.resources ?? []).filter((p) => !kept.has(p.id)).map((p) => ({ resource: p.id, from: p.digest, to: null }));
+  return [...changed, ...removed];
+}
+
+/** Every resourceID used through `state`, given those used before it (P4.1). */
+export function resourceIdsThrough(state: AssetState, before: Iterable<string> = []): Set<string> {
+  const used = new Set(before);
+  for (const r of state.resources) used.add(r.id);
+  return used;
 }
 
 export interface EntryStateContext {
@@ -313,21 +343,57 @@ export interface EntryStateContext {
   index: number;
   previous?: EntryState;
   deactivatedParameter: boolean;
+  /**
+   * Every resourceID the Original used before this entry, in any earlier
+   * entry, including removed ones (P4.1). When absent, only the previous
+   * state's resources are known; the verifier always supplies it.
+   */
+  usedResourceIds?: Iterable<string>;
+  /**
+   * Whether to apply the editor-entry rules here (default true). The VH-Log
+   * engine applies them first, through the specialisation's editor hook
+   * (`checkEditorChange`; VH-Log PR 11, "Editors from a Controller" [S25]).
+   */
+  editorRules?: boolean;
 }
 
-/** Validate an entry's state against the Originals rules and its predecessor. */
-export function checkEntryState(state: JsonObject, ctx: EntryStateContext): EntryState {
+/** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
+function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; operation: string; author: AuthorRef; asset: AssetState } {
   const s = members(state, ["id", "operation", "author", "asset", "transitions"], ["editor"], "state");
   if (s.id !== `did:vh:${ctx.scid}`) invalid("STATE_ID", "state.id must be the Original's did:vh");
   const operation = s.operation;
   if (typeof operation !== "string") invalid("STATE_OPERATION", "operation must be a string");
-  if (LATER_OPERATIONS.has(operation)) fail("unsupported-profile", "STATE_OPERATION_UNSUPPORTED", `${operation} is not supported by this verifier yet`);
   if (ctx.index === 0 ? operation !== "create" : operation !== "update" && operation !== "deactivate") {
     invalid("STATE_OPERATION", ctx.index === 0 ? "the first entry must be a create" : "a later entry is an update or a deactivate");
   }
   const author = checkAuthorRef(s.author);
-  const asset = checkAsset(s.asset, author.did);
+  return { s, operation, author, asset: checkAsset(s.asset, author.did) };
+}
+
+/**
+ * The editor-entry rules of P5.16 for an entry's state, after the state's
+ * members, operation, author reference and asset are checked, and before
+ * every other state rule: an editor's change outside its grant is reported as
+ * that (outside-grant), whatever else it breaks. The Originals profile's
+ * VH-Log PR 11 editor limit [S25].
+ */
+export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): void {
+  const { s, operation, author, asset } = entryHead(state, ctx);
   if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
+}
+
+/** Validate an entry's state against the Originals rules and its predecessor. */
+export function checkEntryState(state: JsonObject, ctx: EntryStateContext): EntryState {
+  const { s, operation, author, asset } = entryHead(state, ctx);
+  if (s.editor !== undefined) {
+    const editor = checkEditorRef(s.editor);
+    if (ctx.editorRules !== false) checkEditorEntry(editor, operation, author, asset, ctx.previous);
+  }
+  // P5.15: no grant names the Original itself, its did:vh or any of its aliases (whose did:btco is the
+  // anchoring sat), before or after anchoring, so holding the sat confers no edit authority (P9.12).
+  for (const g of asset.editors ?? []) {
+    if (g.did === s.id || asset.aliases.includes(g.did)) invalid("STATE_EDITORS", `editor DID ${g.did} names this Original itself (P5.15, P9.12)`);
+  }
 
   // PROVISIONAL (plan 011, PR 7b): layers move one way. An Original starts local, and
   // once published keeps a did:webvh alias, moving only within that alias's SCID (P9.3).
@@ -345,31 +411,42 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
     invalid("STATE_DEACTIVATION", "operation deactivate, status deactivated and VH deactivated: true must agree");
   }
 
-  // The resource set is fixed at genesis (P4.1).
+  // P4.1, P14.5 (originals-spec #49): at least one resource, always. Existing resources keep
+  // their order; an author entry appends the resources it adds and may remove others (an editor
+  // entry may do neither, P5.16, checked with its grant). A resourceID once used is never used
+  // again, even after its resource is removed; there is no rename.
   const previous = ctx.previous?.asset;
+  if (asset.resources.length === 0) {
+    invalid("STATE_RESOURCE_SET", previous ? "an entry cannot remove the last resource (P4.1)" : "genesis must name at least one resource (P4.1)");
+  }
   if (previous) {
-    const was = previous.resources.map((r) => r.id).join("\n");
-    const now = asset.resources.map((r) => r.id).join("\n");
-    if (was !== now) invalid("STATE_RESOURCE_SET", "resources cannot be added, removed, renamed or reordered after genesis");
-    for (const r of asset.resources) {
+    const was = new Set(previous.resources.map((r) => r.id));
+    const kept = asset.resources.filter((r) => was.has(r.id));
+    const order = previous.resources.filter((p) => kept.some((r) => r.id === p.id)).map((p) => p.id).join("\n");
+    if (kept.map((r) => r.id).join("\n") !== order || asset.resources.slice(0, kept.length).some((r) => !was.has(r.id))) {
+      invalid("STATE_RESOURCE_SET", "existing resources keep their order, and added resources are appended after them (P4.1, P14.5)");
+    }
+    const used = new Set([...(ctx.usedResourceIds ?? []), ...was]);
+    for (const r of asset.resources.slice(kept.length)) {
+      if (used.has(r.id)) invalid("STATE_RESOURCE_REUSED", `resourceID ${r.id} was used before in this Original and cannot be used again (P4.1)`);
+    }
+    for (const r of kept) {
       const before = previous.resources.find((p) => p.id === r.id)!;
       if (before.digest === r.digest && (before.mediaType !== r.mediaType || before.size !== r.size)) {
         invalid("STATE_RESOURCE", `resource ${r.id} changed its descriptor without changing its bytes`);
       }
     }
-  } else if (asset.resources.length === 0) {
-    invalid("STATE_RESOURCE_SET", "genesis must name at least one resource");
   }
 
   if (!Array.isArray(s.transitions)) invalid("STATE_MEMBERS", "state.transitions must be an array");
   s.transitions.forEach((t, i) => {
     const m = members(t, ["resource", "from", "to"], [], `state.transitions[${i}]`);
     if (m.from !== null) checkDigest(m.from, `state.transitions[${i}].from`);
-    checkDigest(m.to, `state.transitions[${i}].to`);
+    if (m.to !== null) checkDigest(m.to, `state.transitions[${i}].to`);
   });
   if (deactivating && s.transitions.length > 0) invalid("STATE_TRANSITIONS", "a deactivation changes no resource");
   if (canonicalize(s.transitions) !== canonicalize(expectedTransitions(previous, asset) as unknown as JsonValue)) {
-    invalid("STATE_TRANSITIONS", "transitions must list exactly the resources whose digest changed, in resource order");
+    invalid("STATE_TRANSITIONS", "transitions must list exactly the resources added, removed or whose digest changed: the resulting resources in order, then the removed ones in their previous order (P14.4)");
   }
   return s as unknown as EntryState;
 }

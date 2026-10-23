@@ -9,13 +9,14 @@
  * ordering only; Bitcoin anchoring gives proven ordering and a single history.
  * Author DIDs keep their own method's witnesses, which this does not affect.
  */
+import type { DataIntegrityProof } from "../crypto/index.js";
 import { fail } from "../errors.js";
-import type { JsonObject } from "../json/index.js";
+import { isJsonObject, type JsonObject } from "../json/index.js";
 import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../log/index.js";
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import { ORIGINALS_METHOD, checkAuthorRef, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
+import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, resourceIdsThrough, type AuthorRef, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -68,10 +69,16 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
  * in evidence: the author's and each editor's, by identity DID (P5.14).
  *
  * An author entry is authorized by the author DID's key at the version it
- * names (P5.3, P5.9); an editor entry by the editor DID's key at the version
- * its editor reference names, and only for the change its grant in the
- * parent's state allows, which `checkEntryState` enforces (P5.16). Editor
- * keys follow the author key rules against the editor DID (P5.18).
+ * names (P5.3, P5.9). Editors are VH-Log PR 11's "Editors from a Controller"
+ * [S25], through the engine's editor hook (`keys.editors`): the current
+ * editors are the grants in `asset.editors`, which only an author entry
+ * changes (P5.15, P5.16); an entry identifies its signer as an editor by its
+ * `editor` reference; an editor entry is checked against the grants in its
+ * parent's state (P5.17), and its key follows the author key rules against
+ * the editor DID at the version its reference names (P5.18). The engine
+ * enforces that an editor entry is not the genesis entry, sets no parameter,
+ * leaves the grants alone and carries one proof by its editor; the profile's
+ * `limit` is the grant's scope (`checkEditorEntry`, P5.16).
  * Bitcoin: for an inscribed entry, P9.15 checks the signer DID's state at the
  * inscription time; that is the anchoring branch's (plan 011 PR 9), which
  * hooks in where `namedVersion` is resolved below.
@@ -79,71 +86,99 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
 export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
+  // P4.1: every resourceID used through an entry, so none is used again, even after removal.
+  const usedIds = new WeakMap<LogEntry, ReadonlySet<string>>();
+  const usedThrough = (history: readonly VerifiedEntry[]): ReadonlySet<string> => {
+    const last = history[history.length - 1];
+    if (!last) return new Set();
+    const known = usedIds.get(last.entry);
+    if (known) return known;
+    let used = new Set<string>();
+    for (const v of history) used = resourceIdsThrough((v.entry.state as unknown as EntryState).asset, used);
+    return used;
+  };
+
+  /** The key `signer` authorizes for `proof` at the version it names: the author's, or an editor's (P5.3, P5.18). */
+  const signerKey = (entry: LogEntry, previous: VerifiedEntry | undefined, proof: DataIntegrityProof, role: "author" | "editor"): Promise<string> => {
+    const ref = checkAuthorRef(entry.state.author);
+    if (previous) {
+      const genesisAuthor = (previous.entry.state.author as JsonObject | undefined)?.did;
+      if (ref.did !== genesisAuthor) fail("invalid-evidence", "AUTHOR_DID_CHANGED", "the author DID is fixed at genesis (P5.8)");
+    }
+    authorMethod(ref.did);
+    const editor = role === "editor";
+    const signer: AuthorRef = editor ? checkEditorRef(entry.state.editor) : ref;
+    if (proof.verificationMethod !== signer.verificationMethod) {
+      fail("author-binding", editor ? "SIGNER_VM_MISMATCH" : "AUTHOR_VM_MISMATCH", `the proof's verificationMethod must be the ${role} verification method the entry names (P5.2)`);
+    }
+    const history = byDid.get(signer.did);
+    if (!history) {
+      if (editor) fail("incomplete-evidence", "EDITOR_HISTORY_MISSING", `no verified history for editor DID ${signer.did} (P7.1, P5.6)`, { did: signer.did, role: "editor" });
+      fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`, { did: ref.did, role: "author" });
+    }
+    // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier entry named.
+    // Keyed by identity, so a did:webvh named at another location is the same signer (P5.14).
+    const through = namedThrough(named, previous);
+    const identity = identityKey(signer.did);
+    const before = through.get(identity);
+    if (before !== undefined && versionNumberOf(signer.versionId) < versionNumberOf(before)) {
+      fail("invalid-evidence", editor ? "SIGNER_VERSION_REGRESSED" : "AUTHOR_VERSION_REGRESSED", `an entry may not name an older ${role} DID version than the signer's previous entry (P5.8)`);
+    }
+    const version = namedVersion(history, signer);
+    // P6.5, P5.3: a deactivated DID version authorizes nothing, whoever signs (P5.18 for editors).
+    if (version.deactivated) {
+      fail("deactivated", "SIGNER_VERSION_DEACTIVATED", `${signer.did} is deactivated at version ${signer.versionId}; an entry cannot name it (P6.5, P5.18)`, { did: signer.did, role });
+    }
+    const key = authorKey(version, signer);
+    named.set(entry, new Map([...through, [identity, signer.versionId]]));
+    return Promise.resolve(key);
+  };
+
   return {
     name: "originals",
     versionTime: { fractionalDigits: 3 },
     maxProofs: 1,
     keys: {
       kind: "controller",
-      authorize: ({ entry, previous, proof }) => {
-        const ref = checkAuthorRef(entry.state.author);
-        const editor = entry.state.editor === undefined ? undefined : checkEditorRef(entry.state.editor);
-        if (previous) {
-          const genesisAuthor = (previous.entry.state.author as JsonObject | undefined)?.did;
-          if (ref.did !== genesisAuthor) fail("invalid-evidence", "AUTHOR_DID_CHANGED", "the author DID is fixed at genesis (P5.8)");
-        }
-        authorMethod(ref.did);
-        const signer: AuthorRef = editor ?? ref;
-        if (editor) {
+      authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "author"),
+      // VH-Log PR 11, "Editors from a Controller" [S25]: the grants are the record of editors (P5.15-P5.18).
+      editors: {
+        editorOf: (entry) => {
+          if (entry.state.editor === undefined) return undefined;
+          const editor = checkEditorRef(entry.state.editor);
           authorMethod(editor.did);
-          // P5.16, P5.17: the grant in the parent's state decides before any editor evidence is looked up,
-          // so an editor with no grant is rejected, never reported as missing evidence (C12-05).
-          const parent = previous?.entry.state as unknown as EntryState | undefined;
-          if (!parent) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the genesis entry; only an author entry may (P5.16)");
-          if (!(parent.asset?.editors ?? []).some((g) => g.did === editor.did)) {
-            fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor.did} has no grant in the parent's state (P5.16, P5.17)`);
-          }
-        }
-        if (proof.verificationMethod !== signer.verificationMethod) {
-          fail("author-binding", editor ? "SIGNER_VM_MISMATCH" : "AUTHOR_VM_MISMATCH", `the proof's verificationMethod must be the ${editor ? "editor" : "author"} verification method the entry names (P5.2)`);
-        }
-        const history = byDid.get(signer.did);
-        if (!history) {
-          if (editor) fail("incomplete-evidence", "EDITOR_HISTORY_MISSING", `no verified history for editor DID ${editor.did} (P7.1, P5.6)`, { did: editor.did, role: "editor" });
-          fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`, { did: ref.did, role: "author" });
-        }
-        // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier entry named.
-        // Keyed by identity, so a did:webvh named at another location is the same signer (P5.14).
-        const through = namedThrough(named, previous);
-        const identity = identityKey(signer.did);
-        const before = through.get(identity);
-        if (before !== undefined && versionNumberOf(signer.versionId) < versionNumberOf(before)) {
-          fail("invalid-evidence", editor ? "SIGNER_VERSION_REGRESSED" : "AUTHOR_VERSION_REGRESSED", `an entry may not name an older ${editor ? "editor" : "author"} DID version than the signer's previous entry (P5.8)`);
-        }
-        const version = namedVersion(history, signer);
-        // P6.5, P5.3: a deactivated DID version authorizes nothing, whoever signs (P5.18 for editors).
-        if (version.deactivated) {
-          fail("deactivated", "SIGNER_VERSION_DEACTIVATED", `${signer.did} is deactivated at version ${signer.versionId}; an entry cannot name it (P6.5, P5.18)`, { did: signer.did, role: editor ? "editor" : "author" });
-        }
-        const key = authorKey(version, signer);
-        named.set(entry, new Map([...through, [identity, signer.versionId]]));
-        return Promise.resolve(key);
+          return editor.did;
+        },
+        recordOf: (entry) => (isJsonObject(entry.state.asset) ? entry.state.asset.editors : undefined),
+        // P5.16, P5.17: the grant in the parent's state decides before any editor evidence is looked up,
+        // so an editor with no grant is rejected, never reported as missing evidence (C12-05).
+        lists: (record, editor) => Array.isArray(record) && record.some((g) => isJsonObject(g) && g.did === editor),
+        authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "editor"),
+        // P5.16: only the name, metadata and resource descriptors the grant allows change, and no resource
+        // is added or removed; the author reference is the parent's and the operation is update. Judged
+        // before the state's other rules, so a change outside the grant is reported as that.
+        limit: ({ entry, previous, scid, index }) => {
+          checkEditorChange(entry.state, {
+            scid, index, previous: previous?.entry.state as unknown as EntryState | undefined, deactivatedParameter: entry.parameters.deactivated === true,
+          });
+        },
       },
     },
-    validateEntry: ({ entry, previous, scid, index, active }) => {
+    validateEntry: ({ entry, previous, history, scid, index, active }) => {
       if (Object.keys(active.witness).length > 0) {
         fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
-      checkEntryState(entry.state, {
+      const used = usedThrough(history);
+      const state = checkEntryState(entry.state, {
         scid,
         index,
         previous: previous?.entry.state as unknown as EntryState | undefined,
         deactivatedParameter: entry.parameters.deactivated === true,
+        usedResourceIds: used,
+        // The editor rules run through the engine's editor hook (`keys.editors.limit`).
+        editorRules: false,
       });
-      // P5.16: an editor entry's parameters are empty; only an author entry may change any parameter.
-      if (entry.state.editor !== undefined && Object.keys(entry.parameters).length > 0) {
-        fail("outside-grant", "EDITOR_PARAMETERS", "an editor entry's parameters must be empty (P5.16)");
-      }
+      usedIds.set(entry, resourceIdsThrough(state.asset, used));
     },
   };
 }

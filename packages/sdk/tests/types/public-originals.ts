@@ -48,11 +48,13 @@ import { FileStore } from "@originals/sdk/originals/fs";
 
 const sameClass: typeof OriginalsSDK = SDK;
 const sameSubpath: typeof OriginalsSDK = Subpath;
-const options: OriginalsSDKOptions = { store: new MemoryStore(), authors: [], freshness: "asserted" };
+// There is no freshness option: an unanchored Original is never current (P7.10; originals-spec #46).
+const options: OriginalsSDKOptions = { store: new MemoryStore(), authors: [] };
 const subpathOptions: SubpathOptions = options;
 const sdk: OriginalsSDK = OriginalsSDK.create(options);
 const signer: OriginalsSigner = keySigner({ keyType: "Ed25519", secretKey: new Uint8Array(32), verificationMethod: "did:webvh:z:example.com#orig-1" });
 const maybeView: Promise<OriginalView> = sdk.get("did:vh:example");
+const validAsOf: Promise<string | undefined> = maybeView.then((v) => v.validAsOf?.signers[0]?.obtainedAt ?? undefined);
 const zip: Uint8Array = writeZip(new Map([["a.txt", new Uint8Array([1])]]));
 const files: Map<string, Uint8Array> = readZip(zip);
 const head: string | null = headOf(undefined);

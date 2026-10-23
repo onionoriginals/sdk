@@ -26,7 +26,7 @@ const K2 = seed(22);
 async function journey() {
   const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), clock: clock() });
   const before = alice.ref("orig-1");
   const created = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: before, signer: alice.signer(before, K1) });
   if (created.kind !== "original") throw new Error("expected an Original");
@@ -37,7 +37,7 @@ async function journey() {
 
 /** The same package without the author DID logs, declared partial, as a reader with no identity evidence gets it. */
 function withoutIdentity(zip: Uint8Array, author: string): Uint8Array {
-  const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("authors/")));
+  const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("signers/")));
   const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
   files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author }] })));
   return writeZip(files);
@@ -77,7 +77,10 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     expect(after.did).toBe(alice.did);
     const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: alice.signer(after, K2) });
     expect(appended.status).toBe("committed");
-    expect(appended.original.current, JSON.stringify(appended.original.report.reasons)).toBe(true);
+    // The rotation removed orig-1, so the entries signed with it are historically authorized only (P7.9).
+    expect(appended.original.report.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
+    expect(appended.original.report.historicallyAuthorizedOnly.map((h) => h.versionId)).not.toContain(appended.original.checkpoint);
+    expect(appended.original.validAsOf?.checkpoint).toBe(appended.original.checkpoint);
     expect(appended.original.report.identityEvidence).toMatchObject({ author: alice.did, latestVersionId: alice.versionId });
     // Entries before the move still verify against the versions before it.
     for (const checkpoint of [v1, v2]) {
@@ -161,7 +164,6 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(seen).toContain(didWebvhLogUrl(alice.location));
     expect(r.checkpoint).toBe(head);
     expect(r.identityEvidence.freshness).toBe("not-established");
-    expect(r.reasons).toContain("author-freshness-not-established");
     expect(r.current).toBe(false);
   });
 
@@ -296,7 +298,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     expect(p.status).toBe("committed");
     const files = await hostedFiles(env.sdk, env.did, alias);
     // A reader of a host that serves no author DID log: the identity must come from its location.
-    for (const path of [...files.keys()]) if (path.startsWith("originals/authors/")) files.delete(path);
+    for (const path of [...files.keys()]) if (path.startsWith("originals/signers/")) files.delete(path);
     const base = didWebvhFilesUrl(alias.did);
     const hosted: HostedFetch = (url) => {
       const data = url.startsWith(base) ? files.get(url.slice(base.length)) : undefined;
@@ -386,7 +388,7 @@ describe("C12-134: a forged hash-chained line chooses no identity location (P5.1
     const forged: Record<string, any> = { ...rest, versionTime: "2026-10-18T12:59:00Z", state: { ...last.state, transitions: [], author: { ...last.state.author, verificationMethod: `${tracker}#orig-1` } } };
     forged.versionId = `${Number(String(last.versionId).split("-")[0]) + 1}-${vhHash({ ...forged, versionId: last.versionId })}`;
     files.set("asset/did.jsonl", new TextEncoder().encode(`${log}${JSON.stringify({ ...forged, proof })}\n`));
-    for (const path of [...files.keys()]) if (path.startsWith("authors/")) files.delete(path);
+    for (const path of [...files.keys()]) if (path.startsWith("signers/")) files.delete(path);
     const forgedZip = writeZip(files);
     // The author's own host serves the log: the forged line's location is never requested.
     const seen: string[] = [];

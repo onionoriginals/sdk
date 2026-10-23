@@ -45,11 +45,14 @@
  *    editor rule the profile has; complete identity evidence), and every
  *    resource the entry introduces must arrive with bytes matching its
  *    digest.
- * 4. The candidate head must be current apart from freshness: an entry by a
- *    key the signer's latest DID state no longer lists (P7.9), by a
- *    deactivated DID (P6.5, P5.18), or that leaves the Original otherwise not
- *    current, can never be current and is refused (422 entry_not_current).
- *    Freshness the host cannot establish is not a refusal.
+ * 4. The entry must not be historically authorized only (P7.9): one signed
+ *    by a key the latest verified state of its signer's DID no longer lists,
+ *    by an editor whose DID is deactivated, or once the author DID is
+ *    deactivated (P6.5, P5.18), is refused (422
+ *    entry_historically_authorized_only, with the reason). No unanchored
+ *    Original is ever current (P7.10), so being current is not asked of it;
+ *    an earlier entry that has since become historically authorized only
+ *    does not refuse a new one.
  * 5. Durable before visible (P6.2): new resource bytes and signer DID logs are
  *    written first (each an fsynced atomic replace), then the asset log, the
  *    commit point that publishes the new head, then the manifest naming it.
@@ -88,7 +91,7 @@ import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
 import { ORIGINALS_LIMITS, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
-import { authorPath } from '@originals/sdk/originals';
+import { signerPath } from '@originals/sdk/originals';
 import { json } from './router';
 import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
 import type { OriginalsStore } from './originals-store';
@@ -107,9 +110,6 @@ export const SUBMISSION_LIMITS = Object.freeze({
   resources: ORIGINALS_LIMITS.resources,
   queued: 8,
 });
-
-/** Reasons that only say the host cannot establish freshness; any other keeps the head from being current. */
-const FRESHNESS_ONLY = new Set(['asset-freshness-not-established', 'author-freshness-not-established', 'editor-freshness-not-established']);
 
 export interface ParsedSubmission {
   original: string;
@@ -351,7 +351,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
     if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
     {
-      const storedSigner = store.readHosted(`${siteKey}/originals/${authorPath(signer.did)}/did.jsonl`);
+      const storedSigner = store.readHosted(`${siteKey}/originals/${signerPath(signer.did)}/did.jsonl`);
       const unverified = [s.identities.find((i) => i.did === signer.did)?.log, storedSigner ? text(storedSigner) : null].filter((l): l is string => typeof l === 'string');
       if (unverified.length === 0) return refuse(422, 'identity_missing', { did: signer.did });
       const checked = unverified.map((log) => proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod as string, versionId: signer.versionId as string }, log));
@@ -370,7 +370,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const usedFiles = new Map<string, Uint8Array | null>();
     const now = deps.now();
     for (const did of signerDids(candidate)) {
-      const base = `${siteKey}/originals/${authorPath(did)}`;
+      const base = `${siteKey}/originals/${signerPath(did)}`;
       const storedBytes = store.readHosted(`${base}/did.jsonl`);
       const stored = storedBytes ? text(storedBytes) : null;
       const witnessBytes = store.readHosted(`${base}/did-witness.json`);
@@ -434,9 +434,10 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       report.head === s.parsed.versionId &&
       report.resources.versions.filter((v) => v.versionId === s.parsed.versionId).every((v) => v.bytes === 'verified');
     if (!ok) return refuse(422, 'entry_invalid', { reasons: report.reasons, failure: report.history.failure ?? null });
-    // 4. Never accept a head that can never be current (P7.9, P6.5, P5.18); freshness alone is no refusal.
-    const blocking = report.reasons.filter((r) => !FRESHNESS_ONLY.has(r));
-    if (blocking.length > 0) return refuse(422, 'entry_not_current', { reasons: blocking });
+    // 4. Never accept an entry that is historically authorized only (P7.9, P6.5, P5.18). Being current
+    // is not asked: no unanchored Original is (P7.10).
+    const historical = report.historicallyAuthorizedOnly.find((h) => h.versionId === s.parsed.versionId);
+    if (historical) return refuse(422, 'entry_historically_authorized_only', { reason: historical.reason });
 
     // 5. One synchronous step: compare the head, the signer DID logs and the resources verification
     // used again (P1), then store durably and publish (P6.2).
@@ -452,7 +453,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       store.saveBytes(owner, `${siteKey}/originals/resources/${digest}`, bytes, signedMediaType(s.entry, digest) ?? 'application/octet-stream');
     }
     for (const identity of keepIdentities) {
-      const base = `${siteKey}/originals/${authorPath(identity.did)}`;
+      const base = `${siteKey}/originals/${signerPath(identity.did)}`;
       store.saveBytes(owner, `${base}/did.jsonl`, encoder.encode(identity.log), 'application/jsonl');
       if (identity.witness !== undefined) store.saveBytes(owner, `${base}/did-witness.json`, encoder.encode(JSON.stringify(identity.witness)), 'application/json');
     }

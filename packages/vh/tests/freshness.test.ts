@@ -27,7 +27,7 @@ async function harbor() {
 
 type Options = Parameters<typeof verifyOriginal>[0];
 const verify = (log: LogEntry[], authors: VhAuthor[], extra: Partial<Options> = {}): Promise<OriginalsReport> =>
-  verifyOriginal({ log, authors: authors.map((a) => a.evidence()), now: NOW, bytes: allBytes, freshness: "asserted", ...extra });
+  verifyOriginal({ log, authors: authors.map((a) => a.evidence()), now: NOW, bytes: allBytes, ...extra });
 
 describe("author DID rotation (P5.10)", () => {
   test("C12-51: a key the author DID added signs with no asset log entry for the change", async () => {
@@ -39,7 +39,7 @@ describe("author DID rotation (P5.10)", () => {
     expect(r.history.status).toBe("valid");
     expect(r.authorBinding.status).toBe("valid");
     expect(r.state?.name).toBe("Harbor, studio print");
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
   test("C12-08 (unanchored): an entry naming an old author DID version with a backdated time is never current", async () => {
@@ -52,7 +52,7 @@ describe("author DID rotation (P5.10)", () => {
     expect(r.history.status).toBe("valid"); // historically authorized at the version it names
     expect(r.ordering).toBe("claimed"); // no timestamp-only acceptance
     expect(r.current).toBe(false);
-    expect(r.reasons).toContain("head-key-not-in-latest-author-document");
+    expect(r.reasons).toContain("historically-authorized-only");
   });
 
   test("C12-41 (unanchored): every entry signed by a removed key stays valid history but not current", async () => {
@@ -66,12 +66,13 @@ describe("author DID rotation (P5.10)", () => {
 });
 
 describe("asset log freshness and retained versionIds (P7.6, P7.8)", () => {
-  test("without a freshness policy a valid log is a historical result, not the latest state", async () => {
+  test("a valid unanchored log is a historical result, valid as of its checkpoint, never the latest state (P7.10)", async () => {
     const { alice, genesis, cropped } = await harbor();
-    const r = await verify([genesis, cropped], [alice], { freshness: undefined });
+    const r = await verify([genesis, cropped], [alice]);
     expect(r.history.status).toBe("valid");
     expect(r.assetFreshness.status).toBe("not-established");
-    expect(r.reasons).toContain("asset-freshness-not-established");
+    expect(r.validAsOf?.checkpoint).toBe(cropped.versionId);
+    expect(r.reasons).toEqual(["not-anchored"]);
     expect(r.current).toBe(false);
   });
 
@@ -87,11 +88,11 @@ describe("asset log freshness and retained versionIds (P7.6, P7.8)", () => {
     expect(r.retain.original).toBe(cropped.versionId);
   });
 
-  test("a log at or past the retained versionId is fresh, and the new head is retained", async () => {
+  test("a log at or past the retained versionId is not stale, and the new head is retained", async () => {
     const { alice, genesis, cropped } = await harbor();
     const r = await verify([genesis, cropped], [alice], { retained: { original: genesis.versionId } });
-    expect(r.assetFreshness.status).toBe("asserted");
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.assetFreshness.status).toBe("not-established");
+    expect(r.reasons).toEqual(["not-anchored"]);
     expect(r.retain).toEqual({ original: cropped.versionId, authors: { [alice.did]: alice.versionId } });
   });
 
@@ -153,7 +154,7 @@ describe("C12-23: divergent valid branches are an unresolved fork (P2.1, P6.6, Q
     const r = await verify([genesis, cropped], [alice], { copies: [{ source: "mirror", log: serializeLog([genesis, broken as LogEntry]) }] });
     expect(r.fork).toBeNull();
     expect(r.assetFreshness.copies.find((c) => c.source === "mirror")?.status).toBe("invalid");
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 });
 
@@ -164,7 +165,7 @@ describe("author DID freshness (P7.8)", () => {
     await alice.rotate([{ fragment: "orig", signer: seeded(21) }, { fragment: "spare", signer: seeded(24) }]);
     const latest = alice.versionId;
     const r = await verifyOriginal({
-      log: [genesis, cropped], authors: [alice.evidence(before)], now: NOW, bytes: allBytes, freshness: "asserted",
+      log: [genesis, cropped], authors: [alice.evidence(before)], now: NOW, bytes: allBytes,
       retained: { authors: { [alice.did]: latest } },
     });
     expect(r.history.status).toBe("valid");

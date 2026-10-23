@@ -78,7 +78,7 @@ async function shared(opts: { witnessed?: boolean } = {}) {
   const author = await twoKeyAuthor(new Date(START), opts);
   let ta = START + 1000;
   let tb = START + 1100;
-  const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], freshness: 'asserted', clock });
+  const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock });
   const a = sdkFor(() => (ta += 250));
   const c = await a.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: SVG }], author: author.ref, signer: author.signer });
   if (c.kind !== 'original') throw new Error('expected an Original');
@@ -267,7 +267,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const env = await refusedOnB();
     // Someone extends the refused branch elsewhere: two more entries, signed with both author keys.
     let tc = START + 30_000;
-    const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [env.author.evidence], freshness: 'asserted', clock: () => (tc += 250) });
+    const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [env.author.evidence], clock: () => (tc += 250) });
     expect((await c.import(elsewhere(env))).status).toBe('imported');
     const e1 = await c.edit(env.did, { parent: env.mine.versionId, name: 'Harbor, second key', author: env.author.second.ref, signer: env.author.second.signer });
     await c.edit(env.did, { parent: e1.original.checkpoint, name: 'Harbor, longer', author: env.author.ref, signer: env.author.signer });
@@ -380,17 +380,17 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
 describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
   const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
   const { createSharedSaves, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
-  const { authorPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
+  const { signerPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
 
   /** A third device whose author DID is at v2 (key 0 removed, or deactivated). */
   async function rotated(deactivate: boolean, opts: { witnessed?: boolean } = {}) {
     const env = await shared(opts);
     const v2 = await env.author.rotate(new Date(START + 2000), { deactivate });
     let tc = START + 5000;
-    const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], freshness: 'asserted', clock: () => (tc += 250) });
+    const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], clock: () => (tc += 250) });
     expect((await c.import((await env.a.package(env.did)).bytes)).status).toBe('imported');
     const hostC = landingSharedHost({ sdk: c, aliasDid: env.aliasDid, transport: env.h.adapterFor(SUB2), read: env.h.read });
-    const didPath = `${env.siteKey}/originals/${authorPath(env.author.evidence.did)}/did.jsonl`;
+    const didPath = `${env.siteKey}/originals/${signerPath(env.author.evidence.did)}/did.jsonl`;
     return { ...env, v2, c, hostC, didPath };
   }
 
@@ -403,7 +403,8 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const thief = await env.edit(env.c, MINE, env.author);
     const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
     expect(res.status).toBe(422);
-    expect(await res.json()).toMatchObject({ error: 'entry_not_current', reasons: expect.arrayContaining(['head-key-not-in-latest-author-document']) });
+    // The host refuses an entry that is historically authorized only (P7.9), not one it cannot call current (P7.10).
+    expect(await res.json()).toMatchObject({ error: 'entry_historically_authorized_only', reason: 'key-not-in-latest-signer-document' });
     expect(env.hostedLines()).toEqual(before);
   });
 
@@ -414,7 +415,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const thief = await env.edit(env.a, MINE, env.author);
     const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
     expect(res.status).toBe(422);
-    expect(await res.json()).toMatchObject({ error: 'entry_not_current', reasons: expect.arrayContaining(['author-did-deactivated']) });
+    expect(await res.json()).toMatchObject({ error: 'entry_historically_authorized_only', reason: 'author-did-deactivated' });
   });
 
   test('once hosted, the asset log changes only through the verifying submit route: a PUT that extends it is refused (C4)', async () => {

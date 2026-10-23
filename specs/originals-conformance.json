@@ -1,9 +1,18 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 1039c471c. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "a432aa67529cd86b4ab38d97cc91963be82acbc3",
-    "section": "12"
+    "commit": "1039c471c",
+    "section": "12",
+    "openProposals": [
+      {
+        "pr": 50,
+        "head": "555ce24d3",
+        "rows": [
+          160
+        ]
+      }
+    ]
   },
   "rows": [
     {
@@ -216,15 +225,16 @@
     {
       "id": "C12-16",
       "position": 16,
-      "test": "Resource added, removed or renamed",
-      "requiredResult": "Rejected in baseline fixed-resource profile",
+      "test": "Resource added or removed by an author entry",
+      "requiredResult": "Accepted; an added resource is at version 1; a removed one stays verifiable in history (P4.1, P4.4)",
       "phases": [
         1
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
-        "packages/vh/tests/originals.test.ts"
+        "packages/vh/tests/resources.test.ts"
       ]
     },
     {
@@ -300,15 +310,17 @@
       "id": "C12-22",
       "position": 22,
       "test": "Old valid prefix served as current",
-      "requiredResult": "Freshness unresolved or failed under policy, never assumed",
+      "requiredResult": "Reported valid as of its checkpoint, never current (P7.10)",
       "phases": [
         2
       ],
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/freshness.test.ts",
-        "packages/vh/tests/freshness.test.ts"
-      ]
+        "packages/vh/tests/freshness.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
+      ],
+      "note": "Valid as of its own checkpoint, stale against the retained versionId, never current (P7.10; originals-spec #46)."
     },
     {
       "id": "C12-23",
@@ -321,7 +333,8 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/freshness.test.ts",
-        "packages/vh/tests/freshness.test.ts"
+        "packages/vh/tests/freshness.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
       ],
       "note": "Owner decision Q5: every branch is reported and none is current until anchoring settles it (P9.16)."
     },
@@ -480,9 +493,10 @@
       "status": "partial",
       "coveredBy": [
         "packages/vh/tests/freshness.test.ts",
-        "packages/vh/tests/originals.test.ts"
+        "packages/vh/tests/originals.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
       ],
-      "note": "Unanchored case: historically valid, never current (P7.9). The anchored case arrives in PR 9."
+      "note": "Unanchored case: historically authorized only, never current (P7.9). The anchored case belongs to the Bitcoin branch."
     },
     {
       "id": "C12-42",
@@ -527,8 +541,8 @@
     {
       "id": "C12-46",
       "position": 43,
-      "test": "Author DID history missing through an inscription time",
-      "requiredResult": "Incomplete identity evidence; not reported as current",
+      "test": "Anchored entry whose did:vh or did:webvh signer DID is known only up to a version older than the entry’s inscription time",
+      "requiredResult": "Checked against the newest known version; the report states that version and when it was obtained (P7.8, P9.15)",
       "phases": [
         4
       ],
@@ -548,7 +562,7 @@
       "id": "C12-48",
       "position": 45,
       "test": "Any entry after the author DID is deactivated",
-      "requiredResult": "Not anchored: Original reported as non-current. Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
+      "requiredResult": "Not anchored: deactivation reported; entries historically authorized only (P7.9). Anchored: accepted state remains current; entries inscribed later rejected (P9.15)",
       "phases": [
         2,
         3,
@@ -557,9 +571,10 @@
       "status": "partial",
       "coveredBy": [
         "packages/vh/tests/editors.test.ts",
-        "packages/vh/tests/originals.test.ts"
+        "packages/vh/tests/originals.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
       ],
-      "note": "Unanchored case: a deactivated author DID makes the Original non-current. The anchored case arrives in PR 9."
+      "note": "Unanchored case covered: the author DID's deactivation is reported and every entry is historically authorized only (P7.9, P6.5). The anchored case belongs to the Bitcoin branch."
     },
     {
       "id": "C12-49",
@@ -670,7 +685,7 @@
     {
       "id": "C12-56",
       "position": 54,
-      "test": "Later entry names a different author DID, or an older author DID version than its predecessor",
+      "test": "Later entry names a different author DID, or an older author DID version than the most recent earlier author entry",
       "requiredResult": "Rejected",
       "phases": [
         1
@@ -759,8 +774,8 @@
     {
       "id": "C12-64",
       "position": 62,
-      "test": "Stale author DID history served with a current asset log",
-      "requiredResult": "Identity freshness not established; not reported as currently authorized",
+      "test": "Older author DID history served when the verifier has retained a newer version",
+      "requiredResult": "The newer version is used (P7.8)",
       "phases": [
         2
       ],
@@ -1406,7 +1421,7 @@
       "id": "C12-118",
       "position": 118,
       "test": "Editor entry signed before its revocation, on the revocation’s parent",
-      "requiredResult": "Fork with the revocation; unresolved until anchoring, then decided by chain order (P5.17)",
+      "requiredResult": "Unanchored: fork, unresolved; settled by the anchor’s branch (P9.16). After anchoring: the first inscribed in chain order extending the head is accepted, the other ignored (P9.13)",
       "phases": [
         2,
         4
@@ -1416,7 +1431,7 @@
         "packages/sdk/tests/unit/originals/editors.test.ts",
         "packages/vh/tests/editors.test.ts"
       ],
-      "note": "Unanchored part covered: an editor entry and a revoking author entry with the same parent are an unresolved fork (verifier and SDK import). Decided by chain order after anchoring: the Bitcoin branch."
+      "note": "Unanchored part covered: an editor entry and a revoking author entry with the same parent are an unresolved fork (verifier and SDK import). After anchoring, the first inscribed in chain order extending the head is accepted: the Bitcoin branch."
     },
     {
       "id": "C12-119",
@@ -1456,24 +1471,26 @@
       ],
       "status": "partial",
       "coveredBy": [
-        "packages/vh/tests/editors.test.ts"
+        "packages/vh/tests/editors.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
       ],
-      "note": "Unanchored part covered (not current while the latest editor DID state does not list the key, P7.9). The anchored part (P9.15, P5.13 for did:btco editors) belongs to the Bitcoin branch; profile.ts marks the hook."
+      "note": "Unanchored part covered (historically authorized only while the latest editor DID state does not list the key, P7.9). The anchored part (P9.15, P5.13 for did:btco editors) belongs to the Bitcoin branch; profile.ts marks the hook."
     },
     {
       "id": "C12-122",
       "position": 122,
       "test": "Editor entry after the author DID is deactivated",
-      "requiredResult": "Unanchored: not current. Anchored: rejected if inscribed after the deactivation (P5.18)",
+      "requiredResult": "Unanchored: not current. Anchored: rejected if its inscription time is at or after the author DID deactivation’s versionTime, or for a did:btco author DID if the deactivation precedes it in chain order (P9.15, P5.18)",
       "phases": [
         2,
         4
       ],
       "status": "partial",
       "coveredBy": [
-        "packages/vh/tests/editors.test.ts"
+        "packages/vh/tests/editors.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
       ],
-      "note": "Unanchored part covered (not current once the author DID is deactivated, P5.18). The anchored part belongs to the Bitcoin branch."
+      "note": "Unanchored part covered (historically authorized only once the author DID is deactivated, P5.18, P7.9). The anchored part belongs to the Bitcoin branch."
     },
     {
       "id": "C12-123",
@@ -1553,14 +1570,15 @@
       "id": "C12-129",
       "position": 129,
       "test": "Refused candidate published elsewhere",
-      "requiredResult": "Fork; unresolved until anchoring (P6.6, P6.8)",
+      "requiredResult": "Unanchored: fork; unresolved until anchoring. Anchored: not current; ignored (P6.6, P6.8, P9.12, P9.13)",
       "phases": [
         3
       ],
-      "status": "covered",
+      "status": "partial",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/shared-host.test.ts"
-      ]
+      ],
+      "note": "Unanchored part covered: a refused candidate published elsewhere is a fork, unresolved until anchoring. The anchored part (not current; ignored, P9.12, P9.13) belongs to the Bitcoin branch."
     },
     {
       "id": "C12-130",
@@ -1698,6 +1716,287 @@
         "packages/vh/tests/alias.test.ts"
       ],
       "note": "Unanchored part covered: the alias moves within its SCID by an author entry and author binding is unaffected. The anchored part (a new did:webvh alias is rejected, P9.10) belongs to the Bitcoin branch."
+    },
+    {
+      "id": "C12-140",
+      "position": 140,
+      "test": "Editor entry whose proof’s verificationMethod is the author’s, or whose operation is not update",
+      "requiredResult": "Rejected (P5.2, P5.16)",
+      "phases": [
+        2
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
+    },
+    {
+      "id": "C12-141",
+      "position": 141,
+      "test": "Editor entry naming an older editor DID version than that editor’s previous entry",
+      "requiredResult": "Rejected (P5.8, P5.18)",
+      "phases": [
+        2
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
+    },
+    {
+      "id": "C12-142",
+      "position": 142,
+      "test": "Grant naming a resourceID outside the resource set, or more grants than the profile limit",
+      "requiredResult": "Rejected; limit-exceeded (P5.15, P7.7)",
+      "phases": [
+        2
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
+    },
+    {
+      "id": "C12-143",
+      "position": 143,
+      "test": "Unanchored: verifier that reported a state learns of a competing branch",
+      "requiredResult": "Conflict reported; not silent (P6.6)",
+      "phases": [
+        2
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/unanchored.test.ts"
+      ]
+    },
+    {
+      "id": "C12-144",
+      "position": 144,
+      "test": "Grant, before or after anchoring, naming the anchoring sat’s did:btco DID or the Original’s own did:vh",
+      "requiredResult": "Rejected (P5.15)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/editors.test.ts"
+      ]
+    },
+    {
+      "id": "C12-145",
+      "position": 145,
+      "test": "Unanchored Original with complete evidence and signer DID histories fetched moments ago",
+      "requiredResult": "Reported valid as of its verified checkpoint, with each signer DID versionId and fetch time; never current or currently authorized (P7.10)",
+      "phases": [
+        2
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/cli.test.ts",
+        "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/vh/tests/originals.test.ts",
+        "packages/vh/tests/unanchored.test.ts"
+      ]
+    },
+    {
+      "id": "C12-146",
+      "position": 146,
+      "test": "Entry state with a member section 14 does not list, at any level",
+      "requiredResult": "Rejected (P14.4)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
+    },
+    {
+      "id": "C12-147",
+      "position": 147,
+      "test": "Resource digest in a non-canonical encoding, or a multihash other than SHA-256",
+      "requiredResult": "Rejected (P14.7)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
+    },
+    {
+      "id": "C12-148",
+      "position": 148,
+      "test": "`asset.editors` present as an empty array",
+      "requiredResult": "Rejected (P14.5)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
+    },
+    {
+      "id": "C12-149",
+      "position": 149,
+      "test": "Resource descriptor whose `size` or `mediaType` changes without its `digest`",
+      "requiredResult": "Rejected (P14.6)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
+    },
+    {
+      "id": "C12-150",
+      "position": 150,
+      "test": "Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes",
+      "requiredResult": "Accepted / rejected (P14.13)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/hosting.test.ts",
+        "packages/sdk/tests/unit/originals/sdk.test.ts",
+        "packages/vh/tests/originals.test.ts"
+      ]
+    },
+    {
+      "id": "C12-151",
+      "position": 151,
+      "test": "Derived DID document compared with section 14’s template",
+      "requiredResult": "Identical for every resolver (P14.9)",
+      "phases": [
+        1
+      ],
+      "status": "todo",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release."
+    },
+    {
+      "id": "C12-152",
+      "position": 152,
+      "test": "Evidence package built twice from the same contents",
+      "requiredResult": "Byte-identical archives (P14.10)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
+    },
+    {
+      "id": "C12-153",
+      "position": 153,
+      "test": "Evidence package with a compressed archive entry or a name over 255 bytes",
+      "requiredResult": "Rejected (P14.10)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
+    },
+    {
+      "id": "C12-154",
+      "position": 154,
+      "test": "Editor entry that adds or removes a resource, even one its grant names",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-155",
+      "position": 155,
+      "test": "Entry that adds a resource with a resourceID the Original used before",
+      "requiredResult": "Rejected (P4.1)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-156",
+      "position": 156,
+      "test": "Entry that removes the last resource",
+      "requiredResult": "Rejected (P4.1)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-157",
+      "position": 157,
+      "test": "Author entry removing a resource that a grant still names",
+      "requiredResult": "Rejected (P5.15)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-158",
+      "position": 158,
+      "test": "Added resource not in any grant",
+      "requiredResult": "No editor may change it until an author entry grants it (P5.15)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-159",
+      "position": 159,
+      "test": "Transitions for an added and a removed resource",
+      "requiredResult": "`from: null` for the added one, `to: null` for the removed one, in the order P14.4 gives (P14.4)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
+    },
+    {
+      "id": "C12-160",
+      "position": 160,
+      "test": "Original with 256 resources / 257 resources",
+      "requiredResult": "Accepted / rejected (P14.13)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "proposal": "originals-spec#50@555ce24d3",
+      "note": "PROVISIONAL: open spec PR #50 (head 555ce24d3), not in the pinned table; the owner has decided the 256-resource limit (D6, 21 October 2026).",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/resources.test.ts",
+        "packages/vh/tests/resources.test.ts"
+      ]
     }
   ]
 }

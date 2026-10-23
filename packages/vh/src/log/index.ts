@@ -1,7 +1,8 @@
 /**
  * A generic VH-Log engine (swcurran/VH-Log@f2f9fda with PRs 2, 3, 8, 9, 10 and
- * 11 treated as merged). It implements the log mechanism only; every rule that
- * VH-Log leaves to a specialisation comes from a `Specialisation`.
+ * 11 treated as merged; PR 11 at 2fe380dbf, including "Editors from a
+ * Controller"). It implements the log mechanism only; every rule that VH-Log
+ * leaves to a specialisation comes from a `Specialisation`.
  *
  * Verification follows VH-Log "Read (Resolve)": every entry is fully checked,
  * the first failure ends the valid prefix, and a failing first entry
@@ -29,7 +30,7 @@ import {
   type ProofSigner,
 } from "../crypto/index.js";
 import { OriginalsError, fail, type ErrorCategory } from "../errors.js";
-import { canonicalBytes, isJsonObject, parseJson, parseJsonLines, type JsonObject, type JsonValue, type ParseLimits } from "../json/index.js";
+import { canonicalBytes, canonicalize, isJsonObject, parseJson, parseJsonLines, type JsonObject, type JsonValue, type ParseLimits } from "../json/index.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,6 +76,12 @@ export interface EntryContext {
   entry: LogEntry;
   /** The verified predecessor, absent for the first entry. */
   previous?: VerifiedEntry;
+  /**
+   * Every verified entry before this one, oldest first, for rules that depend
+   * on the whole history (such as Originals' never-reused resourceIDs, P4.1).
+   * Read it during the call only.
+   */
+  history: readonly VerifiedEntry[];
   scid: string;
   /** Parameters in effect after this entry. */
   active: ActiveParameters;
@@ -88,8 +95,55 @@ export interface ControllerKeys {
    * Return the Multikey that may verify `proof` for this entry, or reject with
    * an `OriginalsError` (for example `unauthorized-key`, `author-binding` or
    * `incomplete-evidence`). It must never fall back to trusting the proof's key.
+   * Entries an editor signs go to `editors.authorize` instead.
    */
   authorize(context: EntryContext & { proof: DataIntegrityProof }): Promise<string>;
+  /** VH-Log PR 11, "Editors from a Controller" [S25]: editors the controller authorizes. */
+  editors?: ControllerEditors;
+}
+
+/**
+ * VH-Log PR 11 (swcurran/VH-Log#11 at 2fe380dbf), "Editors from a Controller"
+ * [S25]: the controller may authorize editors, other identities with their own
+ * verifiable histories, whose entries change only the state. The
+ * specialisation defines where the current editors are recorded, how an entry
+ * identifies its signer as an editor, each editor's own key rules, and any
+ * further limit on what an editor may change. The engine enforces the rest:
+ * an editor entry is never the first entry, is checked against the editors
+ * recorded in the entry before it (so adding or removing an editor takes
+ * effect from the next entry), has empty `parameters`, leaves the record of
+ * editors unchanged (only the controller's entries change it), and carries
+ * exactly one proof, by an authorized key of that editor, and no controller
+ * proof. Forks are unchanged: two entries with the same predecessor are a fork
+ * whoever signed them.
+ */
+export interface ControllerEditors {
+  /**
+   * The editor an entry names as its signer, by identity, or undefined for an
+   * entry of the controller. Reject with an `OriginalsError` when the entry's
+   * editor reference is malformed.
+   */
+  editorOf(entry: LogEntry): string | undefined;
+  /**
+   * The record of the current editors an entry carries, which only an entry
+   * the controller signs may change. Compared by JCS; undefined when absent.
+   */
+  recordOf(entry: LogEntry): JsonValue | undefined;
+  /** Whether `record`, the previous entry's, lists `editor`. */
+  lists(record: JsonValue | undefined, editor: string): boolean;
+  /**
+   * The Multikey that may verify `proof` by `editor`, under the editor's own
+   * history rules (the version it relies on, which keys are authorized, how
+   * its history is obtained and how a removed key is kept from adding
+   * entries), or reject. It must never fall back to trusting the proof's key.
+   */
+  authorize(context: EntryContext & { proof: DataIntegrityProof; editor: string }): Promise<string>;
+  /**
+   * Any further limit on what the editor may change in the state, checked at
+   * the state step before `validateEntry`, so a change outside the editor's
+   * limit is reported as that whatever else the state breaks.
+   */
+  limit?(context: EntryContext & { editor: string }): void | Promise<void>;
 }
 
 export interface Specialisation {
@@ -163,8 +217,22 @@ export interface LogVerification {
 
 export interface LogLimits {
   maxEntries?: number;
-  /** Maximum JSON length of one entry. */
+  /**
+   * Maximum size of one entry: the UTF-8 byte length of its stored line,
+   * without the line feed (P7.7; P14.13). A log's text is measured line by line as stored, before it is
+   * parsed, and so is each entry `verifyLog` is given with its stored size
+   * (`lineBytes`) or that `parseLog` parsed. An entry with no stored line
+   * (built or parsed elsewhere) is measured as its JCS serialization, the
+   * line a conforming writer stores (PROVISIONAL).
+   */
   maxEntryBytes?: number;
+}
+
+const utf8 = new TextEncoder();
+
+/** The UTF-8 byte length of `text`. */
+export function utf8Length(text: string): number {
+  return utf8.encode(text).length;
 }
 
 export interface VerifyOptions {
@@ -401,7 +469,7 @@ export function parseVersionTime(value: unknown, fractionalDigits = 0): number {
 const ENTRY_MEMBERS = ["versionId", "versionTime", "parameters", "state", "proof"];
 const VERSION_ID = /^([1-9]\d*)-([1-9A-HJ-NP-Za-km-z]+)$/;
 
-function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
+function checkStructure(raw: unknown, limits: LogLimits, storedBytes: number | undefined): LogEntry {
   if (!isJsonObject(raw)) fail("invalid-evidence", "LOG_LINE_INVALID", "a log line must be a JSON object");
   const keys = Object.keys(raw);
   if (keys.length !== ENTRY_MEMBERS.length || !ENTRY_MEMBERS.every((key) => keys.includes(key))) {
@@ -412,7 +480,8 @@ function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
   }
   if (!isJsonObject(raw.parameters) || !isJsonObject(raw.state)) fail("invalid-evidence", "ENTRY_MEMBERS", "parameters and state must be objects");
   if (!Array.isArray(raw.proof)) fail("invalid-evidence", "ENTRY_MEMBERS", "proof must be an array");
-  if (limits.maxEntryBytes !== undefined && JSON.stringify(raw).length > limits.maxEntryBytes) {
+  // P14.13: the stored line when there is one, else the JCS line a writer stores (PROVISIONAL).
+  if (limits.maxEntryBytes !== undefined && (storedBytes ?? storedLineBytes.get(raw) ?? utf8Length(canonicalize(raw))) > limits.maxEntryBytes) {
     fail("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${limits.maxEntryBytes} bytes`);
   }
   return raw as unknown as LogEntry;
@@ -424,19 +493,36 @@ function checkStructure(raw: unknown, limits: LogLimits): LogEntry {
 async function verifyEntry(
   index: number,
   raw: unknown,
-  previous: VerifiedEntry | undefined,
+  history: readonly VerifiedEntry[],
   options: VerifyOptions,
   now: number,
+  storedBytes?: number,
 ): Promise<VerifiedEntry> {
   const spec = options.specialisation;
+  const previous = index > 0 ? history[index - 1] : undefined;
   // Checks run in VH-Log's step order, as vh-log-interop-0 section 4 pins it, so
   // the first failing check names the error: deactivation, structure,
   // parameters (with pre-rotation), proofs, versionId, versionTime, SCID, state.
   if (previous?.active.deactivated) fail("deactivated", "ENTRY_AFTER_DEACTIVATION", "no entry may follow a deactivating entry");
-  const entry = checkStructure(raw, options.limits ?? {});
+  const entry = checkStructure(raw, options.limits ?? {}, storedBytes);
 
   // Parameters (VH-Log Read step 1) and pre-rotation (step 7, which concerns only parameters).
   const { active, version } = applyParameters(entry.parameters, previous?.active, spec);
+
+  // VH-Log PR 11, "Editors from a Controller": an editor entry follows a controller entry
+  // that records the editor, sets no parameter and leaves the record of editors alone.
+  const editors = spec.keys.kind === "controller" ? spec.keys.editors : undefined;
+  const editor = editors?.editorOf(entry);
+  if (editors && editor !== undefined) {
+    const only = (message: string): never => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an entry the controller signs may (VH-Log PR 11)`);
+    if (!previous) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the first entry; only an entry the controller signs may (VH-Log PR 11)");
+    if (Object.keys(entry.parameters).length > 0) {
+      fail("outside-grant", "EDITOR_PARAMETERS", "an editor entry's parameters must be empty: it cannot change keys, editors, witnesses, the version or deactivation (VH-Log PR 11)");
+    }
+    const record = editors.recordOf(previous.entry);
+    if (!editors.lists(record, editor)) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor} is not an editor in the previous entry (VH-Log PR 11)`);
+    if (canonicalize(editors.recordOf(entry) ?? null) !== canonicalize(record ?? null)) only("an editor entry cannot change the editors");
+  }
   let authorizedKeys: string[] = [];
   if (spec.keys.kind === "updateKeys") {
     const prerotation = (previous?.active.nextKeyHashes.length ?? 0) > 0;
@@ -455,7 +541,10 @@ async function verifyEntry(
   if (spec.maxProofs !== undefined && entry.proof.length > spec.maxProofs) {
     fail("invalid-evidence", "PROOF_COUNT", `an entry may carry at most ${spec.maxProofs} proof(s)`);
   }
-  const context: EntryContext = { index, entry, previous, scid: active.scid, active, version };
+  if (editor !== undefined && entry.proof.length !== 1) {
+    fail("invalid-evidence", "PROOF_COUNT", "an editor entry carries exactly one proof, by its editor, and no controller proof (VH-Log PR 11)");
+  }
+  const context: EntryContext = { index, entry, previous, history, scid: active.scid, active, version };
   const document = withoutProof(entry);
   for (const proof of entry.proof) {
     if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
@@ -463,6 +552,8 @@ async function verifyEntry(
     if (spec.keys.kind === "updateKeys") {
       key = asProofError(() => didKeyMultikey(proof.verificationMethod, { fragment: "optional" }));
       if (!authorizedKeys.includes(key)) fail("unauthorized-key", "UNAUTHORIZED_KEY", `${proof.verificationMethod} is not an active update key`);
+    } else if (editors && editor !== undefined) {
+      key = await editors.authorize({ ...context, proof, editor });
     } else {
       key = await spec.keys.authorize({ ...context, proof });
     }
@@ -505,7 +596,8 @@ async function verifyEntry(
     if (computeScid(preliminary) !== scid) fail("invalid-evidence", "SCID_MISMATCH", "the SCID does not match the first entry");
   }
 
-  // State (step 6).
+  // State (step 6): first any limit the specialisation sets on an editor's change (VH-Log PR 11), then its state rules.
+  if (editors?.limit && editor !== undefined) await editors.limit({ ...context, editor });
   await spec.validateEntry?.(context);
 
   const prior = previous ? witnessListOf(previous.active.witness) : null;
@@ -566,7 +658,12 @@ function approvals(
   return byVersion;
 }
 
-export async function verifyLog(entries: unknown[], options: VerifyOptions): Promise<LogVerification> {
+/**
+ * Verify parsed log entries. `lineBytes`, when given, is the UTF-8 byte length
+ * of each entry's stored line without its line feed, which the entry size
+ * limit measures (P14.13); without it an entry is measured as its JCS line.
+ */
+export async function verifyLog(entries: unknown[], options: VerifyOptions, lineBytes?: readonly number[]): Promise<LogVerification> {
   const now = options.now === undefined ? Date.now() : typeof options.now === "number" ? options.now : options.now.getTime();
   const verified: VerifiedEntry[] = [];
   let failure: LogFailure | undefined;
@@ -578,7 +675,7 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions): Pro
       break;
     }
     try {
-      verified.push(await verifyEntry(index, entries[index], verified[index - 1], options, now));
+      verified.push(await verifyEntry(index, entries[index], verified, options, now, lineBytes?.[index]));
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       const raw = entries[index];
@@ -646,11 +743,20 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const lines = text.length === 0 ? [] : body.split("\n");
   const entries: unknown[] = [];
+  const sizes: number[] = [];
   let parseFailure: LogFailure | undefined;
   for (let index = 0; index < lines.length; index++) {
     try {
       if (lines[index].length === 0) throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
+      // The stored line is what is measured (P7.7, P14.13), before it is parsed, and only it.
+      const max = options.limits?.maxEntryBytes;
+      // A line of at most max / 3 UTF-16 code units is at most max UTF-8 bytes: that bound is what is passed on.
+      const size = max === undefined || lines[index].length <= max / 3 ? lines[index].length * 3 : utf8Length(lines[index]);
+      if (max !== undefined && size > max) {
+        throw new OriginalsError("limit-exceeded", "ENTRY_TOO_LARGE", `entry exceeds ${max} bytes`);
+      }
       entries.push(parseJson(lines[index], options.parse));
+      sizes.push(size);
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       parseFailure = { index, error };
@@ -660,7 +766,7 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   if (lines.length === 0) {
     parseFailure = { index: 0, error: new OriginalsError("invalid-evidence", "LOG_EMPTY", "the log has no entries") };
   }
-  const result = await verifyLog(entries, options);
+  const result = await verifyLog(entries, options, sizes);
   if (!parseFailure || result.failure) return result;
   return { ...result, failure: parseFailure };
 }
@@ -950,8 +1056,24 @@ export const vhLog10: Specialisation = {
 };
 
 /** Parse a log file (strict JSON Lines). Structural checks happen in `verifyLog`. */
+/**
+ * The UTF-8 byte length of the stored line each entry `parseLog` returned was
+ * parsed from, without its line feed: the size the entry size limit measures
+ * (P14.13), carried with the parsed entry so a log assembled from parsed
+ * entries (an Original's anchoring inscriptions, a copy) is measured as
+ * stored.
+ */
+const storedLineBytes = new WeakMap<object, number>();
+
+/** Parse a log file's text, one entry per line, keeping each entry's stored line size (P14.13). */
 export function parseLog(text: string, limits?: ParseLimits): JsonValue[] {
-  return parseJsonLines(text, limits);
+  const entries = parseJsonLines(text, limits);
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  const lines = body.split("\n");
+  entries.forEach((entry, i) => {
+    if (typeof entry === "object" && entry !== null) storedLineBytes.set(entry, utf8Length(lines[i]));
+  });
+  return entries;
 }
 
 export type { ErrorCategory };

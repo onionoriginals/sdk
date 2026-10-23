@@ -24,6 +24,7 @@ import { publishOriginal, type HostedUpload } from "./publish";
 import { landingSharedHost, type SubmitTransport } from "./shared-host";
 import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
 import { short } from "./format";
+import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
@@ -50,8 +51,8 @@ export interface HistoryEntry {
   operation: string;
   /** The author verification method that signed it. */
   authorKey: string;
-  /** Resource changes: id and new digest. */
-  changes: Array<{ resource: string; to: string }>;
+  /** Resource changes: id and new digest, or null for a removed resource (P4.1, P14.4). */
+  changes: Array<{ resource: string; to: string | null }>;
   name: string;
 }
 
@@ -123,7 +124,7 @@ interface LogLine {
   state: {
     operation: string;
     author: { verificationMethod: string };
-    transitions: Array<{ resource: string; to: string }>;
+    transitions: Array<{ resource: string; to: string | null }>;
     asset: { name: string };
   };
 }
@@ -200,15 +201,25 @@ export class DemoEngine {
     for (const l of this.listeners) l(event);
   }
 
+  /** The author DID evidence the SDK reads, with when it was obtained (P7.10). */
+  private readonly authorEvidence = new StampedAuthorEvidence();
+
+  /** Hand the SDK new author DID evidence: restamped if it changed, so `obtainedAt` is never a stale setup time. */
+  private setAuthorEvidence(evidence: AuthorDidEvidence): void {
+    this.authorEvidence.set(evidence);
+  }
+
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
     this.authoring = this.authed ? await this.signedInAuthor() : await createLocalAuthor();
+    this.setAuthorEvidence(this.authoring.evidence);
     this.sdk = OriginalsSDK.create({
       store: this.store,
-      authors: [this.authoring.evidence],
-      // This page holds or just read the author's own DID, so it vouches for its freshness (P7.8).
-      freshness: "asserted",
+      // This page holds or just read the author's own DID: the SDK reads it as stamped when it was
+      // obtained, restamped whenever it changes. An unanchored Original is still only valid as of
+      // its checkpoint, never current (P7.10).
+      authors: async (did) => this.authorEvidence.get(did),
     });
     this.emit("authorship:key", `Authoring as ${short(this.authoring.ref.did)}`, { author: this.authoring.ref });
     return this.authoring;

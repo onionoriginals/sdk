@@ -52,7 +52,7 @@ async function published() {
 const evidence = (a: { did: string; entries: LogEntry[] }): AliasEvidence => ({ did: a.did, log: serializeLog(a.entries) });
 
 const verify = (log: LogEntry[], alice: VhAuthor, extra: Partial<Parameters<typeof verifyOriginal>[0]> = {}): Promise<OriginalsReport> =>
-  verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted", ...extra });
+  verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes: allBytes, ...extra });
 
 describe("publishing a did:webvh alias (P3.6, P9.8)", () => {
   test("an alias listed in the state and pointing back is confirmed; the Original stays current", async () => {
@@ -61,9 +61,9 @@ describe("publishing a did:webvh alias (P3.6, P9.8)", () => {
     expect(r.state?.aliases).toEqual([alias.did]);
     expect(r.document?.alsoKnownAs).toEqual([alias.did]);
     expect(r.aliases).toEqual([{ did: alias.did, status: "confirmed" }]);
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
     // Resolving through the alias reaches the same verified Original.
-    const via = await verifyOriginalByAlias({ alias: evidence(alias), log, authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted" });
+    const via = await verifyOriginalByAlias({ alias: evidence(alias), log, authors: [alice.evidence()], now: NOW, bytes: allBytes });
     expect(via.original).toBe(genesis.state.id);
   });
 
@@ -73,7 +73,7 @@ describe("publishing a did:webvh alias (P3.6, P9.8)", () => {
     const listed = (log[1].state as unknown as { asset: { aliases: string[] } }).asset.aliases[0];
     const r = await verify(log, alice, { aliases: [{ did: listed, log: serializeLog(elsewhere.entries) }] });
     expect(r.aliases[0]).toMatchObject({ did: listed, status: "not-confirmed" });
-    expect(r.current).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
   test("C12-66: a did:webvh pointing to a did:vh that does not list it gives no Originals result", async () => {
@@ -82,7 +82,7 @@ describe("publishing a did:webvh alias (P3.6, P9.8)", () => {
     const claims = await aliasLog([other.state.id as string], "claims.example");
     let caught: unknown;
     try {
-      await verifyOriginalByAlias({ alias: evidence(claims), log: [other], authors: [alice.evidence()], now: NOW, bytes: allBytes, freshness: "asserted" });
+      await verifyOriginalByAlias({ alias: evidence(claims), log: [other], authors: [alice.evidence()], now: NOW, bytes: allBytes });
     } catch (error) {
       caught = error;
     }
@@ -138,7 +138,7 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
     const before = await verify(log, alice, { aliases: [{ did: alias.did, log: movedLog }] });
     expect(before.aliases).toEqual([{ did: alias.did, status: "not-confirmed", reason: "alias-moved" }]);
     expect(before.authorBinding.status).toBe("valid");
-    expect(before.current).toBe(true);
+    expect(before.reasons).toEqual(["not-anchored"]);
     // An author entry lists the moved alias; the author reference is the same as before.
     const relisted = await updateOriginal(publish, { versionTime: at(), aliases: [movedDid], author: ref, sign });
     const after = await verify([...log, relisted], alice, { aliases: [{ did: movedDid, log: movedLog }] });
@@ -146,7 +146,7 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
     expect(after.authorBinding.status).toBe("valid");
     expect(after.identityEvidence.author).toBe(alice.did);
     expect((relisted.state as JsonObject).author).toEqual(ref);
-    expect(after.current, JSON.stringify(after.reasons)).toBe(true);
+    expect(after.reasons).toEqual(["not-anchored"]);
   });
 
   test("aliases other than one did:webvh are refused; did:btco arrives with anchoring", async () => {

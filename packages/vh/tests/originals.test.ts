@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { base58btcEncode, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
 import { parseJson, type JsonObject } from "../src/json/index.js";
-import { appendEntry, createLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
+import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
 import { resolveDidVh } from "../src/didvh/index.js";
 import {
   ORIGINALS_METHOD,
@@ -55,10 +55,10 @@ async function resign(previous: LogEntry, state: JsonObject, sign: Parameters<ty
 describe("C12-01: create, edit and verify in a fresh reader", () => {
   test("the photo example: versions derived from history, no private key in the reader", async () => {
     const { alice, log } = await harbor();
-    const r = await verifyOriginal({ log: serializeLog(log), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1, B2), freshness: "asserted" });
+    const r = await verifyOriginal({ log: serializeLog(log), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1, B2) });
     expect(r.history.status).toBe("valid");
     expect(r.authorBinding.status).toBe("valid");
-    expect(r.identityEvidence).toMatchObject({ status: "complete", author: alice.did, latestVersionId: alice.versionId, freshness: "asserted" });
+    expect(r.identityEvidence).toMatchObject({ status: "complete", author: alice.did, latestVersionId: alice.versionId });
     expect(r.checkpoint).toBe(log[2].versionId);
     expect(r.original).toBe(`did:vh:${log[0].parameters.scid as string}`);
     expect(r.state?.name).toBe("Harbor at dawn");
@@ -70,16 +70,17 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     ]);
     expect(r.resources.status).toBe("available");
     expect(r.ordering).toBe("claimed");
-    expect(r.current).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
-  test("without a freshness assertion the result is verified but not current (P7.8)", async () => {
+  test("C12-145: a verified result is valid as of its checkpoint, never current (P7.8, P7.10)", async () => {
     const { alice, log } = await harbor();
     const r = await report(log, [alice]);
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.freshness).toBe("not-established");
     expect(r.current).toBe(false);
-    expect(r.reasons).toContain("author-freshness-not-established");
+    expect(r.validAsOf).toEqual({ checkpoint: r.head, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null }] });
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
   test("an exact checkpoint returns that checkpoint, or says why it cannot (P3.2)", async () => {
@@ -99,7 +100,7 @@ describe("resources", () => {
     const { alice, log } = await harbor();
     const tampered = allBytes(B1, B2);
     tampered[resourceDigest(bytes(B2))] = bytes("harbor at dawn, tighter crop!");
-    const r = await report(log, [alice], { bytes: tampered, freshness: "asserted" });
+    const r = await report(log, [alice], { bytes: tampered });
     expect(r.resources.status).toBe("digest-failure");
     expect(r.resources.failures.map((v) => [v.version, v.bytes])).toEqual([[2, "mismatch"]]);
     expect(r.current).toBe(false);
@@ -107,27 +108,27 @@ describe("resources", () => {
 
   test("C12-10: missing historical bytes give explicit partial availability; supplied bytes are still checked", async () => {
     const { alice, log } = await harbor();
-    const r = await report(log, [alice], { bytes: allBytes(B2), freshness: "asserted" });
+    const r = await report(log, [alice], { bytes: allBytes(B2) });
     expect(r.resources.status).toBe("partial");
     expect(r.resources.missing.map((v) => [v.resource, v.version, v.versionId])).toEqual([["photo", 1, log[0].versionId]]);
     expect(r.resources.versions[1].bytes).toBe("verified");
     expect(r.history.status).toBe("valid");
     // P7.3, P7.4, P9.18: the log verifies without its bytes. Unavailable content is reported
     // beside the result, never as a verification failure, and `current` leaves it out.
-    expect(r.reasons).toEqual([]);
-    expect(r.current).toBe(true);
+    expect(r.reasons).toEqual(["not-anchored"]);
+    expect(r.validAsOf).not.toBeNull();
   });
 
   test("P7.3, P7.4: current bytes missing too leave the log verified and current; a supplied mismatch still fails", async () => {
     const { alice, log } = await harbor();
-    const none = await report(log, [alice], { bytes: {}, freshness: "asserted" });
+    const none = await report(log, [alice], { bytes: {} });
     expect(none.resources.status).toBe("partial");
     expect(none.resources.missing.map((v) => v.version)).toEqual([1, 2]);
     expect(none.history.status).toBe("valid");
     expect(none.authorBinding.status).toBe("valid");
-    expect(none.current).toBe(true);
+    expect(none.reasons).toEqual(["not-anchored"]);
     const tampered = { [resourceDigest(bytes(B2))]: bytes("not the crop") };
-    const bad = await report(log, [alice], { bytes: tampered, freshness: "asserted" });
+    const bad = await report(log, [alice], { bytes: tampered });
     expect(bad.resources.status).toBe("digest-failure");
     expect(bad.reasons).toContain("resources-digest-failure");
     expect(bad.current).toBe(false);
@@ -149,16 +150,6 @@ describe("resources", () => {
     const asset = log[2].state.asset as JsonObject;
     const counted = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...asset, resources: [{ ...photo(B2), version: 7 }] } }, sign);
     failedWith(await report([...log, counted], [alice]), 3, "STATE_MEMBERS");
-  });
-
-  test("C12-16: resources cannot be added, removed or renamed after genesis", async () => {
-    const { alice, log, ref, sign, at } = await harbor();
-    await expect(updateOriginal(log[2], { versionTime: at(), resources: [photo("x", "sidecar")], author: ref, sign })).rejects.toThrow(OriginalsError);
-    const asset = log[2].state.asset as JsonObject;
-    for (const resources of [[photo(B2), photo("x", "sidecar")], [], [photo(B2, "image")]]) {
-      const entry = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...asset, resources } }, sign);
-      failedWith(await report([...log, entry], [alice]), 3, "STATE_RESOURCE_SET");
-    }
   });
 
   test("C12-80: a digest outside the SHA-256 set is an unsupported profile", async () => {
@@ -240,7 +231,7 @@ describe("history and identity", () => {
   test("C12-21: an update after deactivation is rejected; the history stays readable", async () => {
     const { alice, log, ref, sign, at } = await harbor();
     const end = await deactivateOriginal(log[2], { versionTime: at(), author: ref, sign });
-    const r = await report([...log, end], [alice], { freshness: "asserted" });
+    const r = await report([...log, end], [alice], {});
     expect(r.deactivated).toBe(true);
     expect(r.state?.status).toBe("deactivated");
     expect(r.history.status).toBe("valid");
@@ -268,8 +259,8 @@ describe("history and identity", () => {
     const schnorr = seeded(22, "secp256k1");
     const bob = await VhAuthor.create([{ fragment: "btc", signer: schnorr }]);
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Map", resources: [photo(B1)], author: bob.ref("btc"), sign: bob.signer(schnorr, "btc") });
-    const r = await verifyOriginal({ log: [genesis], authors: [bob.evidence()], now: NOW, bytes: allBytes(B1), freshness: "asserted" });
-    expect(r.current).toBe(true);
+    const r = await verifyOriginal({ log: [genesis], authors: [bob.evidence()], now: NOW, bytes: allBytes(B1) });
+    expect(r.reasons).toEqual(["not-anchored"]);
     const other = structuredClone(genesis);
     other.proof[0].cryptosuite = "ecdsa-jcs-2019";
     failedWith(await verifyOriginal({ log: [other], authors: [bob.evidence()], now: NOW }), 0, "CRYPTOSUITE_NOT_PERMITTED");
@@ -384,7 +375,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
 
   test("C12-09: missing author DID history is incomplete identity evidence, never a pass", async () => {
     const { log } = await harbor();
-    const r = await verifyOriginal({ log, authors: [], now: NOW, freshness: "asserted" });
+    const r = await verifyOriginal({ log, authors: [], now: NOW });
     expect(r.history.status).toBe("incomplete");
     expect(r.history.failure?.category).toBe("incomplete-evidence");
     expect(r.authorBinding.status).toBe("incomplete");
@@ -395,10 +386,10 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
   test("C12-41 (local): a key removed from the latest author DID leaves the history valid but not current (P7.9)", async () => {
     const { alice, log } = await harbor();
     await alice.rotate([{ fragment: "orig2", signer: seeded(23) }]);
-    const r = await report(log, [alice], { freshness: "asserted" });
+    const r = await report(log, [alice], {});
     expect(r.history.status).toBe("valid");
     expect(r.current).toBe(false);
-    expect(r.reasons).toContain("head-key-not-in-latest-author-document");
+    expect(r.reasons).toContain("historically-authorized-only");
   });
 
   test("a key embedded under assertionMethod binds, and stays current while listed", async () => {
@@ -411,14 +402,14 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
       sign: signWith(alice.update, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${alice.update.publicKeyMultibase}#${alice.update.publicKeyMultibase}` }),
     }));
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("emb"), sign: alice.signer(key, "emb") });
-    const r = await report([genesis], [alice], { freshness: "asserted" });
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    const r = await report([genesis], [alice], {});
+    expect(r.reasons).toEqual(["not-anchored"]);
   });
 
   test("C12-48 (local): a deactivated author DID makes an unanchored Original non-current (P6.5)", async () => {
     const { alice, log } = await harbor();
     await alice.deactivate();
-    const r = await report(log, [alice], { freshness: "asserted" });
+    const r = await report(log, [alice], {});
     expect(r.identityEvidence.deactivated).toBe(true);
     expect(r.current).toBe(false);
     expect(r.reasons).toContain("author-did-deactivated");
@@ -431,8 +422,8 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     const ref: AuthorRef = { did: fx.did, verificationMethod: vm, versionId: fx.logA[3].versionId };
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resources: [photo(B1)], author: ref, sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: vm }) });
     const evidence = { did: fx.did, log: serializeLog(fx.logA), witness: fx.witnessA };
-    const r = await verifyOriginal({ log: [genesis], authors: [evidence], now: NOW, bytes: allBytes(B1), freshness: "asserted" });
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    const r = await verifyOriginal({ log: [genesis], authors: [evidence], now: NOW, bytes: allBytes(B1) });
+    expect(r.reasons).toEqual(["not-anchored"]);
     // The rotated-away update key k1 is not an author key.
     const unwitnessed = await verifyOriginal({ log: [genesis], authors: [{ did: fx.did, log: serializeLog(fx.logA) }], now: NOW });
     expect(unwitnessed.identityEvidence.status).toBe("incomplete");
@@ -486,8 +477,12 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const { alice, log, sign } = await harbor();
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
-    const migrate = await resign(log[2], { ...log[2].state, transitions: [], operation: "migrate" }, sign);
-    failedWith(await report([...log, migrate], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
+    // There are no publish or migrate operations: publication and anchoring are updates that add an
+    // alias (P9.10; P14.4, PROVISIONAL, section 14), so any other operation is invalid evidence.
+    for (const operation of ["migrate", "publish"]) {
+      const other = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign);
+      failedWith(await report([...log, other], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+    }
   });
 
   test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {
@@ -496,7 +491,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: witnesses });
     failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_PERMITTED", "invalid-evidence");
     const empty = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: {} });
-    const r = await report([...log, empty], [alice], { freshness: "asserted" });
+    const r = await report([...log, empty], [alice], {});
     expect(r.history.status).toBe("valid");
     expect(r.ordering).toBe("claimed");
   });
@@ -517,5 +512,64 @@ describe("creating needs a well-formed entry", () => {
     await expect(createOriginal({ ...base, name: "x", resources: [photo(B1), photo(B2)] })).rejects.toThrow(OriginalsError);
     await expect(createOriginal({ ...base, name: "x", resources: [{ ...photo(B1), mediaType: "not a type" }] })).rejects.toThrow(OriginalsError);
     await expect(createLog({ versionTime: base.versionTime, parameters: { method: ORIGINALS_METHOD, scid: "{SCID}" }, state: {}, sign: base.sign })).resolves.toBeDefined();
+  });
+});
+
+describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13)", () => {
+  /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
+  async function genesisOf(target: number) {
+    const key = seeded(21);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const ref = alice.ref("orig");
+    const wide = "é".repeat(30_000); // 60,000 UTF-8 bytes, 30,000 UTF-16 code units
+    let pad = 0;
+    for (let i = 0; i < 40; i++) {
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { wide, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign: alice.signer(key, "orig") });
+      const line = serializeLog([entry]).slice(0, -1);
+      const size = new TextEncoder().encode(line).length;
+      if (size === target) return { alice, line, codeUnits: line.length };
+      pad += target - size;
+    }
+    throw new Error(`no entry of ${target} bytes`);
+  }
+
+  test("a line of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
+    const atLimit = await genesisOf(65_536);
+    expect(atLimit.codeUnits).toBeLessThan(40_000);
+    const ok = await verifyOriginal({ log: `${atLimit.line}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    expect(ok.history.status, JSON.stringify(ok.history.failure)).toBe("valid");
+    const over = await genesisOf(65_537);
+    const r = await verifyOriginal({ log: `${over.line}\n`, authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    failedWith(r, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+    expect(r.history.status).toBe("limit-exceeded");
+    // Parsed entries are measured as the line they serialize to.
+    const parsed = await verifyOriginal({ log: [JSON.parse(over.line)], authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+    failedWith(parsed, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+  });
+
+  test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
+    const key = seeded(21);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    // `1e21` re-serializes as `1e+21`: the same entry, and the same versionId and proof, one byte longer each time.
+    const nums = Array.from({ length: 200 }, () => 1e21);
+    let pad = 0;
+    for (let i = 0; i < 40; i++) {
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+      const line = serializeLog([entry]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const size = new TextEncoder().encode(line).length;
+      if (size !== 65_536) {
+        pad += 65_536 - size;
+        continue;
+      }
+      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(65_736);
+      const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+      // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.
+      const parsed = await verifyOriginal({ log: parseLog(`${line}\n`), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(parsed.history.status, JSON.stringify(parsed.history.failure)).toBe("valid");
+      failedWith(await verifyOriginal({ log: [JSON.parse(line)], authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      return;
+    }
+    throw new Error("no entry of 65,536 bytes");
   });
 });

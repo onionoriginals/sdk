@@ -11,7 +11,7 @@ const KEY = seed(21);
 async function setup() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
   return { alice, store, sdk, signer, author };
@@ -39,7 +39,7 @@ async function rejects(promise: Promise<unknown>, category: string, code?: strin
 describe("create, edit and deactivate", () => {
   test("the photo example through the SDK: versions derived from history (P4.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
-    expect(original.current).toBe(true);
+    expect(original.report.reasons).toEqual(["not-anchored"]);
     const cropped = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author, signer });
     const corrected = await sdk.edit(original.did, { parent: cropped.original.checkpoint, metadata: { caption: "Corrected" }, author, signer });
     expect(corrected.status).toBe("committed");
@@ -78,11 +78,13 @@ describe("create, edit and deactivate", () => {
     await rejects(sdk.edit(original.did, { parent: original.checkpoint, resources: [input], author, signer }), "invalid-evidence", "INPUT_INVALID");
   });
 
-  test("C12-19 and C12-16 through the API: same bytes do not advance; unknown resources are rejected", async () => {
+  test("C12-19 and C12-16 through the API: same bytes do not advance; a new id is an addition at version 1 (P4.1, P4.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
     const same = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B1 }], author, signer });
     expect(same.original.resources.length).toBe(1);
-    await rejects(sdk.edit(original.did, { parent: same.original.checkpoint, resources: [{ id: "sidecar", bytes: B2, mediaType: "text/plain" }], author, signer }), "invalid-evidence", "STATE_RESOURCE_SET");
+    const added = await sdk.edit(original.did, { parent: same.original.checkpoint, resources: [{ id: "sidecar", bytes: B2, mediaType: "text/plain" }], author, signer });
+    expect(added.original.state.resources.map((r) => r.id)).toEqual(["photo", "sidecar"]);
+    expect(added.original.resources.map((r) => [r.resource, r.version])).toEqual([["photo", 1], ["sidecar", 1]]);
   });
 
   test("C12-21 through the API: deactivation is terminal", async () => {
@@ -188,5 +190,15 @@ describe("C12-20: import, then edit without authority", () => {
     const draft = await reader.prepareEdit(original.did, { parent: original.checkpoint, name: "Mine", author: alice.ref("orig") });
     await rejects(reader.commit(draft, { sign: "not a function" } as unknown as OriginalsSigner), "unauthorized-key", "SIGNER_REQUIRED");
     expect((await reader.get(original.did)).checkpoint).toBe(original.checkpoint);
+  });
+});
+
+describe("C12-150: the SDK never commits an entry over 65,536 UTF-8 bytes (P7.7; P14.13)", () => {
+  test("an entry whose line is 66,000 UTF-8 bytes but fewer UTF-16 code units is refused", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const store = new MemoryStore();
+    const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
+    const created = sdk.create({ name: "Harbor", metadata: { wide: "é".repeat(33_000) }, resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    await expect(created).rejects.toMatchObject({ category: "limit-exceeded" });
   });
 });

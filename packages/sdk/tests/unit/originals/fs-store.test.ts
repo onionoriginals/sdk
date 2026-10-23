@@ -17,7 +17,7 @@ function tempDir(): string {
 async function withOriginal(dir: string, faults?: ConstructorParameters<typeof FileStore>[1]) {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const store = await FileStore.open(dir, faults);
-  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   return { alice, store, sdk, signer: alice.signer("orig", KEY), author: alice.ref("orig") };
 }
 
@@ -28,10 +28,10 @@ describe("FileStore: durable local commit (P6.2)", () => {
       const { sdk, signer, author, alice } = await withOriginal(dir);
       const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
-      const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+      const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock() });
       const view = await reopened.get(c.original.did);
       expect(view.checkpoint).toBe(c.original.checkpoint);
-      expect(view.current).toBe(true);
+      expect(view.report.reasons).toEqual(["not-anchored"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -69,10 +69,10 @@ describe("FileStore: durable local commit (P6.2)", () => {
       expect(readdirSync(scidDir).some((f) => f.includes(".tmp"))).toBe(true);
       const recovered = await FileStore.open(dir);
       expect(readdirSync(scidDir).some((f) => f.includes(".tmp"))).toBe(false);
-      const reader = OriginalsSDK.create({ store: recovered, authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:10:00Z")) });
+      const reader = OriginalsSDK.create({ store: recovered, authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:10:00Z")) });
       const prior = await reader.get(c.original.did);
       expect(prior.checkpoint).toBe(c.original.checkpoint);
-      expect(prior.current).toBe(true);
+      expect(prior.report.reasons).toEqual(["not-anchored"]);
       // The staged bytes may remain but are not a committed version.
       expect(prior.resources.length).toBe(1);
 
@@ -93,7 +93,7 @@ describe("FileStore: durable local commit (P6.2)", () => {
       if (c.kind !== "original") throw new Error("expected an Original");
       const [digest] = readdirSync(join(dir, "resources"));
       writeFileSync(join(dir, "resources", digest), "tampered");
-      const reader = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+      const reader = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock() });
       const view = await reader.get(c.original.did);
       expect(view.report.resources.status).toBe("digest-failure");
       expect(view.current).toBe(false);
@@ -110,7 +110,7 @@ describe("FileStore: one writer per root (08b review C5)", () => {
       const { sdk, signer, author, alice } = await withOriginal(dir);
       const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
-      const other = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:05:00Z")) });
+      const other = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:05:00Z")) });
       const parent = c.original.checkpoint;
       const d1 = await sdk.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("mine") }], author });
       const d2 = await other.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("theirs") }], author });
@@ -118,7 +118,7 @@ describe("FileStore: one writer per root (08b review C5)", () => {
       const committed = results.filter((r) => r.status === "fulfilled" && r.value.status === "committed");
       expect(committed).toHaveLength(1);
       const winner = (committed[0] as PromiseFulfilledResult<{ original: { checkpoint: string } }>).value.original.checkpoint;
-      const reader = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], freshness: "asserted", clock: clock(Date.parse("2026-10-18T12:10:00Z")) });
+      const reader = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:10:00Z")) });
       expect((await reader.get(c.original.did)).checkpoint).toBe(winner);
     } finally {
       rmSync(dir, { recursive: true, force: true });

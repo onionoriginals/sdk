@@ -21,7 +21,7 @@ const LATER = START + 3_600_000;
 async function authored() {
   const author = await createLocalAuthor(new Date(START));
   let t = START + 1000;
-  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], freshness: 'asserted', clock: () => (t += 250) });
+  const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock: () => (t += 250) });
   const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>');
   const c = await sdk.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: svg }], author: author.ref, signer: author.signer });
   if (c.kind !== 'original') throw new Error('expected an Original');

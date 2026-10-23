@@ -47,15 +47,18 @@ describe("C12-132: a did:webvh author that moved under portability, then rotated
     expect(after).toEqual({ did: alice.did, verificationMethod: `${alice.location}#orig-2`, versionId: rotated });
     expect(after.verificationMethod.startsWith(`${alice.did}#`)).toBe(false);
     const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
-    const r = await verify([...log, next], [alice.evidence()], { freshness: "asserted" });
+    const r = await verify([...log, next], [alice.evidence()], {});
     expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
     expect(r.authorBinding.status).toBe("valid");
     expect(r.identityEvidence).toMatchObject({ status: "complete", author: alice.did, latestVersionId: rotated });
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.validAsOf?.checkpoint).toBe(next.versionId);
+    // The rotation removed the old key: the entries before it are historically authorized only (P7.9).
+    expect(r.historicallyAuthorizedOnly.map((h) => h.versionId)).toEqual(log.map((e) => e.versionId));
+    expect(r.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
     // The author is the identity DID throughout; entries before the move bind to versions before it.
     expect(r.document?.controller).toBe(alice.did);
     expect(before.verificationMethod).toBe(`${alice.did}#orig-1`);
-    const early = await verify([...log, next], [alice.evidence()], { freshness: "asserted", checkpoint: log[1].versionId });
+    const early = await verify([...log, next], [alice.evidence()], { checkpoint: log[1].versionId });
     expect(early.history.status).toBe("valid");
     expect(early.authorBinding.status).toBe("valid");
   });
@@ -63,13 +66,13 @@ describe("C12-132: a did:webvh author that moved under portability, then rotated
   test("the pre-move head stays historically valid but is not current once the key is gone from the latest version (P7.9)", async () => {
     const { alice, log } = await moved();
     await alice.rotate([{ fragment: "orig-2", signer: K2 }]);
-    const r = await verify(log, [alice.evidence()], { freshness: "asserted" });
+    const r = await verify(log, [alice.evidence()], {});
     expect(r.history.status).toBe("valid");
-    expect(r.reasons).toEqual(["head-key-not-in-latest-author-document"]);
+    expect(r.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
     // Kept across the move, the key still holds: the same key under the new `id` meets P5.3 there.
     const kept = await moved();
-    const still = await verify(kept.log, [kept.alice.evidence()], { freshness: "asserted" });
-    expect(still.current, JSON.stringify(still.reasons)).toBe(true);
+    const still = await verify(kept.log, [kept.alice.evidence()], {});
+    expect(still.reasons).toEqual(["not-anchored"]);
   });
 
   test("after the move the verification method must be in the namespace of that version's `id` (P5.3)", async () => {
@@ -165,11 +168,13 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     // No retrieval and no assertion: freshness is not established, and the Original is not currently authorized.
     const plain = await verify(entries, [alice.evidence()]);
     expect(plain.identityEvidence.freshness).toBe("not-established");
-    expect(plain.reasons).toContain("author-freshness-not-established");
+    expect(plain.current).toBe(false);
     // Retrieved from where the latest entry's verification method says the DID is.
     const found = await verify(entries, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.location) }]);
     expect(found.identityEvidence.freshness).toBe("retrieved");
-    expect(found.reasons).not.toContain("author-freshness-not-established");
+    // Established freshness still makes an unanchored Original only valid as of its checkpoint (P7.10).
+    expect(found.current).toBe(false);
+    expect(found.validAsOf?.checkpoint).toBe(next.versionId);
     // Retrieved anywhere else (the old location, which redirects or keeps a copy): not established.
     const elsewhere = await verify(entries, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);
     expect(elsewhere.identityEvidence.freshness).toBe("not-established");

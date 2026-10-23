@@ -11,7 +11,7 @@ import { didWebvhLogUrl } from "@originals/vh/webvh";
 import {
   MemoryStore,
   OriginalsSDK,
-  authorPath,
+  signerPath,
   describeEntry,
   keySigner,
   readZip,
@@ -45,7 +45,7 @@ async function harbor() {
   const carol = await Author.create([{ fragment: "edit", secret: KC }]);
   const dids = [alice, bob, carol];
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: async (did) => dids.find((d) => d.did === did)?.evidence(), freshness: "asserted", clock: clock() });
+  const sdk = OriginalsSDK.create({ store, authors: async (did) => dids.find((d) => d.did === did)?.evidence(), clock: clock() });
   const created = await sdk.create({
     name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }],
     author: alice.ref("orig"), signer: alice.signer("orig", KA),
@@ -64,9 +64,9 @@ describe("C12-113: editors sign through the normal edit API", () => {
     const byBob = await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
     const byCarol = await sdk.edit(did, { parent: byBob.original.checkpoint, metadata: { caption: "Corrected caption" }, ...asCarol });
     const view = byCarol.original;
-    expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
+    expect(view.report.reasons).toEqual(["not-anchored"]);
     expect(view.report.identityEvidence.author).toBe(alice.did);
-    expect(view.report.identityEvidence.editors.map((e) => [e.did, e.status, e.freshness])).toEqual([[bob.did, "complete", "asserted"], [carol.did, "complete", "asserted"]]);
+    expect(view.report.identityEvidence.editors.map((e) => [e.did, e.status, e.freshness])).toEqual([[bob.did, "complete", "not-established"], [carol.did, "complete", "not-established"]]);
     expect(view.state.metadata).toEqual({ caption: "Corrected caption" });
     expect(view.resources.map((r) => [r.version, r.digest])).toEqual([[1, resourceDigest(B1)], [2, resourceDigest(B2)]]);
   });
@@ -101,7 +101,7 @@ describe("C12-117, C12-119: the author grants, narrows and revokes", () => {
     expect(revoked.original.state.editors).toEqual([grant(carol.did, { metadata: true })]);
     await rejects(sdk.edit(did, { parent: revoked.original.checkpoint, resources: [{ id: "photo", bytes: B3 }], ...asBob }), "unauthorized-key", "EDITOR_NOT_GRANTED");
     const view = await sdk.get(did);
-    expect(view.current).toBe(true);
+    expect(view.report.reasons).toEqual(["not-anchored"]);
     expect(view.resources.at(-1)?.versionId).toBe(byBob.original.checkpoint);
     const none = await sdk.edit(did, { parent: revoked.original.checkpoint, editors: null, ...asAlice });
     expect(none.original.state.editors).toBeUndefined();
@@ -115,9 +115,9 @@ describe("C12-124 and P7.1: evidence packages carry every signer's DID history",
     const pkg = await sdk.package(did);
     expect(pkg.manifest).toMatchObject({ completeness: "complete", missing: [] });
     const files = readZip(pkg.bytes);
-    expect(files.has(`${authorPath(bob.did)}/did.jsonl`)).toBe(true);
+    expect(files.has(`${signerPath(bob.did)}/did.jsonl`)).toBe(true);
     // Carol signed nothing, so her history is not needed (P7.1).
-    expect(files.has(`${authorPath(carol.did)}/did.jsonl`)).toBe(false);
+    expect(files.has(`${signerPath(carol.did)}/did.jsonl`)).toBe(false);
     const fresh = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
     const loaded = await fresh.load(pkg.bytes);
     expect(loaded.report.identityEvidence).toMatchObject({ status: "complete" });
@@ -128,7 +128,7 @@ describe("C12-124 and P7.1: evidence packages carry every signer's DID history",
   test("without the editor's history the result is incomplete identity evidence and not current", async () => {
     const { bob, sdk, did, v1, asBob } = await harbor();
     await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
-    const files = new Map([...readZip((await sdk.package(did)).bytes)].filter(([path]) => !path.startsWith(`${authorPath(bob.did)}/`)));
+    const files = new Map([...readZip((await sdk.package(did)).bytes)].filter(([path]) => !path.startsWith(`${signerPath(bob.did)}/`)));
     const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
     files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: bob.did, role: "editor" }] })));
     const fresh = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
@@ -227,7 +227,7 @@ describe("C12-118: an editor entry and a revoking author entry on the same paren
     const { alice, bob, carol, sdk, did, v1, asBob, asAlice } = await harbor();
     const dids = [alice, bob, carol];
     // Bob works from a copy of v1 on his own machine.
-    const bobs = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => dids.find((x) => x.did === d)?.evidence(), freshness: "asserted", clock: clock() });
+    const bobs = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => dids.find((x) => x.did === d)?.evidence(), clock: clock() });
     await bobs.import((await sdk.package(did)).bytes);
     const byBob = await bobs.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
     // Meanwhile Alice revokes Bob on the same parent.
@@ -244,7 +244,7 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry, r
   test("author freshness is not established: the editor entry does not reveal where the author moved", async () => {
     const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: KA }]);
     const bob = await Author.create([{ fragment: "edit", secret: KB }]);
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), freshness: "asserted", clock: clock() });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), clock: clock() });
     const ref = alice.ref("orig-1");
     const created = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: ref, signer: alice.signer(ref, KA), editors: [grant(bob.did, { resources: ["photo"] })] });
     if (created.kind !== "original") throw new Error("expected an Original");
@@ -265,7 +265,6 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry, r
     expect(seen).not.toContain(didWebvhLogUrl(alice.location));
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.freshness).toBe("not-established");
-    expect(r.reasons).toContain("author-freshness-not-established");
     expect(r.current).toBe(false);
   });
 });

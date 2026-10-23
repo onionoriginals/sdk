@@ -43,8 +43,7 @@ import { FileStore } from "@originals/sdk/originals/fs"; // Node: durable local 
 
 const sdk = OriginalsSDK.create({
   store: await FileStore.open("./originals"),   // or new MemoryStore()
-  authors: [authorDidEvidence],                 // or (did) => Promise<AuthorDidEvidence | undefined>
-  freshness: "asserted",                        // only when the caller vouches its evidence is the latest (P7.8)
+  authors: [{ ...authorDidEvidence, obtainedAt }], // or (did) => Promise<AuthorDidEvidence | undefined>
 });
 const signer = keySigner({ keyType: "Ed25519", secretKey, verificationMethod: `${authorDid}#orig` });
 const author = { did: authorDid, verificationMethod: `${authorDid}#orig`, versionId: authorVersionId };
@@ -57,7 +56,8 @@ const edited = await sdk.edit(did, {
   parent: original.checkpoint,   // required; a moved parent is a StaleParent conflict (P4.5)
   name,                          // omitted keeps the value; null is rejected (P4.6)
   metadata,                      // omitted keeps the value; null removes it (P4.6)
-  resources: [{ id: "photo", bytes, expectedDigest }], // same resourceIDs as genesis (P4.1)
+  resources: [{ id: "photo", bytes, expectedDigest }], // a new id adds a resource (P4.1)
+  remove: ["sketch"],            // author only; at least one resource remains (P4.1)
   author, signer,
 });
 await sdk.deactivate(did, { parent, author, signer }); // terminal (P6.5)
@@ -71,7 +71,10 @@ await sdk.import(pkg.bytes); // "imported" | "already-current" | "kept-newer-loc
 ```
 
 The `originals` command verifies a package offline:
-`originals verify harbor.zip [--json] [--now <time>] [--freshness asserted]`.
+`originals verify harbor.zip [--json] [--now <time>]`. It prints the
+checkpoint the package is valid as of and the signer DID versions it relied
+on; it never reports an unanchored Original as current (P7.10). The
+`--freshness asserted` option was removed (originals-spec #46).
 
 - **Durable commit (P6.2).** The SDK signs the entry, verifies the whole
   resulting history, stores new bytes, and then replaces the log atomically.
@@ -98,8 +101,40 @@ The `originals` command verifies a package offline:
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.
+- **Entry size (P7.7; P14.13).** An entry is at most
+  `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
+  length of its stored line without the line feed (previously UTF-16 code
+  units of the re-serialized entry), measured before the line is parsed and
+  never again after. Entries parsed with `parseLog` carry their stored line's
+  size, and `verifyLog` takes the sizes (`lineBytes`) from a caller that has
+  the lines; an entry with no stored line is measured as its JCS
+  serialization (PROVISIONAL). A commit of a larger entry fails with
+  `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
+  log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
+- **Resource set (P4.1, P5.16, P14.4, P14.5; originals-spec #49).** Genesis
+  names at least one resource. The author's `edit` adds a resource by giving
+  bytes and a `mediaType` for a new id, appended after the existing resources
+  in the order given, and removes resources with `remove: [id]`, as long as one
+  remains. A resourceID is never used again in the Original, even after its
+  resource is removed (`STATE_RESOURCE_REUSED`); there is no rename. A removed
+  resource must also leave every grant, so pass `editors` without it
+  (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
+  author grants it (PROVISIONAL: the adding entry may itself grant it; the
+  grant takes effect from the next entry, P5.17). An editor never adds or removes a resource
+  (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
+  resource's earlier versions stay in `resources`, in evidence packages and in
+  hosted snapshots, and stay checked (P8.3). The entry's transitions give
+  `from: null` for an added resource and `to: null` for a removed one: first
+  the resulting resources in order, then the removed ones in their previous
+  order. BREAKING for TypeScript: `Transition.to` is `string | null`.
+- **Limits (P7.7, P14.13; decided by the owner, spec PR #50 (open)).**
+  `ORIGINALS_LIMITS`: 10,000 entries, 65,536 bytes per entry, 256 resources at
+  any one time (removing one makes room for another), 32 editor grants and
+  1,000 versions of one signer DID. Exceeding one is `limit-exceeded`
+  (`STATE_TOO_MANY_RESOURCES` for resources).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
-  counter is rejected, and an unchanged digest does not advance a version.
+  counter is rejected, and an unchanged digest does not advance a version. A
+  resource added after genesis starts at version 1.
 - **Signing (P5.11).** The signer receives the unsigned entry, the proof options,
   a summary of the Original, the operation and the resource changes, with
   `summary.signer` naming whose key signs (the author, or the editor of an
@@ -117,15 +152,24 @@ The `originals` command verifies a package offline:
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used and its freshness: asserted · retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
-| `assetFreshness` | asserted · not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
+| `assetFreshness` | not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
-| `ownership` | none · provisional · established, with confirmation depth and index agreement (P9.11) |
-| `current` | true only when every part above passes under the selected policy, except content availability (section 7): an application that needs the content also checks `resources` |
-| `reasons`, `retain` | why the result is not current; the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
+| `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
+| `validAsOf` | for a valid result, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
+| `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
+| `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
+| `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
+
+`AuthorDidEvidence` carries `obtainedAt` (ISO 8601) and `source` (`package`,
+`host`, `fetched`, `retained` or `supplied`). The SDK stamps evidence it
+obtains: a package's when it is read, a hosted snapshot's, a log retrieved
+with `identityFetch`, and evidence its store kept (with the time it was first
+obtained). Evidence passed in `authors` keeps the caller's `obtainedAt`, and
+is reported with null when it has none, never a guessed time.
 
 Errors are `OriginalsError` (a `StructuredError`) in one of these categories:
 `invalid-evidence`, `incomplete-evidence`, `unsupported-profile`,
@@ -136,10 +180,16 @@ editor's grant, or one only the author may make), `stale-parent`, `fork`,
 ## Evidence package — phase 1, implemented (PROVISIONAL format, D4)
 
 The package is an uncompressed ZIP containing `originals-evidence.json` (the
-manifest), `asset/did.jsonl` through the checkpoint, `asset/did-witness.json`,
-the DID histories of every signer (the author and each editor that signed an
-entry, P7.1) under `authors/<sha256(did)>/`, and the resource bytes
-under `resources/<digest>`. The manifest records the packager's head, so a
+manifest), `asset/did.jsonl` through the checkpoint, the DID histories of
+every signer (the author and each editor that signed an entry, P7.1) under
+`signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
+that DID's method has witnesses; `signerPath(did)`), and the resource bytes
+under `resources/<digest>`. There is no asset witness file: asset logs have
+no witnesses (P9.8). PROVISIONAL (P14.10, section 14;
+BREAKING): the directory was `authors/` and an
+`asset/did-witness.json` was written; neither is written or read any more,
+and a package or hosted snapshot carrying them is rejected
+(`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a
 package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
 declares the package complete or partial, listing any missing items (a
@@ -156,16 +206,30 @@ confidentiality (P8.2).
 ## Author DID rotation, freshness and forks — phase 2 (implemented)
 
 Rotation is an author DID update. Entries naming the new author DID version
-can use the new key without any asset log entry (P5.10). An unwitnessed entry
+can use the new key without any asset log entry (P5.10). An unanchored entry
 signed by a key the latest author DID no longer lists is reported as
-historically authorized with unproven ordering, never as current, whatever
-time it claims (P7.9).
+historically authorized only, with unproven ordering, whatever time it claims
+(P7.9); it stays part of a valid checkpoint.
 
-A valid log is a historical result unless the freshness policy holds (P7.6,
-P7.8). `freshness: "asserted"` is for a caller that vouches its evidence is
-the latest, as an author's own SDK can. Whatever the policy, the store retains
-the highest versionId it has verified for each Original and each author DID.
-Evidence that falls short of a retained versionId is `stale` and not current.
+An unanchored Original is never current (P7.10; originals-spec #46): a valid
+one is reported valid as of its verified checkpoint. There is no freshness
+policy off Bitcoin; the `freshness: "asserted"` option was removed (breaking).
+Freshness is still reported per log (P7.8): `retrieved` for a moved identity's
+log fetched from its latest location, otherwise not established, or stale.
+The store retains the highest versionId it has verified for each Original and
+each author DID.
+Of the signer DID evidence a package or host supplies, the `authors` option
+configures and the store keeps, the one with the newest verified version is
+used, compared by the versionIds that verify and never by bytes: an older log
+that differs only in formatting or a final line feed never rolls a newer one
+back, so an entry whose key that newer version removed is still reported
+historically authorized only (P7.8, P7.9; originals-spec #47,
+merged). The newest verified versionId held is compared against as
+retained. Evidence whose verified versions diverge from another's is an
+identity fork: incomplete identity evidence (`AUTHOR_DID_FORK`), never the
+package's history.
+Evidence that falls short of a retained versionId is `stale`; the result is
+valid as of its own, older checkpoint.
 Evidence that diverges from it is a fork (for the Original) or incomplete
 identity evidence (for an author DID). Reads, commits and imports advance the
 retained versionIds; `load` only compares against them.
@@ -173,7 +237,8 @@ retained versionIds; `load` only compares against them.
 Divergent valid branches are an unresolved fork with no branch current. An
 import that diverges from the local log returns `conflict` and the store keeps
 the other branch, so every later read reports the fork with both branches
-(P6.6). Edits continue on the local branch and stay non-current. Only
+(P6.6), with no branch valid as of a checkpoint (`validAsOf` null). Edits
+continue on the local branch. Only
 anchoring on Bitcoin settles a fork (owner decision Q5, P9.16). Import never
 replaces stored author DID evidence with an older or diverging history.
 
@@ -201,29 +266,42 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
 - A grant names one editor DID, unique in the list, using a method P5.8
   lists (did:vh, did:webvh, did:btco), never the author DID or a DID of the
   author's identity (for a did:webvh author, any did:webvh with its SCID).
-  `resources` are resourceIDs of the Original's resource set. At most
-  `ORIGINALS_LIMITS.editors` (32, PROVISIONAL) grants (P7.7). An empty list is
+  `resources` are resourceIDs of the Original's current resource set. At most
+  `ORIGINALS_LIMITS.editors` (32) grants (P7.7). An empty list is
   not used: no editors means no `editors` member (PROVISIONAL).
 - An editor entry carries `editor: { did, verificationMethod, versionId }` in
   its signed state. It is checked against the grant in its parent's state, so
   a grant, a change to it and a revocation take effect from the next entry
   (P5.17). Its author reference is its parent's, its operation is update, its
   parameters are empty, and only the name, metadata and resources the grant
-  allows change. Only author entries change grants, aliases, lifecycle or
-  parameters, start an Original, anchor it or deactivate it. A change outside
+  allows change. Only author entries add or remove resources, change grants,
+  aliases, lifecycle or parameters, start an Original, anchor it or deactivate
+  it. A change outside
   the grant is refused before anything is signed (`outside-grant`); an editor
   with no grant is `unauthorized-key` (`EDITOR_NOT_GRANTED`).
 - Editor keys follow the author key rules against the editor DID (P5.3,
-  P5.10–P5.14, P7.8, P7.9): a key the latest editor DID no longer lists makes
-  the head not current; versionIds never go backwards per signer identity
-  (P5.8). Once the author DID is deactivated no entry, editor's included, is
-  current. Editors rotate, remove keys or move only in their own DIDs.
+  P5.10–P5.14, P7.8, P7.9): an entry by a key the latest editor DID no longer
+  lists, or by a deactivated editor DID, is historically authorized only;
+  versionIds never go backwards per signer identity (P5.8). Once the author
+  DID is deactivated every entry, editor's included, is historically
+  authorized only (P5.18, P6.5). Editors rotate, remove keys or move only in
+  their own DIDs.
+- A grant never names the Original itself: its did:vh or any of its aliases,
+  including the anchoring sat's did:btco, so holding the sat confers no edit
+  authority (P5.15, P9.12; `STATE_EDITORS`).
 - An editor entry and a revoking author entry with the same parent are a fork,
   unresolved until anchoring (P6.6). Branch length and the number of signers
   decide nothing; an entry bringing content from another branch is an ordinary
   single-parent entry and the fork remains.
-- PROVISIONAL: editor authority is an Originals profile rule. No VH-Log hook
-  carries it yet (VH-Log PR 11 and plan 011 PR 6 pending). Anchored editor
+- Editor authority is VH-Log PR 11's "Editors from a Controller" [S25]
+  (swcurran/VH-Log#11 at `2fe380dbf`, treated as merged): the generic engine's
+  editor hook (`ControllerKeys.editors` in `@originals/vh/log`) enforces that
+  an editor entry is not the genesis entry, sets no parameter
+  (`EDITOR_PARAMETERS`, so an editor deactivation is refused there), is checked
+  against the editors in its parent (`EDITOR_NOT_GRANTED`), leaves the grants
+  unchanged and carries one proof by its editor; the Originals profile
+  supplies the grants, the `editor` reference, the editor key rules and the
+  grant's scope. Anchored editor
   entries (P9.15 at inscription time, P9.12 inscription by the owner) arrive
   with Bitcoin anchoring. No signer is required to use did:btco.
 
@@ -269,7 +347,8 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
   retrieval from that location is how this SDK establishes a moved
   identity's freshness). Otherwise the identity's freshness is not
-  established and the Original is not reported as current. Editor entries
+  established. Either way an unanchored Original is only valid as of its
+  checkpoint (P7.10). Editor entries
   carry their parent's author reference, so they never reveal where a moved
   author now is: the author's location comes from the latest author entry.
   The same applies to each editor DID.
@@ -287,8 +366,8 @@ Asset logs never activate VH witnesses: an entry that sets the witness
 parameter to anything but `{}` is rejected (`WITNESS_NOT_PERMITTED`). On the
 local and web layers an Original is author-signed with claimed ordering.
 Accepted consequences: a stolen author key can make a branch before its
-removal, which is never current once the key is removed (P7.9) but stays an
-unresolved fork until anchoring; the first valid anchor wins (P9.16), so
+removal, which is historically authorized only once the key is removed
+(P7.9) and stays an unresolved fork until anchoring; the first valid anchor wins (P9.16), so
 authors who need protection should anchor early; and a host can show an old
 prefix to a first-time reader (retained versionIds protect repeat readers).
 Bitcoin anchoring gives proven ordering, a single history and an owner.
@@ -304,6 +383,14 @@ asset state (PROVISIONAL: there is no separate publish operation):
 await sdk.publish(did, { parent, author, signer, alias }); // alias: { did, log, witness? }
 const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> under the alias's #files base
 ```
+
+A resource larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
+64 MiB; P8.5, P14.13) can be created and edited locally, since
+a local package is never fetched, but it is never published: `publish`,
+`hostedFiles` and a shared-host `submit` refuse a log that lists one, at any
+version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the resource
+(`details.resource`, `digest`, `size`, `limit`), before anything is written or
+sent. `assertHostable(log)` runs the same check.
 
 An alias counts only in both directions: the asset state lists it and its
 latest document points back (P3.6). Reports list each alias as `confirmed`,
@@ -325,7 +412,7 @@ import { safeFetch } from "@originals/vh/fetch";
 const r = await reader.loadPublished(aliasDid, async (url, options) => (await safeFetch(url, options)).bytes, { signal });
 r.verified; // the exact snapshot: history ending at its checkpoint, binding, identity, no failed digest, the alias
 r.report.resources; // content availability, separately: missing bytes do not fail `verified` (P7.3, P7.4)
-r.report.current; // whether it is the latest, under the freshness policy
+r.report.validAsOf; // the checkpoint it is valid as of; an unanchored Original is never current (P7.10)
 ```
 
 Retrieval is bounded as a whole, not only per file (issue #970). These are
@@ -335,7 +422,8 @@ implementation limits (PROVISIONAL), set with the SDK's `retrievalLimits`:
 | --- | --- | --- |
 | `maxRequests` | 1,024 | requests in one call, failed and optional ones included |
 | `maxTotalBytes` | `archiveLimits.maxTotalBytes` (512 MiB) | bytes accepted in one call, counted as they arrive, alias log included |
-| `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response (P7.7) |
+| `maxFileBytes` | `FETCH_LIMITS.maxBytes` (16 MiB) | one response other than a resource: logs, witness files, the manifest (P7.7) |
+| `maxResourceBytes` | `FETCH_LIMITS.maxResourceBytes` (64 MiB) | one resource response (P8.5; P14.13); a larger resource is unavailable content, not a failure (P7.4) |
 | `requestTimeoutMs` | `FETCH_LIMITS.timeoutMs` (15 s) | one request |
 | `timeoutMs` | 120 s | the whole call, so slow or absent optional files cannot multiply the per-request timeout |
 
@@ -344,8 +432,9 @@ applies to one package: at most `maxEntries` files and `maxTotalBytes` bytes.
 The manifest is checked first. The asset log is unverified, so before anything
 it asks for is requested, every line must carry a well-formed author reference
 and asset state (else `SNAPSHOT_LOG_INVALID`, in the category of the rule it
-breaks), and the whole plan (asset witness, each author's log and witness, each
-resource) must fit the request and file limits. Each request gets
+breaks) and be at most 65,536 UTF-8 bytes (`ENTRY_TOO_LARGE`, P7.7), and the
+whole plan (each signer's log and witness, each resource) must fit the
+request and file limits. Each request gets
 `{ maxBytes, timeoutMs, signal }`: the smaller of its own cap and what is left
 of the budget. A fetcher that ignores them is still bounded, because the SDK
 checks every returned size and stops waiting at the deadline. Exhausting a
@@ -425,7 +514,8 @@ await sdk.reconcile(did, {
   entry that log would refuse: the host judges with the identity evidence
   it holds, and its acceptance does not establish freshness (P7.8). Readers
   judge for themselves with the newest evidence they can get, and an entry
-  that newer evidence refuses is not current for them (P6.5, P7.9). Sending
+  that newer evidence makes historically authorized only is reported so to
+  them (P6.5, P7.9). Sending
   the newer log to the host (with a save, or by the owner) makes it refuse
   such entries from then on.
 - **Forks.** A refused candidate published elsewhere is a fork, unresolved
@@ -448,9 +538,11 @@ byte-identical retries first, then that the entry chains to its head, then
 cheap checks (the signer is the author or granted in the head's state, and its
 key at the named version verifies the proof), then that it verifies under the
 profile against the head, using the submitted signer DID log where it extends
-the one it holds, and that the new head would be current apart from freshness
-the host cannot establish (no removed key, P7.9; no deactivated signer DID,
-P6.5, P5.18). It writes new bytes and DID logs, then the asset log (the commit
+the one it holds, and that the new entry is not historically authorized only
+(`422 { error: "entry_historically_authorized_only", reason }`: no removed
+key, no deactivated editor DID, no deactivated author DID; P7.9, P6.5,
+P5.18). It never asks that the head be current, which no unanchored Original
+is (P7.10). It writes new bytes and DID logs, then the asset log (the commit
 point: the save is accepted from then on), then the manifest, which the next
 request repairs if its write failed, and stores the exact submitted line.
 Resource bytes are served only once the accepted log lists them, with the

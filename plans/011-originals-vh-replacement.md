@@ -6,8 +6,8 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@a432aa67529cd86b4ab38d97cc91963be82acbc3` | Editor's Draft 0.1, the head of the open #34–#36 stack (Q5, Q6, Q15) with #42 and #43 merged into it; re-pinned from `b8e8323` (PR #33, Q14). §12 grows to 139 rows; IDs are kept and the mapping is in `specs/README.md` |
-| VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `7bae699a` | PRs treated as merged |
+| Originals Protocol | `aviarytech/originals-spec@1039c471c` (`master`) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; re-pinned from `051049d8b`. §12 has 159 rows; IDs are kept and the mapping is in `specs/README.md`. Open #50 (head `555ce24d3`: Bitcoin values and limits decided, 256 resources, row 160) is implemented |
+| VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `2fe380dbf` (keys and editors from a controller) | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
 | bip340-jcs-2025 | Data Integrity BIP340 Cryptosuite v0.1 (dcdpr) | Draft; see S6 below |
@@ -25,7 +25,7 @@ A new package **`@originals/vh`** (`packages/vh`) replaces `@originals/cel`. Eac
 |---|---|---|
 | `@originals/vh/json` | Strict JSON parser (rejects duplicate keys, lone surrogates, non-I-JSON numbers), JCS (RFC 8785), bounded sizes | P5.7, VH-Log |
 | `@originals/vh/crypto` | multibase/multihash/multikey; `eddsa-jcs-2022`; `bip340-jcs-2025`; did:key decode | P5.12, VH-Log PR 3 |
-| `@originals/vh/log` | Generic VH-Log engine: SCID, entry hash, parameters (accumulation/activation), proofs, witness threshold, version selection, comparing copies with retained versionIds and minCopies (in PR 2, checked by the vh interop vectors). **Specialisation hooks** for: designated version param, permitted suites, versionTime precision (PR 8), controller keys (PR 11), authoritative source (PR 2), alternative encoding (PR 10), non-HTTPS locations (PR 9) | VH-Log + PRs |
+| `@originals/vh/log` | Generic VH-Log engine: SCID, entry hash, parameters (accumulation/activation), proofs, witness threshold, version selection, comparing copies with retained versionIds and minCopies (in PR 2, checked by the vh interop vectors). **Specialisation hooks** for: designated version param, permitted suites, versionTime precision (PR 8), controller keys and editors from a controller (PR 11, `ControllerKeys.editors`), authoritative source (PR 2), alternative encoding (PR 10), non-HTTPS locations (PR 9) | VH-Log + PRs |
 | `@originals/vh/didvh` | Plain `did:vh:1.0` resolver plus the extension registry (did:vh PR 3) | did:vh |
 | `@originals/vh/webvh` | `did:webvh:1.0` as a VH-Log specialisation (PR 302); DID-to-HTTPS, `#files`, verification of logs produced by `didwebvh-ts` | did:webvh exp. (see Q1) |
 | `@originals/vh/originals` | The `originals:1.0` extension: state schema, transitions, author binding, derived DID document, fork/anchor rules, verification report, evidence package codec | Originals §2–9 |
@@ -42,10 +42,16 @@ bytes ─▶ strict JSON lines ─▶ VH-Log engine (specialisation = originals:
           │  witness parameter ─▶ refused unless {} (no witnesses, Q14)
           │  authoritative-source hook (anchored) ─▶ sat assembly P9.13/P9.15/P9.16
           ▼
-     Originals state rules (P4.x, P5.1, P5.8, P6.5, P9.10) ─▶ derived DID doc (P3.8)
+     Originals state rules (P4.x, P5.1, P5.8, P5.15–P5.18, P6.5, P9.10) ─▶ derived DID doc (P3.8)
           ▼
      VerificationReport { history, authorBinding, identityEvidence, resources,
-                          ordering, freshness, forks, anchors, ownership, current }
+                          ordering, assetFreshness, fork, aliases, anchoring, ownership,
+                          validAsOf, historicallyAuthorizedOnly, current }
+
+An unanchored Original is never `current` (P7.10): a valid one is reported
+`validAsOf` its checkpoint with the signer DID versions relied on and when
+they were obtained, and entries whose key was later removed, or any entry
+after the author DID's deactivation, are `historicallyAuthorizedOnly` (P7.9).
 ```
 
 The generic engine never decides the Originals result (P3.5). Plain `did:vh:1.0` and `did:webvh:1.0` resolvers reject an `originals:1.0` log by its `method` value.
@@ -64,7 +70,7 @@ const view = await sdk.load(pkg);                                   // read-only
 - **Signer** (`OriginalsSigner`): `{ verificationMethod, cryptosuite, sign(request) }`. `request` carries the parsed entry and a human-readable summary (P5.11). There are local Ed25519 and secp256k1 (BIP340) signers for tests and an external-signer adapter for Turnkey.
 - **Store** (`OriginalsStore`): a durable commit contract (P6.2). It stages bytes and the entry, then atomically advances the head. It ships with memory and Node-fs implementations; the fs one uses write-temp + fsync + rename of the head pointer. Recovery on open returns either the prior head or the fully committed one.
 - **Conflict semantics**: an edit names its parent. If the parent has moved the result is `StaleParent`, with no rebase (P4.5, P6.4). An identical accepted retry returns the existing checkpoint.
-- **Errors**: `OriginalsError extends StructuredError`, with `category ∈ { invalid-evidence, incomplete-evidence, unsupported-profile, unauthorized-key, author-binding, stale-parent, fork, deactivated, unavailable-bytes, limit-exceeded }` (section 6's suggested categories) plus a stable `code`. It replaces `CelError`.
+- **Errors**: `OriginalsError extends StructuredError`, with `category ∈ { invalid-evidence, incomplete-evidence, unsupported-profile, unauthorized-key, author-binding, outside-grant, stale-parent, fork, deactivated, unavailable-bytes, limit-exceeded }` (section 6's suggested categories) plus a stable `code`. It replaces `CelError`.
 
 ## 2. Provisional choices (all marked `PROVISIONAL` in code and docs)
 
@@ -77,7 +83,7 @@ const view = await sdk.load(pkg);                                   // read-only
   "parameters": {},                             // genesis: { "method": "originals:1.0", "scid": "…" }
   "state": {
     "id": "did:vh:<SCID>",                      // "did:vh:{SCID}" in the preliminary genesis
-    "operation": "update",                      // create | update | publish | migrate | deactivate
+    "operation": "update",                      // create | update | deactivate; publishing and anchoring are updates
     "author": {
       "did": "did:webvh:…",                     // fixed at genesis (P5.8)
       "verificationMethod": "did:webvh:…#orig-1",
@@ -89,8 +95,11 @@ const view = await sdk.load(pkg);                                   // read-only
       "status": "active",                       // "deactivated" ⇔ parameters.deactivated (P6.5)
       "resources": [ { "id": "photo", "mediaType": "image/jpeg", "size": 123456,
                        "digest": "zQm…" } ],     // multibase base58btc of a sha2-256 multihash
-      "aliases": []                             // ≤1 did:webvh, ≤1 did:btco
+      "aliases": [],                            // ≤1 did:webvh, ≤1 did:btco
+      "editors": [ { "did": "did:webvh:…bob", "name": false, "metadata": false,
+                     "resources": ["photo"] } ]  // optional, 1–32 grants (P5.15)
     },
+    // "editor": { "did", "verificationMethod", "versionId" } in an editor entry (P5.16)
     "transitions": [ { "resource": "photo", "from": "zQmH1…", "to": "zQmH2…" } ]
   },
   "proof": [ { "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
@@ -101,11 +110,13 @@ const view = await sdk.load(pkg);                                   // read-only
 
 Rules this implies:
 - `transitions` MUST list exactly the resources whose digest changed against the parent's asset state, and is empty at genesis except `from: null`. An unchanged digest does not advance a version (P4.4).
-- The migrate entry names its sat by adding a `did:btco:` alias.
+- There are no publish or migrate operations. Publication is an update that lists a did:webvh alias (P3.6); anchoring is an update that adds the sat's `did:btco:` alias, once and terminally (P9.10).
+- Editors (P5.15–P5.18): the author grants editor DIDs the right to change the name, the metadata or named resources (`editors` above). An editor entry carries `editor` and is signed by the editor's own key, checked against the grant in its parent's state; only author entries change grants, aliases, lifecycle or parameters, anchor or deactivate. A grant never names the author's identity, the Original's own did:vh or any of its aliases.
+- Shared-host saves (P6.7, P6.8): a host accepting entries from several signers compares the submitted parent with its head atomically, answers `accepted`, `already-accepted` (a byte-identical retry) or `stale-parent`, and never changes a submission; the SDK keeps a refused candidate, and `reconcile` has the caller sign a new candidate against the new head. It is serialization at one host, not consensus: forks published elsewhere stay unresolved (P6.6).
 - `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Asset logs use no witnesses (Q14); S3's witness-proof suite applies only if that is ever revisited. It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
 - Files: `did.jsonl`, as did:vh requires at a `src` location (no `did-witness.json`, Q14).
 - Further PROVISIONAL rules, as implemented in PR 3:
-  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Their order is fixed at genesis.
+  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Existing resources keep their order; an author entry appends added resources and may remove resources while one remains, an editor entry neither adds nor removes, and a resourceID is never used again in the Original (P4.1, P5.16, P14.5; originals-spec #49).
   - Media types are RFC 6838 `type/subtype`, without parameters. `size` is the exact byte length.
   - A descriptor's `mediaType` or `size` changes only together with its digest.
   - A deactivation changes no resource.
@@ -131,22 +142,24 @@ This departs from the pinned text of P5.3, P5.11 and P9.9; see S8.
 
 ### 2.3 Evidence package (D4) — decided by owner: ZIP
 
-The owner chose an **uncompressed ZIP** (fflate, already a dependency) with a fixed layout and a JSON manifest:
+The owner chose an **uncompressed ZIP**, written and read by the SDK's own strict stored-only codec (`packages/sdk/src/originals/zip.ts`; no compression library), with a fixed layout and a JSON manifest. Entries are sorted, dated 1980-01-01, with the UTF-8 flag and mode 0100644, so the same contents give the same bytes (P14.10, PROVISIONAL #48):
 
 ```
-originals-evidence.json   { format: "originals-evidence/0.1", profile: "originals:1.0",
-                            original: "did:vh:…", checkpoint: "7-Qm…", completeness: "complete"|"partial",
-                            missing: [ {kind:"resource"|"identity"|"witness", …} ], limits: {…} }
-asset/did.jsonl, asset/did-witness.json
-authors/<sha256(authorDid)>/did.jsonl (+ did-witness.json | btco inscriptions)
+originals-evidence.json   exactly { format: "originals-evidence/0.1", profile: "originals:1.0",
+                            original: "did:vh:…", checkpoint: "7-Qm…", head: "9-Qm…",
+                            completeness: "complete"|"partial",
+                            missing: [ {kind:"resource", resource, version, digest, versionId}
+                                     | {kind:"identity", did, role:"author"|"editor"} ] }
+asset/did.jsonl
+signers/<hex sha256(did)>/did.jsonl (+ did-witness.json where that DID's method has witnesses)
 resources/<digest>
 ```
 
-Import rejects absolute paths, `..`, symlinks, duplicate names, and anything over the size, count or ratio bounds before extraction (P7.5). An in-memory object form of the same package is also exposed for API callers.
+`head` is the packager's head, so a package of an earlier checkpoint is never taken for the latest state (P7.6). There is no `limits` member and no asset witness file (asset logs have no witnesses, P9.8). Each signer that signed an entry (the author, and each editor, P7.1) has its did:vh or did:webvh history under `signers/`; nothing about did:btco is packaged, because did:btco signers are read from Bitcoin (P9.18). Import rejects absolute paths, `..`, symlinks, duplicate names, compressed or encrypted entries, and anything over the entry-count (20,000) or total-size (512 MiB) bounds before extraction (P7.5). `EvidenceContents` is the in-memory form of the same package.
 
 ### 2.4 Limits (P7.7)
 
-The provisional limits are 10,000 entries, 64 KiB per entry, 64 resources, 1,000 author-DID versions, a 16 MiB log file and a 64 MiB resource (configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
+The limits (P14.13), decided by the owner on 21 October 2026 (D6; spec PR #50 (open)), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 256 resources at one time, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
 
 ### 2.5 Bitcoin representation (D6)
 
@@ -168,8 +181,13 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **5** | 1 | **Deletion**: `packages/cel` entirely; SDK `v3/`, `core/`, `lifecycle/`, `migration/`, `cel/`, `examples/`, `playground/`, `verify/`, previous-SDK tests and `docs/history/previous-sdk`. The non-history modules stay (`vc/`, `storage/`, `events/`, `kinds/`, `resources/`, DID, Bitcoin and providers; owner decision Q12), with the cel utilities they need moved into the SDK. The landing runs on the new SDK: signed-in authors sign with their did:webvh `#key-1` (auth pulled forward from PR 8, Q12), and signed-out visitors use a browser-local did:vh. Hosted, Bitcoin, `/explore` and `/me` are off (Q4) | Full repo build/typecheck/lint/test green; `verify:esm`, `verify:browser` |
 | **6** | 2 | Author-DID rotation and deactivation, incomplete identity evidence, freshness policy, retained versionIds per Original and author DID, forks reported as unresolved conflicts (Q5) | §12 rows: removed key (unwitnessed), added key without asset entry, stale author history, old prefix as current, divergent branches, older-prefix import |
 | **7a** | 3 | No witnesses (Q14, S9): the asset log refuses a witness parameter; witness-only §12 rows become not-applicable. A witness design (declaration, reference witness, witness service) was built in PRs #961 and #963 and withdrawn | Witness parameter refused; registry check for not-applicable rows |
-| **7b** | 3 | Hosting: publish entry (did:webvh alias, P3.6 two-way binding), hosted layout, exact-snapshot public reader, P9.7 serving headers, `@originals/vh/fetch` | Hosted mixed snapshot; alias both directions; SSRF/redirect/size rows |
+| **7b** | 3 | Hosting: publication as an update entry listing the did:webvh alias (P3.6 two-way binding; no publish operation), hosted layout, exact-snapshot public reader, P9.7 serving headers, `@originals/vh/fetch` | Hosted mixed snapshot; alias both directions; SSRF/redirect/size rows |
 | **8** | 3 | `@originals/auth` and the landing's hosted path: author-controlled alias on originals.build (Q13), landing server hosting the layout with P9.7 headers, publish flow behind `hostedPublication` (off); Boop adapter notes (Boop repo is out of this repo — documented, not changed) | auth tests; landing hosted journey on fixtures |
+| **8b** | 2 | Identity continuity: a did:webvh signer that moves under portability (P5.14), `identityFetch` | §12 rows C12-132 to C12-138 |
+| **8c** | 2 | Editors (P5.15–P5.18): grants in the asset state, editor entries signed by editors' own DIDs, `outside-grant` | §12 rows C12-113 to C12-124 (unanchored parts) |
+| **8d** | 3 | Shared-host saves (P6.7, P6.8): `sign`, `submit`, `refused`, `sync`, `reconcile`; the landing's verifying submit route | §12 rows C12-125 to C12-131 |
+| **8e** | 2, 3 | Re-pin to originals-spec master `051049d8b`: an unanchored Original is never current, valid as of its checkpoint (P7.10, #46); historically authorized only (P7.9); #48's provisional wire format (`signers/`, no asset witness file, UTF-8 entry size, 64 MiB resource fetch cap) | §12 rows C12-22, C12-48, C12-140 to C12-145, C12-150, C12-152, C12-153 |
+| **8f** | 1, 2 | Re-pin to originals-spec master `1039c471c` (#47–#49) with open #50: the author adds and removes resources, editors cannot, resourceIDs are never reused (P4.1, P4.4, P5.15, P5.16, P14.4); editors move into the VH-Log engine as VH-Log PR 11's "Editors from a Controller" hook [S25]; up to 256 resources (P14.13) | §12 rows C12-16, C12-154 to C12-160 |
 | **9** | 4 | Bitcoin representation proposal → then did:btco (author + alias), sat assembly (P9.13), inscription-time checks (P9.15), anchor selection (P9.16), ownership report (P9.11) against fixtures | Bitcoin §12 rows on fixtures |
 | **10** | 4 | Writer/provider: prepare/submit/retry/durable boundary, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
 

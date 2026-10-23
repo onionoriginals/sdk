@@ -12,8 +12,14 @@
  *   or importing never confers signing authority (P7.5, P8.4).
  * - Every verification compares against the highest versionIds this store has
  *   verified for the Original and its author DIDs, so an older prefix is stale
- *   rather than current (P7.6, P7.8). Reads, commits and imports retain the
- *   new highest; loading a package changes nothing.
+ *   (P7.6, P7.8). Reads, commits and imports retain the new highest; loading a
+ *   package changes nothing.
+ * - An unanchored Original is never current (P7.10): a valid one is reported
+ *   valid as of its verified checkpoint (`validAsOf`), naming the signer DID
+ *   versions relied on and when each history was obtained. Evidence is stamped
+ *   with when and where the SDK obtained it: `package`, `host` (a hosted
+ *   snapshot), `fetched` (`identityFetch`), `retained` (this store), or
+ *   `supplied` (the `authors` option, with the caller's own `obtainedAt`).
  * - Publication (P3.6): `publish` lists a did:webvh alias that already points
  *   back to the Original. `loadPublished` is the public reader: it retrieves
  *   the hosted snapshot through the alias and verifies that exact checkpoint
@@ -57,28 +63,28 @@ import {
   type ResourceDescriptor,
   type ResourceVersion,
   type RetainedVersions,
+  type ValidAsOf,
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
-import { MANIFEST, authorPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
-import { HOSTED_PREFIX, type HostedFetch, type RetrievalLimits } from "./hosting.js";
+import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
 import type { HostAnswer, SharedHost } from "./shared.js";
-import { MemoryStore, headOf, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
+import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
 
 export interface OriginalsSDKOptions {
   store?: OriginalsStore;
-  /** Where author DID histories come from. */
-  authors: AuthorSource;
   /**
-   * `asserted` when the caller vouches that the evidence it supplies is the
-   * latest, as an author's own SDK can (P7.8). Reports say so.
+   * Where author DID histories come from. Give each its `obtainedAt` (ISO
+   * 8601): reports on unanchored Originals state when the evidence they relied
+   * on was obtained (P7.10), and say null when it was not given.
    */
-  freshness?: "asserted";
+  authors: AuthorSource;
   /** Milliseconds since the epoch; used for entry timestamps and verification time. */
   clock?: () => number;
   /** Bounds on one evidence package: `load`, `import`, and the snapshot `loadPublished` retrieves. */
@@ -116,12 +122,19 @@ export interface ResourceInput {
   bytes: Uint8Array;
 }
 
+/**
+ * New bytes for a resource. An id in the parent's resource set changes that
+ * resource; a new id adds a resource, appended after the existing ones in the
+ * order given, at version 1 (P4.1, P4.4). Only the author adds (P5.16), and a
+ * resourceID the Original has used before, even for a removed resource, is
+ * refused (P4.1).
+ */
 export interface ResourceChange {
   id: string;
   bytes: Uint8Array;
-  /** Defaults to the current media type. */
+  /** Defaults to the current media type; required for an added resource. */
   mediaType?: string;
-  /** The digest the caller edited from; a different current digest is a conflict (P4.5). */
+  /** The digest the caller edited from; a different current digest is a conflict (P4.5). Not for an added resource. */
   expectedDigest?: string;
 }
 
@@ -140,6 +153,13 @@ export interface EditInput {
   name?: string;
   metadata?: JsonObject | null;
   resources?: ResourceChange[];
+  /**
+   * ResourceIDs to remove (P4.1). Author only (P5.16). At least one resource
+   * must remain, and a removed resource must also leave every grant: pass
+   * `editors` without it. Its earlier versions stay in history, packages and
+   * hosted retrieval (P8.3).
+   */
+  remove?: string[];
   /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
   author?: AuthorRef;
   /**
@@ -218,7 +238,7 @@ export type SubmitResult =
   | { status: "stale-parent"; hostHead: string; refused: RefusedCandidate };
 
 /** The content a reconciled candidate changes; its parent is always the host's new head. */
-export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources">;
+export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources" | "remove">;
 
 export interface ReconcileInput {
   host: SharedHost;
@@ -240,7 +260,15 @@ export interface OriginalView {
   head: string;
   state: AssetState;
   resources: ResourceVersion[];
+  /** Never true for an unanchored Original (P7.10). */
   current: boolean;
+  /**
+   * P7.10: the checkpoint this result is valid as of, the signer DID versions
+   * it relied on and when each history was obtained; null when it does not
+   * verify (see `report.reasons`). Entries that are historically authorized
+   * only are in `report.historicallyAuthorizedOnly` (P7.9).
+   */
+  validAsOf: ValidAsOf | null;
   report: OriginalsReport;
 }
 
@@ -268,8 +296,9 @@ export interface PublishedOriginal extends LoadedEvidence {
    * that fail their digest, and the alias in both directions (P9.1, P3.6).
    * Missing bytes do not fail it: they are unavailable content, reported in
    * `report.resources` (P7.3, P7.4, P9.18); an application that needs the
-   * content checks that too. Whether it is the latest state is
-   * `report.current`, under the freshness policy.
+   * content checks that too. It is never the latest state of an unanchored
+   * Original: that is valid only as of the snapshot's checkpoint
+   * (`report.validAsOf`, P7.10).
    */
   verified: boolean;
 }
@@ -279,15 +308,48 @@ export interface ImportResult {
   original: OriginalView;
 }
 
-function logText(evidence: AuthorDidEvidence): string {
-  return typeof evidence.log === "string" ? evidence.log : evidence.log.map((e) => `${JSON.stringify(e)}\n`).join("");
+/** One candidate for a signer DID's evidence, with the versionIds of its log that verify (P7.8). */
+interface HeldEvidence {
+  evidence: AuthorDidEvidence;
+  ids: string[] | undefined;
+  complete: boolean;
 }
 
-/** True when `longer`'s log strictly extends `shorter`'s: the same lines, then more. */
-function extendsLog(longer: AuthorDidEvidence, shorter: AuthorDidEvidence): boolean {
-  const a = logText(longer);
-  const b = logText(shorter);
-  return a.length > b.length && a.startsWith(b) && (b.length === 0 || b.endsWith("\n"));
+/** True when `a`'s verified versionIds are `b`'s, then possibly more. */
+function extendsIds(a: string[], b: string[]): boolean {
+  return a.length >= b.length && b.every((id, i) => a[i] === id);
+}
+
+/**
+ * The evidence to verify with, of `candidates` (most preferred first), compared
+ * by the versionIds that verify, never by their bytes: the one with the newest
+ * verified version is used (P7.8, P7.9; originals-spec #47,
+ * merged). Two whose verified versions diverge are an identity fork: the
+ * first is used, and `fork` names the other's versionId where they diverge,
+ * which the verifier reports as AUTHOR_DID_FORK, incomplete identity evidence
+ * (P7.8). `newest` is the newest verified versionId known, so a log that falls
+ * short of it is stale.
+ */
+function newestEvidence(candidates: HeldEvidence[]): { chosen: AuthorDidEvidence; newest?: string; fork?: string } | undefined {
+  const [first, ...rest] = candidates;
+  if (!first) return undefined;
+  let best = first;
+  let fork: string | undefined;
+  for (const c of rest) {
+    if (!c.ids || !best.ids) {
+      if (!best.ids && c.ids) best = c;
+      continue;
+    }
+    if (extendsIds(c.ids, best.ids)) {
+      if (c.ids.length > best.ids.length || (!best.complete && c.complete)) best = c;
+    } else if (!extendsIds(best.ids, c.ids)) {
+      const at = c.ids.findIndex((id, i) => best.ids![i] !== id);
+      fork ??= c.ids[at];
+    }
+  }
+  const verified = candidates.flatMap((c) => (c.ids && c.ids.length > 0 ? [c.ids] : []));
+  const longest = verified.reduce<string[] | undefined>((a, b) => (!a || b.length > a.length ? b : a), undefined);
+  return { chosen: best.evidence, ...(longest ? { newest: longest[longest.length - 1] } : {}), ...(fork ? { fork } : {}) };
 }
 
 function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], code: string, message: string, details?: Record<string, unknown>): never {
@@ -495,29 +557,61 @@ export class OriginalsSDK {
 
   /**
    * Signer identity evidence for a log, looked up by identity DID (P5.14): an
-   * evidence package's own, else the author source's, else the store's; then,
-   * with `identityFetch`, the log at the identity's current location, if it
-   * extends that. Stored evidence was verified when it was kept (P7.8), so
-   * where it extends the configured log it is used instead: a static
-   * `authors` list never rolls a newer DID log back, in verification or in
-   * what is published (#965 review C2).
+   * evidence package's own, the author source's, and the store's; then, with
+   * `identityFetch`, the log at the identity's current location, if it
+   * extends that. Of what is supplied, configured and kept, the one with the
+   * newest verified version is used, compared by verified versionIds and never
+   * by bytes, so older evidence never rolls a newer DID log back, in
+   * verification or in what is published (P7.8, P7.9; PROVISIONAL
+   * originals-spec #47; #965 review C2). With `retained`, the newest
+   * verified versionId known is retained for the DID, so evidence that falls
+   * short of it is stale; evidence that diverges is an identity fork, reported
+   * as incomplete identity evidence (AUTHOR_DID_FORK), never as the package's.
    */
-  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = []): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = [], retained?: RetainedVersions): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
     // Other branches compared with this log are verified too, and their editors may differ (P6.6).
     const dids = [...new Set([log, ...others].flatMap(signerDidsOf))];
     for (const did of dids) {
-      const found = supplied.find((a) => a.did === did) ?? (await this.configuredOrStored(did));
-      if (found) out.push(found);
+      const given = supplied.find((a) => a.did === did);
+      const candidates = [...(given ? [given] : []), ...(await this.configuredAndStored(did))];
+      const found = newestEvidence(await Promise.all(candidates.map((c) => this.held(c))));
+      if (!found) continue;
+      out.push(found.chosen);
+      if (retained) {
+        const authors = (retained.authors ??= {});
+        if (found.fork) authors[did] = found.fork;
+        else if (found.newest) authors[did] = higherVersion(authors[did], found.newest);
+      }
     }
     return out;
   }
 
-  private async configuredOrStored(did: string): Promise<AuthorDidEvidence | undefined> {
+  /** The author source's evidence for `did`, then this store's, as candidates (P7.8). */
+  private async configuredAndStored(did: string): Promise<AuthorDidEvidence[]> {
     const source = this.options.authors;
-    const configured = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
-    const stored = await this.store.getAuthorEvidence(did);
-    return configured && stored && extendsLog(stored, configured) ? stored : (configured ?? stored);
+    const found = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+    const configured = found ? { ...found, source: found.source ?? ("supplied" as const) } : undefined;
+    const kept = await this.store.getAuthorEvidence(did);
+    // Kept by this store when it verified it (P7.8): when and where it was first obtained is kept with it.
+    const stored = kept ? { ...kept, source: "retained" as const } : undefined;
+    return [...(configured ? [configured] : []), ...(stored ? [stored] : [])];
+  }
+
+  /** `evidence` with the versionIds of its log that verify; none when its method is not verified here. */
+  private async held(evidence: AuthorDidEvidence): Promise<HeldEvidence> {
+    try {
+      const h = await verifyAuthorHistory(evidence, { now: this.clock() });
+      return { evidence, ids: h.versions.map((v) => v.versionId), complete: !h.failure };
+    } catch (error) {
+      if (error instanceof OriginalsError) return { evidence, ids: undefined, complete: false };
+      throw error;
+    }
+  }
+
+  /** `evidence` as obtained now, from `source` (P7.10). */
+  private obtained(evidence: AuthorDidEvidence, source: "package" | "host" | "fetched"): AuthorDidEvidence {
+    return { ...evidence, obtainedAt: new Date(this.clock()).toISOString(), source };
   }
 
   /** `identityFetch`, with a fetcher's TypeError (offline, DNS) treated as unavailable. */
@@ -678,7 +772,7 @@ export class OriginalsSDK {
       if (error instanceof OriginalsError) return undefined;
       throw error;
     }
-    const candidate: AuthorDidEvidence = { did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url };
+    const candidate: AuthorDidEvidence = this.obtained({ did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url }, "fetched");
     const ids = async (evidence: AuthorDidEvidence) => {
       const h = await verifyAuthorHistory(evidence, { now: this.clock() });
       return h.failure ? undefined : h.versions.map((v) => v.versionId);
@@ -758,9 +852,8 @@ export class OriginalsSDK {
         now: this.clock(),
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
-        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
-    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
+    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     return (await this.withIdentities(log, base, run)).report;
   }
 
@@ -769,7 +862,7 @@ export class OriginalsSDK {
       const failure = report.history.failure;
       sdkError(failure?.category ?? "incomplete-evidence", "ORIGINAL_NOT_VERIFIED", `${did} has no verified checkpoint: ${failure?.message ?? report.reasons.join(", ")}`, { report });
     }
-    return { did, checkpoint: report.checkpoint, head: report.head, state: report.state, resources: report.resources.versions, current: report.current, report };
+    return { did, checkpoint: report.checkpoint, head: report.head, state: report.state, resources: report.resources.versions, current: report.current, validAsOf: report.validAsOf, report };
   }
 
   private async stored(did: string): Promise<string> {
@@ -834,28 +927,45 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resources", "author", "editor", "editors", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resources", "remove", "author", "editor", "editors", "signer"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
   private async prepareUpdate(did: string, input: EditInput, aliases?: string[]): Promise<Draft> {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
+    // P4.1: every resourceID the Original has used through its verified history, removed ones included.
+    const used = new Set([...view.state.resources.map((r) => r.id), ...view.resources.map((v) => v.resource)]);
+    if (input.remove !== undefined && (!Array.isArray(input.remove) || !input.remove.every((id) => typeof id === "string"))) {
+      sdkError("invalid-evidence", "INPUT_INVALID", "remove must be a list of resourceIDs");
+    }
     const resources = (input.resources ?? []).map((r, i) => {
       exactKeys(r, ["id", "bytes", "mediaType", "expectedDigest"], `resources[${i}]`);
+      if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}].bytes must be a Uint8Array`);
       const current = view.state.resources.find((c) => c.id === r.id);
       if (r.expectedDigest !== undefined && current?.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `resource ${r.id} is at ${current?.digest ?? "nothing"}, not ${r.expectedDigest}`);
+      }
+      if (!current) {
+        // An addition (P4.1): the author's only, a fresh id, and a media type of its own.
+        if (input.editor !== undefined) sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", `an editor cannot add a resource (${r.id}); only the author may (P4.1, P5.16)`);
+        if (used.has(r.id)) sdkError("invalid-evidence", "STATE_RESOURCE_REUSED", `resourceID ${r.id} was used before in this Original and cannot be used again (P4.1)`);
+        if (r.mediaType === undefined) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}] adds ${r.id}, so it needs a mediaType`);
       }
       const digest = resourceDigest(r.bytes);
       bytes.set(digest, r.bytes.slice());
       return { id: r.id, mediaType: r.mediaType ?? current?.mediaType ?? "", size: r.bytes.length, digest };
     });
+    if (input.editor !== undefined && (input.remove ?? []).length > 0) {
+      sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor cannot remove a resource; only the author may (P4.1, P5.16)");
+    }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       resources,
+      ...(input.remove !== undefined ? { remove: input.remove } : {}),
+      usedResourceIds: used,
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -894,6 +1004,7 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${input.alias.did} does not point to ${did}: ${check.reason ?? check.message ?? check.status}`);
     }
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [input.alias.did]);
+    assertHostable(await this.stored(did));
     await this.store.putAuthorEvidence(input.alias);
     return this.commit(draft, input.signer);
   }
@@ -947,7 +1058,9 @@ export class OriginalsSDK {
       report.authorBinding.status !== "valid" || report.identityEvidence.status !== "complete" ||
       added.some((v) => v.bytes !== "verified")
     ) {
-      sdkError("invalid-evidence", "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
+      // An entry over a profile limit is limit-exceeded (P7.7); any other failure is invalid evidence.
+      const category = report.history.failure?.category === "limit-exceeded" ? "limit-exceeded" : "invalid-evidence";
+      sdkError(category, "COMMIT_VERIFICATION_FAILED", `the signed entry does not verify: ${report.history.failure?.message ?? report.reasons.join(", ")}`, { report });
     }
     const signed: SignedCandidate = {
       kind: "candidate", original: draft.original, parent: draft.parent, versionId: entry.versionId, entry, line: JSON.stringify(entry), summary: draft.summary, bytes: draft.bytes,
@@ -995,6 +1108,8 @@ export class OriginalsSDK {
     const stored = await this.stored(did);
     const committed = lines(stored).includes(candidate.line);
     if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
+    // A shared host serves what it accepts (P6.7): nothing it could not serve is sent (P8.5, P14.13).
+    assertHostable(committed ? stored : `${stored.trimEnd()}\n${candidate.line}`);
     // Kept before it is sent, with its staged bytes, so a lost acknowledgement is retried with the
     // same signed bytes (P6.4). Staged bytes are content addressed and never a version on their own (P6.1).
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
@@ -1036,6 +1151,7 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1056,6 +1172,7 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
+      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1070,7 +1187,7 @@ export class OriginalsSDK {
    * branch and reported as a fork (P6.6), exactly as `import` does.
    */
   async sync(did: string, host: SharedHost): Promise<ImportResult> {
-    return this.importContents(await host.accepted(did), did);
+    return this.importContents(await host.accepted(did), did, "host");
   }
 
   /**
@@ -1095,7 +1212,7 @@ export class OriginalsSDK {
     const head = synced.original;
     const change = typeof input.change === "function" ? await input.change({ head, ...(kept ? { refused: kept } : {}) }) : input.change;
     if (typeof change !== "object" || change === null) sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
-    exactKeys(change, ["name", "metadata", "resources"], "reconciled change");
+    exactKeys(change, ["name", "metadata", "resources", "remove"], "reconciled change");
     const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
     const result = await this.submit(await this.sign(draft, input.signer), input.host);
     // The refused candidate stays, labelled with what carried its change (P6.8).
@@ -1114,7 +1231,7 @@ export class OriginalsSDK {
     const view = await this.get(did, options);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ retrievedFrom: _, ...evidence }) => evidence);
+    const authors = (await this.packagedIdentities(prefix, view.report)).map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
     const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
     for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
@@ -1142,10 +1259,10 @@ export class OriginalsSDK {
    * bounded by a budget of their own (`retrievalLimits`).
    */
   async load(zip: Uint8Array): Promise<LoadedEvidence> {
-    return this.loadContents(readEvidence(zip, this.options.archiveLimits));
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package");
   }
 
-  private async loadContents(contents: EvidenceContents, aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
+  private async loadContents(contents: EvidenceContents, from: "package" | "host", aliases: AliasEvidence[] = [], retrieval?: Retrieval): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
     const run = (authors: AuthorDidEvidence[]) =>
@@ -1154,14 +1271,12 @@ export class OriginalsSDK {
         log: contents.log,
         authors,
         bytes: contents.bytes,
-        witnessFile: contents.witness,
         checkpoint: contents.manifest.checkpoint,
         now: this.clock(),
         ...comparisons,
-        ...(this.options.freshness ? { freshness: this.options.freshness } : {}),
       });
-    const supplied = contents.authors.map(({ retrievedFrom: _, ...evidence }) => evidence);
-    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])));
+    const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
+    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
     const m = contents.manifest;
@@ -1231,8 +1346,8 @@ export class OriginalsSDK {
 
     const base = `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`;
     const files = new Map<string, Uint8Array>();
-    const put = async (path: string, required: boolean) => {
-      const data = await retrieval.get(`${base}${path}`, { required, archive: true });
+    const put = async (path: string, required: boolean, resource = false) => {
+      const data = await retrieval.get(`${base}${path}`, { required, archive: true, resource });
       if (data) files.set(path, data);
       return data;
     };
@@ -1240,23 +1355,23 @@ export class OriginalsSDK {
     const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
-    const planned = 1 + 2 * plan.authors.length + plan.digests.length;
+    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10, PROVISIONAL, section 14).
+    const planned = 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.
     const identityRequests = identities && this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
     retrieval.plan(planned + identityRequests, files.size + planned);
-    await put("asset/did-witness.json", false);
     for (const did of plan.authors) {
-      if (await put(`${authorPath(did)}/did.jsonl`, false)) await put(`${authorPath(did)}/did-witness.json`, false);
+      if (await put(`${signerPath(did)}/did.jsonl`, false)) await put(`${signerPath(did)}/did-witness.json`, false);
     }
-    for (const digest of plan.digests) await put(`resources/${digest}`, false);
+    for (const digest of plan.digests) await put(`resources/${digest}`, false, true);
     return { alias, files };
   }
 
   private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
     const { alias, files } = await this.retrieveSnapshot(aliasDid, retrieval, true);
     // Every file is already within the budget and the archive limits; no archive is assembled.
-    const loaded = await this.loadContents(readEvidenceFiles(files), [alias], retrieval);
+    const loaded = await this.loadContents(readEvidenceFiles(files), "host", [alias], retrieval);
     const r = loaded.report;
     // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
     // merely points at an Original gives no result through it.
@@ -1282,8 +1397,8 @@ export class OriginalsSDK {
     return this.importContents(readEvidence(zip, this.options.archiveLimits));
   }
 
-  private async importContents(contents: EvidenceContents, expected?: string): Promise<ImportResult> {
-    const loaded = await this.loadContents(contents);
+  private async importContents(contents: EvidenceContents, expected?: string, from: "package" | "host" = "package"): Promise<ImportResult> {
+    const loaded = await this.loadContents(contents, from);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });
@@ -1306,7 +1421,7 @@ export class OriginalsSDK {
       if (have.length === incoming.length && sharesPrefix(incoming, have)) return result("already-current");
       if (incoming.length < have.length && sharesPrefix(incoming, have)) return result("kept-newer-local");
       if (!sharesPrefix(have, incoming)) {
-        await this.keepEvidence(contents, r);
+        await this.keepEvidence(contents, r, from);
         await this.store.putBranch(did, contents.log);
         return result("conflict");
       }
@@ -1314,23 +1429,26 @@ export class OriginalsSDK {
     // A refused candidate is never history (P6.8): a log carrying one is kept as a branch, a fork (P6.6).
     const refused = new Set((await this.store.getRefused(did)).map(refusedVersionId));
     if (incoming.some((id) => refused.has(id))) {
-      await this.keepEvidence(contents, r);
+      await this.keepEvidence(contents, r, from);
       await this.store.putBranch(did, contents.log);
       return result("conflict");
     }
-    await this.keepEvidence(contents, r);
+    await this.keepEvidence(contents, r, from);
     await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
     return result("imported");
   }
 
-  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport): Promise<void> {
+  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }
     for (const evidence of contents.authors) {
       const history = await verifyAuthorHistory(evidence, { now: this.clock() });
       const latest = history.versions[history.versions.length - 1]?.versionId;
-      if (latest !== undefined && report.retain.authors[evidence.did] === latest) await this.store.putAuthorEvidence(evidence);
+      // Kept with when and where it was obtained, which later reports state (P7.10).
+      if (latest !== undefined && report.retain.authors[evidence.did] === latest) {
+        await this.store.putAuthorEvidence(this.obtained({ did: evidence.did, log: evidence.log, ...(evidence.witness !== undefined ? { witness: evidence.witness } : {}) }, from));
+      }
     }
   }
 }

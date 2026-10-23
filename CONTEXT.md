@@ -19,7 +19,7 @@ The full state in every asset log entry: name, metadata, lifecycle status, resou
 _Avoid_: DID document (the DID document is derived from the log, never stored, P3.8)
 
 **Resource**:
-A named file belonging to an Original, identified by a resourceID fixed at genesis (P4.1).
+A named file belonging to an Original, identified by a resourceID that names it for the Original's whole history. Genesis names at least one; only the author adds or removes resources, and a resourceID is never used again, even after its resource is removed (P4.1).
 
 **Resource version**:
 An exact byte sequence bound to a mediaType and a SHA-256 digest in verified history. Version numbers are derived from history and advance only when the digest changes (P4.4).

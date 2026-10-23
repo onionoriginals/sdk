@@ -24,8 +24,10 @@
 import { OriginalsError } from "../errors.js";
 
 export const FETCH_LIMITS = Object.freeze({
-  /** PROVISIONAL (P7.7): the profile's cap on one retrieved file. */
+  /** (P7.7; P14.13): the profile's cap on one retrieved log file. */
   maxBytes: 16 * 1024 * 1024,
+  /** (P8.5; P14.13): the cap on one retrieved resource. */
+  maxResourceBytes: 64 * 1024 * 1024,
   timeoutMs: 15_000,
 });
 
