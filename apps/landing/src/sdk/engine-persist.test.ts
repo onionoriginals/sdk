@@ -35,7 +35,7 @@ describe('a signed-in author\'s work survives a browser restart', () => {
 
     const after = signedIn(idb, author);
     const listed = await after.listOriginals();
-    expect(listed).toEqual([{ did: revised.did, name: 'Harbor at dusk', checkpoint: revised.history.at(-1)!.versionId, published: false }]);
+    expect(listed).toEqual([{ did: revised.did, name: 'Harbor at dusk', checkpoint: revised.history.at(-1)!.versionId, published: false, where: 'this-browser' }]);
     const reopened = await after.open(revised.did);
     expect(reopened.history.map((h) => h.versionId)).toEqual(revised.history.map((h) => h.versionId));
     expect(reopened.resource.hash).toBe(revised.resource.hash);

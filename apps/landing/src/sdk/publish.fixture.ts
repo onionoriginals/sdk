@@ -27,7 +27,9 @@ export function host() {
   const store = createOriginalsStore({ dataDir });
   const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
   const noop = { async handlePut() { return new Response(null, { status: 501 }); }, read() { return new Response(null, { status: 404 }); }, serve() { return null as Response | null; } };
-  const serve = buildFetch({ apiRoutes: null, hostStore: noop, distDir: '/nonexistent/', originals });
+  // The account index routes, as server/index.ts mounts them (#976 B, G3).
+  const apiRoutes = { 'POST /api/originals': originals.record, 'GET /api/originals': originals.list };
+  const serve = buildFetch({ apiRoutes, hostStore: noop, distDir: '/nonexistent/', originals });
   /** A browser signed in as `sub` (no cookie when null), talking to the app's origin. */
   const fetchAs = (sub: string | null) =>
     ((input: RequestInfo | URL, init?: RequestInit) => {

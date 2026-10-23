@@ -677,6 +677,13 @@ export const demo = {
     temporaryNote:
       'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be published or continued once you leave. Download its evidence to keep a copy anyone can verify. Sign in to publish it and keep editing.'
   },
+  /** A signed-in author's Originals (#976 B3): kept in this browser, or published from another device. */
+  yours: {
+    heading: 'Your Originals',
+    open: 'Open',
+    restore: 'Restore',
+    elsewhere: 'Published from another device'
+  },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
     'Something went wrong on our side. Nothing you’ve made is lost — your Original is still in this tab. Try that step again.',

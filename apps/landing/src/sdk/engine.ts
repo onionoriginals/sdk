@@ -19,6 +19,7 @@ import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
+import { FETCH_LIMITS } from "@originals/vh/fetch";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
 import { OriginalsError } from "@originals/vh";
@@ -34,7 +35,7 @@ import { webvhDomain } from "../auth/webvh-domain";
 import { FEATURES, type Feature } from "./features";
 import { publishOriginal, type HostedUpload } from "./publish";
 import { landingSharedHost, type SubmitTransport } from "./shared-host";
-import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
+import { DurableHostingStorageAdapter, type AccountIndex, type AccountIndexEntry } from "./durable-hosting-adapter";
 import { short } from "./format";
 import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
@@ -177,12 +178,18 @@ interface LogLine {
   };
 }
 
-/** An Original this account's store holds, read from its stored log for a list. `open` verifies it. */
+/**
+ * An Original this account has: in this browser's store (`open` verifies it),
+ * or published from another client and listed in the account's index
+ * (`restore` fetches and verifies it from the host; #976 B, G3).
+ */
 export interface StoredOriginalSummary {
   did: string;
   name: string;
-  checkpoint: string;
+  /** The stored head; null for one only on the host, until it is restored. */
+  checkpoint: string | null;
   published: boolean;
+  where: "this-browser" | "host";
 }
 
 /**
@@ -191,7 +198,7 @@ export interface StoredOriginalSummary {
  * Original (P6.7); `read` fetches its public files (defaults to `fetch`).
  */
 export interface PublishTarget {
-  upload: HostedUpload & Partial<SubmitTransport>;
+  upload: HostedUpload & Partial<SubmitTransport> & Partial<AccountIndex>;
   read?: HostedFetch;
   domain: string;
   slug: string;
@@ -401,9 +408,55 @@ export class DemoEngine {
       const log = (await store.get(did))?.log.trimEnd();
       if (!log) continue;
       const last = parseJson(log.slice(log.lastIndexOf("\n") + 1)) as unknown as LogLine;
-      out.push({ did, name: last.state.asset.name, checkpoint: last.versionId, published: (last.state.asset.aliases?.length ?? 0) > 0 });
+      out.push({ did, name: last.state.asset.name, checkpoint: last.versionId, published: (last.state.asset.aliases?.length ?? 0) > 0, where: "this-browser" });
+    }
+    // This browser's own work lists offline too. An unreachable index is said, not hidden.
+    let hosted: AccountIndexEntry[] = [];
+    try {
+      hosted = await this.accountIndex();
+    } catch (error) {
+      this.emit("account:index-unavailable", "Your Originals on other devices can't be listed right now", { error: error instanceof Error ? error.message : String(error) });
+    }
+    for (const entry of hosted) {
+      if (!out.some((o) => o.did === entry.did)) out.push({ did: entry.did, name: entry.title, checkpoint: null, published: true, where: "host" });
     }
     return out;
+  }
+
+  /** The signed-in account's index of published Originals; empty signed out. */
+  private async accountIndex(): Promise<AccountIndexEntry[]> {
+    if (!this.authed) return [];
+    const index = (this.target ?? this.accountTarget()).upload;
+    return typeof index.listOriginals === "function" ? index.listOriginals() : [];
+  }
+
+  /**
+   * Restore a published Original on a client that doesn't hold it (#976 B3):
+   * the host's accepted log, verified, committed to this store, then read
+   * back as a stranger reads it. Editing continues from the host's head with
+   * this author's own signer; restoring confers no authority.
+   */
+  async restore(did: string): Promise<DemoAssetState> {
+    const entry = (await this.accountIndex()).find((e) => e.did === did);
+    if (!entry) throw new Error(`${short(did)} was not published from this account.`);
+    await this.author();
+    const target = this.target ?? this.accountTarget();
+    const read = target.read ?? publicRead;
+    const aliasLog = new TextDecoder().decode(
+      await read(didWebvhLogUrl(entry.alias), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
+    );
+    const alias: AliasEvidence = { did: entry.alias, log: aliasLog };
+    this.alias = alias;
+    this.did = did;
+    const synced = await this.sdk!.sync(did, this.sharedHost());
+    if (synced.status === "conflict") throw new Error("The host's history of this Original diverges from this browser's; it is kept as a conflict, and nothing was chosen.");
+    await this.store!.putAuthorEvidence(alias);
+    this.view = synced.original;
+    await this.verifyPublished(entry.alias, read);
+    await this.recordPublication({ alias, state: "complete" });
+    await this.refresh();
+    this.emit("asset:restored", `Restored ${short(did)} from the host at ${short(this.view.checkpoint)}`, { did, checkpoint: this.view.checkpoint });
+    return this.snapshot();
   }
 
   /**
@@ -620,6 +673,10 @@ export class DemoEngine {
     await this.recordPublication({ alias: result.alias, state: "uploaded" });
     this.view = await this.sdk.get(this.did);
     await this.verifyPublished(result.alias.did, target.read ?? publicRead);
+    // Listed for the author's other clients (G3); the index is a list, never evidence.
+    if (typeof target.upload.recordOriginal === "function") {
+      await target.upload.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: result.alias.did });
+    }
     await this.recordPublication({ alias: result.alias, state: "complete" });
     return { alias: result.alias.did, baseUrl: result.baseUrl };
   }

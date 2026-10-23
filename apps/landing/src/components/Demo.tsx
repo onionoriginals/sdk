@@ -5,7 +5,7 @@ import { DepositPanel } from './DepositPanel';
 import { DepositFeeNotice } from './DepositFeeNotice';
 import { explorerTxUrl } from '../sdk/explorer';
 import { demo } from '../content';
-import type { DemoAssetState, DemoEngine } from '../sdk/engine';
+import type { DemoAssetState, DemoEngine, StoredOriginalSummary } from '../sdk/engine';
 import { engineIdentity } from '../sdk/engine';
 import { btcNetwork, demoTier, btcoExplorerUrl } from '../sdk/network-flag';
 import { useAuth } from '../auth/useAuth';
@@ -16,6 +16,7 @@ import { HistoryChain } from './HistoryChain';
 import { featureEnabled } from '../sdk/features';
 import { AnchoringBeforeSign, AnchoringPanel } from './AnchoringPanel';
 import { anchoringInMotion } from './anchoring-view';
+import { YourOriginals } from './YourOriginals';
 import { Pipeline } from './Pipeline';
 import { Reveal } from './Reveal';
 import {
@@ -312,6 +313,33 @@ export function Demo() {
       return state;
     });
   };
+  /**
+   * Reopen an Original this browser keeps, or restore one published from
+   * another device (#976 B3). The form then shows the reopened bytes, so on
+   * screen equals the log until the author changes something.
+   */
+  const reopen = (original: StoredOriginalSummary) =>
+    runExclusive(runningRef, async () => {
+      setError(null);
+      setPhase('creating');
+      try {
+        const engine = await getEngine();
+        const state = original.where === 'host' ? await engine.restore(original.did) : await engine.open(original.did);
+        const name = state.history.at(-1)?.name ?? original.name;
+        const upload = { name: state.resource.id, content: state.resource.content, contentType: state.resource.contentType };
+        setTitle(name);
+        setSourceKind('upload');
+        setUploaded(upload);
+        setCommitted({ title: name, style, nonce, sourceKind: 'upload', uploaded: upload, written });
+        setAsset(state);
+        setPhase(state.publication === 'complete' ? 'published' : 'created');
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+        setPhase('idle');
+      }
+    });
+
   // Revising leaves `phase` alone — the asset stays exactly where it was.
   const update = async () => {
     // A revision can grow past the cap just as a genesis can — the Write box is
@@ -745,6 +773,9 @@ export function Demo() {
                       {demo.steps.find((step) => step.layer === asset?.layer)?.label ?? demo.form.draftLabel}
                     </span>
                   </div>
+                  {isAuthenticated && phase === 'idle' && (
+                    <YourOriginals getEngine={getEngine} onPick={(o) => void reopen(o)} disabled={busy} />
+                  )}
                   <div className="demo-form" data-disabled={formLocked || undefined}>
                     <label className="demo-field">
                       <span>{demo.form.titleLabel}</span>
