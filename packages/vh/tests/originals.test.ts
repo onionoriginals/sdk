@@ -143,7 +143,7 @@ describe("resources", () => {
     }
   });
 
-  test("C12-89: a digest outside the SHA-256 set is an unsupported profile", async () => {
+  test("C12-80: a digest outside the SHA-256 set is an unsupported profile", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     const sha512ish = multibaseEncode(new Uint8Array([0x13, 0x40, ...new Uint8Array(64)]));
@@ -194,13 +194,13 @@ describe("history and identity", () => {
     expect(r.checkpoint).toBe(log[0].versionId);
   });
 
-  test("C12-82: a delta instead of the full asset state is rejected", async () => {
+  test("C12-73: a delta instead of the full asset state is rejected", async () => {
     const { alice, log, sign } = await harbor();
     const delta = await resign(log[2], { ...log[2].state, asset: { metadata: { caption: "x" } } }, sign);
     failedWith(await report([...log, delta], [alice]), 3, "STATE_MEMBERS");
   });
 
-  test("C12-88: an undefined state member or duplicate JSON keys are rejected", async () => {
+  test("C12-79: an undefined state member or duplicate JSON keys are rejected", async () => {
     const { alice, log, sign } = await harbor();
     const extra = await resign(log[2], { ...log[2].state, note: "unsigned-looking" }, sign);
     failedWith(await report([...log, extra], [alice]), 3, "STATE_MEMBERS");
@@ -210,7 +210,7 @@ describe("history and identity", () => {
     expect(r.history.entries).toBe(0);
   });
 
-  test("C12-85: lifecycle status and VH deactivated must agree", async () => {
+  test("C12-76: lifecycle status and VH deactivated must agree", async () => {
     const { alice, log, sign } = await harbor();
     const asset = log[2].state.asset as JsonObject;
     const statusOnly = await resign(log[2], { ...log[2].state, operation: "deactivate", transitions: [], asset: { ...asset, status: "deactivated" } }, sign);
@@ -231,7 +231,7 @@ describe("history and identity", () => {
     expect((await report([...log, end], [alice], { checkpoint: log[1].versionId })).state?.status).toBe("active");
   });
 
-  test("C12-58: an entry that sets updateKeys or nextKeyHashes is rejected", async () => {
+  test("C12-49: an entry that sets updateKeys or nextKeyHashes is rejected", async () => {
     const { alice, log, sign } = await harbor();
     for (const parameters of [{ updateKeys: [seeded(3).publicKeyMultibase] }, { nextKeyHashes: [] }]) {
       const keyed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, parameters);
@@ -239,14 +239,14 @@ describe("history and identity", () => {
     }
   });
 
-  test("C12-72: two proofs are rejected", async () => {
+  test("C12-63: two proofs are rejected", async () => {
     const { alice, log } = await harbor();
     const doubled = structuredClone(log);
     doubled[1].proof = [doubled[1].proof[0], doubled[1].proof[0]];
     failedWith(await report(doubled, [alice]), 1, "PROOF_COUNT");
   });
 
-  test("C12-81: bip340-jcs-2025 author keys work; any other cryptosuite is rejected", async () => {
+  test("C12-72: bip340-jcs-2025 author keys work; any other cryptosuite is rejected", async () => {
     const schnorr = seeded(22, "secp256k1");
     const bob = await VhAuthor.create([{ fragment: "btc", signer: schnorr }]);
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Map", resources: [photo(B1)], author: bob.ref("btc"), sign: bob.signer(schnorr, "btc") });
@@ -265,7 +265,7 @@ describe("history and identity", () => {
     failedWith(await report([...log, tooFine], [alice]), 3, "VERSION_TIME_FORMAT");
   });
 
-  test("C12-91: histories beyond the profile limits report the last valid prefix as limit-exceeded", async () => {
+  test("C12-82: histories beyond the profile limits report the last valid prefix as limit-exceeded", async () => {
     const { alice, log } = await harbor();
     const r = await report(log, [alice], { limits: { maxEntries: 2 } });
     expect(r.history.status).toBe("limit-exceeded");
@@ -295,7 +295,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     failedWith(await report([...log, entry], [alice]), 3, "AUTHOR_VM_NOT_IN_DOCUMENT", "author-binding");
   });
 
-  test("C12-07, C12-60, C12-62: wrong relationship, controller or document", async () => {
+  test("C12-07, C12-52, C12-54: wrong relationship, controller or document", async () => {
     const key = seeded(21);
     const auth = seeded(68);
     const ctl = seeded(69);
@@ -315,7 +315,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     failedWith(await report([foreign], [alice]), 0, "AUTHOR_VM_FOREIGN", "author-binding");
   });
 
-  test("C12-63: a key expressed as JWK fails author binding", async () => {
+  test("C12-55: a key expressed as JWK fails author binding", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     const doc = alice.document(alice.did, [{ fragment: "orig", signer: key }]);
@@ -333,14 +333,14 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     failedWith(await report([genesis], [alice]), 0, "AUTHOR_KEY_IS_UPDATE_KEY", "author-binding");
   });
 
-  test("C12-61: an entry without the author DID versionId is rejected", async () => {
+  test("C12-53: an entry without the author DID versionId is rejected", async () => {
     const { alice, log, sign } = await harbor();
     const { versionId: _v, ...noVersion } = log[2].state.author as JsonObject;
     const entry = await resign(log[2], { ...log[2].state, transitions: [], author: noVersion }, sign);
     failedWith(await report([...log, entry], [alice]), 3, "STATE_AUTHOR");
   });
 
-  test("C12-64: the author DID is fixed and its version never goes backwards", async () => {
+  test("C12-56: the author DID is fixed and its version never goes backwards", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     const v1 = alice.versionId;
@@ -352,7 +352,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     failedWith(await report([genesis, older], [alice]), 1, "AUTHOR_VERSION_REGRESSED");
   });
 
-  test("C12-65: an author DID method the profile does not list is rejected", async () => {
+  test("C12-57: an author DID method the profile does not list is rejected", async () => {
     const key = seeded(21);
     const mk = key.publicKeyMultibase;
     const genesis = await createOriginal({
@@ -374,7 +374,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("C12-46 (local): a key removed from the latest author DID leaves the history valid but not current (P7.9)", async () => {
+  test("C12-41 (local): a key removed from the latest author DID leaves the history valid but not current (P7.9)", async () => {
     const { alice, log } = await harbor();
     await alice.rotate([{ fragment: "orig2", signer: seeded(23) }]);
     const r = await report(log, [alice], { freshness: "asserted" });
@@ -397,7 +397,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("C12-57 (local): a deactivated author DID makes an unanchored Original non-current (P6.5)", async () => {
+  test("C12-48 (local): a deactivated author DID makes an unanchored Original non-current (P6.5)", async () => {
     const { alice, log } = await harbor();
     await alice.deactivate();
     const r = await report(log, [alice], { freshness: "asserted" });
@@ -422,7 +422,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
 });
 
 describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
-  test("C12-78 and C12-77: every resolver derives the same document from the log; no stored document is used", async () => {
+  test("C12-69 and C12-68: every resolver derives the same document from the log; no stored document is used", async () => {
     const { alice, log } = await harbor();
     const r = await report(log, [alice]);
     const did = r.original!;
@@ -439,7 +439,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     expect(log[2].state.verificationMethod).toBeUndefined();
   });
 
-  test("C12-79: a plain did:vh resolver rejects an Originals log by its method value", async () => {
+  test("C12-70: a plain did:vh resolver rejects an Originals log by its method value", async () => {
     const { log } = await harbor();
     const r = await resolveDidVh(`did:vh:${log[0].parameters.scid as string}`, { didLog: log, now: NOW });
     expect(r.didResolutionMetadata.error).toBe("invalidDid");
@@ -447,13 +447,13 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     expect(ORIGINALS_METHOD).toBe("originals:1.0");
   });
 
-  test("C12-80: a later entry cannot move the log to plain did:vh", async () => {
+  test("C12-71: a later entry cannot move the log to plain did:vh", async () => {
     const { alice, log, sign } = await harbor();
     const moved = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { method: "did:vh:1.0" });
     failedWith(await report([...log, moved], [alice]), 3, "VERSION_UNSUPPORTED");
   });
 
-  test("C12-74: a VH-valid log that breaks Originals rules is not Originals-verified", async () => {
+  test("C12-65: a VH-valid log that breaks Originals rules is not Originals-verified", async () => {
     const { alice, log, sign } = await harbor();
     const bad = await resign(log[2], { ...log[2].state, transitions: [], asset: { name: "x" } }, sign);
     // A permissive specialisation that only checks the log mechanism accepts it.
@@ -470,8 +470,17 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
     const publish = await resign(log[2], { ...log[2].state, transitions: [], operation: "publish" }, sign);
     failedWith(await report([...log, publish], [alice]), 3, "STATE_OPERATION_UNSUPPORTED", "unsupported-profile");
-    const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: { threshold: 1, witnesses: [{ id: `did:key:${seeded(5).publicKeyMultibase}` }] } });
-    failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_SUPPORTED_YET", "unsupported-profile");
+  });
+
+  test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {
+    const { alice, log, sign } = await harbor();
+    const witnesses = { threshold: 2, witnesses: [5, 6, 7].map((n) => ({ id: `did:key:${seeded(n).publicKeyMultibase}` })) };
+    const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: witnesses });
+    failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_PERMITTED", "invalid-evidence");
+    const empty = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: {} });
+    const r = await report([...log, empty], [alice], { freshness: "asserted" });
+    expect(r.history.status).toBe("valid");
+    expect(r.ordering).toBe("claimed");
   });
 
   test("digests are multibase base58btc sha2-256 multihashes (PROVISIONAL, D4)", () => {

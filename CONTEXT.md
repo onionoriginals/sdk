@@ -31,14 +31,11 @@ _Avoid_: controller key, owner (when discussing who may sign)
 **Author key**:
 A verification method embedded in the author DID document under `assertionMethod`. It is never an update key of the author DID's own log (P5.11). Keeping it for Originals only is the signer's discipline; verifiers cannot check it.
 
-**Witness declaration**:
-A DID service in the author DID document that lists the author's witnesses and threshold (P9.9).
-
 **Key rotation**:
 A change to the author DID that adds or removes an author key. Nothing is appended to the asset log (P5.10).
 
 **Witness**:
-A VH witness that approves asset log entries after checking the author DID's latest state. Hosted Originals require at least three (P9.8).
+A VH witness that approves log entries. Asset logs of Originals do not use them (owner decision Q14); an author DID may, under its own method's rules.
 
 **Owner**:
 The current holder of an anchored Original's anchoring sat. Ownership confers no authority to change the Original. An Original that is not anchored has no owner (P9.11).

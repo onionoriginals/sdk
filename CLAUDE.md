@@ -5,7 +5,7 @@ design. Before changing asset behavior, read the pinned documents listed in
 [`specs/README.md`](specs/README.md), the delivery plan
 [`plans/011-originals-vh-replacement.md`](plans/011-originals-vh-replacement.md),
 and the consumer contract [`packages/sdk/ORIGINALS.md`](packages/sdk/ORIGINALS.md).
-[CONTEXT.md](CONTEXT.md) defines author, owner, witness and checkpoint
+[CONTEXT.md](CONTEXT.md) defines author, owner and checkpoint
 terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
 
 ## Implementation routes
@@ -17,7 +17,7 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   document, verification report, evidence packages).
 - `packages/sdk` (`@originals/sdk`) keeps the create, edit, load, verify and
   publish workflow on top of `@originals/vh`, together with durable local
-  storage, signers, hosting, witnesses and Bitcoin adapters.
+  storage, signers, hosting and Bitcoin adapters.
 - `packages/auth` (`@originals/auth`) creates and updates author DIDs with
   `didwebvh-ts` (did:webvh 1.0). Those DIDs are verified by our own engine
   under experimental did:webvh (PR 302).
@@ -47,8 +47,11 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   resource availability, ordering and freshness are reported separately. A
   missing item is an explicit incomplete result, never a pass (section 7).
 - **Layers move one way.** An Original moves from local to web, and from
-  either to Bitcoin. Anchoring is terminal and happens once. Hosted Originals
-  use witnesses declared in the author DID (P9.8–P9.10, P9.16).
+  either to Bitcoin. Anchoring is terminal and happens once (P9.10, P9.16).
+- **No witnesses.** Asset logs never activate VH witnesses (P9.8, P9.9;
+  owner decision Q14). Unanchored ordering is claimed only; Bitcoin anchoring is how an
+  Original gets proven ordering and a single history. Author DIDs keep their
+  own method's witnesses.
 - **Spec first.** Where a pinned document is ambiguous or contradicts itself
   in a way that blocks the work, stop and report the rule ID with a proposed
   fix. Choices the spec leaves open are marked `PROVISIONAL` in code and docs.

@@ -56,7 +56,7 @@ describe("C12-22: an old valid prefix is not the latest state (P7.6)", () => {
   });
 });
 
-describe("C12-73: stale author DID history is not currently authorized (P7.8)", () => {
+describe("C12-64: stale author DID history is not currently authorized (P7.8)", () => {
   async function withStaleAuthorPackage() {
     const h = await harbor();
     const before = h.alice.entries.slice();

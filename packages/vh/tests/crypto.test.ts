@@ -69,7 +69,7 @@ describe("multibase, multihash and multikey", () => {
     }
   });
 
-  test("C12-63: a key in any other encoding is not a Multikey", () => {
+  test("C12-55: a key in any other encoding is not a Multikey", () => {
     const ed = decodeMultikey(json(w3c("keyPair.json")).publicKeyMultibase as string);
     // Same Ed25519 key, but raw bytes without the multicodec prefix.
     expect(errorCode(() => decodeMultikey(multibaseEncode(ed.publicKey)))).toBe("MULTIKEY_UNSUPPORTED");
@@ -160,7 +160,7 @@ describe("cryptosuite policy (P5.12)", () => {
   const { proof, ...document } = signed;
   const pk = keys.publicKeyMultibase as string;
 
-  test("C12-81: any other cryptosuite is unsupported, even with a valid signature", () => {
+  test("C12-72: any other cryptosuite is unsupported, even with a valid signature", () => {
     for (const cryptosuite of ["ecdsa-jcs-2019", "eddsa-rdfc-2022", "Ed25519Signature2020", ""]) {
       const other = { ...(proof as JsonObject), cryptosuite } as unknown as DataIntegrityProof;
       expect(errorCode(() => verifyProof(document, other, pk))).toBe("CRYPTOSUITE_UNSUPPORTED");

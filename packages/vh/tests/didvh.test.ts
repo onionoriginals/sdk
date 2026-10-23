@@ -141,7 +141,7 @@ describe("did:vh extensions (did:vh PR 3)", () => {
     expect(result.didDocument).toEqual({ "@context": ["https://www.w3.org/ns/did/v1"], id: didOf(one), alsoKnownAs: ["urn:example:record"] });
   });
 
-  test("C12-79: a resolver without the extension rejects the log by its method value", async () => {
+  test("C12-70: a resolver without the extension rejects the log by its method value", async () => {
     const one = await recordGenesis();
     const result = await resolve(didOf(one), { didLog: [one] });
     expect(result.didResolutionMetadata.error).toBe("invalidDid");
@@ -149,7 +149,7 @@ describe("did:vh extensions (did:vh PR 3)", () => {
     expect(result.didDocument).toBeNull();
   });
 
-  test("C12-80: a later entry cannot move the log between plain did:vh and an extension", async () => {
+  test("C12-71: a later entry cannot move the log between plain did:vh and an extension", async () => {
     const plain = await genesis();
     const toExtension = await next(plain, 1, { method: "test-record:1.0" });
     expect((await resolve(didOf(plain), { didLog: [plain, toExtension], extensions: [record], versionNumber: 2 })).didResolutionMetadata.error).toBe("invalidDid");

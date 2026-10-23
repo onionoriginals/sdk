@@ -2,8 +2,12 @@
  * The `originals:1.0` did:vh extension (did:vh PR 3) as a VH-Log
  * specialisation. Keys come from the author DID (VH-Log PR 11): one proof per
  * entry (P5.2), by the author key the entry names (P5.3). versionTime carries
- * milliseconds (VH-Log PR 8; owner decision Q8). Witnesses arrive with
- * hosting (plan 011, PR 7), so this verifier refuses a witness parameter.
+ * milliseconds (VH-Log PR 8; owner decision Q8).
+ *
+ * No witnesses (P9.8, P9.9; owner decision Q14): an asset log never sets the
+ * VH witness parameter to anything but `{}`. Unanchored Originals have claimed
+ * ordering only; Bitcoin anchoring gives proven ordering and a single history.
+ * Author DIDs keep their own method's witnesses, which this does not affect.
  */
 import { fail } from "../errors.js";
 import type { JsonObject } from "../json/index.js";
@@ -54,7 +58,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
     },
     validateEntry: ({ entry, previous, scid, index, active }) => {
       if (Object.keys(active.witness).length > 0) {
-        fail("unsupported-profile", "WITNESS_NOT_SUPPORTED_YET", "witnessed Originals arrive with hosted publication (plan 011, PR 7)");
+        fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
       checkEntryState(entry.state, {
         scid,
