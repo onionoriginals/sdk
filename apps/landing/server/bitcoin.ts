@@ -26,6 +26,7 @@ import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-
 import { encodeSatSnapshot } from './sat-snapshot-codec';
 import type { OriginalsAnchoring } from './originals-anchoring';
 import type { PreparedEntryInscription } from '@originals/sdk/originals/bitcoin';
+import type { InscriptionClock } from '@originals/sdk/originals';
 
 /**
  * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
@@ -795,8 +796,12 @@ export function createBitcoinRoutes(deps: {
    * anchoring routes then answer `bitcoin_anchoring_off`.
    */
   anchoring?: OriginalsAnchoring;
-  /** Block headers for the browser's inscription clock (P9.15). The header route is 501 without it. */
-  headers?: (height: number) => Promise<{ time: number; hash: string; prev?: string }>;
+  /**
+   * The server's inscription clock (P9.15): durable and reorg-aware. The
+   * browser's prepare asks it for inscription times instead of walking every
+   * header from genesis through this server. The route is 501 without it.
+   */
+  clock?: Pick<InscriptionClock, 'at'>;
 }): {
   funding: Handler;
   sat: Handler;
@@ -812,7 +817,7 @@ export function createBitcoinRoutes(deps: {
   originalsSubmit: Handler;
   originalsStatus: Handler;
   txStatus: Handler;
-  blockHeader: Handler;
+  inscriptionTime: Handler;
   sweepInscriptions: () => Promise<{ processed: number; unreadable: string[] }>;
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
@@ -2638,6 +2643,17 @@ export function createBitcoinRoutes(deps: {
     } catch {
       return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
     }
+    // A pair already on record (a lost answer, retried) is answered from it,
+    // byte-compared, before the checks that need its inputs unspent (P9.6).
+    const known = await deps.anchoring.recorded(sub, did, pair!);
+    if (known) {
+      if (!known.ok) {
+        const { ok: _ok, httpStatus, ...refusal } = known;
+        return json(refusal, httpStatus);
+      }
+      const { ok: _ok, ...sent } = known;
+      return json(sent);
+    }
     const perUser = inscribeUserLimiter.check(sub);
     if (!perUser.allowed) {
       return json({ error: 'inscribe_user_cap' }, 429, { 'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)) });
@@ -2748,20 +2764,32 @@ export function createBitcoinRoutes(deps: {
     }
   };
 
-  /** GET /api/btc/header?height= — one block header's time, hash and previous hash (P9.15). */
-  const blockHeader: Handler = async (req, url, clientIp) => {
+  /**
+   * GET /api/btc/inscription-time?height=&hash= — the inscription time at a
+   * block (P9.15), from this server's clock: the greatest header timestamp
+   * of the block and its ancestors, epoch milliseconds. Given the hash, a
+   * block no longer on the active chain is refused with the clock's own code
+   * (BLOCK_NOT_ON_CHAIN). The browser's sat reads all come through this
+   * server; the server's own check before broadcast does not depend on them.
+   */
+  const inscriptionTime: Handler = async (req, url, clientIp) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
     const limited = rateLimited(clientIp) ?? quotaCapped(sub);
     if (limited) return limited;
     const raw = url.searchParams.get('height') ?? '';
+    const hash = url.searchParams.get('hash') ?? undefined;
     if (!/^(0|[1-9]\d{0,7})$/.test(raw)) return json({ error: 'bad_height' }, 400);
-    if (!deps.headers) return json({ error: 'headers_unsupported' }, 501);
+    if (hash !== undefined && !/^[0-9a-f]{64}$/i.test(hash)) return json({ error: 'bad_hash' }, 400);
+    if (!deps.clock) return json({ error: 'clock_unsupported' }, 501);
     try {
-      const h = await deps.headers(Number(raw));
-      return json({ time: h.time, hash: h.hash, ...(h.prev ? { prev: h.prev } : {}) });
-    } catch {
-      return json({ error: 'header_unavailable' }, 502);
+      return json({ height: Number(raw), time: await deps.clock.at(Number(raw), hash) });
+    } catch (e) {
+      const err = e as { category?: string; code?: string; message?: string };
+      if (typeof err.code === 'string' && typeof err.category === 'string') {
+        return json({ error: 'inscription_time_refused', category: err.category, code: err.code, message: err.message }, err.code === 'BLOCK_NOT_ON_CHAIN' ? 409 : 502);
+      }
+      return json({ error: 'inscription_time_unavailable' }, 502);
     }
   };
 
@@ -2780,7 +2808,7 @@ export function createBitcoinRoutes(deps: {
     originalsSubmit,
     originalsStatus,
     txStatus,
-    blockHeader,
+    inscriptionTime,
     sweepInscriptions: reconciler.sweepInscriptions,
   };
 }

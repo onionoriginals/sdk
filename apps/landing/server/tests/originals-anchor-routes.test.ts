@@ -18,7 +18,7 @@ import { createBitcoinRoutes } from '../bitcoin';
 import { createInscriptionsStore } from '../inscriptions-store';
 import { createOriginalsAnchoring } from '../originals-anchoring';
 import { createMoneyLogger } from '../money-log';
-import { INDEX, NETWORK, SAT, WALLET_ADDRESS, authorWithOriginal, fakeChain, headerClock, walletSigner } from './originals-chain-fixture';
+import { INDEX, NETWORK, SAT, WALLET_ADDRESS, authorWithOriginal, blockHeader, fakeChain, headerClock, walletSigner } from './originals-chain-fixture';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 const SUB = 'sub-1';
@@ -44,7 +44,7 @@ function harness(opts: { anchoring?: false; bind?: false } = {}) {
   const routes = createBitcoinRoutes({
     jwtSecret: JWT, provider: chain.provider, inscriptions: store, network: NETWORK,
     indexer: { api: 'https://fake-indexer.test' }, fetchImpl: chain.indexerFetch, ordinals: chain.ordinals,
-    moneyLog, anchoring, headers: async (height) => ({ time: 1_700_000_000 + height, hash: height.toString(16).padStart(64, '0') }),
+    moneyLog, anchoring, clock: headerClock(),
   });
   return { chain, routes, store, money };
 }
@@ -171,17 +171,22 @@ describe('POST /api/btc/originals/submit', () => {
 });
 
 describe('the browser\'s chain reads for prepare', () => {
-  test('GET /api/btc/tx and /api/btc/header are authenticated reads of the node', async () => {
+  test('GET /api/btc/tx and /api/btc/inscription-time are authenticated reads of the node and the server\'s clock (P9.15)', async () => {
     const h = harness();
     const txid = h.chain.satUtxo.txid;
     const t = req(`/api/btc/tx?txid=${txid}`);
     const tx = await h.routes.txStatus(t, new URL(t.url));
     expect(tx.status).toBe(200);
     expect(await tx.json()).toMatchObject({ confirmed: true });
-    const hd = req('/api/btc/header?height=7');
-    expect(await (await h.routes.blockHeader(hd, new URL(hd.url))).json()).toEqual({ time: 1_700_000_007, hash: (7).toString(16).padStart(64, '0') });
-    const bad = req('/api/btc/header?height=-1');
-    expect((await h.routes.blockHeader(bad, new URL(bad.url))).status).toBe(400);
+    const at = req('/api/btc/inscription-time?height=7');
+    // The running maximum of header times through block 7, in milliseconds.
+    expect(await (await h.routes.inscriptionTime(at, new URL(at.url))).json()).toEqual({ height: 7, time: blockHeader(7).time * 1000 });
+    const orphan = req(`/api/btc/inscription-time?height=7&hash=${'e'.repeat(64)}`);
+    const refused = await h.routes.inscriptionTime(orphan, new URL(orphan.url));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ code: 'BLOCK_NOT_ON_CHAIN', category: 'invalid-evidence' });
+    const bad = req('/api/btc/inscription-time?height=-1');
+    expect((await h.routes.inscriptionTime(bad, new URL(bad.url))).status).toBe(400);
     const anon = req(`/api/btc/tx?txid=${txid}`, undefined, 'GET', null);
     expect((await h.routes.txStatus(anon, new URL(anon.url))).status).toBe(401);
   });

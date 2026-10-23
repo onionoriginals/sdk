@@ -21,6 +21,7 @@
  * server's recovery store is the one that guards against a second pair.
  */
 import { base64 } from '@scure/base';
+import { OriginalsError } from '@originals/vh';
 import { InscriptionClock, type OriginalsSDK } from '@originals/sdk/originals';
 import { prepareEntryInscription, type PreparedEntryInscription, type OffChainEvidence } from '@originals/sdk/originals/bitcoin';
 import type { BitcoinSigner, OrdinalsProvider, Utxo } from '@originals/sdk';
@@ -64,7 +65,8 @@ export interface SubmitAnswer {
 /** Everything anchoring needs from the network, all through this site's own server. */
 export interface AnchoringTransport {
   provider: Pick<OrdinalsProvider, 'getSatSnapshot' | 'getFirstSatOfOutput' | 'getTransactionStatus' | 'estimateFee'>;
-  header(height: number): Promise<{ time: number; hash: string; prev?: string }>;
+  /** The inscription time at a block (P9.15), from the server's clock; refuses an orphaned block by hash. */
+  inscriptionTime(height: number, hash?: string): Promise<number>;
   submit(body: { did: string; evidence: Uint8Array; pair: PreparedEntryInscription }): Promise<SubmitAnswer>;
   status(did: string): Promise<AnchoringStatus>;
 }
@@ -216,7 +218,14 @@ export function httpAnchoringTransport(opts: { baseUrl?: string; fetchImpl?: typ
   };
   return {
     provider: opts.provider,
-    header: async (height) => answer(await f(`${base}/api/btc/header?height=${height}`, { credentials: 'same-origin' })),
+    inscriptionTime: async (height, hash) => {
+      const res = await f(`${base}/api/btc/inscription-time?height=${height}${hash ? `&hash=${hash}` : ''}`, { credentials: 'same-origin' });
+      const body = (await res.json().catch(() => ({}))) as { time?: number; category?: string; code?: string; message?: string };
+      // The clock's own refusal, as the SDK raises it, so the writer treats it the same way.
+      if (!res.ok && body.code && body.category) throw new OriginalsError(body.category as ConstructorParameters<typeof OriginalsError>[0], body.code, body.message ?? body.code);
+      if (!res.ok || typeof body.time !== 'number') throw new AnchoringSubmitError(res.status, body);
+      return body.time;
+    },
     submit: async ({ did, evidence, pair }) =>
       answer(await f(`${base}/api/btc/originals/submit`, {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
@@ -277,6 +286,24 @@ export async function resendWaiting(transport: AnchoringTransport, outbox: Ancho
   return { sent, pair: waiting.pair, offChain: waiting.pair.offChain, resent: true };
 }
 
+/**
+ * An InscriptionClock that asks the server's clock (P9.15) instead of walking
+ * every header from genesis through it: one request per inscription height,
+ * not one per block of the chain.
+ */
+class ServerInscriptionClock extends InscriptionClock {
+  constructor(private readonly transport: AnchoringTransport) {
+    super(() => Promise.reject(new Error('the server answers inscription times')));
+  }
+  override at(height: number, hash?: string): Promise<number> {
+    return this.transport.inscriptionTime(height, hash);
+  }
+}
+
+function serverClock(transport: AnchoringTransport): InscriptionClock {
+  return new ServerInscriptionClock(transport);
+}
+
 /** Publish the next entry Bitcoin can accept on the Original's sat (P9.13, P9.17). */
 export async function publishNextEntry(p: PublishNextParams): Promise<PublishNextResult> {
   // A pair whose answer was lost goes again, identical: never a second pair for it (P9.6).
@@ -288,7 +315,7 @@ export async function publishNextEntry(p: PublishNextParams): Promise<PublishNex
   };
   const pair = await prepareEntryInscription({
     sdk: p.sdk, did: p.did, fundingUtxos: p.fundingUtxos, satSigner, changeAddress: p.changeAddress, feeRate: p.feeRate, network: p.network,
-    provider: p.transport.provider as OrdinalsProvider, clock: new InscriptionClock((h) => p.transport.header(h)), index: p.index,
+    provider: p.transport.provider as OrdinalsProvider, clock: serverClock(p.transport), index: p.index,
     recoveryStore: null,
   });
   // Signed but not sent: a cancel here discards it, and nothing was spent.

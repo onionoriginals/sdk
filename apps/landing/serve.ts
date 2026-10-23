@@ -40,7 +40,7 @@ import { startBlockCompletion } from './server/block-completion';
 import { join } from 'node:path';
 import { InscriptionClock } from '@originals/sdk/originals';
 import { fileClockStore } from '@originals/sdk/originals/fs';
-import { coreBlockHeaders } from './server/block-headers';
+import { coreBlockHeaderBatches, coreBlockHeaders } from './server/block-headers';
 import { createOriginalsAnchoring, type OriginalsAnchoring } from './server/originals-anchoring';
 import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
@@ -129,13 +129,18 @@ function createFaucetProviderFromEnv(): FaucetProvider {
  * compared on mainnet, so P9.10's SHOULD is not met, and every status says so
  * (`indexes.compared: false`).
  */
-function anchoringFromEnv(provider: FaucetProvider): { anchoring: OriginalsAnchoring; headers: ReturnType<typeof coreBlockHeaders> } | undefined {
+function anchoringFromEnv(provider: FaucetProvider): { anchoring: OriginalsAnchoring; clock: InscriptionClock } | undefined {
   if (!serverAnchoringEnabled()) return undefined;
-  const headers = btcNet === 'regtest'
-    ? coreBlockHeaders({ rpcUrl: process.env.REGTEST_RPC_URL!, rpcAuth: process.env.REGTEST_RPC_AUTH })
-    : coreBlockHeaders({ rpcUrl: process.env.QUICKNODE_ENDPOINT! });
+  const rpc = btcNet === 'regtest'
+    ? { rpcUrl: process.env.REGTEST_RPC_URL!, rpcAuth: process.env.REGTEST_RPC_AUTH }
+    : { rpcUrl: process.env.QUICKNODE_ENDPOINT! };
   const network = btcNet === 'regtest' ? 'regtest' : 'mainnet';
-  const clock = new InscriptionClock(headers, { network, store: fileClockStore(join(originalsDataDir, `inscription-clock-${network}.bin`)) });
+  // Batched and persisted: a cold start walks the chain once, a thousand headers per round
+  // trip, and later reads cost requests in proportion to new blocks only (P9.15).
+  const clock = new InscriptionClock(coreBlockHeaders(rpc), {
+    network, headers: coreBlockHeaderBatches(rpc), batch: 1000, maxRequests: 2000,
+    store: fileClockStore(join(originalsDataDir, `inscription-clock-${network}.bin`)),
+  });
   const anchoring = createOriginalsAnchoring({
     dataDir: originalsDataDir,
     provider,
@@ -144,7 +149,7 @@ function anchoringFromEnv(provider: FaucetProvider): { anchoring: OriginalsAncho
     money,
   });
   console.warn(`[landing] Bitcoin anchoring of Originals is ON (${network}) — plan 011 PR 10b; off unless the owner approved this instance`);
-  return { anchoring, headers };
+  return { anchoring, clock };
 }
 
 function buildApiRoutes(): {
@@ -174,7 +179,7 @@ function buildApiRoutes(): {
       const routes = createBitcoinRoutes({
         jwtSecret,
         provider,
-        ...(anchored ? { anchoring: anchored.anchoring, headers: anchored.headers } : {}),
+        ...(anchored ? { anchoring: anchored.anchoring, clock: anchored.clock } : {}),
         network: providerNetwork,
         indexer,
         ordinals,

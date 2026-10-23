@@ -183,6 +183,8 @@ export function fakeChain() {
   const ordinals: OrdinalLookup = {
     async outpointInscriptions({ txid, vout }) {
       const key = `${txid}:${vout}`;
+      // ord cannot classify an output a confirmed transaction has spent.
+      for (const id of confirmedAt.keys()) if (spends(txs.get(id)!).includes(key)) throw new Error(`output ${key} is spent`);
       return [...(key === holder ? publications.map((p) => p.id) : []), ...(foreign.get(key) ?? [])];
     },
   };

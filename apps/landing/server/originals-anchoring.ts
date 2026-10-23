@@ -236,18 +236,8 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
         return { ok: false, httpStatus: 409, error: 'original_forked', message: 'This copy of the Original diverges from the one this server holds. Forks are not settled off Bitcoin, so neither branch is inscribed.' };
       }
 
-      // The same pair again (a lost answer): it is held already, so it is not sent again here (P9.6).
-      const recorded = await recoveryStore.load(pair.prepared.commitTxId).catch(() => undefined);
-      if (recorded) {
-        if (recorded.prepared.signedCommitHex.toLowerCase() !== pair.prepared.signedCommitHex.toLowerCase() ||
-            recorded.prepared.revealTxHex.toLowerCase() !== pair.prepared.revealTxHex.toLowerCase()) {
-          return { ok: false, httpStatus: 409, error: 'signed_pair_mismatch', message: 'This commit is already on record with different signed transaction bytes.' };
-        }
-        return {
-          ok: true, outcome: 'recorded', versionId: pair.versionId, recoveryId: recorded.recoveryId, inscriptionId: recorded.prepared.inscriptionId,
-          commitTxId: recorded.prepared.commitTxId, revealTxId: recorded.prepared.revealTxId, broadcast: recorded.broadcast,
-        };
-      }
+      const known = await answerRecorded(recoveryStore, pair);
+      if (known) return known;
 
       // Only the replacement this server's own catch-up calls for (P9.6): never one the browser names.
       let replaces: string[] = [];
@@ -274,6 +264,36 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
         return r;
       }
     });
+  }
+
+  /**
+   * The same pair again (a lost answer): held already, so answered from its
+   * record and never sent again here (P9.6); the sweep resumes it if it still
+   * needs sending. Different bytes under the same commit are refused.
+   */
+  async function answerRecorded(recoveryStore: Held['recoveryStore'], pair: PreparedEntryInscription): Promise<AnchoringSent | AnchoringRefusal | null> {
+    const recorded = await recoveryStore.load(pair.prepared.commitTxId).catch(() => undefined);
+    if (!recorded) return null;
+    if (recorded.prepared.signedCommitHex.toLowerCase() !== pair.prepared.signedCommitHex.toLowerCase() ||
+        recorded.prepared.revealTxHex.toLowerCase() !== pair.prepared.revealTxHex.toLowerCase()) {
+      return { ok: false, httpStatus: 409, error: 'signed_pair_mismatch', message: 'This commit is already on record with different signed transaction bytes.' };
+    }
+    return {
+      ok: true, outcome: 'recorded', versionId: pair.versionId, recoveryId: recorded.recoveryId, inscriptionId: recorded.prepared.inscriptionId,
+      commitTxId: recorded.prepared.commitTxId, revealTxId: recorded.prepared.revealTxId, broadcast: recorded.broadcast,
+    };
+  }
+
+  /**
+   * A pair this server already holds, answered from its record before any
+   * check that needs its inputs unspent: by the time a lost answer is retried
+   * its commit may be confirmed, and its inputs spent by it. Null otherwise.
+   */
+  async function recorded(sub: string, did: string, pair: PreparedEntryInscription): Promise<AnchoringSent | AnchoringRefusal | null> {
+    if (typeof did !== 'string' || !DID_RE.test(did) || !wellFormedPair(pair)) return null;
+    const dir = dirOf(sub, did);
+    if (!(await known(dir))) return null;
+    return exclusive(dir, async () => answerRecorded((await open(dir, did)).recoveryStore, pair));
   }
 
   function summarize(did: string, step: CatchUpStep): AnchoringStatus {
@@ -364,7 +384,7 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     return { examined, resumed, failed };
   }
 
-  return { submit, status, sweep };
+  return { submit, recorded, status, sweep };
 }
 
 export type OriginalsAnchoring = ReturnType<typeof createOriginalsAnchoring>;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { coreBlockHeaders } from '../block-headers';
+import { coreBlockHeaderBatches, coreBlockHeaders } from '../block-headers';
 
 const H = (n: number) => n.toString(16).padStart(64, '0');
 
@@ -28,5 +28,28 @@ describe('block headers over Core RPC (P9.15)', () => {
     await expect(wrong(7)).rejects.toThrow('does not describe');
     const missing = coreBlockHeaders({ rpcUrl: 'http://x', fetchImpl: core({}) });
     await expect(missing(7)).rejects.toThrow('Method not found');
+  });
+});
+
+describe('batched headers for the server clock (P9.15)', () => {
+  const TIP = 5;
+  const batchCore = (requests: number[]) => (async (_url: string | URL | Request, init?: RequestInit) => {
+    const calls = JSON.parse(String(init?.body)) as Array<{ id: number; method: string; params: [number | string] }>;
+    requests.push(calls.length);
+    return Response.json(calls.map(({ id, method, params: [p] }) => {
+      if (method === 'getblockhash') return (p as number) <= TIP ? { id, result: H(p as number), error: null } : { id, result: null, error: { code: -8, message: 'Block height out of range' } };
+      const h = parseInt(p as string, 16);
+      return { id, result: { hash: p, time: 1000 + h, ...(h > 0 ? { previousblockhash: H(h - 1) } : {}) }, error: null };
+    }));
+  }) as typeof fetch;
+
+  test('two requests for a run of headers, ending at the tip', async () => {
+    const requests: number[] = [];
+    const batches = coreBlockHeaderBatches({ rpcUrl: 'http://x', fetchImpl: batchCore(requests) });
+    expect(await batches(3, 10)).toEqual([
+      { time: 1003, hash: H(3), prev: H(2) }, { time: 1004, hash: H(4), prev: H(3) }, { time: 1005, hash: H(5), prev: H(4) },
+    ]);
+    expect(requests).toEqual([10, 3]);
+    expect(await batches(6, 10)).toEqual([]);
   });
 });

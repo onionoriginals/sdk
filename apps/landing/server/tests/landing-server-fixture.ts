@@ -17,7 +17,7 @@ import { createInscriptionsStore } from '../inscriptions-store';
 import { createMoneyLogger } from '../money-log';
 import { createOriginalsAnchoring } from '../originals-anchoring';
 import { createWebvhHostStore } from '../webvh-host';
-import { INDEX, NETWORK, WALLET_ADDRESS, blockHeader, type fakeChain, headerClock } from './originals-chain-fixture';
+import { INDEX, NETWORK, WALLET_ADDRESS, type fakeChain, headerClock } from './originals-chain-fixture';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 
@@ -31,7 +31,7 @@ export function inProcessLanding(chain: ReturnType<typeof fakeChain>, sub = 'sub
   const bitcoin = createBitcoinRoutes({
     jwtSecret: JWT, provider: chain.provider, inscriptions, network: NETWORK, indexer: { api: 'https://fake-indexer.test' },
     fetchImpl: chain.indexerFetch, ordinals: chain.ordinals, moneyLog, anchoring,
-    headers: async (height) => blockHeader(height),
+    clock: headerClock(),
   });
   const apiRoutes = buildRoutes({ turnkey: {} as Turnkey, sessions: createInMemorySessionStorage(), jwtSecret: JWT, bitcoin: { ...bitcoin, funding: undefined } });
   const handler = buildFetch({ apiRoutes, hostStore: createWebvhHostStore(), distDir: dataDir, trustedProxyHops: 0, log: () => undefined });
