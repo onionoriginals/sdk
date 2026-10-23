@@ -39,7 +39,7 @@
     "url": "https://github.com/onionoriginals/sdk"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.1",
+    "@changesets/cli": "^3.0.3",
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
     "railway": "3.11.0",
@@ -53,7 +53,8 @@
     "js-yaml": "^4.3.1",
     "fast-uri": "^3.1.6",
     "source-map-js": "^1.2.2",
-    "shell-quote": "^1.11.0"
+    "shell-quote": "^1.11.0",
+    "launch-editor": "^2.14.2"
   },
   "engines": {
     "node": ">=20.10.0"
