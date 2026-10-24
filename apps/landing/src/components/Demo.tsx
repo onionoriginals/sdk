@@ -667,8 +667,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
 
   // Rebuild from a clean slate whenever the auth identity changes (sign in/out
   // via the modal, no reload). Without this the demo keeps the engine it
-  // preloaded, so a user who signs in mid-session would publish through the
-  // anonymous ephemeral adapter instead of their durable account. Skip the
+  // preloaded, so a user who signs in mid-session would keep signing as the
+  // guest, in the guest's database, instead of their account. Skip the
   // initial mount (identity unchanged).
   const identity = engineIdentity(isAuthenticated, user?.subOrgId);
   const prevIdentity = useRef(identity);
@@ -1246,10 +1246,11 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                   asset?.webvhLogUrl && (
                     <div className="demo-resolved">
                       <div className="demo-resolved-head">
-                        {/* An anonymous log is served from the shared in-memory
-                            host store, so the heading stops short of calling it
-                            a permanent home. The caveat itself is up in the
-                            publish step, where it can still change a mind. */}
+                        {/* Publishing needs sign-in (#976 B5), so this block
+                            shows an account's published log. Signed out, the
+                            heading still stops short of calling the page's copy
+                            a home: the guest's work is only in this browser,
+                            and the caveat is up in the publish step. */}
                         <span>{resolved.heading}</span>
                         <span
                           className="demo-resolved-badge"

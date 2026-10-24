@@ -370,13 +370,16 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
   // run. The bundle ignores it on the production host and on mainnet
   // (src/sdk/features.ts); set there, it is a mis-set variable on the wrong
   // instance, so it is named here. VITE_* values are Railway service variables,
-  // read at runtime here as they were at build.
+  // read at runtime here as they were at build. With mainnet it is fatal,
+  // whatever CONFIG_STRICT says (owner decision); on the production host alone
+  // it is an ordinary error.
   if (env.VITE_ACCEPTANCE_HOSTED_PUBLICATION === '1') {
     if (btcNetwork === 'mainnet' || env.VITE_BTC_NETWORK === 'mainnet') {
-      report(
-        'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
-        'VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 on a mainnet instance. The switch is for the staging acceptance run only (scripts/acceptance/hosted-README.md); the bundle ignores it on mainnet. Unset it here.'
-      );
+      issues.push({
+        key: 'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
+        severity: 'fatal',
+        message: 'VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 on a mainnet instance. The switch is for the staging acceptance run only (scripts/acceptance/hosted-README.md); the bundle ignores it on mainnet. Unset it here; this instance refuses to boot until it is.',
+      });
     }
     if (env.VITE_WEBVH_HOST === PRODUCTION_WEBVH_HOST) {
       report(

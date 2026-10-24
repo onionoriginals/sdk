@@ -522,9 +522,28 @@ describe('validateConfig — the hosted acceptance switch is staging-only', () =
       { ...STAGING, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' },
       { ...STAGING, VITE_BTC_NETWORK: 'mainnet' },
     ]) {
-      const issues = errors(validateConfig({ env, dataDir: mounted }));
+      const issues = validateConfig({ env, dataDir: mounted });
       expect(keys(issues)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
     }
+  });
+
+  // Owner decision: the switch with mainnet refuses the boot, whatever
+  // CONFIG_STRICT says and whether or not the instance looks deployed.
+  test('set with mainnet, it is fatal: the boot is refused with CONFIG_STRICT off', () => {
+    const local = { BTC_NETWORK: 'testnet4', VITE_BTC_NETWORK: 'mainnet', VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1', VITE_WEBVH_HOST: 'staging.originals.build' };
+    for (const env of [{ ...STAGING, VITE_BTC_NETWORK: 'mainnet' }, local]) {
+      const issues = validateConfig({ env, dataDir: mounted });
+      expect(fatals(issues).map((i) => i.key)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+      expect(() => enforceConfig(issues, { strict: false, log: () => {} })).toThrow(/VITE_ACCEPTANCE_HOSTED_PUBLICATION/);
+    }
+  });
+
+  test('set on the production host alone, it stays an error: reported, and CONFIG_STRICT decides', () => {
+    const issues = validateConfig({ env: { ...STAGING, VITE_WEBVH_HOST: 'originals.build' }, dataDir: mounted });
+    const mine = issues.filter((i) => i.key === 'VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    expect(mine.map((i) => i.severity)).toEqual(['error']);
+    expect(() => enforceConfig(mine, { strict: false, log: () => {} })).not.toThrow();
+    expect(() => enforceConfig(mine, { strict: true, log: () => {} })).toThrow(/VITE_ACCEPTANCE_HOSTED_PUBLICATION/);
   });
 
   test('set on the production host, it is reported', () => {
