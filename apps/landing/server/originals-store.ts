@@ -75,6 +75,8 @@ export interface OriginalsStore {
     o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
   ): void;
   list(subOrgId: string): OriginalSummary[];
+  /** Private, account-owned evidence artifacts grouped by their hosted Original. */
+  evidenceFiles?(subOrgId: string): Array<Map<string, Uint8Array>>;
   serve(url: URL): Response | null;
   /** Auth-scoped read by object key (adapter.get) — only keys this user wrote. */
   read(subOrgId: string, key: string): Response;
@@ -431,5 +433,19 @@ export function createOriginalsStore(opts: {
     }
   }
 
-  return { saveBytes, recordOriginal, list, serve, read, readHosted, ownerOf };
+  function evidenceFiles(subOrgId: string): Array<Map<string, Uint8Array>> {
+    const keys = Object.keys(readIndex(subOrgId).sizes);
+    const roots = keys.filter((k) => k.endsWith('/originals/originals-evidence.json')).map((k) => k.slice(0, -'originals-evidence.json'.length));
+    return roots.map((root) => {
+      const files = new Map<string, Uint8Array>();
+      for (const key of keys) {
+        if (!key.startsWith(root) || ownerOf(key) !== subOrgId) continue;
+        const bytes = readHosted(key);
+        if (bytes) files.set(key.slice(root.length), bytes);
+      }
+      return files;
+    });
+  }
+
+  return { saveBytes, recordOriginal, list, evidenceFiles, serve, read, readHosted, ownerOf };
 }

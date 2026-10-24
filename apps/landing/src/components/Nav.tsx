@@ -60,6 +60,7 @@ export function Nav() {
           ))}
         </nav>
         <div className="nav-actions">
+          <a className="nav-library" href="/me" onClick={(e) => { e.preventDefault(); navigate('/me'); }}>{nav.library}</a>
           <a className="nav-github" href={nav.github.href} target="_blank" rel="noreferrer">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path
@@ -121,6 +122,7 @@ export function Nav() {
       </div>
       {open && (
         <nav className="nav-mobile" aria-label={nav.mobileAria}>
+          <a href="/me" onClick={(e) => { e.preventDefault(); setOpen(false); navigate('/me'); }}>{nav.library}</a>
           {!isAuthenticated && (
             <a
               href={nav.cta.href}

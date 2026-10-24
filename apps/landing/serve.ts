@@ -46,6 +46,7 @@ import { createMoneyLogger } from './server/money-log';
 import type { Handler } from './server/router';
 import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
+import { createAnchoringLibrary } from './server/originals-library';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
@@ -230,7 +231,7 @@ function buildApiRoutes(): {
       `[landing] ${btcNet} inscription disabled (QUICKNODE_ENDPOINT${btcNet === 'mainnet' ? '' : '/BTC_FAUCET_*'} absent) — inscribe stays mock`
     );
   }
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,

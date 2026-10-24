@@ -560,9 +560,15 @@ their size, resources and queued submissions per Original are bounded
 (PROVISIONAL). Submissions for one Original run one at a time in-process and
 the head comparison and log replace are one synchronous step, which assumes
 one server process per data directory (the landing's instance lock enforces
-it); several instances would need a shared compare-and-swap on the head. Any
-signed-in caller may submit, because the signed entry authorizes the change;
-accepted files stay the namespace owner's (an open deployment question).
+it); several instances would need a shared compare-and-swap on the head. The
+signed entry authorizes the change; the caller only decides who may spend the
+namespace owner's quota (owner decision of 22 October 2026). The caller must
+be the namespace owner, or an account whose landing DID the head state names
+as the author or a granted editor (P5.15): a did:webvh on the Original's host
+whose one path segment is the account's slug. Any other caller is refused
+(`403 { error: "caller_not_authorized" }`) before its body is read, and again
+against the head the save would extend. Accepted files stay the namespace
+owner's.
 Once hosted, an asset log changes only through the submit route: an upload
 (PUT) may create it or repeat it byte for byte (a retried publication, P9.2),
 never roll it back or advance it unverified; a signer's DID log and witness

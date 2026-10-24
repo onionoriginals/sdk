@@ -1,0 +1,12 @@
+.eclipse-interior .originals-library { padding-top: 9rem; min-height: 60vh; }
+.originals-library h1 { font-size: clamp(2.5rem, 7vw, 5rem); letter-spacing: -.05em; margin: 1rem 0; }
+.originals-library > .container > p { max-width: 70ch; margin-bottom: 1.25rem; }
+.library-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 2rem 0; }
+.library-actions input { max-width: 13rem; margin-left: .75rem; }
+.library-list { padding: 0; list-style: none; display: grid; gap: 1rem; }
+.library-list li { border: 1px solid var(--border); padding: 1.5rem; border-radius: 0; }
+.library-list a { font-size: 1.4rem; }
+.library-list small { overflow-wrap: anywhere; opacity: .65; }
+.library-list p { margin: .75rem 0; }
+
+.library-verification { margin: 2rem 0; padding-block: 1.5rem; border-block: 1px solid var(--border); overflow-wrap: anywhere; }
