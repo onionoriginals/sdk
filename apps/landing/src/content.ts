@@ -370,6 +370,8 @@ export const demo = {
     indexSingle: (index: string) => `Read from one index (${index}); no second index was compared.`,
     indexCompared: (indexes: string[]) => `Read from ${indexes.length} indexes that agree: ${indexes.join(', ')}.`,
     neverCurrentNote: 'Until Bitcoin shows the anchor, this Original is valid as of its last version, never confirmed current.',
+    noticeNote: (unverifiable: number, waiting: number) =>
+      `${unverifiable === 1 ? '1 later inscription on the sat cannot be checked yet' : `${unverifiable} later inscriptions on the sat cannot be checked yet`}: the signer's DID history it names is not available here.${waiting > 0 ? ` ${waiting === 1 ? '1 later version waits' : `${waiting} later versions wait`} on it, and will be accepted or set aside once it can be checked.` : ''} The state shown stays current until then.`,
   },
   evidence: {
     action: 'Download evidence',

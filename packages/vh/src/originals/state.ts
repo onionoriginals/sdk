@@ -15,13 +15,13 @@ export const ORIGINALS_METHOD = "originals:1.0";
 
 /**
  * The profile's limits (P7.7, P14.13), decided by the owner on 21 October 2026
- * (D6; spec PR #50 (open), which raises resources from 64 to 256). `nameLength`
+ * (D6; originals-spec #50, merged, which raises resources from 64 to 256). `nameLength`
  * is this SDK's own, PROVISIONAL.
  */
 export const ORIGINALS_LIMITS = Object.freeze({
   entries: 10_000,
   entryBytes: 65_536,
-  /** Resources at any one time (P14.13; spec PR #50 (open)): removing one makes room for another. */
+  /** Resources at any one time (P14.13; originals-spec #50, merged): removing one makes room for another. */
   resources: 256,
   nameLength: 1_024,
   authorVersions: 1_000,
@@ -243,7 +243,7 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
     if (!Array.isArray(g.resources) || !g.resources.every((r) => typeof r === "string")) bad(`state.asset.editors[${i}].resources is a list of resourceIDs`);
     const granted = g.resources;
     if (new Set(granted).size !== granted.length) bad(`state.asset.editors[${i}].resources lists a resource twice`);
-    // P5.15 (originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges): the author entry that adds a resource may also grant it; the grant
+    // P5.15 (originals-spec #51, merged): the author entry that adds a resource may also grant it; the grant
     // takes effect from the next entry (P5.17), so no editor can change it in the entry that adds it.
     for (const r of granted) if (!ids.has(r)) bad(`state.asset.editors[${i}] grants ${r}, which is not in the resource set; removing a resource removes it from every grant (P4.1, P5.15)`);
     return g as unknown as EditorGrant;
@@ -254,7 +254,7 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
 export function checkAsset(value: unknown, authorDid?: string): AssetState {
   const a = members(value, ["name", "status", "resources", "aliases"], ["metadata", "editors"], "state.asset");
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
-    invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} characters`);
+    invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
   if (a.metadata !== undefined && !isJsonObject(a.metadata)) invalid("STATE_METADATA", "metadata must be an object when present");
   if (a.status !== "active" && a.status !== "deactivated") invalid("STATE_STATUS", "status must be active or deactivated");

@@ -187,7 +187,7 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     expect(new DataView(written.buffer).getUint16(12, true)).toBe((0 << 9) | (1 << 5) | 1);
   });
 
-  test("C12-ZIPREAD: the reader decodes every name as UTF-8, rejecting one that is not, and rejects an entry whose mode is not a regular file (P14.10, P7.5)", () => {
+  test("C12-180: the reader decodes every name as UTF-8, rejecting one that is not, and rejects an entry whose mode is not a regular file (P14.10, P7.5)", () => {
     // A name byte made invalid UTF-8 in both headers.
     const zip = encodeZip([raw("a.txt")]);
     const view = new DataView(zip.buffer);

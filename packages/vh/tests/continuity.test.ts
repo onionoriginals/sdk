@@ -190,6 +190,17 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(found.validAsOf?.checkpoint).toBe(next.versionId);
   });
 
+  test("C12-177: a witnessed log found where its own latest version's id points establishes freshness, though every asset entry was signed before the move (P7.8, P5.14)", async () => {
+    const { alice, log } = await moved();
+    const rotated = await alice.rotate([{ fragment: "orig-1", signer: K1 }], witnessList);
+    const url = didWebvhLogUrl(alice.location);
+    const r = await verify(log, [{ ...alice.evidence(), witness: await approve(rotated), retrievedFrom: url, obtainedAt: OBTAINED, source: "fetched" as const }]);
+    expect(r.identityEvidence.freshness).toBe("established");
+    // The same log fetched from the old host, whose latest version names the new one, is not.
+    const old = await verify(log, [{ ...alice.evidence(), witness: await approve(rotated), retrievedFrom: didWebvhLogUrl(alice.did), obtainedAt: OBTAINED, source: "fetched" as const }]);
+    expect(old.identityEvidence.freshness).toBe("not-established");
+  });
+
   test("approved by the DID's own witnesses at its latest version, and retrieved where that version's id says, the log establishes freshness", async () => {
     const { alice, at, log } = await moved();
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }], witnessList);
@@ -204,7 +215,7 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(describeFreshness(alice.did, r.identityEvidence)).toContain("approved by the DID's own witnesses");
     // Established freshness still makes an unanchored Original only valid as of its checkpoint (P7.10).
     expect(r.current).toBe(false);
-    // C12-EXEMPT: the location rule is for a did:webvh log fetched from a location; the same
+    // P7.8: the location rule is for a did:webvh log fetched from a location; the same
     // witnessed log from an evidence package establishes freshness (P7.8).
     const packaged = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "package" }]);
     expect(packaged.identityEvidence.freshness).toBe("established");

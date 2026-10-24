@@ -107,7 +107,7 @@ export interface OriginalsSDKOptions {
    * when it was retrieved and its latest versionId. Its freshness is
    * established only when the DID's own witnesses approve that version and
    * the version's `id` names the location (P7.8; owner decision, 23 Oct
-   * 2026; originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges); otherwise, or if it cannot be obtained, it is not established.
+   * 2026; originals-spec #51, merged); otherwise, or if it cannot be obtained, it is not established.
    *
    * Bounded (08b review R1, R2, A4): only the author DID fixed at genesis is
    * an identity to retrieve, and its location is read from the log's
@@ -450,7 +450,7 @@ function retrievableIdentities(chained: ChainedEntry[], verified: number): strin
  * verified. An editor entry is signed by its editor; the author reference it
  * carries is its parent's and says nothing of where the author is now.
  *
- * P5.14 (08b review r4 #5; originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges): when the evidence held verifies no
+ * P5.14 (08b review r4 #5; originals-spec #51, merged): when the evidence held verifies no
  * entry `did` signed (a reader with no evidence for it), no proof can be
  * checked before the log is retrieved. The location named by the earliest
  * chained entry `did` signed (the genesis entry for the author), which is
@@ -488,6 +488,24 @@ function identityLocations(chained: ChainedEntry[], did: string, verified: numbe
     }
   }
   return out;
+}
+
+/**
+ * Where a did:webvh log held for an identity says it now is: the `id` of its
+ * last version, when that is a did:webvh. Only a request; the verifier uses
+ * what is found there only if it verifies from the identity's genesis, and
+ * establishes freshness only if that log's own latest version names the
+ * location (P5.14, P7.8).
+ */
+function movedTo(evidence: AuthorDidEvidence | undefined): string[] {
+  if (typeof evidence?.log !== "string") return [];
+  const last = evidence.log.trimEnd().split("\n").pop();
+  try {
+    const state = last ? (JSON.parse(last) as { state?: { id?: unknown } }).state : undefined;
+    return typeof state?.id === "string" && state.id.startsWith("did:webvh:") ? [state.id] : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The did:webvh log URL of `location`, or undefined when it is not a did:webvh. */
@@ -691,9 +709,10 @@ export class OriginalsSDK {
   ): Promise<AuthorDidEvidence[]> {
     const chained = chainedEntries(log);
     // Only an identity that signed a chained entry has a location to retrieve from; none is asked twice.
+    // P5.14 (originals-spec #51, merged): and where a log held for it says the DID now is, when that is elsewhere.
     const plan = retrievableIdentities(chained, verified)
       .filter((did) => did.startsWith("did:webvh:"))
-      .map((did) => ({ did, locations: identityLocations(chained, did, verified).filter((l) => !tried.has(`${did} ${logUrlOf(l)}`)) }))
+      .map((did) => ({ did, locations: [...new Set([...identityLocations(chained, did, verified), ...movedTo(base.find((a) => a.did === did))])].filter((l) => !tried.has(`${did} ${logUrlOf(l)}`)) }))
       .filter((p) => p.locations.length > 0);
     if (plan.length === 0) return base;
     budget.plan(2 * plan.reduce((n, p) => n + p.locations.length, 0), 0);

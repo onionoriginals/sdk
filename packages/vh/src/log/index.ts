@@ -245,6 +245,13 @@ export interface VerifyOptions {
   /** Future-dating tolerance; VH-Log recommends at most 5 minutes. */
   futureToleranceSeconds?: number;
   limits?: LogLimits;
+  /**
+   * Entry indexes whose signer authorization and proof signature are not
+   * checked; every other rule is. For a profile that must tell an entry it
+   * cannot authorize yet from one that fails a rule not depending on the
+   * signer (Originals P9.15). Never use it to accept an entry.
+   */
+  unauthorized?: ReadonlySet<number>;
 }
 
 export const SCID_PLACEHOLDER = "{SCID}";
@@ -549,6 +556,13 @@ async function verifyEntry(
   const document = withoutProof(entry);
   for (const proof of entry.proof) {
     if (!isJsonObject(proof)) fail("invalid-evidence", "PROOF_INVALID", "proof must be an object");
+    if (options.unauthorized?.has(index)) {
+      if (proof.proofPurpose !== "assertionMethod") fail("invalid-evidence", "PROOF_PURPOSE", "proofPurpose must be assertionMethod");
+      if (!isCryptosuite(proof.cryptosuite) || !version.entrySuites.includes(proof.cryptosuite)) {
+        fail("unsupported-profile", "CRYPTOSUITE_NOT_PERMITTED", `cryptosuite ${JSON.stringify(proof.cryptosuite)} is not permitted by ${active.version}`);
+      }
+      continue;
+    }
     let key: string;
     if (spec.keys.kind === "updateKeys") {
       key = asProofError(() => didKeyMultikey(proof.verificationMethod, { fragment: "optional" }));
@@ -763,7 +777,10 @@ export function compactLineError(line: string): string | undefined {
   return undefined;
 }
 
-export async function verifyLogText(text: string, options: VerifyOptions & { parse?: ParseLimits; compactLines?: boolean }): Promise<LogVerification> {
+export async function verifyLogText(
+  text: string,
+  options: VerifyOptions & { parse?: ParseLimits; compactLines?: boolean; lineRule?: (line: string) => string | undefined },
+): Promise<LogVerification> {
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const lines = text.length === 0 ? [] : body.split("\n");
   const entries: unknown[] = [];
@@ -777,6 +794,9 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
         const bad = compactLineError(lines[index]) ?? (index === lines.length - 1 && !text.endsWith("\n") ? "the last line does not end in LF" : undefined);
         if (bad) throw new OriginalsError("invalid-evidence", "LOG_LINE_FORMAT", `line ${index + 1}: ${bad}`);
       }
+      // A profile's rule on the line as written, such as Originals P14.3 on number literals.
+      const ruled = options.lineRule?.(lines[index]);
+      if (ruled) throw new OriginalsError("invalid-evidence", "JSON_UNSAFE_NUMBER", `line ${index + 1}: ${ruled}`);
       // The stored line is what is measured (P7.7, P14.13), before it is parsed, and only it.
       const max = options.limits?.maxEntryBytes;
       // A line of at most max / 3 UTF-16 code units is at most max UTF-8 bytes: that bound is what is passed on.

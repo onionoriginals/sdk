@@ -84,6 +84,8 @@ describe('submitting an anchoring pair (P9.6, P9.17, P9.18)', () => {
       publication: 'anchored', action: 'done', heads: { accepted: a.anchoring, committed: a.anchoring, queue: [] },
       ownership: { status: 'provisional', output: `${pair.prepared.revealTxId}:0`, indexes: [INDEX] },
       indexes: { used: [INDEX], compared: false },
+      // Section 7: a current status always carries its notices, here none (P9.15).
+      current: true, notices: [], listed: { unverifiable: [], waiting: [] },
     });
   });
 

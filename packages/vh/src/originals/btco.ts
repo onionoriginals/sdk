@@ -2,7 +2,7 @@
  * The did:btco alias that names an Original's anchoring sat (plan 012 §3.1,
  * §3.5; owner decision Q15). The network prefixes `sig:`, `test:` and `reg:`
  * are this profile's, as the SDK uses them (P9.10, P14.12; owner decision, D6;
- * spec PR #50 (open)).
+ * originals-spec #50, merged).
  */
 import { OriginalsError, fail } from "../errors.js";
 

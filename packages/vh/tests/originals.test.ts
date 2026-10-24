@@ -595,20 +595,34 @@ describe("section 14: the asset log's form (P14.2)", () => {
     expect(r.head).toBe(log[log.length - 1].versionId);
   });
 
-  test("C12-172: P14.3: an integer outside the safe range is rejected however it is written; other numbers are kept", async () => {
+  test("C12-185: P14.5: a name of 1,024 UTF-16 code units is accepted and one of 1,025 rejected, a non-BMP character counting as two", async () => {
+    const { alice, log, sign } = await harbor();
+    const named = (name: string) => resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), name } }, sign);
+    const clef = "\u{1D11E}"; // two UTF-16 code units
+    expect(clef.length).toBe(2);
+    const fits = await report([...log, await named(clef + "a".repeat(1022))], [alice]);
+    expect(fits.history.status, JSON.stringify(fits.history.failure)).toBe("valid");
+    failedWith(await report([...log, await named(clef + "a".repeat(1023))], [alice]), 3, "STATE_NAME", "invalid-evidence");
+  });
+
+  test("C12-172: P14.3: a number whose magnitude is greater than 2^53 - 1 is rejected however it is written; other numbers are kept", async () => {
     const { alice, log, sign } = await harbor();
     // Re-signed with the number as the parser reads it, so only its value is judged.
     const signedWith = async (value: number, written: string) => {
       const entry = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: value } } }, sign);
       return serializeLog([...log, entry]).replace(`"metadata":{"n":${JSON.stringify(value)}}`, `"metadata":{"n":${written}}`);
     };
-    for (const [value, written] of [[1e16, "1e16"], [-1e16, "-1e16"], [9007199254740992, "9007199254740993.0"], [1.5e300, "1.5e300"]] as const) {
+    for (const [value, written] of [[1e16, "1e16"], [-1e16, "-1e16"], [9007199254740992, "9007199254740993.0"], [9007199254740992, "9007199254740991.5"], [9007199254740991, "9007199254740991.4"], [9007199254740991, "9007199254740991.0000001"], [1.5e300, "1.5e300"]] as const) {
       failedWith(await report(await signedWith(value, written), [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
     }
     // Given already parsed, too.
     const parsed = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: 1e16 } } }, sign);
     failedWith(await report([...log, parsed], [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
-    for (const [value, written] of [[1e15, "1e15"], [9007199254740991, "9007199254740991.0"], [1.5, "1.5"], [1e-7, "1e-7"]] as const) {
+    // Any negative zero, however written, including a negative number that underflows to it.
+    for (const written of ["-0", "-0.0", "-0e0", "-1e-400"]) {
+      failedWith(await report(await signedWith(0, written), [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    }
+    for (const [value, written] of [[1e15, "1e15"], [9007199254740991, "9007199254740991.0"], [-9007199254740991, "-9.007199254740991e15"], [1.5, "1.5"], [1e-7, "1e-7"]] as const) {
       const r = await report(await signedWith(value, written), [alice]);
       expect(r.history.status, `${written}: ${JSON.stringify(r.history.failure)}`).toBe("valid");
     }

@@ -420,7 +420,7 @@ const PREFIX: Record<BitcoinNetwork, string> = { mainnet: "", signet: "sig:", te
 
 /**
  * The did:btco alias of a sat on a network (plan 012 §3.5; P9.10, P14.12): the
- * prefixes are decided (owner decision, D6; spec PR #50 (open)), and proposed to
+ * prefixes are decided (owner decision, D6; originals-spec #50, merged), and proposed to
  * the did:btco method as decentralized-identity/labs-ordinals-plus#4 [S30].
  */
 export function btcoAlias(network: BitcoinNetwork, sat: string): string {
@@ -481,7 +481,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
             mediaType: ("mediaType" in body ? body.mediaType : null) ?? "application/octet-stream",
             content: new Uint8Array(),
             // A delegated or encoded inscription's own metadata, when read (null: it carries none).
-            // Absent, it was not read: a did:btco history fails closed there (P5.13; originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges).
+            // Absent, it was not read: a did:btco history fails closed there (P5.13; originals-spec #51, merged).
             ...(!unread && "metadata" in body && body.metadata !== undefined ? { metadata: body.metadata } : {}),
             unsupported: unread ? ("not-read" as const) : (body as { reason: "delegated" | "content-encoding" }).reason,
             ...(unread ? { contentLength: body.contentLength } : {}),

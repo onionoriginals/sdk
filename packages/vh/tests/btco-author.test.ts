@@ -294,7 +294,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(low.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
   });
 
-  test("C12-178: P9.15: a later inscription naming a known did:btco version, with an unread inscription on the author's sat before it, is unverifiable, not accepted against the older state", async () => {
+  test("C12-178, C12-188: P9.15: a later inscription naming a known did:btco version, with an unread inscription on the author's sat before it, is unverifiable, not accepted against the older state", async () => {
     const { v1, genesis, anchor } = await byA();
     const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a known version", author: ref(v1.id), sign });
     const later = inscribed([next], 40);
@@ -311,7 +311,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.notices).toEqual(["unverifiable-inscriptions"]);
   });
 
-  test("C12-DEP: P5.13: an unread inscription on a did:btco author's sat before the anchoring inscription leaves the anchored state's identity evidence incomplete", async () => {
+  test("C12-170: P5.13: an unread inscription on a did:btco author's sat before the anchoring inscription leaves the anchored state's identity evidence incomplete", async () => {
     const { v1, genesis, anchor } = await byA();
     const unread = at(25, { content: new Uint8Array(), unsupported: "not-read" });
     const r = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31)]);
@@ -319,7 +319,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("C12-178: a gap in a did:btco signer's history found after an entry was accepted makes it unverifiable; the head is recomputed and the change reported", async () => {
+  test("C12-183: a gap in a did:btco signer's history found after an entry was accepted makes it unverifiable; the head is recomputed and the change reported", async () => {
     const { v1, genesis, anchor } = await byA();
     const next = await updateOriginal(anchor, { versionTime: time(40), name: "Accepted before the gap was seen", author: ref(v1.id), sign });
     const later = inscribed([next], 40);

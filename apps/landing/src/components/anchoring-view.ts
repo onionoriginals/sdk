@@ -22,6 +22,12 @@ export interface AnchoringView {
   /** The next version can be inscribed now: the anchor is accepted and nothing is in flight. */
   canInscribeNext: boolean;
   neverCurrentNote: string | null;
+  /**
+   * Shown with the label whenever inscriptions after the anchor cannot be
+   * checked yet, or publications wait on them: they do not stop the state
+   * being current, so they are never left out (section 7, P9.15).
+   */
+  noticeNote: string | null;
 }
 
 const IN_FLIGHT = new Set(['resume', 'wait-for-confirmation', 'wait-for-evidence', 'wait-for-bitcoin', 'refused']);
@@ -51,6 +57,7 @@ export function anchoringView(anchoring: DemoAssetState['anchoring']): Anchoring
     canInscribeNext: publication === 'anchored' && unpublished > 0 && !inFlight && status?.heldByThisAccount !== false,
     // An Original is current only when Bitcoin shows its anchor (P7.10).
     neverCurrentNote: publication === 'anchored' ? null : copy.neverCurrentNote,
+    noticeNote: status && status.notices.length > 0 ? copy.noticeNote(status.listed.unverifiable.length, status.listed.waiting.length) : null,
   };
 }
 

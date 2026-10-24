@@ -8,7 +8,7 @@
  *   the anchoring pair is observed on the network (confirmed, or in the
  *   node's mempool) but Bitcoin does not show it, reads are labelled
  *   `pending-bitcoin-acceptance` (P9.18); submitted but not observed, they
- *   are `submitted-unobserved` (P9.18 as originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges);
+ *   are `submitted-unobserved` (P9.18 as originals-spec #51, merged);
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *
@@ -17,7 +17,7 @@
  * anchoring entry last; every later inscription carries exactly one entry,
  * the successor of the head Bitcoin accepts. Media type
  * `application/vnd.originals.vh+jsonl`, no metadata, at most 350,000 bytes
- * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; spec PR #50 (open)). Entries committed after
+ * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; originals-spec #50, merged). Entries committed after
  * the anchoring entry before the anchor is accepted wait, and then go one per
  * later block.
  *
@@ -566,7 +566,7 @@ export type CatchUpStep =
    * head that the writer cannot verify (`waiting-for-earlier-unverifiable`):
    * `waitingOn` names it, and `signer`/`signerVersionId` are what that one
    * needs. Chain order decides between them once it is verified (P9.15;
-   * originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
+   * originals-spec #51, merged).
    */
   | { action: "wait-for-evidence"; versionId: string; recoveryId: string; inscriptionId: string; signer: string; signerVersionId: string; waitingOn?: string; pending: PendingEntries }
   /**

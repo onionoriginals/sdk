@@ -410,7 +410,7 @@ describe("a confirmed inscription whose signer evidence the writer lacks is not 
   });
 });
 
-describe("the writer's inscription waiting on an earlier unverifiable one is not settled (P9.15; waiting-for-earlier-unverifiable)", () => {
+describe("C12-181, C12-188: the writer's inscription waiting on an earlier unverifiable one is not settled (P9.15; waiting-for-earlier-unverifiable)", () => {
   test("catch-up waits for the evidence of the inscription it waits on, and prepares nothing over it", async () => {
     const { alice, bob, store, sdk, did, asAlice, anchored, lines } = await edited();
     // Elsewhere, Bob rotates and signs an edit on the anchored head naming his version 2.

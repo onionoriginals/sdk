@@ -251,7 +251,7 @@ describe("C12-159: transitions for an added and a removed resource", () => {
   });
 });
 
-describe("C12-160: an Original with 256 resources / 257 resources (P14.13; spec PR #50 (open), owner decision)", () => {
+describe("C12-160: an Original with 256 resources / 257 resources (P14.13; originals-spec #50, merged, owner decision)", () => {
   const many = (n: number, from = 0) => Array.from({ length: n }, (_, i) => note(`r${from + i}`, `r${from + i}`));
   const manyBytes = (n: number, from = 0) => Object.fromEntries(many(n, from).map((d, i) => [d.digest, bytes(`r${from + i}`)]));
 

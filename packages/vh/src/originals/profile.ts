@@ -211,15 +211,16 @@ function checkParameterMembers(parameters: JsonObject, index: number): void {
 }
 
 /**
- * P14.3 (wording of originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges): no number in an entry is an integer outside the IEEE 754 safe range,
- * however it was written (`1e16`, `9007199254740993.0`): the strict parser
- * refuses such integer literals, and this the other spellings, and entries
- * given already parsed. Plain VH-Log keeps its own number rules.
+ * P14.3 (wording of originals-spec #51, merged): no number in an entry has a magnitude greater than 2^53 − 1,
+ * however it was written (`1e16`, `9007199254740993.0`, `1.5e300`). Every
+ * double that large is an integer, so this is the safe-integer bound. The
+ * strict parser refuses such integer literals, and this the other spellings,
+ * and entries given already parsed. Plain VH-Log keeps its own number rules.
  */
 function checkSafeIntegers(value: JsonValue): void {
   if (typeof value === "number") {
     if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
-      fail("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${value} is an integer outside the safe range (P14.3)`);
+      fail("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${value} has a magnitude greater than 2^53 - 1 (P14.3)`);
     }
   } else if (Array.isArray(value)) {
     for (const v of value) checkSafeIntegers(v);
@@ -230,8 +231,53 @@ function checkSafeIntegers(value: JsonValue): void {
 
 const PROOF_MEMBERS = ["cryptosuite", "proofPurpose", "proofValue", "type", "verificationMethod"];
 
+const MAX_SAFE = 9_007_199_254_740_991n;
+const NUMBER_TOKEN = /-?(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?/y;
+
 /**
- * P14.4, P14.8 (explicit in originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges): an entry proof has exactly type, cryptosuite,
+ * P14.3 (originals-spec #51, merged): why a line of an Originals asset log has a number whose exact
+ * decimal value, as written, has magnitude greater than 2^53 − 1, or
+ * undefined. Judged on the text, so `9007199254740991.4` is refused although
+ * it parses to a safe integer. Negative zero is refused by the strict parser.
+ */
+export function exactNumberError(line: string): string | undefined {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c !== "-" && (c < "0" || c > "9")) continue;
+    NUMBER_TOKEN.lastIndex = i;
+    const m = NUMBER_TOKEN.exec(line);
+    if (!m) continue;
+    if (exceedsSafe(m[1], m[2] ?? "", m[3] ?? "0")) return `number ${m[0]} has a magnitude greater than 2^53 - 1 (P14.3)`;
+    i += m[0].length - 1;
+  }
+  return undefined;
+}
+
+/** Whether |int.frac × 10^exp| > 2^53 − 1, exactly. */
+function exceedsSafe(int: string, frac: string, exp: string): boolean {
+  const digits = (int + frac).replace(/^0+/, "");
+  if (digits === "") return false;
+  // Exponents too large for an exact BigInt are decided by digit counts alone.
+  const e = Number(exp) - frac.length;
+  const magnitude = digits.length + e; // the value lies in [10^(magnitude-1), 10^magnitude)
+  if (magnitude > 16) return true;
+  if (magnitude < 16) return false;
+  const d = BigInt(digits);
+  return e >= 0 ? d * 10n ** BigInt(e) > MAX_SAFE : d > MAX_SAFE * 10n ** BigInt(-e);
+}
+
+/**
+ * P14.4, P14.8 (explicit in originals-spec #51, merged): an entry proof has exactly type, cryptosuite,
  * verificationMethod, proofPurpose and proofValue; `@context`, `id`,
  * `created`, `expires`, `domain`, `challenge`, `nonce` and `previousProof`
  * are rejected.

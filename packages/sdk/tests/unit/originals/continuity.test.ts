@@ -170,6 +170,21 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
+  test("C12-177: a log from the old host that records a move sends the reader to the new location (P5.14 SHOULD)", async () => {
+    const env = await journey();
+    await env.alice.move("new.example.org");
+    const zip = withoutIdentity((await env.sdk.package(env.did)).bytes, env.alice.did);
+    const seen: string[] = [];
+    const log = env.alice.evidence().log as string;
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(env.alice.did)]: log, [didWebvhLogUrl(env.alice.location)]: log }, seen),
+    });
+    const r = (await reader.load(zip)).report;
+    expect(seen.filter((u) => u.endsWith("/did.jsonl"))).toEqual([didWebvhLogUrl(env.alice.did), didWebvhLogUrl(env.alice.location)]);
+    expect(r.identityEvidence).toMatchObject({ status: "complete", latestVersionId: env.alice.versionId, obtained: { location: didWebvhLogUrl(env.alice.location) } });
+  });
+
   test("found at both locations, the log from the latest verified entry's location is used", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
