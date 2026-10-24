@@ -34,6 +34,7 @@ import {
   completionCopy,
   resolvedCopy,
   publishDurabilityNote,
+  publishStepLock,
   inscribeCostNote,
   selectFundingUtxos,
   depositDisclosure,
@@ -150,7 +151,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
   // cannot drift apart (KTD9).
   const done = completionCopy(inscribeView.simulated, network);
   const resolved = resolvedCopy(isAuthenticated);
-  const durabilityNote = publishDurabilityNote(isAuthenticated);
+  const durabilityNote = publishDurabilityNote(isAuthenticated, featureEnabled('hostedPublication'));
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [style, setStyle] = useState<string>(getArtSeed().style);
@@ -686,8 +687,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
 
   // Rebuild from a clean slate whenever the auth identity changes (sign in/out
   // via the modal, no reload). Without this the demo keeps the engine it
-  // preloaded, so a user who signs in mid-session would publish through the
-  // anonymous ephemeral adapter instead of their durable account. Skip the
+  // preloaded, so a user who signs in mid-session would keep signing as the
+  // guest, in the guest's database, instead of their account. Skip the
   // initial mount (identity unchanged).
   const identity = engineIdentity(isAuthenticated, user?.subOrgId);
   const prevIdentity = useRef(identity);
@@ -958,9 +959,12 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                 <ol className="demo-steps">
                   {demo.steps.map((s, i) => {
                     // Publishing and anchoring wait on later phases (features.ts).
-                    const unavailable = (i === 1 && !featureEnabled('hostedPublication')) || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    // Publishing also needs sign-in, in every build (#976 B5).
+                    const publishLock = i === 1 ? publishStepLock({ hostedPublication: featureEnabled('hostedPublication'), authenticated: isAuthenticated }) : null;
+                    const unavailable = publishLock === 'unavailable' || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    const locked = unavailable || publishLock === 'signed-out';
                     const state =
-                      unavailable
+                      locked
                         ? 'locked'
                         : step > i
                           ? 'done'
@@ -992,10 +996,10 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                               <span className="dot" />
                               {s.label}
                             </span>
-                            {unavailable && (
+                            {locked && (
                               <span className="demo-sim-badge">
                                 <span className="dot" aria-hidden="true" />
-                                {demo.unavailable.badge}
+                                {unavailable ? demo.unavailable.badge : demo.unavailable.signedOutBadge}
                               </span>
                             )}
                             {!unavailable && i === 2 && inscribeView.simulated && (
@@ -1012,14 +1016,14 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                               ? i === 1 ? demo.unavailable.hostedPublication : demo.unavailable.bitcoinAnchoring
                               : i === 2 ? inscribeView.description : s.description}
                           </p>
-                          {/* R7: an anonymous publish is temporary and shares a
-                              demo path. Said HERE — in the publish step, from
-                              first paint — because after the log exists is too
-                              late to decide to sign in first. */}
-                          {i === 1 && !unavailable && durabilityNote && (
+                          {/* R7: signed out, publishing needs sign-in. Said
+                              HERE, in the publish step, from first paint. The
+                              guest-key warning (G10) is the one guest-key-note
+                              above, shown in every build. */}
+                          {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
-                          {state !== 'done' && !unavailable && (
+                          {state !== 'done' && !locked && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
                             // so its "this is not Bitcoin" signal is the
@@ -1034,6 +1038,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                                 pendingRevision,
                                 updating,
                                 anyRunning: busy,
+                                authenticated: isAuthenticated,
                               })}
                               data-busy={state === 'busy' || undefined}
                               onClick={stepActions[i]}
@@ -1272,10 +1277,11 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                   asset?.webvhLogUrl && (
                     <div className="demo-resolved">
                       <div className="demo-resolved-head">
-                        {/* An anonymous log is served from the shared in-memory
-                            host store, so the heading stops short of calling it
-                            a permanent home. The caveat itself is up in the
-                            publish step, where it can still change a mind. */}
+                        {/* Publishing needs sign-in (#976 B5), so this block
+                            shows an account's published log. Signed out, the
+                            heading still stops short of calling the page's copy
+                            a home: the guest's work is only in this browser,
+                            and the caveat is up in the publish step. */}
                         <span>{resolved.heading}</span>
                         <span
                           className="demo-resolved-badge"

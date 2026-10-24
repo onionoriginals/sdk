@@ -206,7 +206,7 @@ export function completionCopy(simulated: boolean, network: BtcNetworkFlag = 'ma
     : network === 'regtest' ? { ...demo.done.real, lead: demo.regtest.done, explorerLabel: null } : demo.done.real;
 }
 
-/** The published-log block. An anonymous log is served here only for a while. */
+/** The published-log block's copy. Publishing needs sign-in (#976 B5); signed out, the heading says the history is only in this browser. */
 export function resolvedCopy(authenticated: boolean): {
   heading: string;
   resolvedBadge: string;
@@ -219,13 +219,26 @@ export function resolvedCopy(authenticated: boolean): {
 }
 
 /**
- * R7 — the durability caveat for an anonymous publish, returned for the
- * PUBLISH STEP rather than for the log that comes back from it. U8 introduced
- * the string but rendered it only after the fact, which is the one moment it
- * cannot change anyone's mind.
+ * R7 — the signed-out caveat, returned for the PUBLISH STEP rather than for
+ * the log that comes back from it: publishing needs sign-in (#976 B5). The
+ * guest-key warning is `library.guestKey` (owner decision of 23 October 2026).
  */
-export function publishDurabilityNote(authenticated: boolean): string | null {
-  return authenticated ? null : demo.hosting.temporaryNote;
+export function publishDurabilityNote(authenticated: boolean, hostedPublication: boolean): string | null {
+  // The guest-key warning (G10) is `library.guestKey`, shown once in every
+  // build. This only says publishing needs sign-in, where publishing exists.
+  return authenticated || !hostedPublication ? null : demo.hosting.temporaryNote;
+}
+
+/**
+ * Why the publish step is locked, or null when it isn't (#976 B5). Hosted
+ * publication off (features.ts) locks it for everyone, and that is the reason
+ * given. Otherwise it needs sign-in: an Original's web address lives in the
+ * author's account, so publishing isn't available signed out.
+ */
+export function publishStepLock(o: { hostedPublication: boolean; authenticated: boolean }): 'unavailable' | 'signed-out' | null {
+  if (!o.hostedPublication) return 'unavailable';
+  if (!o.authenticated) return 'signed-out';
+  return null;
 }
 
 /**
@@ -568,7 +581,7 @@ export function demoFailureMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : '';
   if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
     // 507 from the durable per-user store is a QUOTA, not a blip — "try again
-    // in a moment" would be a lie. The anonymous store no longer 507s at all.
+    // in a moment" would be a lie. Signed out, nothing is published, so no 507.
     if (/failed:\s*429\b/.test(raw)) return demo.hosting.rateLimited;
     if (/failed:\s*507\b/.test(raw)) return demo.hosting.quotaFull;
     return demo.hosting.unavailable;
@@ -621,10 +634,13 @@ export function stepButtonDisabled(opts: {
   updating: boolean;
   /** Any run in flight anywhere — a revision blocks the pipeline too. */
   anyRunning?: boolean;
+  /** Publishing needs sign-in (#976 B5), whatever state the step is in. */
+  authenticated: boolean;
 }): boolean {
   if (opts.state !== 'ready') return true;
   if (opts.anyRunning) return true;
   if (opts.index === 0) return opts.titleEmpty;
+  if (opts.index === 1 && !opts.authenticated) return true;
   // Publishing while the preview shows bytes nothing signed would publish
   // something other than what is on screen.
   if (opts.index === 1) return opts.pendingRevision || opts.updating;
