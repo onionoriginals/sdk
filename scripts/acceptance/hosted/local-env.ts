@@ -17,7 +17,7 @@ import { FileStore } from "@originals/sdk/originals/fs";
 import { signToken, getAuthCookieConfig } from "@originals/auth/server";
 import { DemoEngine, type Authoring, type PublishTarget } from "../../../apps/landing/src/sdk/engine.ts";
 import { DurableHostingStorageAdapter } from "../../../apps/landing/src/sdk/durable-hosting-adapter.ts";
-import type { PublicationRecord } from "../../../apps/landing/src/sdk/publication-records.ts";
+import { higherPublication, type PublicationRecord } from "../../../apps/landing/src/sdk/publication-records.ts";
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from "../../../apps/landing/src/auth/webvh.ts";
 import { serializeCookie } from "../../../apps/landing/server/cookies.ts";
 import * as ed from "@noble/ed25519";
@@ -89,7 +89,9 @@ export async function clientStore(dir: string) {
   const file = (did: string) => join(records, `${createHash("sha256").update(did).digest("hex")}.json`);
   return Object.assign(store, {
     getPublication: async (did: string): Promise<PublicationRecord | undefined> => (existsSync(file(did)) ? (JSON.parse(readFileSync(file(did), "utf8")) as PublicationRecord) : undefined),
-    putPublication: async (did: string, record: PublicationRecord): Promise<void> => writeFileSync(file(did), JSON.stringify(record)),
+    // Forward only, as the browser's store keeps them (higherPublication).
+    putPublication: async (did: string, record: PublicationRecord): Promise<void> =>
+      writeFileSync(file(did), JSON.stringify(higherPublication(existsSync(file(did)) ? (JSON.parse(readFileSync(file(did), "utf8")) as PublicationRecord) : undefined, record))),
   });
 }
 

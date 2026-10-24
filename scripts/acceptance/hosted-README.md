@@ -53,7 +53,7 @@ Railway dashboard. They are never written to source, to a log or to the receipt.
 | `TRUSTED_PROXY_HOPS` | `1` behind the Railway edge |
 | `VITE_WEBVH_HOST` | the staging hostname |
 | `VITE_BTC_NETWORK`, `BTC_NETWORK` | a non-mainnet network |
-| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet` |
+| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet`. Set with mainnet, the server refuses to boot (`server/config.ts`, fatal whatever `CONFIG_STRICT` says) |
 
 ### Railway IaC: never apply it to staging
 
@@ -91,6 +91,17 @@ staging is read-only (see [Operator](#operator)).
 
 The private keys stay in Turnkey. The browser holds only a non-extractable
 P-256 session key in IndexedDB (12 hours) and the `auth_token` cookie (7 days).
+
+**The account's identity DID must be on the staging domain.** Sign-in finds
+an identity the account already has and never mints a second one
+(`readUserWebVHDid`). So an account that signed in before G1 landed keeps a
+`did:webvh:…:magby.originals.build:user-…` identity. That identity doesn't
+resolve from staging, and B2's author binding fails. Use a **fresh sub-org**
+(a test email that has never signed in to this Turnkey org) whose first
+sign-in happens on the staging build, so its identity is minted on the
+staging `VITE_WEBVH_HOST`. The harness checks this before anything is
+published, and records it in the receipt as `author.didDomain`. A DID on any
+other domain fails B1.
 
 ### Operator
 
@@ -186,6 +197,9 @@ Automated:
 
 PASS when all of these hold:
 
+- The author DID's domain is the staging `VITE_WEBVH_HOST`
+  (`did:webvh:<SCID>:<VITE_WEBVH_HOST>:user-<sub16>`), not `magby` or any
+  other host (see [Account](#account)).
 - The author DID document lists `#key-1` as its only `assertionMethod`. The
   log's `updateKeys` are the identity key's `did:key`, which is `#key-0`.
 - Every asset-log entry proof names `<author>#key-1` at a versionId of the
@@ -372,6 +386,7 @@ shape as the section A receipt:
   "author": {
     "did": "did:webvh:…",
     "subOrg": "<first 16 chars>",
+    "didDomain": { "expected": "<VITE_WEBVH_HOST>", "actual": "<the DID's domain>", "status": "PASS" },
     "roles": {
       "identity":   { "verificationMethod": "#key-0", "turnkeyPath": "m/44'/501'/1'/0'", "publicKeyMultibase": "z…", "updateKey": true, "controlsAlias": true },
       "authorship": { "verificationMethod": "#key-1", "turnkeyPath": "m/44'/501'/0'/0'", "publicKeyMultibase": "z…", "updateKey": false, "assertionMethod": true }
@@ -426,11 +441,11 @@ one of them.
 
 | # | Gap | Blocks | Proposed fix |
 |---|---|---|---|
-| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`. Unset, they fall back to the legacy domain `magby.originals.build` (`src/auth/webvh-domain.ts`, PROVISIONAL), never to `location.host`. Reads of the hosted layout for a host the store holds skip the canonical redirect, so existing `magby` identity DIDs stay readable |
+| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`. Unset, they fall back to the legacy domain `magby.originals.build` (`src/auth/webvh-domain.ts`, PROVISIONAL), never to `location.host`. Reads of the hosted layout for a host this instance serves (`VITE_WEBVH_HOST` or the legacy domain) skip the canonical redirect, so existing `magby` identity DIDs stay readable |
 | G6 | No deployed revision. `/api/health` is `{status:"ok"}` | receipt | `GET /api/version` returns the server's `RAILWAY_GIT_COMMIT_SHA`, and the build bakes the SPA's SHA |
 | G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host and `VITE_BTC_NETWORK` isn't `mainnet`. A test pins production off |
 | G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the guest key is kept in this browser, unencrypted, signable by anyone using it, and that sign-in signs with your own key and publishes (owner decision of 23 October 2026). Add a content-claim test |
-| G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | main's `BrowserOriginalsStore` (#992), one IndexedDB database per sub-org and one for the guest, holding the log, resources, author and alias evidence, retained versions and anchors, branches, and pending and refused candidates. Hardened against other tabs; without IndexedDB, memory with a notice |
+| G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | main's `BrowserOriginalsStore` (#992). `browserDatabase()` names one IndexedDB database per account, `originals-library-v1:account:<sub-org>`, and one for the guest, `originals-library-v1:guest`. Each holds the log, resources, author and alias evidence, retained versions and anchors, branches, pending and refused candidates, and publication records. Hardened against other tabs; without IndexedDB, memory with a notice |
 | G4 | After a restart, a publication interrupted after its entry can't resume | B4 | Persist a publication record (`{ alias, state: started \| uploaded \| complete }`) before each step. Reopening restores the alias, and publishing again passes it, so no second publish entry is signed. The files for a checkpoint are deterministic and the host accepts identical repeats, so a resume puts them all again; no per-file list is kept |
 | G5 | `publish()` reports success when the PUTs resolve, with no read-back | B1, B4 | Report complete only after a cookie-less `loadPublished` sees the local checkpoint with every byte. Otherwise the state is `uploaded-unverified` with "Resume" |
 | G3 | Nothing lists or reopens an account's Originals. `GET`/`POST /api/originals` exist but the client never calls them | B3 | main's account library (`/me`, #992) lists them. Publishing also records `{did, alias}` in the account index, as its own retried step. `/me/<did>` restores through `DemoEngine.restore`: the account's evidence, then for a published Original the host's descending head and a stranger read-back |

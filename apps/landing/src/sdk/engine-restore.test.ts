@@ -22,7 +22,7 @@ async function world() {
   const { upload, read, fetchAs } = host();
   const secret = ed.utils.randomSecretKey();
   const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
-  const client = (a: LocalAuthor = author, o: { read?: HostedFetch; idb?: IDBFactory } = {}) => {
+  const client = (a: LocalAuthor = author, o: { read?: HostedFetch; idb?: IDBFactory; noEvidence?: boolean } = {}) => {
     const idb = o.idb ?? new IDBFactory();
     return new DemoEngine({
       authed: true,
@@ -30,7 +30,14 @@ async function world() {
       features: { hostedPublication: true },
       store: new BrowserOriginalsStore(SUB, idb),
       author: async () => a,
-      publishTarget: { upload, read: o.read ?? read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
+      publishTarget: {
+        // noEvidence: the account's evidence route has nothing for it, so restore syncs from the host alone.
+        upload: o.noEvidence ? Object.assign(Object.create(upload), { evidence: async () => null }) : upload,
+        read: o.read ?? read,
+        domain: DOMAIN,
+        slug: userWebvhSlug(SUB),
+        aliasSigner: async () => aliasSigner,
+      },
     });
   };
   return { client, read, author, rows: () => accountRows(fetchAs) };
@@ -170,6 +177,46 @@ describe('restoring a published Original on another client', () => {
 });
 
 describe('restore and the host moving on (P2.1, P4.5)', () => {
+  test('a failed read-back on reopen never downgrades a complete publication', async () => {
+    const w = await world();
+    const idbA = new IDBFactory();
+    const a = w.client(w.author, { idb: idbA });
+    await a.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    const published = await a.publish();
+    expect(published.publication).toBe('complete');
+    // Another client moves the host on, so A's reopen has to sync and read back.
+    const b = w.client(w.author);
+    await b.restore(published.did);
+    await b.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8));
+    // A reopens /me/<did>. The sync's retrieval is the first manifest read;
+    // the read-back's is the second, and it fails (a transient 5xx).
+    let manifests = 0;
+    const read: HostedFetch = async (url, o) => (/originals-evidence\.json$/.test(url) && ++manifests >= 2 ? Promise.reject(new Error('503 from the host')) : w.read(url, o));
+    const reopening = w.client(w.author, { idb: idbA, read, noEvidence: true });
+    await expect(reopening.restore(published.did)).rejects.toThrow();
+    expect((await new BrowserOriginalsStore(SUB, idbA).getPublication(published.did))?.state).toBe('complete');
+    // Still published, and still editable, through the host.
+    const later = w.client(w.author, { idb: idbA });
+    const reopened = await later.open(published.did);
+    expect(reopened.publication).toBe('complete');
+    const next = await later.update('Harbor at night', 'Orbits', art('Harbor at night', 9));
+    expect(next.publication).toBe('complete');
+  });
+
+  test('a reopen whose record is complete and whose host is already current skips the read-back', async () => {
+    const w = await world();
+    const idbA = new IDBFactory();
+    const a = w.client(w.author, { idb: idbA });
+    await a.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    const published = await a.publish();
+    // One retrieval is the sync's; a read-back would be a second.
+    let manifests = 0;
+    const read: HostedFetch = (url, o) => ((/originals-evidence\.json$/.test(url) && manifests++), w.read(url, o));
+    const reopened = await w.client(w.author, { idb: idbA, read }).restore(published.did);
+    expect(reopened.publication).toBe('complete');
+    expect(manifests).toBe(1);
+  });
+
   test('C12-128: the host head moves between the sync and the read-back: restore follows the descending head', async () => {
     const w = await world();
     const a = w.client();

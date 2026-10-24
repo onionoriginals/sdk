@@ -5,7 +5,9 @@
  * profile: IndexedDB, localStorage and cookies survive as they do for a
  * person. "Another client" is a second, empty profile.
  *
- * The page's own engine (`window.__originalsDemo`, set by DemoEngine) is
+ * The page's own engine (`window.__originalsDemo`, which Demo exposes only on
+ * a staging acceptance build: the switch set, not the production host, not
+ * mainnet; src/sdk/acceptance-hook.ts) is
  * driven through its public methods, so every signature is made by the real
  * client-held Turnkey session in that page. Sign-in goes through the UI; the
  * OTP is read from the operator on stdin, typed into the page, and dropped.
@@ -15,6 +17,7 @@
  * NOT YET EXERCISED against a deployed host: the first staging run is its
  * test (scripts/acceptance/hosted-README.md).
  */
+import { didWebvhDomain } from "./did-domain.mjs";
 import { createInterface } from "node:readline/promises";
 import { chromium } from "playwright-core";
 import { safeFetch } from "@originals/vh/fetch";
@@ -140,12 +143,23 @@ const actions = {
     await ensureIdentity(page);
     await engineReady(page);
     await phase.check("b1-create-revise-publish", "create, revise and publish through the page's Turnkey session", async () => {
-      await must(page, "create", "Acceptance harbor", "Orbits", png(PNG_A));
+      const created = await must(page, "create", "Acceptance harbor", "Orbits", png(PNG_A));
+      // Before anything is published: the account's identity DID must be on
+      // this staging domain (hosted-README.md "Account"), or B2 can't bind it.
+      const expected = new URL(base).host;
+      const didDomain = { expected, actual: didWebvhDomain(created.author), status: didWebvhDomain(created.author) === expected ? "PASS" : "FAIL" };
+      phase.facts.didDomain = didDomain;
+      assertEqual(didDomain.actual, expected, "the identity DID's domain (use a fresh sub-org minted on this staging build)");
       await must(page, "update", "Acceptance harbor, revised", "Orbits", png(PNG_B));
       const published = await must(page, "publish");
       assertEqual(published.publication, "complete", "publication");
       phase.facts.work1 = facts(published);
       return phase.facts.work1;
+    });
+    await phase.check("b1-did-domain", "the account's identity DID is on this staging did:webvh domain", async () => {
+      const d = phase.facts.didDomain;
+      assert(d && d.status === "PASS", "the identity DID is not on this staging domain", d);
+      return d;
     });
     await phase.check("b1-key-roles", "the hosted logs show separate identity (alias control) and authorship roles", async () => {
       const s = await must(page, "snapshot");
@@ -159,7 +173,7 @@ const actions = {
       assert(updateKeys(authorLog).some((k) => k.includes(key("#key-0"))), "the identity key is not the author DID's update key");
       assert(updateKeys(aliasLog).some((k) => k.includes(key("#key-0"))), "the identity key does not control the alias (P3.7)");
       assert(![...updateKeys(authorLog), ...updateKeys(aliasLog)].some((k) => k.includes(key("#key-1"))), "the authorship key is an update key (P5.11)");
-      phase.facts.author = { did: s.author, logUrl: didWebvhLogUrl(s.author) };
+      phase.facts.author = { did: s.author, logUrl: didWebvhLogUrl(s.author), didDomain: phase.facts.didDomain };
       phase.facts.roles = {
         identity: { verificationMethod: "#key-0", turnkeyPath: "m/44'/501'/1'/0'", publicKeyMultibase: key("#key-0"), updateKey: true, controlsAlias: true },
         authorship: { verificationMethod: "#key-1", turnkeyPath: "m/44'/501'/0'/0'", publicKeyMultibase: key("#key-1"), updateKey: false, assertionMethod: true },

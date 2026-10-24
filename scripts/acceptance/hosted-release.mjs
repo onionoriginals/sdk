@@ -139,7 +139,8 @@ const p = target === "local" ? { id: "L0-identity", a: "L1-client-a", r1: "L2-re
 const ok = (phase, id) => results.find((r) => r.phase === phase)?.checks.find((c) => c.id === id)?.status === "PASS";
 const all = (...refs) => refs.every(([ph, id]) => ok(ph, id));
 const computed = {
-  "B1-turnkey-create-revise-publish": target === "local" ? all([p.id, "author-identity"], [p.a, "b1-create-revise"], [p.a, "b1-publish"], [p.a, "b1-key-roles"]) : all([p.a, "b1-create-revise-publish"], [p.a, "b1-key-roles"]),
+  // The identity DID's domain is part of B1 on both targets (hosted-README.md "Account").
+  "B1-turnkey-create-revise-publish": target === "local" ? all([p.id, "author-identity"], [p.id, "author-did-domain"], [p.a, "b1-create-revise"], [p.a, "b1-publish"], [p.a, "b1-key-roles"]) : all([p.a, "b1-create-revise-publish"], [p.a, "b1-did-domain"], [p.a, "b1-key-roles"]),
   "B2-signed-out-reader": all([p.r1, "no-authority"], [p.r1, "work1-complete"], [p.r1, "no-cookies"], [p.r2, "work1-complete"]),
   // Stale parent (C12-125) runs on both targets. Another key can't continue
   // a restored work: that check runs only locally, because on staging the
