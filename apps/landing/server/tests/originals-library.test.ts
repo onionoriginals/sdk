@@ -187,35 +187,105 @@ describe('prefixes and Bitcoin-settled forks are not divergence (#996 review; P7
   });
 
   test('a durable record holding a stale pre-anchor branch is saved once Bitcoin shows the anchor (decision C; C12-23, P9.16)', async () => {
-    const { DemoEngine } = await import('../../src/sdk/engine');
-    const { httpAnchoringTransport, memoryOutbox } = await import('../../src/sdk/anchoring');
-    const { HttpOrdinalsProvider } = await import('../../src/sdk/http-ordinals-provider');
-    const { inProcessLanding } = await import('./landing-server-fixture');
-    const { WALLET_ADDRESS, fakeChain, walletSigner } = await import('./originals-chain-fixture');
-    const chain = fakeChain();
-    const landing = inProcessLanding(chain);
-    const author = await createLocalAuthor();
-    const transport = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
-    const engine = new DemoEngine({ features: { bitcoinAnchoring: true }, author, anchoring: { transport, outbox: memoryOutbox(), satSigner: walletSigner, network: 'regtest', index: 'ord-test' } });
-    const { did } = await engine.create('Harbor', 'Orbits', 'harbor');
-    const other = new DemoEngine({ author });
-    await other.importEvidence(await engine.evidencePackage());
-    await other.update('Harbor elsewhere', 'Orbits', 'elsewhere');
-    const stale = await other.evidencePackage();
-    await engine.inscribe({ funding: { fundingUtxos: [chain.satUtxo, chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
-    chain.mine();
-
-    const dir = join(landing.dataDir, 'originals-anchoring', 'sub-engine', keyOf(did));
-    const store = await FileStore.open(join(dir, 'store'));
-    expect((await OriginalsSDK.create({ store, authors: [] }).import(stale)).status).toBe('conflict');
-    await store.close();
-
+    const { landing, did, dir } = await preAnchorFork({ mine: true });
     // Without Bitcoin the copy reports a fork; judged against the sat, the anchor's branch is the history.
     expect((await createAnchoringLibrary(landing.dataDir).list('sub-engine'))[0]).toMatchObject({ did, availability: 'incomplete' });
+    const before = await retainedAnchor(dir, did);
     const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: landing.anchoring.bitcoinEvidence });
     const rows = await library.list('sub-engine');
     expect(rows).toEqual([expect.objectContaining({ did, availability: 'server' })]);
     expect(rows[0].problem).toBeUndefined();
     expect(await library.evidence('sub-engine', did)).toBeInstanceOf(Uint8Array);
+    // The read path writes no retained anchor: only the writer does, under its own lock (round-2 review).
+    expect(await retainedAnchor(dir, did)).toEqual(before);
   });
+});
+
+/** An Original anchored by the in-process landing, whose durable record also holds a stale pre-anchor branch. */
+async function preAnchorFork(opts: { mine: boolean }) {
+  const { DemoEngine } = await import('../../src/sdk/engine');
+  const { httpAnchoringTransport, memoryOutbox } = await import('../../src/sdk/anchoring');
+  const { HttpOrdinalsProvider } = await import('../../src/sdk/http-ordinals-provider');
+  const { inProcessLanding } = await import('./landing-server-fixture');
+  const { WALLET_ADDRESS, fakeChain, walletSigner } = await import('./originals-chain-fixture');
+  const chain = fakeChain();
+  const landing = inProcessLanding(chain);
+  const author = await createLocalAuthor();
+  const transport = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
+  const engine = new DemoEngine({ features: { bitcoinAnchoring: true }, author, anchoring: { transport, outbox: memoryOutbox(), satSigner: walletSigner, network: 'regtest', index: 'ord-test' } });
+  const { did } = await engine.create('Harbor', 'Orbits', 'harbor');
+  const other = new DemoEngine({ author });
+  await other.importEvidence(await engine.evidencePackage());
+  await other.update('Harbor elsewhere', 'Orbits', 'elsewhere');
+  const stale = await other.evidencePackage();
+  await engine.inscribe({ funding: { fundingUtxos: [chain.satUtxo, chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
+  if (opts.mine) chain.mine();
+  const dir = join(landing.dataDir, 'originals-anchoring', 'sub-engine', keyOf(did));
+  const store = await FileStore.open(join(dir, 'store'));
+  expect((await OriginalsSDK.create({ store, authors: [] }).import(stale)).status).toBe('conflict');
+  await store.close();
+  return { landing, did, dir };
+}
+
+async function retainedAnchor(dir: string, did: string) {
+  const store = await FileStore.open(join(dir, 'store'));
+  try { return await store.getRetainedAnchor(did); } finally { await store.close(); }
+}
+
+describe('fork checks against Bitcoin fail safe (round-2 review; P6.6, P9.16)', () => {
+  test('Bitcoin accepting the other branch is not a settlement: incomplete, and no evidence is served (P9.13)', async () => {
+    const { postAnchorFork } = await import('./post-anchor-fork-fixture');
+    const f = await postAnchorFork();
+    // A record whose committed log is A's dropped branch, with B's inscribed branch kept beside it.
+    await durable(f.landing.dataDir, 'other-sub', f.did, [f.branchA, f.branchB]);
+    const library = createAnchoringLibrary(f.landing.dataDir, undefined, { bitcoin: f.landing.anchoring.bitcoinEvidence });
+    const rows = await library.list('other-sub');
+    expect(rows[0]).toMatchObject({ did: f.did, availability: 'incomplete' });
+    expect(rows[0].problem).toMatch(/Bitcoin accepted the other branch/);
+    const refused = await library.evidence('other-sub', f.did).catch((e) => e);
+    expect((refused as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
+  });
+
+  test('a sat reader that throws leaves the fork standing, said as unchecked', async () => {
+    const { landing, did } = await preAnchorFork({ mine: true });
+    const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: async () => { throw new Error('index down'); } });
+    const rows = await library.list('sub-engine');
+    expect(rows[0]).toMatchObject({ did, availability: 'incomplete' });
+    expect(rows[0].problem).toMatch(/fork unresolved/i);
+    expect(rows[0].problem).toMatch(/Bitcoin could not be read/);
+    expect((await library.evidence('sub-engine', did).catch((e) => e) as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
+  });
+
+  test('a sat that does not show the anchor yet leaves the fork standing', async () => {
+    const { landing, did } = await preAnchorFork({ mine: false });
+    const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: landing.anchoring.bitcoinEvidence });
+    const rows = await library.list('sub-engine');
+    expect(rows[0]).toMatchObject({ did, availability: 'incomplete' });
+    expect(rows[0].problem).toMatch(/fork unresolved/i);
+    expect(rows[0].problem).not.toMatch(/Bitcoin could not be read/);
+  });
+
+  test('a sat read that never answers times out and is treated as unchecked', async () => {
+    const { landing, did } = await preAnchorFork({ mine: true });
+    const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: () => new Promise(() => undefined), bitcoinTimeoutMs: 50 });
+    const started = Date.now();
+    const rows = await library.list('sub-engine');
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(rows[0]).toMatchObject({ did, availability: 'incomplete' });
+    expect(rows[0].problem).toMatch(/Bitcoin could not be read/);
+  });
+
+  test('a sat read is cached per alias for a minute', async () => {
+    const { landing } = await preAnchorFork({ mine: true });
+    let reads = 0;
+    let now = 1_000_000;
+    const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: (alias) => { reads++; return landing.anchoring.bitcoinEvidence(alias); }, now: () => now });
+    await library.list('sub-engine');
+    await library.list('sub-engine');
+    expect(reads).toBe(1);
+    now += 61_000;
+    await library.list('sub-engine');
+    expect(reads).toBe(2);
+  });
+
 });
