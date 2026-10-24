@@ -76,7 +76,9 @@ function SmokeTest() {
         import('./sdk/engine'),
         import('./sdk/artwork')
       ]);
-      const engine = new DemoEngine();
+      // A MemoryStore of its own: smoke Originals never land in the guest library (#992).
+      const { MemoryStore: SmokeStore } = await import('@originals/sdk/originals');
+      const engine = new DemoEngine({ store: new SmokeStore() });
       const events: string[] = [];
       engine.on((e) => events.push(e.type));
       const art = generateArtwork('Smoke Test', 'Artwork', 1);

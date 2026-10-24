@@ -33,10 +33,14 @@ export const PRODUCTION_WEBVH_HOST = 'originals.build';
 
 type Env = Record<string, string | undefined>;
 
-export function resolveFeatures(env: Env): Features {
+/** A staging acceptance build (#976 B, G7): the switch set, not the production host, not mainnet. */
+export function acceptanceBuild(env: Env): boolean {
   const host = env.VITE_WEBVH_HOST;
-  const acceptance =
-    env.VITE_ACCEPTANCE_HOSTED_PUBLICATION === '1' && !!host && host !== PRODUCTION_WEBVH_HOST && env.VITE_BTC_NETWORK !== 'mainnet';
+  return env.VITE_ACCEPTANCE_HOSTED_PUBLICATION === '1' && !!host && host !== PRODUCTION_WEBVH_HOST && env.VITE_BTC_NETWORK !== 'mainnet';
+}
+
+export function resolveFeatures(env: Env): Features {
+  const acceptance = acceptanceBuild(env);
   return Object.freeze({ hostedPublication: acceptance, bitcoinAnchoring: env.VITE_ORIGINALS_BITCOIN_ANCHORING === '1', explore: false });
 }
 
