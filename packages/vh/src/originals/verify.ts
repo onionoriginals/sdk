@@ -340,7 +340,7 @@ const SOURCE_TEXT: Record<EvidenceSource, string> = {
 };
 
 /**
- * P7.8 (owner decision, 23 Oct 2026; originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges):
+ * P7.8 (owner decision, 23 Oct 2026; originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges):
  * a plain statement of a signer DID's
  * freshness for people. It always says where and when the history was
  * obtained and its latest version; unless freshness is established it says
@@ -363,7 +363,7 @@ export function describeFreshness(
 }
 
 /**
- * P14.2 (the reader rule is originals-spec #51 (open, head b96841c2e),
+ * P14.2 (the reader rule is originals-spec #51 (open, head 3f5a15ea6),
  * PROVISIONAL until it merges): each line of an asset log is compact JSON
  * ending in a single LF. A copy that is not is treated like one that does not parse; verified as the
  * log itself, the line is reported (LOG_LINE_FORMAT). did:vh and did:webvh
@@ -506,7 +506,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const latest = history?.versions[history.versions.length - 1];
   const obtainedOf = (did: string | null): IdentityObtained => obtained(did, options.authors, histories);
   /**
-   * P7.8 (owner decision, 23 Oct 2026; originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges):
+   * P7.8 (owner decision, 23 Oct 2026; originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges):
    * a log obtained at a location establishes freshness only
    * when the DID's own witnesses approve its latest version, and is the identity's latest there
    * only when that version's `id` names the location. It must also be the location the latest
@@ -650,7 +650,6 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
   if (assembly?.report.headChange) reasons.push("unverifiable-inscription-accepted");
-  if (assembly && assembly.report.gaps.length > 0) reasons.push("signer-history-gap");
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
     if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
