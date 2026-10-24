@@ -355,13 +355,31 @@ export class DemoEngine {
   /**
    * Off Bitcoin no signed entry settles a fork, and extending one branch here
    * would choose it for the author without showing the other (P6.6, P9.16).
-   * Read the store's current report, so a branch imported since is seen.
+   * Read the store's current report, so a branch imported since is seen. For
+   * an Original with a did:btco alias the fork is judged against Bitcoin
+   * first: once the anchor is accepted its branch is the history (P9.16), so a
+   * stale pre-anchor branch does not freeze it. A Bitcoin read that fails
+   * leaves the fork standing.
    */
   private async refuseFork(): Promise<void> {
     if (!this.did || !this.sdk) return;
     const view = await this.sdk.get(this.did);
     this.view = view;
-    if (view.report.fork) throw new ForkUnresolvedError(view.report.fork);
+    if (!view.report.fork) return;
+    if (this.btcoAlias() && !this.settledOnBitcoin()) await this.verifyBitcoin();
+    const fork = this.unsettledFork();
+    if (fork) throw new ForkUnresolvedError(fork);
+  }
+
+  /** The last fresh Bitcoin read accepted the anchor: its branch is the Original's history (P9.16). */
+  private settledOnBitcoin(): boolean {
+    return this.bitcoinVerification?.anchoring?.status === "anchored";
+  }
+
+  /** The fork that stands: the store's, unless Bitcoin has settled it (P6.6, P9.16). */
+  private unsettledFork(): OriginalsFork | undefined {
+    const fork = this.view?.report.fork;
+    return fork && !this.settledOnBitcoin() ? fork : undefined;
   }
 
   async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
@@ -577,8 +595,6 @@ export class DemoEngine {
       throw new FeatureUnavailableError("bitcoinAnchoring", "Anchoring on Bitcoin is not open yet.");
     }
     if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
-    // A pair already prepared is kept as is (P9.6); nothing new is prepared or sent for a forked Original (P6.6, P9.16).
-    await this.refuseFork();
     if (!this.authed && !this.authorOverride) throw new Error("Sign in to anchor: the sat is funded from, and returned to, your own address.");
     const network = this.anchoringNetwork();
     const transport = this.anchoringTransport();
@@ -586,6 +602,9 @@ export class DemoEngine {
     // A pair whose answer was lost goes first, identical, needing no funding or signature (P9.6).
     const resent = await resendWaiting(transport, outbox, this.did);
     if (resent) return this.afterSend(transport, resent);
+    // Only a NEW pair is refused for a fork Bitcoin has not settled; the resend above
+    // sends a pair signed before, byte for byte, and signs nothing (P6.6, P9.6, P9.16).
+    await this.refuseFork();
     const funding = opts?.funding;
     if (!funding || funding.fundingUtxos.length === 0) throw new Error("Anchoring needs funding from your deposit address.");
     const guard = signingGuard({ signal: opts?.signal, sessionActive: opts?.sessionActive });
@@ -654,7 +673,7 @@ export class DemoEngine {
    */
   async abandonRefusedHandOff(): Promise<void> {
     if (!this.did) throw new Error("Create an asset first");
-    await abandonRefused(this.outbox(), this.did);
+    if (!(await abandonRefused(this.outbox(), this.did))) return;
     this.emit("asset:abandoned", `Abandoned the refused submission for ${short(this.did)}`, { did: this.did });
   }
 
@@ -809,7 +828,7 @@ export class DemoEngine {
       metadata: meta ? { id: meta.id, hash: hexOfDigest(meta.digest), content: contentText(bytesOf(meta.digest)) } : undefined,
       credentials: 0,
       history: this.history(),
-      ...(view.report.fork ? { fork: view.report.fork } : {}),
+      ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
       provenance: view.report,
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,

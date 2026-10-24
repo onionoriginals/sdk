@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { BitcoinSigner } from '@originals/sdk';
-import { DemoEngine } from './engine';
+import { DemoEngine, ForkUnresolvedError } from './engine';
 import { AnchoringCancelledError, AnchoringRefusedError, AnchoringSubmitError, SigningSessionExpiredError, httpAnchoringTransport, memoryOutbox, type AnchoringTransport } from './anchoring';
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { createLocalAuthor } from './local-author';
@@ -16,23 +16,24 @@ import { WALLET_ADDRESS, fakeChain, walletSigner } from '../../server/tests/orig
 import { inProcessLanding } from '../../server/tests/landing-server-fixture';
 
 async function setup(opts: { satSigner?: BitcoinSigner; transport?: (t: AnchoringTransport) => AnchoringTransport } = {}) {
+  const author = await createLocalAuthor();
   const chain = fakeChain();
   const landing = inProcessLanding(chain);
   const outbox = memoryOutbox();
   const base = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
   const engine = new DemoEngine({
     features: { bitcoinAnchoring: true },
-    author: await createLocalAuthor(),
+    author,
     anchoring: { transport: opts.transport ? opts.transport(base) : base, outbox, satSigner: opts.satSigner ?? walletSigner, network: 'regtest', index: 'ord-test' },
   });
   const art = generateArtwork('Harbor at dawn', 'Orbits', 7);
   await engine.create('Harbor at dawn', 'Orbits', art.svg);
   const funding = (utxos = [chain.satUtxo, chain.fund(50_000)]) => ({ fundingUtxos: utxos, changeAddress: WALLET_ADDRESS });
-  return { chain, landing, outbox, engine, funding };
+  return { chain, landing, outbox, engine, funding, author };
 }
 
 describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
-  test('the anchoring entry names the sat, the pair goes through the server, and the label follows Bitcoin (C12-34, C12-100, P9.10, P9.18)', async () => {
+  test('the anchoring entry names the sat, the pair goes through the server, and the label follows Bitcoin (C12-34; the pending-Bitcoin-acceptance label of C12-100; P9.10, P9.18)', async () => {
     const { chain, engine, funding } = await setup();
     const state = await engine.inscribe({ funding: funding() });
     expect(state.layer).toBe('did:btco');
@@ -130,7 +131,7 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
     expect(await engine.pendingHandOff()).toBe(false);
   });
 
-  test('a revision after the anchor is inscribed on the same sat, spending the output that holds it (C12-28, P9.12, P9.13)', async () => {
+  test('a revision after the anchor is inscribed on the same sat, spending the output that holds it (P9.12, P9.13)', async () => {
     const { chain, engine, funding } = await setup();
     await engine.inscribe({ funding: funding() });
     chain.mine();
@@ -233,5 +234,59 @@ test('a pair the server refuses is kept, shown with its reason, not resent, and 
   const state = await engine.inscribe({ funding: funding() });
   expect(state.anchoring?.lastSent).toMatchObject({ outcome: 'sent' });
   expect(state.anchoring?.lastSent?.commitTxId).not.toBe(kept?.pair.prepared.commitTxId);
+  expect(chain.sent.length).toBe(2);
+});
+
+/** A copy of the Original as it stood before anchoring, extended on another device: a stale pre-anchor branch. */
+async function staleBranch(engine: DemoEngine, author: Awaited<ReturnType<typeof createLocalAuthor>>) {
+  const other = new DemoEngine({ author });
+  await other.importEvidence(await engine.evidencePackage());
+  await other.update('Harbor elsewhere', 'Orbits', generateArtwork('Harbor elsewhere', 'Orbits', 9).svg);
+  return other.evidencePackage();
+}
+
+test('a stale pre-anchor branch does not freeze an Original Bitcoin already settled (decision C; C12-23, P6.6, P9.16)', async () => {
+  const { chain, engine, funding, author } = await setup();
+  const stale = await staleBranch(engine, author);
+  await engine.inscribe({ funding: funding() });
+  chain.mine();
+  const anchoredHead = engine.snapshot().history.at(-1)!.versionId;
+  // The branch is kept, and without Bitcoin evidence the copy reports a fork.
+  await expect(engine.importEvidence(stale, engine.snapshot().did)).rejects.toThrow(/conflict/i);
+  const opened = await engine.open(engine.snapshot().did);
+  expect((opened.provenance as { fork: unknown }).fork).not.toBeNull();
+
+  // Judged against Bitcoin, the anchor's branch is the history: no fork, settled head shown.
+  const checked = await engine.verifyBitcoin();
+  expect(checked.fork).toBeUndefined();
+  expect(checked.bitcoinVerification?.anchoring?.status).toBe('anchored');
+  expect(checked.bitcoinVerification?.head).toBe(anchoredHead);
+
+  // And it is not refused: a revision goes on the settled branch.
+  const revised = await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg);
+  expect(revised.history.at(-2)?.versionId).toBe(anchoredHead);
+});
+
+test('a fork Bitcoin has not settled still refuses a new pair, but resends an already-signed one byte for byte (C12-15, C12-23, P6.6, P9.6)', async () => {
+  let drop = true;
+  const { chain, engine, outbox, funding, author } = await setup({ transport: (t) => ({ ...t, submit: async (body) => {
+    const answer = await t.submit(body);
+    if (drop) { drop = false; throw new Error('answer lost'); }
+    return answer;
+  } }) });
+  const stale = await staleBranch(engine, author);
+  await expect(engine.inscribe({ funding: funding() })).rejects.toThrow('answer lost');
+  const did = engine.snapshot().did;
+  const waiting = await outbox.get(did);
+  await expect(engine.importEvidence(stale, did)).rejects.toThrow(/conflict/i);
+  expect((await engine.open(did)).fork).toBeDefined();
+
+  // The pair signed before the fork was known goes again, identical: nothing new is signed (P9.6).
+  const resent = await engine.inscribe();
+  expect(resent.anchoring?.lastSent).toMatchObject({ outcome: 'recorded', commitTxId: waiting!.pair.prepared.commitTxId });
+  expect(chain.sent.length).toBe(2);
+
+  // Not yet on Bitcoin, the fork stands: no new pair is prepared over it.
+  await expect(engine.inscribe({ funding: funding([chain.fund(50_000)]) })).rejects.toBeInstanceOf(ForkUnresolvedError);
   expect(chain.sent.length).toBe(2);
 });

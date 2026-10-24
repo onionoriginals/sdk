@@ -73,7 +73,7 @@ export interface AnchoringTransport {
 
 /** The server refused, or could not take, a pair. The outbox stays until acknowledged. */
 export class AnchoringSubmitError extends Error {
-  constructor(public readonly status: number, public readonly body: { error?: string; code?: string; message?: string }) {
+  constructor(public readonly status: number, public readonly body: { error?: string; code?: string; category?: string; message?: string }) {
     super(body.message ?? body.error ?? `The server answered ${status}`);
     this.name = 'AnchoringSubmitError';
   }
@@ -82,28 +82,57 @@ export class AnchoringSubmitError extends Error {
 /** Why the server refused a pair itself, kept beside the pair (owner decision, 23 October 2026). */
 export interface PairRefusal {
   status: number;
+  /** The route's error, e.g. `original_forked` or `not_sendable`. */
+  error?: string;
+  /** The writer's code when it gave one (e.g. `SAT_MOVED`), else the route's error. */
   code: string;
+  /** The spec section 6 category when the writer gave one. */
+  category?: string;
   message: string;
   at: string;
 }
 
 /**
  * Answers that may still be followed by acceptance, or that say nothing about
- * this pair: the pair is kept unchanged and sent again (P9.6). Everything else
- * in 4xx is a refusal of the pair itself (owner decision, 23 October 2026).
+ * this pair: the pair is kept unchanged and sent again (P9.6).
  */
-const KEEP_AND_RESEND = new Set([401, 404, 408, 429]);
+const KEEP_STATUSES = new Set([401, 404, 408, 429]);
+/**
+ * Categories and codes that are about the moment, not the pair: missing or
+ * lagging Bitcoin reads, evidence that may arrive later, a pair still in
+ * flight, an outpoint an index has not caught up with, an address binding
+ * that may be repaired. Kept and resent (decision A, 23 October 2026).
+ */
+const KEEP_CATEGORIES = new Set(['unavailable-bytes', 'incomplete-evidence']);
+const KEEP_CODES = new Set(['SAT_READ_INCOMPLETE', 'BLOCK_TIME_UNAVAILABLE', 'funding_input_spent', 'PAIR_IN_FLIGHT', 'HEAD_NOT_NEXT', 'address_not_bound']);
+/**
+ * Refusals the same signed bytes can never pass: marked refused and kept for
+ * recovery, never resent (decision A, 23 October 2026). Anything not named
+ * here or above is kept and resent: an unknown answer loses nothing.
+ */
+const REFUSED_CODES = new Set([
+  'original_forked', 'signed_pair_mismatch', 'SAT_MOVED', 'sat_not_first', 'payload_too_large', 'INSCRIPTION_TOO_LARGE',
+  'bad_request', 'evidence_not_verified', 'commit_fee_excessive', 'commit_change_omitted',
+]);
 
-/** True for a refusal of this pair itself: 4xx other than 401, 404, 408 and 429. Network errors and 5xx are not. */
+/**
+ * True only for a refusal of this pair itself, judged by the server's
+ * category and codes, not its HTTP status alone. 401, 404, 408, 429, 5xx,
+ * network errors, transient categories and codes, and unknown codes are not.
+ */
 export function isPairRefusal(error: unknown): error is AnchoringSubmitError {
-  return error instanceof AnchoringSubmitError && error.status >= 400 && error.status < 500 && !KEEP_AND_RESEND.has(error.status);
+  if (!(error instanceof AnchoringSubmitError)) return false;
+  if (KEEP_STATUSES.has(error.status) || error.status >= 500 || error.status < 400) return false;
+  const { error: routeError, code, category } = error.body;
+  if ((category && KEEP_CATEGORIES.has(category)) || [routeError, code].some((c) => c !== undefined && KEEP_CODES.has(c))) return false;
+  return [routeError, code].some((c) => c !== undefined && REFUSED_CODES.has(c));
 }
 
 /**
  * The server refused this pair (for example `original_forked`,
- * `signed_pair_mismatch`, `evidence_not_verified`, `not_sendable`,
- * `bad_request`). The pair is kept, marked refused, and not sent again; the
- * user can abandon it explicitly and prepare a new one (P9.6).
+ * `signed_pair_mismatch`, `SAT_MOVED`, `bad_request`). The pair is kept,
+ * marked refused, and not sent again; the user can abandon it explicitly and
+ * prepare a new one (P9.6).
  */
 export class AnchoringRefusedError extends Error {
   constructor(public readonly refusal: PairRefusal) {
@@ -193,6 +222,11 @@ export interface AnchoringOutbox {
   get(did: string): Promise<OutboxEntry | undefined>;
   put(did: string, entry: OutboxEntry): Promise<void>;
   delete(did: string): Promise<void>;
+  /**
+   * Read and, only when `when` holds, delete, as one step (one IDB readwrite
+   * transaction): `absent`, `deleted`, or `kept` when the entry did not match.
+   */
+  deleteIf(did: string, when: (entry: OutboxEntry) => boolean): Promise<'absent' | 'deleted' | 'kept'>;
   list(): Promise<string[]>;
 }
 
@@ -203,6 +237,13 @@ export function memoryOutbox(): AnchoringOutbox {
     get: (did) => Promise.resolve(entries.has(did) ? structuredClone(entries.get(did)) : undefined),
     put: (did, entry) => Promise.resolve(void entries.set(did, structuredClone(entry))),
     delete: (did) => Promise.resolve(void entries.delete(did)),
+    deleteIf: (did, when) => {
+      const found = entries.get(did);
+      if (!found) return Promise.resolve('absent');
+      if (!when(structuredClone(found))) return Promise.resolve('kept');
+      entries.delete(did);
+      return Promise.resolve('deleted');
+    },
   };
 }
 
@@ -238,6 +279,30 @@ export function indexedDbOutbox(name = 'originals-anchoring-outbox'): AnchoringO
     get: (did) => tx('readonly', (s) => s.get(did) as IDBRequest<OutboxEntry | undefined>),
     put: async (did, entry) => void (await tx('readwrite', (s) => s.put(entry, did))),
     delete: async (did) => void (await tx('readwrite', (s) => s.delete(did))),
+    deleteIf: async (did, when) => {
+      const db = await open();
+      try {
+        // The read and the conditional delete share one readwrite transaction, across tabs too.
+        return await new Promise<'absent' | 'deleted' | 'kept'>((resolve, reject) => {
+          const t = db.transaction('pairs', 'readwrite');
+          const store = t.objectStore('pairs');
+          let outcome: 'absent' | 'deleted' | 'kept' = 'absent';
+          const read = store.get(did);
+          read.onsuccess = () => {
+            const found = read.result as OutboxEntry | undefined;
+            if (!found) return;
+            try {
+              if (when(found)) { store.delete(did); outcome = 'deleted'; } else outcome = 'kept';
+            } catch (error) { t.abort(); reject(error); }
+          };
+          t.oncomplete = () => resolve(outcome);
+          t.onerror = () => reject(t.error);
+          t.onabort = () => reject(t.error);
+        });
+      } finally {
+        db.close();
+      }
+    },
   };
 }
 
@@ -286,7 +351,9 @@ async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, d
     if (!isPairRefusal(error)) throw error;
     const refused: PairRefusal = {
       status: error.status,
-      code: error.body.error ?? error.body.code ?? `http_${error.status}`,
+      ...(error.body.error ? { error: error.body.error } : {}),
+      code: error.body.code ?? error.body.error ?? `http_${error.status}`,
+      ...(error.body.category ? { category: error.body.category } : {}),
       message: error.body.message ?? `The server answered ${error.status}${error.body.error ? ` (${error.body.error})` : ''}.`,
       at: new Date().toISOString(),
     };
@@ -340,11 +407,11 @@ export async function resendWaiting(transport: AnchoringTransport, outbox: Ancho
  * new one can be prepared. A pair that is not marked refused may still be
  * accepted, so it is never abandoned here (P9.6).
  */
-export async function abandonRefused(outbox: AnchoringOutbox, did: string): Promise<void> {
-  const waiting = await outbox.get(did);
-  if (!waiting) return;
-  if (!waiting.refused) throw new Error('Only a submission the server refused can be abandoned. This one may still be accepted, so it has been kept.');
-  await outbox.delete(did);
+export async function abandonRefused(outbox: AnchoringOutbox, did: string): Promise<boolean> {
+  // One step, so a pair another tab replaced since the user looked is never deleted.
+  const outcome = await outbox.deleteIf(did, (entry) => !!entry.refused);
+  if (outcome === 'kept') throw new Error('Only a submission the server refused can be abandoned. This one may still be accepted, so it has been kept.');
+  return outcome === 'deleted';
 }
 
 /**

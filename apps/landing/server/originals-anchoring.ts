@@ -128,12 +128,14 @@ function statusFor(category: string): number {
   switch (category) {
     case 'stale-parent': return 409;
     case 'incomplete-evidence': return 503;
+    // A sat or block read missing bytes is transient: the browser keeps and resends the pair (P9.6).
+    case 'unavailable-bytes': return 503;
     case 'limit-exceeded': return 413;
     default: return 422;
   }
 }
 
-function refusal(error: unknown, fallback: string): AnchoringRefusal {
+export function refusal(error: unknown, fallback: string): AnchoringRefusal {
   if (error instanceof OriginalsError) {
     const details = error.details as Record<string, unknown> | undefined;
     // The report can be large and carries the whole log; the problems name what failed.
