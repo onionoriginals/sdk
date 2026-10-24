@@ -9,6 +9,12 @@ It assumes plan 011 PR 10b. Nothing here runs without the owner's approval
 for that stage. `bitcoinAnchoring` stays off in every shipped build: each
 stage below runs a local landing built with it on.
 
+Stage A's [24 October 2026 UTC live receipt and observations](originals-live-975-2026-10-24.md)
+record real browser-authorized Turnkey signing on disposable regtest, including
+the separately approved production organization, cancellation, natural expiry,
+retry, reinscription, durable restart and a fresh SDK reader. Stage C remains
+pending.
+
 ## What is already established, and by what
 
 | Evidence | Where | What it proves | What it does not |
