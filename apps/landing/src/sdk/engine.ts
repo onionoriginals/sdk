@@ -386,7 +386,7 @@ export class DemoEngine {
     const alias = aliasDid ? await this.store!.getAuthorEvidence(aliasDid) : undefined;
     this.did = did;
     this.view = view;
-    this.alias = alias ? { did: alias.did, log: alias.log, ...(alias.witness === undefined ? {} : { witness: alias.witness }) } : null;
+    this.alias = alias?.log !== undefined ? { did: alias.did, log: alias.log, ...(alias.witness === undefined ? {} : { witness: alias.witness }) } : null;
     await this.refresh();
     this.emit("asset:opened", `Opened ${short(did)} at ${short(view.checkpoint)}`, { did, checkpoint: view.checkpoint });
     return this.snapshot();
