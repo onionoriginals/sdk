@@ -210,3 +210,6 @@
   font-size: var(--text-xs);
   line-height: 1.5;
 }
+
+.nav-library { white-space: nowrap; font-size: var(--text-sm); }
+@media (max-width: 1100px) { .nav-library { display: none; } }

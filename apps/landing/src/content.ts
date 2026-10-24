@@ -62,6 +62,7 @@ export const nav = {
   mobileAria: 'Mobile',
   openMenu: 'Open menu',
   closeMenu: 'Close menu',
+  library: 'Your Originals',
   signIn: 'Sign in',
   signOut: 'Sign out',
   /** Why Sign out is unavailable mid signing-session refresh (FR1). */
@@ -876,10 +877,11 @@ export const legal = {
         heading: 'Keys held in your browser',
         body: [
           'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
-          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, that key does not exist and the Original is signed by a key generated in the page and discarded with it.',
+          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, Originals use a guest authorship key generated and saved in this browser’s IndexedDB. It is separate from every signed-in account and survives refresh on this device; clearing browser data destroys it.',
           'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
-          'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted once the server answers.'
+          'Unsigned drafts, signed Originals, resource files and verified checkpoints are kept in account-scoped IndexedDB storage on this device. Guest authorship keys are also saved locally so guest work can be revised after refresh. Signing in does not upload local drafts, and signing out keeps them for the same account’s return. Clearing browser data removes these local copies; export evidence for recovery.',
+          'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted only when the server acknowledges those exact transactions.'
         ]
       },
       {
@@ -1004,4 +1006,31 @@ export const legal = {
       }
     ]
   }
+};
+
+/** Private recovery is separate from public hosting and Bitcoin publication. */
+export const library = {
+  eyebrow: 'Your library', title: 'Your Originals', loadingAccount: 'Loading your account…',
+  accountIntro: 'Work saved for your signed-in account, together with its copies in this browser.',
+  guestIntro: 'Guest work saved in this browser. Sign in to find work saved to your account.',
+  durability: 'Browser copies stay on this device and can be lost if browser data is cleared. Keep an evidence export. Importing verifies the evidence; it does not make you its author or owner.',
+  create: 'Create an Original', import: 'Import evidence', refresh: 'Refresh list',
+  reading: 'Reading your saved work…', empty: 'No saved Originals found here yet.',
+  browser: 'In this browser', account: 'Saved to account', pending: 'Submission awaiting an answer', incomplete: 'Incomplete account record',
+  draft: 'Continue unfinished draft', draftNote: 'Unfinished draft · In this browser',
+  localNote: 'Signed work is saved in this browser. Keep an evidence export for recovery; local copies are not available on other devices.',
+  opening: 'Opening and verifying your Original…', saved: 'Saved copy', author: 'Author:', history: 'History:', binding: 'Author binding:', resources: 'Resources:', identity: 'Identity evidence:',
+  savedHead: 'Saved head:', bitcoin: 'Bitcoin:', acceptedHead: 'Accepted head:', notChecked: 'not checked', notEstablished: 'not established',
+  bitcoinTrust: "This Bitcoin read relies on this site's provider and one index. No independent index was compared. The holder of the sat is reported separately from authorship; resource and identity files remain off Bitcoin.",
+  checkBitcoin: 'Check Bitcoin again', localCheckpoint: 'Local history is valid as of this saved checkpoint. It has no Bitcoin-accepted head.',
+  pendingNote: 'Submission awaiting an answer. Resuming sends the same signed submission; it does not sign or pay again.',
+  bitcoinStatusUnavailable: 'Submission status could not be read. Your saved evidence and any pending submission have been kept.',
+  bitcoinUnchecked: 'Bitcoin status checked when opened',
+  listError: 'Your library could not be read. Please retry.',
+  tooLarge: 'This export is too large to open here.', importError: 'Evidence was not opened:',
+  identityLimit: 'Identity checks use the newest verified history available to this reader. They do not establish that no newer identity version exists.',
+  bitcoinLabels: { anchored: 'Accepted on this Bitcoin read', 'not-anchored': 'No accepted anchor found in this read', unverified: 'Incomplete Bitcoin evidence' } as Record<string, string>,
+  holder: 'Sat holder output (provisional):',
+  currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
+  draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
 };

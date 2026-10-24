@@ -12,12 +12,12 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, satEvidence, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult, type OriginalsStore } from "@originals/sdk/originals";
 import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsReport } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
@@ -115,6 +115,8 @@ export interface DemoAssetState {
   };
   /** The verification report of the current checkpoint. */
   provenance: unknown;
+  bitcoinVerification?: OriginalsReport;
+  bitcoinReadError?: string;
 }
 
 export interface AssetSource {
@@ -184,7 +186,7 @@ export class DemoEngine {
   private readonly authed: boolean;
   private readonly subOrgId?: string;
   private readonly listeners = new Set<Listener>();
-  private readonly store = new MemoryStore();
+  private readonly store: OriginalsStore;
   private authoring: Authoring | null = null;
   private sdk: OriginalsSDK | null = null;
   private did: string | null = null;
@@ -205,6 +207,8 @@ export class DemoEngine {
   private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished"> | undefined = undefined;
 
   constructor(opts?: {
+    store?: OriginalsStore;
+    localAuthor?: () => Promise<Authoring>;
     authed?: boolean;
     subOrgId?: string;
     networkFlag?: BtcNetworkFlag;
@@ -220,6 +224,8 @@ export class DemoEngine {
     /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
     anchoring?: AnchoringOptions;
   }) {
+    this.store = opts?.store ?? new MemoryStore();
+    this.localAuthor = opts?.localAuthor;
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
@@ -227,10 +233,12 @@ export class DemoEngine {
     this.authorOverride = opts?.author;
     this.anchoringOpts = opts?.anchoring ?? {};
     this.networkFlag = opts?.networkFlag ?? btcNetwork();
-    (globalThis as Record<string, unknown>).__originalsDemo = this;
     this.tier = demoTier(this.networkFlag, this.authed);
   }
 
+  private bitcoinVerification?: OriginalsReport;
+  private bitcoinReadError?: string;
+  private readonly localAuthor?: () => Promise<Authoring>;
   private readonly authorOverride?: Authoring;
 
   on(listener: Listener): () => void {
@@ -255,15 +263,17 @@ export class DemoEngine {
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    this.authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await createLocalAuthor());
-    this.setAuthorEvidence(this.authoring.evidence);
-    this.sdk = OriginalsSDK.create({
+    const authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
+    this.setAuthorEvidence(authoring.evidence);
+    await this.store.putAuthorEvidence(authoring.evidence);
+    this.sdk ??= OriginalsSDK.create({
       store: this.store,
       // This page holds or just read the author's own DID: the SDK reads it as stamped when it was
       // obtained, restamped whenever it changes. An unanchored Original is still only valid as of
       // its checkpoint, never current (P7.10).
       authors: async (did) => this.authorEvidence.get(did),
     });
+    this.authoring = authoring;
     this.emit("authorship:key", `Authoring as ${short(this.authoring.ref.did)}`, { author: this.authoring.ref });
     return this.authoring;
   }
@@ -647,7 +657,7 @@ export class DemoEngine {
   private transport?: AnchoringTransport;
 
   private outbox(): AnchoringOutbox {
-    return (this.outboxStore ??= this.anchoringOpts.outbox ?? indexedDbOutbox());
+    return (this.outboxStore ??= this.anchoringOpts.outbox ?? indexedDbOutbox(this.subOrgId ? `originals-anchoring-outbox:account:${this.subOrgId}` : 'originals-anchoring-outbox:guest'));
   }
   private outboxStore?: AnchoringOutbox;
 
@@ -657,11 +667,71 @@ export class DemoEngine {
     return (await this.sdk!.package(this.did)).bytes;
   }
 
+  /** Reopening is a read, never a signature, broadcast or grant (P7.5, P8.4). */
+  async open(did: string): Promise<DemoAssetState> {
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    const view = await this.sdk.get(did);
+    if (view.report.history.status !== "valid" || view.report.authorBinding.status !== "valid") {
+      throw new Error("This Original's history or author binding could not be verified. Keep its evidence for recovery.");
+    }
+    if (this.did !== did) {
+      this.anchoring = undefined;
+      this.bitcoinVerification = undefined;
+      this.bitcoinReadError = undefined;
+    }
+    this.did = did;
+    this.view = view;
+    const alias = view.state.aliases.find((a) => a.startsWith('did:webvh:'));
+    const aliasEvidence = alias ? await this.store.getAuthorEvidence(alias) : undefined;
+    this.alias = aliasEvidence?.log !== undefined ? { did: aliasEvidence.did, log: aliasEvidence.log, witness: aliasEvidence.witness } : null;
+    await this.refresh();
+    return this.snapshot();
+  }
+
+  /** Fresh independent SDK verification of the sat read; never trusts a
+   * server's summary as an accepted head (P3.5, P9.13, P9.17).
+   * Keep the committed working view separate from Bitcoin's accepted view.
+   */
+  async verifyBitcoin(): Promise<DemoAssetState> {
+    this.bitcoinVerification = undefined;
+    this.bitcoinReadError = undefined;
+    const alias = this.btcoAlias();
+    if (!alias || !this.sdk || !this.did) return this.snapshot();
+    try {
+      const transport = this.anchoringTransport();
+      const snapshot = await transport.provider.getSatSnapshot!(alias.slice(alias.lastIndexOf(':') + 1), { bodies: 'originals' });
+      const network = alias.startsWith('did:btco:reg:') ? 'regtest' : alias.startsWith('did:btco:sig:') ? 'signet' : alias.startsWith('did:btco:test:') ? 'testnet' : 'mainnet';
+      if (snapshot.network !== network) throw new Error('The Bitcoin read is for a different network.');
+      const evidence = await satEvidence(snapshot, {
+        clock: { at: (height, hash) => transport.inscriptionTime(height, hash) },
+        index: this.anchoringOpts.index ?? `ord@landing-${network}`,
+        // Ownership depth is not established by an output lookup in this read.
+        ownerConfirmations: 0,
+      });
+      this.bitcoinVerification = (await this.sdk.load(await this.evidencePackage(), { bitcoin: [evidence] })).report;
+    } catch {
+      this.bitcoinReadError = 'Bitcoin could not be checked now. This saved copy is not proof of the currently accepted head. Retry when the Bitcoin reader is available.';
+    }
+    return this.snapshot();
+  }
+
+  /** SDK import verifies untrusted evidence and preserves branches (P7.5, P6.6). */
+  async importEvidence(bytes: Uint8Array, expectedDid?: string): Promise<DemoAssetState> {
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    if (expectedDid) {
+      const checked = await this.sdk.load(bytes);
+      if (checked.report.original !== expectedDid) throw new Error('The saved evidence names a different Original.');
+    }
+    const imported = await this.sdk.import(bytes);
+    if (imported.status === "conflict") throw new Error("Conflicting history kept for recovery. No branch was chosen.");
+    return this.open(imported.original.did);
+  }
+
   snapshot(): DemoAssetState {
     const view = this.view;
     if (!view || !this.did) throw new Error("No asset yet");
     const state = view.state;
-    const [primary, ...rest] = state.resources;
+    const [primary = { id: "", digest: "", mediaType: "application/octet-stream" }, ...rest] = state.resources;
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
@@ -685,6 +755,8 @@ export class DemoEngine {
       credentials: 0,
       history: this.history(),
       provenance: view.report,
+      bitcoinVerification: this.bitcoinVerification,
+      bitcoinReadError: this.bitcoinReadError,
     };
   }
 
