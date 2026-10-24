@@ -219,6 +219,11 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     // witnessed log from an evidence package establishes freshness (P7.8).
     const packaged = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "package" }]);
     expect(packaged.identityEvidence.freshness).toBe("established");
+    // Its latest version names the moved location: reported, never marking freshness worse.
+    expect(packaged.identityEvidence.obtained.movedTo).toBe(alice.location);
+    // A host's snapshot is a copy too: judged by its witnesses, not by the location rule.
+    const hosted = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "host" }]);
+    expect(hosted.identityEvidence.freshness).toBe("established");
     // Unwitnessed, it does not.
     const bare = await verify(entries, [{ ...alice.evidence(), source: "package" }]);
     expect(bare.identityEvidence.freshness).toBe("not-established");
@@ -249,9 +254,10 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     // P5.14: the move is reported, and that the log where it points was not obtained.
     expect(r.identityEvidence.obtained).toMatchObject({ movedTo: alice.location, movedLog: "not-obtained" });
     expect(describeFreshness(alice.did, r.identityEvidence)).toContain(`now at ${alice.location}`);
-    // A package has no fetch location: the moved-identity rule does not apply to its log (P7.8).
+    // A package's log names the move too (P5.14): reported, but its freshness is judged as usual (P7.8).
     const packaged = await verify(log, [{ ...alice.evidence(), source: "package" }]);
-    expect(packaged.identityEvidence.obtained.movedTo).toBeUndefined();
+    expect(packaged.identityEvidence.obtained).toMatchObject({ movedTo: alice.location, movedLog: "not-obtained" });
+    expect(packaged.identityEvidence.freshness).toBe("not-established");
   });
 
   test("a retrieved log shorter than the retained versionId is stale, whatever its source", async () => {

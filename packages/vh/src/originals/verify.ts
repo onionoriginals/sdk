@@ -112,8 +112,9 @@ export interface IdentityObtained {
   /** Whether the DID's own witnesses approve that version. */
   witnessed: boolean;
   /**
-   * A did:webvh log fetched from a location whose latest version names
-   * another: where the DID now is, by that version's `id` (P5.14, P7.8).
+   * A did:webvh log whose latest version names another location than the
+   * one it was fetched from, or for a copy than the identity DID: where the
+   * DID now is, by that version's `id` (P5.14).
    */
   movedTo?: string;
   /** With `movedTo`: the log there was not obtained, so freshness is not established. */
@@ -324,15 +325,17 @@ function obtained(did: string | null, authors: AuthorDidEvidence[], histories: A
 }
 
 /**
- * P5.14, P7.8: a did:webvh log fetched from a location whose latest version's
- * `id` names another shows the identity moved; the log there was not obtained,
- * or it would be the one reported. A package or a host has no such location
- * (owner decisions on #993's review).
+ * P5.14: a did:webvh log whose latest version's `id` names another location
+ * than the one it was fetched from (or, for a copy from a package or a host,
+ * than the identity DID itself) shows the identity moved, and the log there
+ * was not obtained, or it would be the one reported. This only reports the
+ * move; a copy's freshness is still judged by its witnesses (P7.8; owner
+ * decision on #993's review).
  */
 function movedFrom(evidence: AuthorDidEvidence | undefined, latestId: unknown): Pick<IdentityObtained, "movedTo" | "movedLog"> {
-  if (!evidence?.retrievedFrom || evidence.source === "host" || evidence.source === "package") return {};
-  if (typeof latestId !== "string" || !latestId.startsWith("did:webvh:")) return {};
-  return logUrl(latestId) === evidence.retrievedFrom ? {} : { movedTo: latestId, movedLog: "not-obtained" };
+  if (!evidence || typeof latestId !== "string" || !latestId.startsWith("did:webvh:")) return {};
+  const from = evidence.retrievedFrom ?? logUrl(evidence.did);
+  return logUrl(latestId) === from ? {} : { movedTo: latestId, movedLog: "not-obtained" };
 }
 
 const SOURCE_TEXT: Record<EvidenceSource, string> = {

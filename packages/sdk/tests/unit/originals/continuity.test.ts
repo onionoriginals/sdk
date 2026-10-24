@@ -12,7 +12,7 @@ import { localSigner } from "@originals/vh/crypto";
 import { createLog, serializeLog, signWith, vhHash } from "@originals/vh/log";
 import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
-import { MemoryStore, OriginalsSDK, hostedFiles, readZip, signerPath, writeZip, type HostedFetch } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, hostedFiles, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
 import { WebvhIdentity, bytes, clock, seed } from "./helpers.js";
 
 const B1 = bytes("harbor at dawn, first crop");
@@ -325,7 +325,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     return { ...env, alias, files, hosted };
   }
 
-  test("P7.8: a did:webvh signer log a host serves is judged as fetched from the host's location, so the location rule applies", async () => {
+  test("P7.8: a did:webvh signer log a host serves is a copy, like a package: it has no fetch location, so the location rule does not apply", async () => {
     const env = await movedAndRotated();
     const key = localSigner("Ed25519", seed(61));
     const k = key.publicKeyMultibase;
@@ -347,7 +347,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     const r = await reader.loadPublished(alias.did, hosted);
     expect(r.report.identityEvidence).toMatchObject({
       status: "complete", freshness: "not-established",
-      obtained: { location: `${base}originals/${signerPath(env.alice.did)}/did.jsonl`, source: "host" },
+      obtained: { location: null, source: "host" },
     });
   });
 

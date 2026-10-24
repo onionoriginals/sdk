@@ -498,8 +498,8 @@ function identityLocations(chained: ChainedEntry[], did: string, verified: numbe
  * location (P5.14, P7.8).
  */
 function movedTo(evidence: AuthorDidEvidence | undefined): string[] {
-  // Only for a log fetched from a location: a package's or a host's has none (P7.8).
-  if (typeof evidence?.log !== "string" || !evidence.retrievedFrom || evidence.source !== "fetched") return [];
+  // Any verified log held, fetched or a copy from a package or host (P5.14; owner decision on #993's review).
+  if (typeof evidence?.log !== "string") return [];
   const last = evidence.log.trimEnd().split("\n").pop();
   try {
     const state = last ? (JSON.parse(last) as { state?: { id?: unknown } }).state : undefined;
@@ -1340,7 +1340,6 @@ export class OriginalsSDK {
     aliases: AliasEvidence[] = [],
     retrieval?: Retrieval,
     bitcoin?: SatEvidence[],
-    hostBase?: string,
   ): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
@@ -1355,10 +1354,9 @@ export class OriginalsSDK {
         now: this.clock(),
         ...comparisons,
       });
-    // A did:webvh signer log a host serves is judged as fetched from the host's location (P7.8; owner
-    // decision on #993's review), so the location rule applies to it.
-    const hostedAt = (did: string) => (from === "host" && hostBase && did.startsWith("did:webvh:") ? { retrievedFrom: `${hostBase}${signerPath(did)}/did.jsonl` } : {});
-    const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}), ...hostedAt(did) }, from));
+    // A host's snapshot is a copy, like a package: no fetch location, so the location rule does not
+    // apply to its signer logs (P7.8; owner decision on #993's review).
+    const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
     const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
@@ -1454,7 +1452,7 @@ export class OriginalsSDK {
   private async retrievePublished(aliasDid: string, retrieval: Retrieval): Promise<PublishedOriginal> {
     const { alias, files } = await this.retrieveSnapshot(aliasDid, retrieval, true);
     // Every file is already within the budget and the archive limits; no archive is assembled.
-    const loaded = await this.loadContents(readEvidenceFiles(files), "host", [alias], retrieval, undefined, `${didWebvhFilesUrl(aliasDid)}${HOSTED_PREFIX}`);
+    const loaded = await this.loadContents(readEvidenceFiles(files), "host", [alias], retrieval);
     const r = loaded.report;
     // Both directions (P3.6): the checkpoint's own state must list the alias. A did:webvh that
     // merely points at an Original gives no result through it.
