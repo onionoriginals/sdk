@@ -8,17 +8,17 @@
 import * as ed from "@noble/ed25519";
 import { generateArtwork } from "../../../apps/landing/src/sdk/artwork.ts";
 import { assert, assertEqual, Phase } from "../lib/phase.mjs";
-import { readCustody, signedInEngine, type LocalInput } from "./local-env.ts";
+import { accountRows, readCustody, signedInEngine, type LocalInput } from "./local-env.ts";
 
 const phase = new Phase("L5-client-b");
 const input = phase.input as LocalInput & { prior: Record<string, { did: string; alias?: string; checkpoint: string; entries: number }> };
 const { work1 } = input.prior;
 
-await phase.check("b3-other-client-restore", "another client lists the work from the account and restores it from the host", async () => {
+await phase.check("b3-other-client-restore", "another client finds the work in the account library and restores it from the host", async () => {
   const { engine, store } = await signedInEngine(input, input.dirs.storeB);
   assertEqual(await store.list(), [], "client B's store before restoring");
-  const listed = await engine.listOriginals();
-  assert(listed.some((o) => o.did === work1.did && o.where === "host"), "the published work is not listed from the account", listed);
+  const listed = await accountRows(input);
+  assert(listed.some((o) => o.did === work1.did && o.availability === "server" && o.alias === work1.alias), "the published work is not in the account library with its alias", listed);
   const restored = await engine.restore(work1.did);
   assertEqual(restored.publication, "complete", "publication");
   assertEqual(restored.webvhDid, work1.alias, "alias");

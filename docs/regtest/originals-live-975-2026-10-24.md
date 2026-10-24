@@ -104,3 +104,20 @@ typecheck passed, along with the separate Core/ord landing journey.
   this does not establish public-host availability.
 - The owner's mainnet receipt remains pending. The production Turnkey approval
   for this regtest run does not authorize mainnet spending or deployment.
+
+## Library recovery follow-up (PR 10c, 2026-10-24)
+
+The refresh/reopen gap above is addressed separately in
+[the library recovery report](originals-library-975-2026-10-24.md). That work
+adds `/me`, account-scoped local persistence, authenticated durable discovery,
+and verified consumer reopening. The exact Stage A ZIP above was imported
+through the browser's recovery file input: all four entries, author binding,
+identity evidence and resource bytes verified, including the recorded final
+head. This was an offline-copy recovery check against a separate test chain,
+not a fresh reading of the original Stage A chain or another live Turnkey run.
+
+Separate disposable Core/ord evidence proves server-library reopening and
+signer-free retry after a process kill. Browser checks use local keys and
+fixture authentication, without production credentials. The original report's
+live-signing and fresh-profile limits remain historical facts, and the
+public-host/mainnet release gates remain pending.

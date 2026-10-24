@@ -148,3 +148,59 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
     expect((await engine.anchoringStatus()).anchoring?.status).toMatchObject({ publication: 'anchored', action: 'done', heads: { accepted: revised.history.at(-1)!.versionId } });
   });
 });
+
+test('fresh engine reopens an uncertain pair and resends without any signer or funding (P9.6)', async () => {
+  let drop = true;
+  let signed = 0;
+  const { chain, engine, outbox, funding, landing } = await setup({
+    satSigner: { signAndFinalizeCommitPsbt: (psbt) => { signed++; return walletSigner.signAndFinalizeCommitPsbt(psbt); } },
+    transport: (t) => ({ ...t, submit: async (body) => {
+      const answer = await t.submit(body);
+      if (drop) { drop = false; throw new Error('answer lost'); }
+      return answer;
+    } }),
+  });
+  await expect(engine.inscribe({ funding: funding() })).rejects.toThrow('answer lost');
+  const before = engine.snapshot();
+  const waiting = await outbox.get(before.did);
+  const transport = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
+  const reopened = new DemoEngine({ authed: true, subOrgId: 'sub-engine', features: { bitcoinAnchoring: true }, anchoring: { transport, outbox, network: 'regtest', index: 'ord-test' } });
+  await reopened.importEvidence(await engine.evidencePackage());
+  expect(await reopened.pendingHandOff()).toBe(true);
+  expect((await reopened.inscribe()).anchoring?.lastSent?.outcome).toBe('recorded');
+  expect(reopened.snapshot().history).toEqual(before.history);
+  expect(signed).toBe(1);
+  expect(chain.sent.length).toBe(2);
+  expect(await outbox.get(before.did)).toBeUndefined();
+  expect(waiting?.pair.prepared.commitTxId).toBe(reopened.snapshot().anchoring?.lastSent?.commitTxId);
+  chain.mine();
+  const verified = await reopened.verifyBitcoin();
+  expect(verified.bitcoinVerification?.history.status).toBe('valid');
+  expect(verified.bitcoinVerification?.authorBinding.status).toBe('valid');
+  expect(verified.bitcoinVerification?.anchoring?.status).toBe('anchored');
+  expect(verified.bitcoinVerification?.head).toBe(before.history.at(-1)?.versionId);
+  expect(verified.bitcoinVerification?.resources.status).toBe('available');
+  expect(verified.bitcoinVerification?.ownership?.status).toBe('provisional');
+});
+
+test('reauth or a disabled writer never discards an uncertain signed pair (P9.6)', async () => {
+  const { AnchoringSubmitError } = await import('./anchoring');
+  let attempt = 0;
+  const { engine, outbox, funding, chain } = await setup({ transport: (t) => ({ ...t, submit: async (body) => {
+    attempt++;
+    if (attempt === 2) throw new AnchoringSubmitError(401, { error: 'unauthorized' });
+    if (attempt === 3) throw new AnchoringSubmitError(404, { error: 'bitcoin_anchoring_off' });
+    const answer = await t.submit(body);
+    if (attempt === 1) throw new Error('answer lost');
+    return answer;
+  } }) });
+  await expect(engine.inscribe({ funding: funding() })).rejects.toThrow('answer lost');
+  const did = engine.snapshot().did;
+  const saved = await outbox.get(did);
+  await expect(engine.inscribe()).rejects.toThrow('unauthorized');
+  expect(await outbox.get(did)).toEqual(saved);
+  await expect(engine.inscribe()).rejects.toThrow('bitcoin_anchoring_off');
+  expect(await outbox.get(did)).toEqual(saved);
+  expect((await engine.inscribe()).anchoring?.lastSent?.outcome).toBe('recorded');
+  expect(chain.sent.length).toBe(2);
+});

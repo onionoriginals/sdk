@@ -4,21 +4,22 @@ import * as ed from '@noble/ed25519';
 import { MemoryStore, OriginalsSDK, type HostedFetch } from '@originals/sdk/originals';
 import { AccountIndexError, DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
-import { IndexedDbStore } from './idb-store';
+import { BrowserOriginalsStore } from './browser-store';
 import { createLocalAuthor, type LocalAuthor } from './local-author';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
 
 // #976 B3, gap G3. On another client (a fresh browser profile, an empty
 // store), the signed-in author finds a published Original in the account's
-// index and restores it from the host, verified as any reader verifies it,
+// library (main's /me data path: GET /api/originals and its evidence) and
+// restores it, then reads the host, verified as any reader verifies it,
 // then keeps editing from the host's head as the explicit parent (P2.1, P6.7).
 // The authority to sign is the author's own key, never the index or the host.
 const art = (title: string, seed: number) => generateArtwork(title, 'Orbits', seed).svg;
 
 async function world() {
   const author = await createLocalAuthor();
-  const { upload, read } = host();
+  const { upload, read, fetchAs } = host();
   const secret = ed.utils.randomSecretKey();
   const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
   const client = (a: LocalAuthor = author, o: { read?: HostedFetch; idb?: IDBFactory } = {}) => {
@@ -27,21 +28,18 @@ async function world() {
       authed: true,
       subOrgId: SUB,
       features: { hostedPublication: true },
-      openStore: () => IndexedDbStore.open(SUB, idb),
+      store: new BrowserOriginalsStore(SUB, idb),
       author: async () => a,
       publishTarget: { upload, read: o.read ?? read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
     });
   };
-  return { client, read, author };
+  return { client, read, author, rows: () => accountRows(fetchAs) };
 }
 
-/** A reader that runs `before` ahead of its `n`th read of an alias log (`…/o-…/did.jsonl`), once. */
-function onAliasRead(read: HostedFetch, n: number, before: () => Promise<void>): HostedFetch {
-  let seen = 0;
-  return async (url, o) => {
-    if (/\/o-[^/]+\/did\.jsonl$/.test(url) && ++seen === n) await before();
-    return read(url, o);
-  };
+/** The account's library rows, as /me reads them (GET /api/originals). */
+async function accountRows(fetchAs: ReturnType<typeof host>['fetchAs']) {
+  const res = await fetchAs(SUB)('http://app.local/api/originals');
+  return ((await res.json()) as { originals: Array<{ did: string; title: string; availability: string; alias?: string }> }).originals;
 }
 
 // G5: completion depends only on the stranger's read-back. The account index
@@ -50,7 +48,7 @@ function onAliasRead(read: HostedFetch, n: number, before: () => Promise<void>):
 describe('a failed account-index write never blocks publication', () => {
   async function indexFails(status = 507) {
     const author = await createLocalAuthor();
-    const { upload, read } = host();
+    const { upload, read, fetchAs } = host();
     const secret = ed.utils.randomSecretKey();
     const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
     let failing = true;
@@ -58,7 +56,7 @@ describe('a failed account-index write never blocks publication', () => {
     const flaky = {
       put: upload.put.bind(upload),
       submit: upload.submit.bind(upload),
-      listOriginals: upload.listOriginals.bind(upload),
+      evidence: upload.evidence.bind(upload),
       recordOriginal: (entry: Parameters<typeof upload.recordOriginal>[0]) => {
         attempts++;
         return failing ? Promise.reject(new Error(`DurableHostingStorageAdapter.recordOriginal failed: ${status}`)) : upload.recordOriginal(entry);
@@ -70,11 +68,11 @@ describe('a failed account-index write never blocks publication', () => {
         authed: true,
         subOrgId: SUB,
         features: { hostedPublication: true },
-        openStore: () => IndexedDbStore.open(SUB, store),
+        store: new BrowserOriginalsStore(SUB, store),
         author: async () => author,
         publishTarget: { upload: u, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner },
       });
-    return { client, read, heal: () => (failing = false), attempts: () => attempts };
+    return { client, read, heal: () => (failing = false), attempts: () => attempts, rows: () => accountRows(fetchAs) };
   }
 
   test('a 507 STORE_FULL from the index: publication is still complete, editable, and the index is reported unlisted', async () => {
@@ -99,9 +97,11 @@ describe('a failed account-index write never blocks publication', () => {
     expect(demoFailureMessage(refused)).toBe(demo.hosting.indexFull);
     expect(demoFailureMessage(new AccountIndexError(500, 'x'))).toBe(demo.hosting.indexUnavailable);
 
+    // main's library already finds the hosted snapshot; the index adds its alias.
+    expect((await w.rows()).find((o) => o.did === published.did)?.alias).toBeUndefined();
     w.heal();
     expect((await a.retryAccountIndex()).accountIndex).toBe('listed');
-    expect((await w.client(undefined, new IDBFactory()).listOriginals()).map((o) => o.did)).toEqual([published.did]);
+    expect((await w.rows()).find((o) => o.did === published.did)?.alias).toBe(published.webvhDid);
   });
 
   test('after a restart, an unlisted publication is retried when the Original is opened', async () => {
@@ -120,7 +120,7 @@ describe('a failed account-index write never blocks publication', () => {
 });
 
 describe('restoring a published Original on another client', () => {
-  test('listed from the account, restored from the host, and edited from its head', async () => {
+  test('listed in the account library, restored, and edited from the host\'s head', async () => {
     const w = await world();
     const a = w.client();
     await a.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
@@ -128,9 +128,10 @@ describe('restoring a published Original on another client', () => {
     // Client A only: an unpublished Original stays in A's own store.
     const draft = await a.create('Sketch', 'Orbits', art('Sketch', 2));
 
-    const b = w.client();
-    const listed = await b.listOriginals();
-    expect(listed).toEqual([{ did: published.did, name: 'Harbor at dawn', checkpoint: null, published: true, where: 'host' }]);
+    const idbB = new IDBFactory();
+    const b = w.client(w.author, { idb: idbB });
+    const listed = await w.rows();
+    expect(listed.find((o) => o.did === published.did)).toMatchObject({ title: 'Harbor at dawn', availability: 'server', alias: published.webvhDid });
     expect(listed.some((o) => o.did === draft.did)).toBe(false);
 
     const restored = await b.restore(published.did);
@@ -144,9 +145,8 @@ describe('restoring a published Original on another client', () => {
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.head).toBe(revised.history.at(-1)!.versionId);
 
-    // After restoring, B lists it from its own store too.
-    expect((await w.client().listOriginals()).length).toBe(1);
-    expect((await b.listOriginals())).toMatchObject([{ did: published.did, where: 'this-browser', published: true }]);
+    // After restoring, B's own store holds it.
+    expect(await new BrowserOriginalsStore(SUB, idbB).list()).toEqual([published.did]);
 
     // C12-125: client A, a revision behind, can't save on its old parent:
     // the host refuses it with a stale-parent conflict, never a rebase (P4.5).
@@ -165,7 +165,7 @@ describe('restoring a published Original on another client', () => {
 
   test('an Original the account never published can\'t be restored', async () => {
     const w = await world();
-    await expect(w.client().restore('did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ')).rejects.toThrow(/not published from this account/);
+    await expect(w.client().restore('did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ')).rejects.toThrow(/isn't saved to this account/);
   });
 });
 
@@ -175,14 +175,17 @@ describe('restore and the host moving on (P2.1, P4.5)', () => {
     const a = w.client();
     await a.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
     const published = await a.publish();
-    // Restore reads the alias log itself, then the read-back reads it again.
-    // Between the two, client A saves on the host.
+    // Once the sync has stored the alias evidence in B, and before B's
+    // read-back, client A saves on the host.
     let moved: string | undefined;
-    const b = w.client(w.author, {
-      read: onAliasRead(w.read, 2, async () => {
+    const idb = new IDBFactory();
+    const read: HostedFetch = async (url, o) => {
+      if (!moved && (await new BrowserOriginalsStore(SUB, idb).getAuthorEvidence(published.webvhDid!))) {
         moved = (await a.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8))).history.at(-1)!.versionId;
-      }),
-    });
+      }
+      return w.read(url, o);
+    };
+    const b = w.client(w.author, { read, idb });
     const restored = await b.restore(published.did);
     expect(moved).toBeDefined();
     expect(restored.publication).toBe('complete');
@@ -199,7 +202,8 @@ describe('restore and the host moving on (P2.1, P4.5)', () => {
     let blind = true;
     // Reads fail only once the sync has committed the host's log to B's
     // store: the read-back, not the sync, is what fails.
-    const synced = async () => (await (await IndexedDbStore.open(SUB, idb)).list()).includes(published.did);
+    // Fail reads once B holds the alias evidence: after the sync, so the read-back fails.
+    const synced = async () => !!(await new BrowserOriginalsStore(SUB, idb).getAuthorEvidence(published.webvhDid!));
     const read: HostedFetch = async (url, o) => (blind && (await synced()) ? Promise.reject(new Error('timed out')) : w.read(url, o));
     const b = w.client(w.author, { read, idb });
     await expect(b.restore(published.did)).rejects.toThrow();
@@ -208,7 +212,8 @@ describe('restore and the host moving on (P2.1, P4.5)', () => {
     // The copy is in this browser, listed but not complete, and finishing it completes it.
     blind = false;
     const later = w.client(w.author, { read, idb });
-    expect((await later.listOriginals()).find((o) => o.did === published.did)?.where).toBe('this-browser');
+    expect(await new BrowserOriginalsStore(SUB, idb).list()).toContain(published.did);
+    expect((await new BrowserOriginalsStore(SUB, idb).getPublication(published.did))?.state).toBe('uploaded');
     const reopened = await later.open(published.did);
     expect(reopened.publication).toBe('incomplete');
     expect((await later.publish()).publication).toBe('complete');

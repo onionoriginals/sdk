@@ -2,24 +2,30 @@ import { describe, test, expect } from 'bun:test';
 import { demo, legal } from '../content';
 import { publishDurabilityNote, publishStepLock, resolvedCopy, stepButtonDisabled } from './demo-logic';
 
-// #976 B5, gap G10. Signed out, the Original is signed by a key made in the
-// page and discarded with it. The copy says so, and promises no storage,
-// backup or anonymous publication that doesn't exist.
+// #976 B5, gap G10; owner decision of 23 October 2026 (#992). Signed out,
+// the Original is signed with a guest key kept in this browser with the work,
+// unencrypted, so anyone using the browser can sign as that guest. The copy
+// says so, and promises no backup or anonymous publication that doesn't exist.
 const privacyText = JSON.stringify(legal);
 
-describe('signed-out copy is explicit about the discarded key', () => {
-  test('the publish-step note says the key is discarded and points to sign-in', () => {
+describe('signed-out copy is explicit about the kept guest key', () => {
+  test('the publish-step note warns the guest key is kept, unencrypted, and points to sign-in', () => {
     const note = demo.hosting.temporaryNote;
-    expect(note).toMatch(/discard/i);
-    expect(note).toMatch(/sign in/i);
-    expect(note).not.toMatch(/shared demo area|couple of hours/i);
+    expect(note).toMatch(/saved in this browser/i);
+    expect(note).toMatch(/unencrypted/i);
+    expect(note).toMatch(/anyone using this browser can sign as this guest/i);
+    expect(note).not.toMatch(/discard|shared demo area|couple of hours/i);
+    expect(note).toMatch(/sign in to sign with your own key and publish/i);
   });
 
   test('privacy copy claims no key in localStorage, no backup file and no anonymous publishing', () => {
     expect(privacyText).not.toMatch(/lives in this browser’s localStorage/);
     expect(privacyText).not.toMatch(/backup file/i);
     expect(privacyText).not.toMatch(/What it publishes goes to an in-memory store/);
-    expect(privacyText).toMatch(/generated in the page and discarded with it/);
+    expect(privacyText).not.toMatch(/discarded with it/);
+    expect(privacyText).toMatch(/guest key made in this browser/);
+    expect(privacyText).toMatch(/unencrypted/);
+    expect(privacyText).toMatch(/Anyone who uses this browser can read them and sign as this guest/);
   });
 
   test('no signed-out heading says the history is available here', () => {
@@ -31,11 +37,13 @@ describe('signed-out copy is explicit about the discarded key', () => {
 // (hostedPublication off) and in the staging acceptance build (on).
 describe('signed out, publishing is locked and the G10 note shows in both builds', () => {
   for (const hostedPublication of [false, true]) {
-    test(`hostedPublication ${hostedPublication}: the step is locked and the note says the key is discarded`, () => {
+    test(`hostedPublication ${hostedPublication}: the step is locked and the note warns about the kept guest key`, () => {
       expect(publishStepLock({ hostedPublication, authenticated: false })).not.toBeNull();
-      const note = publishDurabilityNote(false, hostedPublication);
-      expect(note).toMatch(/discard/i);
-      expect(note).not.toMatch(/shared demo area|couple of hours/i);
+      const note = publishDurabilityNote(false, hostedPublication)!;
+      expect(note).toMatch(/saved in this browser/i);
+      expect(note).toMatch(/unencrypted/i);
+      expect(note).toMatch(/anyone using this browser can sign as this guest/i);
+      expect(note).not.toMatch(/discard|shared demo area|couple of hours/i);
     });
   }
 

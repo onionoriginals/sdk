@@ -1,44 +1,59 @@
 /**
- * Dry run L6 (Bun): the signed-out demo (#976 B5). Its key is made in the page
- * and discarded with it: nothing is kept, publishing needs sign-in, a new page
- * lists nothing, and the evidence package holds only public keys.
+ * Dry run L6 (Bun): the signed-out demo (#976 B5). Owner decision of 23
+ * October 2026 (#992): signed out, the guest key and the guest's work are
+ * kept in this browser's guest database, unencrypted, with a warning.
+ * Publishing needs sign-in, nothing goes to any account database or the
+ * server, and the evidence package holds only public keys.
  *
- * Bun has no IndexedDB, so on its own a signed-out engine could keep nothing
- * there whatever it did, and "a new page lists nothing" would prove nothing.
- * The phase installs fake-indexeddb as the page's IndexedDB first, so the
- * check sees whether the signed-out engine opens any database at all.
+ * Bun has no IndexedDB, so the phase installs fake-indexeddb as the page's
+ * IndexedDB: the checks see which databases the signed-out engine opens.
  */
 import { IDBFactory } from "fake-indexeddb";
 import { MemoryStore, OriginalsSDK, readEvidence } from "@originals/sdk/originals";
 import { generateArtwork } from "../../../apps/landing/src/sdk/artwork.ts";
 import { DemoEngine } from "../../../apps/landing/src/sdk/engine.ts";
-import { createLocalAuthor } from "../../../apps/landing/src/sdk/local-author.ts";
+import { browserDatabase } from "../../../apps/landing/src/sdk/browser-store.ts";
 import { demo } from "../../../apps/landing/src/content.ts";
 import { assert, assertEqual, Phase } from "../lib/phase.mjs";
 
 const phase = new Phase("L6-signed-out");
 
-await phase.check("b5-ephemeral", "signed out: nothing is kept, publishing is unavailable, and the copy says the key is discarded", async () => {
+await phase.check("b5-guest", "signed out: publishing is unavailable, guest work survives a reload in the guest database only, and nothing reaches an account database or the server", async () => {
   const idb = new IDBFactory();
   (globalThis as { indexedDB?: IDBFactory }).indexedDB = idb;
-  const engine = new DemoEngine({ features: { hostedPublication: true } });
-  const created = await engine.create("Sketch", "Orbits", generateArtwork("Sketch", "Orbits", 5).svg);
-  let refused = "";
+  // Every request the page makes, so "nothing reaches the server" is checked, not assumed.
+  const requests: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(`${init?.method ?? "GET"} ${String(input instanceof Request ? input.url : input)}`);
+    return realFetch(input, init);
+  }) as typeof fetch;
   try {
-    await engine.publish();
-  } catch (error) {
-    refused = (error as Error).message;
+    const engine = new DemoEngine({ features: { hostedPublication: true } });
+    const created = await engine.create("Sketch", "Orbits", generateArtwork("Sketch", "Orbits", 5).svg);
+    let refused = "";
+    try {
+      await engine.publish();
+    } catch (error) {
+      refused = (error as Error).message;
+    }
+    assert(/Sign in/i.test(refused), "a signed-out Original could be published", refused);
+    // The reload: a new page on the same browser finds the guest work under the same guest key.
+    const reloaded = new DemoEngine();
+    const reopened = await reloaded.open(created.did);
+    assertEqual(reopened.history.map((h) => h.versionId), created.history.map((h) => h.versionId), "the guest work after a reload");
+    const next = await reloaded.update("Sketch, later", "Orbits", generateArtwork("Sketch, later", "Orbits", 6).svg);
+    assertEqual(next.author, created.author, "the guest author after a reload");
+    const databases = (await idb.databases()).map((d) => d.name);
+    assertEqual(databases, [browserDatabase()], "IndexedDB databases a signed-out page opened");
+    assertEqual(requests, [], "requests a signed-out page made");
+    for (const note of [demo.hosting.temporaryNote, demo.hosting.temporaryNoteNoPublish]) {
+      assert(/unencrypted/i.test(note) && /anyone using this browser can sign as this guest/i.test(note), "the signed-out note doesn't warn that the guest key is kept here", note);
+    }
+    return { did: created.did, refused, databases };
+  } finally {
+    globalThis.fetch = realFetch;
   }
-  assert(/Sign in/i.test(refused), "a signed-out Original could be published", refused);
-  assertEqual(await idb.databases(), [], "IndexedDB databases a signed-out page opened");
-  assertEqual(await new DemoEngine().listOriginals(), [], "a new page's list");
-  // The same IndexedDB does keep a signed-in account's work, so the empty
-  // list above is the signed-out engine's choice, not a missing store.
-  const signedIn = new DemoEngine({ authed: true, subOrgId: "suborg-acceptance-l6", author: () => createLocalAuthor() });
-  await signedIn.create("Kept", "Orbits", generateArtwork("Kept", "Orbits", 4).svg);
-  assert((await idb.databases()).length === 1, "the control: a signed-in engine kept nothing in the same IndexedDB", await idb.databases());
-  assert(/discard/i.test(demo.hosting.temporaryNote), "the signed-out note doesn't say the key is discarded", demo.hosting.temporaryNote);
-  return { did: created.did, refused };
 });
 
 await phase.check("b5-package-public-only", "the signed-out evidence package holds no private key", async () => {

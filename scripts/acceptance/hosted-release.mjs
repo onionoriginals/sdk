@@ -146,7 +146,7 @@ const computed = {
   // page's only signer is the account's own Turnkey session.
   "B3-restore-continue": all([p.ar, "b3-reopen-continue"], [p.b, "b3-other-client-restore"], [p.r3, "work1-complete"]) && (target === "staging" ? all([p.stale, "b3-stale-parent"]) : all([p.ar, "b3-listed"], [p.b, "b3-stale-parent"], [p.b, "b3-restore-no-authority"])),
   "B4-interrupted-publication": all([p.a, "b4-interrupt-work2"], [p.a, "b4-interrupt-work3"], [p.r1, "work2-incomplete"], [p.r1, "work3-incomplete"], [p.ar, "b4-resume-work2"], [p.ar, "b4-resume-work3"], [p.r2, "work2-complete"], [p.r2, "work3-complete"]),
-  "B5-signed-out-ephemeral": target === "local" ? all([p.so, "b5-ephemeral"], [p.so, "b5-package-public-only"]) : all([p.so, "b5-ephemeral"]),
+  "B5-signed-out-guest": target === "local" ? all([p.so, "b5-guest"], [p.so, "b5-package-public-only"]) : all([p.so, "b5-guest"]),
   "B6-flag-off": preflight.find((x) => x.id === "b6-source-off")?.status === "PASS" && (target === "local" || ok(p.prod, "b6-production-off")),
 };
 const passed = preflight.every((x) => x.status === "PASS") && results.length > 0 && results.every((r) => r.status === "PASS") && Object.values(computed).every(Boolean);

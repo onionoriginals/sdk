@@ -11,18 +11,26 @@ function toBytes(data: Buffer | Uint8Array | string): Uint8Array {
   return new Uint8Array(data);
 }
 
-/** A published Original in the signed-in account's index. */
+/** A published Original, as the account's index records it (#976 B, G3). */
 export interface AccountIndexEntry {
   did: string;
   title: string;
   alias: string;
 }
 
-/** The account index a publish target can keep. `DurableHostingStorageAdapter` is one. */
+/**
+ * The account library a publish target can reach. `DurableHostingStorageAdapter`
+ * is one. Listing is main's library (`src/sdk/library.ts`, `/me`); this only
+ * records a published Original and reads the account's own evidence for it.
+ */
 export interface AccountIndex {
   recordOriginal(entry: AccountIndexEntry & { resourceHash: string }): Promise<void>;
-  listOriginals(): Promise<AccountIndexEntry[]>;
+  /** The account's evidence package for `did`, as `/me` imports it; null when the account has none. */
+  evidence(did: string): Promise<Uint8Array | null>;
 }
+
+/** The largest evidence package read back, as `fetchLibraryEvidence` caps it. */
+const MAX_EVIDENCE_BYTES = 96 * 1024 * 1024;
 
 export class DurableHostingStorageAdapter implements AccountIndex {
   private readonly baseUrl: string;
@@ -85,14 +93,15 @@ export class DurableHostingStorageAdapter implements AccountIndex {
     if (!res.ok) throw new Error(`DurableHostingStorageAdapter.recordOriginal failed: ${res.status}`);
   }
 
-  /** The account's published Originals that carry an alias. */
-  async listOriginals(): Promise<AccountIndexEntry[]> {
-    const res = await this.fetchImpl(`${this.baseUrl}/api/originals`, { method: 'GET', credentials: 'same-origin' });
-    if (!res.ok) throw new Error(`DurableHostingStorageAdapter.listOriginals failed: ${res.status}`);
-    const body = (await res.json()) as { originals?: Array<{ did?: unknown; title?: unknown; alias?: unknown }> };
-    return (body.originals ?? []).flatMap((o) =>
-      typeof o.did === 'string' && typeof o.title === 'string' && typeof o.alias === 'string' ? [{ did: o.did, title: o.title, alias: o.alias }] : [],
-    );
+  /** The account's evidence for `did` (`GET /api/originals/evidence`, main's library data path), size-capped. */
+  async evidence(did: string): Promise<Uint8Array | null> {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/originals/evidence?did=${encodeURIComponent(did)}`, { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`DurableHostingStorageAdapter.evidence failed: ${res.status}`);
+    if (Number(res.headers.get('content-length')) > MAX_EVIDENCE_BYTES) throw new Error('This recovery export is too large to open here.');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > MAX_EVIDENCE_BYTES) throw new Error('This recovery export is too large to open here.');
+    return bytes;
   }
 
   async get(objectKey: string): Promise<{ content: Buffer; contentType: string } | null> {

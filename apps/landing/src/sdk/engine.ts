@@ -12,12 +12,12 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type OriginalsStore, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, satEvidence, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult, type OriginalsStore } from "@originals/sdk/originals";
 import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsReport } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { FETCH_LIMITS } from "@originals/vh/fetch";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
@@ -39,7 +39,8 @@ import { DurableHostingStorageAdapter, type AccountIndex, type AccountIndexEntry
 import { short } from "./format";
 import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
-import { IndexedDbStore, MemoryPublicationRecords, hasPublicationRecords, type PublicationRecord, type PublicationRecords } from "./idb-store";
+import { BrowserOriginalsStore } from "./browser-store";
+import { MemoryPublicationRecords, hasPublicationRecords, type PublicationRecord, type PublicationRecords } from "./publication-records";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
 import { authorshipPublicKeyMultibase, turnkeyAuthorshipSigner } from "./turnkey-authorship-signer";
@@ -135,6 +136,8 @@ export interface DemoAssetState {
   provenance: unknown;
   /** Signed in, but this browser has no IndexedDB, so the work is in memory only (#976 B, G2). */
   notKeptAcrossRestarts?: true;
+  bitcoinVerification?: OriginalsReport;
+  bitcoinReadError?: string;
 }
 
 export interface AssetSource {
@@ -208,20 +211,6 @@ interface LogLine {
 }
 
 /**
- * An Original this account has: in this browser's store (`open` verifies it),
- * or published from another client and listed in the account's index
- * (`restore` fetches and verifies it from the host; #976 B, G3).
- */
-export interface StoredOriginalSummary {
-  did: string;
-  name: string;
-  /** The stored head; null for one only on the host, until it is restored. */
-  checkpoint: string | null;
-  published: boolean;
-  where: "this-browser" | "host";
-}
-
-/**
  * Where an Original is published, and the key that controls its alias (P3.7).
  * An upload that can also `submit` takes shared-host saves of the published
  * Original (P6.7); `read` fetches its public files (defaults to `fetch`).
@@ -250,13 +239,15 @@ export class DemoEngine {
   private readonly subOrgId?: string;
   private readonly listeners = new Set<Listener>();
   /**
-   * Signed in, the account's IndexedDB store, so work survives a browser
-   * restart (#976 B, G2). Signed out, a MemoryStore: that work is page-scoped
-   * and its key is discarded with the page (B5).
+   * The engine's store. The page passes main's account-scoped
+   * BrowserOriginalsStore: signed in, the account's database; signed out, the
+   * guest's (owner decision of 23 October 2026). Without IndexedDB it is a
+   * MemoryStore, and the snapshot says the work isn't kept across restarts
+   * (#976 B, G2).
    */
-  private store: OriginalsStore | null = null;
-  private storeOpening: Promise<OriginalsStore> | null = null;
-  private readonly openStoreWith?: () => Promise<OriginalsStore>;
+  private readonly store: OriginalsStore;
+  /** In memory only, because this browser has no IndexedDB. */
+  private readonly notKeptAcrossRestarts: boolean;
   private readonly authorWith?: () => Promise<Authoring>;
   private authoring: Authoring | null = null;
   private sdk: OriginalsSDK | null = null;
@@ -281,6 +272,8 @@ export class DemoEngine {
   private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished"> | undefined = undefined;
 
   constructor(opts?: {
+    store?: OriginalsStore;
+    localAuthor?: () => Promise<Authoring>;
     authed?: boolean;
     subOrgId?: string;
     networkFlag?: BtcNetworkFlag;
@@ -295,9 +288,13 @@ export class DemoEngine {
     author?: Authoring | (() => Promise<Authoring>);
     /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
     anchoring?: AnchoringOptions;
-    /** Overrides the store, for tests. */
-    openStore?: () => Promise<OriginalsStore>;
   }) {
+    // Without a store from the page: this browser's own (the account's, or the
+    // guest's), or memory when there is no IndexedDB, which the snapshot says.
+    const own = !opts?.store && globalThis.indexedDB ? new BrowserOriginalsStore(opts?.authed ? opts?.subOrgId : undefined) : null;
+    this.store = opts?.store ?? own ?? new MemoryStore();
+    this.localAuthor = opts?.localAuthor ?? (own ? () => own.localAuthor() : undefined);
+    this.notKeptAcrossRestarts = !opts?.store && !globalThis.indexedDB;
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
@@ -305,12 +302,13 @@ export class DemoEngine {
     this.authorOverride = typeof opts?.author === "function" ? undefined : opts?.author;
     this.anchoringOpts = opts?.anchoring ?? {};
     this.networkFlag = opts?.networkFlag ?? btcNetwork();
-    this.openStoreWith = opts?.openStore;
     this.authorWith = typeof opts?.author === "function" ? opts.author : undefined;
-    (globalThis as Record<string, unknown>).__originalsDemo = this;
     this.tier = demoTier(this.networkFlag, this.authed);
   }
 
+  private bitcoinVerification?: OriginalsReport;
+  private bitcoinReadError?: string;
+  private readonly localAuthor?: () => Promise<Authoring>;
   private readonly authorOverride?: Authoring;
 
   on(listener: Listener): () => void {
@@ -332,31 +330,6 @@ export class DemoEngine {
     this.authorEvidence.set(evidence);
   }
 
-  /**
-   * This engine's store: the account's durable one when signed in and the
-   * browser has IndexedDB. Signed in without IndexedDB, a MemoryStore, and the
-   * snapshot says the work isn't kept across restarts rather than failing
-   * silently. A failed open isn't cached, so the next action tries again.
-   */
-  private openStore(): Promise<OriginalsStore> {
-    if (this.storeOpening) return this.storeOpening;
-    const durable = this.authed && !!this.subOrgId;
-    const opening = this.openStoreWith
-      ? this.openStoreWith()
-      : durable && globalThis.indexedDB
-        ? IndexedDbStore.open(this.subOrgId!)
-        : Promise.resolve(new MemoryStore());
-    this.notKeptAcrossRestarts = !this.openStoreWith && durable && !globalThis.indexedDB;
-    this.storeOpening = opening.then(
-      (store) => (this.store = store),
-      (error: unknown) => {
-        this.storeOpening = null;
-        throw error;
-      },
-    );
-    return this.storeOpening;
-  }
-
   /** Where publication records are kept: the durable store when it keeps them. */
   private records(): PublicationRecords {
     return this.store && hasPublicationRecords(this.store) ? this.store : this.memoryPublications;
@@ -367,22 +340,20 @@ export class DemoEngine {
     await this.records().putPublication(this.did!, record);
   }
 
-  /** Signed in, but the work is in memory only: this browser has no IndexedDB. */
-  private notKeptAcrossRestarts = false;
-
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    const store = await this.openStore();
-    this.authoring = this.authorOverride ?? (this.authorWith ? await this.authorWith() : this.authed ? await this.signedInAuthor() : await createLocalAuthor());
-    this.setAuthorEvidence(this.authoring.evidence);
-    this.sdk = OriginalsSDK.create({
-      store,
+    const authoring = this.authorOverride ?? (this.authorWith ? await this.authorWith() : this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
+    this.setAuthorEvidence(authoring.evidence);
+    await this.store.putAuthorEvidence(authoring.evidence);
+    this.sdk ??= OriginalsSDK.create({
+      store: this.store,
       // This page holds or just read the author's own DID: the SDK reads it as stamped when it was
       // obtained, restamped whenever it changes. An unanchored Original is still only valid as of
       // its checkpoint, never current (P7.10).
       authors: async (did) => this.authorEvidence.get(did),
     });
+    this.authoring = authoring;
     this.emit("authorship:key", `Authoring as ${short(this.authoring.ref.did)}`, { author: this.authoring.ref });
     return this.authoring;
   }
@@ -443,102 +414,57 @@ export class DemoEngine {
   }
 
   /**
-   * The Originals this account's store holds, read from each stored log's
-   * last entry: a list, not a verification. `open` verifies.
-   */
-  async listOriginals(): Promise<StoredOriginalSummary[]> {
-    const store = await this.openStore();
-    const out: StoredOriginalSummary[] = [];
-    for (const did of await store.list()) {
-      const log = (await store.get(did))?.log.trimEnd();
-      if (!log) continue;
-      const last = parseJson(log.slice(log.lastIndexOf("\n") + 1)) as unknown as LogLine;
-      out.push({ did, name: last.state.asset.name, checkpoint: last.versionId, published: (last.state.asset.aliases?.length ?? 0) > 0, where: "this-browser" });
-    }
-    // This browser's own work lists offline too. An unreachable index is said, not hidden.
-    let hosted: AccountIndexEntry[] = [];
-    try {
-      hosted = await this.accountIndex();
-    } catch (error) {
-      this.emit("account:index-unavailable", "Your Originals on other devices can't be listed right now", { error: error instanceof Error ? error.message : String(error) });
-    }
-    for (const entry of hosted) {
-      if (!out.some((o) => o.did === entry.did)) out.push({ did: entry.did, name: entry.title, checkpoint: null, published: true, where: "host" });
-    }
-    return out;
-  }
-
-  /** The signed-in account's index of published Originals; empty signed out. */
-  private async accountIndex(): Promise<AccountIndexEntry[]> {
-    if (!this.authed) return [];
-    const index = (this.target ?? this.accountTarget()).upload;
-    return typeof index.listOriginals === "function" ? index.listOriginals() : [];
-  }
-
-  /**
-   * Restore a published Original on a client that doesn't hold it (#976 B3):
-   * the host's accepted log, verified, committed to this store, then read
-   * back as a stranger reads it. Editing continues from the host's head with
-   * this author's own signer; restoring confers no authority.
+   * Reopen an Original this browser may not hold (#976 B3, G3). The data
+   * path is main's account library: the account's own evidence
+   * (`GET /api/originals/evidence`), verified and imported as any import is;
+   * importing grants no authorship or ownership (P7.5, P8.4). A published
+   * Original then gets the hosted restore semantics: the host's accepted log
+   * is synced only when it extends this copy, never a diverging head (P2.1,
+   * P4.5), and read back as a stranger reads it before it is recorded
+   * complete (G5). If the read-back fails, the copy is recorded as uploaded,
+   * so opening it later offers to finish (G4), and this page takes nothing on.
+   * Editing continues with this author's own signer; restoring confers none.
    */
   async restore(did: string): Promise<DemoAssetState> {
-    const entry = (await this.accountIndex()).find((e) => e.did === did);
-    if (!entry) throw new Error(`${short(did)} was not published from this account.`);
-    await this.author();
     const target = this.target ?? this.accountTarget();
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    const sdk = this.sdk;
+    const bytes = typeof target.upload.evidence === "function" ? await target.upload.evidence(did) : null;
+    if (bytes) {
+      const checked = await sdk.load(bytes);
+      if (checked.report.original !== did) throw new Error("The account's evidence names a different Original.");
+      const imported = await sdk.import(bytes);
+      if (imported.status === "conflict") throw new Error("Conflicting history kept for recovery. No branch was chosen.");
+    }
+    let held: OriginalView;
+    try {
+      held = await sdk.get(did);
+    } catch {
+      throw new Error(`${short(did)} isn't saved to this account.`);
+    }
+    const aliasDid = held.state.aliases.find((a) => a.startsWith("did:webvh:"));
+    if (!aliasDid || !this.features.hostedPublication) return this.open(did);
     const read = target.read ?? publicRead;
     const aliasLog = new TextDecoder().decode(
-      await read(didWebvhLogUrl(entry.alias), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
+      await read(didWebvhLogUrl(aliasDid), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
     );
-    const alias: AliasEvidence = { did: entry.alias, log: aliasLog };
-    const synced = await this.sdk!.sync(did, this.sharedHost(alias.did));
+    const alias: AliasEvidence = { did: aliasDid, log: aliasLog };
+    const synced = await sdk.sync(did, this.sharedHost(alias.did));
     if (synced.status === "conflict") throw new Error("The host's history of this Original diverges from this browser's; it is kept as a conflict, and nothing was chosen.");
-    await this.store!.putAuthorEvidence(alias);
+    await this.store.putAuthorEvidence(alias);
     // The host may move on between the sync and the read-back: readBack
     // follows a head that descends, and never one that diverges (P2.1, P4.5).
-    let view: OriginalView;
     try {
-      view = await this.readBack(did, alias.did, read, synced.original);
+      await this.readBack(did, alias.did, read, synced.original);
     } catch (error) {
-      // The host's log is in this store now. Its record says so, listed but
-      // not complete, so opening it later offers to finish (G4); this page
-      // takes nothing on until the read-back succeeds.
       await this.records().putPublication(did, { alias, state: "uploaded", indexed: true });
       throw error;
     }
-    const record: PublicationRecord = { alias, state: "complete", indexed: true };
-    await this.records().putPublication(did, record);
-    this.did = did;
-    this.alias = alias;
-    this.view = view;
-    this.publication = record;
-    await this.refresh();
-    this.emit("asset:restored", `Restored ${short(did)} from the host at ${short(this.view.checkpoint)}`, { did, checkpoint: this.view.checkpoint });
-    return this.snapshot();
-  }
-
-  /**
-   * Reopen an Original from this account's store (#976 B3), verified as any
-   * load is. A published one gets its alias back from the stored evidence,
-   * so its revisions go through the host again. Continuing still needs this
-   * author's signer: the store holds no key.
-   */
-  async open(did: string): Promise<DemoAssetState> {
-    await this.author();
-    const view = await this.sdk!.get(did);
-    const aliasDid = view.state.aliases[0];
-    const alias = aliasDid ? await this.store!.getAuthorEvidence(aliasDid) : undefined;
-    const record = (await this.records().getPublication(did)) ?? null;
-    this.did = did;
-    this.view = view;
-    this.publication = record;
-    // The listed alias, else the one an interrupted publication built before its entry (G4).
-    this.alias = alias?.log !== undefined ? { did: alias.did, log: alias.log, ...(alias.witness === undefined ? {} : { witness: alias.witness }) } : (record?.alias ?? null);
-    await this.refresh();
-    // Published but not yet listed for the author's other clients: try again (G3).
-    if (record?.state === "complete" && record.indexed === false && this.publicationState() === "complete") await this.tryAccountIndex();
-    this.emit("asset:opened", `Opened ${short(did)} at ${short(view.checkpoint)}`, { did, checkpoint: view.checkpoint });
-    return this.snapshot();
+    // Found through the account's library, so it is listed there already.
+    await this.records().putPublication(did, { alias, state: "complete", indexed: true });
+    const state = await this.open(did);
+    this.emit("asset:restored", `Restored ${short(did)} from the host at ${short(state.history.at(-1)?.versionId ?? "")}`, { did });
+    return state;
   }
 
   async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
@@ -992,7 +918,7 @@ export class DemoEngine {
   private transport?: AnchoringTransport;
 
   private outbox(): AnchoringOutbox {
-    return (this.outboxStore ??= this.anchoringOpts.outbox ?? indexedDbOutbox());
+    return (this.outboxStore ??= this.anchoringOpts.outbox ?? indexedDbOutbox(this.subOrgId ? `originals-anchoring-outbox:account:${this.subOrgId}` : 'originals-anchoring-outbox:guest'));
   }
   private outboxStore?: AnchoringOutbox;
 
@@ -1002,11 +928,76 @@ export class DemoEngine {
     return (await this.sdk!.package(this.did)).bytes;
   }
 
+  /** Reopening is a read, never a signature, broadcast or grant (P7.5, P8.4). */
+  async open(did: string): Promise<DemoAssetState> {
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    const view = await this.sdk.get(did);
+    if (view.report.history.status !== "valid" || view.report.authorBinding.status !== "valid") {
+      throw new Error("This Original's history or author binding could not be verified. Keep its evidence for recovery.");
+    }
+    if (this.did !== did) {
+      this.anchoring = undefined;
+      this.bitcoinVerification = undefined;
+      this.bitcoinReadError = undefined;
+    }
+    const alias = view.state.aliases.find((a) => a.startsWith('did:webvh:'));
+    const aliasEvidence = alias ? await this.store.getAuthorEvidence(alias) : undefined;
+    const record = (await this.records().getPublication(did)) ?? null;
+    this.did = did;
+    this.view = view;
+    this.publication = record;
+    // The listed alias, else the one an interrupted publication built before its entry (G4).
+    this.alias = aliasEvidence?.log !== undefined ? { did: aliasEvidence.did, log: aliasEvidence.log, ...(aliasEvidence.witness === undefined ? {} : { witness: aliasEvidence.witness }) } : (record?.alias ?? null);
+    await this.refresh();
+    // Published but not yet listed for the author's other clients: try again (G3).
+    if (record?.state === "complete" && record.indexed === false && this.publicationState() === "complete") await this.tryAccountIndex();
+    return this.snapshot();
+  }
+
+  /** Fresh independent SDK verification of the sat read; never trusts a
+   * server's summary as an accepted head (P3.5, P9.13, P9.17).
+   * Keep the committed working view separate from Bitcoin's accepted view.
+   */
+  async verifyBitcoin(): Promise<DemoAssetState> {
+    this.bitcoinVerification = undefined;
+    this.bitcoinReadError = undefined;
+    const alias = this.btcoAlias();
+    if (!alias || !this.sdk || !this.did) return this.snapshot();
+    try {
+      const transport = this.anchoringTransport();
+      const snapshot = await transport.provider.getSatSnapshot!(alias.slice(alias.lastIndexOf(':') + 1), { bodies: 'originals' });
+      const network = alias.startsWith('did:btco:reg:') ? 'regtest' : alias.startsWith('did:btco:sig:') ? 'signet' : alias.startsWith('did:btco:test:') ? 'testnet' : 'mainnet';
+      if (snapshot.network !== network) throw new Error('The Bitcoin read is for a different network.');
+      const evidence = await satEvidence(snapshot, {
+        clock: { at: (height, hash) => transport.inscriptionTime(height, hash) },
+        index: this.anchoringOpts.index ?? `ord@landing-${network}`,
+        // Ownership depth is not established by an output lookup in this read.
+        ownerConfirmations: 0,
+      });
+      this.bitcoinVerification = (await this.sdk.load(await this.evidencePackage(), { bitcoin: [evidence] })).report;
+    } catch {
+      this.bitcoinReadError = 'Bitcoin could not be checked now. This saved copy is not proof of the currently accepted head. Retry when the Bitcoin reader is available.';
+    }
+    return this.snapshot();
+  }
+
+  /** SDK import verifies untrusted evidence and preserves branches (P7.5, P6.6). */
+  async importEvidence(bytes: Uint8Array, expectedDid?: string): Promise<DemoAssetState> {
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    if (expectedDid) {
+      const checked = await this.sdk.load(bytes);
+      if (checked.report.original !== expectedDid) throw new Error('The saved evidence names a different Original.');
+    }
+    const imported = await this.sdk.import(bytes);
+    if (imported.status === "conflict") throw new Error("Conflicting history kept for recovery. No branch was chosen.");
+    return this.open(imported.original.did);
+  }
+
   snapshot(): DemoAssetState {
     const view = this.view;
     if (!view || !this.did) throw new Error("No asset yet");
     const state = view.state;
-    const [primary, ...rest] = state.resources;
+    const [primary = { id: "", digest: "", mediaType: "application/octet-stream" }, ...rest] = state.resources;
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
@@ -1035,6 +1026,8 @@ export class DemoEngine {
       history: this.history(),
       provenance: view.report,
       ...(this.notKeptAcrossRestarts ? { notKeptAcrossRestarts: true as const } : {}),
+      bitcoinVerification: this.bitcoinVerification,
+      bitcoinReadError: this.bitcoinReadError,
     };
   }
 
@@ -1052,11 +1045,11 @@ export class DemoEngine {
   /** Refresh the cached log and bytes from the store after each commit. */
   private async refresh(): Promise<void> {
     if (!this.did) return;
-    const stored = await this.store!.get(this.did);
+    const stored = await this.store.get(this.did);
     const text = stored?.log ?? "";
     this.logEntries = text.trimEnd().split("\n").filter(Boolean).map((line) => parseJson(line) as unknown as LogLine);
     for (const v of this.view?.resources ?? []) {
-      const bytes = await this.store!.getResource(v.digest);
+      const bytes = await this.store.getResource(v.digest);
       if (bytes) this.bytes.set(v.digest, bytes);
     }
   }

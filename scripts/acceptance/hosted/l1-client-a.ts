@@ -77,7 +77,7 @@ for (const [name, fails] of [
       put: (key: string, data: Uint8Array | string, o?: { contentType?: string }) => (fails(key) ? Promise.reject(new Error("connection lost")) : real.put(key, data, o)),
       submit: real.submit.bind(real),
       recordOriginal: real.recordOriginal.bind(real),
-      listOriginals: real.listOriginals.bind(real),
+      evidence: real.evidence.bind(real),
     };
     const { engine: e } = await signedInEngine(input, input.dirs.storeA, { custody, upload: flaky });
     const created = await e.create(name === "work2" ? "Tide table" : "Night ferry", "Orbits", art(name, name === "work2" ? 11 : 12));

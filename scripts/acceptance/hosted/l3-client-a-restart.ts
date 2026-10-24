@@ -16,9 +16,9 @@ const input = phase.input as LocalInput & { prior: Record<string, { did: string;
 const { engine, store } = await signedInEngine(input, input.dirs.storeA);
 const { work1, work2, work3 } = input.prior;
 
-await phase.check("b3-listed", "after the restart this browser lists all three works", async () => {
-  const listed = await engine.listOriginals();
-  for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && o.where === "this-browser"), `${w.did} is not listed`, listed);
+await phase.check("b3-listed", "after the restart this browser's store holds all three works", async () => {
+  const listed = await store.list();
+  for (const w of [work1, work2, work3]) assert(listed.includes(w.did), `${w.did} is not in this browser's store`, listed);
   return listed;
 });
 
