@@ -95,16 +95,16 @@
  * namespace only that account can write (originals-routes.ts `hostPut`).
  * A byte-identical retry wins over a revoked grant (owner decision of
  * 23 October 2026; P6.7, C12-128): it is acknowledged when the caller was
- * allowed at the matching entry's parent, named by that parent's state or
- * signing the entry itself, so an editor whose acknowledgement was lost still
- * learns its entry was accepted after the author revoked its grant. Only new
+ * allowed at the matching entry's parent, named by that parent's state (which
+ * names any valid signer of the entry, P5.16, P5.17), so an editor whose
+ * acknowledgement was lost still learns its entry was accepted after the author revoked its grant. Only new
  * appends are gated by the head. Before the body is read, a caller that no
  * line of the hosted log names is refused (403 caller_not_authorized); the
  * precise check runs in the queued attempt, after the byte-identical match is
  * found and against the head a new append would extend (P1), so a grant
- * removed meanwhile counts. Every refusal of a caller is the same 403, so it
- * shows nobody whether an entry is in the log. Accepted files stay the
- * namespace owner's and count against the owner's quota.
+ * removed meanwhile counts. Every refusal of a caller is the same 403. That is
+ * hygiene, not confidentiality: the hosted log itself is public. Accepted
+ * files stay the namespace owner's and count against the owner's quota.
  */
 import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
@@ -204,6 +204,9 @@ export interface Caller {
  * `<host>/<slug>/`: a did:webvh on `host` whose one path segment is `slug`.
  */
 export function namesAccount(did: string, host: string, slug: string): boolean {
+  // A cheap necessary condition before parsing: with nothing percent-encoded, the one path segment
+  // is the DID's last `:`-separated component, so it must end with `:<slug>`.
+  if (!did.includes('%') && !did.endsWith(`:${slug}`)) return false;
   try {
     const parts = parseDidWebvh(did);
     return `${parts.host}${parts.port ? `:${parts.port}` : ''}`.toLowerCase() === host.toLowerCase() && parts.path.length === 1 && parts.path[0] === slug;
@@ -212,26 +215,25 @@ export function namesAccount(did: string, host: string, slug: string): boolean {
   }
 }
 
-type StateRefs = { author?: { did?: unknown }; editor?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } };
+type StateRefs = { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } };
 
-/** The DIDs the state at `line` names as author or granted editor (P5.15); none for no line. */
+/**
+ * The DIDs the state at `line` names as author or granted editor (P5.15); none for no line. Any valid
+ * signer of the next entry is among them: the author is fixed, and an editor needs a grant in its
+ * parent's state (P5.16, P5.17).
+ */
 function allowedAt(line: string | undefined): unknown[] {
   const state = line === undefined ? undefined : (lineState(line) as StateRefs | undefined);
   const editors = Array.isArray(state?.asset?.editors) ? state.asset.editors : [];
   return [state?.author?.did, ...editors.map((g) => g?.did)];
 }
 
-/** The DID that signs the entry at `line`: its editor, or else its author (P5.16). */
-function signerAt(line: string): unknown {
-  const state = lineState(line) as StateRefs | undefined;
-  return (state?.editor ?? state?.author)?.did;
-}
-
 /** Null when `caller` owns the namespace or one of `dids` is its landing DID; otherwise a 403, the same whatever the reason. */
-function callerRefusal(siteKey: string, owner: string, dids: unknown[], caller: Caller): Refusal | null {
+function callerRefusal(siteKey: string, owner: string, dids: Iterable<unknown>, caller: Caller): Refusal | null {
   if (owner === caller.sub) return null;
   const host = siteKey.split('/')[0];
-  const named = dids.some((did) => typeof did === 'string' && namesAccount(did, host, caller.slug));
+  // Each distinct DID is matched once.
+  const named = [...new Set(dids)].some((did) => typeof did === 'string' && namesAccount(did, host, caller.slug));
   return named ? null : refuse(403, 'caller_not_authorized');
 }
 
@@ -384,9 +386,8 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
 
   /**
    * Whether `caller` may send a body to the Original hosted at `siteKey`, judged before it is read:
-   * null for the namespace owner or an account any line of the hosted log names, as author, granted
-   * editor or signer. The queued attempt then judges the caller precisely (owner decision of
-   * 23 October 2026).
+   * null for the namespace owner or an account any line of the hosted log names as author or granted
+   * editor. The queued attempt then judges the caller precisely (owner decision of 23 October 2026).
    */
   function mayCall(siteKey: string, caller: Caller): Refusal | null {
     const assetKey = `${siteKey}/originals/asset/did.jsonl`;
@@ -394,8 +395,11 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const logBytes = store.readHosted(assetKey);
     const logText = logBytes ? text(logBytes) : null;
     if (!owner || logText === null || logText.trim() === '') return refuse(404, 'not_hosted');
+    if (owner === caller.sub) return null;
     const lines = logText.trimEnd().split('\n');
-    return callerRefusal(siteKey, owner, lines.flatMap((line) => [...allowedAt(line), signerAt(line)]), caller);
+    const dids = new Set<unknown>();
+    for (const line of lines) for (const did of allowedAt(line)) dids.add(did);
+    return callerRefusal(siteKey, owner, dids, caller);
   }
 
   async function attempt(siteKey: string, s: ParsedSubmission, caller: Caller): Promise<Outcome> {
@@ -415,12 +419,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
     // The caller, judged here in the queue so nothing changes between the check and the answer (P1).
     // A byte-identical retry (P6.7, C12-128) needs a caller allowed at the matching entry's parent:
-    // named by its parent's state, or the entry's own signer, so a grant revoked after the entry was
-    // accepted still gets its acknowledgement. Anything else is a new append, judged against the head
-    // it would extend, so a grant removed since the route's check counts (owner decision of
-    // 23 October 2026). Both refusals are the same 403, so it shows nobody whether an entry exists.
+    // named by its parent's state, which names any valid signer of it (P5.16, P5.17), so a grant
+    // revoked after the entry was accepted still gets its acknowledgement. Anything else is a new
+    // append, judged against the head it would extend, so a grant removed since the route's check
+    // counts (owner decision of 23 October 2026). Both refusals are the same 403 (hygiene only: the
+    // hosted log is public).
     const match = lines.indexOf(s.entry);
-    const allowed = match >= 0 ? [...allowedAt(lines[match - 1]), signerAt(lines[match])] : allowedAt(lines[lines.length - 1]);
+    const allowed = match >= 0 ? allowedAt(lines[match - 1]) : allowedAt(lines[lines.length - 1]);
     const callerRefused = callerRefusal(siteKey, owner, allowed, caller);
     if (callerRefused) return callerRefused;
     if (typeof head !== 'string' || s.original !== original) return refuse(400, 'original_mismatch');

@@ -754,7 +754,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     expect(env.hostedLines().length).toBe(lines);
   });
 
-  test('C12-117: a revoked editor\'s account submitting a new entry is refused; only new appends are gated by the head (owner decision of 23 October 2026)', async () => {
+  test('P5.15: a revoked editor\'s account submitting a new entry is refused; only new appends are gated by the head (owner decision of 23 October 2026)', async () => {
     const editor = await landingDid(COLLAB);
     const env = await shared({ editor: editor.evidence, start: Date.now() });
     const { a, b, did } = env;
@@ -787,7 +787,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: grant.checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
     if (revoke.status !== 'accepted') throw new Error('expected acceptance');
     const before = env.hostedLines();
-    // The editor's account was named in the log, but not at the early entry's parent, nor as its signer.
+    // The editor's account was named in the log, but not by the state at the early entry's parent.
     const retried = await env.post({ original: did, entry: earlyLine, resources: {}, identities: [] }, COLLAB);
     const fresh = await env.post({ original: did, entry: (await env.edit(a, MINE)).line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, COLLAB);
     expect(retried.status).toBe(403);
@@ -833,6 +833,9 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     const slug = userWebvhSlug(COLLAB);
     expect(namesAccount(did, DOMAIN, slug)).toBe(true);
     expect(namesAccount(did.replace(`:${DOMAIN}:`, `:${DOMAIN}%3A8443:`), `${DOMAIN}:8443`, slug)).toBe(true);
+    // The cheap string filter keeps the parse's semantics: a percent-encoded path segment decodes to the slug.
+    expect(namesAccount(did.replace(`:${slug}`, `:%75${slug.slice(1)}`), DOMAIN, slug)).toBe(true);
+    expect(namesAccount(did.toUpperCase(), DOMAIN, slug)).toBe(false);
     for (const other of [
       did.replace(`:${DOMAIN}:`, ':other.example.com:'),
       `${did}:o-111111111111111a`,
