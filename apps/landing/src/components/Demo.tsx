@@ -1,4 +1,5 @@
 import { BrowserOriginalsStore } from '../sdk/browser-store';
+import { clearAcceptanceEngine, exposeAcceptanceEngine } from '../sdk/acceptance-hook';
 import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
 import { navigate } from '../router';
 import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
@@ -87,10 +88,10 @@ function useEngine(authed: boolean, subOrgId?: string) {
       const store = globalThis.indexedDB ? new BrowserOriginalsStore(authed ? subOrgId : undefined) : null;
       const engine = new DemoEngine({ authed, subOrgId, ...(store ? { store, localAuthor: () => store.localAuthor() } : {}) });
       engineRef.current = engine;
-      // The page's own engine, for the hosted acceptance driver and a curious
-      // reader's devtools. Set here, not in the engine, so a helper engine
-      // (an import on /me) never takes its place.
-      (globalThis as Record<string, unknown>).__originalsDemo = engine;
+      // The page's own engine, for the hosted acceptance driver, on a staging
+      // acceptance build only (never production). Set here, not in the
+      // engine, so a helper engine (an import on /me) never takes its place.
+      exposeAcceptanceEngine(engine);
       return engine;
     });
     return loading.current;
@@ -101,6 +102,7 @@ function useEngine(authed: boolean, subOrgId?: string) {
   const discardEngine = useCallback(() => {
     engineRef.current = null;
     loading.current = null;
+    clearAcceptanceEngine();
   }, []);
 
   return { getEngine, discardEngine };
