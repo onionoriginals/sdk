@@ -14,6 +14,8 @@
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
     "typecheck:regtest": "tsc --noEmit -p tsconfig.regtest.json",
     "smoke": "node scripts/smoke.mjs",
+    "check:chunks": "node scripts/check-chunks.mjs",
+    "check:boot": "node scripts/boot.mjs",
     "check:ordinals": "bun scripts/check-quicknode-ordinals.ts",
     "ci": "bun scripts/ci.mjs",
     "icons": "bun scripts/icons.mjs",
