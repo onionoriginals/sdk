@@ -482,7 +482,8 @@ export class DemoEngine {
 
   private publicationState(): DemoAssetState["publication"] {
     if (this.publication?.state === "complete") return "complete";
-    return this.publication || (this.view?.state.aliases.length ?? 0) > 0 ? "incomplete" : "none";
+    // Bitcoin aliases are terminal anchoring state, not unfinished web publication (P9.10).
+    return this.publication || this.view?.state.aliases.some((did) => did.startsWith("did:webvh:")) ? "incomplete" : "none";
   }
 
   /**
