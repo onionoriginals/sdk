@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "task": "Add an observational REV acceptance check to SDK pull requests, with commit-bound evidence collection.",
+  "criteria": [
+    { "id": "revision", "description": "The collector includes the exact checked-out PR head SHA, base revision, implementation diff and supplied behavioral observations; it rejects a mismatched head SHA and reuse of an unchanged task from the base revision." },
+    { "id": "invalid-evidence", "description": "The collector fails for missing behavioral evidence, duplicate source IDs, source files outside the repository, and evidence exceeding the 1 MiB corpus limit, without silently truncating evidence." }
+  ]
+}

@@ -40,3 +40,11 @@ Describe how you tested your changes:
 ## Screenshots / Output (if applicable)
 
 <!-- Add screenshots or relevant command output -->
+
+## REV acceptance criteria
+
+- [ ] Updated `.rev/task.json` with observable requirements for this PR
+- [ ] Updated `.rev/collect.sh` and `.rev/sources.json` with relevant code and fresh behavioral evidence
+- [ ] Acceptance criteria and probe expectations are ready for independent review
+
+See [REV setup and evidence guide](../.rev/README.md).

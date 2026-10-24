@@ -1,0 +1,5 @@
+[
+  { "id": "collector", "kind": "code", "path": "scripts/rev-evidence.mjs" },
+  { "id": "expectations", "kind": "test", "path": "scripts/rev-evidence.test.mjs" },
+  { "id": "observations", "kind": "behavior", "path": ".rev/observations.txt" }
+]
