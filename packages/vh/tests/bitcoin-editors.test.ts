@@ -98,6 +98,19 @@ const verify = (signers: Array<VhAuthor | AuthorDidEvidence>, bitcoin: SatEviden
 const forge = (previous: LogEntry, state: JsonObject, sign: Parameters<typeof appendEntry>[1]["sign"]) =>
   appendEntry(previous, { versionTime: time(20), parameters: {}, state, sign });
 
+describe("C12-189: an impossible signer versionId is rejected without the signer's DID history (P9.15)", () => {
+  test("a malformed versionId, or one past the 1,000-version limit, never blocks, though the editor's history is not held", async () => {
+    const { alice, anchor, anchoring, asBob } = await harbor();
+    const anchorAt = anchoring();
+    for (const versionId of ["not-a-version", "1001-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y"]) {
+      const odd = await updateOriginal(anchor, { versionTime: time(20), resources: [photo(B2)], ...asBob(versionId) });
+      const r = await verify([alice], [sat([anchorAt, inscribe(odd, 20)])]);
+      expect(r.anchoring?.ignored, versionId).toEqual([expect.objectContaining({ versionId: odd.versionId, reason: "invalid-entry", code: "AUTHOR_VERSION_IMPOSSIBLE" })]);
+      expect(r.anchoring?.unverifiable, versionId).toEqual([]);
+    }
+  });
+});
+
 describe("C12-123: an editor entry inscribed on the anchoring sat by the owner (P9.12)", () => {
   test("is accepted: the editor's signature authorizes it, the owner's inscription places it, and holding the sat grants nothing", async () => {
     const { alice, bob, anchor, anchoring, asBob } = await harbor();

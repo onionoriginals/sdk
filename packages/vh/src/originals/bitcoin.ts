@@ -358,13 +358,16 @@ function unverifiedLater(entry: LogEntry, inscription: SatInscription, histories
  */
 function impossibleVersion(entry: LogEntry, histories: AuthorHistory[]): boolean {
   const ref = signerRefOf(entry);
-  const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
-  if (!ref || !history || history.method === "did:btco") return false;
+  // The method from the DID itself: the form and the limit need no history of it.
+  if (!ref || !(ref.did.startsWith("did:vh:") || ref.did.startsWith("did:webvh:"))) return false;
   // `<number>-<entry hash>`, numbered from 1: anything else is no version of a did:vh or did:webvh.
   if (!/^[1-9][0-9]*-[1-9A-HJ-NP-Za-km-z]+$/.test(ref.versionId)) return true;
   const n = versionNumberOf(ref.versionId);
-  const newest = history.versions[history.versions.length - 1];
-  return n > ORIGINALS_LIMITS.authorVersions || (newest?.deactivated === true && n > newest.versionNumber);
+  if (n > ORIGINALS_LIMITS.authorVersions) return true;
+  // Only after a deactivated version does it need the history held.
+  const history = histories.find((h) => h.did === ref.did);
+  const newest = history?.versions[history.versions.length - 1];
+  return newest?.deactivated === true && n > newest.versionNumber;
 }
 
 /**

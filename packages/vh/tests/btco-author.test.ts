@@ -336,6 +336,14 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(again.current, JSON.stringify(again.reasons)).toBe(true);
   });
 
+  test("P5.13: a did:btco gap read with an unanchored log whose entry has no author reports the failure, never throws", async () => {
+    const { v1, genesis } = await byA();
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const junk = { ...genesis, versionId: "2-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y", state: { ...genesis.state, author: null } };
+    const r = await verifyOriginal({ now: NOW, bytes: allBytes, log: [genesis, junk] as never, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, unread]) }] });
+    expect(r.history.status).not.toBe("valid");
+  });
+
   test("C12-93: an inscribed entry naming a did:btco author version inscribed later in the same block is rejected", async () => {
     const { v1, v2, genesis, anchor } = await grant(version(31, both(), { transactionIndex: 9 }));
     const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31, { transactionIndex: 5 })]);

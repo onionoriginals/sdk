@@ -489,7 +489,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const anchorLog = onBitcoin ? assembly!.entries.slice(0, anchoringIndex(assembly!.entries) + 1) : Array.isArray(input) ? input : raw ?? [];
   const signedBy = (did: string) => anchorLog.some((e) => {
     const state = (e as { state?: unknown } | null)?.state;
-    return isJsonObject(state) && signerOf(state as unknown as EntryState).ref.did === did;
+    return isJsonObject(state) && signerOf(state as unknown as EntryState)?.ref?.did === did;
   });
   for (const held of heldBack) {
     const at = onBitcoin ? assembly?.anchorPosition : undefined;

@@ -2521,6 +2521,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
