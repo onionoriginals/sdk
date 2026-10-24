@@ -10,6 +10,7 @@ import {
   formatProxySample,
   type SocketPeerSource,
 } from './client-ip';
+import { servedWebvhHosts } from './webvh-hosts';
 
 // Minimal surface buildFetch depends on; the real store (webvh-host.ts)
 // implements exactly these two methods. `handlePut` takes the resolved client
@@ -132,21 +133,27 @@ export function buildFetch(deps: {
   // One sample per process so the hop count can be checked against the live
   // proxy (see client-ip.ts) without a debug endpoint or per-request logging.
   let sampled = false;
-  let spaRevision: Promise<string | null> | undefined;
+  let spaRevision: string | null = null;
 
   // Hosted-layout paths (`/user-<slug>/…`). A did:webvh names the host it was
-  // published under, and the durable store serves by that host.
+  // published under, and the durable store serves by that host. Only this
+  // instance's own did:webvh hosts are served off the canonical host; a
+  // stored object under any other Host header still redirects (P3.6).
+  const servedHosts = servedWebvhHosts(canonicalHost);
   const durableHosted = (url: URL): Response | null =>
-    /^\/user-[^/]+\//.test(url.pathname) ? ((deps.publications ?? originals)?.serve(url) ?? null) : null;
+    servedHosts?.includes(url.host) && /^\/user-[^/]+\//.test(url.pathname)
+      ? ((deps.publications ?? originals)?.serve(url) ?? null)
+      : null;
 
   // Bun calls this with (request, server); server exposes the real peer IP.
   return async (req, server?: BunServerLike) => {
     const url = new URL(req.url);
     const path = url.pathname;
 
-    // 0. Canonical host (#529). A visitor on the Railway-generated hostname
-    // would mint did:webvh identifiers pinned to it, permanently — `demoHost()`
-    // reads window.location.host. Bounce documents to the one host DIDs may
+    // 0. Canonical host (#529). The SPA mints did:webvh identifiers on the
+    // domain it was built for (`webvhDomain()`, VITE_WEBVH_HOST), never on
+    // the hostname the visitor arrived on, so a Railway-generated hostname
+    // serves nothing a DID names. Bounce documents to the one host DIDs may
     // name, before anything can serve them the SPA.
     //
     // /api/* is deliberately exempt: a 301 on a PUT is not safely replayable,
@@ -162,8 +169,9 @@ export function buildFetch(deps: {
     // to keep working.
     //
     // A hosted-layout object stored under this very host is served here, not
-    // bounced: a did:webvh minted on another domain is fetched from that domain,
-    // and the canonical host doesn't hold it (#976 B, G1; P3.6).
+    // bounced, when the host is one this instance serves (the legacy did:webvh
+    // domain): a did:webvh minted there is fetched from that domain, and the
+    // canonical host doesn't hold it (#976 B, G1; P3.6).
     if (
       canonicalHost &&
       url.host !== canonicalHost &&
@@ -221,8 +229,11 @@ export function buildFetch(deps: {
     // The deployed revision, for the hosted acceptance receipt (#976 B, G6).
     // Answered with or without sign-in configured; unknown is null, never a guess.
     if (path === '/api/version' && (req.method === 'GET' || req.method === 'HEAD')) {
-      spaRevision ??= readSpaRevision(distDir);
-      return json({ revision: deps.revision ?? null, spaRevision: await spaRevision });
+      // A known revision is cached; an unknown one is read again, so a dist
+      // built after boot is reported, not a null pinned for the process's life.
+      const known = spaRevision ?? (await readSpaRevision(distDir));
+      if (known) spaRevision = known;
+      return json({ revision: deps.revision ?? null, spaRevision: known });
     }
 
     // 2. All other /api/* — dispatch when configured, else a clear JSON 404
@@ -275,11 +286,11 @@ export function buildFetch(deps: {
   };
 }
 
-/** The revision Vite baked into the built index.html (`<meta name="originals-revision">`), or null. */
+/** The revision Vite baked into the built index.html (`<meta name="originals-revision">`, `-dirty` for an unclean tree), or null. */
 async function readSpaRevision(distDir: string): Promise<string | null> {
   try {
     const html = await file(`${distDir.replace(/\/?$/, '/')}index.html`).text();
-    return /<meta name="originals-revision" content="([0-9a-f]{7,64})">/.exec(html)?.[1] ?? null;
+    return /<meta name="originals-revision" content="([0-9a-f]{7,64}(?:-dirty)?)">/.exec(html)?.[1] ?? null;
   } catch {
     return null;
   }

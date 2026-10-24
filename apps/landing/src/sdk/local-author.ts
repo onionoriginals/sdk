@@ -1,8 +1,8 @@
 /**
  * A browser-local author for visitors who are not signed in: a did:vh whose
- * log and keys exist only in this page. Its update key and its author key are
+ * log and keys can be saved in guest browser storage. Its update key and its author key are
  * different keys (P5.11), and the author key is the document's assertionMethod
- * (P5.3). Nothing about it is published or persisted; an Original it authors
+ * (P5.3). Nothing about it is published; an Original it authors
  * verifies anywhere through the evidence package, which carries this DID's log.
  */
 import { localSigner, type ProofSigner } from "@originals/vh/crypto";
@@ -14,6 +14,8 @@ export interface LocalAuthor {
   ref: AuthorRef;
   evidence: AuthorDidEvidence;
   signer: OriginalsSigner;
+  /** Local-only recovery; never included in evidence packages. */
+  secret: Uint8Array;
 }
 
 const randomKey = () => crypto.getRandomValues(new Uint8Array(32));
@@ -41,8 +43,13 @@ export async function createLocalAuthor(now: Date = new Date()): Promise<LocalAu
   const authorDid = genesis.state.id as string;
   const verificationMethod = `${authorDid}#author`;
   return {
+    secret: authorSecret,
     ref: { did: authorDid, verificationMethod, versionId: genesis.versionId },
     evidence: { did: authorDid, log: serializeLog([genesis]) },
     signer: keySigner({ keyType: "Ed25519", secretKey: authorSecret, verificationMethod }),
   };
+}
+
+export function restoreLocalAuthor(saved: Pick<LocalAuthor, 'ref' | 'evidence' | 'secret'>): LocalAuthor {
+  return { ...saved, signer: keySigner({ keyType: 'Ed25519', secretKey: saved.secret, verificationMethod: saved.ref.verificationMethod }) };
 }

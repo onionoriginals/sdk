@@ -7,7 +7,7 @@
  *     body      { original, entry, resources: { <digest>: <base64> }, identities: [{ did, log, witness? }] }
  *     200       { status: "accepted" | "already-accepted", checkpoint, head }
  *     409       { status: "stale-parent", error: "stale_parent", head }
- *     400 malformed · 401 not signed in · 404 not hosted · 413 too large
+ *     400 malformed · 401 not signed in · 403 caller not authorized · 404 not hosted · 413 too large
  *     422 the entry does not verify against the head, its bytes are missing or wrong, or the Original is anchored
  *
  * In the order P6.7 sets:
@@ -86,16 +86,30 @@
  * on the head: a database row or object-store conditional write keyed by the
  * Original, or a lock service, held across the compare and the log replace.
  *
- * Who may call: any signed-in account (the existing JWT model; rate limited),
- * because the signed entry, not the account, authorizes the change (P5.4,
- * P5.9). The namespace owner, and any other signed-in caller presenting a
- * valid entry, may save; accepted files stay the namespace owner's and count
- * against the owner's quota. PROVISIONAL: whether a host should require more
- * of a caller who is not the namespace owner is an open deployment question.
+ * Who may call (owner decision of 22 October 2026): the signed entry, not
+ * the account, authorizes the change (P5.4, P6.7). The account only decides
+ * who may spend the namespace owner's quota and make the host read a body.
+ * The caller must be the namespace owner, or an account whose landing DID the
+ * head state names as the author or a granted editor (P5.15): a did:webvh on
+ * the Original's host whose one path segment is the account's slug, a
+ * namespace only that account can write (originals-routes.ts `hostPut`).
+ * A byte-identical retry wins over a revoked grant (owner decision of
+ * 23 October 2026; P6.7, C12-128): it is acknowledged when the caller was
+ * allowed at the matching entry's parent, named by that parent's state (which
+ * names any valid signer of the entry, P5.16, P5.17), so an editor whose
+ * acknowledgement was lost still learns its entry was accepted after the author revoked its grant. Only new
+ * appends are gated by the head. Before the body is read, a caller that no
+ * line of the hosted log names is refused (403 caller_not_authorized); the
+ * precise check runs in the queued attempt, after the byte-identical match is
+ * found and against the head a new append would extend (P1), so a grant
+ * removed meanwhile counts. Every refusal of a caller is the same 403. That is
+ * hygiene, not confidentiality: the hosted log itself is public. Accepted
+ * files stay the namespace owner's and count against the owner's quota.
  */
 import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
+import { parseDidWebvh } from '@originals/vh/webvh';
 import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { signerPath } from '@originals/sdk/originals';
 import { json } from './router';
@@ -177,6 +191,50 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
     identities.push({ did: i.did, log: i.log, ...(i.witness !== undefined ? { witness: i.witness } : {}) });
   }
   return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities };
+}
+
+/** The signed-in account submitting: its JWT `sub` and its namespace slug. */
+export interface Caller {
+  sub: string;
+  slug: string;
+}
+
+/**
+ * True when `did` is the landing DID of the account whose namespace is
+ * `<host>/<slug>/`: a did:webvh on `host` whose one path segment is `slug`.
+ */
+export function namesAccount(did: string, host: string, slug: string): boolean {
+  // A cheap necessary condition before parsing: with nothing percent-encoded, the one path segment
+  // is the DID's last `:`-separated component, so it must end with `:<slug>`.
+  if (!did.includes('%') && !did.endsWith(`:${slug}`)) return false;
+  try {
+    const parts = parseDidWebvh(did);
+    return `${parts.host}${parts.port ? `:${parts.port}` : ''}`.toLowerCase() === host.toLowerCase() && parts.path.length === 1 && parts.path[0] === slug;
+  } catch {
+    return false;
+  }
+}
+
+type StateRefs = { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } };
+
+/**
+ * The DIDs the state at `line` names as author or granted editor (P5.15); none for no line. Any valid
+ * signer of the next entry is among them: the author is fixed, and an editor needs a grant in its
+ * parent's state (P5.16, P5.17).
+ */
+function allowedAt(line: string | undefined): unknown[] {
+  const state = line === undefined ? undefined : (lineState(line) as StateRefs | undefined);
+  const editors = Array.isArray(state?.asset?.editors) ? state.asset.editors : [];
+  return [state?.author?.did, ...editors.map((g) => g?.did)];
+}
+
+/** Null when `caller` owns the namespace or one of `dids` is its landing DID; otherwise a 403, the same whatever the reason. */
+function callerRefusal(siteKey: string, owner: string, dids: Iterable<unknown>, caller: Caller): Refusal | null {
+  if (owner === caller.sub) return null;
+  const host = siteKey.split('/')[0];
+  // Each distinct DID is matched once.
+  const named = [...new Set(dids)].some((did) => typeof did === 'string' && namesAccount(did, host, caller.slug));
+  return named ? null : refuse(403, 'caller_not_authorized');
 }
 
 /** True when `entry` is the next entry after the entry whose versionId is `head` (VH-Log chaining). */
@@ -326,7 +384,25 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     store.saveBytes(owner, key, encoder.encode(`${JSON.stringify(next, null, 2)}\n`), 'application/json');
   }
 
-  async function attempt(siteKey: string, s: ParsedSubmission): Promise<Outcome> {
+  /**
+   * Whether `caller` may send a body to the Original hosted at `siteKey`, judged before it is read:
+   * null for the namespace owner or an account any line of the hosted log names as author or granted
+   * editor. The queued attempt then judges the caller precisely (owner decision of 23 October 2026).
+   */
+  function mayCall(siteKey: string, caller: Caller): Refusal | null {
+    const assetKey = `${siteKey}/originals/asset/did.jsonl`;
+    const owner = store.ownerOf(assetKey);
+    const logBytes = store.readHosted(assetKey);
+    const logText = logBytes ? text(logBytes) : null;
+    if (!owner || logText === null || logText.trim() === '') return refuse(404, 'not_hosted');
+    if (owner === caller.sub) return null;
+    const lines = logText.trimEnd().split('\n');
+    const dids = new Set<unknown>();
+    for (const line of lines) for (const did of allowedAt(line)) dids.add(did);
+    return callerRefusal(siteKey, owner, dids, caller);
+  }
+
+  async function attempt(siteKey: string, s: ParsedSubmission, caller: Caller): Promise<Outcome> {
     const assetKey = `${siteKey}/originals/asset/did.jsonl`;
     const owner = store.ownerOf(assetKey);
     const logBytes = store.readHosted(assetKey);
@@ -341,12 +417,23 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     } catch {
       return refuse(409, 'hosted_log_invalid');
     }
+    // The caller, judged here in the queue so nothing changes between the check and the answer (P1).
+    // A byte-identical retry (P6.7, C12-128) needs a caller allowed at the matching entry's parent:
+    // named by its parent's state, which names any valid signer of it (P5.16, P5.17), so a grant
+    // revoked after the entry was accepted still gets its acknowledgement. Anything else is a new
+    // append, judged against the head it would extend, so a grant removed since the route's check
+    // counts (owner decision of 23 October 2026). Both refusals are the same 403 (hygiene only: the
+    // hosted log is public).
+    const match = lines.indexOf(s.entry);
+    const allowed = match >= 0 ? allowedAt(lines[match - 1]) : allowedAt(lines[lines.length - 1]);
+    const callerRefused = callerRefusal(siteKey, owner, allowed, caller);
+    if (callerRefused) return callerRefused;
     if (typeof head !== 'string' || s.original !== original) return refuse(400, 'original_mismatch');
     // A manifest left a step behind by an earlier save is repaired first (C6).
     tryWriteManifest(owner, siteKey, s.original, head);
 
     // 1. Byte-identical to an accepted entry: its checkpoint and the current head (P6.4).
-    if (lines.includes(s.entry)) {
+    if (match >= 0) {
       return { http: 200, body: { status: 'already-accepted', checkpoint: s.parsed.versionId, head } };
     }
     // 2. After anchoring only inscriptions on the sat count (P9.12); the anchoring entry counts once inscribed (P9.10).
@@ -478,13 +565,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     return { http: 200, body: { status: 'accepted', checkpoint: s.parsed.versionId, head: s.parsed.versionId } };
   }
 
-  /** Accept, recognise or refuse one submission for the Original hosted at `siteKey`. */
-  function submit(siteKey: string, s: ParsedSubmission): Promise<Response> {
+  /** Accept, recognise or refuse one submission by `caller` for the Original hosted at `siteKey`. */
+  function submit(siteKey: string, s: ParsedSubmission, caller: Caller): Promise<Response> {
     const queued = serialized(siteKey, async () => {
       for (let i = 0; i < 3; i++) {
         let outcome: Outcome;
         try {
-          outcome = await attempt(siteKey, s);
+          outcome = await attempt(siteKey, s, caller);
         } catch (e) {
           const msg = (e as Error).message;
           if (msg === 'STORE_FULL') return json({ error: 'store_full' }, 507);
@@ -498,5 +585,5 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     return queued ?? Promise.resolve(json({ error: 'busy' }, 503, { 'Retry-After': '1' }));
   }
 
-  return { submit };
+  return { mayCall, submit };
 }

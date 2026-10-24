@@ -7,6 +7,7 @@ import { buildFetch } from './app';
 import { createWebvhHostStore } from './webvh-host';
 import type { BitcoinRoutes } from './bitcoin';
 import { createOriginalsStore } from './originals-store';
+import { createAnchoringLibrary } from './originals-library';
 import { createOriginalsRoutes, type OriginalsRoutes } from './originals-routes';
 
 // did:webvh creation is client-side (browser Ed25519 key, see src/auth/webvh.ts):
@@ -57,6 +58,7 @@ export function buildRoutes(deps: {
   if (deps.originals) {
     routes['POST /api/originals'] = deps.originals.record;
     routes['GET /api/originals'] = deps.originals.list;
+    routes['GET /api/originals/evidence'] = deps.originals.evidence;
   }
   return routes;
 }
@@ -68,7 +70,7 @@ if (import.meta.main) {
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
   const dataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
   const originalsStore = createOriginalsStore({ dataDir });
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore });
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(dataDir, originalsStore) });
   const apiRoutes = buildRoutes({
     turnkey: getTurnkey(),
     sessions: createInMemorySessionStorage(),

@@ -29,6 +29,7 @@ const GOOD = {
   ORIGINALS_DATA_DIR: '/data',
   TRUSTED_PROXY_HOPS: '1',
   RAILWAY_VOLUME_MOUNT_PATH: '/data',
+  VITE_WEBVH_HOST: 'staging.originals.build',
 };
 const mounted: DataDirProbe = { path: '/data', writable: true, mountPoints: ['/data'] };
 
@@ -445,19 +446,21 @@ describe('validateConfig — the deposit indexer seam', () => {
 });
 
 /**
- * The did:webvh host (#529). `demoHost()` falls back to `window.location.host`,
- * so without VITE_WEBVH_HOST baked in, whichever hostname a visitor happened to
- * arrive on is written into their DID — permanently, because a did:webvh domain
- * cannot be changed after publication. Railway keeps its generated
- * *.up.railway.app hostname reachable alongside the custom domain, so this is
- * not hypothetical. Required once the deploy spends real money.
+ * The did:webvh host (#529; #976 B, G1). The SPA mints every did:webvh on the
+ * domain it was built for, `VITE_WEBVH_HOST` (`webvhDomain()`). Unset, it falls
+ * back to the legacy domain `magby.originals.build`, so a deployed instance
+ * without it mints DIDs on a domain it may not serve, permanently, because a
+ * did:webvh domain cannot be changed after publication (P3.6; an alias that
+ * moves host is an alias change, C12-139). Required on every deployed
+ * instance, not only once the deploy spends real money.
  */
-describe('validateConfig — the did:webvh host is pinned, not inherited from the visitor', () => {
+describe('validateConfig — the did:webvh host is pinned on every deployed instance', () => {
   const MAINNET = {
     ...GOOD,
     BTC_NETWORK: 'mainnet',
     VITE_BTC_NETWORK: 'mainnet',
     QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/',
+    VITE_WEBVH_HOST: 'originals.build',
   };
 
   test('a mainnet deploy without VITE_WEBVH_HOST is reported naming it', () => {
@@ -465,15 +468,24 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
     expect(keys(issues)).toContain('VITE_WEBVH_HOST');
   });
 
+  test('a testnet deploy without VITE_WEBVH_HOST is reported too, naming the legacy fallback', () => {
+    const issues = errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }));
+    expect(keys(issues)).toEqual(['VITE_WEBVH_HOST']);
+    expect(issues[0].message).toContain('magby.originals.build');
+    expect(issues[0].message).not.toMatch(/whatever hostname|arrived on/);
+  });
+
   test('setting it to a bare host satisfies the rule', () => {
-    const env = { ...MAINNET, VITE_WEBVH_HOST: 'originals.build' };
-    expect(errors(validateConfig({ env, dataDir: mounted }))).toEqual([]);
+    expect(errors(validateConfig({ env: MAINNET, dataDir: mounted }))).toEqual([]);
+    expect(errors(validateConfig({ env: GOOD, dataDir: mounted }))).toEqual([]);
   });
 
   test('a value carrying a scheme or a path is reported — the DID wants a bare host', () => {
-    for (const bad of ['https://originals.build', 'originals.build/', 'originals.build/logs']) {
-      const issues = errors(validateConfig({ env: { ...MAINNET, VITE_WEBVH_HOST: bad }, dataDir: mounted }));
-      expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+    for (const env of [MAINNET, GOOD]) {
+      for (const bad of ['https://originals.build', 'originals.build/', 'originals.build/logs']) {
+        const issues = errors(validateConfig({ env: { ...env, VITE_WEBVH_HOST: bad }, dataDir: mounted }));
+        expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+      }
     }
   });
 
@@ -485,8 +497,9 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
     expect(issues[0].message).toMatch(/lowercase/);
   });
 
-  test('not required on testnet4 — a throwaway chain does not mint permanent DIDs worth protecting', () => {
-    expect(errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }))).toEqual([]);
+  test('not an error locally — a dev build mints on the legacy domain on purpose (PROVISIONAL)', () => {
+    const local = { BTC_NETWORK: 'testnet4' };
+    expect(errors(validateConfig({ env: local, dataDir: mounted }))).toEqual([]);
   });
 });
 

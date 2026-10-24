@@ -1,5 +1,0 @@
----
-'@originals/vh': minor
----
-
-Editors move into the generic VH-Log engine as VH-Log PR 11's "Editors from a Controller" (swcurran/VH-Log#11 at 2fe380dbf, [S25]). A controller-keyed specialisation may set `keys.editors` (`ControllerEditors`): where the current editors are recorded (`recordOf`), how an entry names its editor (`editorOf`, `lists`), each editor's key rules (`authorize`) and any further limit on its change (`limit`). The engine enforces that an editor entry is not the first entry, is checked against the editors in the entry before it, has empty `parameters` (`outside-grant`, `EDITOR_PARAMETERS`), leaves the record of editors unchanged (`EDITOR_AUTHOR_ONLY`), and carries exactly one proof, by an authorized key of that editor (`PROOF_COUNT`). Forks are unchanged. The Originals profile implements the hook with its grants (P5.15–P5.18); valid logs verify as before. An editor entry that deactivates is now refused at its `deactivated` parameter (`EDITOR_PARAMETERS`) rather than as `EDITOR_AUTHOR_ONLY`; both are `outside-grant`.
