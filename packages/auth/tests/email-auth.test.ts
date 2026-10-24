@@ -65,11 +65,7 @@ function createMockTurnkeyClient(overrides?: {
     overrides?.createSubOrganization ??
     mock(() =>
       Promise.resolve({
-        activity: {
-          result: {
-            createSubOrganizationResultV7: { subOrganizationId: 'sub_org_new' },
-          },
-        },
+        subOrganizationId: 'sub_org_new',
       })
     );
 
@@ -317,11 +313,7 @@ describe('email-auth', () => {
     test('provisions a new sub-org after successful verification when none exists', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'new_sub_org' },
-            },
-          },
+          subOrganizationId: 'new_sub_org',
         })
       );
       const client = createMockTurnkeyClient({

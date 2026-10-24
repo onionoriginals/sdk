@@ -59,7 +59,19 @@ Railway dashboard. They are never written to source, to a log or to the receipt.
 
 - A **separate staging Turnkey org**, provisioned by the owner.
 - A dedicated test email whose inbox the operator can read. Its first
-  sign-in creates one sub-org, and the app creates its wallet accounts:
+  sign-in creates one sub-org and a wallet.
+
+The parent API user needs permission for `ACTIVITY_TYPE_INIT_OTP_V3`,
+`ACTIVITY_TYPE_VERIFY_OTP_V2`, and `ACTIVITY_TYPE_CREATE_SUB_ORGANIZATION_V8`
+(the creation version sent by the pinned Turnkey SDK). A policy allowing only
+creation V7 rejects a new account even after its OTP verifies successfully.
+The SDK returns the created `subOrganizationId` as a top-level result field;
+the app must not depend on a versioned activity result member. Updating a
+Turnkey policy requires an administrator; the application API key need not
+have that privilege. An OTP that already verified before provisioning failed
+cannot be reused: correct the permission, then request a fresh code.
+
+The account's wallet contains these roles:
 
 | Role | Turnkey account | Path | In the author DID | Used for |
 |---|---|---|---|---|

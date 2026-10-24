@@ -199,11 +199,7 @@ describe('turnkey-client', () => {
         overrides?.createSubOrganization ??
         mock(() =>
           Promise.resolve({
-            activity: {
-              result: {
-                createSubOrganizationResultV7: { subOrganizationId: 'new_sub_org' },
-              },
-            },
+            subOrganizationId: 'new_sub_org',
           })
         );
 
@@ -331,14 +327,37 @@ describe('turnkey-client', () => {
       expect(result).toBe('existing_sub_org');
     });
 
+    test('reads the new sub-org ID from the installed SDK V8 response', async () => {
+      const client = createTurnkeyClient({
+        apiPublicKey: 'test-public-key',
+        apiPrivateKey: 'test-private-key',
+        organizationId: 'parent_org_123',
+      });
+      const api = client.apiClient();
+      // Exercise the installed SDK's command/result mapping, stopping at its
+      // HTTP boundary. Old V7-only mocks hid a real hosted sign-in failure.
+      const request = mock(async (url: string) => {
+        if (url === '/public/v1/query/list_suborgs') return { organizationIds: [] };
+        if (url === '/public/v1/submit/create_sub_organization') {
+          return {
+            activity: {
+              status: 'ACTIVITY_STATUS_COMPLETED',
+              result: { createSubOrganizationResultV8: { subOrganizationId: 'v8_sub_org' } },
+            },
+          };
+        }
+        throw new Error(`Unexpected Turnkey request: ${url}`);
+      });
+      Object.assign(api, { request });
+      client.apiClient = () => api;
+
+      expect(await getOrCreateTurnkeySubOrg('new@example.com', client)).toBe('v8_sub_org');
+    });
+
     test('creates new sub-org when none exists', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'brand_new_org' },
-            },
-          },
+          subOrganizationId: 'brand_new_org',
         })
       );
       const client = createMockClient({
@@ -358,11 +377,7 @@ describe('turnkey-client', () => {
       // curve/path rather than defaulting to an Ethereum address.
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'brand_new_org' },
-            },
-          },
+          subOrganizationId: 'brand_new_org',
         })
       );
       const client = createMockClient({
@@ -387,11 +402,7 @@ describe('turnkey-client', () => {
       const createWallet = mock(() => Promise.resolve({ walletId: 'w_repaired' }));
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'rebuilt_org' },
-            },
-          },
+          subOrganizationId: 'rebuilt_org',
         })
       );
       const client = createMockClient({
@@ -876,7 +887,7 @@ describe('turnkey-client', () => {
       const client = createMockClient({
         getSubOrgIds: mock(() => Promise.resolve({ organizationIds: [] })),
         createSubOrganization: mock(() =>
-          Promise.resolve({ activity: { result: { createSubOrganizationResultV7: {} } } })
+          Promise.resolve({})
         ),
       });
 
@@ -896,11 +907,7 @@ describe('turnkey-client', () => {
     test('creates sub-org with correct wallet configuration', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'new_org' },
-            },
-          },
+          subOrganizationId: 'new_org',
         })
       );
       const client = createMockClient({
@@ -930,11 +937,7 @@ describe('turnkey-client', () => {
     test('passes email as root user', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'new_org' },
-            },
-          },
+          subOrganizationId: 'new_org',
         })
       );
       const client = createMockClient({
@@ -1016,11 +1019,7 @@ describe('turnkey-client', () => {
       const wrapped = new Error('lookup failed', { cause: notFound });
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'created_after_wrapped_404' },
-            },
-          },
+          subOrganizationId: 'created_after_wrapped_404',
         })
       );
       const client = createMockClient({
@@ -1036,11 +1035,7 @@ describe('turnkey-client', () => {
       const notFound = Object.assign(new Error('resource not found'), { code: 5 });
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'fallback_new' },
-            },
-          },
+          subOrganizationId: 'fallback_new',
         })
       );
       const client = createMockClient({
@@ -1071,11 +1066,7 @@ describe('turnkey-client', () => {
     test('normalizes email in the created root user', async () => {
       const createSubOrganization = mock(() =>
         Promise.resolve({
-          activity: {
-            result: {
-              createSubOrganizationResultV7: { subOrganizationId: 'new_org' },
-            },
-          },
+          subOrganizationId: 'new_org',
         })
       );
       const client = createMockClient({
@@ -1115,9 +1106,7 @@ describe('turnkey-client', () => {
           const id = `sub-org-${createCalls}`;
           persistedSubOrgIds = [id];
           return {
-            activity: {
-              result: { createSubOrganizationResultV7: { subOrganizationId: id } },
-            },
+            subOrganizationId: id,
           };
         });
         const client = createMockClient({
