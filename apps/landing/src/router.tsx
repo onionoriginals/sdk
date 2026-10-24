@@ -9,12 +9,12 @@
  */
 import { useEffect, useState } from 'react';
 
-// /explore and /me (hosted and inscribed Originals) are rebuilt on the Originals
-// Protocol with web publication and Bitcoin anchoring (plan 011, PRs 8 and 10).
-// Until then their paths fall through to the landing page.
-export type RouteName = 'landing' | 'privacy' | 'terms';
+// Private /me recovery is available independently of the public Explore and
+// publication gates. Unknown paths still return to the landing page.
+export type RouteName = 'landing' | 'privacy' | 'terms' | 'originals';
 
 export function routeForPath(pathname: string): RouteName {
+  if (pathname === '/me' || pathname.startsWith('/me/')) return 'originals';
   if (pathname === '/privacy') return 'privacy';
   if (pathname === '/terms') return 'terms';
   return 'landing';

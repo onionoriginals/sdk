@@ -174,11 +174,13 @@ export class Retrieval {
     this.controller.signal.addEventListener("abort", abort, { once: true });
     if (this.controller.signal.aborted) request.abort();
     const timer = setTimeout(() => {
-      // A timer may fire before Date.now crosses the deadline's millisecond.
-      // If this request spent the remaining operation time, section 6 requires
-      // a limit-exceeded error, even for an optional file (issue #970).
-      if (remainingMs <= this.limits.requestTimeoutMs) this.timedOut = true;
-      abort();
+      // A deadline-limited request exhausts the operation even if its timer
+      // arrives just before the operation timer or the next wall-clock tick.
+      // Otherwise an optional timeout can be swallowed as a missing file.
+      if (remainingMs <= this.limits.requestTimeoutMs) {
+        this.timedOut = true;
+        this.controller.abort();
+      } else abort();
     }, timeoutMs);
     // A fetcher that ignores the signal is not waited for.
     const stopped = new Promise<never>((_, reject) => {

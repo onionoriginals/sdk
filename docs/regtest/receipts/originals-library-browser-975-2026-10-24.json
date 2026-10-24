@@ -1,0 +1,68 @@
+{
+  "journey": "landing-library-refresh-reopen",
+  "issue": "#975",
+  "date": "2026-10-24",
+  "implementation": "fd6bb4b97705795559fded48f77a3627ffd1d8d2",
+  "browser": "B3 collaborative Chromium preview",
+  "origin": "http://127.0.0.1:3101",
+  "api": "loopback :3102, local-key simulated-chain fixture",
+  "productionTurnkeyUsed": false,
+  "publicNetworksUsed": false,
+  "checks": [
+    {
+      "check": "guest signed work survives navigation reload",
+      "original": "did:vh:QmS7SGTBRYcRH3kR58npQb5Ub2QNCaT41tMjhR1qt71gxq",
+      "historyEntriesBefore": 2,
+      "exactHistoryAndResourceBytes": true,
+      "authorRestored": true,
+      "historyEntriesAfterRevision": 3
+    },
+    {
+      "check": "unsigned form survives reload",
+      "title": "Unfinished browser draft",
+      "source": "write",
+      "text": "Draft survives refresh \u2014 exact UTF-8 bytes.",
+      "restored": true
+    },
+    {
+      "check": "pending outbox survives reload and fresh-engine retry",
+      "original": "did:vh:Qmed4U3xtjYxDCSqmf5kt8JDZZjMmVkLh6i7EQAEMUi9xz",
+      "identicalPair": true,
+      "signatures": 0,
+      "additionalBroadcasts": 0,
+      "outcome": "recorded"
+    },
+    {
+      "check": "atomic head across independent IndexedDB store handles",
+      "winners": 1,
+      "staleParents": 1,
+      "reopenedHistoryEntries": 2
+    },
+    {
+      "check": "Bob and guest cannot list/read Alice evidence or transaction pairs",
+      "accounts": [
+        "bob",
+        "guest"
+      ],
+      "crossAccountServerEvidenceStatus": 404,
+      "isolated": true
+    },
+    {
+      "check": "historical Stage A ZIP imported through file-input change in fresh consumer UI",
+      "original": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "history": "valid",
+      "authorBinding": "valid",
+      "identityEvidence": "complete",
+      "resources": "available",
+      "savedHead": "4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS",
+      "bitcoinAcceptedHead": null,
+      "current": false,
+      "limit": "The independent simulated fixture chain does not contain the historical regtest anchor."
+    }
+  ],
+  "limits": [
+    "Fixture sign-in is a local test cookie, not a new live Turnkey OTP run.",
+    "The Core/ord receipt covers real Bitcoin regtest separately, with disposable local keys.",
+    "No public-host, independent-index or mainnet release proof."
+  ]
+}

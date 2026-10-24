@@ -32,7 +32,7 @@ hosted stack, and stays untouched.
 | Built from the exact candidate SHA, the head of the stack under test | The receipt compares the deployed revision with the source SHA (G6) |
 | Its own mounted volume, with `ORIGINALS_DATA_DIR` pointing at it | The durable host store is the volume. A deployed instance with auth refuses to boot without a mounted volume (`server/config.ts`) |
 | Its own domain, set as `VITE_WEBVH_HOST` (a bare hostname) and bound in Railway | The did:webvh domain of every identity and alias minted there, permanently (G1). Must not be `originals.build` |
-| The acceptance-only publication build switch (G7) | `hostedPublication` is otherwise a constant `false` |
+| The acceptance-only publication build switch (G7) | Without it, `resolveFeatures` returns `hostedPublication: false` |
 | `VITE_BTC_NETWORK` not `off`, and `BTC_NETWORK` matching it | The Turnkey session bootstrap only runs when the network flag is on (`src/auth/useAuth.tsx`). No Bitcoin action is taken, and no funds are involved |
 
 Environment variables, **by name only**. The owner sets their values in the
@@ -49,7 +49,30 @@ Railway dashboard. They are never written to source, to a log or to the receipt.
 | `TRUSTED_PROXY_HOPS` | `1` behind the Railway edge |
 | `VITE_WEBVH_HOST` | the staging hostname |
 | `VITE_BTC_NETWORK`, `BTC_NETWORK` | a non-mainnet network |
-| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host |
+| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet` |
+
+### Railway IaC: never apply it to staging
+
+`.railway/railway.ts` is the desired state of the `builder` service, and it
+has **no per-environment scoping**. `railway config apply` reconciles it
+against whichever environment the CLI is linked to. Applied to staging, it
+would:
+
+- set `VITE_WEBVH_HOST` to `originals.build`, so every identity and alias
+  minted there would claim the production domain, permanently (G1);
+- set `BTC_NETWORK` and `VITE_BTC_NETWORK` to `mainnet`;
+- point the source at `branch: "main"`, so staging stops building the
+  candidate SHA (G6);
+- mount `builder-volume` at `/data`;
+- **delete** every variable the file doesn't declare, including
+  `VITE_ACCEPTANCE_HOSTED_PUBLICATION`.
+
+The file has no override mechanism for staging. Staging is configured in the
+Railway dashboard only. **Never run `railway config apply` (or
+`railway config plan` followed by apply) with the CLI linked to the staging
+environment.** Before any `railway config` command, run `railway status` and
+confirm the linked environment is production. The operator's CLI access to
+staging is read-only (see [Operator](#operator)).
 
 ### Account
 
@@ -228,38 +251,56 @@ PASS when all of these hold:
   snapshot.
 - After resuming, the B2 checks pass.
 
-### B5. Signed-out ephemeral demo stays explicit
+### B5. Signed-out guest work stays explicit and stays in the guest database
+
+Owner decision of 23 October 2026 (#992): signed out, the guest key and the
+guest's work are kept in this browser, unencrypted, with a warning. Anyone
+using the browser can sign as that guest.
 
 Automated, in a fresh signed-out context:
 
 1. Create a work.
-2. Check the copy: the key is generated in the page and discarded with it.
-   Nothing may claim a stored key or a backup.
+2. Check the copy: the guest key is saved in this browser with the work,
+   unencrypted, and anyone using this browser can sign as this guest. Sign-in
+   is how to sign with your own key and publish. Nothing may claim a backup.
 3. Export the evidence package.
 4. Reload.
 
 PASS when all of these hold:
 
-- After the reload the work is gone, and the page says so. It doesn't offer
-  to restore it.
 - Publishing isn't available signed out.
+- After the reload the guest work is still there, in the guest database
+  (`originals-library-v1:guest`) only.
+- Nothing is written to any account database (`originals-library-v1:account:*`)
+  or to the server: no hosted write, no account-index write.
 - The package's did:vh genesis holds only Multikey public keys. No file in
   the package holds private key material: no `secretKeyMultibase`, no
-  `privateKey*` member, no Multikey Ed25519 secret prefix.
-- No anonymous key is persisted to localStorage, IndexedDB or a cookie.
+  `privateKey*` member, no Multikey Ed25519 secret prefix. (The guest key
+  itself is in the guest database, by the decision above, never in a package.)
 
 ### B6. Hosted publication stays off until this receipt passes
 
+**B6 is a UI gate.** It checks that no build except the staging acceptance
+build offers publishing in the page. It doesn't close the server path: the
+server's `PUT /api/originals/host/*` accepts hosted writes from any signed-in
+account regardless of the flag, in every environment. That is unchanged by
+this runbook, and B6 makes no claim about it.
+
 Automated:
 
-- The candidate source has `hostedPublication: false` in `features.ts`.
+- In the candidate source, `resolveFeatures({})` and
+  `resolveFeatures(<production env>)` both return
+  `hostedPublication: false` (`features.ts`). The production env is the
+  `VITE_*` shape of `.railway/railway.ts`: `VITE_WEBVH_HOST=originals.build`,
+  `VITE_BTC_NETWORK=mainnet`, with or without
+  `VITE_ACCEPTANCE_HOSTED_PUBLICATION=1`.
 - Production (`https://originals.build`) still serves a bundle with publishing
   disabled. The harness checks the deployed `/api/version` and the step's
   disabled state.
 
-PASS when publication is off everywhere except the staging acceptance build.
-Turning it on is a separate owner PR, and that PR cites a PASS receipt from
-this runbook.
+PASS when the publish step is off in every build except the staging
+acceptance build. Turning it on is a separate owner PR, and that PR cites a
+PASS receipt from this runbook.
 
 ## Receipt
 
@@ -343,11 +384,11 @@ one of them.
 
 | # | Gap | Blocks | Proposed fix |
 |---|---|---|---|
-| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`, falling back to `location.host`. Reads of the hosted layout for a host the store holds skip the canonical redirect, so existing `magby` identity DIDs stay readable |
+| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`. Unset, they fall back to the legacy domain `magby.originals.build` (`src/auth/webvh-domain.ts`, PROVISIONAL), never to `location.host`. Reads of the hosted layout for a host the store holds skip the canonical redirect, so existing `magby` identity DIDs stay readable |
 | G6 | No deployed revision. `/api/health` is `{status:"ok"}` | receipt | `GET /api/version` returns the server's `RAILWAY_GIT_COMMIT_SHA`, and the build bakes the SPA's SHA |
-| G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host. A test pins production off |
-| G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the key is page-scoped, discarded, and not recoverable. Add a content-claim test |
-| G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | An IndexedDB `OriginalsStore`, one database per sub-org, holding the log, resources, author and alias evidence, retained versions, branches, and pending and refused candidates. Signed-in engines use it; signed out stays `MemoryStore` |
+| G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host and `VITE_BTC_NETWORK` isn't `mainnet`. A test pins production off |
+| G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the guest key is kept in this browser, unencrypted, signable by anyone using it, and that sign-in signs with your own key and publishes (owner decision of 23 October 2026). Add a content-claim test |
+| G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | main's `BrowserOriginalsStore` (#992), one IndexedDB database per sub-org and one for the guest, holding the log, resources, author and alias evidence, retained versions and anchors, branches, and pending and refused candidates. Hardened against other tabs; without IndexedDB, memory with a notice |
 | G4 | After a restart, a publication interrupted after its entry can't resume | B4 | Persist a publication record (the alias evidence, the phase, the files uploaded) before each step. On open, an incomplete record offers "Resume", which passes the stored alias, so no second publish entry is signed |
 | G5 | `publish()` reports success when the PUTs resolve, with no read-back | B1, B4 | Report complete only after a cookie-less `loadPublished` sees the local checkpoint with every byte. Otherwise the state is `uploaded-unverified` with "Resume" |
 | G3 | Nothing lists or reopens an account's Originals. `GET`/`POST /api/originals` exist but the client never calls them | B3 | Publishing records `{did, alias}` in the account index. The engine lists the durable store plus the index, opens local work, and restores a published Original from the host with `sdk.sync` |

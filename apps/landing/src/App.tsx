@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { YourOriginals } from './pages/YourOriginals';
+import { useAuth } from './auth/useAuth';
 import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
 import { Why } from './components/Why';
@@ -30,12 +32,12 @@ function RoutedApp() {
       <Nav />
       {legalDoc ? (
         <LegalPage doc={legalDoc} />
-      ) : (
+      ) : route === 'originals' ? <YourOriginals /> : (
         <main>
           <Hero />
           <RecordLine />
           <Why />
-          <Demo />
+          <AccountDemo />
           <RealExample />
           <Protocol />
           <Developers />
@@ -97,4 +99,9 @@ function SmokeTest() {
     })().catch((e) => setOut('ERROR: ' + (e as Error).stack));
   }, []);
   return <pre id="smoke-out">{out}</pre>;
+}
+
+function AccountDemo() {
+  const { user, isLoading } = useAuth();
+  return isLoading ? null : <Demo key={user?.subOrgId ?? 'guest'} />;
 }
