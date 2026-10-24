@@ -61,7 +61,7 @@ describe('runExclusive — one run at a time, whichever surface asks', () => {
 });
 
 describe('stepButtonDisabled — a busy step is not clickable', () => {
-  const base = { index: 2 as const, titleEmpty: false, pendingRevision: false, updating: false };
+  const base = { index: 2 as const, titleEmpty: false, pendingRevision: false, updating: false, authenticated: true };
 
   test('the inscribe button is disabled while its own run is in flight', () => {
     // This clause did not exist: `state !== 'ready' && state !== 'busy'` left

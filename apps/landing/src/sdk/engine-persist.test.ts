@@ -77,6 +77,39 @@ describe('a signed-in author\'s work survives a browser restart', () => {
   });
 });
 
+describe('opening the store (#976 B, G2)', () => {
+  const saved = globalThis.indexedDB;
+  afterEach(() => {
+    globalThis.indexedDB = saved;
+  });
+
+  test('a failed open is not cached: the next attempt opens the store', async () => {
+    const idb = new IDBFactory();
+    const author = await createLocalAuthor();
+    let attempts = 0;
+    const engine = signedIn(idb, author, {
+      openStore: () => (++attempts === 1 ? Promise.reject(new Error('transient')) : IndexedDbStore.open(SUB, idb)),
+    });
+    await expect(engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7))).rejects.toThrow('transient');
+    const created = await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect(attempts).toBe(2);
+    expect(created.notKeptAcrossRestarts).toBeUndefined();
+    expect(await (await IndexedDbStore.open(SUB, idb)).list()).toEqual([created.did]);
+  });
+
+  test('signed in without IndexedDB, the work is kept in memory and the snapshot says so', async () => {
+    globalThis.indexedDB = undefined as unknown as IDBFactory;
+    const engine = new DemoEngine({ authed: true, subOrgId: SUB, author: await createLocalAuthor() });
+    const created = await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect(created.notKeptAcrossRestarts).toBe(true);
+  });
+
+  test('signed out, memory is by design, and the G10 note covers it instead', async () => {
+    const created = await new DemoEngine().create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect(created.notKeptAcrossRestarts).toBeUndefined();
+  });
+});
+
 describe('signed out, nothing is kept (#976 B5)', () => {
   const saved = globalThis.indexedDB;
   afterEach(() => {
