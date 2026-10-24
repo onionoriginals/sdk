@@ -125,6 +125,8 @@ export interface DemoAssetState {
   bitcoinOtherBranch?: boolean;
   /** The verification report of the current checkpoint. */
   provenance: unknown;
+  /** Signed in, but this browser has no IndexedDB, so the work is in memory only (#976 B, G2). */
+  notKeptAcrossRestarts?: true;
   bitcoinVerification?: OriginalsReport;
   bitcoinReadError?: string;
 }
@@ -196,7 +198,7 @@ export interface PublishTarget {
   aliasSigner: () => Promise<WebVHSigner>;
 }
 
-interface Authoring {
+export interface Authoring {
   ref: AuthorRef;
   signer: OriginalsSigner;
   evidence: AuthorDidEvidence;
@@ -211,7 +213,17 @@ export class DemoEngine {
   private readonly authed: boolean;
   private readonly subOrgId?: string;
   private readonly listeners = new Set<Listener>();
+  /**
+   * The engine's store. The page passes main's account-scoped
+   * BrowserOriginalsStore: signed in, the account's database; signed out, the
+   * guest's (owner decision of 23 October 2026). Without IndexedDB it is a
+   * MemoryStore, and the snapshot says the work isn't kept across restarts
+   * (#976 B, G2).
+   */
   private readonly store: OriginalsStore;
+  /** In memory only, because this browser has no IndexedDB. */
+  private readonly notKeptAcrossRestarts: boolean;
+  private readonly authorWith?: () => Promise<Authoring>;
   private authoring: Authoring | null = null;
   private sdk: OriginalsSDK | null = null;
   private did: string | null = null;
@@ -234,6 +246,8 @@ export class DemoEngine {
   constructor(opts?: {
     store?: OriginalsStore;
     localAuthor?: () => Promise<Authoring>;
+    /** The page fell back to memory because this browser has no IndexedDB (#976 B, G2); the snapshot says so. */
+    notKeptAcrossRestarts?: boolean;
     authed?: boolean;
     subOrgId?: string;
     networkFlag?: BtcNetworkFlag;
@@ -245,19 +259,24 @@ export class DemoEngine {
      * Overrides the signed-in author (Turnkey `#key-1`), for tests and the
      * regtest journey, which sign with local keys and say so.
      */
-    author?: Authoring;
+    author?: Authoring | (() => Promise<Authoring>);
     /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
     anchoring?: AnchoringOptions;
   }) {
+    // The page chooses the store (browser-store.ts `pageStore`): this
+    // browser's own, or memory when there is no IndexedDB, which the page
+    // says. Without one, memory, as on main: a plain engine is not the guest.
     this.store = opts?.store ?? new MemoryStore();
     this.localAuthor = opts?.localAuthor;
+    this.notKeptAcrossRestarts = opts?.notKeptAcrossRestarts ?? false;
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
     this.target = opts?.publishTarget;
-    this.authorOverride = opts?.author;
+    this.authorOverride = typeof opts?.author === "function" ? undefined : opts?.author;
     this.anchoringOpts = opts?.anchoring ?? {};
     this.networkFlag = opts?.networkFlag ?? btcNetwork();
+    this.authorWith = typeof opts?.author === "function" ? opts.author : undefined;
     this.tier = demoTier(this.networkFlag, this.authed);
   }
 
@@ -288,7 +307,7 @@ export class DemoEngine {
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    const authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
+    const authoring = this.authorOverride ?? (this.authorWith ? await this.authorWith() : this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
     this.setAuthorEvidence(authoring.evidence);
     await this.store.putAuthorEvidence(authoring.evidence);
     this.sdk ??= OriginalsSDK.create({
@@ -864,6 +883,7 @@ export class DemoEngine {
       ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
       ...(this.bitcoinOtherBranch() ? { bitcoinOtherBranch: true } : {}),
       provenance: view.report,
+      ...(this.notKeptAcrossRestarts ? { notKeptAcrossRestarts: true as const } : {}),
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,
     };

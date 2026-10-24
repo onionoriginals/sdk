@@ -1,4 +1,5 @@
-import { BrowserOriginalsStore } from '../sdk/browser-store';
+import { BrowserOriginalsStore, pageStore } from '../sdk/browser-store';
+import { clearAcceptanceEngine, exposeAcceptanceEngine } from '../sdk/acceptance-hook';
 import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
 import { navigate } from '../router';
 import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
@@ -83,9 +84,13 @@ function useEngine(authed: boolean, subOrgId?: string) {
     if (engineRef.current) return engineRef.current;
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
       // Signing identity and browser storage share the same account scope.
-      const store = new BrowserOriginalsStore(authed ? subOrgId : undefined);
-      const engine = new DemoEngine({ authed, subOrgId, store, localAuthor: () => store.localAuthor() });
+      // Without IndexedDB the engine keeps the work in memory and says so (#976 B, G2).
+      const engine = new DemoEngine({ authed, subOrgId, ...pageStore(authed ? subOrgId : undefined) });
       engineRef.current = engine;
+      // The page's own engine, for the hosted acceptance driver, on a staging
+      // acceptance build only (never production). Set here, not in the
+      // engine, so a helper engine (an import on /me) never takes its place.
+      exposeAcceptanceEngine(engine);
       return engine;
     });
     return loading.current;
@@ -96,6 +101,7 @@ function useEngine(authed: boolean, subOrgId?: string) {
   const discardEngine = useCallback(() => {
     engineRef.current = null;
     loading.current = null;
+    clearAcceptanceEngine();
   }, []);
 
   return { getEngine, discardEngine };
@@ -1070,6 +1076,11 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                   })}
                 </ol>
 
+                {/* #976 B, G2: signed in without IndexedDB, the work is in
+                    memory only. Said, never failed silently. */}
+                {asset?.notKeptAcrossRestarts && (
+                  <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
+                )}
                 {asset && (
                   <div className="demo-evidence">
                     <button

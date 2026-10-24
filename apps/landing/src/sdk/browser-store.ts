@@ -1,21 +1,41 @@
 /** Account-scoped local persistence. Atomic head CAS is P6.2; retained state is P7.8.
  * No server/cross-device durability is implied by this IndexedDB database.
+ *
+ * The one IndexedDB store for Originals in this browser (#976 B, G2): signed
+ * in, the account's database; signed out, the guest's (owner decision of
+ * 23 October 2026). The retained anchor is kept, so a change of anchor is
+ * reported after a restart too, never silent (P9.16).
+ *
+ * Each call opens the database, works in one transaction and closes it, so a
+ * failed open is retried by the next call. Other tabs: a connection closes as
+ * soon as another tab upgrades the schema (`versionchange`), and an open that
+ * an older tab blocks waits for it instead of failing (#976 B, G2).
  */
-import { headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
+import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
 import type { AuthorDidEvidence, RetainedAnchor } from '@originals/vh/originals';
 import { createLocalAuthor, restoreLocalAuthor, type LocalAuthor } from './local-author';
 
 export const browserDatabase = (account?: string) => `originals-library-v1:${account ? `account:${account}` : 'guest'}`;
 
 export class BrowserOriginalsStore implements OriginalsStore {
-  constructor(readonly account?: string) {}
+  /** `factory` overrides the page's IndexedDB, for tests. */
+  constructor(readonly account?: string, private readonly factory?: IDBFactory) {}
   private async transaction<T>(mode: IDBTransactionMode, work: (s: IDBObjectStore, done: (value: T) => void, fail: (error: unknown) => void) => void): Promise<T> {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = indexedDB.open(browserDatabase(this.account), 1);
+      const idb = this.factory ?? globalThis.indexedDB;
+      if (!idb) { reject(new Error('This browser has no IndexedDB, so your work can’t be kept here. Export your evidence before leaving.')); return; }
+      const r = idb.open(browserDatabase(this.account), 1);
       r.onupgradeneeded = () => r.result.createObjectStore('data');
-      r.onsuccess = () => resolve(r.result);
+      r.onsuccess = () => {
+        // Give way to another tab's upgrade rather than block it for as long as this transaction lasts.
+        r.result.onversionchange = () => r.result.close();
+        resolve(r.result);
+      };
       r.onerror = () => reject(r.error);
-      r.onblocked = () => reject(new Error('Close other Originals tabs to open your saved work.'));
+      // An older tab still holds the database. Not fatal: the open proceeds
+      // when it closes. Rejecting here would leave the connection that later
+      // succeeds open, owned by no one.
+      r.onblocked = () => {};
     });
     try {
       return await new Promise<T>((resolve, reject) => {
@@ -67,7 +87,8 @@ export class BrowserOriginalsStore implements OriginalsStore {
     });
     if (conflict) throw conflict;
   }
-  putResource(digest: string, bytes: Uint8Array) { return this.put(`bytes:${digest}`, bytes); }
+  // Content addressed: the first bytes stored for a digest stay, as in the SDK's MemoryStore.
+  putResource(digest: string, bytes: Uint8Array) { return this.change<Uint8Array>(`bytes:${digest}`, (old) => old ?? bytes.slice()); }
   getResource(digest: string) { return this.getValue<Uint8Array>(`bytes:${digest}`); }
   putAuthorEvidence(evidence: AuthorDidEvidence) { return this.put(`author:${evidence.did}`, evidence); }
   getAuthorEvidence(did: string) { return this.getValue<AuthorDidEvidence>(`author:${did}`); }
@@ -93,4 +114,18 @@ export class BrowserOriginalsStore implements OriginalsStore {
       r.onsuccess = () => done(r.result.filter((k): k is string => typeof k === 'string' && k.startsWith('log:')).map((k) => k.slice(4)));
     });
   }
+}
+
+/**
+ * The store the page gives its engine (#976 B, G2): this browser's own,
+ * signed in the account's database and signed out the guest's (owner
+ * decision of 23 October 2026), with its guest author. Without IndexedDB, a
+ * MemoryStore, and the page says the work isn't kept across restarts.
+ */
+export function pageStore(account?: string, factory: IDBFactory | undefined = globalThis.indexedDB):
+  | { store: BrowserOriginalsStore; localAuthor: () => Promise<LocalAuthor>; notKeptAcrossRestarts: false }
+  | { store: MemoryStore; notKeptAcrossRestarts: true } {
+  if (!factory) return { store: new MemoryStore(), notKeptAcrossRestarts: true };
+  const store = new BrowserOriginalsStore(account, factory);
+  return { store, localAuthor: () => store.localAuthor(), notKeptAcrossRestarts: false };
 }
