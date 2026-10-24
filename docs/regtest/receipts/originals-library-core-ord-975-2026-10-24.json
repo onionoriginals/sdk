@@ -1,0 +1,190 @@
+{
+  "journey": "landing-anchor",
+  "plan": "plan 011 PR 10b",
+  "issue": "#975",
+  "revision": "0ed896ff89eb28986351324eb0c74b90ba96d577",
+  "dirty": true,
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0"
+  },
+  "network": "regtest",
+  "server": {
+    "entry": "apps/landing/serve.ts",
+    "processes": 2,
+    "index": "ord@regtest-local",
+    "indexesCompared": false,
+    "recoveryStore": "fileRecoveryStore (per Original, on disk)"
+  },
+  "browser": {
+    "entry": "apps/landing/src/sdk/engine.ts (DemoEngine) in the journey process",
+    "outbox": "memory"
+  },
+  "signers": {
+    "author": "local did:vh key (not the Turnkey did:webvh #key-1)",
+    "commit": "local P2WPKH key (not Turnkey)",
+    "reveal": "SDK ephemeral key"
+  },
+  "liveTurnkeySigning": "not exercised here: #975 stage A",
+  "faultInjection": "Core RPC proxy held the reveal broadcast; the server process was SIGKILLed",
+  "steps": [
+    {
+      "step": "anchored",
+      "did": "did:vh:QmRQbgV3RkqpsT5oQtgxqkSTqf9BXs7LCa5NKqCSHvSy5g",
+      "sat": "did:btco:reg:9999789436",
+      "entry": "2-QmWQm7sJhyeZ8y1daHLx8oQUHs9nVnzkVDGz1q8uDeVrd1",
+      "commit": "3f37e79362fd2049850dfe4b9c0284adf8da6111f816bf977ebaa305d54af98f",
+      "reveal": "8bf1ff747be6849d715ea7255a678cecd295ab2ced00358a4c35db100026a94a",
+      "holder": "8bf1ff747be6849d715ea7255a678cecd295ab2ced00358a4c35db100026a94a:0",
+      "confirmations": 1,
+      "offChain": {
+        "original": "did:vh:QmRQbgV3RkqpsT5oQtgxqkSTqf9BXs7LCa5NKqCSHvSy5g",
+        "through": "2-QmWQm7sJhyeZ8y1daHLx8oQUHs9nVnzkVDGz1q8uDeVrd1",
+        "resources": [
+          {
+            "resource": "artwork.svg",
+            "version": 1,
+            "digest": "zQmQFsf99ZwdsmPdG8TztucYfqUADcoqFHSPZTEiHSVKTSK",
+            "mediaType": "image/svg+xml",
+            "size": 1736,
+            "versionId": "1-QmdhXRZEGUsgLnEnfmC2uAGsKRdPfTBzTZ5UVerr9aMxsw",
+            "held": true
+          },
+          {
+            "resource": "metadata.json",
+            "version": 1,
+            "digest": "zQmQD3G222n9BDuT9rSvDSzPEp6nNH4jfjq1QLGBTP7PESC",
+            "mediaType": "application/json",
+            "size": 241,
+            "versionId": "1-QmdhXRZEGUsgLnEnfmC2uAGsKRdPfTBzTZ5UVerr9aMxsw",
+            "held": true
+          }
+        ],
+        "identities": [
+          {
+            "did": "did:vh:QmaACczREttjPPZuRji2Wvi7CjnYTxo6TX1LMWo2eZxiz4",
+            "role": "author",
+            "held": true
+          }
+        ],
+        "onBitcoin": [],
+        "replication": "not-guaranteed"
+      }
+    },
+    {
+      "step": "reinscribed",
+      "entry": "3-QmP7tKSGfsRBJS9stFCuvvMjdTb72Tb6cfHZuX2ekXj5qu",
+      "inputZero": "8bf1ff747be6849d715ea7255a678cecd295ab2ced00358a4c35db100026a94a:0",
+      "commit": "ad7d7a15e887458e020cdad36e59622cd47d207eb1a8dd7948015407b594579a",
+      "reveal": "e2dda3a535a7e7a4ac233d0257b971faf428826258b7139bf14146024b886277"
+    },
+    {
+      "step": "killed-between-commit-and-reveal",
+      "entry": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU",
+      "recoveryId": "921a0549e2cdab5d1841cfd4648f6dd36464d371f3b5a6d5b0ac236e15464a27",
+      "recordState": "reveal_broadcast_unknown",
+      "killedExit": 137,
+      "signal": "SIGKILL",
+      "commitMined": true,
+      "revealSent": false,
+      "acceptedHeadStill": "3-QmP7tKSGfsRBJS9stFCuvvMjdTb72Tb6cfHZuX2ekXj5qu"
+    },
+    {
+      "step": "reopened-from-account-library",
+      "did": "did:vh:QmRQbgV3RkqpsT5oQtgxqkSTqf9BXs7LCa5NKqCSHvSy5g",
+      "entries": 4,
+      "author": "did:vh:QmaACczREttjPPZuRji2Wvi7CjnYTxo6TX1LMWo2eZxiz4",
+      "signer": "none",
+      "identicalPair": true
+    },
+    {
+      "step": "resumed-by-a-fresh-server",
+      "reveal": "99831872a32b58b521d38b86650fbd83f21d378dd3714f616599286c9831dd92",
+      "identicalBytes": true,
+      "browserRetry": "recorded",
+      "acceptedHead": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU"
+    },
+    {
+      "step": "reorg",
+      "invalidated": "46ab9cb121e5d404674e3a8b2b21db24a531d165054bafe7b2b25890251f0d62",
+      "duringReorg": {
+        "publication": "anchored",
+        "action": "wait-for-confirmation"
+      },
+      "after": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU"
+    },
+    {
+      "step": "fresh-consumer-reopen",
+      "did": "did:vh:QmRQbgV3RkqpsT5oQtgxqkSTqf9BXs7LCa5NKqCSHvSy5g",
+      "head": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU",
+      "resources": "available",
+      "history": "valid",
+      "authorBinding": "valid",
+      "signer": "none",
+      "index": "ord@regtest-local"
+    },
+    {
+      "step": "fresh-reader",
+      "network": "regtest",
+      "index": "ord-0.29.0-regtest",
+      "indexesConsulted": 1,
+      "history": "valid",
+      "authorBinding": "valid",
+      "identity": "complete",
+      "head": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU",
+      "current": true,
+      "ownership": {
+        "status": "provisional",
+        "sat": "did:btco:reg:9999789436",
+        "output": "99831872a32b58b521d38b86650fbd83f21d378dd3714f616599286c9831dd92:0",
+        "address": "bcrt1qa7smny2mksqqlngzjtpgll2hhk75sf3yug4nns",
+        "confirmations": 3,
+        "indexes": [
+          "ord-0.29.0-regtest"
+        ]
+      },
+      "resources": [
+        {
+          "resource": "artwork.svg",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "1bc43997f54632e7ff5afb0d5bf6991299b99a71261f2973b027bc98f5605e99"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "507d59ec5382d96cf832fbcb26e418783358a6c83ec88965c4d6ea3469f38692"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "beb06005c727516a86e07718adb626f11003538939c7aa9687d514b6dae0c91e"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "2810aedc1457bb2b4d43bc28b23d2553cdd66ca751f0107f2bafa6996fe258aa"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "f574eb467fd2ed444983e98577df9ca8f24a07415776ac490e9bb903ff663296"
+        }
+      ],
+      "fromBitcoinAlone": {
+        "copy": "absent",
+        "head": "4-QmVpykq8b3ZmCZQGwRnZnDsKQhS2yHd3rpLGDiJPqj9ceU"
+      }
+    }
+  ]
+}

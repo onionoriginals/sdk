@@ -32,6 +32,8 @@ import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFil
 import { readBodyCapped } from './body';
 import { createSharedSaves, parseSubmission } from './shared-saves';
 
+import type { AnchoringLibrary } from './originals-library';
+
 const HOST_PREFIX = '/api/originals/host/';
 const SUBMIT_PREFIX = '/api/originals/submit/';
 // A submission carries one entry, the bytes it introduces (base64) and its signer's DID logs.
@@ -92,6 +94,7 @@ export interface OriginalsRoutes {
   submit(req: Request, url: URL, clientIp: string): Promise<Response>;
   record: Handler;
   list: Handler;
+  evidence: Handler;
   serve(url: URL): Response | null;
 }
 
@@ -99,6 +102,7 @@ export function createOriginalsRoutes(deps: {
   jwtSecret: string;
   store: OriginalsStore;
   now?: () => number;
+  library?: AnchoringLibrary;
 }): OriginalsRoutes {
   const { store } = deps;
   const now = deps.now ?? (() => Date.now());
@@ -309,11 +313,31 @@ export function createOriginalsRoutes(deps: {
     return json({ ok: true }, 200);
   };
 
-  const list: Handler = (req) => {
+  const list: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    return json({ originals: store.list(sub) });
+    try {
+      const rows = new Map<string, { did: string; title: string; availability: string }>(store.list(sub).map((o) => [o.did, { ...o, availability: 'incomplete' }]));
+      // Discovery reads the caller's durable anchoring tree, even without a
+      // separate summary or with the Bitcoin writer disabled (P9.18).
+      for (const row of await deps.library?.list(sub) ?? []) rows.set(row.did, { ...rows.get(row.did), ...row });
+      return json({ originals: [...rows.values()] }, 200, { 'Cache-Control': 'no-store' });
+    } catch { return json({ error: 'library_unavailable', message: 'Your saved work could not be listed. Please retry.' }, 503); }
   };
 
-  return { hostPut, hostGet, submit, record, list, serve: (url) => store.serve(url) };
+  const evidence: Handler = async (req, url) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    try {
+      const bytes = await deps.library?.evidence(sub, url.searchParams.get('did') ?? '');
+      if (!bytes) return json({ error: 'evidence_not_found' }, 404);
+      return new Response(bytes as Uint8Array<ArrayBuffer>, { headers: {
+        'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+        'Content-Disposition': 'attachment; filename="original.originals.zip"',
+        'X-Content-Type-Options': 'nosniff',
+      } });
+    } catch { return json({ error: 'evidence_unavailable', message: 'This saved evidence needs recovery. No work was removed.' }, 503); }
+  };
+
+  return { hostPut, hostGet, submit, record, list, evidence, serve: (url) => store.serve(url) };
 }
