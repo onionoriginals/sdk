@@ -163,6 +163,13 @@ jobs:
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 
+      # A successful bundle can still have a cross-chunk initialization crash.
+      # Load the emitted JS in Chromium and exercise the real SDK lifecycle.
+      - name: Install Chromium for the production bundle smoke test
+        run: bun run --cwd apps/landing playwright-core install --with-deps chromium
+      - name: Exercise the production bundle in Chromium
+        run: bun apps/landing/scripts/ci.mjs --smoke-only
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

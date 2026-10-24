@@ -98,6 +98,10 @@ export default defineConfig({
     target: 'es2022',
     rolldownOptions: {
       output: {
+        // Shared SDK/engine chunks contain hash subclasses and their bases.
+        // Preserve module evaluation order across those chunks: otherwise a
+        // subclass can execute before its imported base has been initialized.
+        strictExecutionOrder: true,
         codeSplitting: {
           groups: [{
             name: 'buffer-polyfill',

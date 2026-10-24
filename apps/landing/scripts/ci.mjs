@@ -5,6 +5,7 @@
 //
 // One command from anywhere in the repo:
 //   bun apps/landing/scripts/ci.mjs        (or `bun run landing:ci` at root)
+//   bun apps/landing/scripts/ci.mjs --smoke-only  (build + browser lifecycle)
 //
 // Chromium resolution (scripts/browser.mjs): CHROMIUM_PATH env override →
 // /opt/pw-browsers/chromium (managed containers) → playwright-core's own
@@ -83,6 +84,12 @@ if (smoke.status !== 0) {
   stopServer();
   console.error('[landing-ci] FAILED: smoke test');
   process.exit(smoke.status ?? 1);
+}
+
+if (process.argv.includes('--smoke-only')) {
+  stopServer();
+  console.log('\n[landing-ci] PASS — production bundle creates and verifies a local Original with zero browser errors');
+  process.exit(0);
 }
 
 // Throttled-network TTI budget check (tti.mjs). Runs against the same preview
