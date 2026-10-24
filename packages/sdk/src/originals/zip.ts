@@ -1,5 +1,5 @@
 /**
- * P14.10 (originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges): the sort, date, UTF-8 flag and mode rules bind the writer
+ * P14.10 (originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges): the sort, date, UTF-8 flag and mode rules bind the writer
  * (`writeZip`); the reader may ignore them, and does.
  *
  * A minimal, strict ZIP codec for evidence packages (PROVISIONAL format, D4;

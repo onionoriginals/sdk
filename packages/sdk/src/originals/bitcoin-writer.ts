@@ -8,7 +8,7 @@
  *   the anchoring pair is observed on the network (confirmed, or in the
  *   node's mempool) but Bitcoin does not show it, reads are labelled
  *   `pending-bitcoin-acceptance` (P9.18); submitted but not observed, they
- *   are `submitted-unobserved` (P9.18 as originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges);
+ *   are `submitted-unobserved` (P9.18 as originals-spec #51 (open, head b96841c2e), PROVISIONAL until it merges);
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *

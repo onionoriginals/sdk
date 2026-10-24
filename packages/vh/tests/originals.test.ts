@@ -567,7 +567,7 @@ describe("section 14: the asset log's form (P14.2)", () => {
     }
   });
 
-  test("C12-173: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
+  test("C12-173, C12-179: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
     const { alice, log } = await harbor();
     const text = serializeLog(log);
     expect((await report(text, [alice])).history.status).toBe("valid");
@@ -581,6 +581,18 @@ describe("section 14: the asset log's form (P14.2)", () => {
     failedWith(await report(lines.join("\n"), [alice]), 1, "LOG_LINE_FORMAT", "invalid-evidence");
     // Spaces inside strings are content, not whitespace.
     expect(text).toContain("Harbor at dawn");
+  });
+
+  test("C12-179: P14.2: key order and string escapes in a line are not constrained, because hashes and proofs are over the JCS form", async () => {
+    const { alice, log } = await harbor();
+    const lines = serializeLog(log).split("\n");
+    // The same entry with its top-level members reversed, and a name escaped differently.
+    const entry = JSON.parse(lines[1]) as Record<string, unknown>;
+    lines[1] = JSON.stringify(Object.fromEntries(Object.entries(entry).reverse())).replace("Harbor", "\\u0048arbor");
+    expect(lines[1].startsWith('{"proof"')).toBe(true);
+    const r = await report(lines.join("\n"), [alice]);
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.head).toBe(log[log.length - 1].versionId);
   });
 
   test("C12-172: P14.3: an integer outside the safe range is rejected however it is written; other numbers are kept", async () => {

@@ -222,6 +222,17 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(atNew.identityEvidence.freshness).toBe("not-established");
   });
 
+  test("C12-177: a log from the old host whose latest version moves the DID and removes a key: the removal is applied, and freshness is not established (P7.8)", async () => {
+    // The move version drops orig-1 for orig-2; the asset entries were signed with orig-1 before it.
+    const { alice, log } = await moved([{ fragment: "orig-2", signer: K2 }]);
+    const r = await verify(log, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);
+    // Every verified version is used, including the one that removes the key (P7.8, P7.9).
+    expect(r.historicallyAuthorizedOnly.map((h) => h.versionId)).toEqual(log.map((e) => e.versionId));
+    expect(r.reasons).toContain("historically-authorized-only");
+    expect(r.identityEvidence.latestVersionId).toBe(alice.versionId);
+    expect(r.identityEvidence.freshness).toBe("not-established");
+  });
+
   test("a retrieved log shorter than the retained versionId is stale, whatever its source", async () => {
     const { alice, log } = await moved();
     const r = await verify(log, [{ ...alice.evidence(alice.entries.slice(0, 1)), retrievedFrom: didWebvhLogUrl(alice.did) }], { retained: { authors: { [alice.did]: alice.versionId } } });

@@ -1,5 +1,5 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 1039c471c. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 1039c471c. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
   "spec": {
     "repository": "aviarytech/originals-spec",
     "commit": "1039c471c",
@@ -14,9 +14,9 @@
       },
       {
         "pr": 51,
-        "head": "3f5a15ea6",
+        "head": "b96841c2e",
         "rows": [
-          161,
+          101,
           162,
           163,
           164,
@@ -30,7 +30,11 @@
           172,
           173,
           174,
-          175
+          175,
+          176,
+          177,
+          178,
+          179
         ]
       }
     ]
@@ -161,7 +165,8 @@
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
-      ]
+      ],
+      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 9): Missing identity history for an entry the accepted state depends on | Incomplete identity evidence; no blanket verified result. For an inscription after the anchor, see P9.15’s unverifiable case"
     },
     {
       "id": "C12-10",
@@ -855,7 +860,8 @@
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
-      ]
+      ],
+      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 60): Anchored Original whose did:vh or did:webvh author DID log is unavailable for entries the accepted state depends on | Incomplete identity evidence; not reported as current. Later inscriptions it cannot check are unverifiable and leave the accepted state current (P9.15)"
     },
     {
       "id": "C12-63",
@@ -1389,7 +1395,8 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
-      ]
+      ],
+      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 100): Anchoring when the log or signer identity evidence through the signed anchoring entry does not verify | SDK refuses to inscribe (P9.18)"
     },
     {
       "id": "C12-101",
@@ -1722,7 +1729,8 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/editors.test.ts",
         "packages/vh/tests/editors.test.ts"
-      ]
+      ],
+      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 125): Editor DID history missing for an editor entry | In the accepted state: incomplete identity evidence, not reported as current (P7.1, P5.6). An inscription after the anchor: unverifiable; accepted state stays current (P9.15)"
     },
     {
       "id": "C12-125",
@@ -2209,83 +2217,98 @@
       ]
     },
     {
+      "id": "C12-176",
+      "position": 101,
+      "test": "Verified anchoring inscription after submission",
+      "requiredResult": "Submitted, not observed, while the network is not seen to hold it; pending Bitcoin acceptance while in the mempool or confirmed; anchored once confirmed (P9.18)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
+      ]
+    },
+    {
       "id": "C12-161",
-      "position": 161,
+      "position": 162,
       "test": "Inscription after the anchor naming a signer DID version the verifier cannot verify",
       "requiredResult": "Reported unverifiable; the accepted state stays current and its identity evidence is not made incomplete (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
     {
       "id": "C12-162",
-      "position": 162,
+      "position": 163,
       "test": "Inscription after the anchor naming a did:vh or did:webvh signer version number the verifier holds under another versionId",
       "requiredResult": "Rejected (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
     {
       "id": "C12-163",
-      "position": 163,
+      "position": 164,
       "test": "Inscription after the anchor naming a did:btco signer version not in that DID’s fully read history",
       "requiredResult": "Rejected (P5.13, P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/btco-author.test.ts"
       ]
     },
     {
       "id": "C12-164",
-      "position": 164,
+      "position": 165,
       "test": "Unverifiable inscription after the anchor that the verifier later verifies and accepts",
       "requiredResult": "Change of head reported, not silent (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
     {
       "id": "C12-165",
-      "position": 165,
+      "position": 166,
       "test": "Moved signer with no verified entry yet, whose latest entry names a location other than its earliest",
       "requiredResult": "Earliest entry’s location asked first; a log from either must verify from the identity’s genesis (P5.14)",
       "phases": [
         2
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/continuity.test.ts"
       ]
     },
     {
       "id": "C12-166",
-      "position": 166,
+      "position": 167,
       "test": "Signer DID log obtained from a location without support from that DID’s witnesses or watchers",
       "requiredResult": "Freshness not established; the report states where and when it was obtained and that a newer version may exist (P7.8)",
       "phases": [
@@ -2293,8 +2316,8 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/continuity.test.ts",
         "packages/vh/tests/continuity.test.ts"
@@ -2302,45 +2325,45 @@
     },
     {
       "id": "C12-167",
-      "position": 167,
+      "position": 168,
       "test": "Signer DID log obtained at a location whose latest version’s `id` names another location",
       "requiredResult": "Not used as that identity’s latest (P7.8)",
       "phases": [
         2
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/continuity.test.ts"
       ]
     },
     {
       "id": "C12-168",
-      "position": 168,
+      "position": 169,
       "test": "Anchoring inscription submitted but rejected, evicted or not visible to the SDK’s Bitcoin provider",
       "requiredResult": "Labelled submitted, not observed; never pending Bitcoin acceptance (P9.18)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
       ]
     },
     {
       "id": "C12-169",
-      "position": 169,
+      "position": 170,
       "test": "did:btco inscription with a delegated or content-encoded body whose own metadata is a DID document for that DID",
       "requiredResult": "A version of that DID (P5.13)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/btco-author.test.ts"
@@ -2348,52 +2371,52 @@
     },
     {
       "id": "C12-170",
-      "position": 170,
+      "position": 171,
       "test": "did:btco inscription on the DID’s sat whose metadata the verifier has not read",
       "requiredResult": "History ends before it; identity evidence incomplete (P5.13)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/btco-author.test.ts"
       ]
     },
     {
       "id": "C12-171",
-      "position": 171,
+      "position": 172,
       "test": "Author entry that adds a resource and grants it to an editor",
       "requiredResult": "Accepted; the editor may change it from the next entry (P5.15, P5.17)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/resources.test.ts"
       ]
     },
     {
       "id": "C12-172",
-      "position": 172,
+      "position": 173,
       "test": "Number such as `1e16` or `9007199254740993.0` in an entry",
       "requiredResult": "Rejected (P14.3)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ]
     },
     {
       "id": "C12-173",
-      "position": 173,
+      "position": 174,
       "test": "Asset log or inscription body with a carriage return, non-compact JSON or no final line feed",
       "requiredResult": "Rejected (P14.2)",
       "phases": [
@@ -2401,8 +2424,8 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/originals.test.ts"
@@ -2410,32 +2433,79 @@
     },
     {
       "id": "C12-174",
-      "position": 174,
+      "position": 175,
       "test": "Proof with a member other than those P14.8 lists",
       "requiredResult": "Rejected (P14.8)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ]
     },
     {
       "id": "C12-175",
-      "position": 175,
+      "position": 176,
       "test": "Evidence package whose entries are unsorted or carry other dates, flags or modes",
       "requiredResult": "A reader may accept it; a writer never produces it (P14.10)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@3f5a15ea6",
-      "note": "PROVISIONAL: open spec PR #51 (head 3f5a15ea6), not in the pinned table; owner decisions of 23 October 2026.",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
+    },
+    {
+      "id": "C12-177",
+      "position": 177,
+      "test": "Signer DID log from the old host whose latest version moves the DID and removes a key",
+      "requiredResult": "Removal applied; moved log sought; freshness not established until found (P7.8, P5.14)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "covered",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
+      "coveredBy": [
+        "packages/vh/tests/continuity.test.ts"
+      ]
+    },
+    {
+      "id": "C12-178",
+      "position": 178,
+      "test": "did:btco signer whose named version is known but an earlier inscription on its sat is unread",
+      "requiredResult": "Unverifiable; not accepted against the older state (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
+    },
+    {
+      "id": "C12-179",
+      "position": 179,
+      "test": "Asset log line with whitespace outside JSON strings / with keys in non-JCS order",
+      "requiredResult": "Rejected / accepted (P14.2)",
+      "phases": [
+        1,
+        4
+      ],
+      "status": "covered",
+      "proposal": "originals-spec#51@b96841c2e",
+      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
       ]
     }
   ]

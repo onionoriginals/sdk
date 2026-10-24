@@ -39,24 +39,26 @@ for (const root of roots) {
 
 describe("section 12 conformance registry", () => {
   // The pinned table (originals-spec master 1039c471c) has 159 rows. Open spec PRs propose more,
-  // registered provisionally with `proposal`: #50 row 160, and #51 rows 161 to 175. Ids are stable
-  // across re-pins, so they need not equal table positions; a pinned row records its position in
-  // the pinned table, a proposed one its position in its pull request's table.
+  // registered provisionally with `proposal`: #50 row 160, and #51 19 rows, one of them (101)
+  // between pinned rows. Ids are stable across re-pins, so they need not equal table positions; a
+  // pinned row records its position in the pinned table, a proposed one its position in its pull
+  // request's table.
   test("registers all 159 pinned rows and the proposed ones with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(175);
+    expect(registry.rows.length).toBe(179);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
     expect(pinned.length).toBe(159);
     expect(registry.rows.slice(0, 159)).toEqual(pinned);
     expect(pinned.map((r) => r.position)).toEqual(pinned.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(175);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(179);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 
-  test("each open proposal lists its rows, in its table's order after the pinned rows", () => {
+  test("each open proposal lists its rows, in its table's order", () => {
     for (const p of registry.spec.openProposals) {
       const rows = registry.rows.filter((r) => r.proposal === `originals-spec#${p.pr}@${p.head}`);
       expect(rows.map((r) => r.position), `#${p.pr}`).toEqual(p.rows);
-      expect(Math.min(...p.rows), `#${p.pr}`).toBeGreaterThan(159);
+      expect([...p.rows].sort((a, b) => a - b), `#${p.pr}`).toEqual(p.rows);
+      expect(new Set(p.rows).size, `#${p.pr}`).toBe(p.rows.length);
     }
     const listed = new Set(registry.spec.openProposals.map((p) => `originals-spec#${p.pr}@${p.head}`));
     for (const r of registry.rows.filter((r) => r.proposal !== undefined)) expect(listed.has(r.proposal!), r.id).toBe(true);
