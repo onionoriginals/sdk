@@ -187,6 +187,20 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     expect(new DataView(written.buffer).getUint16(12, true)).toBe((0 << 9) | (1 << 5) | 1);
   });
 
+  test("C12-ZIPREAD: the reader decodes every name as UTF-8, rejecting one that is not, and rejects an entry whose mode is not a regular file (P14.10, P7.5)", () => {
+    // A name byte made invalid UTF-8 in both headers.
+    const zip = encodeZip([raw("a.txt")]);
+    const view = new DataView(zip.buffer);
+    const central = view.getUint32(zip.length - 22 + 16, true);
+    zip[30] = 0xff;
+    zip[central + 46] = 0xff;
+    fails(zip, "ARCHIVE_PATH");
+    for (const type of [0o040000, 0o010000, 0o020000, 0o060000, 0o140000]) {
+      fails(encodeZip([raw("a.txt", { externalAttributes: ((type | 0o644) << 16) >>> 0 })]), "ARCHIVE_PATH");
+    }
+    expect([...readZip(encodeZip([raw("a.txt", { externalAttributes: (0o100600 << 16) >>> 0 })])).keys()]).toEqual(["a.txt"]);
+  });
+
   test("P14.10: missing items have exact shapes; an identity item names its role", () => {
     const manifest = (missing: unknown[]) =>
       bytes(JSON.stringify({ format: "originals-evidence/0.1", profile: "originals:1.0", original: "did:vh:Qm", checkpoint: "1-Qm", head: "1-Qm", completeness: "partial", missing }));

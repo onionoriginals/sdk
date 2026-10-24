@@ -46,7 +46,7 @@ import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
 import { compactLineError, parseLog, type LogEntry, type LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
-import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
+import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { signerOf, type AuthorRef, type EntryState } from "./state.js";
 
 /** The media type of an Originals inscription (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
@@ -83,6 +83,13 @@ export type IgnoredReason =
    * originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges).
    */
   | "later-inscription-unverifiable"
+  /**
+   * After the anchor: a publication extending the head while an earlier
+   * inscription extending the same head is unverifiable. Chain order decides,
+   * so it is not accepted until that one is resolved; `waitingOn` names it
+   * (P9.15; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
+   */
+  | "waiting-for-earlier-unverifiable"
   | "author-version-not-yet-in-effect"
   | "author-key-not-valid-at-inscription-time"
   | "author-deactivated-at-inscription-time";
@@ -124,7 +131,7 @@ export interface AnchoringReport {
   conflicting: Placed[];
   /** Inscriptions accepted after the anchor, in chain order. */
   accepted: Placed[];
-  ignored: Array<{ sat: string; inscription: string; versionId?: string; reason: IgnoredReason; code?: string }>;
+  ignored: Array<{ sat: string; inscription: string; versionId?: string; reason: IgnoredReason; code?: string; waitingOn?: string }>;
   /**
    * Inscriptions after the anchor whose signer DID version could not be
    * verified (`later-inscription-unverifiable`), with the signer DID and the
@@ -150,12 +157,15 @@ export interface AnchoringReport {
   /** Set when the anchor differs from the retained one: the change, and the owner with it, is reported (P9.16). */
   change: { previous: RetainedAnchor; current: RetainedAnchor | null } | null;
   /**
-   * Set when an inscription reported unverifiable before (the retained
-   * anchor's `unverifiable`) is now verified and accepted: the head it
-   * changes, from the head retained before to the head now, is reported, never
-   * silently (P9.15, as P9.16 for an anchor).
+   * Set when the head moves from the one retained before because an
+   * inscription's verifiability changed, never silently (P9.15, as P9.16 for
+   * an anchor; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges): `resolved`, the inscriptions
+   * reported unverifiable before (the retained anchor's `unverifiable`) that
+   * no longer are, accepted or rejected; `verified`, the inscriptions accepted
+   * past the retained head; `unverified`, inscriptions at or below the
+   * retained head, accepted before, that are unverifiable now.
    */
-  headChange: { previous: string | null; current: string; verified: Placed[] } | null;
+  headChange: { previous: string | null; current: string; verified: Placed[]; resolved: string[]; unverified: string[] } | null;
   /** No index lists every sat (P9.16). */
   uniqueness: "not-established";
   tip: { height: number; hash: string } | null;
@@ -330,13 +340,24 @@ function btcoReadThrough(history: AuthorHistory, inscription: SatInscription): b
  * Original.
  */
 function unverifiedLater(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): { reason: IgnoredReason; code?: string; ref?: AuthorRef } {
+  if (notInHistory(entry, inscription, histories)) return { reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY" };
+  const ref = signerRefOf(entry);
+  return { reason: "later-inscription-unverifiable", ...(ref ? { ref } : {}) };
+}
+
+/**
+ * Whether the signer's history shows the version an entry inscribed on the
+ * anchoring sat names is not that DID's, in the anchoring inscription or
+ * after it (P9.15; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges): for a did:vh or did:webvh, numbered at or below the
+ * newest verified version but not in the history; for a did:btco whose sat
+ * was read in full through the inscription, not among its versions.
+ */
+function notInHistory(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): boolean {
   const ref = signerRefOf(entry);
   const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
   const newest = history?.versions[history.versions.length - 1];
-  const known = ref && history ? history.versions.some((v) => v.versionId === ref.versionId) : true;
-  const notInHistory = ref && history && newest && !known && (history.method === "did:btco" ? btcoReadThrough(history, inscription) : versionNumberOf(ref.versionId) <= newest.versionNumber);
-  if (notInHistory) return { reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY" };
-  return { reason: "later-inscription-unverifiable", ...(ref ? { ref } : {}) };
+  if (!ref || !history || !newest || history.versions.some((v) => v.versionId === ref.versionId)) return false;
+  return history.method === "did:btco" ? btcoReadThrough(history, inscription) : versionNumberOf(ref.versionId) <= newest.versionNumber;
 }
 
 export interface Assembly {
@@ -348,6 +369,8 @@ export interface Assembly {
   ownerDisputed: boolean;
   /** Ignored versionIds whose rejection came from the author checks, for retroactive-revocation reporting. */
   rejectedByAuthorState: Set<string>;
+  /** The anchoring inscription's chain position, when anchored: entries in it are checked against signer DID state there (P5.13). */
+  anchorPosition?: ChainPosition;
 }
 
 type Verify = (entries: unknown[]) => Promise<LogVerification>;
@@ -390,8 +413,8 @@ export async function assembleFromBitcoin(
   const ignored: AnchoringReport["ignored"] = [];
   const unverifiable: AnchoringReport["unverifiable"] = [];
   const rejectedByAuthorState = new Set<string>();
-  const ignore = (sat: string, i: SatInscription | string, reason: IgnoredReason, entry?: LogEntry, code?: string) => {
-    ignored.push({ sat, inscription: typeof i === "string" ? i : i.id, ...(entry?.versionId ? { versionId: entry.versionId } : {}), reason, ...(code ? { code } : {}) });
+  const ignore = (sat: string, i: SatInscription | string, reason: IgnoredReason, entry?: LogEntry, code?: string, waitingOn?: string) => {
+    ignored.push({ sat, inscription: typeof i === "string" ? i : i.id, ...(entry?.versionId ? { versionId: entry.versionId } : {}), reason, ...(code ? { code } : {}), ...(waitingOn ? { waitingOn } : {}) });
     if (entry && (reason === "author-key-not-valid-at-inscription-time" || reason === "author-deactivated-at-inscription-time")) rejectedByAuthorState.add(entry.versionId);
   };
 
@@ -436,6 +459,10 @@ export async function assembleFromBitcoin(
     if (anchoringIndex(entries) !== entries.length - 1) return ["last-entry-not-anchoring"];
     const last = entries[entries.length - 1];
     if (satNamedBy(last) !== read.alias.did) return ["names-another-sat"];
+    // An entry naming a version its signer's history shows is not that DID's is rejected, here
+    // as after the anchor, not incomplete identity evidence (P9.15; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
+    const wrong = entries.find((e) => notInHistory(e, i, histories));
+    if (wrong) return ["invalid-entry", "AUTHOR_VERSION_NOT_IN_HISTORY"];
     const v = await verify(entries);
     if (!passes(v, entries.length)) {
       const code = v.failure?.error.code;
@@ -523,14 +550,18 @@ export async function assembleFromBitcoin(
    * An inscription after the anchor whose signer could not be verified: never incomplete identity
    * evidence for the accepted head, which it cannot change (P9.12, P9.15).
    */
-  const ignoreLater = (on: string, i: SatInscription, entry: LogEntry, reason: IgnoredReason, code?: string) => {
+  /** Whether the inscription was reported unverifiable. */
+  const ignoreLater = (on: string, i: SatInscription, entry: LogEntry, reason: IgnoredReason, code?: string): boolean => {
     const unverified = reason === "author-version-unavailable" || code === "AUTHOR_VERSION_UNAVAILABLE" || code === "AUTHOR_HISTORY_MISSING" || code === "EDITOR_HISTORY_MISSING";
-    if (!unverified) return ignore(on, i, reason, entry, code);
+    if (!unverified) {
+      ignore(on, i, reason, entry, code);
+      return false;
+    }
     const later = unverifiedLater(entry, i, histories);
     ignore(on, i, later.reason, entry, later.code);
-    if (later.reason === "later-inscription-unverifiable") {
-      unverifiable.push({ sat: on, inscription: i.id, ...(entry.versionId ? { versionId: entry.versionId } : {}), signer: later.ref?.did ?? "", signerVersionId: later.ref?.versionId ?? "" });
-    }
+    if (later.reason !== "later-inscription-unverifiable") return false;
+    unverifiable.push({ sat: on, inscription: i.id, ...(entry.versionId ? { versionId: entry.versionId } : {}), signer: later.ref?.did ?? "", signerVersionId: later.ref?.versionId ?? "" });
+    return true;
   };
   for (const r of rejected) {
     const after = r.read === read && chainOrder(r.inscription, chosen.inscription) > 0;
@@ -541,9 +572,12 @@ export async function assembleFromBitcoin(
   }
 
   // After the anchor: one entry per inscription, extending the head at a greater height (P9.13).
+  // Chain order decides: while an inscription extending the head is unverifiable, a later one
+  // extending the same head waits on it (P9.15; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
   const head: LogEntry[] = [...chosen.entries];
   const accepted: Placed[] = [];
   let lastHeight = chosen.inscription.height;
+  let blocking: string | null = null;
   for (const { inscription: i, entry } of singles.get(read)!) {
     if (chainOrder(i, chosen.inscription) <= 0) continue;
     if (i.height <= lastHeight) {
@@ -553,13 +587,19 @@ export async function assembleFromBitcoin(
     const n = versionNumberOf(entry.versionId);
     const candidate = [...head, entry];
     const v = n === head.length + 1 ? await verify(candidate) : null;
+    // It extends the head when it chains to it: the right number and entry hash.
+    const extendsHead = v !== null && v.failure?.error.code !== "ENTRY_HASH_MISMATCH";
+    if (blocking && extendsHead) {
+      ignore(sat, i, "waiting-for-earlier-unverifiable", entry, undefined, blocking);
+      continue;
+    }
     if (!v || !passes(v, candidate.length)) {
-      ignoreLater(sat, i, entry, !v || v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", v?.failure?.error.code);
+      if (ignoreLater(sat, i, entry, extendsHead ? "invalid-entry" : "does-not-extend-head", v?.failure?.error.code) && extendsHead) blocking = i.id;
       continue;
     }
     const author = checkAtInscriptionTime(entry, i, histories);
     if (author) {
-      ignoreLater(sat, i, entry, author);
+      if (ignoreLater(sat, i, entry, author)) blocking = i.id;
       continue;
     }
     head.push(entry);
@@ -582,16 +622,25 @@ export async function assembleFromBitcoin(
   const current: RetainedAnchor = { inscription: anchor.inscription, sat, owner: owner?.output ?? null };
   const previous = options.previousAnchor;
   const change = previous && (previous.inscription !== current.inscription || previous.sat !== current.sat) ? { previous, current } : null;
-  // P9.15: an inscription this verifier reported unverifiable before and now accepts changes the head; it is reported.
+  // P9.15: a head that moves from the retained one because an inscription's verifiability changed
+  // is reported, whichever way it moves (originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
   const before = new Set(previous && !change ? previous.unverifiable ?? [] : []);
-  const verified = accepted.filter((a) => before.has(a.inscription));
-  const headChange = verified.length > 0 ? { previous: options.previousHead ?? null, current: head[head.length - 1].versionId, verified } : null;
+  const now = new Set(unverifiable.map((u) => u.inscription));
+  const resolved = [...before].filter((id) => !now.has(id));
+  const retainedNumber = options.previousHead !== undefined ? versionNumberOf(options.previousHead) : NaN;
+  const unverified = unverifiable.filter((u) => !before.has(u.inscription) && u.versionId !== undefined && versionNumberOf(u.versionId) <= retainedNumber).map((u) => u.inscription);
+  const currentHead = head[head.length - 1].versionId;
+  const moved = options.previousHead !== undefined && currentHead !== options.previousHead;
+  const headChange = moved && (resolved.length > 0 || unverified.length > 0)
+    ? { previous: options.previousHead ?? null, current: currentHead, verified: accepted.filter((a) => versionNumberOf(a.versionId) > retainedNumber), resolved, unverified }
+    : null;
   return {
     entries: head,
     report: {
       sat, status: "anchored", anchor, conflicting, accepted, ignored, unverifiable, disputed, indexes: read.indexes, copy: copyStatus, superseded, change,
       headChange, uniqueness: "not-established", tip: read.tip,
     },
+    anchorPosition: { height: chosen.inscription.height, transactionIndex: chosen.inscription.transactionIndex, inscriptionIndex: chosen.inscription.inscriptionIndex },
     owner: owner
       ? { status: "provisional", sat, output: owner.output, ...(owner.address ? { address: owner.address } : {}), confirmations: owner.confirmations, indexes: read.indexes }
       : null,

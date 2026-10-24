@@ -40,7 +40,7 @@ import {
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
 import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor } from "./bitcoin.js";
-import type { SatEvidence } from "./btco.js";
+import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
 import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
@@ -260,6 +260,13 @@ export interface OriginalsReport {
   historicallyAuthorizedOnly: HistoricalAuthorization[];
   /** Never true for an Original that is not anchored (P7.10). */
   current: boolean;
+  /**
+   * What a current result is shown with, never dropped (section 7; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges):
+   * `unverifiable-inscriptions` when inscriptions after the anchor are unverifiable,
+   * `publications-waiting` when publications wait on one of them (P9.15). Neither stops the
+   * accepted state being current.
+   */
+  notices: Array<"unverifiable-inscriptions" | "publications-waiting">;
   /** Why the result is not current: `not-anchored` for every unanchored Original, and anything else that applies. */
   reasons: string[];
   /**
@@ -417,6 +424,10 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     identityFailures.push(failure);
     if (!failuresByDid.has(did)) failuresByDid.set(did, failure);
   };
+  // P5.13 (originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges): a did:btco history that stops at an unread or
+  // disputed inscription is missing evidence only for an entry whose check depends on the history
+  // past it. Held here until the anchor is known; inscriptions after it are unverifiable (P9.15).
+  const heldBack: Array<{ did: string; before: ChainPosition; failure: { code: string; message: string } }> = [];
   const retainedAuthors = { ...options.retained?.authors };
   const staleAuthors = new Set<string>();
   const forkedAuthors = new Set<string>();
@@ -424,7 +435,12 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     try {
       const h = await verifyAuthorHistory(evidence, { now: options.now, maxVersions: options.limits?.maxAuthorVersions });
       histories.push(h);
-      if (h.failure) noteFailure(h.did, { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` });
+      if (h.failure) {
+        const failure = { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` };
+        const gap = h.method === "did:btco" && h.establishedBefore && (failure.code === "AUTHOR_SAT_READ_INCOMPLETE" || failure.code === "AUTHOR_PLACEMENT_DISPUTED");
+        if (gap) heldBack.push({ did: h.did, before: h.establishedBefore!, failure });
+        else noteFailure(h.did, failure);
+      }
       const retained = retainedAuthors[h.did];
       if (retained !== undefined) {
         // By versionId: a did:btco version is an inscription id, with no number in it.
@@ -470,6 +486,12 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     input = assembly.entries;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
+  // The entries in the anchoring inscription depend on each signer's history up to it; without an
+  // anchor every entry may (P5.13).
+  for (const held of heldBack) {
+    const at = onBitcoin ? assembly?.anchorPosition : undefined;
+    if (!at || chainOrder(at, held.before) >= 0) noteFailure(held.did, held.failure);
+  }
   const supplied = (): Promise<LogVerification> =>
     typeof input === "string" ? verifyLogText(input, { ...verifyOptions, compactLines: true }) : verifyLog(input, verifyOptions);
   let log: LogVerification;
@@ -514,12 +536,18 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
    */
   const signerFreshness = (did: string | null, role: "author" | "editor"): Freshness => {
     if (did && staleAuthors.has(did)) return "stale";
-    if (!did || !retrievedAtLocation(did, role, options.authors, log.entries)) return "not-established";
+    if (!did) return "not-established";
     const o = obtainedOf(did);
+    if (!o.witnessed) return "not-established";
+    // The location rule is for a did:webvh log fetched from a location: it is the identity's latest
+    // there only where the latest entry it signed points (P5.14) and its latest version's `id` names
+    // that location. A did:vh log, or one from an evidence package, is judged by its witnesses alone
+    // (P7.8; originals-spec #51 (open, head c6479e26e), PROVISIONAL until it merges).
+    if (o.location === null || !did.startsWith("did:webvh:")) return "established";
+    if (!retrievedAtLocation(did, role, options.authors, log.entries)) return "not-established";
     const h = histories.find((x) => x.did === did);
     const latestId = h?.versions[h.versions.length - 1]?.document.id;
-    const names = typeof latestId === "string" && logUrl(latestId) === o.location;
-    return o.witnessed && names ? "established" : "not-established";
+    return typeof latestId === "string" && logUrl(latestId) === o.location ? "established" : "not-established";
   };
 
   // The editor DIDs relied on: each that signed a verified entry, and one whose missing history stopped verification.
@@ -615,6 +643,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
     historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
     current: false,
+    notices: [],
     reasons,
     // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
     // After a change of anchor, the new anchor's branch is the history (P9.16).
@@ -649,7 +678,12 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
-  if (assembly?.report.headChange) reasons.push("unverifiable-inscription-accepted");
+  const headChange = assembly?.report.headChange;
+  if (headChange) {
+    if (headChange.verified.some((a) => headChange.resolved.includes(a.inscription))) reasons.push("unverifiable-inscription-accepted");
+    if (headChange.resolved.length > 0) reasons.push("unverifiable-inscription-resolved");
+    if (headChange.unverified.length > 0) reasons.push("accepted-inscription-unverifiable");
+  }
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
     if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
@@ -666,6 +700,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
   // P7.10: only an anchored Original's state derived from its sat can be current (P9.13).
   report.current = valid && selected === head && anchored(head) && reasons.length === 0;
+  if (onBitcoin && onBitcoin.unverifiable.length > 0) report.notices.push("unverifiable-inscriptions");
+  if (onBitcoin && onBitcoin.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) report.notices.push("publications-waiting");
   return report;
 }
 

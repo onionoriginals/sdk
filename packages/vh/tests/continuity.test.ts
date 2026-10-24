@@ -204,9 +204,13 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(describeFreshness(alice.did, r.identityEvidence)).toContain("approved by the DID's own witnesses");
     // Established freshness still makes an unanchored Original only valid as of its checkpoint (P7.10).
     expect(r.current).toBe(false);
-    // The same witnessed log from a package is not retrieved at any location: not established.
+    // C12-EXEMPT: the location rule is for a did:webvh log fetched from a location; the same
+    // witnessed log from an evidence package establishes freshness (P7.8).
     const packaged = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "package" }]);
-    expect(packaged.identityEvidence.freshness).toBe("not-established");
+    expect(packaged.identityEvidence.freshness).toBe("established");
+    // Unwitnessed, it does not.
+    const bare = await verify(entries, [{ ...alice.evidence(), source: "package" }]);
+    expect(bare.identityEvidence.freshness).toBe("not-established");
     expect(describeFreshness(alice.did, packaged.identityEvidence)).toContain(`obtained from the evidence package at ${OBTAINED}`);
     // Retrieved anywhere else (the old location, which redirects or keeps a copy): not established.
     const elsewhere = await verify(entries, [{ ...witnessed, retrievedFrom: didWebvhLogUrl(alice.did) }]);

@@ -951,17 +951,7 @@ received.report.ownership?.output;                           // compare with the
   `putRetainedAnchor`) lists the inscriptions reported unverifiable, and
   when one of them is accepted later `anchoring.headChange` gives the head
   retained before, the head now and the inscriptions verified, with the
-  reason `unverifiable-inscription-accepted`, once. A did:btco signer whose
-  named version is known but whose sat has an unread inscription before the
-  candidate (or a tip read below it) leaves the candidate unverifiable,
-  never accepted against the older state, because that inscription could
-  remove the key. An entry this verifier accepted before stays accepted
-  when such a gap is found later: `anchoring.gaps` states each one, with
-  where the signer's history stops (`establishedBefore`), and the reason is
-  `signer-history-gap`. This holds only when the head reached chains to the
-  retained head (`retain.original`), whose versionId commits to every entry
-  before it (P9.15; originals-spec #51, open at `b96841c2e`; PROVISIONAL
-  until it merges). A retained
+  reason `unverifiable-inscription-accepted`, once. A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key
   removal can get later inscriptions accepted by readers who do not know of
