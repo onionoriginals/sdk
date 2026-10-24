@@ -206,8 +206,7 @@ every signer (the author and each editor that signed an entry, P7.1) under
 `signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
 that DID's method has witnesses; `signerPath(did)`), and the resource bytes
 under `resources/<digest>`. There is no asset witness file: asset logs have
-no witnesses (P9.8). PROVISIONAL (P14.10, section 14;
-BREAKING): the directory was `authors/` and an
+no witnesses (P9.8). P14.10 (BREAKING): the directory was `authors/` and an
 `asset/did-witness.json` was written; neither is written or read any more,
 and a package or hosted snapshot carrying them is rejected
 (`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a
@@ -255,10 +254,12 @@ owner decision of 23 October 2026; originals-spec #51, merged at master
 identity moved: its verified versions are used, removals included, and the
 SDK also asks that location (P5.14). Until that log is obtained,
 `obtained.movedTo` names where the DID now is and `movedLog` is
-`not-obtained`, and `describeFreshness` says so. A did:webvh signer log a host
-serves is judged as fetched from its URL on the host, so the location rule
-applies to it; a package's log has no fetch location, so the move rule does
-not (owner decisions on #993's review). Watchers are not consulted, so a log
+`not-obtained`, and `describeFreshness` says so. That holds for a copy too: a
+package's or a host's log whose latest version names another location than
+the identity DID reports the move and is followed (P5.14 SHOULD), its
+freshness judged as before. A host's snapshot is a copy like a package, not a
+log fetched from a location, so the location rule does not apply to it and a
+witnessed one establishes freshness (owner decisions on #993's review). Watchers are not consulted, so a log
 supported only by watchers is reported not established. Otherwise freshness is `not-established`
 (or `stale`), and the report states where, when and as of which version the
 history was obtained (`identityEvidence.obtained` and each editor's:
@@ -991,9 +992,14 @@ received.report.ownership?.output;                           // compare with the
   inscriptions accepted past it (`verified`), those reported unverifiable
   before that no longer are (`resolved`), those accepted before that are
   unverifiable now (`unverified`, as when a did:btco gap is found later; the
-  retained anchor keeps the accepted ids), and blockers the sat no longer
-  carries (`vanished`, a reorganization, P9.5). The result stays current and
-  carries the notice `head-changed`, once (owner decision on #993's review).
+  retained anchor keeps the accepted ids), and inscriptions reported
+  unverifiable or accepted before that the sat no longer carries (`vanished`,
+  a reorganization, P9.5). The result stays current and carries the notice
+  `head-changed`, once (owner decision on #993's review), unless a
+  reorganization dropped the retained head, which is
+  `authoritative-source-changed`. While blocked, a publication extending any
+  waiting one, directly or through others, waits too, and one at or below the
+  height of the one it extends is `not-above-previous-height`.
   A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key

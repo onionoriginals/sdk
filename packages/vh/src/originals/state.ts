@@ -45,7 +45,7 @@ export interface ResourceDescriptor {
 }
 
 /**
- * An editor grant (P5.15). PROVISIONAL member names (D4): one editor DID and
+ * An editor grant (P5.15; members per P14.5): one editor DID and
  * exactly which content it may change: the name, the metadata, and the
  * resources listed by resourceID.
  */
@@ -62,7 +62,7 @@ export interface AssetState {
   status: "active" | "deactivated";
   resources: ResourceDescriptor[];
   aliases: string[];
-  /** The editor grants (P5.15). Absent means no editors; PROVISIONAL: an empty list is not used. */
+  /** The editor grants (P5.15). Absent means no editors; an empty list is not used (P14.5). */
   editors?: EditorGrant[];
 }
 

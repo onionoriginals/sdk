@@ -148,7 +148,7 @@ export interface CreateInput {
   metadata?: JsonObject;
   resources: ResourceInput[];
   author: AuthorRef;
-  /** Editor grants (P5.15; PROVISIONAL member names, D4). */
+  /** Editor grants (P5.15; member names per P14.5). */
   editors?: EditorGrant[];
 }
 
@@ -587,8 +587,8 @@ export class OriginalsSDK {
    * extends that. Of what is supplied, configured and kept, the one with the
    * newest verified version is used, compared by verified versionIds and never
    * by bytes, so older evidence never rolls a newer DID log back, in
-   * verification or in what is published (P7.8, P7.9; PROVISIONAL
-   * originals-spec #47; #965 review C2). With `retained`, the newest
+   * verification or in what is published (P7.8, P7.9; originals-spec #47,
+   * merged; #965 review C2). With `retained`, the newest
    * verified versionId known is retained for the DID, so evidence that falls
    * short of it is stale; evidence that diverges is an identity fork, reported
    * as incomplete identity evidence (AUTHOR_DID_FORK), never as the package's.
@@ -1436,7 +1436,7 @@ export class OriginalsSDK {
     const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
-    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10, PROVISIONAL, section 14).
+    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10).
     const planned = 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.
