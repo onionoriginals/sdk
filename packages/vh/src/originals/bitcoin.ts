@@ -166,8 +166,8 @@ export interface AnchoringReport {
    * reported unverifiable before (the retained anchor's `unverifiable`) that
    * no longer are, accepted or rejected; `verified`, the inscriptions accepted
    * past the retained head; `unverified`, inscriptions accepted before that
-   * are unverifiable now; `vanished`, those reported unverifiable before that
-   * the sat no longer carries, as after a reorganization (P9.5).
+   * are unverifiable now; `vanished`, those reported unverifiable or accepted
+   * before that the sat no longer carries, as after a reorganization (P9.5).
    */
   headChange: { previous: string | null; current: string; verified: Placed[]; resolved: string[]; unverified: string[]; vanished: string[] } | null;
   /** No index lists every sat (P9.16). */
@@ -636,7 +636,11 @@ export async function assembleFromBitcoin(
   };
   const listUnverifiable = (i: SatInscription, entry: LogEntry, ref?: AuthorRef) =>
     unverifiable.push({ sat, inscription: i.id, ...(entry.versionId ? { versionId: entry.versionId } : {}), signer: ref?.did ?? "", signerVersionId: ref?.versionId ?? "" });
-  let blocking: { id: string; chain: LogEntry[] } | null = null;
+  // While blocked, `branches` are the waiting publications, each with the head before it and the
+  // height it was inscribed at: one extending the head, or any of them, directly or through other
+  // waiting ones, waits too, at a greater height than the one it extends (P9.13, P9.15).
+  let blocking: { id: string } | null = null;
+  let branches: Array<{ chain: LogEntry[]; height: number }> = [];
   for (const { inscription: i, entry } of singles.get(read)!) {
     if (chainOrder(i, chosen.inscription) <= 0) continue;
     if (i.height <= lastHeight) {
@@ -644,12 +648,34 @@ export async function assembleFromBitcoin(
       continue;
     }
     const n = versionNumberOf(entry.versionId);
-    const base = n === head.length + 1 ? head : blocking && n === blocking.chain.length + 1 ? blocking.chain : null;
-    if (!base) {
+    // The head, or a waiting branch this entry is numbered to extend, in chain order.
+    const bases: Array<{ chain: LogEntry[]; height: number }> = [
+      ...(n === head.length + 1 ? [{ chain: head, height: lastHeight }] : []),
+      ...branches.filter((b) => b.chain.length + 1 === n),
+    ];
+    if (bases.length === 0) {
       ignore(sat, i, "does-not-extend-head", entry);
       continue;
     }
-    const verdict = await judge(base, entry, i);
+    // The base it chains to, judged with authorization set aside, so a rule depending on the signer
+    // cannot hide which one it extends; the head when it chains to none.
+    const chainsTo = async (b: { chain: LogEntry[] }) =>
+      (await verify([...b.chain, entry], { unauthorized: range(head.length, b.chain.length + 1) })).failure?.error.code !== "ENTRY_HASH_MISMATCH";
+    let chained: { chain: LogEntry[]; height: number } | undefined;
+    for (const b of bases) if (!chained && (await chainsTo(b))) chained = b;
+    let verdict: Verdict | null = null;
+    let base: { chain: LogEntry[]; height: number } | null = null;
+    let tooLow = false;
+    const b = chained ?? bases[0];
+    if (i.height <= b.height) tooLow = true;
+    else {
+      verdict = await judge(b.chain, entry, i);
+      base = b;
+    }
+    if (!verdict || !base) {
+      ignore(sat, i, tooLow ? "not-above-previous-height" : "does-not-extend-head", entry);
+      continue;
+    }
     if (verdict.kind === "rejected") {
       ignore(sat, i, verdict.reason, entry, verdict.code);
       continue;
@@ -657,13 +683,14 @@ export async function assembleFromBitcoin(
     if (blocking) {
       if (verdict.kind === "unverifiable") listUnverifiable(i, entry, verdict.ref);
       ignore(sat, i, "waiting-for-earlier-unverifiable", entry, undefined, blocking.id);
-      if (base === blocking.chain) blocking.chain = [...blocking.chain, entry];
+      branches.push({ chain: [...base.chain, entry], height: i.height });
       continue;
     }
     if (verdict.kind === "unverifiable") {
       ignore(sat, i, "later-inscription-unverifiable", entry);
       listUnverifiable(i, entry, verdict.ref);
-      blocking = { id: i.id, chain: [...head, entry] };
+      blocking = { id: i.id };
+      branches = [{ chain: [...head, entry], height: i.height }];
       continue;
     }
     head.push(entry);
@@ -692,7 +719,8 @@ export async function assembleFromBitcoin(
   const now = new Set(unverifiable.map((u) => u.inscription));
   const onSat = new Set(read.inscriptions.map((x) => x.id));
   const resolved = [...before].filter((id) => !now.has(id) && onSat.has(id));
-  const vanished = [...before].filter((id) => !onSat.has(id));
+  const acceptedEarlier = previous && !change ? previous.accepted ?? [] : [];
+  const vanished = [...new Set([...before, ...acceptedEarlier])].filter((id) => !onSat.has(id));
   const retainedNumber = options.previousHead !== undefined ? versionNumberOf(options.previousHead) : NaN;
   // Accepted before: by the retained ids where the anchor was retained with them, else by number.
   const acceptedBefore = previous && !change && previous.accepted ? new Set(previous.accepted) : null;

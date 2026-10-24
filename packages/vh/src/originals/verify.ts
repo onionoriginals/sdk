@@ -690,7 +690,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const headChange = assembly?.report.headChange;
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
-    const explained = headChange && headChange.vanished.length === 0;
+    // Only an accepted entry that is unverifiable now can take the retained head away; resolving
+    // an unverifiable one never does, and a vanished one is a reorganization (P9.5).
+    const explained = headChange && headChange.unverified.length > 0 && headChange.vanished.length === 0;
     if (!explained && !log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
     if (assembly.rejectedByAuthorState.has(retained)) reasons.push("retroactive-revocation-conflict");
   }
