@@ -99,6 +99,25 @@ describe('BrowserOriginalsStore: durable across a browser restart', () => {
   });
 });
 
+// #976 B, G4. A publication record survives a restart, so an interrupted
+// publication resumes under the same alias (P9.2).
+describe('BrowserOriginalsStore: publication records', () => {
+  test('a record round-trips across handles, as a copy, and is replaced as the publication moves on', async () => {
+    const idb = new IDBFactory();
+    const record = { alias: { did: 'did:webvh:x', log: line('1-w') }, state: 'started' as const };
+    const first = new BrowserOriginalsStore('suborg-a', idb);
+    expect(await first.getPublication(DID)).toBeUndefined();
+    await first.putPublication(DID, record);
+    record.alias.log = 'mutated';
+    const second = new BrowserOriginalsStore('suborg-a', idb);
+    expect(await second.getPublication(DID)).toEqual({ alias: { did: 'did:webvh:x', log: line('1-w') }, state: 'started' });
+    await second.putPublication(DID, { alias: { did: 'did:webvh:x', log: line('1-w') }, state: 'complete' });
+    expect((await first.getPublication(DID))?.state).toBe('complete');
+    // Records are per account, like everything else here.
+    expect(await new BrowserOriginalsStore('suborg-b', idb).getPublication(DID)).toBeUndefined();
+  });
+});
+
 const rawOpen = (idb: IDBFactory, version: number, onblocked?: () => void) =>
   new Promise<IDBDatabase>((resolve, reject) => {
     const r = idb.open(browserDatabase('suborg-a'), version);

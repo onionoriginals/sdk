@@ -14,10 +14,11 @@
 import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
 import type { AuthorDidEvidence, RetainedAnchor } from '@originals/vh/originals';
 import { createLocalAuthor, restoreLocalAuthor, type LocalAuthor } from './local-author';
+import type { PublicationRecord, PublicationRecords } from './publication-records';
 
 export const browserDatabase = (account?: string) => `originals-library-v1:${account ? `account:${account}` : 'guest'}`;
 
-export class BrowserOriginalsStore implements OriginalsStore {
+export class BrowserOriginalsStore implements OriginalsStore, PublicationRecords {
   /** `factory` overrides the page's IndexedDB, for tests. */
   constructor(readonly account?: string, private readonly factory?: IDBFactory) {}
   private async transaction<T>(mode: IDBTransactionMode, work: (s: IDBObjectStore, done: (value: T) => void, fail: (error: unknown) => void) => void): Promise<T> {
@@ -96,6 +97,9 @@ export class BrowserOriginalsStore implements OriginalsStore {
   putRetained(did: string, id: string) { return this.change<string>(`retained:${did}`, (old) => higherVersion(old, id)); }
   getRetainedAnchor(did: string) { return this.getValue<RetainedAnchor>(`anchor:${did}`); }
   putRetainedAnchor(did: string, anchor: RetainedAnchor) { return this.put(`anchor:${did}`, anchor); }
+  // Each Original's publication record (#976 B, G4). A key like the others, so no schema change.
+  getPublication(did: string) { return this.getValue<PublicationRecord>(`publication:${did}`); }
+  putPublication(did: string, record: PublicationRecord) { return this.put(`publication:${did}`, structuredClone(record)); }
   putBranch(did: string, log: string) { return this.change<string[]>(`branches:${did}`, (old = []) => old.includes(log) ? old : [...old, log]); }
   async getBranches(did: string) { return (await this.getValue<string[]>(`branches:${did}`)) ?? []; }
   putRefused(did: string, refused: StoredRefused) {
