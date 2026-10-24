@@ -1,5 +1,20 @@
 # @originals/auth
 
+## 4.0.2
+
+### Patch Changes
+
+- c7337f3: Read the Turnkey SDK's subOrganizationId result when provisioning a verified email account, allowing sign-in with the installed V8 sub-organization API.
+- Updated dependencies [194f7ab]
+- Updated dependencies [989665c]
+- Updated dependencies [65d3a8a]
+- Updated dependencies [0dc1980]
+- Updated dependencies [ae19f3c]
+- Updated dependencies [fdb4ea4]
+- Updated dependencies [1ff1939]
+- Updated dependencies [230855f]
+  - @originals/sdk@5.1.0
+
 ## 4.0.1
 
 ### Patch Changes

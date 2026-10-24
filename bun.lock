@@ -13,7 +13,7 @@
     },
     "apps/landing": {
       "name": "@originals/landing",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@fontsource-variable/archivo": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.2.8",
@@ -22,7 +22,7 @@
         "@noble/hashes": "^2.0.1",
         "@originals/auth": "workspace:*",
         "@originals/sdk": "workspace:*",
-        "@originals/vh": "^0.2.0",
+        "@originals/vh": "^0.3.0",
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.2.0",
         "@turnkey/api-key-stamper": "^0.6.7",
@@ -50,11 +50,11 @@
     },
     "packages/auth": {
       "name": "@originals/auth",
-      "version": "4.0.1",
+      "version": "4.0.2",
       "dependencies": {
         "@noble/ed25519": "^3.1.0",
         "@noble/hashes": "^2.0.1",
-        "@originals/sdk": "^5.0.0",
+        "@originals/sdk": "^5.1.0",
         "@turnkey/crypto": "^2.10.0",
         "@turnkey/sdk-server": "^8.3.0",
         "jsonwebtoken": "^9.0.2"
@@ -80,7 +80,7 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "5.0.0",
+      "version": "5.1.0",
       "bin": {
         "originals": "./dist/originals/cli.js"
       },
@@ -89,7 +89,7 @@
         "@noble/ed25519": "^3.1.0",
         "@noble/hashes": "^2.0.1",
         "@noble/secp256k1": "^3.1.0",
-        "@originals/vh": "^0.2.0",
+        "@originals/vh": "^0.3.0",
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.2.0",
         "b58": "^4.0.3",
@@ -116,7 +116,7 @@
     },
     "packages/vh": {
       "name": "@originals/vh",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.0.1",
