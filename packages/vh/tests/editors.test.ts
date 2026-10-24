@@ -159,6 +159,11 @@ describe("C12-115: an editor entry that changes grants, aliases, lifecycle or pa
     // Without the parameter, the operation itself is the author's (P5.16).
     const operationOnly = await forge(genesis, { ...genesis.state, operation: "deactivate", transitions: [], editor: bob.ref("edit") }, bob.signer(KB, "edit"));
     failedWith(await verify([genesis, operationOnly], [alice, bob, carol]), 1, "EDITOR_AUTHOR_ONLY", "outside-grant");
+    // An operation the profile does not define is invalid evidence, whoever signs, never outside a grant or an unsupported profile.
+    for (const operation of ["migrate", "publish"]) {
+      const other = await forge(genesis, { ...genesis.state, operation, transitions: [], editor: bob.ref("edit") }, bob.signer(KB, "edit"));
+      failedWith(await verify([genesis, other], [alice, bob, carol]), 1, "STATE_OPERATION", "invalid-evidence");
+    }
   });
 
   test("the grant's scope is judged before the state's other rules: an editor dropping a published Original's alias is outside its grant (P5.16, P9.3)", async () => {

@@ -478,10 +478,14 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
     // There are no publish or migrate operations: publication and anchoring are updates that add an
-    // alias (P9.10; P14.4, PROVISIONAL, section 14), so any other operation is invalid evidence.
+    // alias (P9.10, P14.4), so any other operation is invalid evidence, never an unsupported profile.
     for (const operation of ["migrate", "publish"]) {
       const other = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign);
       failedWith(await report([...log, other], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+      const asDeactivation = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign, { deactivated: true });
+      failedWith(await report([...log, asDeactivation], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+      const genesis = await createLog({ versionTime: "2026-10-18T12:00:00.000Z", parameters: { method: ORIGINALS_METHOD, scid: "{SCID}" }, state: { ...log[0].state, id: "did:vh:{SCID}", operation }, sign });
+      failedWith(await report([genesis], [alice]), 0, "STATE_OPERATION", "invalid-evidence");
     }
   });
 

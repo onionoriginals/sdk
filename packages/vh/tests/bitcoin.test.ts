@@ -7,7 +7,7 @@
  * section 12 rows by registry id (specs/originals-conformance.json).
  */
 import { describe, expect, test } from "bun:test";
-import { serializeLog, type LogEntry } from "../src/log/index.js";
+import { appendEntry, serializeLog, type LogEntry } from "../src/log/index.js";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
   ORIGINALS_INSCRIPTION_TYPE,
@@ -850,6 +850,15 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
     expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY", versionId: junk.versionId })]);
     expect(r.anchoring?.unverifiable).toEqual([]);
     expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("a later inscription whose operation is migrate is an invalid entry, not an unsupported profile (P14.4)", async () => {
+    const { alice, copy, anchor, sign, anchoring } = await anchored();
+    const migrate = await appendEntry(anchor, { versionTime: time(30), parameters: {}, state: { ...anchor.state, operation: "migrate", transitions: [] }, sign });
+    const r = await verify(copy, alice, [sat([anchoring(10), inscribe(migrate, 30)])]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: migrate.versionId, reason: "invalid-entry", code: "STATE_OPERATION" })]);
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
