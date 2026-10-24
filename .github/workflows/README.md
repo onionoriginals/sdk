@@ -71,3 +71,10 @@ bun run changeset
 This records the affected packages and the semver bump (patch/minor/major) plus a
 summary that becomes the CHANGELOG entry. The Version PR aggregates pending
 changesets into the next release.
+
+## REV acceptance check (`ci.yml`)
+
+PRs collect criterion-specific evidence in an unprivileged job, then run the
+commit-pinned `aviarytech/rev` action after all CI jobs. Configure the
+`TYPESAFE_API_KEY` Actions secret and keep `REV` nonrequired during evaluation.
+See the [per-PR task and evidence guide](../../.rev/README.md).

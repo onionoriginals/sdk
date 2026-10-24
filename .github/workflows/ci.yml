@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: ["**"]
 
+permissions:
+  contents: read
+
 jobs:
   typecheck:
     name: Typecheck passes
@@ -64,6 +67,9 @@ jobs:
 
       - name: Run tests
         run: bun run test
+
+      - name: REV evidence collector contract
+        run: node --test scripts/rev-evidence.test.mjs
 
       - name: Release workflow contract
         run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs scripts/sync-release-lockfile.test.mjs
@@ -205,10 +211,7 @@ jobs:
     # PAT/GitHub App opens it (so the author is no longer the bot). The
     # changeset-release/* branch is only writable by maintainers/CI, so using it
     # as an exemption signal is acceptable.
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.user.login != 'github-actions[bot]' &&
-      github.head_ref != 'changeset-release/main'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -227,4 +230,71 @@ jobs:
       # Fails if the PR adds no changeset. For PRs that genuinely need no release
       # (docs/CI/tests only), add an empty one: `bun run changeset --empty`.
       - name: Require a changeset
+        if: >-
+          github.event.pull_request.user.login != 'github-actions[bot]' &&
+          github.head_ref != 'changeset-release/main'
         run: bunx changeset status --since=origin/${{ github.base_ref }}
+
+  rev-evidence:
+    name: Collect REV acceptance evidence
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+      - run: bun install --frozen-lockfile
+      - name: Run criterion-specific probes without secrets
+        run: bash -euo pipefail .rev/collect.sh
+      - name: Bind evidence to the checked-out PR revision
+        env:
+          REV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/rev-evidence.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rev-acceptance-evidence
+          path: |
+            .rev/task.json
+            .rev/evidence.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  rev:
+    name: REV
+    needs: [typecheck, lint, tests, coverage, esm-importable, landing, audit, changeset, rev-evidence]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Data only: no PR checkout, installs, or PR-authored scripts in this job.
+      - uses: actions/download-artifact@v8
+        id: evidence
+        with:
+          name: rev-acceptance-evidence
+          path: rev-input
+      - name: Evaluate acceptance criteria
+        if: ${{ !cancelled() }}
+        uses: aviarytech/rev@b54dc9be88d370f2d1b51f4aee2a117a961294b8
+        with:
+          api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          task-file: rev-input/task.json
+          evidence-file: rev-input/evidence.json
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          needs: ${{ toJSON(needs) }}
+          steps: ${{ toJSON(steps) }}
+          report-file: rev-report.json
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: rev-report
+          path: rev-report.json
+          if-no-files-found: error
+          retention-days: 14
