@@ -757,6 +757,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       <div className="container">
         <a href="/me" onClick={(e) => { e.preventDefault(); navigate('/me'); }}>{libraryCopy.title} →</a>
         <p>{libraryCopy.localNote}</p>
+        {!isAuthenticated && <p data-testid="guest-key-note">{libraryCopy.guestKey}</p>}
         {opening && <p role="status">{libraryCopy.opening}</p>}
         {openDid && asset && <div className="library-verification">
           <h2>{libraryCopy.saved}</h2>

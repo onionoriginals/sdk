@@ -51,6 +51,7 @@ function AccountLibrary({ account, fundingAddress }: { account?: string; funding
       <p className="eyebrow">{copy.eyebrow}</p>
       <h1>{copy.title}</h1>
       <p>{account ? copy.accountIntro : copy.guestIntro}</p>
+      {!account && <p>{copy.guestKey}</p>}
       <p>{copy.durability}</p>
       <div className="library-actions">
         <a className="btn btn-primary" href="/#demo" onClick={(e) => { e.preventDefault(); navigate('/'); requestAnimationFrame(() => document.getElementById('demo')?.scrollIntoView()); }}>{copy.create}</a>
