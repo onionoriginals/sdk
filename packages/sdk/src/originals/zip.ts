@@ -50,10 +50,12 @@ const UTF8 = 0x0800;
 const REGULAR_FILE = (0o100644 << 16) >>> 0;
 const DOS_DATE_1980_01_01 = (0 << 9) | (1 << 5) | 1;
 
-/** Check one archive path (P7.5). */
+const NAME_BYTES = new TextEncoder();
+
+/** Check one archive path (P7.5); its length is counted in UTF-8 bytes, at most 255 (P14.10). */
 export function checkArchivePath(name: string): void {
   const bad = (why: string) => archiveError("ARCHIVE_PATH", `archive path ${JSON.stringify(name)} ${why}`);
-  if (name.length === 0 || name.length > 255) bad("is empty or too long");
+  if (name.length === 0 || NAME_BYTES.encode(name).length > 255) bad("is empty or longer than 255 UTF-8 bytes");
   if (name.includes("\u0000")) bad("contains NUL");
   if (name.includes("\\")) bad("contains a backslash");
   if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) bad("is absolute");

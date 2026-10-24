@@ -39,7 +39,7 @@ async function journey() {
 function withoutIdentity(zip: Uint8Array, author: string): Uint8Array {
   const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("signers/")));
   const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
-  files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author }] })));
+  files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author, role: "author" }] })));
   return writeZip(files);
 }
 

@@ -211,8 +211,14 @@ and a package or hosted snapshot carrying them is rejected
 (`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a
 package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
-declares the package complete or partial, listing any missing items (a
-missing DID history is `{ kind: "identity", did, role: "author" | "editor" }`).
+declares the package complete or partial, listing any missing items. Each
+has exactly the members of its kind (P14.10): `{ kind: "resource", resource,
+version, digest, versionId }` or `{ kind: "identity", did, role: "author" |
+"editor" }`, with `role` required; anything else is `EVIDENCE_MANIFEST`. The
+landing host lists a signer DID history it does not hold as an identity
+item, so a hosted snapshot is complete only when no resource version and no
+signer history is missing. Archive names are at most 255 UTF-8 bytes, for
+the reader and the writer (`ARCHIVE_PATH`; previously UTF-16 code units).
 
 Import bounds sizes and counts before extracting anything. It rejects absolute
 paths, `..` segments, symbolic links and duplicate entries. It never replaces a

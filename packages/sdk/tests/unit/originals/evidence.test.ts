@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { resourceDigest } from "@originals/vh/originals";
-import { MemoryStore, OriginalsSDK, readEvidence, readZip, signerPath, writeZip } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, readEvidence, readManifest, readZip, signerPath, writeZip } from "../../../src/originals/index.js";
 import { encodeZip } from "../../../src/originals/zip.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -160,6 +160,34 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
   test("C12-153: an archive with a compressed entry or a name over 255 bytes is rejected (P14.10, PROVISIONAL, section 14)", () => {
     fails(encodeZip([raw("a", { method: 8 })]), "ARCHIVE_COMPRESSED");
     fails(encodeZip([raw("x".repeat(256))]), "ARCHIVE_PATH");
+  });
+
+  test("P14.10: the 255 name limit counts UTF-8 bytes, for the reader and the writer", () => {
+    // 128 two-byte characters: 128 UTF-16 code units, 256 UTF-8 bytes.
+    const wide = "é".repeat(128);
+    fails(encodeZip([raw(wide)]), "ARCHIVE_PATH");
+    expect(() => writeZip(new Map([[wide, bytes("x")]]))).toThrow(expect.objectContaining({ code: "ARCHIVE_PATH" }) as never);
+    const fits = "é".repeat(127) + "x"; // 255 bytes
+    expect([...readZip(writeZip(new Map([[fits, bytes("x")]]))).keys()]).toEqual([fits]);
+  });
+
+  test("P14.10: missing items have exact shapes; an identity item names its role", () => {
+    const manifest = (missing: unknown[]) =>
+      bytes(JSON.stringify({ format: "originals-evidence/0.1", profile: "originals:1.0", original: "did:vh:Qm", checkpoint: "1-Qm", head: "1-Qm", completeness: "partial", missing }));
+    const resource = { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: "1-Qm" };
+    const identity = { kind: "identity", did: "did:vh:QmAlice", role: "author" };
+    expect(readManifest(manifest([resource, identity, { ...identity, role: "editor" }])).missing).toHaveLength(3);
+    const bad: unknown[] = [
+      { kind: "identity", did: "did:vh:QmAlice" }, // role is required
+      { ...identity, role: "owner" },
+      { ...identity, extra: true },
+      { ...resource, size: 3 },
+      { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1) },
+      { ...resource, version: "1" },
+      { kind: "file", path: "x" },
+      "identity",
+    ];
+    for (const item of bad) expect(() => readManifest(manifest([item])), JSON.stringify(item)).toThrow(expect.objectContaining({ code: "EVIDENCE_MANIFEST" }) as never);
   });
 
   test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (P14.10, P9.8; PROVISIONAL, section 14)", async () => {
