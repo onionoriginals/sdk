@@ -12,8 +12,8 @@ import { IDBFactory } from "fake-indexeddb";
 import { MemoryStore, OriginalsSDK, readEvidence } from "@originals/sdk/originals";
 import { generateArtwork } from "../../../apps/landing/src/sdk/artwork.ts";
 import { DemoEngine } from "../../../apps/landing/src/sdk/engine.ts";
-import { browserDatabase } from "../../../apps/landing/src/sdk/browser-store.ts";
-import { demo } from "../../../apps/landing/src/content.ts";
+import { browserDatabase, pageStore } from "../../../apps/landing/src/sdk/browser-store.ts";
+import { library } from "../../../apps/landing/src/content.ts";
 import { assert, assertEqual, Phase } from "../lib/phase.mjs";
 
 const phase = new Phase("L6-signed-out");
@@ -29,7 +29,8 @@ await phase.check("b5-guest", "signed out: publishing is unavailable, guest work
     return realFetch(input, init);
   }) as typeof fetch;
   try {
-    const engine = new DemoEngine({ features: { hostedPublication: true } });
+    // The signed-out page's engine, as Demo builds it (pageStore: the guest database).
+    const engine = new DemoEngine({ features: { hostedPublication: true }, ...pageStore() });
     const created = await engine.create("Sketch", "Orbits", generateArtwork("Sketch", "Orbits", 5).svg);
     let refused = "";
     try {
@@ -39,7 +40,7 @@ await phase.check("b5-guest", "signed out: publishing is unavailable, guest work
     }
     assert(/Sign in/i.test(refused), "a signed-out Original could be published", refused);
     // The reload: a new page on the same browser finds the guest work under the same guest key.
-    const reloaded = new DemoEngine();
+    const reloaded = new DemoEngine({ ...pageStore() });
     const reopened = await reloaded.open(created.did);
     assertEqual(reopened.history.map((h) => h.versionId), created.history.map((h) => h.versionId), "the guest work after a reload");
     const next = await reloaded.update("Sketch, later", "Orbits", generateArtwork("Sketch, later", "Orbits", 6).svg);
@@ -47,9 +48,8 @@ await phase.check("b5-guest", "signed out: publishing is unavailable, guest work
     const databases = (await idb.databases()).map((d) => d.name);
     assertEqual(databases, [browserDatabase()], "IndexedDB databases a signed-out page opened");
     assertEqual(requests, [], "requests a signed-out page made");
-    for (const note of [demo.hosting.temporaryNote, demo.hosting.temporaryNoteNoPublish]) {
-      assert(/unencrypted/i.test(note) && /anyone using this browser can sign as this guest/i.test(note), "the signed-out note doesn't warn that the guest key is kept here", note);
-    }
+    // The one guest-key warning (#996's library.guestKey), shown wherever guest mode is.
+    assert(/stored in this browser, unencrypted/i.test(library.guestKey) && /anyone using this browser can sign as this guest/i.test(library.guestKey), "the guest-key warning doesn't say the key is stored here unencrypted and who can sign", library.guestKey);
     return { did: created.did, refused, databases };
   } finally {
     globalThis.fetch = realFetch;

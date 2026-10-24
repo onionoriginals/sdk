@@ -80,14 +80,20 @@ async function engineReady(page, authed = true) {
 }
 
 /**
- * The account library as a person sees it: main's /me page (#992). Each row
- * is the Original's DID and its labels ("In this browser", "Saved to
- * account", ...). Returns to the demo afterwards, with its engine ready.
+ * The account library as a person sees it: main's /me page (#992, #996). Each
+ * row (`LibraryEntry`) is a link for a real DID (an `unknown:` record is
+ * plain text), its labels ("In this browser", "Saved to account", ...) in the
+ * first <p>, the DID in <small>, and any problem (a fork, a divergence,
+ * unreadable evidence) in a later <p>. Returns to the demo afterwards, with
+ * its engine ready.
  */
 async function libraryRows(page, authed = true) {
   await page.goto(`${base.replace(/\/$/, "")}/me`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector(".originals-library") && !/Reading your saved work/.test(document.body.textContent ?? ""), null, { timeout: 60_000 });
-  const rows = await page.$$eval(".library-list li", (lis) => lis.map((li) => ({ did: li.querySelector("small")?.textContent ?? "", labels: li.querySelector("p")?.textContent ?? "" })));
+  const rows = await page.$$eval(".library-list li", (lis) => lis.map((li) => {
+    const ps = [...li.querySelectorAll("p")].map((p) => p.textContent ?? "");
+    return { did: li.querySelector("small")?.textContent ?? "", labels: ps[0] ?? "", problem: ps.slice(1).join(" ") || null, openable: !!li.querySelector("a") };
+  }));
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await engineReady(page, authed);
   return rows;
@@ -207,7 +213,8 @@ const actions = {
     const { work1, work2, work3 } = input.prior;
     await phase.check("b3-reopen-continue", "after the restart the work is listed on /me as in this browser, reopens and takes the next revision", async () => {
       const listed = await libraryRows(page);
-      for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && /in this browser/i.test(o.labels)), `${w.did} is not listed as in this browser`, listed);
+      // Listed, openable and with no problem: a fork or divergence here is a FAIL, never a pass (#996).
+      for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && o.openable && !o.problem && /in this browser/i.test(o.labels)), `${w.did} is not listed as in this browser, openable and without a problem`, listed);
       const reopened = await must(page, "open", work1.did);
       assertEqual(reopened.history.at(-1).versionId, work1.checkpoint, "checkpoint");
       const next = await must(page, "update", "Acceptance harbor, after restart", "Orbits", png(PNG_A));
@@ -241,7 +248,7 @@ const actions = {
     const { work1 } = input.prior;
     await phase.check("b3-other-client-restore", "another client restores the published work from the host and continues it", async () => {
       const listed = await libraryRows(page);
-      assert(listed.some((o) => o.did === work1.did && /saved to account/i.test(o.labels)), "the published work is not listed on /me as saved to the account", listed);
+      assert(listed.some((o) => o.did === work1.did && o.openable && !o.problem && /saved to account/i.test(o.labels)), "the published work is not listed on /me as saved to the account, openable and without a problem", listed);
       const restored = await must(page, "restore", work1.did);
       assertEqual([restored.publication, restored.webvhDid, restored.history.at(-1).versionId], ["complete", work1.alias, work1.checkpoint], "publication, alias, head");
       const next = await must(page, "update", "Acceptance harbor, other client", "Orbits", png(PNG_B));
