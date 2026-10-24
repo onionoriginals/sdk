@@ -24,6 +24,8 @@
 import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
+import { PRODUCTION_WEBVH_HOST } from '../src/sdk/features';
+import { LEGACY_WEBVH_DOMAIN } from '../src/auth/webvh-domain';
 import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl, serverAnchoringEnabled } from './bitcoin';
 
 /** Block notifications are hints; QuickNode still verifies commit confirmation. */
@@ -343,24 +345,46 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     });
   }
 
-  // The did:webvh host (#529). `demoHost()` in the SPA falls back to
-  // `window.location.host`, so an unset VITE_WEBVH_HOST means whichever
-  // hostname the visitor arrived on is baked into their DID — and a did:webvh
-  // domain cannot be changed after publication. Railway keeps its generated
-  // *.up.railway.app hostname reachable alongside the custom domain, so the
-  // wrong host is one bookmark away. Gated on mainnet: only there does a
-  // mis-pinned DID cost anything that cannot be thrown away.
+  // The did:webvh host (#529; #976 B, G1). The SPA mints every did:webvh on
+  // the domain it was built for, VITE_WEBVH_HOST (`webvhDomain()` in
+  // src/auth/webvh-domain.ts). Unset, it falls back to the legacy domain
+  // magby.originals.build, which a deployed instance other than production may
+  // not serve, and a did:webvh domain cannot be changed after publication
+  // (P3.6). So it is required on every deployed instance, whatever the network.
   const webvhHost = env.VITE_WEBVH_HOST;
-  if (btcNetwork === 'mainnet') {
-    if (!webvhHost) {
+  if (!webvhHost) {
+    if (deployed) {
       report(
         'VITE_WEBVH_HOST',
-        'VITE_WEBVH_HOST is unset with BTC_NETWORK=mainnet — every published DID is pinned to whatever hostname the visitor arrived on, permanently. Set it and REBUILD the SPA (Vite bakes it at build time).'
+        `VITE_WEBVH_HOST is unset on a deployed instance — every new did:webvh is minted on the legacy domain ${LEGACY_WEBVH_DOMAIN}, permanently, whether or not this instance serves it. Set it to this instance's bare hostname and REBUILD the SPA (Vite bakes it at build time).`
       );
-    } else if (!isBareHost(webvhHost)) {
+    }
+  } else if (!isBareHost(webvhHost)) {
+    report(
+      'VITE_WEBVH_HOST',
+      `VITE_WEBVH_HOST="${webvhHost}" is not a bare lowercase hostname — a did:webvh domain carries no scheme, port or path, and must be lowercase (e.g. "originals.build").`
+    );
+  }
+
+  // The hosted acceptance switch (#976 B, gap G7) exists only for the staging
+  // run. The bundle ignores it on the production host and on mainnet
+  // (src/sdk/features.ts); set there, it is a mis-set variable on the wrong
+  // instance, so it is named here. VITE_* values are Railway service variables,
+  // read at runtime here as they were at build. With mainnet it is fatal,
+  // whatever CONFIG_STRICT says (owner decision); on the production host alone
+  // it is an ordinary error.
+  if (env.VITE_ACCEPTANCE_HOSTED_PUBLICATION === '1') {
+    if (btcNetwork === 'mainnet' || env.VITE_BTC_NETWORK === 'mainnet') {
+      issues.push({
+        key: 'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
+        severity: 'fatal',
+        message: 'VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 on a mainnet instance. The switch is for the staging acceptance run only (scripts/acceptance/hosted-README.md); the bundle ignores it on mainnet. Unset it here; this instance refuses to boot until it is.',
+      });
+    }
+    if (env.VITE_WEBVH_HOST === PRODUCTION_WEBVH_HOST) {
       report(
-        'VITE_WEBVH_HOST',
-        `VITE_WEBVH_HOST="${webvhHost}" is not a bare lowercase hostname — a did:webvh domain carries no scheme, port or path, and must be lowercase (e.g. "originals.build").`
+        'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
+        `VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 with VITE_WEBVH_HOST=${PRODUCTION_WEBVH_HOST}, the production host. The switch is for the staging acceptance run only; the bundle ignores it here. Unset it.`
       );
     }
   }

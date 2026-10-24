@@ -12,7 +12,9 @@ import {
 } from './webvh';
 
 // #976 B, gap G1: the did:webvh domain is the host the SPA was built for, so a
-// reader can fetch what was published there (P3.6). It is permanent once used.
+// reader can fetch what was published there (P3.6). It is permanent once used:
+// an alias that moves to another host is an alias change by an author entry,
+// never a silent re-pin (C12-139, P3.6, P9.3).
 describe('the did:webvh domain comes from the build', () => {
   test('VITE_WEBVH_HOST names the domain', () => {
     expect(webvhDomain({ VITE_WEBVH_HOST: 'staging.originals.build' })).toBe('staging.originals.build');
@@ -38,6 +40,9 @@ async function legacyIdentity(subOrgId: string) {
   return { built, key: userDidLogKey(LEGACY_WEBVH_DOMAIN, userWebvhSlug(subOrgId)), jsonl };
 }
 
+// The author DID is fixed at genesis; rotation and moves happen only in the
+// author DID's own log (P5.8–P5.10). A build on a new domain therefore finds
+// the legacy identity rather than minting a second author for the account.
 describe('an identity minted on the legacy domain stays the author', () => {
   const subOrgId = 'suborg-legacy0123456';
 

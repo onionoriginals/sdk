@@ -147,7 +147,7 @@ jobs:
       # publication and a signed-out reader. Never a section B receipt: Turnkey
       # and a public host are what B proves (scripts/acceptance/hosted-README.md).
       - name: Hosted acceptance phase failure regressions
-        run: node --test scripts/acceptance/lib/phase-result.test.mjs
+        run: node --test scripts/acceptance/lib/phase-result.test.mjs scripts/acceptance/hosted/did-domain.test.mjs
       - name: Hosted acceptance dry run (loopback host, fresh processes)
         run: node scripts/acceptance/hosted-release.mjs --target local --out "$RUNNER_TEMP/originals-hosted-acceptance"
 

@@ -62,6 +62,7 @@ export const nav = {
   mobileAria: 'Mobile',
   openMenu: 'Open menu',
   closeMenu: 'Close menu',
+  library: 'Your Originals',
   signIn: 'Sign in',
   signOut: 'Sign out',
   /** Why Sign out is unavailable mid signing-session refresh (FR1). */
@@ -258,7 +259,7 @@ export const demo = {
       layer: 'did:vh',
       label: 'Private draft',
       description:
-        'Creates a signed record of your file. It stays private until you publish. When you’re signed in, Turnkey holds your signing key. Otherwise, the key and your work stay in this tab.'
+        'Creates a signed record of your file. It stays private until you publish. When you’re signed in, Turnkey holds your signing key. Otherwise, a guest key and your work stay in this browser.'
     },
     {
       id: 'publish',
@@ -308,6 +309,8 @@ export const demo = {
    */
   unavailable: {
     badge: 'Coming back',
+    /** The publish step's badge when only sign-in is missing (#976 B5). */
+    signedOutBadge: 'Sign in to publish',
     hostedPublication:
       'Publishing to the web is being rebuilt on the Originals Protocol and returns soon. Your Original is complete without it: download its evidence to keep a copy anyone can check.',
     bitcoinAnchoring:
@@ -452,8 +455,11 @@ export const demo = {
   },
   resolved: {
     heading: 'Signed history—available on this site',
-    /** Signed-out heading. Publishing needs sign-in; see `hosting.temporaryNote`. */
-    temporaryHeading: 'Signed history—available here for now',
+    /**
+     * Signed-out heading. Publishing needs sign-in (#976 B5), so a signed-out
+     * history is only in this browser; see `hosting.temporaryNote`.
+     */
+    temporaryHeading: 'Signed history—in this browser only',
     resolvedBadge: 'Available ✓',
     pendingBadge: 'Available on the published site',
     linkLabel: 'Open the signed history',
@@ -660,7 +666,20 @@ export const demo = {
    * failed: 507` was reaching the page before this existed — a transport string
    * on screen, and a breach of the mechanical floor in GRADING.md.
    */
+  /** Where signed-in work is kept on this device (#976 B, G2). */
+  storage: {
+    notKeptAcrossRestarts:
+      'This browser can’t keep your work on this device, so it isn’t saved across restarts. Keep this page open, and download its evidence before you leave.'
+  },
   hosting: {
+    /** Published and verified, but not yet in the account's list (G3). Said apart from publication. */
+    notListed:
+      'Published, and anyone can verify it. It isn’t in your account’s list yet, so your other devices won’t show it until it is.',
+    retryListing: 'Add to my list',
+    indexFull:
+      'Your account’s list of published Originals is full, so this one can’t be added. It is still published, and anyone can verify it.',
+    indexUnavailable:
+      'We couldn’t add this Original to your account’s list. It is still published, and anyone can verify it. Try again in a moment.',
     rateLimited:
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
     unavailable:
@@ -674,15 +693,13 @@ export const demo = {
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
+    // Owner decision of 23 October 2026: signed out, the guest key is kept in
+    // this browser with a warning (#992). Said before anything is signed.
     temporaryNote:
-      'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be published or continued once you leave. Download its evidence to keep a copy anyone can verify. Sign in to publish it and keep editing.'
-  },
-  /** A signed-in author's Originals (#976 B3): kept in this browser, or published from another device. */
-  yours: {
-    heading: 'Your Originals',
-    open: 'Open',
-    restore: 'Restore',
-    elsewhere: 'Published from another device'
+      'Signed out, this Original is signed with a guest key saved in this browser with your work, unencrypted: it survives a reload here, and anyone using this browser can sign as this guest. Publishing needs sign-in. Sign in to sign with your own key and publish.',
+    /** The same caveat (G10) for a build where no one can publish yet. */
+    temporaryNoteNoPublish:
+      'Signed out, this Original is signed with a guest key saved in this browser with your work, unencrypted: it survives a reload here, and anyone using this browser can sign as this guest. Sign in to sign with your own key.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -887,9 +904,10 @@ export const legal = {
         heading: 'Keys and your browser',
         body: [
           'Signed in, the keys behind your did:webvh identity and the Originals you author are Ed25519 keys in your Turnkey sub-organization, not in this browser. The identity key controls your DID and each published Original’s web address; a different key signs your Originals. This site publishes your DID log and never holds either private key.',
-          'Signed out, neither key exists. The Original is signed by a key generated in the page and discarded with it: it is never stored or sent anywhere, and nothing can recover it, so that Original can’t be continued after you leave. Its evidence package holds no private key.',
+          'Signed out, Originals are signed with a guest key made in this browser. The guest key and your guest work are saved in this browser’s IndexedDB, unencrypted and separate from every account, so they survive a reload on this device. Anyone who uses this browser can read them and sign as this guest. Nothing of it is sent to the server, and clearing browser data destroys it. Sign in to sign with your own key and to publish. A guest Original’s evidence package holds no private key.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
-          'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted once the server answers.'
+          'Unsigned drafts, signed Originals, resource files and verified checkpoints are kept in account-scoped IndexedDB storage on this device. Guest authorship keys are also saved locally so guest work can be revised after refresh. Signing in does not upload local drafts, and signing out keeps them for the same account’s return. Clearing browser data removes these local copies; export evidence for recovery.',
+          'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted only when the server acknowledges those exact transactions.'
         ]
       },
       {
@@ -899,7 +917,7 @@ export const legal = {
           'When you inscribe, the signed commit and reveal transactions are stored before anything is broadcast. That copy is what lets the server finish an inscription for a browser tab that died between the two, and it stays on the volume afterwards — only a superseded pair that can no longer land has its signed transactions dropped. A per-account ceiling bounds how many of these records are kept, oldest spent ones first.',
           'When you anchor an Original on Bitcoin, the server keeps its own copy of the evidence you send with it: the Original’s signed history, your DID’s log, and the bytes of its files. It checks that copy before anything is broadcast, and keeps it, with the signed transactions, so it can finish or re-send an inscription later. Bitcoin itself holds only the signed history; that copy, and your own, are where the files live.',
           'The deposit address your account is bound to is stored too, along with the last balance read we could trust and any unresolved problem reading it, in a file named after your sub-organization id. That is what puts a warning on Your Originals after you have closed the tab.',
-          'The anonymous demo stores nothing durable. What it publishes goes to an in-memory store with a size budget and a time limit, and it is gone by the next deploy.'
+          'Signed out, nothing is published and the server stores nothing: publishing needs sign-in, and guest work stays in this browser.'
         ]
       },
       {
@@ -1014,4 +1032,31 @@ export const legal = {
       }
     ]
   }
+};
+
+/** Private recovery is separate from public hosting and Bitcoin publication. */
+export const library = {
+  eyebrow: 'Your library', title: 'Your Originals', loadingAccount: 'Loading your account…',
+  accountIntro: 'Work saved for your signed-in account, together with its copies in this browser.',
+  guestIntro: 'Guest work saved in this browser. Sign in to find work saved to your account.',
+  durability: 'Browser copies stay on this device and can be lost if browser data is cleared. Keep an evidence export. Importing verifies the evidence; it does not make you its author or owner.',
+  create: 'Create an Original', import: 'Import evidence', refresh: 'Refresh list',
+  reading: 'Reading your saved work…', empty: 'No saved Originals found here yet.',
+  browser: 'In this browser', account: 'Saved to account', pending: 'Submission awaiting an answer', incomplete: 'Incomplete account record',
+  draft: 'Continue unfinished draft', draftNote: 'Unfinished draft · In this browser',
+  localNote: 'Signed work is saved in this browser. Keep an evidence export for recovery; local copies are not available on other devices.',
+  opening: 'Opening and verifying your Original…', saved: 'Saved copy', author: 'Author:', history: 'History:', binding: 'Author binding:', resources: 'Resources:', identity: 'Identity evidence:',
+  savedHead: 'Saved head:', bitcoin: 'Bitcoin:', acceptedHead: 'Accepted head:', notChecked: 'not checked', notEstablished: 'not established',
+  bitcoinTrust: "This Bitcoin read relies on this site's provider and one index. No independent index was compared. The holder of the sat is reported separately from authorship; resource and identity files remain off Bitcoin.",
+  checkBitcoin: 'Check Bitcoin again', localCheckpoint: 'Local history is valid as of this saved checkpoint. It has no Bitcoin-accepted head.',
+  pendingNote: 'Submission awaiting an answer. Resuming sends the same signed submission; it does not sign or pay again.',
+  bitcoinStatusUnavailable: 'Submission status could not be read. Your saved evidence and any pending submission have been kept.',
+  bitcoinUnchecked: 'Bitcoin status checked when opened',
+  listError: 'Your library could not be read. Please retry.',
+  tooLarge: 'This export is too large to open here.', importError: 'Evidence was not opened:',
+  identityLimit: 'Identity checks use the newest verified history available to this reader. They do not establish that no newer identity version exists.',
+  bitcoinLabels: { anchored: 'Accepted on this Bitcoin read', 'not-anchored': 'No accepted anchor found in this read', unverified: 'Incomplete Bitcoin evidence' } as Record<string, string>,
+  holder: 'Sat holder output (provisional):',
+  currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
+  draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
 };

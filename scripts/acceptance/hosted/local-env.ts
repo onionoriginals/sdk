@@ -17,7 +17,7 @@ import { FileStore } from "@originals/sdk/originals/fs";
 import { signToken, getAuthCookieConfig } from "@originals/auth/server";
 import { DemoEngine, type Authoring, type PublishTarget } from "../../../apps/landing/src/sdk/engine.ts";
 import { DurableHostingStorageAdapter } from "../../../apps/landing/src/sdk/durable-hosting-adapter.ts";
-import type { PublicationRecord } from "../../../apps/landing/src/sdk/idb-store.ts";
+import { higherPublication, type PublicationRecord } from "../../../apps/landing/src/sdk/publication-records.ts";
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from "../../../apps/landing/src/auth/webvh.ts";
 import { serializeCookie } from "../../../apps/landing/server/cookies.ts";
 import * as ed from "@noble/ed25519";
@@ -81,7 +81,7 @@ export async function identitySigner(c: Custody): Promise<BrowserWebVHSigner> {
   return new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
 }
 
-/** A FileStore that also keeps publication records, as the browser's IndexedDbStore does (G4). */
+/** A FileStore that also keeps publication records, as the browser's BrowserOriginalsStore does (G4). */
 export async function clientStore(dir: string) {
   const store = await FileStore.open(dir);
   const records = join(dir, "publications");
@@ -89,7 +89,9 @@ export async function clientStore(dir: string) {
   const file = (did: string) => join(records, `${createHash("sha256").update(did).digest("hex")}.json`);
   return Object.assign(store, {
     getPublication: async (did: string): Promise<PublicationRecord | undefined> => (existsSync(file(did)) ? (JSON.parse(readFileSync(file(did), "utf8")) as PublicationRecord) : undefined),
-    putPublication: async (did: string, record: PublicationRecord): Promise<void> => writeFileSync(file(did), JSON.stringify(record)),
+    // Forward only, as the browser's store keeps them (higherPublication).
+    putPublication: async (did: string, record: PublicationRecord): Promise<void> =>
+      writeFileSync(file(did), JSON.stringify(higherPublication(existsSync(file(did)) ? (JSON.parse(readFileSync(file(did), "utf8")) as PublicationRecord) : undefined, record))),
   });
 }
 
@@ -103,11 +105,18 @@ export async function signedInEngine(input: LocalInput, storeDir: string, opts: 
     subOrgId: input.sub,
     // The staging build's switch, standing in for VITE_ACCEPTANCE_HOSTED_PUBLICATION (G7).
     features: { hostedPublication: true },
-    openStore: async () => store,
+    store,
     author: async () => authoring(custody),
     publishTarget: { upload: opts.upload ?? uploader(input), read: strangerRead(input), domain: input.domain, slug: userWebvhSlug(input.sub), aliasSigner: async () => aliasSigner },
   });
   return { engine, store, custody };
+}
+
+/** The account's library rows, as /me reads them (GET /api/originals; main's data path). */
+export async function accountRows(input: LocalInput): Promise<Array<{ did: string; title: string; availability: string; alias?: string }>> {
+  const res = await fetch(`http://127.0.0.1:${input.port}/api/originals`, { headers: { cookie: cookieFor(input) } });
+  if (!res.ok) throw new Error(`GET /api/originals answered ${res.status}`);
+  return ((await res.json()) as { originals: Array<{ did: string; title: string; availability: string; alias?: string }> }).originals;
 }
 
 /** Deterministic test bytes: a real PNG (1x1) and a text body. */

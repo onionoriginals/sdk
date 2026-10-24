@@ -5,7 +5,9 @@
  * profile: IndexedDB, localStorage and cookies survive as they do for a
  * person. "Another client" is a second, empty profile.
  *
- * The page's own engine (`window.__originalsDemo`, set by DemoEngine) is
+ * The page's own engine (`window.__originalsDemo`, which Demo exposes only on
+ * a staging acceptance build: the switch set, not the production host, not
+ * mainnet; src/sdk/acceptance-hook.ts) is
  * driven through its public methods, so every signature is made by the real
  * client-held Turnkey session in that page. Sign-in goes through the UI; the
  * OTP is read from the operator on stdin, typed into the page, and dropped.
@@ -15,6 +17,7 @@
  * NOT YET EXERCISED against a deployed host: the first staging run is its
  * test (scripts/acceptance/hosted-README.md).
  */
+import { didWebvhDomain } from "./did-domain.mjs";
 import { createInterface } from "node:readline/promises";
 import { chromium } from "playwright-core";
 import { safeFetch } from "@originals/vh/fetch";
@@ -76,6 +79,20 @@ async function engineReady(page, authed = true) {
   await page.waitForFunction((want) => globalThis.__originalsDemo && globalThis.__originalsDemo.authed === want, authed, { timeout: 60_000 });
 }
 
+/**
+ * The account library as a person sees it: main's /me page (#992). Each row
+ * is the Original's DID and its labels ("In this browser", "Saved to
+ * account", ...). Returns to the demo afterwards, with its engine ready.
+ */
+async function libraryRows(page, authed = true) {
+  await page.goto(`${base.replace(/\/$/, "")}/me`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector(".originals-library") && !/Reading your saved work/.test(document.body.textContent ?? ""), null, { timeout: 60_000 });
+  const rows = await page.$$eval(".library-list li", (lis) => lis.map((li) => ({ did: li.querySelector("small")?.textContent ?? "", labels: li.querySelector("p")?.textContent ?? "" })));
+  await page.goto(base, { waitUntil: "domcontentloaded" });
+  await engineReady(page, authed);
+  return rows;
+}
+
 async function ensureIdentity(page) {
   const cta = page.locator("button.idp-cta");
   if (await cta.count()) {
@@ -126,12 +143,23 @@ const actions = {
     await ensureIdentity(page);
     await engineReady(page);
     await phase.check("b1-create-revise-publish", "create, revise and publish through the page's Turnkey session", async () => {
-      await must(page, "create", "Acceptance harbor", "Orbits", png(PNG_A));
+      const created = await must(page, "create", "Acceptance harbor", "Orbits", png(PNG_A));
+      // Before anything is published: the account's identity DID must be on
+      // this staging domain (hosted-README.md "Account"), or B2 can't bind it.
+      const expected = new URL(base).host;
+      const didDomain = { expected, actual: didWebvhDomain(created.author), status: didWebvhDomain(created.author) === expected ? "PASS" : "FAIL" };
+      phase.facts.didDomain = didDomain;
+      assertEqual(didDomain.actual, expected, "the identity DID's domain (use a fresh sub-org minted on this staging build)");
       await must(page, "update", "Acceptance harbor, revised", "Orbits", png(PNG_B));
       const published = await must(page, "publish");
       assertEqual(published.publication, "complete", "publication");
       phase.facts.work1 = facts(published);
       return phase.facts.work1;
+    });
+    await phase.check("b1-did-domain", "the account's identity DID is on this staging did:webvh domain", async () => {
+      const d = phase.facts.didDomain;
+      assert(d && d.status === "PASS", "the identity DID is not on this staging domain", d);
+      return d;
     });
     await phase.check("b1-key-roles", "the hosted logs show separate identity (alias control) and authorship roles", async () => {
       const s = await must(page, "snapshot");
@@ -145,7 +173,7 @@ const actions = {
       assert(updateKeys(authorLog).some((k) => k.includes(key("#key-0"))), "the identity key is not the author DID's update key");
       assert(updateKeys(aliasLog).some((k) => k.includes(key("#key-0"))), "the identity key does not control the alias (P3.7)");
       assert(![...updateKeys(authorLog), ...updateKeys(aliasLog)].some((k) => k.includes(key("#key-1"))), "the authorship key is an update key (P5.11)");
-      phase.facts.author = { did: s.author, logUrl: didWebvhLogUrl(s.author) };
+      phase.facts.author = { did: s.author, logUrl: didWebvhLogUrl(s.author), didDomain: phase.facts.didDomain };
       phase.facts.roles = {
         identity: { verificationMethod: "#key-0", turnkeyPath: "m/44'/501'/1'/0'", publicKeyMultibase: key("#key-0"), updateKey: true, controlsAlias: true },
         authorship: { verificationMethod: "#key-1", turnkeyPath: "m/44'/501'/0'/0'", publicKeyMultibase: key("#key-1"), updateKey: false, assertionMethod: true },
@@ -177,9 +205,9 @@ const actions = {
     await signIn(page);
     await engineReady(page);
     const { work1, work2, work3 } = input.prior;
-    await phase.check("b3-reopen-continue", "after the restart the work is listed, reopens and takes the next revision", async () => {
-      const listed = await must(page, "listOriginals");
-      for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && o.where === "this-browser"), `${w.did} is not listed`, listed);
+    await phase.check("b3-reopen-continue", "after the restart the work is listed on /me as in this browser, reopens and takes the next revision", async () => {
+      const listed = await libraryRows(page);
+      for (const w of [work1, work2, work3]) assert(listed.some((o) => o.did === w.did && /in this browser/i.test(o.labels)), `${w.did} is not listed as in this browser`, listed);
       const reopened = await must(page, "open", work1.did);
       assertEqual(reopened.history.at(-1).versionId, work1.checkpoint, "checkpoint");
       const next = await must(page, "update", "Acceptance harbor, after restart", "Orbits", png(PNG_A));
@@ -212,8 +240,8 @@ const actions = {
     await engineReady(page);
     const { work1 } = input.prior;
     await phase.check("b3-other-client-restore", "another client restores the published work from the host and continues it", async () => {
-      const listed = await must(page, "listOriginals");
-      assert(listed.some((o) => o.did === work1.did && o.where === "host"), "the published work is not listed from the account", listed);
+      const listed = await libraryRows(page);
+      assert(listed.some((o) => o.did === work1.did && /saved to account/i.test(o.labels)), "the published work is not listed on /me as saved to the account", listed);
       const restored = await must(page, "restore", work1.did);
       assertEqual([restored.publication, restored.webvhDid, restored.history.at(-1).versionId], ["complete", work1.alias, work1.checkpoint], "publication, alias, head");
       const next = await must(page, "update", "Acceptance harbor, other client", "Orbits", png(PNG_B));
@@ -224,16 +252,48 @@ const actions = {
     await ctx.close();
   },
 
-  /** B5: a signed-out, ephemeral page. */
+  /**
+   * B3 on staging, C12-125: back on client A's profile, whose copy is now a
+   * revision behind B's. A save on its old parent is refused, never rebased.
+   */
+  async "client-a-stale"() {
+    const ctx = await launch(input.profile);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await signIn(page);
+    await engineReady(page);
+    const { work1 } = input.prior;
+    await phase.check("b3-stale-parent", "client A, a revision behind, can't save on its old parent: refused, not rebased", async () => {
+      const opened = await must(page, "open", work1.did);
+      const parent = opened.history.at(-1).versionId;
+      const stale = await call(page, "update", "Acceptance harbor, stale copy", "Orbits", png(PNG_A));
+      assert(!stale.ok && stale.name === "StaleSaveError", "a save on a stale parent was not refused", stale);
+      const after = await must(page, "snapshot");
+      assertEqual(after.history.at(-1).versionId, parent, "client A's head after the refusal");
+      return { parent, refused: stale.name };
+    });
+    await ctx.close();
+  },
+
+  /**
+   * B5: a signed-out guest page. Owner decision of 23 October 2026 (#992):
+   * the guest key and work are kept in this browser's guest database,
+   * unencrypted, with a warning; publishing needs sign-in; nothing goes to
+   * an account database or the server.
+   */
   async "signed-out"() {
     const ctx = await launch(null);
     const page = await ctx.newPage();
+    const writes = [];
+    page.on("request", (r) => {
+      if (r.method() !== "GET" && r.method() !== "HEAD" && new URL(r.url()).pathname.startsWith("/api/")) writes.push(`${r.method()} ${new URL(r.url()).pathname}`);
+    });
     await page.goto(base, { waitUntil: "domcontentloaded" });
     await engineReady(page, false);
-    await phase.check("b5-ephemeral", "signed out: the key is discarded, publishing needs sign-in, and a reload keeps nothing", async () => {
+    await phase.check("b5-guest", "signed out: the guest-key warning shows, publishing is unavailable, guest work survives a reload in the guest database only, and nothing reaches an account database or the server", async () => {
       const body = await page.textContent("body");
-      assert(/discarded/.test(body), "the page doesn't say the signed-out key is discarded");
-      await must(page, "create", "Signed-out sketch", "Orbits", png(PNG_A));
+      assert(/unencrypted/i.test(body) && /anyone using this browser can sign as this guest/i.test(body), "the page doesn't warn that the guest key is kept in this browser");
+      const created = await must(page, "create", "Signed-out sketch", "Orbits", png(PNG_A));
       const zip = Uint8Array.from((await must(page, "evidencePackage")).__bytes);
       const pub = await call(page, "publish");
       assert(!pub.ok, "a signed-out Original was published", pub);
@@ -241,11 +301,14 @@ const actions = {
       const hits = ["secretKey", "privateKey", "secretKeyMultibase"].filter((n) => latin.includes(n));
       if (/z3u2[1-9A-HJ-NP-Za-km-z]{40,}/.test(latin)) hits.push("multikey-secret");
       assertEqual(hits, [], "private key material in the package");
-      const stored = await page.evaluate(async () => ({ idb: (await indexedDB.databases()).map((d) => d.name), local: Object.keys(localStorage) }));
-      assert(!stored.idb.some((n) => n?.startsWith("originals-store:")), "a signed-out page opened an Originals store", stored);
       await page.reload();
       await engineReady(page, false);
-      assertEqual(await must(page, "listOriginals"), [], "a reloaded page's list");
+      const reopened = await must(page, "open", created.did);
+      assertEqual(reopened.history.map((h) => h.versionId), created.history.map((h) => h.versionId), "the guest work after a reload");
+      const stored = await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+      assert(stored.includes("originals-library-v1:guest"), "the guest work isn't in the guest database", stored);
+      assert(!stored.some((n) => n?.startsWith("originals-library-v1:account:")), "a signed-out page opened an account database", stored);
+      assertEqual(writes, [], "writes a signed-out page sent to the server");
       return { packageSha256: sha256Hex(zip), files: Object.keys(readEvidence(zip).bytes).length, stored };
     });
     await ctx.close();

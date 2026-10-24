@@ -1,5 +1,60 @@
 # @originals/landing
 
+## 0.3.0
+
+### Minor Changes
+
+- f9f84fd: Hosted publication on the Originals Protocol, behind `hostedPublication` (off). A signed-in author publishes an Original under a did:webvh alias in their own namespace, controlled by their Turnkey identity key; the host accepts only the hosted layout, checks each resource against the Original's uploaded asset log, and serves it with the media type that log declares (the host does not verify the log; readers do). The CEL-era host key shapes are gone.
+- 1e8e1a5: Run the landing on the Originals Protocol (plan 011, PR 5). Create and revise sign as the visitor's author DID: their did:webvh through its Turnkey `#key-1` authorship key, or a browser-local did:vh when signed out. A new "Download evidence" button exports the verifiable ZIP. "First Light" is regenerated as a real evidence package and verified in the browser. Web publication, Bitcoin anchoring, `/explore` and `/me` are off until plan 011 PRs 8 and 10 rebuild them, and the copy says so.
+- 840d011: Shared-host saves (P6.7, P6.8). The SDK adds `sign` (a verified candidate against the exact parent, not yet history), `submit` (send it to a `SharedHost`; commit locally only once the host accepts or already accepted it), `refused`, `sync` and `reconcile`. A stale-parent refusal keeps the draft and the signed candidate, labelled `refused`, beside the log; the SDK never commits, packages, publishes or submits it again, and `reconcile` has the caller's signer sign the caller's reconciled change against the host's verified new head. Stores add `putRefused`/`getRefused`/`dropRefused`; `retrieveHosted` reads a hosted snapshot unverified for a host's `accepted`.
+
+  The landing host adds `POST /api/originals/submit/<site key>`: byte-identical retries return their checkpoint and the current head, otherwise only an entry extending the accepted head and verifying under the profile is accepted, in one serialized compare-and-replace per Original, with bytes stored before the head is published. A stale parent is a 409 naming the head. The signed entry authorizes the change; the caller must be the namespace owner or an account whose landing did:webvh the head state names as author or granted editor, and any other caller gets a 403 before its body is read (owner decision of 22 October 2026; P5.15). A hosted asset log can no longer be replaced by one that does not extend it. The engine saves published Originals through the host (still behind `hostedPublication`, off).
+
+- 1832877: Unanchored Originals are never current (Originals spec master 051049d8b, originals-spec #46; P7.9, P7.10, P6.5). BREAKING: `verifyOriginal` no longer takes `freshness`, `Freshness` loses `asserted`, and `current` is always false for an Original that is not anchored, with `not-anchored` first in `reasons`. Reports gain `validAsOf` (`{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`, null when the checkpoint does not verify or the Original is forked) and `historicallyAuthorizedOnly` (each entry whose key the signer's latest DID state no longer lists, by a deactivated editor DID, or after the author DID's deactivation; reason `historically-authorized-only`), which replace the `head-key-not-in-latest-*`, `editor-did-deactivated` and `*-freshness-not-established` reasons. `AuthorDidEvidence` gains `obtainedAt` and `source`, which the SDK stamps for evidence it obtains. The SDK drops its `freshness` option, `OriginalView` gains `validAsOf`, and `originals verify` drops `--freshness` and prints what the result is valid as of. A grant naming the Original's own did:vh or one of its aliases is rejected (P5.15). The landing's shared-host submit route refuses an entry that is historically authorized only (`422 entry_historically_authorized_only`) instead of one that would not be current.
+- d018a77: Wire format per section 14 of the Originals spec (originals-spec #48, merged at master 1039c471c; PROVISIONAL). BREAKING: evidence packages and hosted snapshots keep signer DID histories under `signers/<hex sha256 of the DID>/` (`signerPath`, replacing `authorPath`) and carry no `asset/did-witness.json`, since asset logs have no witnesses (P9.8); the old `authors/` directory and an asset witness file are rejected (`EVIDENCE_LAYOUT`), with no legacy reading. `verifyOriginal` drops `witnessFile`, `EvidenceContents` drops `witness` and `StoredOriginal`/`CommitUpdate` drop `witness`. An entry's size is the UTF-8 byte length of its stored line without the line feed, at most 65,536 (P7.7, P14.13), in the log engine, the hosted retrieval plan and SDK commits, which fail with `limit-exceeded`. Hosted retrieval caps one resource at 64 MiB (`FETCH_LIMITS.maxResourceBytes`, `RetrievalLimits.maxResourceBytes`, P8.5), separately from the 16 MiB log-file cap. The landing's hosted layout follows, and the First Light example package is regenerated.
+
+### Patch Changes
+
+- 0b3fc5c: Redesign the landing and interior pages around the eclipse identity: dark night ground, Archivo type, a live eclipse hero and amber reserved for signing and Bitcoin moments.
+- 8a823fa: Keep the signed-in landing hero within phone width: a long identity no longer pushes the headline, intro and actions off-screen.
+- f17156d: Add the landing's Originals anchoring and reinscription flow behind the disabled bitcoinAnchoring flag, with browser-authorized signing and durable retry. Make the SDK Bitcoin writer entry point browser safe, and patch vulnerable tooling dependencies.
+- e397e67: Bump vite to 8.1.6 and resolve launch-editor 2.14.2 to clear GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv and GHSA-r825-w8mm-5pxw.
+- 75bbca5: Restore saved Originals and local drafts after refresh through an account-scoped library, verified evidence import/export and safe resumption of uncertain Bitcoin submissions. Keep hosted evidence privately discoverable without publication gates, and prevent optional retrieval timeouts from swallowing the whole-operation deadline.
+- e900d43: The author can add and remove resources (originals-spec #49, master 1039c471c; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5). `edit` adds a resource for a new id (with its `mediaType`), appended after the existing ones at version 1, and removes resources with `remove: [id]` while one remains; `prepareUpdateOriginal` takes the same `resources` and `remove`, and `usedResourceIds`. An editor entry never adds or removes a resource (`outside-grant`, `EDITOR_AUTHOR_ONLY`). A resourceID is never used again in an Original, even after removal (`invalid-evidence`, `STATE_RESOURCE_REUSED`); a removed resource must leave every grant (`STATE_EDITORS`). Transitions give `from: null` for an added resource and `to: null` for a removed one, the resulting resources first and then the removed ones in their previous order. A removed resource's earlier versions stay in reports, packages and hosted snapshots. The signer display names additions and removals. `STATE_RESOURCE_SET` now means only a reordering, an empty resource set or a removal of an unknown id. BREAKING (types): `Transition.to` is `string | null`; `EntryContext` (the VH-Log engine's specialisation context) carries `history`.
+- Updated dependencies [f17156d]
+- Updated dependencies [a861a1c]
+- Updated dependencies [135154b]
+- Updated dependencies [596562c]
+- Updated dependencies [74fb2de]
+- Updated dependencies [c008e66]
+- Updated dependencies [6317ece]
+- Updated dependencies [c68fac7]
+- Updated dependencies [11bb93f]
+- Updated dependencies [08913a8]
+- Updated dependencies [75bbca5]
+- Updated dependencies [3f9a365]
+- Updated dependencies [47752a0]
+- Updated dependencies [216d6d0]
+- Updated dependencies [a4a7283]
+- Updated dependencies [1e8e1a5]
+- Updated dependencies [e900d43]
+- Updated dependencies [dcee1fc]
+- Updated dependencies [cef01ce]
+- Updated dependencies [840d011]
+- Updated dependencies [1832877]
+- Updated dependencies [7001d2a]
+- Updated dependencies [f8e0e29]
+- Updated dependencies [944bb5a]
+- Updated dependencies [d018a77]
+- Updated dependencies [902db9a]
+- Updated dependencies [5924062]
+- Updated dependencies [ac61f88]
+- Updated dependencies [bfdd489]
+- Updated dependencies [b6f785d]
+  - @originals/sdk@5.0.0
+  - @originals/vh@0.2.0
+  - @originals/auth@4.0.1
+
 ## 0.2.1
 
 ### Patch Changes

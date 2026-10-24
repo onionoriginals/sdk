@@ -53,10 +53,21 @@ const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
 const dirty = sh("git", ["status", "--porcelain"]).stdout.trim().split("\n").filter(Boolean);
 const dists = ["packages/sdk/dist/originals/index.js", "packages/sdk/dist/originals/fs-store.js", "packages/vh/dist/originals/index.js"];
 pre("built", "built package entry points exist (run `bun run build`)", dists.every((d) => existsSync(join(root, d))), { missing: dists.filter((d) => !existsSync(join(root, d))) });
-// B6 in source: the default stays off, and the production deploy config never sets the switch.
-const features = readFileSync(join(root, "apps/landing/src/sdk/features.ts"), "utf8");
+// B6 in source (hosted-README.md): resolveFeatures({}) and resolveFeatures(<production env>)
+// both leave hostedPublication off, with or without the switch, and the production deploy
+// config never sets it. Evaluated, not pattern-matched: Bun runs the candidate's features.ts.
 const railway = readFileSync(join(root, ".railway/railway.ts"), "utf8");
-pre("b6-source-off", "hostedPublication is off unless a non-production staging build sets the switch; production config doesn't", /host !== PRODUCTION_WEBVH_HOST/.test(features) && /PRODUCTION_WEBVH_HOST = 'originals\.build'/.test(features) && !railway.includes("VITE_ACCEPTANCE_HOSTED_PUBLICATION"), { file: "apps/landing/src/sdk/features.ts" });
+const featuresProbe = sh(bun, ["-e", `
+  const { resolveFeatures } = await import(${JSON.stringify(join(root, "apps/landing/src/sdk/features.ts"))});
+  const production = { VITE_WEBVH_HOST: "originals.build", VITE_BTC_NETWORK: "mainnet" };
+  console.log(JSON.stringify({
+    empty: resolveFeatures({}).hostedPublication,
+    production: resolveFeatures(production).hostedPublication,
+    productionWithSwitch: resolveFeatures({ ...production, VITE_ACCEPTANCE_HOSTED_PUBLICATION: "1" }).hostedPublication,
+  }));
+`]);
+const b6 = (() => { try { return JSON.parse(featuresProbe.stdout.trim().split("\n").at(-1)); } catch { return null; } })();
+pre("b6-source-off", "resolveFeatures({}) and resolveFeatures(<production env>) leave hostedPublication off, with or without the switch; production config doesn't set it", !!b6 && b6.empty === false && b6.production === false && b6.productionWithSwitch === false && !railway.includes("VITE_ACCEPTANCE_HOSTED_PUBLICATION"), { file: "apps/landing/src/sdk/features.ts", resolved: b6, ...(b6 ? {} : { error: featuresProbe.stderr.slice(-400) }) });
 if (target === "staging") pre("email", "--email names the test inbox", !!flag("--email"), {});
 
 // ------------------------------------------------------------- phases
@@ -99,7 +110,7 @@ if (!blocked && target === "local") {
     () => { const f = factsOf("L1-client-a"); return reader("L2-reader", readerCases([["work1", f.work1], ["work2", f.work2, "incomplete"], ["work3", f.work3, "incomplete"]], "complete")); },
     () => bunPhase("L3-client-a-restart", "l3-client-a-restart.ts", ["custody", "storeA"], factsOf("L1-client-a")),
     () => { const f = factsOf("L3-client-a-restart"); return reader("L4-reader", readerCases([["work1", f.work1], ["work2", f.work2], ["work3", f.work3]], "complete")); },
-    () => bunPhase("L5-client-b", "l5-client-b.ts", ["custody", "storeB", "storeC"], factsOf("L3-client-a-restart")),
+    () => bunPhase("L5-client-b", "l5-client-b.ts", ["custody", "storeA", "storeB", "storeC"], factsOf("L3-client-a-restart")),
     () => reader("L6-reader", readerCases([["work1", factsOf("L5-client-b").work1]], "complete")),
     () => bunPhase("L7-signed-out", "l6-signed-out.ts", []),
   ];
@@ -116,6 +127,7 @@ if (!blocked && target === "local") {
     () => { const f = factsOf("S3-client-a-restart"); return reader("S4-reader", readerCases([["work1", f.work1], ["work2", f.work2], ["work3", f.work3]], "complete")); },
     () => browser("S5-client-b", "client-b", { profile: profiles.b, prior: factsOf("S3-client-a-restart") }),
     () => reader("S6-reader", readerCases([["work1", factsOf("S5-client-b").work1]], "complete")),
+    () => browser("S6b-client-a-stale", "client-a-stale", { profile: profiles.a, prior: factsOf("S3-client-a-restart") }),
     () => browser("S7-signed-out", "signed-out"),
     () => browser("S8-production", "production", { productionUrl: flag("--production-url") }),
   ];
@@ -123,15 +135,19 @@ if (!blocked && target === "local") {
 }
 
 // ------------------------------------------------------------- gates
-const p = target === "local" ? { id: "L0-identity", a: "L1-client-a", r1: "L2-reader", ar: "L3-client-a-restart", r2: "L4-reader", b: "L5-client-b", r3: "L6-reader", so: "L7-signed-out" } : { a: "S1-client-a", r1: "S2-reader", ar: "S3-client-a-restart", r2: "S4-reader", b: "S5-client-b", r3: "S6-reader", so: "S7-signed-out", prod: "S8-production" };
+const p = target === "local" ? { id: "L0-identity", a: "L1-client-a", r1: "L2-reader", ar: "L3-client-a-restart", r2: "L4-reader", b: "L5-client-b", r3: "L6-reader", so: "L7-signed-out" } : { a: "S1-client-a", r1: "S2-reader", ar: "S3-client-a-restart", r2: "S4-reader", b: "S5-client-b", r3: "S6-reader", stale: "S6b-client-a-stale", so: "S7-signed-out", prod: "S8-production" };
 const ok = (phase, id) => results.find((r) => r.phase === phase)?.checks.find((c) => c.id === id)?.status === "PASS";
 const all = (...refs) => refs.every(([ph, id]) => ok(ph, id));
 const computed = {
-  "B1-turnkey-create-revise-publish": target === "local" ? all([p.id, "author-identity"], [p.a, "b1-create-revise"], [p.a, "b1-publish"], [p.a, "b1-key-roles"]) : all([p.a, "b1-create-revise-publish"], [p.a, "b1-key-roles"]),
+  // The identity DID's domain is part of B1 on both targets (hosted-README.md "Account").
+  "B1-turnkey-create-revise-publish": target === "local" ? all([p.id, "author-identity"], [p.id, "author-did-domain"], [p.a, "b1-create-revise"], [p.a, "b1-publish"], [p.a, "b1-key-roles"]) : all([p.a, "b1-create-revise-publish"], [p.a, "b1-did-domain"], [p.a, "b1-key-roles"]),
   "B2-signed-out-reader": all([p.r1, "no-authority"], [p.r1, "work1-complete"], [p.r1, "no-cookies"], [p.r2, "work1-complete"]),
-  "B3-restore-continue": all([p.ar, "b3-reopen-continue"], [p.b, "b3-other-client-restore"], [p.r3, "work1-complete"]) && (target === "staging" || all([p.ar, "b3-listed"], [p.b, "b3-restore-no-authority"])),
+  // Stale parent (C12-125) runs on both targets. Another key can't continue
+  // a restored work: that check runs only locally, because on staging the
+  // page's only signer is the account's own Turnkey session.
+  "B3-restore-continue": all([p.ar, "b3-reopen-continue"], [p.b, "b3-other-client-restore"], [p.r3, "work1-complete"]) && (target === "staging" ? all([p.stale, "b3-stale-parent"]) : all([p.ar, "b3-listed"], [p.b, "b3-stale-parent"], [p.b, "b3-restore-no-authority"])),
   "B4-interrupted-publication": all([p.a, "b4-interrupt-work2"], [p.a, "b4-interrupt-work3"], [p.r1, "work2-incomplete"], [p.r1, "work3-incomplete"], [p.ar, "b4-resume-work2"], [p.ar, "b4-resume-work3"], [p.r2, "work2-complete"], [p.r2, "work3-complete"]),
-  "B5-signed-out-ephemeral": target === "local" ? all([p.so, "b5-ephemeral"], [p.so, "b5-package-public-only"]) : all([p.so, "b5-ephemeral"]),
+  "B5-signed-out-guest": target === "local" ? all([p.so, "b5-guest"], [p.so, "b5-package-public-only"]) : all([p.so, "b5-guest"]),
   "B6-flag-off": preflight.find((x) => x.id === "b6-source-off")?.status === "PASS" && (target === "local" || ok(p.prod, "b6-production-off")),
 };
 const passed = preflight.every((x) => x.status === "PASS") && results.length > 0 && results.every((r) => r.status === "PASS") && Object.values(computed).every(Boolean);

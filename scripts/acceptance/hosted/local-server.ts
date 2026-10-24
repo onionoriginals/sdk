@@ -8,6 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { createOriginalsStore } from "../../../apps/landing/server/originals-store.ts";
 import { createOriginalsRoutes } from "../../../apps/landing/server/originals-routes.ts";
+import { createAnchoringLibrary } from "../../../apps/landing/server/originals-library.ts";
 import { buildFetch } from "../../../apps/landing/server/app.ts";
 
 const dataDir = process.env.ACCEPTANCE_DATA_DIR;
@@ -16,7 +17,8 @@ const portFile = process.env.ACCEPTANCE_PORT_FILE;
 if (!dataDir || !jwtSecret || !portFile) throw new Error("local-server needs ACCEPTANCE_DATA_DIR, ACCEPTANCE_JWT_SECRET and ACCEPTANCE_PORT_FILE");
 
 const store = createOriginalsStore({ dataDir });
-const originals = createOriginalsRoutes({ jwtSecret, store });
+// main's account library (/me): GET /api/originals discovers hosted snapshots, and its evidence route restores them.
+const originals = createOriginalsRoutes({ jwtSecret, store, library: createAnchoringLibrary(dataDir, store) });
 const noHostStore = {
   async handlePut() {
     return new Response(null, { status: 501 });
@@ -32,7 +34,7 @@ const server = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
   fetch: buildFetch({
-    apiRoutes: { "POST /api/originals": originals.record, "GET /api/originals": originals.list },
+    apiRoutes: { "POST /api/originals": originals.record, "GET /api/originals": originals.list, "GET /api/originals/evidence": originals.evidence },
     hostStore: noHostStore,
     distDir: "/nonexistent/",
     originals,

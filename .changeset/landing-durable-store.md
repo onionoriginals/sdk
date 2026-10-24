@@ -2,4 +2,4 @@
 '@originals/landing': minor
 ---
 
-A signed-in author's work is kept in IndexedDB (one database per account) and survives a browser restart: `DemoEngine.listOriginals()` lists it and `open(did)` reopens and verifies it, with a published Original's alias restored so its revisions go through the host. Signed out, work stays in memory and is discarded with the page (#976 B, G2).
+The browser's one Originals store is `BrowserOriginalsStore` (#992): signed in, the account's database; signed out, the guest's. It is hardened against other tabs: a connection gives way to another tab's schema upgrade, a blocked open waits instead of failing, each call opens the database again so a failed open is retried, and a resource's first bytes stay. Without IndexedDB, the engine keeps the work in memory and the page says it isn't saved across restarts. The page's own engine is `window.__originalsDemo` again, set by the page rather than by every engine (#976 B, G2).

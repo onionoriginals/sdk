@@ -5,12 +5,13 @@
  * key (the update key, and later each alias's controller); #key-1 the only
  * assertionMethod (P5.3, P5.11). The secrets go only to the custody file.
  */
+import { didWebvhDomain } from "./did-domain.mjs";
 import * as ed from "@noble/ed25519";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { verifyAuthorHistory } from "@originals/vh/originals";
 import { BrowserWebVHSigner, buildUserWebVHDid, ed25519PublicKeyMultibase, userDidLogKey, userWebvhSlug } from "../../../apps/landing/src/auth/webvh.ts";
-import { assert, findSecrets, Phase, utf8 } from "../lib/phase.mjs";
+import { assert, assertEqual, findSecrets, Phase, utf8 } from "../lib/phase.mjs";
 import { uploader, type LocalInput } from "./local-env.ts";
 
 const phase = new Phase("L0-identity");
@@ -44,6 +45,16 @@ await phase.check("author-identity", "the author's did:webvh is built with the l
   assert(findSecrets(utf8(JSON.stringify(pub)), { identity, authorship }).length === 0, "public facts contain a secret");
   phase.facts.author = pub;
   return pub;
+});
+
+// B1: the identity DID is on this instance's did:webvh domain (hosted-README.md "Account").
+await phase.check("author-did-domain", "the author's identity DID is on this instance's did:webvh domain", async () => {
+  const author = phase.facts.author as { did: string };
+  const didDomain = { expected: input.domain, actual: didWebvhDomain(author.did), status: "FAIL" as "PASS" | "FAIL" };
+  didDomain.status = didDomain.actual === didDomain.expected ? "PASS" : "FAIL";
+  phase.facts.author = { ...phase.facts.author, didDomain };
+  assertEqual(didDomain.actual, didDomain.expected, "the identity DID's domain");
+  return didDomain;
 });
 
 phase.finish();

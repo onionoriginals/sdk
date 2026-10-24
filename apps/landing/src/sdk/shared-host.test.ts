@@ -1,9 +1,10 @@
 /**
  * Shared-host saves through the landing's real routes and durable store
  * (P6.6, P6.7, P6.8; section 12 rows 131-137 of spec a432aa67). Two devices of
- * one author save the same Original; the second is signed in as a different
- * account, which the host accepts because the signed entry, not the account,
- * authorizes the change.
+ * one author save the same Original, both signed in to the author's account
+ * (one email is one landing account). The signed entry authorizes the change;
+ * the caller must be the namespace owner or an account whose landing DID the
+ * head state names as author or editor (owner decision of 22 October 2026).
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
@@ -14,14 +15,16 @@ import { parseJson } from '@originals/vh/json';
 import { appendEntry, createLog, createWitnessProof, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
 import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type AuthorRef } from '@originals/vh/originals';
 import { MemoryStore, OriginalsSDK, keySigner, readEvidence, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
-import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
+import { BrowserWebVHSigner, buildUserWebVHDid, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { publishOriginal } from './publish';
 import { DOMAIN, SUB, cookieFor, host } from './publish.fixture';
 import { encodeSubmission, landingSharedHost, siteKeyOf } from './shared-host';
 
 const START = Date.now();
 const LATER = START + 3_600_000;
-const SUB2 = 'sub-collaborator-02';
+const COLLAB = 'sub-collaborator-02';
+/** The namespace owner, calling `createSharedSaves` directly. */
+const OWNER = { sub: SUB, slug: userWebvhSlug(SUB) };
 const enc = (s: string) => new TextEncoder().encode(s);
 const SVG = enc('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>');
 const THEIRS = enc('<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>');
@@ -73,14 +76,17 @@ async function twoKeyAuthor(now: Date, opts: { witnessed?: boolean } = {}) {
 }
 
 /** A published Original, a second device that has it, and a host client for each. */
-async function shared(opts: { witnessed?: boolean } = {}) {
+async function shared(opts: { witnessed?: boolean; editor?: AuthorDidEvidence; start?: number } = {}) {
   const h = host();
-  const author = await twoKeyAuthor(new Date(START), opts);
-  let ta = START + 1000;
-  let tb = START + 1100;
-  const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock });
+  const start = opts.start ?? START;
+  const author = await twoKeyAuthor(new Date(start), opts);
+  let ta = start + 1000;
+  let tb = start + 1100;
+  const evidence = [author.evidence, ...(opts.editor ? [opts.editor] : [])];
+  const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: evidence, clock });
   const a = sdkFor(() => (ta += 250));
-  const c = await a.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: SVG }], author: author.ref, signer: author.signer });
+  const editors = opts.editor ? [{ did: opts.editor.did, name: false, metadata: false, resources: ['artwork.svg'] }] : undefined;
+  const c = await a.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: SVG }], author: author.ref, signer: author.signer, ...(editors ? { editors } : {}) });
   if (c.kind !== 'original') throw new Error('expected an Original');
   const did = c.original.did;
   const secret = ed.utils.randomSecretKey();
@@ -92,7 +98,7 @@ async function shared(opts: { witnessed?: boolean } = {}) {
   const parent = (await a.get(did)).checkpoint;
   const siteKey = siteKeyOf(aliasDid);
   const hostA = landingSharedHost({ sdk: a, aliasDid, transport: h.adapterFor(SUB), read: h.read });
-  const hostB = landingSharedHost({ sdk: b, aliasDid, transport: h.adapterFor(SUB2), read: h.read });
+  const hostB = landingSharedHost({ sdk: b, aliasDid, transport: h.adapterFor(SUB), read: h.read });
   const logPath = join(h.dataDir, 'hosted', siteKey, 'originals', 'asset', 'did.jsonl');
   const hostedLines = () => readFileSync(logPath, 'utf8').trimEnd().split('\n');
   /** POST a submission as `sub`, returning the raw HTTP response. */
@@ -143,7 +149,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.head).toBe(theirs.checkpoint);
     // The raw answer: 409 with the head's checkpoint.
-    const again = await env.post({ original: did, entry: mine.line, resources: {}, identities: [] }, SUB2);
+    const again = await env.post({ original: did, entry: mine.line, resources: {}, identities: [] });
     expect(again.status).toBe(409);
     expect(await again.json()).toMatchObject({ status: 'stale-parent', head: theirs.checkpoint });
     // B's SDK never submits it again (P6.8).
@@ -231,7 +237,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const { a, b, did } = env;
     const candidate = await env.edit(b, MINE);
     // The host accepts B's save, but the answer never reaches B.
-    const lost = await env.post({ original: did, entry: candidate.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
+    const lost = await env.post({ original: did, entry: candidate.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] });
     expect(lost.status).toBe(200);
     expect((await b.get(did)).checkpoint).toBe(env.parent);
     // A fetches the new head and saves on top of it.
@@ -244,7 +250,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     if (retry.status === 'stale-parent') return;
     expect(retry.original.checkpoint).toBe(candidate.versionId);
     // Raw retries of the same bytes: still the same answer, no conflict, no append.
-    const raw = await env.post({ original: did, entry: candidate.line, resources: {}, identities: [] }, SUB2);
+    const raw = await env.post({ original: did, entry: candidate.line, resources: {}, identities: [] });
     expect(raw.status).toBe(200);
     expect(await raw.json()).toEqual({ status: 'already-accepted', checkpoint: candidate.versionId, head: later.checkpoint });
     expect(env.hostedLines().length).toBe(lines);
@@ -308,7 +314,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const before = env.hostedLines().length;
     const answers = await Promise.all([
       env.post({ original: env.did, entry: one.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] }),
-      env.post({ original: env.did, entry: two.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2),
+      env.post({ original: env.did, entry: two.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }),
     ]);
     expect(answers.map((r) => r.status).sort()).toEqual([200, 409]);
     expect(env.hostedLines().length).toBe(before + 1);
@@ -342,8 +348,10 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const elsewhereKey = encodeURIComponent(`${DOMAIN}/${userWebvhSlug(SUB)}/o-111111111111111a`);
     const missing = await env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/submit/${elsewhereKey}`, { method: 'POST', body: encodeSubmission(full) }));
     expect(missing.status).toBe(404);
-    // Accepted from the second account; the files stay the namespace owner's.
-    expect((await env.post(full, SUB2)).status).toBe(200);
+    // Not from an account the head state does not name; from the namespace owner, whose files they are.
+    expect((await env.post(full, COLLAB)).status).toBe(403);
+    expect(env.hostedLines()).toEqual(before);
+    expect((await env.post(full)).status).toBe(200);
     expect(readFileSync(`${env.logPath}.owner`, 'utf8')).toBe(SUB);
     const served = await env.h.serve(new Request(`http://${env.siteKey}/originals/resources/${resourceDigest(THEIRS)}`));
     expect(served.headers.get('content-type')).toBe('image/svg+xml');
@@ -425,7 +433,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     let tc = START + 5000;
     const c = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], clock: () => (tc += 250) });
     expect((await c.import((await env.a.package(env.did)).bytes)).status).toBe('imported');
-    const hostC = landingSharedHost({ sdk: c, aliasDid: env.aliasDid, transport: env.h.adapterFor(SUB2), read: env.h.read });
+    const hostC = landingSharedHost({ sdk: c, aliasDid: env.aliasDid, transport: env.h.adapterFor(SUB), read: env.h.read });
     const didPath = `${env.siteKey}/originals/${signerPath(env.author.evidence.did)}/did.jsonl`;
     return { ...env, v2, c, hostC, didPath };
   }
@@ -437,7 +445,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const before = env.hostedLines();
     // A thief holding the removed key 0 signs against the new head.
     const thief = await env.edit(env.c, MINE, env.author);
-    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
+    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] });
     expect(res.status).toBe(422);
     // The host refuses an entry that is historically authorized only (P7.9), not one it cannot call current (P7.10).
     expect(await res.json()).toMatchObject({ error: 'entry_historically_authorized_only', reason: 'key-not-in-latest-signer-document' });
@@ -449,7 +457,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     // The owner uploads the deactivated author DID log, which extends the stored one.
     expect((await env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(env.didPath)}`, { method: 'PUT', body: env.v2.log as string }))).status).toBe(200);
     const thief = await env.edit(env.a, MINE, env.author);
-    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, SUB2);
+    const res = await env.post({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] });
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: 'entry_historically_authorized_only', reason: 'author-did-deactivated' });
   });
@@ -481,14 +489,14 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const cand = await env.edit(env.b, THEIRS);
     const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] }));
     if ('http' in parsed) throw new Error('expected a submission');
-    const res = await saves.submit(env.siteKey, parsed);
+    const res = await saves.submit(env.siteKey, parsed, OWNER);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: 'accepted', checkpoint: cand.versionId });
     expect(env.hostedLines().at(-1)).toBe(cand.line);
     const manifestPath = join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'originals-evidence.json');
     expect((JSON.parse(readFileSync(manifestPath, 'utf8')) as { checkpoint: string }).checkpoint).not.toBe(cand.versionId);
     full = false;
-    expect((await saves.submit(env.siteKey, parsed)).status).toBe(200); // a retry: already accepted
+    expect((await saves.submit(env.siteKey, parsed, OWNER)).status).toBe(200); // a retry: already accepted
     expect((JSON.parse(readFileSync(manifestPath, 'utf8')) as { checkpoint: string }).checkpoint).toBe(cand.versionId);
   });
 
@@ -496,7 +504,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const env = await shared();
     const cand = parseJson((await env.edit(env.a, THEIRS)).line) as { proof: Array<{ proofValue: string }> };
     cand.proof[0].proofValue = `z${'2'.repeat(86)}`;
-    const res = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] }, 'random-stranger');
+    const res = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] });
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: 'proof_invalid' });
   });
@@ -508,7 +516,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     // refused by the proof check, before the log is verified.
     const cand = parseJson((await env.edit(env.a, THEIRS)).line) as { proof: Array<{ proofValue: string }> };
     cand.proof[0].proofValue = `z${'2'.repeat(86)}`;
-    const bad = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.author.evidence.did, log: junkLog }] }, 'random-stranger');
+    const bad = await env.post({ original: env.did, entry: JSON.stringify(cand), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.author.evidence.did, log: junkLog }] });
     expect(bad.status).toBe(422);
     expect(await bad.json()).toMatchObject({ error: 'proof_invalid' });
     // A signer that is neither the author nor granted is refused before its log is looked at.
@@ -521,7 +529,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const forged: Record<string, any> = { ...rest, state: { ...rest.state, author: { ...stranger.ref } } };
     forged.versionId = `${Number(head.split('-')[0]) + 1}-${vhHash({ ...forged, versionId: head })}`;
     const other = { versionId: forged.versionId, versionTime: forged.versionTime, parameters: forged.parameters, state: forged.state, proof };
-    const unauthorized = await env.post({ original: env.did, entry: JSON.stringify(other), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: stranger.ref.did, log: `${stranger.evidence.log as string}{"junk":1}\n` }] }, 'random-stranger');
+    const unauthorized = await env.post({ original: env.did, entry: JSON.stringify(other), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: stranger.ref.did, log: `${stranger.evidence.log as string}{"junk":1}\n` }] });
     expect(unauthorized.status).toBe(422);
     expect(await unauthorized.json()).toMatchObject({ error: 'signer_not_authorized' });
   });
@@ -578,7 +586,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const thief = await env.edit(env.a, MINE, env.author);
     const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: thief.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }));
     if ('http' in parsed) throw new Error('expected a submission');
-    const res = await saves.submit(env.siteKey, parsed);
+    const res = await saves.submit(env.siteKey, parsed, OWNER);
     expect(raced).toBe(true);
     expect(res.status).toBe(422);
     expect(readFileSync(join(env.h.dataDir, 'hosted', env.didPath), 'utf8')).toBe(env.v2.log as string);
@@ -592,7 +600,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const cand = await env.edit(env.b, THEIRS);
     const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] }));
     if ('http' in parsed) throw new Error('expected a submission');
-    expect((await saves.submit(env.siteKey, parsed)).status).toBe(507);
+    expect((await saves.submit(env.siteKey, parsed, OWNER)).status).toBe(507);
     const resourceUrl = `http://${env.siteKey}/originals/resources/${resourceDigest(THEIRS)}`;
     expect((await env.h.serve(new Request(resourceUrl))).status).toBe(404);
     // Accepted later, it is served, with the media type its descriptor declares whatever the sidecar says.
@@ -613,7 +621,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     // Submit: a junk-extended signer log is refused, and nothing is written.
     const before = env.hostedLines();
     const cand = await env.edit(env.c, THEIRS, env.author.second);
-    const viaSubmit = await env.post({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.v2.did, log: `${env.v2.log as string}{"junk":1}\n` }] }, SUB2);
+    const viaSubmit = await env.post({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ did: env.v2.did, log: `${env.v2.log as string}{"junk":1}\n` }] });
     expect(viaSubmit.status).toBe(422);
     expect(await viaSubmit.json()).toMatchObject({ error: 'identity_log_invalid' });
     expect(env.hostedLines()).toEqual(before);
@@ -631,13 +639,13 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const cand = await env.edit(env.c, THEIRS, env.author.second);
     const body = (witness: unknown) => ({ original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [{ ...env.v2, witness } as AuthorDidEvidence] });
     // Counted in the identity byte cap.
-    const big = await env.post(body([{ versionId: '1-x', proof: [{ v: 'x'.repeat(2 * 1024 * 1024) }] }]), SUB2);
+    const big = await env.post(body([{ versionId: '1-x', proof: [{ v: 'x'.repeat(2 * 1024 * 1024) }] }]));
     expect(big.status).toBe(413);
     // A file that would not be written is not judged: this DID log is not witnessed, so the stored file stays.
     const v2Id = (JSON.parse((env.v2.log as string).trimEnd().split('\n')[1]) as { versionId: string }).versionId;
     const kept = JSON.stringify([{ versionId: v2Id, proof: [{ proofValue: 'z1' }] }]);
     writeFileSync(witnessPath, kept);
-    const ignored = await env.post(body({ injected: '<script>alert(1)</script>'.repeat(1000) }), SUB2);
+    const ignored = await env.post(body({ injected: '<script>alert(1)</script>'.repeat(1000) }));
     expect(ignored.status).toBe(200);
     expect(readFileSync(witnessPath, 'utf8')).toBe(kept);
     rmSync(witnessPath);
@@ -652,13 +660,13 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     // The stored v1 file holds v1's proof; v2's pruned file holds only v2's. A file the submitted log does
     // not verify with is refused with the log, and nothing is written.
     const before = readFileSync(witnessPath, 'utf8');
-    const wrong = await env.post(body(env.author.evidence.witness), SUB2);
+    const wrong = await env.post(body(env.author.evidence.witness));
     expect(wrong.status).toBe(422);
     expect(await wrong.json()).toMatchObject({ error: 'identity_log_invalid' });
     expect(readFileSync(witnessPath, 'utf8')).toBe(before);
     // Proofs reordered member by member are the same proofs: accepted, and stored with the log it verifies.
     const reordered = (env.v2.witness as Array<{ versionId: string; proof: Record<string, unknown>[] }>).map((e) => ({ proof: e.proof.map((p) => Object.fromEntries(Object.entries(p).reverse())), versionId: e.versionId }));
-    const res = await env.post(body(reordered), SUB2);
+    const res = await env.post(body(reordered));
     expect(res.status, await res.clone().text()).toBe(200);
     expect(readFileSync(join(env.h.dataDir, 'hosted', env.didPath), 'utf8')).toBe(env.v2.log as string);
     expect(JSON.parse(readFileSync(witnessPath, 'utf8'))).toEqual(reordered);
@@ -676,8 +684,170 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const forged: Record<string, any> = { ...rest, state: { ...rest.state, author: { ...rest.state.author, versionId: '7-QmFake' } } };
     forged.versionId = `${Number(head.split('-')[0]) + 1}-${vhHash({ ...forged, versionId: head })}`;
     const ordered = { versionId: forged.versionId, versionTime: forged.versionTime, parameters: forged.parameters, state: forged.state, proof: [{ ...proof[0], proofValue: `z${'2'.repeat(86)}` }] };
-    const res = await env.post({ original: env.did, entry: JSON.stringify(ordered), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] }, 'random-stranger');
+    const res = await env.post({ original: env.did, entry: JSON.stringify(ordered), resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [] });
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: 'signer_version_unavailable', versionId: '7-QmFake' });
+  });
+});
+
+/** The landing DID of account `sub` (`did:webvh:<SCID>:<DOMAIN>:user-…`), as the landing builds it, signing with `#key-1`. */
+async function landingDid(sub: string) {
+  const update = ed.utils.randomSecretKey();
+  const authoring = ed.utils.randomSecretKey();
+  const signer = new BrowserWebVHSigner(update, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(update)));
+  const built = await buildUserWebVHDid(signer, { domain: DOMAIN, slug: userWebvhSlug(sub), authorshipPublicKeyMultibase: ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(authoring)) });
+  const entries = built.didLog as Array<{ versionId: string }>;
+  const verificationMethod = `${built.did}#key-1`;
+  return {
+    evidence: { did: built.did, log: entries.map((e) => `${JSON.stringify(e)}\n`).join('') } as AuthorDidEvidence,
+    ref: { did: built.did, verificationMethod, versionId: entries[entries.length - 1].versionId } as AuthorRef,
+    signer: keySigner({ keyType: 'Ed25519', secretKey: authoring, verificationMethod }),
+  };
+}
+
+describe('who may submit: the namespace owner, or an account whose landing DID the head state names (owner decision of 22 October 2026; P6.7, P5.15)', () => {
+  const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
+  const { createSharedSaves, namesAccount, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
+
+  test('an account the head state does not name is refused before the body is read, and nothing is written', async () => {
+    const env = await shared();
+    const candidate = await env.edit(env.a, THEIRS);
+    const body = encodeSubmission({ original: env.did, entry: candidate.line, resources: { [resourceDigest(THEIRS)]: THEIRS }, identities: [env.author.evidence] });
+    const before = env.hostedLines();
+    const req = new Request(`http://app.local/api/originals/submit/${encodeURIComponent(env.siteKey)}`, { method: 'POST', headers: { cookie: cookieFor(COLLAB) }, body });
+    const res = await env.h.serve(req);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'caller_not_authorized' });
+    expect(req.bodyUsed).toBe(false);
+    expect(env.hostedLines()).toEqual(before);
+    // C12-128 does not open the route to a stranger: a byte-identical retry of someone else's accepted
+    // entry gets the same refusal as a new entry, so it cannot probe whether the entry exists.
+    expect((await env.a.submit(candidate, env.hostA)).status).toBe('accepted');
+    const retry = new Request(`http://app.local/api/originals/submit/${encodeURIComponent(env.siteKey)}`, { method: 'POST', headers: { cookie: cookieFor(COLLAB) }, body: encodeSubmission({ original: env.did, entry: candidate.line, resources: {}, identities: [] }) });
+    const retried = await env.h.serve(retry);
+    expect(retried.status).toBe(403);
+    expect(await retried.json()).toEqual({ error: 'caller_not_authorized' });
+    expect(retry.bodyUsed).toBe(false);
+  });
+
+  test('C12-128, P6.7: an editor\'s accepted entry retried after its grant was revoked returns its checkpoint and the current head; no append (owner decision of 23 October 2026)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const { a, b, did } = env;
+    const own = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    // The host accepts the editor's save, but the answer never reaches the editor.
+    const lost = await env.post({ original: did, entry: own.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
+    expect(lost.status).toBe(200);
+    expect((await b.get(did)).checkpoint).toBe(env.parent);
+    // The author fetches the new head and revokes the editor's grant.
+    expect((await a.sync(did, env.hostA)).status).toBe('imported');
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: (await a.get(did)).checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const lines = env.hostedLines().length;
+    // The editor retries the same bytes from its own account: already accepted, and committed locally.
+    const viaEditor = landingSharedHost({ sdk: b, aliasDid: env.aliasDid, transport: env.h.adapterFor(COLLAB), read: env.h.read });
+    const retry = await b.submit(own, viaEditor);
+    expect(retry).toMatchObject({ status: 'already-accepted', checkpoint: own.versionId, hostHead: revoke.checkpoint, behind: true });
+    const raw = await env.post({ original: did, entry: own.line, resources: {}, identities: [] }, COLLAB);
+    expect(raw.status).toBe(200);
+    expect(await raw.json()).toEqual({ status: 'already-accepted', checkpoint: own.versionId, head: revoke.checkpoint });
+    expect(env.hostedLines().length).toBe(lines);
+  });
+
+  test('P5.15: a revoked editor\'s account submitting a new entry is refused; only new appends are gated by the head (owner decision of 23 October 2026)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const { a, b, did } = env;
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: env.parent, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const before = env.hostedLines();
+    // An editor entry signed against the parent the grant was still in: refused as a caller, not a stale parent.
+    const stale = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    const refused = await env.post({ original: did, entry: stale.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'caller_not_authorized' });
+    // An author's entry on the head, relayed by the revoked editor's account: refused too.
+    const relayed = await env.edit(a, NOON);
+    const relay = await env.post({ original: did, entry: relayed.line, resources: { [resourceDigest(NOON)]: NOON }, identities: [env.author.evidence] }, COLLAB);
+    expect(relay.status).toBe(403);
+    expect(await relay.json()).toEqual({ error: 'caller_not_authorized' });
+    expect(env.hostedLines()).toEqual(before);
+  });
+
+  test('C12-128: a retry is acknowledged only to a caller allowed at the matching entry\'s parent; otherwise the refusal is the one a new entry gets', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ start: Date.now() });
+    const { a, did } = env;
+    // An author entry accepted before the editor was granted anything.
+    const early = await a.submit(await env.edit(a, THEIRS), env.hostA);
+    if (early.status !== 'accepted') throw new Error('expected acceptance');
+    const earlyLine = env.hostedLines().at(-1) as string;
+    const grant = await a.submit(await a.sign(await a.prepareEdit(did, { parent: early.checkpoint, editors: [{ did: editor.evidence.did, name: false, metadata: false, resources: ['artwork.svg'] }], author: env.author.ref }), env.author.signer), env.hostA);
+    if (grant.status !== 'accepted') throw new Error('expected acceptance');
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: grant.checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const before = env.hostedLines();
+    // The editor's account was named in the log, but not by the state at the early entry's parent.
+    const retried = await env.post({ original: did, entry: earlyLine, resources: {}, identities: [] }, COLLAB);
+    const fresh = await env.post({ original: did, entry: (await env.edit(a, MINE)).line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, COLLAB);
+    expect(retried.status).toBe(403);
+    expect(fresh.status).toBe(403);
+    expect(await retried.json()).toEqual(await fresh.json());
+    // The grant entry's parent did not name the editor either; the revoking entry's parent did.
+    expect((await env.post({ original: did, entry: before[before.length - 2], resources: {}, identities: [] }, COLLAB)).status).toBe(403);
+    const acknowledged = await env.post({ original: did, entry: before[before.length - 1], resources: {}, identities: [] }, COLLAB);
+    expect(await acknowledged.json()).toEqual({ status: 'already-accepted', checkpoint: revoke.checkpoint, head: revoke.checkpoint });
+    expect(env.hostedLines()).toEqual(before);
+  });
+
+  test('an account whose landing did:webvh is granted as editor saves its own entry, and may relay the author\'s (P5.15, P5.16)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const viaEditor = landingSharedHost({ sdk: env.a, aliasDid: env.aliasDid, transport: env.h.adapterFor(COLLAB), read: env.h.read });
+    expect((await env.a.submit(await env.edit(env.a, THEIRS), viaEditor)).status).toBe('accepted');
+    const own = await env.a.sign(await env.a.prepareEdit(env.did, { parent: (await env.a.get(env.did)).checkpoint, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    expect((await env.a.submit(own, viaEditor)).status).toBe('accepted');
+    expect(env.hostedLines().at(-1)).toBe(own.line);
+    // The files stay the namespace owner's.
+    expect(readFileSync(`${env.logPath}.owner`, 'utf8')).toBe(SUB);
+  });
+
+  test('the caller is judged against the head the submission extends: a grant removed meanwhile refuses the account (P1, P5.17)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const revoke = await env.a.sign(await env.a.prepareEdit(env.did, { parent: (await env.a.get(env.did)).checkpoint, editors: null, author: env.author.ref }), env.author.signer);
+    expect((await env.a.submit(revoke, env.hostA)).status).toBe('accepted');
+    // The route's check ran against the earlier head; the queued attempt checks again.
+    const saves = createSharedSaves({ store: createOriginalsStore({ dataDir: env.h.dataDir }), now: () => Date.now() });
+    const next = await env.edit(env.a, MINE);
+    const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: next.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }));
+    if ('http' in parsed) throw new Error('expected a well-formed submission');
+    const refused = await saves.submit(env.siteKey, parsed, { sub: COLLAB, slug: userWebvhSlug(COLLAB) });
+    expect(refused.status).toBe(403);
+    expect(env.hostedLines().at(-1)).toBe(revoke.line);
+    expect((await saves.submit(env.siteKey, parsed, { sub: SUB, slug: userWebvhSlug(SUB) })).status).toBe(200);
+  });
+
+  test('an account is named only by a did:webvh on the Original\'s host whose one path segment is its slug', async () => {
+    const { did } = (await landingDid(COLLAB)).evidence;
+    const slug = userWebvhSlug(COLLAB);
+    expect(namesAccount(did, DOMAIN, slug)).toBe(true);
+    expect(namesAccount(did.replace(`:${DOMAIN}:`, `:${DOMAIN}%3A8443:`), `${DOMAIN}:8443`, slug)).toBe(true);
+    // The cheap string filter keeps the parse's semantics: a percent-encoded path segment decodes to the slug.
+    expect(namesAccount(did.replace(`:${slug}`, `:%75${slug.slice(1)}`), DOMAIN, slug)).toBe(true);
+    expect(namesAccount(did.toUpperCase(), DOMAIN, slug)).toBe(false);
+    for (const other of [
+      did.replace(`:${DOMAIN}:`, ':other.example.com:'),
+      `${did}:o-111111111111111a`,
+      did.replace(slug, userWebvhSlug(SUB)),
+      did.replace(`:${slug}`, ''),
+      did.replace('did:webvh:', 'did:vh:'),
+      'did:webvh:',
+      'not a did',
+    ]) {
+      expect(namesAccount(other, DOMAIN, slug), other).toBe(false);
+    }
+    expect(namesAccount(did, 'other.example.com', slug)).toBe(false);
+    expect(namesAccount(did, DOMAIN, userWebvhSlug(SUB))).toBe(false);
   });
 });

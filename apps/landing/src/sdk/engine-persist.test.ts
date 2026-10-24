@@ -4,12 +4,13 @@ import * as ed from '@noble/ed25519';
 import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
 import { DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
-import { IndexedDbStore } from './idb-store';
+import { BrowserOriginalsStore, browserDatabase } from './browser-store';
 import { createLocalAuthor, type LocalAuthor } from './local-author';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
 
-// #976 B3, gap G2. A signed-in author's work is kept in IndexedDB, so closing
+// #976 B3, gap G2. A signed-in author's work is kept in IndexedDB
+// (BrowserOriginalsStore, the account's database), so closing
 // the browser and opening it again finds it, and editing continues from the
 // explicit parent (P2.1, P4.5). The signing authority is the author's own
 // (Turnkey in the app; a test key here), never something the store holds.
@@ -17,7 +18,7 @@ function signedIn(idb: IDBFactory, author: LocalAuthor, extra: ConstructorParame
   return new DemoEngine({
     authed: true,
     subOrgId: SUB,
-    openStore: () => IndexedDbStore.open(SUB, idb),
+    store: new BrowserOriginalsStore(SUB, idb),
     author: async () => author,
     ...extra,
   });
@@ -26,7 +27,7 @@ function signedIn(idb: IDBFactory, author: LocalAuthor, extra: ConstructorParame
 const art = (title: string, seed: number) => generateArtwork(title, 'Orbits', seed).svg;
 
 describe('a signed-in author\'s work survives a browser restart', () => {
-  test('the Original is listed, reopens at its checkpoint and takes the next revision', async () => {
+  test('the Original is in the account store, reopens at its checkpoint and takes the next revision', async () => {
     const idb = new IDBFactory();
     const author = await createLocalAuthor();
     const before = signedIn(idb, author);
@@ -34,8 +35,7 @@ describe('a signed-in author\'s work survives a browser restart', () => {
     const revised = await before.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8));
 
     const after = signedIn(idb, author);
-    const listed = await after.listOriginals();
-    expect(listed).toEqual([{ did: revised.did, name: 'Harbor at dusk', checkpoint: revised.history.at(-1)!.versionId, published: false, where: 'this-browser' }]);
+    expect(await new BrowserOriginalsStore(SUB, idb).list()).toEqual([revised.did]);
     const reopened = await after.open(revised.did);
     expect(reopened.history.map((h) => h.versionId)).toEqual(revised.history.map((h) => h.versionId));
     expect(reopened.resource.hash).toBe(revised.resource.hash);
@@ -58,7 +58,6 @@ describe('a signed-in author\'s work survives a browser restart', () => {
     const published = await before.publish();
 
     const after = signedIn(idb, author, { features: { hostedPublication: true }, publishTarget: target });
-    expect((await after.listOriginals())[0].published).toBe(true);
     const reopened = await after.open(published.did);
     expect(reopened.webvhDid).toBe(published.webvhDid);
     const revised = await after.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8));
@@ -77,18 +76,47 @@ describe('a signed-in author\'s work survives a browser restart', () => {
   });
 });
 
-describe('signed out, nothing is kept (#976 B5)', () => {
+describe('without IndexedDB (#976 B, G2)', () => {
   const saved = globalThis.indexedDB;
   afterEach(() => {
     globalThis.indexedDB = saved;
   });
 
-  test('a signed-out engine never opens IndexedDB, and a new page lists nothing', async () => {
+  for (const authed of [true, false]) {
+    test(`${authed ? 'signed in' : 'signed out'}, the work is kept in memory and the snapshot says so`, async () => {
+      globalThis.indexedDB = undefined as unknown as IDBFactory;
+      const engine = new DemoEngine({ authed, ...(authed ? { subOrgId: SUB, author: await createLocalAuthor() } : {}) });
+      const created = await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+      expect(created.notKeptAcrossRestarts).toBe(true);
+    });
+  }
+
+  test('with IndexedDB, there is no such notice', async () => {
+    const created = await signedIn(new IDBFactory(), await createLocalAuthor()).create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect(created.notKeptAcrossRestarts).toBeUndefined();
+  });
+});
+
+// #976 B5; owner decision of 23 October 2026 (#992). Signed out, the guest key
+// and the guest's work are kept in this browser's guest database, and nowhere
+// else: not in an account's database.
+describe('signed out, guest work stays in the guest database', () => {
+  const saved = globalThis.indexedDB;
+  afterEach(() => {
+    globalThis.indexedDB = saved;
+  });
+
+  test('a reload finds the guest work under the same guest key; no account database is written', async () => {
     const idb = new IDBFactory();
     globalThis.indexedDB = idb;
-    const engine = new DemoEngine();
-    await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
-    expect(await idb.databases()).toEqual([]);
-    expect(await new DemoEngine().listOriginals()).toEqual([]);
+    const created = await new DemoEngine().create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect((await idb.databases()).map((d) => d.name)).toEqual([browserDatabase()]);
+    // The reload: a new engine on the same browser.
+    const reloaded = new DemoEngine();
+    const reopened = await reloaded.open(created.did);
+    expect(reopened.history.map((h) => h.versionId)).toEqual(created.history.map((h) => h.versionId));
+    const next = await reloaded.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8));
+    expect(next.author).toBe(created.author);
+    expect((await idb.databases()).map((d) => d.name)).toEqual([browserDatabase()]);
   });
 });

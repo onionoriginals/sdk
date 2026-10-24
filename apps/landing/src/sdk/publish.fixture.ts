@@ -11,6 +11,7 @@ import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { createOriginalsStore } from '../../server/originals-store';
 import { createOriginalsRoutes } from '../../server/originals-routes';
+import { createAnchoringLibrary } from '../../server/originals-library';
 import { buildFetch } from '../../server/app';
 import { serializeCookie } from '../../server/cookies';
 
@@ -25,10 +26,10 @@ export function cookieFor(sub: string): string {
 export function host() {
   const dataDir = mkdtempSync(join(tmpdir(), 'landing-publish-'));
   const store = createOriginalsStore({ dataDir });
-  const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+  const originals = createOriginalsRoutes({ jwtSecret: JWT, store, library: createAnchoringLibrary(dataDir, store) });
   const noop = { async handlePut() { return new Response(null, { status: 501 }); }, read() { return new Response(null, { status: 404 }); }, serve() { return null as Response | null; } };
   // The account index routes, as server/index.ts mounts them (#976 B, G3).
-  const apiRoutes = { 'POST /api/originals': originals.record, 'GET /api/originals': originals.list };
+  const apiRoutes = { 'POST /api/originals': originals.record, 'GET /api/originals': originals.list, 'GET /api/originals/evidence': originals.evidence };
   const serve = buildFetch({ apiRoutes, hostStore: noop, distDir: '/nonexistent/', originals });
   /** A browser signed in as `sub` (no cookie when null), talking to the app's origin. */
   const fetchAs = (sub: string | null) =>
