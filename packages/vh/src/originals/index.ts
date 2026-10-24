@@ -9,3 +9,5 @@ export * from "./profile.js";
 export * from "./build.js";
 export * from "./verify.js";
 export * from "./alias.js";
+export * from "./bitcoin.js";
+export * from "./btco.js";

@@ -153,13 +153,13 @@ on; it never reports an unanchored Original as current (P7.10). The
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
-| `assetFreshness` | not-established · stale against the retained versionId, with every compared copy of the asset log (P7.6) |
+| `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
-| `validAsOf` | for a valid result, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
+| `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
 | `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
@@ -559,12 +559,226 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
-## Bitcoin anchoring and ownership — phase 4
+## Bitcoin anchoring and ownership — phase 4 (verifier implemented; writer in PR 10)
 
-An Original can be anchored from the local or the web layer, once, terminally,
-to one sat (P9.10). After that, the inscriptions on the sat decide the log
-(P9.13), each checked against the author DID's state at its inscription time
-(P9.15). The inscription encoding (D6) will be proposed before any writer code
-is written. With no witnesses (Q14), the anchor is the first valid anchoring
-entry in chain order, and ownership is reported as provisional (P9.16). Spending requires the owner's explicit
-approval, and release evidence comes from real Core/ord regtest.
+The representation is [plan 012](../../plans/012-bitcoin-representation.md)
+(owner decision Q15). An Original can be anchored from the local or the web
+layer, once, terminally, to one sat (P9.10):
+
+```ts
+await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
+// The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
+// Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
+const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
+// A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).
+const served = new InscriptionClock(header, { network: "mainnet", headers, store: fileClockStore(path), maxRequests: 1000 });
+// One read per index used; the verifier compares their placement (P9.10, P9.11).
+const evidence = await satEvidence(snapshot, { clock, ownerConfirmations, index: "ord@node-a" });
+const view = await sdk.get(did, { bitcoin: [evidence] });                     // also load(zip, { bitcoin })
+view.report.anchoring; // anchor, conflicting anchors, accepted, ignored and disputed inscriptions, indexes, copy, change, tip
+view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes: ["ord@node-a"] }
+// Without any copy of the log: verifyOriginal({ bitcoin: [evidence], authors }) (P9.17, P9.18).
+```
+
+- The anchoring entry is an ordinary update that adds the sat's did:btco alias
+  (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere, P14.12;
+  the did:btco method does not yet define the prefixes, proposed upstream as
+  decentralized-identity/labs-ordinals-plus#4 [S30]; strict grammar: no sign,
+  no leading zeros, below the total supply). From then on the alias never changes, and no did:webvh alias may be
+  added, replaced or re-added; the one listed at anchoring may stay or go
+  (P9.10, D7).
+- The anchoring inscription carries the whole log, genesis through the
+  anchoring entry; every later inscription exactly one entry, as
+  `application/vnd.originals.vh+jsonl`, with no metadata and at most 350,000
+  bytes (P9.17, P14.12; owner decisions, D6; spec PR #50 (open)). So the sat alone verifies the
+  log: a stored or packaged copy is only compared (`anchoring.copy`), and one
+  that differs is ignored. Entries before the anchoring entry are checked
+  against the versions they name, with claimed ordering (P9.15). The writer
+  (PR 10) must inscribe the full log when anchoring.
+- Placement rests on the index (P9.10): an inscription counts for a sat only
+  when every index read supplied reports it on that sat number on that
+  network. Indexes that disagree leave it `disputed`
+  (`bitcoin-placement-disputed`), and disagreement on the holder gives no
+  owner (`ownership-indexes-disagree`).
+- Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
+  from 1 confirmation on every network, mainnet included (P9.5; depth
+  reported) when it extends the head at a strictly
+  greater height and passes the author checks at its inscription time
+  (P9.15). Entries only in a copy are not current, and a copy can neither fork
+  nor make stale an anchored log. Only the anchor and accepted inscriptions
+  have `anchored` ordering. The anchor is the first valid anchoring entry in
+  chain order across the sats supplied; others, on the same sat or another,
+  are conflicting anchors, never current (P9.16). Each anchoring inscription
+  checks itself. The store keeps the anchor it reported (`getRetainedAnchor`,
+  optional), so an earlier one learned later is reported in
+  `anchoring.change` with the owner change (`anchor-changed`), once.
+- Resource bytes are not on Bitcoin and not needed for the log: an anchored
+  Original without them is reported `resources.status: "partial"` and stays
+  current (P7.3, P7.4, P9.18); supplied bytes are still checked.
+- The clock checks each inscription's block hash: it rewinds past a
+  reorganisation and refuses a block no longer on the chain
+  (`BLOCK_NOT_ON_CHAIN`), even one it read before the reorganisation. Before
+  reading past the blocks it holds, it checks the highest one against the
+  active chain, so an orphaned block's maximum never carries into the new
+  chain (#971).
+- The holder of the anchoring sat can inscribe anything on it, but cannot
+  make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
+  delegated or encoded inscription as observed but unsupported, and a body
+  or metadata past its byte budget or the transport's response cap (for
+  example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
+  `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
+  verifier ignores a non-Originals one (`not-an-originals-inscription`) and
+  rejects a delegated or encoded Originals one (`unsupported-encoding`;
+  P9.14, P9.17). An Originals inscription the reader did not read fails the
+  read (`SAT_READ_INCOMPLETE`, missing evidence, P9.17), unless what the
+  index reports already rejects it: a length over 350,000 bytes
+  (`too-large`) or metadata (`carries-metadata`). For an Original's asset
+  read, pass `getSatSnapshot(sat, { bodies: 'originals' })`: only
+  `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
+  their metadata are fetched, and every other inscription is reported
+  `not-requested`, so the holder's other inscriptions cost no body reads. The
+  default, `bodies: 'all'`, reads every body and its metadata, as a did:btco
+  read needs (P5.13). The reader's budget (`snapshotBudget` on
+  `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5
+  per inscription the index lists, so a sat with many entries reads in full;
+  `maxListedInscriptions` (default 100,000; more is refused,
+  `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`) bounds it. At most `maxInscriptions`
+  (default 10,000) inscriptions have their body and metadata read, in listing
+  order, counting only the ones the read would fetch (with `bodies:
+  'originals'`, only Originals inscriptions); every later one is still listed
+  and placed, but reported observed but unread (`over-budget`), so
+  reinscribing the sat many times does not fail a read (PROVISIONAL).
+  `timeoutMs` defaults to
+  30 seconds plus 250 ms per listed inscription, at most `maxTimeoutMs`
+  (default 10 minutes); an explicit `timeoutMs` is kept as given. Each
+  request has its own `requestTimeoutMs` (default 15 seconds,
+  `SAT_SNAPSHOT_REQUEST_TIMEOUT`), and at most `concurrency` (default 8)
+  reads are in flight. Originals bodies within their size limit are read
+  from their own `maxOriginalsBytes` (default 64 MiB), so other bodies,
+  bounded by `maxContentBytes` (default 32 MiB), cannot spend it
+  (PROVISIONAL). Every reader failure is an `OriginalsError` with a section 6
+  category; running out of budget is `incomplete-evidence`
+  (`SAT_SNAPSHOT_BUDGET_EXCEEDED`, `SAT_SNAPSHOT_TOO_MANY_INSCRIPTIONS`). A
+  holder who floods the sat past these bounds still costs an explicit
+  incomplete result, never a wrong one; raise the budget to read it.
+  PROVISIONAL bound: an unread Originals inscription could be an entry, so
+  Originals-typed junk the holder adds is read from the Originals budgets and
+  fails the read closed once it exhausts them. About 192 Originals-typed
+  inscriptions of 350,000 bytes (some 67 MB of witness data) exhaust the
+  default `maxOriginalsBytes`, and more than 10,000 Originals-typed
+  inscriptions of any size exhaust `maxInscriptions`. A reader raises them
+  through `snapshotBudget` (`maxOriginalsBytes` up to 1 GiB,
+  `maxInscriptions` up to 100,000) to read such a sat.
+- Signer DID freshness for an anchored Original (originals-spec #47,
+  P7.8, P9.15): each did:vh or did:webvh
+  signer is checked against the newest version of its DID this verifier
+  knows of: the newest it obtained from any source in this verification or
+  retained from earlier (the SDK compares a package's or host's evidence
+  with what it is configured with and keeps by verified versionIds, never by
+  bytes, and uses the newest; evidence that diverges is an identity fork,
+  incomplete). It need not show that no
+  newer version exists. `validAsOf.signers` states, for each signer, the
+  versionId relied on and when and where that history was obtained
+  (`obtainedAt`, `source`: `package`, `host`, `fetched`, `retained` or
+  `supplied`). An entry inscribed after the newest known version is checked
+  against it and is not incomplete identity evidence. An entry before or at
+  the anchor naming a version the verifier has no verified copy of is
+  incomplete identity evidence (P5.6). After the anchor such an inscription
+  never downgrades the accepted head (P9.12; PROVISIONAL): one naming a
+  version numbered at or below the newest verified version of that DID, but
+  not in its history, is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`);
+  one naming a newer version, or signed by a DID with no history here, is
+  `later-inscription-unverifiable`, listed in `anchoring.unverifiable` with
+  the signer DID and version it names, and the accepted head keeps its
+  identity evidence and stays current. The holder of the sat decides what is
+  inscribed but has no authority (P9.11, P9.12), so otherwise a hash-chained
+  junk entry naming a version that does not exist would make the Original
+  incomplete, never current, for good. A verifier that obtains the named
+  version verifies the inscription. Spec question (raised on #47 and not adopted at master 1039c471c, P9.15
+  and P5.6): add to P9.15 "An inscription after the anchoring inscription
+  whose signer DID version the verifier cannot verify is reported as
+  unverifiable. It does not make the identity evidence of the accepted
+  state incomplete, and it does not prevent that state from being current;
+  an inscription naming a version number the verifier holds under another
+  versionId is invalid." A retained
+  versionId the evidence falls short of is `stale`, and the result is not
+  current. The cost, accepted by the owner: a host that withholds a key
+  removal can get later inscriptions accepted by readers who do not know of
+  it. did:btco signers are read from Bitcoin (P5.13). Anchoring does not
+  require did:btco DIDs for the author or editors (owner decision of 21
+  October 2026, #47; nothing in the SDK requires them); a did:btco author is
+  how Bitcoin alone suffices (P9.18).
+- After anchoring, deactivating the author DID leaves the accepted state
+  current and refuses later inscriptions; a key the author removes later does
+  not unseat entries accepted before (P9.15).
+- An anchored log with no Bitcoin evidence is `unverified`, and one whose
+  evidence holds no valid anchor is `not-anchored`; neither is current, and
+  neither advances the retained versionId. A
+  retained versionId that Bitcoin no longer includes is reported as
+  `authoritative-source-changed`, and an author DID version that would reject
+  an accepted inscription as `retroactive-revocation-conflict`.
+- Ownership is the anchoring sat's holder, always provisional, never authority
+  (P9.11, P9.12). did:btco author DIDs arrive in PR 9b. Spending requires the
+  owner's explicit approval, and release evidence comes from real Core/ord
+  regtest.
+
+### Inscription time at scale (#973)
+
+The running maximum (P9.15) depends on every header from genesis, so a
+reader derives it once and keeps it. `InscriptionClock` takes, besides the
+single-header source:
+
+- `headers(from, count, signal)`: a batched source, one request per `batch`
+  (default 2000) headers, for example a JSON-RPC batch of `getblockhash` and
+  `getblockheader`. Each block but genesis must carry `prev` (Core's
+  `previousblockhash`), so the clock checks that each block extends the one
+  before it and a reorganisation during a read cannot splice two chains
+  together; a block without it is refused (`BLOCK_PARENT_REQUIRED`).
+- `store`: a `ClockStore` (`load`/`save` of opaque bytes) with the `network`
+  it follows. `fileClockStore(path)` from `@originals/sdk/originals/fs`
+  writes one file atomically (Node only); a server can keep the same bytes in
+  any blob store. The state holds the network, every block hash and running
+  maximum, and a CRC-32. On restart the clock checks the network tag and the
+  genesis hash (one request; another network or chain is refused with
+  `CLOCK_STORE_NETWORK_MISMATCH` or `BLOCK_SOURCE_NETWORK_MISMATCH`), and
+  discards a damaged state (`stats.discarded = "corrupt"`) and rebuilds.
+  A saved boundary is then checked against the active chain like any other,
+  rewinding to the fork point by galloping and bisection. The store saves
+  after `saveEvery` (default 144) new blocks and on `flush()`; an older
+  saved state is only slower, never wrong. The bytes are the reader's own
+  derived state, not a checkpoint to download or share. The byte format
+  and the defaults are PROVISIONAL.
+- `maxRequests` (default 10,000 per `at` call) and `signal` (per clock, per
+  call or through `satEvidence`): running out or being cancelled is
+  `incomplete-evidence` (`BLOCK_TIME_BUDGET_EXCEEDED`, `BLOCK_TIME_ABORTED`),
+  never a guessed time. What was derived is kept, so a retry continues.
+
+A read of a block the clock holds costs one request, a probe that the active
+chain still has it, so a block orphaned since it was read is refused by hash
+(`BLOCK_NOT_ON_CHAIN`) as a fresh clock refuses it. Any other read costs one
+boundary check plus the new or reorganised blocks. Each appended block must
+extend the one before it: a batched `headers` source must give every block's
+`prev` (Core's `previousblockhash`; `BLOCK_PARENT_REQUIRED` otherwise), and a
+single-header source without `prev` costs a second request per new block,
+re-reading the parent, so give `prev` there too. `bun run --cwd packages/sdk bench:clock` runs a
+deterministic 900,000-header synthetic chain (204,786 blocks with a timestamp
+earlier than their parent's) through a cold start, warm reads and restarts
+with a file store, and checks every sampled time against an independently
+rebuilt clock. On an Apple M4 (Bun 1.2.22, in-process source; `--rtt-ms 1`
+adds a delay per request):
+
+| Scenario | Requests | Headers | Latency | With 1 ms per request |
+| --- | ---: | ---: | ---: | ---: |
+| Cold start, batch 2000 | 450 | 900,000 | 422 ms | 959 ms |
+| Save state (32.4 MB file) | 0 | 0 | 114 ms | 106 ms |
+| Warm reads of known blocks, x10,000 (one probe each) | 10,000 | 10,000 | 25 ms | 12.7 s |
+| Warm read, 1 new block | 2 | 2 | 0.3 ms | 3.6 ms |
+| Restart, read a known block (load, check and probe) | 2 | 2 | 82 ms | 75 ms |
+| Restart, then 6 new blocks | 2 | 7 | 0.1 ms | 3.6 ms |
+| Restart across a 6-block reorganisation (+3) | 8 | 16 | 74 ms | 88 ms |
+| Cold start, one request per header | 900,010 | 900,010 | 602 ms | about 15 min (projected, not run) |
+| Cold start, default budget, one per header | 10,000, then refused | 10,000 | 7 ms | |
+
+The counts are exact and asserted by `tests/unit/originals/clock-bench.test.ts`
+on a 20,000-header chain; the latencies exclude a real node's own cost of
+serving 900,000 headers, which bounds a production cold start.

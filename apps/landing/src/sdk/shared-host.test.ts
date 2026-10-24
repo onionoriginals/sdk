@@ -13,7 +13,7 @@ import { localSigner, multibaseEncode, proofHashData } from '@originals/vh/crypt
 import { parseJson } from '@originals/vh/json';
 import { appendEntry, createLog, createWitnessProof, serializeLog, signWith, type LogEntry } from '@originals/vh/log';
 import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type AuthorRef } from '@originals/vh/originals';
-import { MemoryStore, OriginalsSDK, keySigner, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
+import { MemoryStore, OriginalsSDK, keySigner, readEvidence, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { publishOriginal } from './publish';
 import { DOMAIN, SUB, cookieFor, host } from './publish.fixture';
@@ -374,6 +374,42 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect((await put(`${env.siteKey}/originals/asset/did.jsonl`, old.subarray(0, old.length - 1))).status).toBe(409);
     const reader = await env.stranger().loadPublished(env.aliasDid, env.h.read);
     expect(reader.verified, JSON.stringify(reader.reasons)).toBe(true);
+  });
+});
+
+describe('an anchored Original takes no shared-host saves (P9.12)', () => {
+  const SAT = 'did:btco:reg:5000000000';
+
+  /** Device A anchors the published Original; its anchoring entry and the anchored log. */
+  async function anchoredOnA() {
+    const env = await shared();
+    await env.a.anchor(env.did, { parent: (await env.a.get(env.did)).checkpoint, author: env.author.ref, signer: env.author.signer, sat: SAT });
+    const log = readEvidence((await env.a.package(env.did)).bytes).log;
+    const lines = log.trimEnd().split('\n');
+    return { ...env, anchoredLog: log, anchoring: lines[lines.length - 1] };
+  }
+
+  test('the anchoring entry is refused: it counts only once inscribed on its sat, never as a host append', async () => {
+    const env = await anchoredOnA();
+    const before = env.hostedLines();
+    const res = await env.post({ original: env.did, entry: env.anchoring, resources: {}, identities: [env.author.evidence] });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'original_anchored', sat: SAT });
+    expect(env.hostedLines()).toEqual(before);
+  });
+
+  test('an entry after the anchor is refused even when the host holds the anchored log: only inscriptions on the sat count', async () => {
+    const env = await anchoredOnA();
+    // A host holding the anchored log (as an initial upload of it would leave it).
+    writeFileSync(env.logPath, env.anchoredLog);
+    const next = await env.edit(env.a, MINE);
+    const res = await env.post({ original: env.did, entry: next.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'original_anchored', sat: SAT });
+    expect(env.hostedLines()).toEqual(env.anchoredLog.trimEnd().split('\n'));
+    // A retried submission of an entry the host already holds is still recognised (P6.4).
+    const again = await env.post({ original: env.did, entry: env.anchoring, resources: {}, identities: [env.author.evidence] });
+    expect(again.status).toBe(200);
   });
 });
 

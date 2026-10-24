@@ -47,9 +47,9 @@ export class Author {
     };
   }
 
-  async rotate(keys: Array<{ fragment: string; secret: Uint8Array }>) {
+  async rotate(keys: Array<{ fragment: string; secret: Uint8Array }>, versionTime = this.time()) {
     this.entries.push(await appendEntry(this.entries[this.entries.length - 1], {
-      versionTime: this.time(), parameters: {}, state: this.document(this.did, keys), sign: this.signUpdate(),
+      versionTime, parameters: {}, state: this.document(this.did, keys), sign: this.signUpdate(),
     }));
   }
 

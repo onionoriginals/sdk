@@ -8,19 +8,25 @@
  *     200       { status: "accepted" | "already-accepted", checkpoint, head }
  *     409       { status: "stale-parent", error: "stale_parent", head }
  *     400 malformed · 401 not signed in · 404 not hosted · 413 too large
- *     422 the entry does not verify against the head, or its bytes are missing or wrong
+ *     422 the entry does not verify against the head, its bytes are missing or wrong, or the Original is anchored
  *
  * In the order P6.7 sets:
  *
  * 1. An entry byte-identical to a line of the accepted log is already
  *    accepted: its checkpoint and the current head are returned, with no
  *    append and no conflict, however far the head has moved (P6.4).
- * 2. Otherwise the entry's parent must be the accepted head: its versionId
+ * 2. An anchored Original takes no saves (P9.12): once the accepted log or the
+ *    entry lists a did:btco alias, only inscriptions on that sat count as its
+ *    history, so the host refuses the entry (422 original_anchored, naming the
+ *    sat) rather than accept an append as if it were accepted history. The
+ *    anchoring entry itself counts only once inscribed (P9.10), so it is
+ *    refused too.
+ * 3. Otherwise the entry's parent must be the accepted head: its versionId
  *    must hash over the entry with the head's versionId (VH-Log chaining). An
  *    entry that chains to any other entry, to none, or that was changed after
  *    signing, does not extend the head and is a stale-parent conflict naming
  *    the head.
- * 3. Cheap checks come first, before any signer DID log is verified (C7,
+ * 4. Cheap checks come first, before any signer DID log is verified (C7,
  *    r4 #4): the entry carries one proof, by the signer it names, who is the
  *    author or holds a grant in the head's state (422 signer_not_authorized);
  *    the stored or submitted signer DID log, read without verifying it, shows
@@ -45,7 +51,7 @@
  *    editor rule the profile has; complete identity evidence), and every
  *    resource the entry introduces must arrive with bytes matching its
  *    digest.
- * 4. The entry must not be historically authorized only (P7.9): one signed
+ * 5. The entry must not be historically authorized only (P7.9): one signed
  *    by a key the latest verified state of its signer's DID no longer lists,
  *    by an editor whose DID is deactivated, or once the author DID is
  *    deactivated (P6.5, P5.18), is refused (422
@@ -53,7 +59,7 @@
  *    Original is ever current (P7.10), so being current is not asked of it;
  *    an earlier entry that has since become historically authorized only
  *    does not refuse a new one.
- * 5. Durable before visible (P6.2): new resource bytes and signer DID logs are
+ * 6. Durable before visible (P6.2): new resource bytes and signer DID logs are
  *    written first (each an fsynced atomic replace), then the asset log, the
  *    commit point that publishes the new head, then the manifest naming it.
  *    Once the log is written the save is accepted, whatever happens to the
@@ -90,7 +96,7 @@
 import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
-import { ORIGINALS_LIMITS, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
+import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { signerPath } from '@originals/sdk/originals';
 import { json } from './router';
 import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
@@ -193,6 +199,12 @@ function lineState(line: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The sat a state's did:btco alias names, if it lists one: the Original is anchored from that entry on (P9.10). */
+function satOf(state: Record<string, unknown> | undefined): string | undefined {
+  const asset = state?.asset as { aliases?: unknown } | undefined;
+  return Array.isArray(asset?.aliases) ? btcoAliasOf(asset.aliases.filter((a): a is string => typeof a === 'string')) : undefined;
 }
 
 /** Every DID that signs the log's entries: the author, and an editor where an entry names one (P5.16). */
@@ -337,10 +349,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     if (lines.includes(s.entry)) {
       return { http: 200, body: { status: 'already-accepted', checkpoint: s.parsed.versionId, head } };
     }
-    // 2. Only an entry whose parent is the head; never rebased (P6.7).
+    // 2. After anchoring only inscriptions on the sat count (P9.12); the anchoring entry counts once inscribed (P9.10).
+    const sat = lines.map(lineState).map(satOf).find((a) => a !== undefined) ?? satOf(lineState(s.entry));
+    if (sat !== undefined) return refuse(422, 'original_anchored', { sat });
+    // 3. Only an entry whose parent is the head; never rebased (P6.7).
     if (!extendsHead(s.parsed, head)) return refuse(409, 'stale_parent', { status: 'stale-parent', head });
 
-    // 3a. Cheap checks before any signer DID log is verified (C7; #08d review r4 #4): the signer is the
+    // 4a. Cheap checks before any signer DID log is verified (C7; #08d review r4 #4): the signer is the
     // author or granted in the head's state, and its key at the named version, in the stored or the
     // submitted signer log read without verifying it, verifies the one proof. Full verification would
     // refuse an entry failing either, so nobody can make the host verify a log for one.
@@ -361,7 +376,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       }
     }
 
-    // 3. Verify under the profile against the head.
+    // 4. Verify under the profile against the head.
     const candidate = [...lines, s.entry];
     const identities: AuthorDidEvidence[] = [];
     /** Submitted signer DID logs verification used, to store; a witness file only where verification needed it. */
@@ -405,7 +420,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       }
       if (heldEvidence) identities.push(heldEvidence);
     }
-    // 3b. The signer DID log verification uses must show the named version and key (#08d review r2 #8).
+    // 4b. The signer DID log verification uses must show the named version and key (#08d review r2 #8).
     const signerLog = identities.find((i) => i.did === signer.did)?.log;
     if (typeof signerLog !== 'string') return refuse(422, 'identity_missing', { did: signer.did });
     const verifies = proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog);
@@ -434,12 +449,12 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       report.head === s.parsed.versionId &&
       report.resources.versions.filter((v) => v.versionId === s.parsed.versionId).every((v) => v.bytes === 'verified');
     if (!ok) return refuse(422, 'entry_invalid', { reasons: report.reasons, failure: report.history.failure ?? null });
-    // 4. Never accept an entry that is historically authorized only (P7.9, P6.5, P5.18). Being current
+    // 5. Never accept an entry that is historically authorized only (P7.9, P6.5, P5.18). Being current
     // is not asked: no unanchored Original is (P7.10).
     const historical = report.historicallyAuthorizedOnly.find((h) => h.versionId === s.parsed.versionId);
     if (historical) return refuse(422, 'entry_historically_authorized_only', { reason: historical.reason });
 
-    // 5. One synchronous step: compare the head, the signer DID logs and the resources verification
+    // 6. One synchronous step: compare the head, the signer DID logs and the resources verification
     // used again (P1), then store durably and publish (P6.2).
     if (!sameBytes(store.readHosted(assetKey), logBytes)) return 'again';
     for (const [key, used] of usedFiles) {

@@ -27,6 +27,7 @@
 import { OriginalsError, type ErrorCategory } from "../errors.js";
 import type { JsonObject } from "../json/index.js";
 import {
+  parseLog,
   resolveCopies,
   verifyLog,
   verifyLogText,
@@ -37,14 +38,19 @@ import {
   type VerifiedEntry,
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
+import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor, type SatEvidence } from "./bitcoin.js";
 import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
-  /** The asset log: `did.jsonl` text or parsed entries. */
-  log: string | unknown[];
+  /**
+   * The asset log: `did.jsonl` text or parsed entries. Optional with Bitcoin
+   * evidence: the anchoring sat carries an anchored Original's whole log, and
+   * a copy that differs from it is ignored (P9.17, P9.18).
+   */
+  log?: string | unknown[];
   /** Author DID histories. Missing history is incomplete evidence, never trust in the key (P5.6). */
   authors: AuthorDidEvidence[];
   /** Resource bytes by digest. */
@@ -57,6 +63,15 @@ export interface VerifyOriginalOptions {
   retained?: RetainedVersions;
   /** did:webvh alias logs, to confirm the aliases the asset state lists (P3.6). */
   aliases?: AliasEvidence[];
+  /**
+   * What indexes read from the anchoring sat, and from any other sat known to
+   * carry an anchoring inscription for this Original, one read per index used
+   * (plan 012 §3.4; P9.10, P9.11). Bitcoin then decides the whole log: the
+   * anchoring inscription carries it through the anchoring entry, and each
+   * later inscription one entry (P9.12-P9.17). A supplied log is only a copy,
+   * compared and otherwise ignored.
+   */
+  bitcoin?: SatEvidence[];
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
 }
@@ -64,6 +79,8 @@ export interface VerifyOriginalOptions {
 export interface RetainedVersions {
   original?: string;
   authors?: Record<string, string>;
+  /** The anchor reported before: an anchor that differs now is reported as a change, never silently (P9.16). */
+  anchor?: RetainedAnchor;
 }
 
 /**
@@ -88,8 +105,9 @@ export interface SignerReliance {
 /**
  * P7.10: what a valid result is valid as of: `checkpoint`, judged with the
  * signer DID versions listed. It is set whenever the checkpoint verifies,
- * whether or not the Original is current; for an unanchored Original it is
- * all the result shows, since that is never current.
+ * anchored or not and whether or not the Original is current; for an
+ * unanchored Original it is all the result shows, since that is never
+ * current.
  */
 export interface ValidAsOf {
   checkpoint: string;
@@ -187,15 +205,19 @@ export interface OriginalsReport {
    * stale when it falls short of either; otherwise not established, because
    * off Bitcoin nothing shows it is the latest (P7.10).
    */
-  assetFreshness: { status: Freshness; retainedVersionId: string | null; copies: CopyReport[] };
+  assetFreshness: { status: Freshness | "anchored"; retainedVersionId: string | null; copies: CopyReport[] };
   fork: OriginalsFork | null;
   /**
    * Each alias the checkpoint's state lists, and whether it is confirmed in both
    * directions (P3.6). An unconfirmed alias does not affect the Original itself.
    */
   aliases: AliasReport[];
-  /** Unwitnessed and unanchored: claimed ordering only (P7.6). */
-  ordering: "claimed";
+  /** Present when the log names an anchoring sat or Bitcoin evidence was supplied (P9.10-P9.16). */
+  anchoring: AnchoringReport | null;
+  /** The anchoring sat's holder: never authority, always provisional (P9.11, P9.12). */
+  ownership: OwnershipReport | null;
+  /** Anchored from the anchoring entry on (P9.13); claimed before it and for unanchored Originals (P7.6). */
+  ordering: "claimed" | "anchored";
   deactivated: boolean;
   state: AssetState | null;
   /** The derived DID document at the checkpoint (P3.8). */
@@ -214,10 +236,12 @@ export interface OriginalsReport {
   /** Why the result is not current: `not-anchored` for every unanchored Original, and anything else that applies. */
   reasons: string[];
   /**
-   * The versionIds to retain after this verification: never lower than those
-   * supplied, and unchanged by a fork or stale evidence.
+   * The versionIds to retain after this verification, never lower than those
+   * supplied, and unchanged by a fork or stale evidence; and, for an anchored
+   * Original, the anchor reported, so a later change of anchor is reported
+   * rather than silent (P9.16).
    */
-  retain: { original: string | null; authors: Record<string, string> };
+  retain: { original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor };
 }
 
 function toFailure(index: number, versionId: string | undefined, error: OriginalsError): ReportFailure {
@@ -327,14 +351,34 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     now: options.now,
     limits: { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes, ...options.limits },
   };
+  // An anchored Original: Bitcoin decides the log (plan 012 §3.4; P9.17).
+  const onSats = (options.bitcoin?.length ?? 0) > 0;
+  if (options.log === undefined && !onSats) throw new OriginalsError("incomplete-evidence", "LOG_MISSING", "neither an asset log nor Bitcoin evidence was supplied");
+  let input: string | unknown[] = options.log ?? [];
+  let assembly: Awaited<ReturnType<typeof assembleFromBitcoin>> | null = null;
+  let raw: unknown[] | null = null;
+  try {
+    raw = options.log === undefined ? null : typeof options.log === "string" ? parseLog(options.log) : options.log;
+  } catch (error) {
+    if (!(error instanceof OriginalsError)) throw error;
+    raw = onSats ? [] : null; // a copy that does not parse is ignored when the sat carries the log
+  }
+  if (onSats || (raw && anchoringIndex(raw) >= 0)) {
+    const previousAnchor = options.retained?.anchor;
+    assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries) => verifyLog(entries, verifyOptions), histories, previousAnchor ? { previousAnchor } : {});
+    input = assembly.entries;
+  }
+  const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
   const supplied = (): Promise<LogVerification> =>
-    typeof options.log === "string" ? verifyLogText(options.log, verifyOptions) : verifyLog(options.log, verifyOptions);
+    typeof input === "string" ? verifyLogText(input, verifyOptions) : verifyLog(input, verifyOptions);
   let log: LogVerification;
   let fork: OriginalsFork | null = null;
   let copies: CopyReport[] = [];
   let stale = false;
-  if ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined) {
-    const text = typeof options.log === "string" ? options.log : options.log.map((e) => `${JSON.stringify(e)}\n`).join("");
+  // Once anchored, Bitcoin decides from the anchor on: a copy can neither fork the log nor
+  // make it stale (P9.13, P9.16). A retained version Bitcoin dropped is reported below.
+  if (!onBitcoin && ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined)) {
+    const text = typeof input === "string" ? input : input.map((e) => `${JSON.stringify(e)}\n`).join("");
     const resolution = await resolveCopies({ source: "supplied", log: text }, options.copies ?? [], {
       ...verifyOptions,
       ...(options.retained?.original !== undefined ? { retainedVersionId: options.retained.original } : {}),
@@ -353,6 +397,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const failure = log.failure ? toFailure(log.failure.index, log.failure.versionId, log.failure.error) : undefined;
 
   const head = log.entries[log.entries.length - 1];
+  // Anchored ordering only for what Bitcoin accepted: the anchor and the inscriptions after it.
+  const inscribed = new Set(onBitcoin ? [onBitcoin.anchor!.versionId, ...onBitcoin.accepted.map((a) => a.versionId)] : []);
+  const anchored = (v: VerifiedEntry | undefined) => v !== undefined && inscribed.has(v.entry.versionId);
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
@@ -400,7 +447,14 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
-  const identityIncomplete = failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete");
+  // P9.15 (originals-spec #47): an inscribed entry naming a signer DID version
+  // the verifier has no verified copy of, or none at or after, is incomplete identity evidence (P5.6).
+  const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
+  const identityIncomplete =
+    failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
+  const retainedAnchor: RetainedAnchor | undefined = onBitcoin
+    ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null }
+    : options.retained?.anchor;
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
     original: log.scid ? `did:vh:${log.scid}` : null,
@@ -425,21 +479,34 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       failures: mismatched,
     },
     assetFreshness: {
-      status: stale ? "stale" : "not-established",
+      // An anchored log is the sat's, as of the read's tip (P9.13, P9.17).
+      status: stale ? "stale" : onBitcoin ? "anchored" : "not-established",
       retainedVersionId: options.retained?.original ?? null,
       copies,
     },
     fork,
     aliases: await Promise.all((state?.asset.aliases ?? []).map((did) => checkAlias(`did:vh:${log.scid}`, options.aliases?.find((a) => a.did === did), did, options.now))),
-    ordering: "claimed",
+    anchoring: assembly?.report ?? null,
+    ownership: assembly?.owner ?? null,
+    ordering: anchored(selected) ? "anchored" : "claimed",
     deactivated: log.deactivated,
     state: state?.asset ?? null,
     document: selected ? deriveDocument(prefix) : null,
     validAsOf: null,
-    historicallyAuthorizedOnly: historicallyAuthorizedOnly(prefix, histories, authorDid),
+    // P7.9 is for entries not inscribed on an anchoring sat; those are checked at their inscription
+    // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
+    historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
     current: false,
     reasons,
-    retain: { original: retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null), authors: retainedAuthors },
+    // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
+    // After a change of anchor, the new anchor's branch is the history (P9.16).
+    retain: {
+      original: assembly && !onBitcoin
+        ? (options.retained?.original ?? null)
+        : onBitcoin?.change ? (head?.entry.versionId ?? null) : retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null),
+      authors: retainedAuthors,
+      ...(retainedAnchor ? { anchor: retainedAnchor } : {}),
+    },
   };
   for (const h of histories) {
     const latestId = h.versions[h.versions.length - 1]?.versionId;
@@ -447,17 +514,28 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
 
   // P7.10: nothing off Bitcoin shows that a newer entry or another branch does not exist.
-  reasons.push("not-anchored");
+  if (!anchored(head)) reasons.push("not-anchored");
   if (failure) reasons.push(`history-${report.history.status}`);
   if (report.identityEvidence.status === "incomplete") reasons.push("identity-evidence-incomplete");
   if (fork) reasons.push("fork-unresolved");
   if (report.assetFreshness.status === "stale") reasons.push("asset-log-older-than-retained");
   if (report.identityEvidence.freshness === "stale") reasons.push("author-history-older-than-retained");
   if (editors.some((e) => e.freshness === "stale")) reasons.push("editor-history-older-than-retained");
-  // P6.5: the author DID's deactivation is reported with the result.
-  if (report.identityEvidence.deactivated) reasons.push("author-did-deactivated");
+  // P6.5: the author DID's deactivation is reported with an unanchored result. An anchored
+  // Original's accepted state stays current after it (P9.15).
+  if (report.identityEvidence.deactivated && !anchored(head)) reasons.push("author-did-deactivated");
   // P7.9: any result that includes a historically authorized entry says so.
   if (report.historicallyAuthorizedOnly.length > 0) reasons.push("historically-authorized-only");
+  if (assembly?.report.status === "unverified") reasons.push("bitcoin-evidence-missing");
+  if (assembly?.report.status === "not-anchored") reasons.push("anchor-not-found-on-bitcoin");
+  if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
+  if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
+  if (assembly?.report.change) reasons.push("anchor-changed");
+  if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
+    const retained = options.retained.original;
+    if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
+    if (assembly.rejectedByAuthorState.has(retained)) reasons.push("retroactive-revocation-conflict");
+  }
   // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
   // `resources` as unavailable content, never as a failure. Bytes that are supplied are still
   // checked, and a mismatch fails.
@@ -467,8 +545,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     !failure && report.authorBinding.status === "valid" && report.identityEvidence.status === "complete" &&
     report.resources.status !== "digest-failure" && fork === null;
   if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
-  // P7.10: only an anchored Original can be current, and none is anchored here.
-  report.current = false;
+  // P7.10: only an anchored Original's state derived from its sat can be current (P9.13).
+  report.current = valid && selected === head && anchored(head) && reasons.length === 0;
   return report;
 }
 

@@ -65,7 +65,7 @@ test('sat snapshots retain raw metadata and derive reveal order from active Core
     if (req.method === 'POST') {
       const { method } = await req.json() as { method: string };
       const result = method === 'getblockchaininfo' ? { chain: 'regtest', blocks: 100, bestblockhash: hash }
-        : method === 'getblockhash' ? hash : method === 'getblock' ? { hash, height: 100, confirmations: 1, tx: [txid] } : null;
+        : method === 'getblockhash' ? hash : method === 'getblock' ? { hash, height: 100, confirmations: 1, time: 1_760_000_000, tx: [txid] } : null;
       return Response.json({ result });
     }
     const path = new URL(req.url).pathname;
@@ -80,7 +80,7 @@ test('sat snapshots retain raw metadata and derive reveal order from active Core
   const provider = new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' });
   const snapshot = await provider.getSatSnapshot('123');
   expect(snapshot.enumerationComplete).toBe(true);
-  expect(snapshot.blocks).toEqual([{ height: 100, hash, txids: [txid] }]);
+  expect(snapshot.blocks).toEqual([{ height: 100, hash, txids: [txid], time: 1_760_000_000 }]);
   expect(snapshot.publications[0].creation?.transactionIndex).toBe(0);
   expect(snapshot.publications[0].body).toEqual({ status: 'complete', mediaType: 'image/png', bytes: new Uint8Array([0, 255, 1]), metadata: new Uint8Array([161, 99, 108, 111, 103, 128]) });
   expect(snapshot.ownership).toEqual({ owner: 'holder', satpoint: txid + ':0:0' });

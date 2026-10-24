@@ -79,9 +79,9 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
  * enforces that an editor entry is not the genesis entry, sets no parameter,
  * leaves the grants alone and carries one proof by its editor; the profile's
  * `limit` is the grant's scope (`checkEditorEntry`, P5.16).
- * Bitcoin: for an inscribed entry, P9.15 checks the signer DID's state at the
- * inscription time; that is the anchoring branch's (plan 011 PR 9), which
- * hooks in where `namedVersion` is resolved below.
+ * Bitcoin: an inscribed entry is also checked against the signer DID's state
+ * at its inscription time (P9.15), in `assembleFromBitcoin` through the same
+ * `signerOf`.
  */
 export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);

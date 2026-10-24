@@ -163,10 +163,14 @@ The limits (P14.13), decided by the owner on 21 October 2026 (D6; spec PR #50 (o
 
 ### 2.5 Bitcoin representation (D6)
 
-This is deferred to Phase 4 and will come to you as its own proposal before any writer code. The working idea is one inscription per publication on the anchoring sat:
-- The body is `text/jsonl` of the full entries beyond the durable boundary.
-- A compact delta encoding (PR 10) is added only if size demands it.
-- Media inscriptions stay raw bytes bound by digest.
+Proposed and accepted (owner decision Q15): see [plan 012](012-bitcoin-representation.md).
+In short: the anchoring entry is an ordinary update that adds the sat's
+did:btco alias; every inscription on the anchoring sat carries one complete
+entry as `application/vnd.originals.vh+jsonl`, with no did:btco metadata; the
+history before the anchor comes from a copy and chains to it; Bitcoin is the
+authoritative source from the anchor on; inscriptions count at 1 confirmation
+with their depth reported; did:btco author DIDs follow the method spec v0.2.0.
+Spec findings S10–S12 are in plan 012 section 2.
 
 ## 3. Phased delivery (spec §10), as stacked PRs against `main`
 
@@ -188,8 +192,9 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **8d** | 3 | Shared-host saves (P6.7, P6.8): `sign`, `submit`, `refused`, `sync`, `reconcile`; the landing's verifying submit route | §12 rows C12-125 to C12-131 |
 | **8e** | 2, 3 | Re-pin to originals-spec master `051049d8b`: an unanchored Original is never current, valid as of its checkpoint (P7.10, #46); historically authorized only (P7.9); #48's provisional wire format (`signers/`, no asset witness file, UTF-8 entry size, 64 MiB resource fetch cap) | §12 rows C12-22, C12-48, C12-140 to C12-145, C12-150, C12-152, C12-153 |
 | **8f** | 1, 2 | Re-pin to originals-spec master `1039c471c` (#47–#49) with open #50: the author adds and removes resources, editors cannot, resourceIDs are never reused (P4.1, P4.4, P5.15, P5.16, P14.4); editors move into the VH-Log engine as VH-Log PR 11's "Editors from a Controller" hook [S25]; up to 256 resources (P14.13) | §12 rows C12-16, C12-154 to C12-160 |
-| **9** | 4 | Bitcoin representation proposal → then did:btco (author + alias), sat assembly (P9.13), inscription-time checks (P9.15), anchor selection (P9.16), ownership report (P9.11) against fixtures | Bitcoin §12 rows on fixtures |
-| **10** | 4 | Writer/provider: prepare/submit/retry/durable boundary, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
+| **9a** | 4 | Bitcoin verifier on fixtures (plan 012): anchoring entry and alias rules, assembly over sat snapshots supplied as evidence (no Bitcoin `src` yet; plan 012 §3.4), chain order, inscription time, P9.15 for did:vh/did:webvh authors, anchors and conflicting anchors, ownership report, reorg reporting | Bitcoin §12 rows on recorded fixtures |
+| **9b** | 4 | did:btco author DIDs per the method spec v0.2.0 (CBOR metadata), replacing the SDK's content-based resolver | §12 rows 58–61 |
+| **10** | 4 | Writer/provider: anchor and reinscribe through the sat inscription builder and recovery store, durable boundary and retries, landing `server/bitcoin.ts` reconciliation | **Real Core 31.1 / ord 0.29.0 regtest** journey incl. faults; no mainnet/testnet spending |
 
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
@@ -268,3 +273,4 @@ The algorithm itself is small: JCS, then `sha256(sha256(config) ‖ sha256(doc))
 - **Q12 — PR 5 shape (2026-10-18).** One PR. The non-history SDK modules stay. The landing's signed-in authoring moves forward from PR 8: the user's did:webvh already keeps its Turnkey authorship key (`#key-1`, assertionMethod) separate from its identity update key (`#key-0`), so it signs Originals directly.
 - **Q13 — hosted landing (2026-10-19).** Signed-in authors' aliases live on originals.build, and each alias log's update key is in the author's Turnkey wallet (P3.7). `hostedPublication` stays off until the owner's public-host proof passes. (Its witness-service part is superseded by Q14.)
 - **Q14 — no witnesses (2026-10-19; S9).** Asset logs do not use witnesses. Anyone who needs proven ordering anchors on Bitcoin. This withdraws the PR 7a witness design and the PR 8a witness service, supersedes Q7 for asset logs, and leaves Q13's alias decision in place.
+- **Q15 — Bitcoin representation (2026-10-20; plan 012).** Anchoring inscription carries the anchoring entry only; full entries, no deltas yet; did:btco author DIDs follow the method spec v0.2.0; inscriptions count at 1 confirmation with their depth reported.
