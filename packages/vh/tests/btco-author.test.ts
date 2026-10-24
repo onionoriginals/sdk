@@ -20,6 +20,7 @@ import {
   verifyAuthorHistory,
   verifyOriginal,
   type AuthorRef,
+  type OriginalsReport,
   type SatEvidence,
   type SatInscription,
 } from "../src/originals/index.js";
@@ -216,11 +217,12 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   const inscribed = (entries: LogEntry[], height: number, extra: Partial<SatInscription> = {}) =>
     at(height, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(entries)), ...extra });
   /** Verify from Bitcoin alone: the author's sat and the anchoring sat, no copy of the log (P9.18). */
-  const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[]) =>
+  const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[], retained?: OriginalsReport["retain"]) =>
     verifyOriginal({
       now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: "index" in (author[0] ?? {}) ? (author as SatEvidence[]) : sat(AUTHOR, author as Inscribed[]) }],
       bitcoin: [sat(SAT, anchoring)],
+      ...(retained ? { retained } : {}),
     });
 
   /** The issue's repro: V1 lists key A; the anchoring entry is signed with B and names V2, the grant of B. */
@@ -290,6 +292,50 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     const short = { ...sat(AUTHOR, [v1]), tip: { height: 35, hash: "cc".repeat(32) } };
     const low = await fromBitcoin([short], [inscribed([genesis, anchor], 31), later]);
     expect(low.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+  });
+
+  test("C12-178: P9.15: a later inscription naming a known did:btco version, with an unread inscription on the author's sat before it, is unverifiable, not accepted against the older state", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a known version", author: ref(v1.id), sign });
+    const later = inscribed([next], 40);
+    // The unread inscription could be a version that removes key A.
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const r = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+    expect(r.anchoring?.unverifiable).toEqual([{ sat: SAT, inscription: later.id, versionId: next.versionId, signer: AUTHOR, signerVersionId: v1.id }]);
+    expect(r.anchoring?.gaps).toEqual([]);
+  });
+
+  test("C12-178: P9.15: an entry already accepted stays accepted when a gap in its did:btco signer's history is found later, and the report states the gap", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Accepted before the gap was seen", author: ref(v1.id), sign });
+    const later = inscribed([next], 40);
+    const first = await fromBitcoin([v1], [inscribed([genesis, anchor], 31), later]);
+    expect(first.head).toBe(next.versionId);
+    expect(first.anchoring?.gaps).toEqual([]);
+    // A later read cannot read an inscription on the author's sat before the accepted one.
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const again = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later], first.retain);
+    expect(again.head).toBe(next.versionId);
+    expect(again.anchoring?.accepted.map((a) => a.inscription)).toEqual([later.id]);
+    expect(again.anchoring?.unverifiable).toEqual([]);
+    expect(again.anchoring?.gaps).toEqual([{ sat: SAT, inscription: later.id, versionId: next.versionId, signer: AUTHOR, signerVersionId: v1.id, establishedBefore: expect.objectContaining({ height: 35 }) }]);
+    expect(again.reasons).toContain("signer-history-gap");
+    expect(again.reasons).not.toContain("authoritative-source-changed");
+  });
+
+  test("C12-178: an entry this verifier never accepted gets no such exception: a retained head before it leaves it unverifiable", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const before = await fromBitcoin([v1], [inscribed([genesis, anchor], 31)]);
+    expect(before.head).toBe(anchor.versionId);
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Never accepted here", author: ref(v1.id), sign });
+    const later = inscribed([next], 40);
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const r = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later], before.retain);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.unverifiable.map((u) => u.inscription)).toEqual([later.id]);
+    expect(r.anchoring?.gaps).toEqual([]);
   });
 
   test("C12-93: an inscribed entry naming a did:btco author version inscribed later in the same block is rejected", async () => {
