@@ -301,3 +301,98 @@ test('a mixed-case canonical host still redirects a foreign host, to the lowerca
   expect(res.status).toBe(301);
   expect(res.headers.get('location')).toBe('https://originals.build/page');
 });
+
+/**
+ * #976 B, gap G1; P3.6. A did:webvh names the host it was published on, and
+ * the durable store serves by that host. A hosted-layout read on a
+ * non-canonical host this instance serves (the legacy did:webvh domain) that
+ * holds the object is served there, never bounced to a host that doesn't hold
+ * it. Anything else on that host, and every read on a host this instance
+ * doesn't serve, still redirects.
+ */
+describe('hosted-layout reads on the host they were published under', () => {
+  const stored = '/user-abc0123456789ab/did.jsonl';
+  // The store answers for any host it holds; only the served did:webvh hosts may bypass the redirect.
+  const publications = {
+    serve: (url: URL) =>
+      (url.host === 'magby.originals.build' || url.host === 'intruder.example.com') && url.pathname === stored ? new Response('log') : null,
+  };
+  const fetchFn = () =>
+    buildFetch({ apiRoutes: configuredRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0, canonicalHost: 'originals.build', publications });
+
+  test('a stored object is served, not redirected', async () => {
+    const res = await fetchFn()(new Request(`https://magby.originals.build${stored}`));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('log');
+  });
+
+  test('a hosted-layout path with nothing stored still redirects', async () => {
+    const res = await fetchFn()(new Request('https://magby.originals.build/user-zzz/did.jsonl'));
+    expect(res.status).toBe(301);
+  });
+
+  test('a document on that host still redirects', async () => {
+    const res = await fetchFn()(new Request('https://magby.originals.build/some/page'));
+    expect(res.status).toBe(301);
+  });
+
+  // P3.6: a did:webvh is fetched from the domain it names, and this instance
+  // serves only its own did:webvh hosts. A stored object under any other
+  // Host header is not served from here.
+  test('a stored object under a host that is not served still redirects', async () => {
+    const res = await fetchFn()(new Request(`https://intruder.example.com${stored}`));
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe(`https://originals.build${stored}`);
+  });
+});
+
+/**
+ * #976 B, gap G6. The acceptance receipt compares the deployed revision with
+ * the source SHA, so the server reports its own and the SPA's, with or without
+ * sign-in configured.
+ */
+describe('GET /api/version', () => {
+  test('reports the server revision and the SPA revision baked into index.html', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'landing-dist-rev-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><head><meta name="originals-revision" content="abc1234"></head>');
+    try {
+      for (const apiRoutes of [configuredRoutes, null]) {
+        const fetchFn = buildFetch({ apiRoutes, hostStore: noopHostStore, distDir: dir + '/', trustedProxyHops: 0, revision: 'def456' });
+        const res = await fetchFn(new Request('https://originals.build/api/version'));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ revision: 'def456', spaRevision: 'abc1234' });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a dirty build revision is reported as such, never as the clean SHA', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'landing-dist-rev-'));
+    writeFileSync(join(dir, 'index.html'), `<head><meta name="originals-revision" content="${'a'.repeat(40)}-dirty"></head>`);
+    try {
+      const res = await buildFetch({ apiRoutes: null, hostStore: noopHostStore, distDir: dir + '/', trustedProxyHops: 0 })(new Request('https://originals.build/api/version'));
+      expect((await res.json()).spaRevision).toBe(`${'a'.repeat(40)}-dirty`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an unknown SPA revision is not cached: a later build is read', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'landing-dist-rev-'));
+    try {
+      const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore, distDir: dir + '/', trustedProxyHops: 0 });
+      expect((await (await fetchFn(new Request('https://originals.build/api/version'))).json()).spaRevision).toBeNull();
+      writeFileSync(join(dir, 'index.html'), '<head><meta name="originals-revision" content="abc1234"></head>');
+      expect((await (await fetchFn(new Request('https://originals.build/api/version'))).json()).spaRevision).toBe('abc1234');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an unknown revision is null, never a guess', async () => {
+    const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore, distDir, trustedProxyHops: 0 });
+    const res = await fetchFn(new Request('https://originals.build/api/version'));
+    expect(await res.json()).toEqual({ revision: null, spaRevision: null });
+  });
+});

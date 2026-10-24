@@ -3,7 +3,7 @@
  * did:webvh alias (P3.6; no witnesses, owner decision Q14); the hosted snapshot
  * is verified exactly, never mixed (P9.1); resources are served isolated (P9.7).
  */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { localSigner } from "@originals/vh/crypto";
 import { createLog, serializeLog, signWith } from "@originals/vh/log";
@@ -11,6 +11,7 @@ import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl } from "@originals/vh/webvh";
 import { MemoryStore, OriginalsSDK, RETRIEVAL_LIMITS, hostedFiles, servingHeaders, type HostedFetch, type HostedFetchOptions } from "../../../src/originals/index.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
+import { Retrieval } from "../../../src/originals/retrieval.js";
 
 const KEY = seed(21);
 const B1 = bytes("first crop");
@@ -359,6 +360,23 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     const tiny = instrumented(files, base);
     expect((await rejection(reader(3).loadPublished(alias.did, tiny.fetch))).details).toMatchObject({ limit: "requests", requests: 3 });
     expect(tiny.calls.map((c) => c.path.replace(/^.*\//, ""))).toEqual(["did-witness.json", "did.jsonl", "originals-evidence.json"]);
+  });
+
+  test("a request capped by the operation deadline cannot become an optional miss when its timer fires early", async () => {
+    // Timers and Date.now need not cross the millisecond boundary together.
+    // Hold wall time one millisecond short of the deadline while the request
+    // timer fires: exhausting the operation budget must still fail (section 6).
+    const now = spyOn(Date, "now").mockReturnValue(1_000);
+    const budget = new Retrieval(() => new Promise(() => {}), { timeoutMs: 1_000, requestTimeoutMs: 200 });
+    now.mockReturnValue(1_999);
+    try {
+      const error = await rejection(budget.get("https://example.com/did-witness.json", { required: false, archive: true }));
+      expect(error.code).toBe("RETRIEVAL_BUDGET_EXCEEDED");
+      expect(error.details).toMatchObject({ limit: "time", timeoutMs: 1_000 });
+    } finally {
+      budget.close();
+      now.mockRestore();
+    }
   });
 
   test("a whole-operation deadline bounds many slow optional requests", async () => {

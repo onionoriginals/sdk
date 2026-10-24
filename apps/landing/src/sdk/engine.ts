@@ -29,7 +29,8 @@ import {
 } from "./anchoring";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import { TurnkeySatSigner } from "./turnkey-sat-signer";
-import { DEFAULT_WEBVH_DOMAIN, TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
+import { TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
+import { webvhDomain } from "../auth/webvh-domain";
 import { FEATURES, type Feature } from "./features";
 import { publishOriginal, type HostedUpload } from "./publish";
 import { landingSharedHost, type SubmitTransport } from "./shared-host";
@@ -591,7 +592,7 @@ export class DemoEngine {
     if (!this.authed || !subOrgId) throw new Error("Sign in to publish: an Original's web address lives in your account.");
     return {
       upload: new DurableHostingStorageAdapter(),
-      domain: DEFAULT_WEBVH_DOMAIN,
+      domain: webvhDomain(),
       slug: userWebvhSlug(subOrgId),
       aliasSigner: async () => {
         const { openSessionKey } = await import("../auth/turnkey-browser-client");

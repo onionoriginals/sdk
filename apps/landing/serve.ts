@@ -48,6 +48,7 @@ import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createAnchoringLibrary } from './server/originals-library';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
+import { servedWebvhHosts } from './server/webvh-hosts';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
@@ -231,7 +232,8 @@ function buildApiRoutes(): {
       `[landing] ${btcNet} inscription disabled (QUICKNODE_ENDPOINT${btcNet === 'mainnet' ? '' : '/BTC_FAUCET_*'} absent) — inscribe stays mock`
     );
   }
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}) });
+  // Writes only under this instance's own did:webvh hosts (#976 B, G1; P3.6).
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost()) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
@@ -268,6 +270,8 @@ const server = Bun.serve({
     // bakes in, read at runtime here so the redirect and the DID agree; a bad
     // value is already a named violation in the boot config report.
     canonicalHost: canonicalWebvhHost(),
+    // Railway sets this for the deployed commit; /api/version reports it (#976 B, G6).
+    revision: process.env.RAILWAY_GIT_COMMIT_SHA || null,
   }),
   // Last line of defence (R3): a handler that throws must not reach a client
   // as an untyped 500 with nothing in the log. One named JSON body, one
