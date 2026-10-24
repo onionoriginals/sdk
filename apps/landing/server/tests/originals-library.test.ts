@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex } from '@scure/base';
 import { MemoryStore, OriginalsSDK, readZip } from '@originals/sdk/originals';
+import { OriginalsError } from '@originals/vh';
 import { FileStore } from '@originals/sdk/originals/fs';
 import { createAnchoringLibrary } from '../originals-library';
 import type { OriginalsStore } from '../originals-store';
@@ -95,6 +96,10 @@ describe('durable rows are labelled saved only when the report verifies (section
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ did, availability: 'incomplete' });
     expect(rows[0].problem).toMatch(/fork/i);
+    // The app cannot settle it: the copy says so, and keeps both exports.
+    expect(rows[0].problem).toMatch(/does not offer/i);
+    const refused = await createAnchoringLibrary(dataDir).evidence('alice', did).catch((e) => e);
+    expect((refused as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
   });
 
   test('a record with incomplete identity evidence is incomplete with a problem (P5.6)', async () => {
@@ -133,7 +138,10 @@ describe('hosted snapshots (section 7; P6.6)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ did, availability: 'incomplete' });
     expect(rows[0].problem).toMatch(/disagree/i);
-    expect(await library.evidence('alice', did)).toBeNull();
+    // Not a 404 that hides it: a distinct divergence the opened view can show (#996 review).
+    const refused = await library.evidence('alice', did).catch((e) => e);
+    expect(refused).toBeInstanceOf(OriginalsError);
+    expect((refused as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
   });
 
   test('evidence is the copy the list verified, not the first root that names the Original (P7.5)', async () => {
@@ -142,7 +150,8 @@ describe('hosted snapshots (section 7; P6.6)', () => {
     const good = files(branchA);
     // Same manifest, but the log is not the signed one: it names the Original and fails verification.
     const damaged = new Map(good);
-    const logKey = [...good.keys()].find((k) => k.endsWith('did.jsonl'))!;
+    const logKey = 'asset/did.jsonl';
+    expect(good.has(logKey)).toBe(true);
     damaged.set(logKey, bytes('{"broken":true}\n'));
     const library = createAnchoringLibrary(dataDir, hosting([damaged, good]));
     const rows = await library.list('alice');
@@ -163,5 +172,50 @@ describe('hosted snapshots (section 7; P6.6)', () => {
     const rows = await library.list('alice');
     expect(rows).toEqual([expect.objectContaining({ did, availability: 'server' })]);
     expect(rows[0].problem).toBeUndefined();
+  });
+});
+
+describe('prefixes and Bitcoin-settled forks are not divergence (#996 review; P7.6, P9.16)', () => {
+  test('a hosted copy that is a prefix of another is stale, not divergent: the longer one is served', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'library-'));
+    const { did, genesis, branchA } = await divergent();
+    const library = createAnchoringLibrary(dataDir, hosting([files(genesis), files(branchA)]));
+    const rows = await library.list('alice');
+    expect(rows).toEqual([expect.objectContaining({ did, availability: 'server', title: 'Device A' })]);
+    const report = (await OriginalsSDK.create({ authors: [] }).load((await library.evidence('alice', did))!)).report;
+    expect(report.state?.name).toBe('Device A');
+  });
+
+  test('a durable record holding a stale pre-anchor branch is saved once Bitcoin shows the anchor (decision C; C12-23, P9.16)', async () => {
+    const { DemoEngine } = await import('../../src/sdk/engine');
+    const { httpAnchoringTransport, memoryOutbox } = await import('../../src/sdk/anchoring');
+    const { HttpOrdinalsProvider } = await import('../../src/sdk/http-ordinals-provider');
+    const { inProcessLanding } = await import('./landing-server-fixture');
+    const { WALLET_ADDRESS, fakeChain, walletSigner } = await import('./originals-chain-fixture');
+    const chain = fakeChain();
+    const landing = inProcessLanding(chain);
+    const author = await createLocalAuthor();
+    const transport = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
+    const engine = new DemoEngine({ features: { bitcoinAnchoring: true }, author, anchoring: { transport, outbox: memoryOutbox(), satSigner: walletSigner, network: 'regtest', index: 'ord-test' } });
+    const { did } = await engine.create('Harbor', 'Orbits', 'harbor');
+    const other = new DemoEngine({ author });
+    await other.importEvidence(await engine.evidencePackage());
+    await other.update('Harbor elsewhere', 'Orbits', 'elsewhere');
+    const stale = await other.evidencePackage();
+    await engine.inscribe({ funding: { fundingUtxos: [chain.satUtxo, chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
+    chain.mine();
+
+    const dir = join(landing.dataDir, 'originals-anchoring', 'sub-engine', keyOf(did));
+    const store = await FileStore.open(join(dir, 'store'));
+    expect((await OriginalsSDK.create({ store, authors: [] }).import(stale)).status).toBe('conflict');
+    await store.close();
+
+    // Without Bitcoin the copy reports a fork; judged against the sat, the anchor's branch is the history.
+    expect((await createAnchoringLibrary(landing.dataDir).list('sub-engine'))[0]).toMatchObject({ did, availability: 'incomplete' });
+    const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: landing.anchoring.bitcoinEvidence });
+    const rows = await library.list('sub-engine');
+    expect(rows).toEqual([expect.objectContaining({ did, availability: 'server' })]);
+    expect(rows[0].problem).toBeUndefined();
+    expect(await library.evidence('sub-engine', did)).toBeInstanceOf(Uint8Array);
   });
 });

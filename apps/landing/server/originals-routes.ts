@@ -342,7 +342,11 @@ export function createOriginalsRoutes(deps: {
         'Content-Disposition': 'attachment; filename="original.originals.zip"',
         'X-Content-Type-Options': 'nosniff',
       } });
-    } catch { return json({ error: 'evidence_unavailable', message: 'This saved evidence needs recovery. No work was removed.' }, 503); }
+    } catch (error) {
+      // Two histories and neither chosen (P6.6): said as such, so the opened view can show it.
+      if ((error as { code?: string } | null)?.code === 'EVIDENCE_DIVERGED') return json({ error: 'diverged', message: (error as Error).message }, 409);
+      return json({ error: 'evidence_unavailable', message: 'This saved evidence needs recovery. No work was removed.' }, 503);
+    }
   };
 
   return { hostPut, hostGet, submit, record, list, evidence, serve: (url) => store.serve(url) };

@@ -34,7 +34,8 @@ import { join } from 'node:path';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex } from '@scure/base';
 import { OriginalsError } from '@originals/vh';
-import { OriginalsSDK, type InscriptionClock } from '@originals/sdk/originals';
+import { OriginalsSDK, satEvidence, type InscriptionClock } from '@originals/sdk/originals';
+import type { SatEvidence } from '@originals/vh/originals';
 import { FileStore, fileRecoveryStore } from '@originals/sdk/originals/fs';
 import {
   catchUp,
@@ -389,7 +390,18 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     return { examined, resumed, failed };
   }
 
-  return { submit, recorded, status, sweep };
+  /**
+   * A fresh read of a did:btco alias's sat, as evidence for verifyOriginal: the
+   * library judges a durable record's fork against it (P9.16). Ownership depth
+   * is not established by this read.
+   */
+  async function bitcoinEvidence(alias: string): Promise<SatEvidence[]> {
+    if (typeof deps.provider.getSatSnapshot !== 'function') throw new Error('no sat reads');
+    const snapshot = await deps.provider.getSatSnapshot(alias.slice(alias.lastIndexOf(':') + 1), { bodies: 'originals' });
+    return [await satEvidence(snapshot, { clock: deps.clock, index: deps.index, ownerConfirmations: 0 })];
+  }
+
+  return { submit, recorded, status, sweep, bitcoinEvidence };
 }
 
 export type OriginalsAnchoring = ReturnType<typeof createOriginalsAnchoring>;
