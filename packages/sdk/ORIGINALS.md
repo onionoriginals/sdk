@@ -142,6 +142,15 @@ on; it never reports an unanchored Original as current (P7.10). The
   `proofPurpose` and `proofValue` (`PROOF_MEMBERS`): `created`, `expires`,
   `id`, `domain`, `challenge`, `nonce`, `previousProof` and `@context` are
   rejected.
+- **Form (P14.2, P14.3).** `versionTime` ends in `Z` (`+00:00` is
+  `VERSION_TIME_FORMAT`), with at most three fractional digits. Each line of
+  an asset log, and of an Originals inscription body, is compact JSON ending
+  in a single LF: a missing final LF, CRLF or whitespace between tokens is
+  `LOG_LINE_FORMAT` for the log (an inscription is `undecodable`). This is
+  the asset log's rule only: did:vh and did:webvh signer and alias logs keep
+  their own method's rules. No number in an entry is an integer outside the
+  IEEE 754 safe range, however written (`1e16`, `9007199254740993.0`;
+  `JSON_UNSAFE_NUMBER`).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version. A
   resource added after genesis starts at version 1.

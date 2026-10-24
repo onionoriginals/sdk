@@ -551,6 +551,62 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
   });
 });
 
+describe("section 14: the asset log's form (P14.2)", () => {
+  test("versionTime ends in Z, with at most three fractional digits", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    for (const versionTime of ["2026-10-18T12:30:00.000+00:00", "2026-10-18T12:30:00+00:00", "2026-10-18T12:30:00.0001Z"]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]), 3, "VERSION_TIME_FORMAT", "invalid-evidence");
+    }
+    for (const versionTime of ["2026-10-18T12:30:00Z", "2026-10-18T12:30:00.5Z", "2026-10-18T12:30:00.123Z"]) {
+      expect((await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice])).history.status).toBe("valid");
+    }
+  });
+
+  test("each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
+    const { alice, log } = await harbor();
+    const text = serializeLog(log);
+    expect((await report(text, [alice])).history.status).toBe("valid");
+    failedWith(await report(text.slice(0, -1), [alice]), 2, "LOG_LINE_FORMAT", "invalid-evidence");
+    failedWith(await report(text.replaceAll("\n", "\r\n"), [alice]), 0, "LOG_LINE_FORMAT", "invalid-evidence");
+    // The same entry with a space after a colon: valid JSON, the same versionId and proof, not compact.
+    const lines = text.split("\n");
+    lines[1] = lines[1].replace('"versionTime":', '"versionTime": ');
+    failedWith(await report(lines.join("\n"), [alice]), 1, "LOG_LINE_FORMAT", "invalid-evidence");
+    lines[1] = `${lines[1].replace('"versionTime": ', '"versionTime":')}\t`;
+    failedWith(await report(lines.join("\n"), [alice]), 1, "LOG_LINE_FORMAT", "invalid-evidence");
+    // Spaces inside strings are content, not whitespace.
+    expect(text).toContain("Harbor at dawn");
+  });
+
+  test("P14.3: an integer outside the safe range is rejected however it is written; other numbers are kept", async () => {
+    const { alice, log, sign } = await harbor();
+    // Re-signed with the number as the parser reads it, so only its value is judged.
+    const signedWith = async (value: number, written: string) => {
+      const entry = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: value } } }, sign);
+      return serializeLog([...log, entry]).replace(`"metadata":{"n":${JSON.stringify(value)}}`, `"metadata":{"n":${written}}`);
+    };
+    for (const [value, written] of [[1e16, "1e16"], [-1e16, "-1e16"], [9007199254740992, "9007199254740993.0"], [1.5e300, "1.5e300"]] as const) {
+      failedWith(await report(await signedWith(value, written), [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    }
+    // Given already parsed, too.
+    const parsed = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: 1e16 } } }, sign);
+    failedWith(await report([...log, parsed], [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    for (const [value, written] of [[1e15, "1e15"], [9007199254740991, "9007199254740991.0"], [1.5, "1.5"], [1e-7, "1e-7"]] as const) {
+      const r = await report(await signedWith(value, written), [alice]);
+      expect(r.history.status, `${written}: ${JSON.stringify(r.history.failure)}`).toBe("valid");
+    }
+  });
+
+  test("a did:vh or did:webvh signer log keeps its own method's line rules", async () => {
+    const { alice, log } = await harbor();
+    const signerLog = alice.evidence().log as string;
+    const r = await verifyOriginal({ log, authors: [{ did: alice.did, log: signerLog.replaceAll("\n", "\r\n").slice(0, -2) }], now: NOW, bytes: allBytes(B1, B2) });
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.identityEvidence.status).toBe("complete");
+  });
+});
+
 describe("creating needs a well-formed entry", () => {
   test("a create with an invalid genesis is refused by the builder", async () => {
     const key = seeded(21);
@@ -598,18 +654,18 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
   test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
-    // `1e21` re-serializes as `1e+21`: the same entry, and the same versionId and proof, one byte longer each time.
-    const nums = Array.from({ length: 200 }, () => 1e21);
+    // `1.5e-6` re-serializes as `0.0000015`: the same entry, and the same versionId and proof, three bytes longer each time.
+    const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
       const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
-      const line = serializeLog([entry]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const line = serializeLog([entry]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = new TextEncoder().encode(line).length;
       if (size !== 65_536) {
         pad += 65_536 - size;
         continue;
       }
-      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(65_736);
+      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(66_136);
       const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
       expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
       // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.

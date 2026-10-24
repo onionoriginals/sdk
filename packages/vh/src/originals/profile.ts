@@ -11,7 +11,7 @@
  */
 import type { DataIntegrityProof } from "../crypto/index.js";
 import { fail } from "../errors.js";
-import { isJsonObject, type JsonObject } from "../json/index.js";
+import { isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../log/index.js";
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
@@ -139,7 +139,8 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
 
   return {
     name: "originals",
-    versionTime: { fractionalDigits: 3 },
+    // P14.2: at most three fractional digits, and UTC written as Z.
+    versionTime: { fractionalDigits: 3, utc: "Z" },
     maxProofs: 1,
     keys: {
       kind: "controller",
@@ -173,6 +174,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       }
       checkParameterMembers(entry.parameters, index);
       for (const proof of entry.proof) checkProofMembers(proof);
+      checkSafeIntegers(entry as unknown as JsonValue);
       const used = usedThrough(history);
       const state = checkEntryState(entry.state, {
         scid,
@@ -205,6 +207,24 @@ function checkParameterMembers(parameters: JsonObject, index: number): void {
     fail("invalid-evidence", "PARAMETER_MEMBERS", index === 0
       ? "the genesis entry's parameters are exactly method and scid (P14.1)"
       : "an entry's parameters are exactly {} or, for a deactivation, {\"deactivated\": true} (P14.1)");
+  }
+}
+
+/**
+ * P14.3: no number in an entry is an integer outside the IEEE 754 safe range,
+ * however it was written (`1e16`, `9007199254740993.0`): the strict parser
+ * refuses such integer literals, and this the other spellings, and entries
+ * given already parsed. Plain VH-Log keeps its own number rules.
+ */
+function checkSafeIntegers(value: JsonValue): void {
+  if (typeof value === "number") {
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      fail("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${value} is an integer outside the safe range (P14.3)`);
+    }
+  } else if (Array.isArray(value)) {
+    for (const v of value) checkSafeIntegers(v);
+  } else if (isJsonObject(value)) {
+    for (const v of Object.values(value)) checkSafeIntegers(v);
   }
 }
 

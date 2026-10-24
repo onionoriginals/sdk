@@ -157,7 +157,8 @@ export interface Specialisation {
    */
   extraParameters?: Readonly<Record<string, (value: JsonValue) => boolean>>;
   /** VH-Log PR 8: fractional-second precision (at most 3 digits) and a minimum interval. */
-  versionTime?: { fractionalDigits?: number; minIntervalSeconds?: number };
+  /** `utc: "Z"`: versionTime must end in `Z`, not `+00:00` (Originals P14.2). */
+  versionTime?: { fractionalDigits?: number; minIntervalSeconds?: number; utc?: "Z" };
   /** Maximum proofs per entry; unlimited when absent. */
   maxProofs?: number;
   /**
@@ -579,6 +580,9 @@ async function verifyEntry(
 
   // versionTime (step 4).
   const time = parseVersionTime(entry.versionTime, spec.versionTime?.fractionalDigits ?? 0);
+  if (spec.versionTime?.utc === "Z" && !entry.versionTime.endsWith("Z")) {
+    fail("invalid-evidence", "VERSION_TIME_FORMAT", `versionTime ${JSON.stringify(entry.versionTime)} must end in Z (${spec.name})`);
+  }
   if (previous) {
     if (time <= previous.time) fail("invalid-evidence", "VERSION_TIME_ORDER", "versionTime must be later than the previous entry's");
     const interval = (spec.versionTime?.minIntervalSeconds ?? 0) * 1000;
@@ -739,7 +743,27 @@ export async function verifyLog(entries: unknown[], options: VerifyOptions, line
  * Verify a log file's text. Lines are parsed one at a time, so a line that is
  * not strict JSON ends the valid prefix there, like any other failing entry.
  */
-export async function verifyLogText(text: string, options: VerifyOptions & { parse?: ParseLimits }): Promise<LogVerification> {
+/**
+ * Why `line` is not compact JSON (no whitespace between tokens, so no CR), or
+ * undefined when it is. Only the form is judged; parsing is separate.
+ */
+export function compactLineError(line: string): string | undefined {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+      return c === "\r" ? "a line ends in CRLF or carries a CR" : "a line has whitespace between JSON tokens";
+    }
+  }
+  return undefined;
+}
+
+export async function verifyLogText(text: string, options: VerifyOptions & { parse?: ParseLimits; compactLines?: boolean }): Promise<LogVerification> {
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const lines = text.length === 0 ? [] : body.split("\n");
   const entries: unknown[] = [];
@@ -748,6 +772,11 @@ export async function verifyLogText(text: string, options: VerifyOptions & { par
   for (let index = 0; index < lines.length; index++) {
     try {
       if (lines[index].length === 0) throw new OriginalsError("invalid-evidence", "JSONL_BLANK_LINE", `line ${index + 1} is empty`);
+      if (options.compactLines) {
+        // A profile that requires each line to be compact JSON ending in a single LF (Originals P14.2).
+        const bad = compactLineError(lines[index]) ?? (index === lines.length - 1 && !text.endsWith("\n") ? "the last line does not end in LF" : undefined);
+        if (bad) throw new OriginalsError("invalid-evidence", "LOG_LINE_FORMAT", `line ${index + 1}: ${bad}`);
+      }
       // The stored line is what is measured (P7.7, P14.13), before it is parsed, and only it.
       const max = options.limits?.maxEntryBytes;
       // A line of at most max / 3 UTF-16 code units is at most max UTF-8 bytes: that bound is what is passed on.

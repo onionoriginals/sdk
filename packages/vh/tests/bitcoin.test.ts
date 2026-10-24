@@ -597,6 +597,21 @@ async function paddedTo(target: number) {
   throw new Error(`could not pad a log to ${target} bytes`);
 }
 
+describe("an inscription body is compact JSON Lines, each ending in one LF (P14.2)", () => {
+  test("a missing final LF, CRLF or whitespace between tokens makes the body undecodable", async () => {
+    const { alice, copy } = await anchored();
+    const text = serializeLog(copy);
+    const variants = [text.slice(0, -1), text.replaceAll("\n", "\r\n"), text.replace('"versionTime":', '"versionTime": ')];
+    for (const body of variants) {
+      const r = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(body) })])]);
+      expect(r.anchoring?.status).toBe("not-anchored");
+      expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "undecodable" })]);
+    }
+    const ok = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(text) })])]);
+    expect(ok.anchoring?.status).toBe("anchored");
+  });
+});
+
 describe("the inscription body limit (P9.17, P14.12; decided, D6; spec PR #50 (open))", () => {
   test("C12-111: an anchoring inscription of exactly 350,000 bytes is accepted", async () => {
     expect(ORIGINALS_INSCRIPTION_MAX_BYTES).toBe(350_000);
@@ -859,11 +874,11 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const sign = alice.signer(KEY, "orig");
     const ref = alice.ref("orig");
-    const nums = Array.from({ length: 200 }, () => 1e21);
+    const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
       const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign });
-      const line = serializeLog([genesis]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const line = serializeLog([genesis]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = bytes(line).length;
       if (size !== 65_536) {
         pad += 65_536 - size;

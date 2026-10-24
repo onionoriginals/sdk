@@ -44,7 +44,7 @@
  */
 import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
-import { parseLog, type LogEntry, type LogVerification } from "../log/index.js";
+import { compactLineError, parseLog, type LogEntry, type LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { signerOf, type AuthorRef, type EntryState } from "./state.js";
@@ -186,9 +186,12 @@ export function anchoringIndex(entries: unknown[]): number {
   return entries.findIndex((e) => satNamedBy(e) !== undefined);
 }
 
+/** The body's entries: compact JSON Lines, each line ending in one LF (P14.2), or undefined. */
 function decode(content: Uint8Array): LogEntry[] | undefined {
   try {
-    const entries = parseLog(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content));
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
+    if (!text.endsWith("\n") || text.slice(0, -1).split("\n").some((line) => compactLineError(line) !== undefined)) return undefined;
+    const entries = parseLog(text);
     return entries.length > 0 && entries.every(isJsonObject) ? (entries as unknown as LogEntry[]) : undefined;
   } catch (error) {
     if (error instanceof OriginalsError || error instanceof TypeError) return undefined;

@@ -27,6 +27,7 @@
 import { OriginalsError, type ErrorCategory } from "../errors.js";
 import type { JsonObject } from "../json/index.js";
 import {
+  compactLineError,
   parseLog,
   resolveCopies,
   verifyLog,
@@ -360,6 +361,17 @@ export function describeFreshness(
   return `${seen} Its freshness is not established. ${newer}`;
 }
 
+/**
+ * P14.2: each line of an asset log is compact JSON ending in a single LF. A
+ * copy that is not is treated like one that does not parse; verified as the
+ * log itself, the line is reported (LOG_LINE_FORMAT). did:vh and did:webvh
+ * signer logs keep their own method's rules.
+ */
+function checkLogForm(text: string): void {
+  const bad = !text.endsWith("\n") || text.slice(0, -1).split("\n").some((line) => compactLineError(line) !== undefined);
+  if (bad) throw new OriginalsError("invalid-evidence", "LOG_LINE_FORMAT", "the asset log is not compact JSON Lines, each line ending in one LF (P14.2)");
+}
+
 function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Array | undefined {
   if (!bytes) return undefined;
   return typeof bytes === "function" ? bytes(digest) : (Object.prototype.hasOwnProperty.call(bytes, digest) ? bytes[digest] : undefined);
@@ -440,6 +452,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   let assembly: Awaited<ReturnType<typeof assembleFromBitcoin>> | null = null;
   let raw: unknown[] | null = null;
   try {
+    if (typeof options.log === "string") checkLogForm(options.log);
     raw = options.log === undefined ? null : typeof options.log === "string" ? parseLog(options.log) : options.log;
   } catch (error) {
     if (!(error instanceof OriginalsError)) throw error;
@@ -456,7 +469,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
   const supplied = (): Promise<LogVerification> =>
-    typeof input === "string" ? verifyLogText(input, verifyOptions) : verifyLog(input, verifyOptions);
+    typeof input === "string" ? verifyLogText(input, { ...verifyOptions, compactLines: true }) : verifyLog(input, verifyOptions);
   let log: LogVerification;
   let fork: OriginalsFork | null = null;
   let copies: CopyReport[] = [];
