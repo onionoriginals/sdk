@@ -202,3 +202,26 @@ describe('IndexedDbStore: opening is robust to other tabs', () => {
     await expect(IndexedDbStore.open('suborg-a', undefined as unknown as IDBFactory)).rejects.toThrow(/IndexedDB/);
   });
 });
+
+// #976 B, G4. Version 3 adds publication records. A version 2 database keeps
+// its Originals and retained anchors, and gains the table.
+describe('IndexedDbStore: version 2 upgrades to publication records', () => {
+  test('a version 2 database keeps everything and takes publication records', async () => {
+    const idb = new IDBFactory();
+    const v2 = await rawOpen(idb, 2, [...V1_TABLES, 'retainedAnchors']);
+    await new Promise<void>((resolve, reject) => {
+      const tx = v2.transaction(['originals', 'retainedAnchors'], 'readwrite');
+      tx.objectStore('originals').put({ log: line('1-a') }, DID);
+      tx.objectStore('retainedAnchors').put({ inscription: 'abc0i0', sat: '1', owner: null }, DID);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    v2.close();
+    const store = await IndexedDbStore.open('suborg-a', idb);
+    expect((await store.get(DID))?.log).toBe(line('1-a'));
+    expect(await store.getRetainedAnchor(DID)).toEqual({ inscription: 'abc0i0', sat: '1', owner: null });
+    const record = { alias: { did: 'did:webvh:x', log: line('1-w') }, state: 'started' as const };
+    await store.putPublication(DID, record);
+    expect(await store.getPublication(DID)).toEqual(record);
+  });
+});

@@ -73,9 +73,11 @@ export interface DemoAssetState {
   layer: LayerId;
   did: string;
   /**
-   * The web publication (#976 B4): `incomplete` once an alias is built or
-   * listed but a stranger has not yet verified the hosted snapshot; `complete`
-   * only after one has. `layer` is `did:webvh` only when complete.
+   * The web publication (#976 B4): `incomplete` once an entry lists a
+   * did:webvh alias but a stranger has not yet verified the hosted snapshot;
+   * `complete` only after one has. An alias built for a publish whose entry
+   * was never signed is not listed, so it is `none`, and `webvhDid` is unset.
+   * `layer` is `did:webvh` only when complete.
    */
   publication: "none" | "incomplete" | "complete";
   webvhDid?: string;
@@ -498,10 +500,21 @@ export class DemoEngine {
     return this.features.hostedPublication && this.publicationState() === "complete" && !!this.alias && !!this.view?.state.aliases.includes(this.alias.did);
   }
 
+  /** The did:webvh alias the Original's state lists, if any (P3.6). Bitcoin aliases are terminal anchoring state, not web publication (P9.10). */
+  private listedWebvhAlias(): string | undefined {
+    return this.view?.state.aliases.find((did) => did.startsWith("did:webvh:"));
+  }
+
+  /**
+   * Published only once an entry lists a did:webvh alias. Listed, it is
+   * complete when a stranger verified the snapshot, and incomplete until
+   * then. A `started` record with no entry listing its alias published
+   * nothing (a cancelled signature, P9.2): it is kept only so the next
+   * publish reuses the alias, and the Original stays editable.
+   */
   private publicationState(): DemoAssetState["publication"] {
-    if (this.publication?.state === "complete") return "complete";
-    // Bitcoin aliases are terminal anchoring state, not unfinished web publication (P9.10).
-    return this.publication || this.view?.state.aliases.some((did) => did.startsWith("did:webvh:")) ? "incomplete" : "none";
+    if (!this.listedWebvhAlias()) return "none";
+    return this.publication?.state === "complete" ? "complete" : "incomplete";
   }
 
   /**
@@ -637,9 +650,40 @@ export class DemoEngine {
     this.alias = result.alias;
     await this.recordPublication({ alias: result.alias, state: "uploaded" });
     this.view = await this.sdk.get(this.did);
-    await this.verifyPublished(result.alias.did, target.read ?? publicRead);
+    await this.readBack(result.alias.did, target.read ?? publicRead);
     await this.recordPublication({ alias: result.alias, state: "complete" });
     return { alias: result.alias.did, baseUrl: result.baseUrl };
+  }
+
+  /**
+   * The G5 read-back, for a client that may be behind the host. Another
+   * client may have saved on the host since this one's entry (P6.7), so the
+   * host serves a later head. That head is synced to, and the read-back
+   * repeated at it, only when the SDK verified it as extending this client's
+   * history (`imported`). A host that diverges is a fork: kept as a branch,
+   * reported, never accepted (P2.1, P4.5, P6.6).
+   */
+  private async readBack(aliasDid: string, read: HostedFetch): Promise<void> {
+    try {
+      await this.verifyPublished(aliasDid, read);
+      return;
+    } catch (error) {
+      if (!(error instanceof PublicationNotVerifiedError)) throw error;
+      let synced: Awaited<ReturnType<OriginalsSDK["sync"]>>;
+      try {
+        synced = await this.sdk!.sync(this.did!, this.sharedHost());
+      } catch {
+        throw error;
+      }
+      if (synced.status === "conflict") {
+        throw new PublicationNotVerifiedError([...error.reasons, "the host's history diverges from this copy; it is kept as a branch, and no branch is chosen (P6.6)"]);
+      }
+      if (synced.status !== "imported") throw error;
+      this.view = synced.original;
+      await this.refresh();
+      this.emit("asset:synced", `The host's version ${short(this.view.checkpoint)} (${synced.status})`, { checkpoint: this.view.checkpoint });
+      await this.verifyPublished(aliasDid, read);
+    }
   }
 
   /**
@@ -838,7 +882,8 @@ export class DemoEngine {
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
-    const alias = state.aliases.find((a) => a.startsWith("did:webvh:")) ?? this.publication?.alias.did;
+    // Only a listed alias: a `started` one published nothing, and its URL would 404 (P9.2).
+    const alias = this.listedWebvhAlias();
     const btco = state.aliases.find((a) => a.startsWith("did:btco:"));
     const publication = this.publicationState();
     return {
