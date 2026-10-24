@@ -1,6 +1,6 @@
 {
   "name": "@originals/vh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Verifiable History for the Originals Protocol: strict JSON/JCS, eddsa-jcs-2022 and bip340-jcs-2025, a VH-Log engine, did:vh, did:webvh and the originals:1.0 extension, browser-safe",
   "type": "module",
   "main": "./dist/index.js",
