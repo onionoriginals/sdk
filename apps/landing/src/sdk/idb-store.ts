@@ -13,10 +13,17 @@
  * - refused candidates are kept beside the log, never in it (P6.8), and the
  *   pending candidate until the host answers (P6.4).
  *
+ * - the anchor last reported for an anchored Original is retained, so a later
+ *   change of anchor is reported after a restart too, never silent (P9.16).
+ *
+ * Other tabs: an open connection closes when another tab upgrades the schema
+ * (`versionchange`), and says so on its next use. An open that another tab
+ * blocks waits for it rather than failing.
+ *
  * Nothing here is trusted on read: the SDK verifies logs, evidence and byte
  * digests every time (P8.1). No private key is ever written here.
  */
-import type { AuthorDidEvidence } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 import {
   headOf,
   higherVersion,
@@ -29,8 +36,10 @@ import {
   type StoredRefused,
 } from "@originals/sdk/originals";
 
-const VERSION = 1;
-const TABLES = ["originals", "resources", "authors", "retained", "branches", "refused", "pending"] as const;
+// Upgrades only add tables, so every version opens every older database.
+// 2 adds `retainedAnchors` (P9.16).
+const VERSION = 2;
+const TABLES = ["originals", "resources", "authors", "retained", "branches", "refused", "pending", "retainedAnchors"] as const;
 type Table = (typeof TABLES)[number];
 
 /** The database for one account. */
@@ -41,7 +50,17 @@ export function storeName(subOrgId: string): string {
 type Body<T> = (table: (name: Table) => IDBObjectStore, done: (value: T) => void, fail: (error: unknown) => void) => void;
 
 export class IndexedDbStore implements OriginalsStore {
-  private constructor(private readonly db: IDBDatabase) {}
+  /** Set once another tab's upgrade has closed this connection. */
+  private closedBy: string | null = null;
+
+  private constructor(private readonly db: IDBDatabase) {
+    // Another tab is upgrading the schema. Give way, or it is blocked for as
+    // long as this page stays open; this page's next use says why it stopped.
+    db.onversionchange = () => {
+      this.closedBy = "Your saved work was opened by a newer version of this site in another tab. Reload this page to continue.";
+      db.close();
+    };
+  }
 
   /** Open (or create) the account's database. */
   static open(subOrgId: string, factory: IDBFactory = globalThis.indexedDB): Promise<IndexedDbStore> {
@@ -53,7 +72,11 @@ export class IndexedDbStore implements OriginalsStore {
       };
       request.onsuccess = () => resolve(new IndexedDbStore(request.result));
       request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error("Another tab is upgrading this store; close it and try again."));
+      // An older tab still holds the database. Not fatal: the open proceeds
+      // as soon as it closes, and this tab's connections close for upgrades
+      // themselves (onversionchange). Rejecting here would leave the
+      // connection that later succeeds open, owned by no one.
+      request.onblocked = () => {};
     });
   }
 
@@ -63,6 +86,7 @@ export class IndexedDbStore implements OriginalsStore {
 
   /** One transaction; settles when it commits, or with the first failure. */
   private run<T>(tables: Table[], mode: IDBTransactionMode, body: Body<T>): Promise<T> {
+    if (this.closedBy) return Promise.reject(new Error(this.closedBy));
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(tables, mode);
       let value: T;
@@ -144,6 +168,14 @@ export class IndexedDbStore implements OriginalsStore {
 
   putRetained(did: string, versionId: string): Promise<void> {
     return this.update<string>("retained", did, (current) => higherVersion(current, versionId));
+  }
+
+  getRetainedAnchor(did: string): Promise<RetainedAnchor | undefined> {
+    return this.read<RetainedAnchor>("retainedAnchors", did);
+  }
+
+  putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
+    return this.update<RetainedAnchor>("retainedAnchors", did, () => ({ ...anchor }));
   }
 
   putBranch(did: string, log: string): Promise<void> {
