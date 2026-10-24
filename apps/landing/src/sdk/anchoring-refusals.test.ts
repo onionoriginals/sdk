@@ -211,3 +211,30 @@ describe('the IndexedDB outbox (fake-indexeddb)', () => {
     } finally { g.indexedDB = saved; }
   });
 });
+
+describe('outbox marks are written only over the same pair (round 3; P9.6)', () => {
+  const newer = (): OutboxEntry => ({ ...entry(), pair: { versionId: '3-QmNewer', prepared: { commitTxId: 'c1', revealTxId: 'r1' } } as unknown as PreparedEntryInscription, savedAt: '2026-10-23T11:00:00.000Z' });
+  const cases: Array<[string, () => unknown, Partial<OutboxEntry>]> = [
+    ['the refused mark', () => new AnchoringSubmitError(409, { error: 'original_forked', message: 'diverges' }), {}],
+    ['a strike', () => new AnchoringSubmitError(422, { error: 'not_sendable', code: 'SOMETHING_NEW' }), {}],
+    ['clearing strikes', () => new TypeError('Failed to fetch'), { strikes: { answer: '422:SOMETHING_NEW', count: 2 } }],
+  ];
+  for (const backend of ['memory', 'indexeddb'] as const) {
+    for (const [name, error, extra] of cases) {
+      test(`${backend}: ${name} does not overwrite a newer pair another tab put meanwhile`, async () => {
+        const g = globalThis as { indexedDB?: unknown };
+        const saved = g.indexedDB;
+        if (backend === 'indexeddb') g.indexedDB = new (await import('fake-indexeddb')).IDBFactory();
+        try {
+          const { indexedDbOutbox } = await import('./anchoring');
+          const outbox = backend === 'memory' ? memoryOutbox() : indexedDbOutbox('outbox-race');
+          await outbox.put(DID, { ...entry(), ...extra });
+          // While the old pair is being answered, another tab replaces it with a newer one.
+          const { t } = transport(async () => { await outbox.put(DID, newer()); throw error(); });
+          await resendWaiting(t, outbox, DID).catch(() => undefined);
+          expect(await outbox.get(DID)).toEqual(newer());
+        } finally { g.indexedDB = saved; }
+      });
+    }
+  }
+});

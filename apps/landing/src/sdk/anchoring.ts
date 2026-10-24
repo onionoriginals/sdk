@@ -247,6 +247,12 @@ export interface AnchoringOutbox {
    * transaction): `absent`, `deleted`, or `kept` when the entry did not match.
    */
   deleteIf(did: string, when: (entry: OutboxEntry) => boolean): Promise<'absent' | 'deleted' | 'kept'>;
+  /**
+   * Replace the entry with `next` only while it still holds the pair whose
+   * commit is `commitTxId`, as one step (one IDB readwrite transaction): a
+   * newer pair another tab put meanwhile is never overwritten (P9.6).
+   */
+  replaceIf(did: string, commitTxId: string, next: OutboxEntry): Promise<'absent' | 'replaced' | 'kept'>;
   list(): Promise<string[]>;
 }
 
@@ -263,6 +269,13 @@ export function memoryOutbox(): AnchoringOutbox {
       if (!when(structuredClone(found))) return Promise.resolve('kept');
       entries.delete(did);
       return Promise.resolve('deleted');
+    },
+    replaceIf: (did, commitTxId, next) => {
+      const found = entries.get(did);
+      if (!found) return Promise.resolve('absent');
+      if (found.pair.prepared.commitTxId !== commitTxId) return Promise.resolve('kept');
+      entries.set(did, structuredClone(next));
+      return Promise.resolve('replaced');
     },
   };
 }
@@ -323,6 +336,29 @@ export function indexedDbOutbox(name = 'originals-anchoring-outbox'): AnchoringO
         db.close();
       }
     },
+    replaceIf: async (did, commitTxId, next) => {
+      const db = await open();
+      try {
+        return await new Promise<'absent' | 'replaced' | 'kept'>((resolve, reject) => {
+          const t = db.transaction('pairs', 'readwrite');
+          const store = t.objectStore('pairs');
+          let outcome: 'absent' | 'replaced' | 'kept' = 'absent';
+          const read = store.get(did);
+          read.onsuccess = () => {
+            const found = read.result as OutboxEntry | undefined;
+            if (!found) return;
+            if (found.pair.prepared.commitTxId !== commitTxId) { outcome = 'kept'; return; }
+            store.put(next, did);
+            outcome = 'replaced';
+          };
+          t.oncomplete = () => resolve(outcome);
+          t.onerror = () => reject(t.error);
+          t.onabort = () => reject(t.error);
+        });
+      } finally {
+        db.close();
+      }
+    },
   };
 }
 
@@ -373,10 +409,10 @@ async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, d
       if (kind === 'unknown') {
         const answer = answerCode(error as AnchoringSubmitError);
         const count = entry.strikes?.answer === answer ? entry.strikes.count + 1 : 1;
-        if (count < UNKNOWN_REFUSAL_LIMIT) { await outbox.put(did, { ...entry, strikes: { answer, count } }); throw error; }
+        if (count < UNKNOWN_REFUSAL_LIMIT) { await outbox.replaceIf(did, entry.pair.prepared.commitTxId, { ...entry, strikes: { answer, count } }); throw error; }
       } else {
         // Any other answer breaks the row; the pair itself is untouched (P9.6).
-        if (entry.strikes) { const { strikes: _strikes, ...rest } = entry; await outbox.put(did, rest); }
+        if (entry.strikes) { const { strikes: _strikes, ...rest } = entry; await outbox.replaceIf(did, entry.pair.prepared.commitTxId, rest); }
         throw error;
       }
     }
@@ -390,7 +426,8 @@ async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, d
       message: error.body.message ?? `The server answered ${error.status}${error.body.error ? ` (${error.body.error})` : ''}.`,
       at: new Date().toISOString(),
     };
-    await outbox.put(did, { ...kept, refused });
+    // Only over this same pair: a newer pair another tab put meanwhile stays as it is (P9.6).
+    await outbox.replaceIf(did, entry.pair.prepared.commitTxId, { ...kept, refused });
     throw new AnchoringRefusedError(refused);
   }
   if (sent.commitTxId !== entry.pair.prepared.commitTxId || sent.revealTxId !== entry.pair.prepared.revealTxId || sent.versionId !== entry.pair.versionId) {
