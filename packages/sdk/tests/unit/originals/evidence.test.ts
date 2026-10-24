@@ -195,9 +195,15 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     zip[30] = 0xff;
     zip[central + 46] = 0xff;
     fails(zip, "ARCHIVE_PATH");
+    // Invalid UTF-8 in the local header's name only: still ARCHIVE_PATH, never a raw TypeError.
+    const local = encodeZip([raw("a.txt")]);
+    local[30] = 0xff;
+    fails(local, "ARCHIVE_PATH");
     for (const type of [0o040000, 0o010000, 0o020000, 0o060000, 0o140000]) {
       fails(encodeZip([raw("a.txt", { externalAttributes: ((type | 0o644) << 16) >>> 0 })]), "ARCHIVE_PATH");
     }
+    // No Unix mode at all (a DOS attribute only, or none) is not a regular file either (owner decision on #993's review).
+    for (const externalAttributes of [0, 0x10, 0x20]) fails(encodeZip([raw("a.txt", { externalAttributes })]), "ARCHIVE_PATH");
     expect([...readZip(encodeZip([raw("a.txt", { externalAttributes: (0o100600 << 16) >>> 0 })])).keys()]).toEqual(["a.txt"]);
   });
 

@@ -188,7 +188,8 @@ export function readZip(bytes: Uint8Array, limits: ZipLimits = {}): Map<string, 
     if (compressed !== size) archiveError("ARCHIVE_INVALID", `${name} has inconsistent sizes`);
     const type = (external >>> 16) & 0o170000;
     if (type === 0o120000) archiveError("ARCHIVE_SYMLINK", `${name} is a symbolic link`);
-    if (type !== 0 && type !== 0o100000) archiveError("ARCHIVE_PATH", `${name} is not a regular file`);
+    // P14.10: a regular file, by its Unix mode; an entry with none is not one (owner decision on #993's review).
+    if (type !== 0o100000) archiveError("ARCHIVE_PATH", `${name} is not a regular file`);
     checkArchivePath(name);
     const key = name.normalize("NFC");
     if (seen.has(key)) archiveError("ARCHIVE_DUPLICATE", `${name} appears twice`);
@@ -205,7 +206,13 @@ export function readZip(bytes: Uint8Array, limits: ZipLimits = {}): Map<string, 
     if (o + 30 > centralOffset || view.getUint32(o, true) !== 0x04034b50) archiveError("ARCHIVE_INVALID", `${entry.name} has no local header`);
     const nameLength = view.getUint16(o + 26, true);
     const extraLength = view.getUint16(o + 28, true);
-    if (decoder.decode(bytes.subarray(o + 30, o + 30 + nameLength)) !== entry.name) archiveError("ARCHIVE_INVALID", `${entry.name}'s local header names another file`);
+    let localName: string;
+    try {
+      localName = decoder.decode(bytes.subarray(o + 30, o + 30 + nameLength));
+    } catch {
+      return archiveError("ARCHIVE_PATH", `${entry.name}'s local header name is not UTF-8`);
+    }
+    if (localName !== entry.name) archiveError("ARCHIVE_INVALID", `${entry.name}'s local header names another file`);
     const start = o + 30 + nameLength + extraLength;
     if (start + entry.size > centralOffset) archiveError("ARCHIVE_INVALID", `${entry.name} is out of bounds`);
     const data = bytes.slice(start, start + entry.size);
