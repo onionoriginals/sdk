@@ -116,6 +116,8 @@ export interface RetainedAnchor {
    * (`AnchoringReport.headChange`, P9.15).
    */
   unverifiable?: string[];
+  /** The inscriptions after the anchor accepted with it: one unverifiable later is a change of head, not a new one (P9.15). */
+  accepted?: string[];
 }
 
 export interface AnchoringReport {
@@ -163,10 +165,11 @@ export interface AnchoringReport {
    * an anchor; originals-spec #51, merged): `resolved`, the inscriptions
    * reported unverifiable before (the retained anchor's `unverifiable`) that
    * no longer are, accepted or rejected; `verified`, the inscriptions accepted
-   * past the retained head; `unverified`, inscriptions at or below the
-   * retained head, accepted before, that are unverifiable now.
+   * past the retained head; `unverified`, inscriptions accepted before that
+   * are unverifiable now; `vanished`, those reported unverifiable before that
+   * the sat no longer carries, as after a reorganization (P9.5).
    */
-  headChange: { previous: string | null; current: string; verified: Placed[]; resolved: string[]; unverified: string[] } | null;
+  headChange: { previous: string | null; current: string; verified: Placed[]; resolved: string[]; unverified: string[]; vanished: string[] } | null;
   /** No index lists every sat (P9.16). */
   uniqueness: "not-established";
   tip: { height: number; hash: string } | null;
@@ -598,11 +601,38 @@ export async function assembleFromBitcoin(
   let lastHeight = chosen.inscription.height;
   // `blocking` is the first unverifiable inscription extending the head; `chain` is the head with
   // it and the publications waiting on top of it, which are followed once it is accepted (P9.15;
-  // originals-spec #51, merged). Whether an entry chains, and every rule not depending on the
-  // signer DID version it names, is judged with that version's authorization set aside.
+  // originals-spec #51, merged). Each candidate is judged in full first: one that would be
+  // rejected on its own is rejected while another blocks; one that would be accepted, or is
+  // unverifiable itself, waits. On the chain only the chain's own authorization is set aside.
+  type Verdict = { kind: "valid" } | { kind: "unverifiable"; ref?: AuthorRef } | { kind: "rejected"; reason: IgnoredReason; code?: string };
+  const asUnverified = (entry: LogEntry, i: SatInscription, reason: IgnoredReason, code?: string): Verdict => {
+    if (reason !== "author-version-unavailable" && !(code !== undefined && UNVERIFIED_CODES.has(code))) return { kind: "rejected", reason, ...(code ? { code } : {}) };
+    const later = unverifiedLater(entry, i, histories);
+    return later.reason === "later-inscription-unverifiable" ? { kind: "unverifiable", ...(later.ref ? { ref: later.ref } : {}) } : { kind: "rejected", reason: later.reason, ...(later.code ? { code: later.code } : {}) };
+  };
+  const range = (from: number, to: number) => new Set(Array.from({ length: Math.max(0, to - from) }, (_, k) => from + k));
+  const judge = async (base: LogEntry[], entry: LogEntry, i: SatInscription): Promise<Verdict> => {
+    const chainAside = range(head.length, base.length);
+    const v = await verify([...base, entry], chainAside.size > 0 ? { unauthorized: chainAside } : undefined);
+    if (!passes(v, base.length + 1)) {
+      const code = v.failure?.error.code;
+      if (code === "ENTRY_HASH_MISMATCH" || (v.failure?.index ?? base.length) < base.length) return { kind: "rejected", reason: "does-not-extend-head", ...(code ? { code } : {}) };
+      if (code !== undefined && UNVERIFIED_CODES.has(code)) {
+        // Rejected, not unverifiable, when it fails a rule not depending on that version.
+        const rest = await verify([...base, entry], { unauthorized: range(head.length, base.length + 1) });
+        if (!passes(rest, base.length + 1)) {
+          const c = rest.failure?.error.code;
+          return { kind: "rejected", reason: c === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", ...(c ? { code: c } : {}) };
+        }
+      }
+      return asUnverified(entry, i, "invalid-entry", code);
+    }
+    const author = checkAtInscriptionTime(entry, i, histories);
+    return author ? asUnverified(entry, i, author) : { kind: "valid" };
+  };
+  const listUnverifiable = (i: SatInscription, entry: LogEntry, ref?: AuthorRef) =>
+    unverifiable.push({ sat, inscription: i.id, ...(entry.versionId ? { versionId: entry.versionId } : {}), signer: ref?.did ?? "", signerVersionId: ref?.versionId ?? "" });
   let blocking: { id: string; chain: LogEntry[] } | null = null;
-  const independently = async (base: LogEntry[], entry: LogEntry, from: number) =>
-    verify([...base, entry], { unauthorized: new Set(Array.from({ length: base.length + 1 - from }, (_, k) => from + k)) });
   for (const { inscription: i, entry } of singles.get(read)!) {
     if (chainOrder(i, chosen.inscription) <= 0) continue;
     if (i.height <= lastHeight) {
@@ -610,33 +640,26 @@ export async function assembleFromBitcoin(
       continue;
     }
     const n = versionNumberOf(entry.versionId);
-    if (blocking) {
-      const base = n === head.length + 1 ? head : n === blocking.chain.length + 1 ? blocking.chain : null;
-      if (base && passes(await independently(base, entry, head.length), base.length + 1)) {
-        ignore(sat, i, "waiting-for-earlier-unverifiable", entry, undefined, blocking.id);
-        if (base === blocking.chain) blocking.chain = [...blocking.chain, entry];
-        continue;
-      }
-    }
-    const candidate = [...head, entry];
-    const v = n === head.length + 1 ? await verify(candidate) : null;
-    if (!v || !passes(v, candidate.length)) {
-      let code = v?.failure?.error.code;
-      let reason: IgnoredReason = !v || code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry";
-      if (v && code !== undefined && UNVERIFIED_CODES.has(code)) {
-        // Rejected, not unverifiable, when it fails a rule not depending on that version.
-        const rest = await independently(head, entry, head.length);
-        if (!passes(rest, candidate.length)) {
-          code = rest.failure?.error.code;
-          reason = code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry";
-        }
-      }
-      if (ignoreLater(sat, i, entry, reason, code) && !blocking) blocking = { id: i.id, chain: candidate };
+    const base = n === head.length + 1 ? head : blocking && n === blocking.chain.length + 1 ? blocking.chain : null;
+    if (!base) {
+      ignore(sat, i, "does-not-extend-head", entry);
       continue;
     }
-    const author = checkAtInscriptionTime(entry, i, histories);
-    if (author) {
-      if (ignoreLater(sat, i, entry, author) && !blocking) blocking = { id: i.id, chain: candidate };
+    const verdict = await judge(base, entry, i);
+    if (verdict.kind === "rejected") {
+      ignore(sat, i, verdict.reason, entry, verdict.code);
+      continue;
+    }
+    if (blocking) {
+      if (verdict.kind === "unverifiable") listUnverifiable(i, entry, verdict.ref);
+      ignore(sat, i, "waiting-for-earlier-unverifiable", entry, undefined, blocking.id);
+      if (base === blocking.chain) blocking.chain = [...blocking.chain, entry];
+      continue;
+    }
+    if (verdict.kind === "unverifiable") {
+      ignore(sat, i, "later-inscription-unverifiable", entry);
+      listUnverifiable(i, entry, verdict.ref);
+      blocking = { id: i.id, chain: [...head, entry] };
       continue;
     }
     head.push(entry);
@@ -663,13 +686,19 @@ export async function assembleFromBitcoin(
   // is reported, whichever way it moves (originals-spec #51, merged).
   const before = new Set(previous && !change ? previous.unverifiable ?? [] : []);
   const now = new Set(unverifiable.map((u) => u.inscription));
-  const resolved = [...before].filter((id) => !now.has(id));
+  const onSat = new Set(read.inscriptions.map((x) => x.id));
+  const resolved = [...before].filter((id) => !now.has(id) && onSat.has(id));
+  const vanished = [...before].filter((id) => !onSat.has(id));
   const retainedNumber = options.previousHead !== undefined ? versionNumberOf(options.previousHead) : NaN;
-  const unverified = unverifiable.filter((u) => !before.has(u.inscription) && u.versionId !== undefined && versionNumberOf(u.versionId) <= retainedNumber).map((u) => u.inscription);
+  // Accepted before: by the retained ids where the anchor was retained with them, else by number.
+  const acceptedBefore = previous && !change && previous.accepted ? new Set(previous.accepted) : null;
+  const unverified = unverifiable
+    .filter((u) => !before.has(u.inscription) && (acceptedBefore ? acceptedBefore.has(u.inscription) : u.versionId !== undefined && versionNumberOf(u.versionId) <= retainedNumber))
+    .map((u) => u.inscription);
   const currentHead = head[head.length - 1].versionId;
   const moved = options.previousHead !== undefined && currentHead !== options.previousHead;
-  const headChange = moved && (resolved.length > 0 || unverified.length > 0)
-    ? { previous: options.previousHead ?? null, current: currentHead, verified: accepted.filter((a) => versionNumberOf(a.versionId) > retainedNumber), resolved, unverified }
+  const headChange = moved && (resolved.length > 0 || unverified.length > 0 || vanished.length > 0)
+    ? { previous: options.previousHead ?? null, current: currentHead, verified: accepted.filter((a) => versionNumberOf(a.versionId) > retainedNumber), resolved, unverified, vanished }
     : null;
   return {
     entries: head,

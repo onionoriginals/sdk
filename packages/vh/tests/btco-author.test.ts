@@ -323,15 +323,17 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     const { v1, genesis, anchor } = await byA();
     const next = await updateOriginal(anchor, { versionTime: time(40), name: "Accepted before the gap was seen", author: ref(v1.id), sign });
     const later = inscribed([next], 40);
-    const first = await fromBitcoin([v1], [inscribed([genesis, anchor], 31), later]);
+    const anchoring = inscribed([genesis, anchor], 31);
+    const first = await fromBitcoin([v1], [anchoring, later]);
     expect(first.head).toBe(next.versionId);
     const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
-    const again = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later], first.retain);
+    const again = await fromBitcoin([v1, unread], [anchoring, later], first.retain);
     expect(again.head).toBe(anchor.versionId);
     expect(again.anchoring?.unverifiable.map((u) => u.inscription)).toEqual([later.id]);
-    expect(again.anchoring?.headChange).toEqual({ previous: next.versionId, current: anchor.versionId, verified: [], resolved: [], unverified: [later.id] });
-    expect(again.reasons).toContain("accepted-inscription-unverifiable");
-    expect(again.current).toBe(false);
+    expect(again.anchoring?.headChange).toEqual({ previous: next.versionId, current: anchor.versionId, verified: [], resolved: [], unverified: [later.id], vanished: [] });
+    expect(again.notices).toContain("head-changed");
+    expect(again.notices).toContain("unverifiable-inscriptions");
+    expect(again.current, JSON.stringify(again.reasons)).toBe(true);
   });
 
   test("C12-93: an inscribed entry naming a did:btco author version inscribed later in the same block is rejected", async () => {

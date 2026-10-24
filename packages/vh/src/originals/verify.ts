@@ -262,11 +262,13 @@ export interface OriginalsReport {
   current: boolean;
   /**
    * What a current result is shown with, never dropped (section 7; originals-spec #51, merged):
+   * `head-changed` when the head moved from the retained one because an
+   * inscription's verifiability changed (`anchoring.headChange` says how and why),
    * `unverifiable-inscriptions` when inscriptions after the anchor are unverifiable,
    * `publications-waiting` when publications wait on one of them (P9.15). Neither stops the
    * accepted state being current.
    */
-  notices: Array<"unverifiable-inscriptions" | "publications-waiting">;
+  notices: Array<"head-changed" | "unverifiable-inscriptions" | "publications-waiting">;
   /** Why the result is not current: `not-anchored` for every unanchored Original, and anything else that applies. */
   reasons: string[];
   /**
@@ -570,8 +572,12 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
   // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
   const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
+  const acceptedNow = onBitcoin?.accepted.map((a) => a.inscription) ?? [];
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
-    ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null, ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}) }
+    ? {
+      inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null,
+      ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}), ...(acceptedNow.length > 0 ? { accepted: acceptedNow } : {}),
+    }
     : options.retained?.anchor;
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
@@ -651,15 +657,14 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
+  // A head change from an inscription's verifiability is a notice, not a reason: the state reached
+  // is current, and the change is shown with it (P9.15; owner decision on #993's review). One that a
+  // reorganization caused is also VH-Log's authoritative-source-changed warning (P9.5).
   const headChange = assembly?.report.headChange;
-  if (headChange) {
-    if (headChange.verified.some((a) => headChange.resolved.includes(a.inscription))) reasons.push("unverifiable-inscription-accepted");
-    if (headChange.resolved.length > 0) reasons.push("unverifiable-inscription-resolved");
-    if (headChange.unverified.length > 0) reasons.push("accepted-inscription-unverifiable");
-  }
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
-    if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
+    const explained = headChange && headChange.vanished.length === 0;
+    if (!explained && !log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
     if (assembly.rejectedByAuthorState.has(retained)) reasons.push("retroactive-revocation-conflict");
   }
   // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
@@ -673,6 +678,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
   // P7.10: only an anchored Original's state derived from its sat can be current (P9.13).
   report.current = valid && selected === head && anchored(head) && reasons.length === 0;
+  if (headChange) report.notices.push("head-changed");
   if (onBitcoin && onBitcoin.unverifiable.length > 0) report.notices.push("unverifiable-inscriptions");
   if (onBitcoin && onBitcoin.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) report.notices.push("publications-waiting");
   return report;

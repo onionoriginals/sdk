@@ -449,10 +449,63 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
       previous: anchor.versionId,
       current: good.versionId,
       verified: [expect.objectContaining({ inscription: waiting.id })],
-      resolved: [blocking.id],
+      // Both were unverifiable to the first reader: the waiting one named the newer version too.
+      resolved: [blocking.id, waiting.id],
       unverified: [],
+      vanished: [],
     });
-    expect(after.reasons).toContain("unverifiable-inscription-resolved");
+    // The change is a notice; the state reached is current (owner decision on #993's review).
+    expect(after.notices).toContain("head-changed");
+    expect(after.current, JSON.stringify(after.reasons)).toBe(true);
+  });
+
+  test("C12-181, C12-35: a publication that would be rejected on its own is rejected while another blocks, not listed as waiting", async () => {
+    const { alice, copy, anchor, anchoring, ref, sign } = await anchored();
+    const older = alice.entries.slice();
+    await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const first = await updateOriginal(anchor, { versionTime: time(30), name: "Names a version the reader lacks", author: alice.ref("orig"), sign: alice.signer(KEY, "orig") });
+    const valid = await updateOriginal(anchor, { versionTime: time(40), name: "Signature forged", author: ref, sign });
+    const forged = { ...valid, proof: [{ ...valid.proof[0], proofValue: valid.proof[0].proofValue.slice(0, -2) + (valid.proof[0].proofValue.endsWith("1") ? "22" : "11") }] } as LogEntry;
+    const r = await verifyOriginal({ log: copy, authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(first, 30), inscribe(forged, 40)])] });
+    expect(r.anchoring?.ignored).toEqual([
+      expect.objectContaining({ versionId: first.versionId, reason: "later-inscription-unverifiable" }),
+      expect.objectContaining({ versionId: forged.versionId, reason: "invalid-entry", code: "PROOF_SIGNATURE" }),
+    ]);
+  });
+
+  test("C12-181, C12-161: a second unverifiable inscription extending the same head is listed as unverifiable and as waiting on the first", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const older = alice.entries.slice();
+    await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const asNew = { author: alice.ref("orig"), sign: alice.signer(KEY, "orig") };
+    const a = inscribe(await updateOriginal(anchor, { versionTime: time(30), name: "A", ...asNew }), 30);
+    const b = inscribe(await updateOriginal(anchor, { versionTime: time(40), name: "B", ...asNew }), 40);
+    const r = await verifyOriginal({ log: copy, authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), a, b])] });
+    expect(r.anchoring?.unverifiable.map((u) => u.inscription)).toEqual([a.id, b.id]);
+    expect(r.anchoring?.ignored).toEqual([
+      expect.objectContaining({ inscription: a.id, reason: "later-inscription-unverifiable" }),
+      expect.objectContaining({ inscription: b.id, reason: "waiting-for-earlier-unverifiable", waitingOn: a.id }),
+    ]);
+    expect(r.retain.anchor?.unverifiable).toEqual([a.id, b.id]);
+  });
+
+  test("C12-164, P9.5: a blocking inscription that a reorganization removed is reported as vanished, not resolved", async () => {
+    const { alice, copy, anchor, anchoring, ref, sign } = await anchored();
+    const older = alice.entries.slice();
+    await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const blocking = inscribe(await updateOriginal(anchor, { versionTime: time(30), name: "Names a version the reader lacks", author: alice.ref("orig"), sign: alice.signer(KEY, "orig") }), 30);
+    const good = await updateOriginal(anchor, { versionTime: time(40), name: "Valid, later", author: ref, sign });
+    const waiting = inscribe(good, 40);
+    const anchorAt = anchoring(10);
+    const before = await verifyOriginal({ log: copy, authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchorAt, blocking, waiting])] });
+    expect(before.head).toBe(anchor.versionId);
+    // A reorganization drops the blocking inscription: the waiting one is accepted.
+    const after = await verifyOriginal({ log: copy, authors: [alice.evidence(older)], now: NOW, bytes: allBytes, bitcoin: [sat([anchorAt, waiting])], retained: before.retain });
+    expect(after.head).toBe(good.versionId);
+    expect(after.anchoring?.headChange).toEqual({
+      previous: anchor.versionId, current: good.versionId, verified: [expect.objectContaining({ inscription: waiting.id })], resolved: [], unverified: [], vanished: [blocking.id],
+    });
+    expect(after.notices).toContain("head-changed");
   });
 
   test("C12-187: publications that extend an unverifiable inscription wait on it, and are followed once it is accepted (P9.15, P9.13)", async () => {
@@ -539,9 +592,10 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
       verified: [expect.objectContaining({ inscription: later.id, versionId: next.versionId })],
       resolved: [later.id],
       unverified: [],
+      vanished: [],
     });
-    expect(second.reasons).toContain("unverifiable-inscription-accepted");
-    expect(second.current).toBe(false);
+    expect(second.notices).toEqual(["head-changed"]);
+    expect(second.current, JSON.stringify(second.reasons)).toBe(true);
     expect(second.retain.anchor?.unverifiable).toBeUndefined();
 
     // Reported once: the next verification with the same evidence is current.
