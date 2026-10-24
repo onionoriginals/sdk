@@ -535,7 +535,7 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
     failedWith(await report([...log, await resign(log[2], off, sign, { deactivated: true, ttl: 60 })], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
   });
 
-  test("P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
+  test("C12-174: P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
     const { alice, key, log, ref } = await harbor();
     const same = { ...log[2].state, transitions: [] };
     const base = { type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: ref.verificationMethod, proofPurpose: "assertionMethod" } as const;
@@ -567,7 +567,7 @@ describe("section 14: the asset log's form (P14.2)", () => {
     }
   });
 
-  test("each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
+  test("C12-173: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
     const { alice, log } = await harbor();
     const text = serializeLog(log);
     expect((await report(text, [alice])).history.status).toBe("valid");
@@ -583,7 +583,7 @@ describe("section 14: the asset log's form (P14.2)", () => {
     expect(text).toContain("Harbor at dawn");
   });
 
-  test("P14.3: an integer outside the safe range is rejected however it is written; other numbers are kept", async () => {
+  test("C12-172: P14.3: an integer outside the safe range is rejected however it is written; other numbers are kept", async () => {
     const { alice, log, sign } = await harbor();
     // Re-signed with the number as the parser reads it, so only its value is judged.
     const signedWith = async (value: number, written: string) => {

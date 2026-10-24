@@ -134,7 +134,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
-  test("found at the location of the DID in the latest entry's verification method, the log is used; without its witnesses' approval freshness is not established, and the report says where, when and which version (P7.8)", async () => {
+  test("C12-166: found at the location of the DID in the latest entry's verification method, the log is used; without its witnesses' approval freshness is not established, and the report says where, when and which version (P7.8)", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const log = alice.evidence().log as string;
@@ -362,7 +362,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
 });
 
 describe("C12-134: a forged hash-chained line chooses no identity location (P5.14; 08b review r2 #5)", () => {
-  test("the location comes from the last entry that verified, not from an appended line whose proof does not", async () => {
+  test("C12-165: the location comes from the last entry that verified, not from an appended line whose proof does not", async () => {
     const { alice, sdk, did } = await journey();
     const files = new Map(readZip((await sdk.package(did)).bytes));
     const log = new TextDecoder().decode(files.get("asset/did.jsonl"));
@@ -381,7 +381,7 @@ describe("C12-134: a forged hash-chained line chooses no identity location (P5.1
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
   });
 
-  test("08b review r4 #5 (PROVISIONAL): a reader with no identity evidence asks the genesis entry's location before a forged line's", async () => {
+  test("C12-165: 08b review r4 #5 (PROVISIONAL): a reader with no identity evidence asks the genesis entry's location before a forged line's", async () => {
     const { alice, sdk, did } = await journey();
     const files = new Map(readZip((await sdk.package(did)).bytes));
     const log = new TextDecoder().decode(files.get("asset/did.jsonl"));

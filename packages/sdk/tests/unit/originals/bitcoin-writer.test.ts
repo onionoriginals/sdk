@@ -612,7 +612,7 @@ describe("recovery review of the writer: retries, liveness and damaged records (
     }
   });
 
-  test("C12-100: a pair whose commit was rejected is submitted-unobserved, not pending Bitcoin acceptance; one never sent is not anchored (P9.4, P9.18)", async () => {
+  test("C12-100, C12-168: a pair whose commit was rejected is submitted-unobserved, not pending Bitcoin acceptance; one never sent is not anchored (P9.4, P9.18)", async () => {
     const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
     const pair = await pairFor(sdk, did, node(snapshot([])).provider);
     const r = recovery();

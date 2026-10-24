@@ -372,7 +372,7 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     expect(r.current).toBe(true);
   });
 
-  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P9.15, P5.6)", async () => {
+  test("C12-161: a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P9.15, P5.6)", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const older = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
@@ -390,7 +390,7 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     expect(fresh.anchoring?.unverifiable).toEqual([]);
   });
 
-  test("P9.15: a verifier that later verifies and accepts an inscription it reported unverifiable reports the change of head, never silently", async () => {
+  test("C12-164: P9.15: a verifier that later verifies and accepts an inscription it reported unverifiable reports the change of head, never silently", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const older = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
@@ -598,7 +598,7 @@ async function paddedTo(target: number) {
 }
 
 describe("an inscription body is compact JSON Lines, each ending in one LF (P14.2)", () => {
-  test("a missing final LF, CRLF or whitespace between tokens makes the body undecodable", async () => {
+  test("C12-173: a missing final LF, CRLF or whitespace between tokens makes the body undecodable", async () => {
     const { alice, copy } = await anchored();
     const text = serializeLog(copy);
     const variants = [text.slice(0, -1), text.replaceAll("\n", "\r\n"), text.replace('"versionTime":', '"versionTime": ')];
@@ -826,7 +826,7 @@ describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18
 describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15)", () => {
   const HOLDER = seeded(77);
 
-  test("a hash-chained later inscription naming an author version that does not exist is reported unverifiable; the accepted head stays complete and current", async () => {
+  test("C12-161: a hash-chained later inscription naming an author version that does not exist is reported unverifiable; the accepted head stays complete and current", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     // The holder has no author key: it names a version the author DID never had and signs with its own key.
     const fake = { ...alice.ref("orig"), versionId: "9-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" };
@@ -841,7 +841,7 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("a later inscription naming a version number the verifier holds under another id is invalid, not unverifiable", async () => {
+  test("C12-162: a later inscription naming a version number the verifier holds under another id is invalid, not unverifiable", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const fake = { ...alice.ref("orig"), versionId: "1-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" };
     const junk = await updateOriginal(anchor, { versionTime: time(30), name: "Names version 1 under another id", author: fake, sign: alice.signer(HOLDER, "orig") });

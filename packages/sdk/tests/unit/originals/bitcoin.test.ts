@@ -394,7 +394,7 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     ]);
   });
 
-  test("finding 9, P5.13: a delegated or encoded inscription carries its own metadata; metadata not read stays absent", async () => {
+  test("C12-169: finding 9, P5.13: a delegated or encoded inscription carries its own metadata; metadata not read stays absent", async () => {
     const e = await satEvidence(snapshot([
       { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null, metadata: new Uint8Array([0xa0]) } },
       { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: null, metadata: null } },

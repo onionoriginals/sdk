@@ -164,7 +164,7 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
   const witnessList = { witness: { threshold: 1, witnesses: [{ id: `did:key:${W.publicKeyMultibase}` }] } };
   const approve = async (versionId: string) => [{ versionId, proof: [await createWitnessProof(W, versionId)] }];
 
-  test("a log retrieved from the latest entry's location, not approved by the DID's own witnesses, does not establish freshness; the report says where, when and which version (owner decision, 23 Oct 2026)", async () => {
+  test("C12-166: a log retrieved from the latest entry's location, not approved by the DID's own witnesses, does not establish freshness; the report says where, when and which version (owner decision, 23 Oct 2026)", async () => {
     const { alice, at, log } = await moved();
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }]);
     const after = alice.ref("orig-2", rotated);
@@ -213,7 +213,7 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(elsewhere.identityEvidence.freshness).toBe("not-established");
   });
 
-  test("a log whose latest version's id names another location is not the identity's latest where it was obtained, witnessed or not", async () => {
+  test("C12-167: a log whose latest version's id names another location is not the identity's latest where it was obtained, witnessed or not", async () => {
     // The latest asset entry was signed before the move, at the old location; the log there says the DID has moved.
     const { alice, log } = await moved();
     const atOld = await verify(log, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);

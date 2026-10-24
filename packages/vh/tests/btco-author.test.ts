@@ -263,7 +263,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("P9.15, P5.13: after the anchor, an entry naming a versionId that a fully read did:btco history does not hold is invalid, not unverifiable", async () => {
+  test("C12-163: P9.15, P5.13: after the anchor, an entry naming a versionId that a fully read did:btco history does not hold is invalid, not unverifiable", async () => {
     const { v1, genesis, anchor } = await byA();
     const fake = id(); // no inscription on the author's sat
     const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a version the sat never had", author: ref(fake), sign });
@@ -393,7 +393,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(agreed.current, JSON.stringify(agreed.reasons)).toBe(true);
   });
 
-  test("M1, P5.13: a delegated or encoded inscription without metadata is not a version; an unread one leaves the history incomplete from there", async () => {
+  test("C12-170: M1, P5.13: a delegated or encoded inscription without metadata is not a version; an unread one leaves the history incomplete from there", async () => {
     const { v1, genesis, anchor } = await byA();
     const delegated = at(20, { content: new Uint8Array(), unsupported: "delegated", metadata: null });
     const later = version(22, both());
@@ -410,7 +410,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
+  test("C12-169: finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
     const { v1 } = await byA();
     // Metadata is the inscription's own, whatever its body's delegation or encoding.
     for (const unsupported of ["delegated", "content-encoding"] as const) {

@@ -210,7 +210,7 @@ describe("C12-158: an added resource not in any grant", () => {
   });
 });
 
-describe("C12-158: the author entry that adds a resource may grant it (PROVISIONAL reading of P5.15)", () => {
+describe("C12-158, C12-171: the author entry that adds a resource may grant it (PROVISIONAL reading of P5.15)", () => {
   test("the grant takes effect from the next entry, so only then may the editor change it (P5.17)", async () => {
     const { alice, bob, at, genesis, asAlice, asBob } = await harbor((bob) => [grant(bob.did, { resources: ["photo"] })]);
     const both = await updateOriginal(genesis, { versionTime: at(), resources: [note(N1)], editors: [grant(bob.did, { resources: ["photo", "note"] })], ...asAlice });

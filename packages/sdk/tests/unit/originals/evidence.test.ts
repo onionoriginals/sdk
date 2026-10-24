@@ -171,6 +171,22 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     expect([...readZip(writeZip(new Map([[fits, bytes("x")]]))).keys()]).toEqual([fits]);
   });
 
+  test("C12-175: the order, date, UTF-8 flag and mode rules bind the writer; the reader accepts an archive that breaks them (P14.10)", () => {
+    // Unsorted names, no UTF-8 flag, mode 0100755.
+    const zip = encodeZip([raw("b.txt", { flags: 0, externalAttributes: (0o100755 << 16) >>> 0 }), raw("a.txt")]);
+    // Another date in both headers: local header offset 12, central header offset 14.
+    const view = new DataView(zip.buffer);
+    const central = view.getUint32(zip.length - 22 + 16, true);
+    const otherDate = (46 << 9) | (10 << 5) | 23; // 2026-10-23
+    view.setUint16(12, otherDate, true);
+    view.setUint16(central + 14, otherDate, true);
+    expect([...readZip(zip).keys()].sort()).toEqual(["a.txt", "b.txt"]);
+    // The writer still produces the deterministic form.
+    const written = writeZip(readZip(zip));
+    expect([...readZip(written).keys()]).toEqual(["a.txt", "b.txt"]);
+    expect(new DataView(written.buffer).getUint16(12, true)).toBe((0 << 9) | (1 << 5) | 1);
+  });
+
   test("P14.10: missing items have exact shapes; an identity item names its role", () => {
     const manifest = (missing: unknown[]) =>
       bytes(JSON.stringify({ format: "originals-evidence/0.1", profile: "originals:1.0", original: "did:vh:Qm", checkpoint: "1-Qm", head: "1-Qm", completeness: "partial", missing }));
